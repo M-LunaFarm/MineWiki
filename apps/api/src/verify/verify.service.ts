@@ -1,11 +1,12 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException
 } from '@nestjs/common';
 import { Queue } from 'bullmq';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { ConfigService } from '@minewiki/config';
 import { normalizeMinecraftUuid } from '@minewiki/minecraft';
@@ -67,6 +68,8 @@ export class VerifyService {
       this.config.getOptional('VERIFY_PUBLIC_BASE_URL') ??
       this.config.getOptional('NEXT_PUBLIC_SITE_URL') ??
       'https://minewiki.kr';
+    const completionToken = createCompletionToken();
+    const completionTokenHash = hashCompletionToken(completionToken);
 
     await this.ensureGuildChannel(payload.guildId, payload.channelId, now);
     const options = await this.resolveGuildVerificationOptions(payload.guildId, payload.channelId, {
@@ -80,6 +83,7 @@ export class VerifyService {
         requesterDiscordId: payload.requesterDiscordId,
         roleId: options.roleId ?? null,
         nicknameTemplate: options.nicknameTemplate ?? null,
+        completionTokenHash,
         expiresAt,
         eventLog: [
           {
@@ -90,7 +94,7 @@ export class VerifyService {
         ]
       }
     });
-    const verificationUrl = this.buildVerificationUrl(baseUrl, created.id);
+    const verificationUrl = this.buildVerificationUrl(baseUrl, created.id, completionToken);
     await this.prisma.discordVerificationSession.update({
       where: { id: created.id },
       data: { verificationUrl }
@@ -137,6 +141,9 @@ export class VerifyService {
     if (!session) {
       throw new NotFoundException('Discord verification session not found.');
     }
+    if (session.status !== 'pending') {
+      throw new ConflictException('Discord verification session is already completed.');
+    }
     if (session.expiresAt.getTime() < Date.now()) {
       await this.prisma.discordVerificationSession.update({
         where: { id: session.id },
@@ -144,11 +151,13 @@ export class VerifyService {
       });
       throw new ForbiddenException('Discord verification session expired.');
     }
+    this.assertCompletionToken(session.completionTokenHash, payload.completionToken);
 
     const minecraftUuid = normalizeMinecraftUuid(payload.minecraftUuid);
     const minecraftName = payload.playerName ?? minecraftUuid.replace(/-/g, '').slice(0, 16);
-    const updated = await this.prisma.discordVerificationSession.update({
-      where: { id: session.id },
+    await this.assertDiscordVerifyLinkConflicts(session, accountId, minecraftUuid);
+    const result = await this.prisma.discordVerificationSession.updateMany({
+      where: { id: session.id, status: 'pending' },
       data: {
         status: 'sync_pending',
         accountId,
@@ -166,6 +175,15 @@ export class VerifyService {
         ]
       }
     });
+    if (result.count !== 1) {
+      throw new ConflictException('Discord verification session is already completed.');
+    }
+    const updated = await this.prisma.discordVerificationSession.findUnique({
+      where: { id: session.id }
+    });
+    if (!updated) {
+      throw new NotFoundException('Discord verification session not found.');
+    }
 
     await this.persistDiscordVerification(updated, accountId, minecraftUuid, minecraftName);
 
@@ -501,6 +519,49 @@ export class VerifyService {
     ]);
   }
 
+  private assertCompletionToken(expectedHash: string | null, token: string): void {
+    if (!expectedHash || !token) {
+      throw new ForbiddenException('Discord verification token is invalid.');
+    }
+    const actualHash = hashCompletionToken(token);
+    const expected = Buffer.from(expectedHash, 'hex');
+    const actual = Buffer.from(actualHash, 'hex');
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+      throw new ForbiddenException('Discord verification token is invalid.');
+    }
+  }
+
+  private async assertDiscordVerifyLinkConflicts(
+    session: { requesterDiscordId: string },
+    accountId: string,
+    minecraftUuid: string
+  ): Promise<void> {
+    const [identityForUuid, discordLink, minecraftLink] = await Promise.all([
+      this.prisma.minecraftIdentity.findFirst({
+        where: {
+          uuid: minecraftUuid,
+          accountId: { not: accountId }
+        },
+        select: { accountId: true }
+      }),
+      this.prisma.lunaDiscordAccountLink.findUnique({
+        where: { discordUserId: session.requesterDiscordId }
+      }),
+      this.prisma.lunaDiscordAccountLink.findUnique({
+        where: { minecraftUuid }
+      })
+    ]);
+    if (identityForUuid) {
+      throw new ConflictException('Minecraft identity is already linked to another MineWiki account.');
+    }
+    if (discordLink && discordLink.minecraftUuid !== minecraftUuid) {
+      throw new ConflictException('Discord account is already linked to another Minecraft identity.');
+    }
+    if (minecraftLink && minecraftLink.discordUserId !== session.requesterDiscordId) {
+      throw new ConflictException('Minecraft identity is already linked to another Discord account.');
+    }
+  }
+
   private async ensureGuild(guildId: string, now = new Date()): Promise<void> {
     await this.prisma.lunaGuild.upsert({
       where: { guildId },
@@ -625,9 +686,12 @@ export class VerifyService {
     };
   }
 
-  private buildVerificationUrl(baseUrl: string, sessionId: string): string {
+  private buildVerificationUrl(baseUrl: string, sessionId: string, completionToken?: string): string {
     const url = new URL('/me', baseUrl);
     url.searchParams.set('verifySessionId', sessionId);
+    if (completionToken) {
+      url.searchParams.set('verifyToken', completionToken);
+    }
     return url.toString();
   }
 
@@ -700,6 +764,14 @@ export interface LunaGuildDetailResponse extends LunaGuildResponse {
 
 function createLunaId(): string {
   return randomUUID().replace(/-/g, '').slice(0, 32);
+}
+
+function createCompletionToken(): string {
+  return randomBytes(32).toString('base64url');
+}
+
+function hashCompletionToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
 function toJsonValue(value: unknown): Prisma.InputJsonValue {

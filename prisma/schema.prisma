@@ -518,6 +518,7 @@ model DiscordVerificationSession {
   roleId             String?
   nicknameTemplate   String?
   verificationUrl    String?
+  completionTokenHash String?   @map("completion_token_hash") @db.Char(64)
   eventLog           Json?
   syncAttempts       Int       @default(0)
   lastSyncStatus     String?

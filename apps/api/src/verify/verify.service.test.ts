@@ -60,8 +60,11 @@ if (!hasDatabase) {
         nicknameTemplate: '{player}'
       });
       sessionId = session.sessionId;
+      const completionToken = new URL(session.verificationUrl).searchParams.get('verifyToken');
+      assert.ok(completionToken);
 
       const completed = await service.completeDiscordSession(session.sessionId, account.id, {
+        completionToken,
         minecraftUuid,
         playerName: 'Tester'
       });

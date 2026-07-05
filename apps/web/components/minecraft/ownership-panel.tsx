@@ -34,6 +34,7 @@ function buildAvatarCandidates(uuid: string): string[] {
 
 async function completeDiscordVerifySession(
   sessionId: string,
+  completionToken: string,
   identity: MinecraftIdentity,
 ): Promise<void> {
   const response = await fetch(
@@ -43,6 +44,7 @@ async function completeDiscordVerifySession(
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        completionToken,
         minecraftUuid: identity.uuid,
         playerName: identity.playerName,
       }),
@@ -61,6 +63,7 @@ async function completeDiscordVerifySession(
 export function MinecraftOwnershipPanel() {
   const searchParams = useSearchParams();
   const verifySessionId = searchParams.get('verifySessionId');
+  const verifyToken = searchParams.get('verifyToken');
   const [identity, setIdentity] = useState<MinecraftIdentity | null>(null);
   const [playerName, setPlayerName] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'verifying' | 'loadingIdentity'>('idle');
@@ -124,8 +127,8 @@ export function MinecraftOwnershipPanel() {
         const data = (await response.json()) as MinecraftIdentity;
         setIdentity(data);
         setPlayerName(data.playerName ?? null);
-        if (verifySessionId) {
-          await completeDiscordVerifySession(verifySessionId, data);
+        if (verifySessionId && verifyToken) {
+          await completeDiscordVerifySession(verifySessionId, verifyToken, data);
           setDiscordVerifyStatus('Discord 검증 세션이 MineWiki 계정과 연결되었습니다.');
         }
         setPendingAuth(null);
@@ -142,7 +145,7 @@ export function MinecraftOwnershipPanel() {
         setStatus('idle');
       }
     },
-    [verifySessionId],
+    [verifySessionId, verifyToken],
   );
 
   const fetchIdentity = useCallback(async () => {
@@ -171,8 +174,8 @@ export function MinecraftOwnershipPanel() {
       const data = (await response.json()) as MinecraftIdentity;
       setIdentity(data);
       setPlayerName(data.playerName ?? null);
-      if (verifySessionId) {
-        await completeDiscordVerifySession(verifySessionId, data);
+      if (verifySessionId && verifyToken) {
+        await completeDiscordVerifySession(verifySessionId, verifyToken, data);
         setDiscordVerifyStatus('Discord 검증 세션이 MineWiki 계정과 연결되었습니다.');
       }
       setFlowStage('completed');
@@ -186,7 +189,7 @@ export function MinecraftOwnershipPanel() {
     } finally {
       setStatus('idle');
     }
-  }, [verifySessionId]);
+  }, [verifySessionId, verifyToken]);
 
   useEffect(() => {
     void fetchIdentity();
@@ -382,7 +385,9 @@ export function MinecraftOwnershipPanel() {
             </p>
             {verifySessionId ? (
               <p className="mt-3 rounded-lg border border-[#13ec80]/[.35] bg-[#13ec80]/[.10] px-4 py-3 text-sm text-[#b9f8d9]">
-                Discord /minewiki verify 세션을 완료하려면 Minecraft 소유권 인증을 마쳐 주세요.
+                {verifyToken
+                  ? 'Discord /minewiki verify 세션을 완료하려면 Minecraft 소유권 인증을 마쳐 주세요.'
+                  : 'Discord verify 링크가 만료되었거나 토큰이 없습니다. Discord에서 다시 시작해 주세요.'}
               </p>
             ) : null}
             {discordVerifyStatus ? (

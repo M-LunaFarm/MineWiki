@@ -464,6 +464,7 @@ export const discordVerifySessionResponseSchema = z.object({
 });
 
 export const discordVerifyCompleteRequestSchema = z.object({
+  completionToken: z.string().min(32).max(256),
   minecraftUuid: z.string().uuid(),
   playerName: z.string().min(3).max(16).optional(),
 });
