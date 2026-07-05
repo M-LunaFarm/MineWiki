@@ -678,6 +678,25 @@ model WikiPageRenderCache {
   @@map("page_render_cache")
 }
 
+model WikiRecentChange {
+  id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId        BigInt?  @map("page_id") @db.UnsignedBigInt
+  revisionId    BigInt?  @map("revision_id") @db.UnsignedBigInt
+  actorId       BigInt?  @map("actor_id") @db.UnsignedBigInt
+  changeType    String   @map("change_type") @db.VarChar(32)
+  title         String   @db.VarChar(255)
+  namespaceCode String   @map("namespace_code") @db.VarChar(32)
+  summary       String?  @db.VarChar(255)
+  isMinor       Boolean  @default(false) @map("is_minor")
+  createdAt     DateTime @map("created_at")
+
+  @@index([createdAt])
+  @@index([changeType])
+  @@index([changeType, createdAt])
+  @@index([pageId, createdAt])
+  @@map("recent_changes")
+}
+
 model ServerWiki {
   id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   spaceId           BigInt   @map("space_id") @db.UnsignedBigInt
