@@ -69,6 +69,14 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
                 <dd>{page.links.length}</dd>
               </div>
             </dl>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link href={`${routePath}/history`} className="chip chip-accent">
+                역사
+              </Link>
+              <Link href={`/wiki/revision/${page.revision.id}`} className="chip chip-muted">
+                현재 판
+              </Link>
+            </div>
           </section>
           {page.categories.length > 0 ? (
             <section className="surface-flat p-4">

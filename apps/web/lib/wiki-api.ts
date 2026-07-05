@@ -58,6 +58,41 @@ export interface WikiRevisionResponse {
   readonly visibility: string;
 }
 
+export interface WikiRevisionSummary {
+  readonly id: string;
+  readonly revisionNo: number;
+  readonly editSummary: string | null;
+  readonly isMinor: boolean;
+  readonly createdBy: string | null;
+  readonly createdAt: string;
+  readonly contentHash: string;
+  readonly contentSize: number;
+}
+
+export interface WikiRevisionDiffResponse {
+  readonly left: WikiRevisionResponse;
+  readonly right: WikiRevisionResponse;
+  readonly hunks: Array<{
+    readonly type: 'context' | 'added' | 'removed';
+    readonly line: string;
+    readonly leftLine: number | null;
+    readonly rightLine: number | null;
+  }>;
+}
+
+export interface WikiRecentChangeSummary {
+  readonly id: string;
+  readonly pageId: string | null;
+  readonly revisionId: string | null;
+  readonly actorId: string | null;
+  readonly changeType: string;
+  readonly title: string;
+  readonly namespaceCode: string;
+  readonly summary: string | null;
+  readonly isMinor: boolean;
+  readonly createdAt: string;
+}
+
 export interface WikiMutationResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -74,6 +109,44 @@ export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisio
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to load wiki revision.');
+  }
+  return response.json();
+}
+
+export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionSummary[]> {
+  const response = await fetch(`${baseUrl}/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions`, {
+    credentials: 'include',
+    next: { revalidate: 30 }
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load wiki revisions.');
+  }
+  return response.json();
+}
+
+export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {
+  const response = await fetch(
+    `${baseUrl}/v1/wiki/revisions/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`,
+    {
+      credentials: 'include'
+    }
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load wiki diff.');
+  }
+  return response.json();
+}
+
+export async function fetchWikiRecent(): Promise<WikiRecentChangeSummary[]> {
+  const response = await fetch(`${baseUrl}/v1/wiki/recent`, {
+    credentials: 'include',
+    next: { revalidate: 30 }
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load recent wiki changes.');
   }
   return response.json();
 }

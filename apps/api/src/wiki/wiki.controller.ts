@@ -13,7 +13,12 @@ import {
   type WikiRevisionResponse,
   type WikiSectionMutationRequest
 } from './wiki-edit.service';
-import { WikiReadService, type WikiPageResponse, type WikiRevisionSummary } from './wiki-read.service';
+import {
+  WikiReadService,
+  type WikiPageResponse,
+  type WikiRecentChangeSummary,
+  type WikiRevisionSummary
+} from './wiki-read.service';
 import { WikiProfileService, type WikiMeResponse } from './wiki-profile.service';
 
 @Controller('v1/wiki')
@@ -53,6 +58,12 @@ export class WikiController {
   @UseGuards(OptionalSessionGuard)
   getPageRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiRevisionSummary[]> {
     return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null);
+  }
+
+  @Get('recent')
+  @UseGuards(OptionalSessionGuard)
+  getRecent(@Req() request: FastifyRequest): Promise<WikiRecentChangeSummary[]> {
+    return this.wikiRead.getRecent(request.sessionPayload?.userId ?? null);
   }
 
   @Get('revisions/:revisionId')

@@ -44,6 +44,19 @@ export interface WikiRevisionSummary {
   readonly contentSize: number;
 }
 
+export interface WikiRecentChangeSummary {
+  readonly id: string;
+  readonly pageId: string | null;
+  readonly revisionId: string | null;
+  readonly actorId: string | null;
+  readonly changeType: string;
+  readonly title: string;
+  readonly namespaceCode: string;
+  readonly summary: string | null;
+  readonly isMinor: boolean;
+  readonly createdAt: string;
+}
+
 @Injectable()
 export class WikiReadService {
   constructor(
@@ -108,6 +121,43 @@ export class WikiReadService {
       contentHash: revision.contentHash,
       contentSize: revision.contentSize
     }));
+  }
+
+  async getRecent(accountId?: string | null): Promise<WikiRecentChangeSummary[]> {
+    const changes = await this.prisma.wikiRecentChange.findMany({
+      orderBy: [{ createdAt: 'desc' }],
+      take: 100
+    });
+    const visible: WikiRecentChangeSummary[] = [];
+    for (const change of changes) {
+      if (change.pageId) {
+        const page = await this.prisma.wikiPage.findUnique({ where: { id: change.pageId } });
+        try {
+          await this.wikiPermissions.assertCanReadPage({
+            accountId: accountId ?? null,
+            page
+          });
+        } catch {
+          continue;
+        }
+      }
+      visible.push({
+        id: change.id.toString(),
+        pageId: change.pageId?.toString() ?? null,
+        revisionId: change.revisionId?.toString() ?? null,
+        actorId: change.actorId?.toString() ?? null,
+        changeType: change.changeType,
+        title: change.title,
+        namespaceCode: change.namespaceCode,
+        summary: change.summary,
+        isMinor: change.isMinor,
+        createdAt: change.createdAt.toISOString()
+      });
+      if (visible.length >= 50) {
+        break;
+      }
+    }
+    return visible;
   }
 
   private async renderPage(namespace: string, page: {
