@@ -469,6 +469,7 @@ export const discordVerifyCompleteRequestSchema = z.object({
 });
 
 export const discordVerifySyncJobSchema = z.object({
+  action: z.enum(['link', 'revoke']).optional(),
   sessionId: z.string().uuid(),
   guildId: z.string().min(1),
   discordUserId: z.string().min(1),
@@ -477,6 +478,9 @@ export const discordVerifySyncJobSchema = z.object({
   playerName: z.string().min(3).max(16).optional(),
   roleId: z.string().min(1).optional(),
   nicknameTemplate: z.string().min(1).max(80).optional(),
+  dmTemplate: z.string().min(1).max(512).optional(),
+  logChannelId: z.string().min(1).optional(),
+  logMessageTemplate: z.string().min(1).max(512).optional(),
 });
 
 export const pluginSyncEventSchema = z.object({

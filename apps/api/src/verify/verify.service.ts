@@ -69,13 +69,17 @@ export class VerifyService {
       'https://minewiki.kr';
 
     await this.ensureGuildChannel(payload.guildId, payload.channelId, now);
+    const options = await this.resolveGuildVerificationOptions(payload.guildId, payload.channelId, {
+      roleId: payload.roleId,
+      nicknameTemplate: payload.nicknameTemplate
+    });
     const created = await this.prisma.discordVerificationSession.create({
       data: {
         guildId: payload.guildId,
         channelId: payload.channelId,
         requesterDiscordId: payload.requesterDiscordId,
-        roleId: payload.roleId ?? null,
-        nicknameTemplate: payload.nicknameTemplate ?? null,
+        roleId: options.roleId ?? null,
+        nicknameTemplate: options.nicknameTemplate ?? null,
         expiresAt,
         eventLog: [
           {
@@ -172,15 +176,27 @@ export class VerifyService {
       minecraftUuid
     });
 
+    const syncOptions = await this.resolveGuildVerificationOptions(
+      updated.guildId,
+      updated.channelId,
+      {
+        roleId: updated.roleId ?? undefined,
+        nicknameTemplate: updated.nicknameTemplate ?? undefined
+      }
+    );
     await this.enqueueDiscordSync({
+      action: 'link',
       sessionId: updated.id,
       guildId: updated.guildId,
       discordUserId: updated.requesterDiscordId,
       accountId,
       minecraftUuid,
       playerName: minecraftName,
-      roleId: updated.roleId ?? undefined,
-      nicknameTemplate: updated.nicknameTemplate ?? undefined
+      roleId: syncOptions.roleId,
+      nicknameTemplate: syncOptions.nicknameTemplate,
+      dmTemplate: syncOptions.dmTemplate,
+      logChannelId: syncOptions.logChannelId,
+      logMessageTemplate: syncOptions.logMessageTemplate
     });
 
     return {
@@ -524,6 +540,37 @@ export class VerifyService {
     });
   }
 
+  private async resolveGuildVerificationOptions(
+    guildId: string,
+    channelId: string,
+    overrides: { roleId?: string; nicknameTemplate?: string } = {}
+  ): Promise<DiscordVerificationOptions> {
+    const [guild, channel] = await Promise.all([
+      this.prisma.lunaGuild.findUnique({ where: { guildId } }),
+      this.prisma.lunaGuildChannelSetting.findUnique({
+        where: { guildId_channelId: { guildId, channelId } }
+      })
+    ]);
+    const roleId = overrides.roleId ?? channel?.verifiedRoleId ?? guild?.verifiedRoleId ?? undefined;
+    const nicknameTemplate =
+      overrides.nicknameTemplate ?? channel?.nicknameFormat ?? guild?.nicknameFormat ?? undefined;
+    const dmTemplate =
+      channel?.botMessageTemplate ??
+      guild?.botMessageTemplate ??
+      'MineWiki 인증이 완료되었습니다. Minecraft: {player}';
+    const logChannelId = channel?.logChannelId ?? guild?.logChannelId ?? undefined;
+    const logMessageTemplate = logChannelId
+      ? '<@{discord}> 님이 Minecraft 계정 {player} ({uuid}) 인증을 완료했습니다.'
+      : undefined;
+    return {
+      roleId,
+      nicknameTemplate,
+      dmTemplate,
+      logChannelId,
+      logMessageTemplate
+    };
+  }
+
   private toGuildResponse(guild: {
     guildId: string;
     verifiedRoleId: string | null;
@@ -611,6 +658,14 @@ export interface LunaGuildSettingsRequest {
   readonly botMessagePayload?: unknown;
   readonly verifyReplyPayload?: unknown;
   readonly policyJson?: unknown;
+}
+
+interface DiscordVerificationOptions {
+  readonly roleId?: string;
+  readonly nicknameTemplate?: string;
+  readonly dmTemplate?: string;
+  readonly logChannelId?: string;
+  readonly logMessageTemplate?: string;
 }
 
 export interface LunaGuildResponse {
