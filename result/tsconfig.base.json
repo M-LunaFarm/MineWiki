@@ -13,6 +13,9 @@
       "@minewiki/logger": ["packages/logger/src"],
       "@minewiki/schemas": ["packages/schemas/src"],
       "@minewiki/analytics": ["packages/analytics/src"],
+      "@minewiki/auth": ["packages/auth/src"],
+      "@minewiki/db": ["packages/db/src"],
+      "@minewiki/minecraft": ["packages/minecraft/src"],
       "@minewiki/security": ["packages/security/src"],
       "@minewiki/clients": ["packages/clients/src"],
       "@minewiki/ui": ["packages/ui/src"]

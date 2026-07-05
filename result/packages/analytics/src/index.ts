@@ -6,6 +6,9 @@ export type AnalyticsEventName =
   | 'minecraft.verification.completed'
   | 'minecraft.verification.failed'
   | 'minecraft.verification.revoked'
+  | 'discord.verify.session.created'
+  | 'discord.verify.completed'
+  | 'plugin.sync.received'
   | 'vote.submitted'
   | 'review.submitted';
 
@@ -29,6 +32,22 @@ export interface AnalyticsEventPayloadMap {
   'minecraft.verification.revoked': {
     userId: string;
     removed: boolean;
+  };
+  'discord.verify.session.created': {
+    sessionId: string;
+    guildId: string;
+    requesterDiscordId: string;
+  };
+  'discord.verify.completed': {
+    sessionId: string;
+    accountId: string;
+    discordUserId: string;
+    minecraftUuid: string;
+  };
+  'plugin.sync.received': {
+    serverId?: string;
+    minecraftUuid: string;
+    action: string;
   };
   'vote.submitted': {
     serverId: string;

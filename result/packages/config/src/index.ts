@@ -10,7 +10,8 @@ function hydrateEnvironment(): void {
     return;
   }
 
-  const customEnvFile = process.env.CREEPERVOTE_ENV_FILE?.trim();
+  const customEnvFile =
+    process.env.MINEWIKI_ENV_FILE?.trim() ?? process.env.CREEPERVOTE_ENV_FILE?.trim();
   const defaultFiles = ['.env.local', '.env'];
   const candidates = [
     ...(customEnvFile ? [customEnvFile] : []),
@@ -37,12 +38,16 @@ const envSchema = z.object({
   API_HOST: z.string().optional(),
   NEXT_PUBLIC_API_BASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SITE_URL: z.string().url().optional(),
+  INTERNAL_API_BASE_URL: z.string().url().optional(),
   DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().url().optional(),
   DISCORD_BOT_TOKEN: z.string().optional(),
   DISCORD_CLIENT_ID: z.string().optional(),
   DISCORD_CLIENT_SECRET: z.string().optional(),
   DISCORD_REDIRECT_URI: z.string().url().optional(),
+  INTERNAL_BOT_API_TOKEN: z.string().optional(),
+  PLUGIN_SYNC_TOKEN: z.string().optional(),
+  VERIFY_PUBLIC_BASE_URL: z.string().url().optional(),
   TURNSTILE_SECRET_KEY: z.string().optional(),
   HCAPTCHA_SECRET_KEY: z.string().optional(),
   UPLOAD_STORAGE_ROOT: z.string().optional(),

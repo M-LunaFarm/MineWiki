@@ -182,6 +182,41 @@ if (!token || !clientId) {
         });
         break;
       }
+      case 'verify': {
+        if (!guildId) {
+          await interaction.reply({
+            content: 'This command is only available inside a guild.',
+            ephemeral: true
+          });
+          return;
+        }
+        try {
+          const role = interaction.options.getRole('role');
+          const nicknameTemplate = interaction.options.getString('nickname-template') ?? undefined;
+          const result = await createVerifySession({
+            guildId,
+            channelId: interaction.channelId,
+            requesterDiscordId: interaction.user.id,
+            roleId: role?.id,
+            nicknameTemplate
+          });
+          await interaction.reply({
+            content: [
+              'MineWiki Minecraft verification session created.',
+              `Open: ${result.verificationUrl}`,
+              `Expires: ${result.expiresAt}`
+            ].join('\n'),
+            ephemeral: true
+          });
+        } catch (error) {
+          Logger.error({ err: error, guildId }, 'Failed to create Discord verify session');
+          await interaction.reply({
+            content: error instanceof Error ? error.message : 'Unable to create verification session.',
+            ephemeral: true
+          });
+        }
+        break;
+      }
       default:
         await interaction.reply({
           content: 'Unsupported command.',
@@ -273,11 +308,60 @@ async function registerCommands(rest: REST, clientId: string): Promise<void> {
             type: ApplicationCommandOptionType.Subcommand,
             name: 'rewards',
             description: 'Show reward role settings.'
+          },
+          {
+            type: ApplicationCommandOptionType.Subcommand,
+            name: 'verify',
+            description: 'Start Discord and Minecraft account verification.',
+            options: [
+              {
+                type: ApplicationCommandOptionType.Role,
+                name: 'role',
+                description: 'Role to grant after verification.',
+                required: false
+              },
+              {
+                type: ApplicationCommandOptionType.String,
+                name: 'nickname-template',
+                description: 'Nickname template, e.g. {player}.',
+                required: false
+              }
+            ]
           }
         ]
       }
     ]
   });
+}
+
+async function createVerifySession(payload: {
+  guildId: string;
+  channelId: string;
+  requesterDiscordId: string;
+  roleId?: string;
+  nicknameTemplate?: string;
+}): Promise<{ verificationUrl: string; expiresAt: string }> {
+  const token = config.getOptional('INTERNAL_BOT_API_TOKEN');
+  if (!token) {
+    throw new Error('INTERNAL_BOT_API_TOKEN is not configured.');
+  }
+  const apiBase =
+    config.getOptional('INTERNAL_API_BASE_URL') ??
+    config.getOptional('NEXT_PUBLIC_API_BASE_URL') ??
+    'http://127.0.0.1:3000';
+  const response = await fetch(`${apiBase.replace(/\/+$/u, '')}/v1/verify/discord/sessions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const message = await response.text().catch(() => '');
+    throw new Error(`Verification API failed: ${response.status} ${message}`.trim());
+  }
+  return (await response.json()) as { verificationUrl: string; expiresAt: string };
 }
 
 async function processDueDigests(

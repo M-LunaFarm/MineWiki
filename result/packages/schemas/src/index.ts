@@ -448,6 +448,47 @@ export const discordDigestJobSchema = z.object({
   timezone: z.string().min(1),
 });
 
+export const discordVerifySessionCreateRequestSchema = z.object({
+  guildId: z.string().min(1),
+  channelId: z.string().min(1),
+  requesterDiscordId: z.string().min(1),
+  roleId: z.string().min(1).optional(),
+  nicknameTemplate: z.string().min(1).max(80).optional(),
+});
+
+export const discordVerifySessionResponseSchema = z.object({
+  sessionId: z.string().uuid(),
+  status: z.enum(['pending', 'linked', 'sync_pending', 'synced', 'failed', 'expired']),
+  verificationUrl: z.string().url(),
+  expiresAt: z.string().datetime(),
+});
+
+export const discordVerifyCompleteRequestSchema = z.object({
+  minecraftUuid: z.string().uuid(),
+  playerName: z.string().min(3).max(16).optional(),
+});
+
+export const discordVerifySyncJobSchema = z.object({
+  sessionId: z.string().uuid(),
+  guildId: z.string().min(1),
+  discordUserId: z.string().min(1),
+  accountId: z.string().uuid(),
+  minecraftUuid: z.string().uuid(),
+  playerName: z.string().min(3).max(16).optional(),
+  roleId: z.string().min(1).optional(),
+  nicknameTemplate: z.string().min(1).max(80).optional(),
+});
+
+export const pluginSyncEventSchema = z.object({
+  serverId: z.string().uuid().optional(),
+  pluginServerId: z.string().min(1).optional(),
+  discordUserId: z.string().min(1).optional(),
+  minecraftUuid: z.string().uuid(),
+  playerName: z.string().min(3).max(16).optional(),
+  action: z.enum(['minecraft_verified', 'discord_linked', 'role_synced', 'nickname_synced']),
+  payload: z.record(z.unknown()).optional(),
+});
+
 export type UserAccount = z.infer<typeof userAccountSchema>;
 export type ServerSummary = z.infer<typeof serverSummarySchema>;
 export type ServerDetail = z.infer<typeof serverDetailSchema>;
@@ -472,6 +513,15 @@ export type ServerPingJob = z.infer<typeof serverPingJobSchema>;
 export type ClaimVerificationJob = z.infer<typeof claimVerificationJobSchema>;
 export type RankAggregationJob = z.infer<typeof rankAggregationJobSchema>;
 export type DiscordDigestJob = z.infer<typeof discordDigestJobSchema>;
+export type DiscordVerifySessionCreateRequest = z.infer<
+  typeof discordVerifySessionCreateRequestSchema
+>;
+export type DiscordVerifySessionResponse = z.infer<
+  typeof discordVerifySessionResponseSchema
+>;
+export type DiscordVerifyCompleteRequest = z.infer<typeof discordVerifyCompleteRequestSchema>;
+export type DiscordVerifySyncJob = z.infer<typeof discordVerifySyncJobSchema>;
+export type PluginSyncEvent = z.infer<typeof pluginSyncEventSchema>;
 export type AuthProvider = z.infer<typeof authProviderSchema>;
 export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
 export type AuthAccount = z.infer<typeof authAccountSchema>;

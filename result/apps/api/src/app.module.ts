@@ -17,6 +17,7 @@ import { TelemetryModule } from './telemetry/telemetry.module';
 import { AppConfigModule } from './config/config.module';
 import { PrismaModule } from './common/prisma.module';
 import { SupportModule } from './support/support.module';
+import { VerifyModule } from './verify/verify.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { SupportModule } from './support/support.module';
     AuthModule,
     DashboardModule,
     SupportModule,
+    VerifyModule,
     TelemetryModule,
     AppConfigModule,
     PrismaModule

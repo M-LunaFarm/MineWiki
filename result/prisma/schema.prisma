@@ -229,6 +229,8 @@ model MinecraftIdentity {
   lastVerifiedAt DateTime
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([uuid])
 }
 
 model Server {
@@ -502,4 +504,45 @@ model DiscordSubscription {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   nextDigestAt DateTime
+}
+
+model DiscordVerificationSession {
+  id                 String    @id @default(uuid())
+  status             String    @default("pending")
+  guildId            String
+  channelId          String
+  requesterDiscordId String
+  accountId          String?
+  minecraftUuid      String?
+  minecraftName      String?
+  roleId             String?
+  nicknameTemplate   String?
+  verificationUrl    String?
+  eventLog           Json?
+  syncAttempts       Int       @default(0)
+  lastSyncStatus     String?
+  createdAt          DateTime  @default(now())
+  expiresAt          DateTime
+  completedAt        DateTime?
+  lastSyncAt         DateTime?
+
+  @@index([guildId, requesterDiscordId])
+  @@index([accountId])
+  @@index([status, expiresAt])
+}
+
+model ServerPluginSyncEvent {
+  id             String   @id @default(uuid())
+  serverId       String?
+  pluginServerId String?
+  discordUserId  String?
+  minecraftUuid  String
+  playerName     String?
+  action         String
+  payload        Json?
+  createdAt      DateTime @default(now())
+
+  @@index([serverId, createdAt])
+  @@index([minecraftUuid, createdAt])
+  @@index([discordUserId, createdAt])
 }

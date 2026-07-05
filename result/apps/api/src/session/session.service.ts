@@ -1,6 +1,7 @@
 ﻿import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { serialize } from 'cookie';
+import { DEFAULT_SESSION_TTL_SECONDS, MINEWIKI_SESSION_COOKIE } from '@minewiki/auth';
 import { PrismaService } from '../common/prisma.service';
 
 interface SessionRecord {
@@ -47,9 +48,6 @@ export interface SessionSummary {
   readonly isElevated: boolean;
 }
 
-const SESSION_COOKIE_NAME = 'mw_session';
-const DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 14; // 14 days
-
 @Injectable()
 export class SessionService {
   constructor(private readonly prisma: PrismaService) {}
@@ -59,7 +57,7 @@ export class SessionService {
     const sessionId = randomUUID();
     const issuedAt = new Date();
     const expiresAt = new Date(
-      issuedAt.getTime() + (options.ttlSeconds ?? DEFAULT_TTL_SECONDS) * 1000
+      issuedAt.getTime() + (options.ttlSeconds ?? DEFAULT_SESSION_TTL_SECONDS) * 1000
     );
 
     await this.prisma.session.create({
@@ -256,7 +254,7 @@ export class SessionService {
   }
 
   private serializeCookie(record: SessionRecord): string {
-    return serialize(SESSION_COOKIE_NAME, record.token, {
+    return serialize(MINEWIKI_SESSION_COOKIE, record.token, {
       httpOnly: true,
       secure: true,
       sameSite: 'strict',

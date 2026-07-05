@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, ShieldCheck, SquareArrowOutUpRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { MinecraftIdentity } from '@minewiki/schemas';
@@ -31,7 +32,35 @@ function buildAvatarCandidates(uuid: string): string[] {
   ];
 }
 
+async function completeDiscordVerifySession(
+  sessionId: string,
+  identity: MinecraftIdentity,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/v1/verify/discord/sessions/${encodeURIComponent(sessionId)}/complete`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        minecraftUuid: identity.uuid,
+        playerName: identity.playerName,
+      }),
+    },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(
+      typeof body?.message === 'string'
+        ? body.message
+        : 'Discord 검증 세션을 완료하지 못했습니다.',
+    );
+  }
+}
+
 export function MinecraftOwnershipPanel() {
+  const searchParams = useSearchParams();
+  const verifySessionId = searchParams.get('verifySessionId');
   const [identity, setIdentity] = useState<MinecraftIdentity | null>(null);
   const [playerName, setPlayerName] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'verifying' | 'loadingIdentity'>('idle');
@@ -41,6 +70,7 @@ export function MinecraftOwnershipPanel() {
   const [isRevoking, setIsRevoking] = useState(false);
   const [flowStage, setFlowStage] = useState<FlowStage>('idle');
   const [avatarIndex, setAvatarIndex] = useState(0);
+  const [discordVerifyStatus, setDiscordVerifyStatus] = useState<string | null>(null);
 
   const isBusy =
     status !== 'idle' ||
@@ -94,6 +124,10 @@ export function MinecraftOwnershipPanel() {
         const data = (await response.json()) as MinecraftIdentity;
         setIdentity(data);
         setPlayerName(data.playerName ?? null);
+        if (verifySessionId) {
+          await completeDiscordVerifySession(verifySessionId, data);
+          setDiscordVerifyStatus('Discord 검증 세션이 MineWiki 계정과 연결되었습니다.');
+        }
         setPendingAuth(null);
         setError(null);
         setFlowStage('completed');
@@ -108,7 +142,7 @@ export function MinecraftOwnershipPanel() {
         setStatus('idle');
       }
     },
-    [],
+    [verifySessionId],
   );
 
   const fetchIdentity = useCallback(async () => {
@@ -137,6 +171,10 @@ export function MinecraftOwnershipPanel() {
       const data = (await response.json()) as MinecraftIdentity;
       setIdentity(data);
       setPlayerName(data.playerName ?? null);
+      if (verifySessionId) {
+        await completeDiscordVerifySession(verifySessionId, data);
+        setDiscordVerifyStatus('Discord 검증 세션이 MineWiki 계정과 연결되었습니다.');
+      }
       setFlowStage('completed');
     } catch (identityError) {
       setError(
@@ -148,7 +186,7 @@ export function MinecraftOwnershipPanel() {
     } finally {
       setStatus('idle');
     }
-  }, []);
+  }, [verifySessionId]);
 
   useEffect(() => {
     void fetchIdentity();
@@ -342,6 +380,16 @@ export function MinecraftOwnershipPanel() {
               정품 계정을 인증하면 서버 등록, 리뷰 작성, 투표 신뢰 배지 등 주요 기능을 사용할 수
               있습니다. Microsoft 로그인을 통해 안전하게 인증하세요.
             </p>
+            {verifySessionId ? (
+              <p className="mt-3 rounded-lg border border-[#13ec80]/[.35] bg-[#13ec80]/[.10] px-4 py-3 text-sm text-[#b9f8d9]">
+                Discord /minewiki verify 세션을 완료하려면 Minecraft 소유권 인증을 마쳐 주세요.
+              </p>
+            ) : null}
+            {discordVerifyStatus ? (
+              <p className="mt-3 rounded-lg border border-blue-300/30 bg-blue-400/[.10] px-4 py-3 text-sm text-blue-100">
+                {discordVerifyStatus}
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

@@ -30,12 +30,18 @@ importers:
       '@minewiki/analytics':
         specifier: workspace:*
         version: link:../../packages/analytics
+      '@minewiki/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@minewiki/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@minewiki/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@minewiki/minecraft':
+        specifier: workspace:*
+        version: link:../../packages/minecraft
       '@minewiki/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
@@ -446,6 +452,19 @@ importers:
         specifier: ^5.4.2
         version: 5.9.3
 
+  packages/auth:
+    dependencies:
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.19
+        version: 20.19.43
+      typescript:
+        specifier: ^5.4.2
+        version: 5.9.3
+
   packages/clients:
     dependencies:
       '@minewiki/schemas':
@@ -474,6 +493,15 @@ importers:
         specifier: ^5.4.2
         version: 5.9.3
 
+  packages/db:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.19
+        version: 20.19.43
+      typescript:
+        specifier: ^5.4.2
+        version: 5.9.3
+
   packages/logger:
     dependencies:
       pino:
@@ -486,6 +514,19 @@ importers:
       '@types/node':
         specifier: ^22.9.0
         version: 22.20.0
+
+  packages/minecraft:
+    dependencies:
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.19
+        version: 20.19.43
+      typescript:
+        specifier: ^5.4.2
+        version: 5.9.3
 
   packages/schemas:
     dependencies:

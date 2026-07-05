@@ -13,8 +13,10 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.637.0",
     "@minewiki/analytics": "workspace:*",
+    "@minewiki/auth": "workspace:*",
     "@minewiki/config": "workspace:*",
     "@minewiki/logger": "workspace:*",
+    "@minewiki/minecraft": "workspace:*",
     "@minewiki/schemas": "workspace:*",
     "@minewiki/security": "workspace:*",
     "@nestjs/axios": "^4.0.1",
@@ -49,8 +51,10 @@
   },
   "_moduleAliases": {
     "@minewiki/analytics": "../../packages/analytics/dist",
+    "@minewiki/auth": "../../packages/auth/dist",
     "@minewiki/config": "../../packages/config/dist",
     "@minewiki/logger": "../../packages/logger/dist",
+    "@minewiki/minecraft": "../../packages/minecraft/dist",
     "@minewiki/security": "../../packages/security/dist",
     "@minewiki/schemas": "../../packages/schemas/dist"
   }

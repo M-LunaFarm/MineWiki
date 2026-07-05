@@ -15,9 +15,11 @@ import {
   createDiscordDigestDeliverer,
   type DiscordDigestResult,
 } from './processors/discord-digest';
+import { createDiscordVerifySyncer } from './processors/discord-verify-sync';
 import type {
   ClaimVerificationJob,
   DiscordDigestJob,
+  DiscordVerifySyncJob,
   RankAggregationJob,
   ServerPingJob,
 } from '@minewiki/schemas';
@@ -77,6 +79,10 @@ const discordDeliverer = createDiscordDigestDeliverer({
   token: discordToken,
 });
 const discordDigestSender = createDiscordDigestSender(discordDeliverer);
+const discordVerifySyncer = createDiscordVerifySyncer({
+  prisma,
+  token: discordToken,
+});
 const tracer = trace.getTracer('minewiki-worker');
 
 if (!discordToken) {
@@ -209,6 +215,11 @@ const discordDigestQueue = createWorker('discord-digest', async (job) => {
   const result = await discordDigestSender.send(job.data);
   await handleDigestOutcome(job.data, result);
   return result;
+});
+
+createWorker('discord-verify-sync', async (job) => {
+  Logger.info({ jobId: job.id, data: job.data }, 'Processing Discord verify sync job');
+  return discordVerifySyncer.sync(job.data as DiscordVerifySyncJob);
 });
 
 function scheduleInterval(name: string, intervalMs: number, task: () => Promise<void>) {

@@ -8,6 +8,7 @@
 } from '@nestjs/common';
 import { randomBytes, createHash } from 'node:crypto';
 import { ConfigService } from '@minewiki/config';
+import { normalizeMinecraftUuid } from '@minewiki/minecraft';
 import type {
   MinecraftAuthorizationStartRequest,
   MinecraftAuthorizationStartResponse,
@@ -508,17 +509,11 @@ export class MinecraftService {
   }
 
   private formatUuid(raw: string): string {
-    const normalized = raw.replace(/-/g, '').trim();
-    if (normalized.length !== 32) {
+    try {
+      return normalizeMinecraftUuid(raw);
+    } catch {
       throw new ForbiddenException('Minecraft ?꾨줈??UUID ?뺤떇???щ컮瑜댁? ?딆뒿?덈떎.');
     }
-    return [
-      normalized.slice(0, 8),
-      normalized.slice(8, 12),
-      normalized.slice(12, 16),
-      normalized.slice(16, 20),
-      normalized.slice(20)
-    ].join('-');
   }
 
   private async consumeAuthorization(state: string, userId: string) {
