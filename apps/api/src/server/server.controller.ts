@@ -30,6 +30,7 @@ import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
 import { ClaimService } from '../claim/claim.service';
+import { FileService } from '../file/file.service';
 import { decodeBase64 } from '../upload/upload.utils';
 import { serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schemas';
 
@@ -53,7 +54,8 @@ type RequiredServerRegistrationPayload =
 export class ServerController {
   constructor(
     private readonly serverService: ServerService,
-    private readonly claimService: ClaimService
+    private readonly claimService: ClaimService,
+    private readonly files: FileService
   ) {}
 
   @Get()
@@ -147,19 +149,22 @@ export class ServerController {
   @UseGuards(SessionGuard)
   @Post('assets/images')
   async uploadDescriptionImage(
+    @CurrentSession() session: SessionPayload,
     @Body('data') data: string,
     @Body('filename') filename?: string
   ) {
     if (!data) {
       throw new BadRequestException('이미지 데이터가 필요합니다.');
     }
-    const buffer = decodeBase64(data);
-    const stored = await this.serverService.uploadContentImage({
-      buffer,
-      filename: filename?.trim() ? filename.trim() : undefined
+    const stored = await this.files.createImage(session.userId, {
+      data,
+      filename: filename?.trim() ? filename.trim() : undefined,
+      usageContext: 'server_description'
     });
     return {
-      url: stored.publicPath,
+      id: stored.id,
+      url: stored.url,
+      publicPath: stored.publicPath,
       mimeType: stored.mimeType,
       width: stored.width,
       height: stored.height,

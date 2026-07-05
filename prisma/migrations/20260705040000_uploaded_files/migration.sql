@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS `uploaded_files` (
+  `id` CHAR(36) NOT NULL,
+  `owner_account_id` CHAR(36) NULL,
+  `filename` VARCHAR(255) NOT NULL,
+  `original_name` VARCHAR(255) NULL,
+  `mime_type` VARCHAR(128) NOT NULL,
+  `size_bytes` INT UNSIGNED NOT NULL,
+  `width` INT UNSIGNED NULL,
+  `height` INT UNSIGNED NULL,
+  `sha256` CHAR(64) NOT NULL,
+  `storage_path` VARCHAR(1024) NOT NULL,
+  `public_path` VARCHAR(1024) NOT NULL,
+  `usage_context` VARCHAR(64) NOT NULL DEFAULT 'general',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'active',
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  KEY `uploaded_files_owner_account_id_idx` (`owner_account_id`),
+  KEY `uploaded_files_usage_context_idx` (`usage_context`),
+  KEY `uploaded_files_sha256_idx` (`sha256`),
+  KEY `uploaded_files_status_idx` (`status`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

@@ -568,6 +568,30 @@ model PluginSyncCooldown {
   @@map("plugin_sync_cooldowns")
 }
 
+model UploadedFile {
+  id             String   @id @default(uuid()) @db.Char(36)
+  ownerAccountId String?  @map("owner_account_id") @db.Char(36)
+  filename       String   @db.VarChar(255)
+  originalName   String?  @map("original_name") @db.VarChar(255)
+  mimeType       String   @map("mime_type") @db.VarChar(128)
+  sizeBytes      Int      @map("size_bytes") @db.UnsignedInt
+  width          Int?     @db.UnsignedInt
+  height         Int?     @db.UnsignedInt
+  sha256         String   @db.Char(64)
+  storagePath    String   @map("storage_path") @db.VarChar(1024)
+  publicPath     String   @map("public_path") @db.VarChar(1024)
+  usageContext   String   @default("general") @map("usage_context") @db.VarChar(64)
+  status         String   @default("active") @db.VarChar(32)
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([ownerAccountId])
+  @@index([usageContext])
+  @@index([sha256])
+  @@index([status])
+  @@map("uploaded_files")
+}
+
 model LunaGuild {
   guildId            String   @id @map("guild_id") @db.VarChar(32)
   verifiedRoleId     String?  @map("verified_role_id") @db.VarChar(32)

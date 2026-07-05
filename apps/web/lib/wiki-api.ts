@@ -193,3 +193,29 @@ export async function saveWikiPage(input: {
   }
   return response.json();
 }
+
+export async function uploadWikiImage(input: {
+  data: string;
+  filename: string;
+}): Promise<{ url: string; publicPath: string; id: string; filename: string }> {
+  const response = await fetch(`${baseUrl}/v1/files/images`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      data: input.data,
+      filename: input.filename,
+      usageContext: 'wiki_editor'
+    })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.message ?? 'Failed to upload wiki image.');
+  }
+  return {
+    id: String(body.id),
+    filename: String(body.filename),
+    url: String(body.url ?? body.publicPath),
+    publicPath: String(body.publicPath ?? body.url)
+  };
+}

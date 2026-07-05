@@ -20,6 +20,7 @@ import { SupportModule } from './support/support.module';
 import { VerifyModule } from './verify/verify.module';
 import { WikiModule } from './wiki/wiki.module';
 import { PluginSyncModule } from './plugin-sync/plugin-sync.module';
+import { FileModule } from './file/file.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { PluginSyncModule } from './plugin-sync/plugin-sync.module';
     SupportModule,
     VerifyModule,
     PluginSyncModule,
+    FileModule,
     WikiModule,
     TelemetryModule,
     AppConfigModule,

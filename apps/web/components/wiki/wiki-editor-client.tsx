@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Eye, Loader2, Save } from 'lucide-react';
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { AlertTriangle, Eye, ImagePlus, Loader2, Save } from 'lucide-react';
+import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
 import {
   fetchWikiRevision,
   previewWikiMarkup,
   saveWikiPage,
+  uploadWikiImage,
   type WikiPageResponse
 } from '../../lib/wiki-api';
 
@@ -22,11 +23,13 @@ interface WikiEditorClientProps {
 export function WikiEditorClient({ page, namespace, title, routePath }: WikiEditorClientProps) {
   const router = useRouter();
   const { account, loading } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [contentRaw, setContentRaw] = useState('');
   const [editSummary, setEditSummary] = useState('');
   const [isMinor, setIsMinor] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [loadingRevision, setLoadingRevision] = useState(Boolean(page));
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
@@ -110,6 +113,30 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     });
   }
 
+  async function handleImageSelect(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setFeedback('이미지 파일만 업로드할 수 있습니다.');
+      return;
+    }
+    setUploadingImage(true);
+    setFeedback(null);
+    try {
+      const data = await readFileAsDataUrl(file);
+      const uploaded = await uploadWikiImage({ data, filename: file.name });
+      const alt = normalizeAltText(file.name);
+      setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${uploaded.filename}|${alt}]]\n`);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : '이미지 업로드 중 오류가 발생했습니다.');
+    } finally {
+      setUploadingImage(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="mx-auto flex min-h-[50vh] max-w-4xl items-center justify-center px-4">
@@ -181,12 +208,30 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
             <button
               type="button"
               onClick={submit}
-              disabled={!canSubmit || saving}
+              disabled={!canSubmit || saving || uploadingImage}
               className="btn-primary h-10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               저장
             </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingImage || saving || loadingRevision}
+            >
+              {uploadingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
+              이미지
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(event) => void handleImageSelect(event)}
+            />
           </div>
         </section>
 
@@ -231,4 +276,23 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       </div>
     </main>
   );
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('파일을 읽지 못했습니다.'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('파일을 읽지 못했습니다.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function normalizeAltText(filename: string): string {
+  return filename.trim().replace(/\.[^.]+$/u, '').replace(/[|\[\]]/g, '').slice(0, 80) || 'image';
 }

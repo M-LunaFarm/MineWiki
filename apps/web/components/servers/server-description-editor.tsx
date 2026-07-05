@@ -181,13 +181,14 @@ export function ServerDescriptionEditor({
       setUploadState({ uploading: true, error: null });
       try {
         const dataUrl = await readFileAsDataUrl(file);
-        const response = await fetch(`${apiBaseUrl}/v1/servers/assets/images`, {
+        const response = await fetch(`${apiBaseUrl}/v1/files/images`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
             data: dataUrl,
             filename: file.name,
+            usageContext: 'server_description',
           }),
         });
         const body = await response.json().catch(() => ({}));

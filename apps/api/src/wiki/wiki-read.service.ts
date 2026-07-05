@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  type AstNode,
   parseMarkup,
   renderDocument,
   resolveWikiPath,
@@ -206,7 +207,8 @@ export class WikiReadService {
       }
     });
     const parsed = parseMarkup(revision.contentRaw);
-    const html = cache?.html ?? renderDocument(parsed.ast);
+    const files = cache ? {} : await this.findRenderableFiles(parsed.ast);
+    const html = cache?.html ?? renderDocument(parsed.ast, { files });
     if (!cache) {
       await this.prisma.wikiPageRenderCache
         .create({
@@ -267,10 +269,44 @@ export class WikiReadService {
     return `/servers/${server.shortCode?.trim() || server.id}`;
   }
 
+  private async findRenderableFiles(ast: AstNode[]) {
+    const fileNames = Array.from(collectFileNames(ast));
+    if (fileNames.length === 0) {
+      return {};
+    }
+    const files = await this.prisma.uploadedFile.findMany({
+      where: {
+        filename: { in: fileNames },
+        status: 'active'
+      }
+    });
+    return Object.fromEntries(
+      files.map((file) => [
+        file.filename,
+        {
+          url: file.publicPath,
+          mimeType: file.mimeType,
+          originalName: file.originalName ?? file.filename
+        }
+      ])
+    );
+  }
+
   private parseBigIntId(value: string, label: string): bigint {
     if (!/^\d+$/.test(value)) {
       throw new BadRequestException(`${label} must be an unsigned integer.`);
     }
     return BigInt(value);
   }
+}
+
+function collectFileNames(ast: AstNode[], output = new Set<string>()): Set<string> {
+  for (const node of ast) {
+    if (node.type === 'file') {
+      output.add(node.fileName);
+    } else if (node.type === 'folding') {
+      collectFileNames(node.children, output);
+    }
+  }
+  return output;
 }
