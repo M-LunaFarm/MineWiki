@@ -5,7 +5,8 @@ import {
   UnauthorizedException
 } from '@nestjs/common';
 import { Queue } from 'bullmq';
-import type { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { ConfigService } from '@minewiki/config';
 import { normalizeMinecraftUuid } from '@minewiki/minecraft';
 import type {
@@ -61,11 +62,13 @@ export class VerifyService {
     payload: DiscordVerifySessionCreateRequest
   ): Promise<DiscordVerifySessionResponse> {
     const expiresAt = new Date(Date.now() + VERIFY_SESSION_TTL_MS);
+    const now = new Date();
     const baseUrl =
       this.config.getOptional('VERIFY_PUBLIC_BASE_URL') ??
       this.config.getOptional('NEXT_PUBLIC_SITE_URL') ??
       'https://minewiki.kr';
 
+    await this.ensureGuildChannel(payload.guildId, payload.channelId, now);
     const created = await this.prisma.discordVerificationSession.create({
       data: {
         guildId: payload.guildId,
@@ -139,13 +142,14 @@ export class VerifyService {
     }
 
     const minecraftUuid = normalizeMinecraftUuid(payload.minecraftUuid);
+    const minecraftName = payload.playerName ?? minecraftUuid.replace(/-/g, '').slice(0, 16);
     const updated = await this.prisma.discordVerificationSession.update({
       where: { id: session.id },
       data: {
         status: 'sync_pending',
         accountId,
         minecraftUuid,
-        minecraftName: payload.playerName ?? null,
+        minecraftName,
         completedAt: new Date(),
         eventLog: [
           ...(Array.isArray(session.eventLog) ? session.eventLog : []),
@@ -158,6 +162,8 @@ export class VerifyService {
         ]
       }
     });
+
+    await this.persistDiscordVerification(updated, accountId, minecraftUuid, minecraftName);
 
     await this.events.track('discord.verify.completed', {
       sessionId: updated.id,
@@ -172,7 +178,7 @@ export class VerifyService {
       discordUserId: updated.requesterDiscordId,
       accountId,
       minecraftUuid,
-      playerName: payload.playerName,
+      playerName: minecraftName,
       roleId: updated.roleId ?? undefined,
       nicknameTemplate: updated.nicknameTemplate ?? undefined
     });
@@ -217,6 +223,153 @@ export class VerifyService {
     return { id: created.id, accepted: true };
   }
 
+  async revokeDiscordVerification(input: {
+    readonly guildId: string;
+    readonly discordUserId: string;
+    readonly reason?: string;
+  }): Promise<{ guildId: string; discordUserId: string; status: 'revoked' }> {
+    const current = await this.prisma.lunaGuildVerification.findUnique({
+      where: {
+        guildId_discordUserId: {
+          guildId: input.guildId,
+          discordUserId: input.discordUserId
+        }
+      }
+    });
+    if (!current) {
+      throw new NotFoundException('Guild verification not found.');
+    }
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.lunaGuildVerification.update({
+        where: {
+          guildId_discordUserId: {
+            guildId: input.guildId,
+            discordUserId: input.discordUserId
+          }
+        },
+        data: {
+          status: 'revoked',
+          verifiedAt: now
+        }
+      }),
+      this.prisma.lunaEvent.create({
+        data: {
+          eventId: createLunaId(),
+          eventType: 'minecraft_revoked',
+          guildId: input.guildId,
+          channelId: null,
+          discordUserId: input.discordUserId,
+          minecraftUuid: current.minecraftUuid,
+          minecraftName: current.minecraftUuid.replace(/-/g, '').slice(0, 16),
+          occurredAt: now.toISOString(),
+          payloadJson: toJsonValue({ reason: input.reason ?? 'api_revoke' }),
+          createdAt: now
+        }
+      })
+    ]);
+    await this.events.track('discord.verify.revoked', {
+      guildId: input.guildId,
+      discordUserId: input.discordUserId
+    });
+    return {
+      guildId: input.guildId,
+      discordUserId: input.discordUserId,
+      status: 'revoked'
+    };
+  }
+
+  async listGuilds(): Promise<LunaGuildResponse[]> {
+    const guilds = await this.prisma.lunaGuild.findMany({
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 100
+    });
+    return guilds.map((guild) => this.toGuildResponse(guild));
+  }
+
+  async getGuild(guildId: string): Promise<LunaGuildDetailResponse> {
+    const guild = await this.prisma.lunaGuild.findUnique({ where: { guildId } });
+    if (!guild) {
+      throw new NotFoundException('Guild not found.');
+    }
+    const [channels, verificationCount, actionProfiles] = await Promise.all([
+      this.prisma.lunaGuildChannelSetting.findMany({
+        where: { guildId },
+        orderBy: [{ updatedAt: 'desc' }],
+        take: 100
+      }),
+      this.prisma.lunaGuildVerification.count({ where: { guildId, status: 'verified' } }),
+      this.prisma.lunaActionProfile.findMany({
+        where: { guildId },
+        orderBy: [{ updatedAt: 'desc' }],
+        take: 100
+      })
+    ]);
+    return {
+      ...this.toGuildResponse(guild),
+      verificationCount,
+      channels: channels.map((channel) => this.toChannelResponse(channel)),
+      actionProfiles: actionProfiles.map((profile) => ({
+        profileId: profile.profileId,
+        channelId: profile.channelId,
+        name: profile.name,
+        triggerEvent: profile.triggerEvent,
+        enabled: profile.enabled,
+        updatedAt: profile.updatedAt.toISOString()
+      }))
+    };
+  }
+
+  async updateGuildSettings(
+    guildId: string,
+    input: LunaGuildSettingsRequest
+  ): Promise<LunaGuildResponse | LunaGuildChannelResponse> {
+    const now = new Date();
+    const data = {
+      verifiedRoleId: input.verifiedRoleId ?? null,
+      logChannelId: input.logChannelId ?? null,
+      nicknameFormat: input.nicknameFormat ?? null,
+      botMessageTemplate: input.botMessageTemplate ?? null,
+      botMessagePayload: input.botMessagePayload
+        ? toJsonValue(input.botMessagePayload)
+        : Prisma.JsonNull,
+      verifyReplyPayload: input.verifyReplyPayload
+        ? toJsonValue(input.verifyReplyPayload)
+        : Prisma.JsonNull,
+      policyJson: input.policyJson ? toJsonValue(input.policyJson) : Prisma.JsonNull,
+      updatedAt: now
+    };
+    if (input.channelId) {
+      const channel = await this.prisma.lunaGuildChannelSetting.upsert({
+        where: {
+          guildId_channelId: {
+            guildId,
+            channelId: input.channelId
+          }
+        },
+        create: {
+          guildId,
+          channelId: input.channelId,
+          ...data,
+          createdAt: now
+        },
+        update: data
+      });
+      await this.ensureGuild(guildId, now);
+      return this.toChannelResponse(channel);
+    }
+    const guild = await this.prisma.lunaGuild.upsert({
+      where: { guildId },
+      create: {
+        guildId,
+        ...data,
+        createdAt: now
+      },
+      update: data
+    });
+    return this.toGuildResponse(guild);
+  }
+
   private async enqueueDiscordSync(job: DiscordVerifySyncJob): Promise<void> {
     if (!this.syncQueue) {
       await this.prisma.discordVerificationSession.update({
@@ -229,6 +382,200 @@ export class VerifyService {
       return;
     }
     await this.syncQueue.add('sync', job, { jobId: `discord-verify:${job.sessionId}` });
+  }
+
+  private async persistDiscordVerification(
+    session: {
+      id: string;
+      guildId: string;
+      channelId: string;
+      requesterDiscordId: string;
+    },
+    accountId: string,
+    minecraftUuid: string,
+    minecraftName: string
+  ): Promise<void> {
+    const now = new Date();
+    await this.ensureGuild(session.guildId, now);
+    await this.prisma.$transaction([
+      this.prisma.minecraftIdentity.upsert({
+        where: { accountId },
+        create: {
+          accountId,
+          uuid: minecraftUuid,
+          playerName: minecraftName,
+          msOwned: true,
+          lastVerifiedAt: now
+        },
+        update: {
+          uuid: minecraftUuid,
+          playerName: minecraftName,
+          msOwned: true,
+          lastVerifiedAt: now
+        }
+      }),
+      this.prisma.lunaDiscordAccountLink.upsert({
+        where: { discordUserId: session.requesterDiscordId },
+        create: {
+          discordUserId: session.requesterDiscordId,
+          minecraftUuid,
+          minecraftName,
+          lastVerifiedAt: now,
+          updatedAt: now
+        },
+        update: {
+          minecraftUuid,
+          minecraftName,
+          lastVerifiedAt: now,
+          updatedAt: now
+        }
+      }),
+      this.prisma.lunaGuildVerification.upsert({
+        where: {
+          guildId_discordUserId: {
+            guildId: session.guildId,
+            discordUserId: session.requesterDiscordId
+          }
+        },
+        create: {
+          guildId: session.guildId,
+          discordUserId: session.requesterDiscordId,
+          minecraftUuid,
+          status: 'verified',
+          verifiedAt: now
+        },
+        update: {
+          minecraftUuid,
+          status: 'verified',
+          verifiedAt: now
+        }
+      }),
+      this.prisma.lunaPrivacyConsent.upsert({
+        where: {
+          discordUserId_consentType: {
+            discordUserId: session.requesterDiscordId,
+            consentType: 'minecraft_verify'
+          }
+        },
+        create: {
+          discordUserId: session.requesterDiscordId,
+          consentType: 'minecraft_verify',
+          consentedAt: now,
+          updatedAt: now
+        },
+        update: {
+          consentedAt: now,
+          updatedAt: now
+        }
+      }),
+      this.prisma.lunaEvent.create({
+        data: {
+          eventId: createLunaId(),
+          eventType: 'minecraft_verified',
+          guildId: session.guildId,
+          channelId: session.channelId,
+          discordUserId: session.requesterDiscordId,
+          minecraftUuid,
+          minecraftName,
+          occurredAt: now.toISOString(),
+          payloadJson: toJsonValue({ sessionId: session.id, accountId }),
+          createdAt: now
+        }
+      })
+    ]);
+  }
+
+  private async ensureGuild(guildId: string, now = new Date()): Promise<void> {
+    await this.prisma.lunaGuild.upsert({
+      where: { guildId },
+      create: {
+        guildId,
+        createdAt: now,
+        updatedAt: now
+      },
+      update: {
+        updatedAt: now
+      }
+    });
+  }
+
+  private async ensureGuildChannel(
+    guildId: string,
+    channelId: string,
+    now = new Date()
+  ): Promise<void> {
+    await this.ensureGuild(guildId, now);
+    await this.prisma.lunaGuildChannelSetting.upsert({
+      where: {
+        guildId_channelId: {
+          guildId,
+          channelId
+        }
+      },
+      create: {
+        guildId,
+        channelId,
+        createdAt: now,
+        updatedAt: now
+      },
+      update: {
+        updatedAt: now
+      }
+    });
+  }
+
+  private toGuildResponse(guild: {
+    guildId: string;
+    verifiedRoleId: string | null;
+    logChannelId: string | null;
+    nicknameFormat: string | null;
+    botMessageTemplate: string | null;
+    botMessagePayload: Prisma.JsonValue | null;
+    verifyReplyPayload: Prisma.JsonValue | null;
+    policyJson: Prisma.JsonValue | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): LunaGuildResponse {
+    return {
+      guildId: guild.guildId,
+      verifiedRoleId: guild.verifiedRoleId,
+      logChannelId: guild.logChannelId,
+      nicknameFormat: guild.nicknameFormat,
+      botMessageTemplate: guild.botMessageTemplate,
+      botMessagePayload: guild.botMessagePayload,
+      verifyReplyPayload: guild.verifyReplyPayload,
+      policyJson: guild.policyJson,
+      createdAt: guild.createdAt.toISOString(),
+      updatedAt: guild.updatedAt.toISOString()
+    };
+  }
+
+  private toChannelResponse(channel: {
+    guildId: string;
+    channelId: string;
+    verifiedRoleId: string | null;
+    logChannelId: string | null;
+    nicknameFormat: string | null;
+    botMessageTemplate: string | null;
+    botMessagePayload: Prisma.JsonValue | null;
+    verifyReplyPayload: Prisma.JsonValue | null;
+    policyJson: Prisma.JsonValue | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): LunaGuildChannelResponse {
+    return {
+      guildId: channel.guildId,
+      channelId: channel.channelId,
+      verifiedRoleId: channel.verifiedRoleId,
+      logChannelId: channel.logChannelId,
+      nicknameFormat: channel.nicknameFormat,
+      botMessageTemplate: channel.botMessageTemplate,
+      botMessagePayload: channel.botMessagePayload,
+      verifyReplyPayload: channel.verifyReplyPayload,
+      policyJson: channel.policyJson,
+      createdAt: channel.createdAt.toISOString(),
+      updatedAt: channel.updatedAt.toISOString()
+    };
   }
 
   private buildVerificationUrl(baseUrl: string, sessionId: string): string {
@@ -253,4 +600,53 @@ export class VerifyService {
     }
     return 'pending';
   }
+}
+
+export interface LunaGuildSettingsRequest {
+  readonly channelId?: string;
+  readonly verifiedRoleId?: string | null;
+  readonly logChannelId?: string | null;
+  readonly nicknameFormat?: string | null;
+  readonly botMessageTemplate?: string | null;
+  readonly botMessagePayload?: unknown;
+  readonly verifyReplyPayload?: unknown;
+  readonly policyJson?: unknown;
+}
+
+export interface LunaGuildResponse {
+  readonly guildId: string;
+  readonly verifiedRoleId: string | null;
+  readonly logChannelId: string | null;
+  readonly nicknameFormat: string | null;
+  readonly botMessageTemplate: string | null;
+  readonly botMessagePayload: Prisma.JsonValue | null;
+  readonly verifyReplyPayload: Prisma.JsonValue | null;
+  readonly policyJson: Prisma.JsonValue | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface LunaGuildChannelResponse extends LunaGuildResponse {
+  readonly channelId: string;
+}
+
+export interface LunaGuildDetailResponse extends LunaGuildResponse {
+  readonly verificationCount: number;
+  readonly channels: LunaGuildChannelResponse[];
+  readonly actionProfiles: Array<{
+    readonly profileId: string;
+    readonly channelId: string | null;
+    readonly name: string;
+    readonly triggerEvent: string;
+    readonly enabled: boolean;
+    readonly updatedAt: string;
+  }>;
+}
+
+function createLunaId(): string {
+  return randomUUID().replace(/-/g, '').slice(0, 32);
+}
+
+function toJsonValue(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }

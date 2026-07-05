@@ -349,7 +349,7 @@ async function createVerifySession(payload: {
     config.getOptional('INTERNAL_API_BASE_URL') ??
     config.getOptional('NEXT_PUBLIC_API_BASE_URL') ??
     'http://127.0.0.1:3000';
-  const response = await fetch(`${apiBase.replace(/\/+$/u, '')}/v1/verify/discord/sessions`, {
+  const response = await fetch(`${apiBase.replace(/\/+$/u, '')}/v1/discord/verify/sessions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,

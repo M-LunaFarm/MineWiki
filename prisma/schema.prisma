@@ -547,6 +547,123 @@ model ServerPluginSyncEvent {
   @@index([discordUserId, createdAt])
 }
 
+model LunaGuild {
+  guildId            String   @id @map("guild_id") @db.VarChar(32)
+  verifiedRoleId     String?  @map("verified_role_id") @db.VarChar(32)
+  logChannelId       String?  @map("log_channel_id") @db.VarChar(32)
+  nicknameFormat     String?  @map("nickname_format") @db.VarChar(128)
+  botMessageTemplate String?  @map("bot_message_template") @db.VarChar(512)
+  botMessagePayload  Json?    @map("bot_message_payload")
+  verifyReplyPayload Json?    @map("verify_reply_payload")
+  policyJson         Json?    @map("policy_json")
+  createdAt          DateTime @map("created_at")
+  updatedAt          DateTime @map("updated_at")
+
+  @@map("guilds")
+}
+
+model LunaGuildChannelSetting {
+  guildId            String   @map("guild_id") @db.VarChar(32)
+  channelId          String   @map("channel_id") @db.VarChar(32)
+  verifiedRoleId     String?  @map("verified_role_id") @db.VarChar(32)
+  logChannelId       String?  @map("log_channel_id") @db.VarChar(32)
+  nicknameFormat     String?  @map("nickname_format") @db.VarChar(128)
+  botMessageTemplate String?  @map("bot_message_template") @db.VarChar(512)
+  botMessagePayload  Json?    @map("bot_message_payload")
+  verifyReplyPayload Json?    @map("verify_reply_payload")
+  policyJson         Json?    @map("policy_json")
+  createdAt          DateTime @map("created_at")
+  updatedAt          DateTime @map("updated_at")
+
+  @@id([guildId, channelId])
+  @@index([guildId])
+  @@map("guild_channel_settings")
+}
+
+model LunaDiscordAccountLink {
+  discordUserId  String   @id @map("discord_user_id") @db.VarChar(32)
+  minecraftUuid  String   @unique @map("mc_uuid") @db.Char(36)
+  minecraftName  String   @map("mc_ign") @db.VarChar(16)
+  lastVerifiedAt DateTime @map("last_verified_at")
+  updatedAt      DateTime @map("updated_at")
+
+  @@map("account_links")
+}
+
+model LunaGuildVerification {
+  guildId       String   @map("guild_id") @db.VarChar(32)
+  discordUserId String   @map("discord_user_id") @db.VarChar(32)
+  minecraftUuid String   @map("mc_uuid") @db.Char(36)
+  status        String   @db.VarChar(16)
+  verifiedAt    DateTime @map("verified_at")
+
+  @@id([guildId, discordUserId])
+  @@index([minecraftUuid])
+  @@map("guild_verifications")
+}
+
+model LunaActionProfile {
+  profileId    String   @id @map("profile_id") @db.VarChar(32)
+  guildId      String   @map("guild_id") @db.VarChar(32)
+  channelId    String?  @map("channel_id") @db.VarChar(32)
+  name         String   @db.VarChar(64)
+  triggerEvent String   @map("trigger_event") @db.VarChar(64)
+  targetsJson  Json?    @map("targets_json")
+  actionsJson  Json?    @map("actions_json")
+  enabled      Boolean  @default(true)
+  updatedAt    DateTime @map("updated_at")
+
+  @@index([guildId])
+  @@index([channelId])
+  @@map("action_profiles")
+}
+
+model LunaEvent {
+  eventId       String   @id @map("event_id") @db.VarChar(32)
+  eventType     String   @map("event_type") @db.VarChar(64)
+  guildId       String   @map("guild_id") @db.VarChar(32)
+  channelId     String?  @map("channel_id") @db.VarChar(32)
+  discordUserId String   @map("discord_user_id") @db.VarChar(32)
+  minecraftUuid String   @map("mc_uuid") @db.Char(36)
+  minecraftName String   @map("mc_ign") @db.VarChar(16)
+  occurredAt    String   @map("occurred_at") @db.VarChar(40)
+  payloadJson   Json?    @map("payload_json")
+  createdAt     DateTime @map("created_at")
+
+  @@index([guildId])
+  @@index([channelId])
+  @@map("events")
+}
+
+model LunaPushDelivery {
+  deliveryId     String    @id @map("delivery_id") @db.VarChar(64)
+  eventId        String    @map("event_id") @db.VarChar(32)
+  guildId        String    @map("guild_id") @db.VarChar(32)
+  serverId       String    @map("server_id") @db.VarChar(32)
+  status         String    @db.VarChar(16)
+  attemptCount   Int       @default(0) @map("attempt_count")
+  nextRetryAt    DateTime? @map("next_retry_at")
+  lastError      String?   @map("last_error") @db.VarChar(255)
+  lastHttpStatus Int?      @map("last_http_status")
+  lastLatencyMs  Int?      @map("last_latency_ms")
+  payloadJson    Json?     @map("payload_json")
+  updatedAt      DateTime  @map("updated_at")
+
+  @@index([eventId])
+  @@map("push_deliveries")
+}
+
+model LunaPrivacyConsent {
+  discordUserId String   @map("discord_user_id") @db.VarChar(32)
+  consentType   String   @map("consent_type") @db.VarChar(32)
+  consentedAt   DateTime @map("consented_at")
+  updatedAt     DateTime @map("updated_at")
+
+  @@id([discordUserId, consentType])
+  @@index([consentType])
+  @@map("privacy_consents")
+}
+
 model WikiProfile {
   id                      BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   accountId               String?   @unique @map("account_id") @db.Char(36)

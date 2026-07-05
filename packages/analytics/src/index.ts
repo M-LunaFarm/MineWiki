@@ -8,6 +8,7 @@ export type AnalyticsEventName =
   | 'minecraft.verification.revoked'
   | 'discord.verify.session.created'
   | 'discord.verify.completed'
+  | 'discord.verify.revoked'
   | 'plugin.sync.received'
   | 'vote.submitted'
   | 'review.submitted';
@@ -43,6 +44,10 @@ export interface AnalyticsEventPayloadMap {
     accountId: string;
     discordUserId: string;
     minecraftUuid: string;
+  };
+  'discord.verify.revoked': {
+    guildId: string;
+    discordUserId: string;
   };
   'plugin.sync.received': {
     serverId?: string;
