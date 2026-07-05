@@ -7,6 +7,7 @@ import { ReviewService } from './review.service';
 import { PrismaService } from '../common/prisma.service';
 import { ServerService } from '../server/server.service';
 import { UploadService } from '../upload/upload.service';
+import { FileService } from '../file/file.service';
 import { VoteStore } from '../vote/vote.store';
 import { AccountSeparationService } from '../auth/account-separation.service';
 import { MinecraftService } from '../minecraft/minecraft.service';
@@ -22,7 +23,8 @@ if (!hasDatabase) {
   const prisma = new PrismaService();
   const config = new ConfigService({} as NodeJS.ProcessEnv);
   const uploads = new UploadService(config);
-  const serverService = new ServerService(uploads, prisma, new WikiProfileService(prisma));
+  const files = new FileService(prisma, uploads);
+  const serverService = new ServerService(files, prisma, new WikiProfileService(prisma));
   const events = { track: async () => {} } as BusinessEventService;
   const voteStore = new VoteStore(prisma);
   const accounts = new AccountSeparationService(prisma);

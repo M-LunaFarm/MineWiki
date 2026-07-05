@@ -31,7 +31,6 @@ import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
 import { ClaimService } from '../claim/claim.service';
 import { FileService } from '../file/file.service';
-import { decodeBase64 } from '../upload/upload.utils';
 import { serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schemas';
 
 const votifierPayloadSchema = z.object({
@@ -194,8 +193,7 @@ export class ServerController {
     if (!data) {
       throw new BadRequestException('이미지 데이터가 필요합니다.');
     }
-    const buffer = decodeBase64(data);
-    const stored = await this.serverService.updateBanner(id, { buffer });
+    const stored = await this.serverService.updateBanner(id, session.userId, { data });
     return stored;
   }
 

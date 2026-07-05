@@ -22,7 +22,7 @@ import { randomInt } from 'node:crypto';
 import { isIP } from 'node:net';
 import { PrismaService } from '../common/prisma.service';
 import { type StoredVerificationGrade, type ServerFilters, type ServerSort } from './server.store';
-import { UploadService, type ImageUploadInput, type StoredImage } from '../upload/upload.service';
+import { FileService, type FileImageUploadRequest, type FileImageUploadResponse } from '../file/file.service';
 import { FirestoreTelemetryService } from '../telemetry/firestore-telemetry.service';
 import type { ClaimMethod } from '../claim/claim.types';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
@@ -43,7 +43,7 @@ export class ServerService {
   private readonly telemetry: Pick<FirestoreTelemetryService, 'record'>;
 
   constructor(
-    private readonly uploads: UploadService,
+    private readonly files: FileService,
     private readonly prisma: PrismaService,
     private readonly wikiProfiles: WikiProfileService,
     @Optional() private readonly firestoreTelemetry?: FirestoreTelemetryService,
@@ -737,11 +737,14 @@ export class ServerService {
     });
   }
 
-  async updateBanner(id: string, upload: ImageUploadInput): Promise<StoredImage> {
+  async updateBanner(id: string, accountId: string, upload: FileImageUploadRequest): Promise<FileImageUploadResponse> {
     const startedAt = Date.now();
     try {
       await this.ensureExists(id);
-      const stored = await this.uploads.storeImage(upload);
+      const stored = await this.files.createImage(accountId, {
+        ...upload,
+        usageContext: 'server_banner',
+      });
       await this.prisma.server.update({
         where: { id },
         data: { bannerUrl: stored.publicPath },
@@ -760,10 +763,13 @@ export class ServerService {
     }
   }
 
-  async uploadContentImage(upload: ImageUploadInput): Promise<StoredImage> {
+  async uploadContentImage(accountId: string, upload: FileImageUploadRequest): Promise<FileImageUploadResponse> {
     const startedAt = Date.now();
     try {
-      const stored = await this.uploads.storeImage(upload);
+      const stored = await this.files.createImage(accountId, {
+        ...upload,
+        usageContext: 'server_description',
+      });
       void this.telemetry.record('create', 'serverAssets', Date.now() - startedAt, true);
       return stored;
     } catch (error) {

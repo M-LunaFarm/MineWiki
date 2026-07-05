@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +10,7 @@ import { UploadService } from '../upload/upload.service';
 import { PrismaService } from '../common/prisma.service';
 import type { ConfigService } from '@minewiki/config';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
+import { FileService } from '../file/file.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -38,7 +39,8 @@ if (!hasDatabase) {
       }
     } as unknown as ConfigService;
     const uploadService = new UploadService(configStub);
-    const service = new ServerService(uploadService, prisma, wikiProfiles);
+    const fileService = new FileService(prisma, uploadService);
+    const service = new ServerService(fileService, prisma, wikiProfiles);
     return {
       service,
       cleanup: () => rmSync(storageRoot, { recursive: true, force: true })
@@ -73,13 +75,15 @@ if (!hasDatabase) {
         .jpeg()
         .toBuffer();
 
-      const stored = await service.updateBanner(server.id, { buffer, filename: 'banner.jpg' });
+      const stored = await service.updateBanner(server.id, randomUUID(), {
+        data: `data:image/jpeg;base64,${buffer.toString('base64')}`,
+        filename: 'banner.jpg'
+      });
 
       const detail = await service.detail(server.id);
       assert.equal(detail.bannerUrl, stored.publicPath);
       assert.ok(stored.filename.endsWith('.webp'));
       assert.ok(stored.width <= 800);
-      assert.ok(statSync(stored.storagePath).isFile());
     } finally {
       cleanup();
     }
@@ -99,11 +103,13 @@ if (!hasDatabase) {
         .png()
         .toBuffer();
 
-      const stored = await service.uploadContentImage({ buffer, filename: 'content.png' });
+      const stored = await service.uploadContentImage(randomUUID(), {
+        data: `data:image/png;base64,${buffer.toString('base64')}`,
+        filename: 'content.png'
+      });
       assert.ok(stored.publicPath.length > 0);
       assert.ok(stored.filename.endsWith('.webp'));
       assert.ok(stored.width <= 1200);
-      assert.ok(statSync(stored.storagePath).isFile());
     } finally {
       cleanup();
     }

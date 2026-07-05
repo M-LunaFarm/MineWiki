@@ -1,11 +1,17 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { promises as fs } from 'node:fs';
 import { PrismaService } from '../common/prisma.service';
-import { UploadService } from '../upload/upload.service';
+import { UploadService, type StoredImage } from '../upload/upload.service';
 import { decodeBase64 } from '../upload/upload.utils';
 
 export interface FileImageUploadRequest {
   readonly data?: string;
+  readonly filename?: string;
+  readonly usageContext?: string;
+}
+
+export interface FileImageBufferUploadRequest {
+  readonly buffer: Buffer;
   readonly filename?: string;
   readonly usageContext?: string;
 }
@@ -46,6 +52,25 @@ export class FileService {
       buffer: decodeBase64(request.data),
       filename: request.filename?.trim() || undefined
     });
+    return this.createImageRecord(accountId, request, stored);
+  }
+
+  async createImageFromBuffer(
+    accountId: string | null,
+    request: FileImageBufferUploadRequest
+  ): Promise<FileImageUploadResponse> {
+    const stored = await this.uploads.storeImage({
+      buffer: request.buffer,
+      filename: request.filename?.trim() || undefined
+    });
+    return this.createImageRecord(accountId, request, stored);
+  }
+
+  private async createImageRecord(
+    accountId: string | null,
+    request: FileImageUploadRequest | FileImageBufferUploadRequest,
+    stored: StoredImage
+  ): Promise<FileImageUploadResponse> {
     const created = await this.prisma.uploadedFile.create({
       data: {
         ownerAccountId: accountId,
