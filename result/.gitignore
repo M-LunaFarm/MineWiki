@@ -1,8 +1,0 @@
-node_modules/
-dist/
-.next/
-.turbo/
-package-lock.json
-*.tsbuildinfo
-apps/wiki/.claude/
-apps/wiki/*.png

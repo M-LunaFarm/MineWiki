@@ -31,7 +31,6 @@ export default tseslint.config(
       'LunaVotifier/**',
       'VoteWeb/**',
       'mwiki/**',
-      'result/**',
     ],
   },
   js.configs.recommended,
