@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseMarkup, renderDocument } from '../src/markup.js';
+import { parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
 import { resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
@@ -10,6 +10,7 @@ test('normalizes titles, slugs, search text, and content hashes', () => {
   assert.equal(slugifyTitle('엔더 진주'), '엔더_진주');
   assert.equal(normalizeSearch('엔더 진주'), '엔더진주');
   assert.match(hashContent('MineWiki'), /^[a-f0-9]{64}$/);
+  assert.match(WIKI_RENDERER_VERSION, /^minewiki-bwm-\d+\.\d+\.\d+$/);
 });
 
 test('resolves canonical wiki route mappings', () => {

@@ -1,5 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { parseMarkup, renderDocument, resolveWikiPath, slugifyTitle } from '@minewiki/wiki-core';
+import {
+  parseMarkup,
+  renderDocument,
+  resolveWikiPath,
+  slugifyTitle,
+  WIKI_RENDERER_VERSION
+} from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { WikiPermissionService } from './wiki-permission.service';
 
@@ -141,13 +147,29 @@ export class WikiReadService {
       revision
     });
 
-    const cache = await this.prisma.wikiPageRenderCache.findFirst({
+    const cache = await this.prisma.wikiPageRenderCache.findUnique({
       where: {
-        revisionId: revision.id
-      },
-      orderBy: [{ createdAt: 'desc' }]
+        revisionId_rendererVersion: {
+          revisionId: revision.id,
+          rendererVersion: WIKI_RENDERER_VERSION
+        }
+      }
     });
     const parsed = parseMarkup(revision.contentRaw);
+    const html = cache?.html ?? renderDocument(parsed.ast);
+    if (!cache) {
+      await this.prisma.wikiPageRenderCache
+        .create({
+          data: {
+            pageId: page.id,
+            revisionId: revision.id,
+            rendererVersion: WIKI_RENDERER_VERSION,
+            html,
+            createdAt: new Date()
+          }
+        })
+        .catch(() => undefined);
+    }
     const serverDirectoryPath = await this.findServerDirectoryPath(namespace, page.spaceId);
     return {
       id: page.id.toString(),
@@ -167,7 +189,7 @@ export class WikiReadService {
         createdAt: revision.createdAt.toISOString(),
         createdBy: revision.createdBy?.toString() ?? null
       },
-      html: cache?.html ?? renderDocument(parsed.ast),
+      html,
       links: parsed.links,
       categories: parsed.categories,
       serverDirectoryPath

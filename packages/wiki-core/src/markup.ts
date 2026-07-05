@@ -3,6 +3,8 @@ import type { AstNode, InlineNode, ParsedDocument } from './types.js';
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle } from './normalize.js';
 
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.0';
+
 const componentNameMap: Record<string, string> = {
   '문서 상태': 'document_status',
   '몹 정보': 'mob_info',

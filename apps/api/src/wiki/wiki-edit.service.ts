@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException
 } from '@nestjs/common';
-import { hashContent, parseMarkup, renderDocument, slugifyTitle } from '@minewiki/wiki-core';
+import { hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
@@ -336,7 +336,7 @@ export class WikiEditService {
   }
 
   private async createRevision(
-    tx: Pick<PrismaService, 'wikiPageRevision'>,
+    tx: Pick<PrismaService, 'wikiPageRenderCache' | 'wikiPageRevision'>,
     input: {
       pageId: bigint;
       revisionNo: number;
@@ -349,7 +349,7 @@ export class WikiEditService {
     }
   ) {
     const parsed = parseMarkup(input.contentRaw);
-    return tx.wikiPageRevision.create({
+    const revision = await tx.wikiPageRevision.create({
       data: {
         pageId: input.pageId,
         revisionNo: input.revisionNo,
@@ -372,6 +372,16 @@ export class WikiEditService {
         visibility: 'public'
       }
     });
+    await tx.wikiPageRenderCache.create({
+      data: {
+        pageId: input.pageId,
+        revisionId: revision.id,
+        rendererVersion: WIKI_RENDERER_VERSION,
+        html: renderDocument(parsed.ast),
+        createdAt: input.createdAt
+      }
+    });
+    return revision;
   }
 
   private async insertRecentChange(
