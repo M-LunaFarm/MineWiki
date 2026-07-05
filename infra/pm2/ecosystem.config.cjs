@@ -1,36 +1,50 @@
+const path = require('node:path');
+
+const repoRoot = path.resolve(__dirname, '../..');
+const envFile = path.join(repoRoot, '.env');
+
 module.exports = {
   apps: [
     {
-      name: 'minewiki-wiki',
-      cwd: './apps/wiki',
-      script: 'dist/src/server.js',
-      env: { NODE_ENV: 'production', PORT: '3015' }
-    },
-    {
       name: 'minewiki-web',
-      cwd: './apps/web',
+      cwd: path.join(repoRoot, 'apps/web'),
       script: 'node_modules/next/dist/bin/next',
       args: 'start -H 127.0.0.1 -p 4311',
-      env: { NODE_ENV: 'production' }
+      env: {
+        NODE_ENV: 'production',
+        PORT: '4311',
+        MINEWIKI_ENV_FILE: envFile,
+      },
     },
     {
       name: 'minewiki-api',
-      cwd: './apps/api',
+      cwd: path.join(repoRoot, 'apps/api'),
       script: 'dist/apps/api/src/main.js',
       node_args: '-r module-alias/register',
-      env: { NODE_ENV: 'production', PORT: '3000' }
+      env: {
+        NODE_ENV: 'production',
+        API_HOST: '127.0.0.1',
+        API_PORT: '3000',
+        MINEWIKI_ENV_FILE: envFile,
+      },
     },
     {
       name: 'minewiki-worker',
-      cwd: './apps/worker',
-      script: 'dist/index.js',
-      env: { NODE_ENV: 'production' }
+      cwd: path.join(repoRoot, 'apps/worker'),
+      script: 'dist/apps/worker/src/index.js',
+      env: {
+        NODE_ENV: 'production',
+        MINEWIKI_ENV_FILE: envFile,
+      },
     },
     {
       name: 'minewiki-bot',
-      cwd: './apps/bot',
-      script: 'dist/index.js',
-      env: { NODE_ENV: 'production' }
-    }
-  ]
+      cwd: path.join(repoRoot, 'apps/bot'),
+      script: 'dist/apps/bot/src/index.js',
+      env: {
+        NODE_ENV: 'production',
+        MINEWIKI_ENV_FILE: envFile,
+      },
+    },
+  ],
 };

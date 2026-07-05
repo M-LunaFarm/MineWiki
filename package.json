@@ -17,7 +17,8 @@
     "build:api": "pnpm --dir apps/api build",
     "build:worker": "pnpm --dir apps/worker build",
     "build:bot": "pnpm --dir apps/bot build",
-    "check": "turbo run check build --continue"
+    "check": "turbo run check build --continue",
+    "smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {
     "prisma": "^6.17.1",
