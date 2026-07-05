@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@minewiki/api": "workspace:*"
+  }
+}

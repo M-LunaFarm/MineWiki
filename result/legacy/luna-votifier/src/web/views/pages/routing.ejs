@@ -1,0 +1,98 @@
+<%
+  const guildName = currentGuild?.name || 'Guild';
+  const guildId = currentGuild?.id || '';
+  const channelQuery = selectedChannelId ? `?channel_id=${selectedChannelId}` : '';
+%>
+<%- include('../partials/top', { bodyClass: 'dashboard' }) %>
+
+<div class="section-header">
+  <div>
+    <h1><%= guildName %> 라우팅</h1>
+    <p class="channel-hint">이벤트별 전송 대상 서버를 정합니다.</p>
+  </div>
+</div>
+
+<section class="card channel-select">
+  <form class="channel-form" method="get" action="<%= actionPath %>">
+    <label>
+      설정 적용 범위
+      <select name="channel_id">
+        <option value="">길드 기본값</option>
+        <% if (allowAllChannels) { %>
+          <option value="__all" <%= selectedChannelId === '__all' ? 'selected' : '' %>>모든 채널 보기</option>
+        <% } %>
+        <% channelOptions.forEach((channel) => { %>
+          <option value="<%= channel.id %>" <%= selectedChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+        <% }) %>
+      </select>
+    </label>
+    <button class="btn btn-ghost" type="submit">범위 적용</button>
+  </form>
+  <p class="channel-hint">모든 채널 보기는 목록 확인용입니다. 편집하려면 특정 채널을 선택하세요.</p>
+</section>
+
+<% if (isAllChannels) { %>
+  <section class="card">
+    <h2>채널별 규칙</h2>
+    <div class="overflow-x-auto">
+      <table cellpadding="12" class="w-full text-sm" style="min-width: 640px; border-collapse: collapse;">
+        <thead>
+          <tr class="border-b border-white/10 text-left text-white/50">
+            <th>채널</th>
+            <th>규칙</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (!channelRules || channelRules.length === 0) { %>
+            <tr class="border-b border-white/10"><td class="px-4 py-3" colspan="2">채널별 라우팅 규칙이 없습니다.</td></tr>
+          <% } %>
+          <% channelRules.forEach((row) => { %>
+            <tr class="border-b border-white/10">
+              <td><%= row.channel_name %></td>
+              <td><pre class="mono"><%= row.rules_text || '{}' %></pre></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+<% } else { %>
+  <form class="form" method="post" action="/guilds/<%= guildId %>/routing">
+    <input type="hidden" name="csrf_token" value="<%= csrfToken %>" />
+    <input type="hidden" name="channel_id" value="<%= selectedChannelId %>" />
+    <div class="grid">
+      <% eventTypes.forEach((eventType) => { %>
+        <% const rule = rules[eventType.key] || { mode: 'all', server_ids: [] }; %>
+        <section class="card">
+          <div class="section-header">
+            <div>
+              <h2><%= eventType.label %></h2>
+              <p class="channel-hint">이 이벤트가 전달될 서버를 선택합니다.</p>
+            </div>
+            <label>
+              모드
+              <select name="mode_<%= eventType.slug %>">
+                <option value="all" <%= rule.mode === 'all' ? 'selected' : '' %>>모든 서버</option>
+                <option value="include" <%= rule.mode === 'include' ? 'selected' : '' %>>선택 서버만</option>
+                <option value="exclude" <%= rule.mode === 'exclude' ? 'selected' : '' %>>선택 서버 제외</option>
+              </select>
+            </label>
+          </div>
+          <div class="checkbox-grid">
+            <% servers.forEach((server) => { %>
+              <label class="checkbox">
+                <input type="checkbox" name="servers_<%= eventType.slug %>" value="<%= server.server_id %>" <%= rule.server_ids.includes(server.server_id) ? 'checked' : '' %> />
+                <span><%= server.server_name %><%= server.enabled ? '' : ' (비활성)' %></span>
+              </label>
+            <% }) %>
+          </div>
+        </section>
+      <% }) %>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-primary" type="submit">라우팅 저장</button>
+    </div>
+  </form>
+<% } %>
+
+<%- include('../partials/bottom') %>

@@ -1,0 +1,284 @@
+<%
+  const guildName = currentGuild?.name || 'Guild';
+  const guildId = currentGuild?.id || '';
+  const channelQuery = selectedChannelId ? `?channel_id=${selectedChannelId}` : '';
+  const statusMeta = (status) => {
+    if (status === 'success') return { label: '성공', cls: 'badge-live' };
+    if (status === 'retrying') return { label: '재시도 중', cls: 'badge-off' };
+    if (status === 'pending') return { label: '대기', cls: 'badge-off' };
+    if (status === 'failed') return { label: '실패', cls: 'badge-off' };
+    return { label: status || '-', cls: 'badge-off' };
+  };
+%>
+<%- include('../partials/top', { bodyClass: 'dashboard' }) %>
+
+<div class="section-header">
+  <div>
+    <h1><%= guildName %> 로그</h1>
+    <p class="channel-hint">이벤트, 전송, 감사, 권한 기록을 확인합니다.</p>
+  </div>
+</div>
+
+<section class="card channel-select">
+  <form class="channel-form" method="get" action="<%= actionPath %>">
+    <input type="hidden" name="log_tab" value="<%= logTab %>" />
+    <input type="hidden" name="event_type" value="<%= eventTypeFilter %>" />
+    <input type="hidden" name="from" value="<%= dateFrom %>" />
+    <input type="hidden" name="to" value="<%= dateTo %>" />
+    <input type="hidden" name="delivery_status" value="<%= deliveryStatusFilter %>" />
+    <input type="hidden" name="events_page" value="<%= eventsPagination.page %>" />
+    <input type="hidden" name="deliveries_page" value="<%= deliveriesPagination.page %>" />
+    <input type="hidden" name="audits_page" value="<%= auditsPagination.page %>" />
+    <input type="hidden" name="entitlements_page" value="<%= entitlementsPagination.page %>" />
+    <label>
+      조회 범위
+      <select name="channel_id">
+        <option value="">길드 기본값</option>
+        <% if (allowAllChannels) { %>
+          <option value="__all" <%= selectedChannelId === '__all' ? 'selected' : '' %>>모든 채널 보기</option>
+        <% } %>
+        <% channelOptions.forEach((channel) => { %>
+          <option value="<%= channel.id %>" <%= selectedChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+        <% }) %>
+      </select>
+    </label>
+    <button class="btn btn-ghost" type="submit">범위 적용</button>
+  </form>
+  <p class="channel-hint">길드 기본값은 채널 ID가 없는 이벤트를 표시합니다.</p>
+</section>
+
+<nav class="action-stack" aria-label="로그 탭">
+  <a class="btn <%= logTab === 'all' ? 'btn-primary' : 'btn-ghost' %>" href="<%= actionPath %><%= logTabQueries.all ? '?' + logTabQueries.all : '' %>">전체</a>
+  <a class="btn <%= logTab === 'events' ? 'btn-primary' : 'btn-ghost' %>" href="<%= actionPath %><%= logTabQueries.events ? '?' + logTabQueries.events : '' %>">이벤트</a>
+  <a class="btn <%= logTab === 'deliveries' ? 'btn-primary' : 'btn-ghost' %>" href="<%= actionPath %><%= logTabQueries.deliveries ? '?' + logTabQueries.deliveries : '' %>">전송</a>
+  <a class="btn <%= logTab === 'audits' ? 'btn-primary' : 'btn-ghost' %>" href="<%= actionPath %><%= logTabQueries.audits ? '?' + logTabQueries.audits : '' %>">감사</a>
+  <a class="btn <%= logTab === 'entitlements' ? 'btn-primary' : 'btn-ghost' %>" href="<%= actionPath %><%= logTabQueries.entitlements ? '?' + logTabQueries.entitlements : '' %>">권한</a>
+</nav>
+
+<% if (logTab === 'all' || logTab === 'events') { %>
+  <section class="card">
+    <div class="section-header">
+      <div>
+        <h2>최근 이벤트</h2>
+        <p class="channel-hint">총 <%= eventsPagination.total %>건</p>
+      </div>
+    </div>
+    <form class="form channel-form" method="get" action="<%= actionPath %>">
+      <input type="hidden" name="log_tab" value="<%= logTab %>" />
+      <input type="hidden" name="channel_id" value="<%= selectedChannelId %>" />
+      <input type="hidden" name="delivery_status" value="<%= deliveryStatusFilter %>" />
+      <input type="hidden" name="events_page" value="1" />
+      <input type="hidden" name="deliveries_page" value="<%= deliveriesPagination.page %>" />
+      <input type="hidden" name="audits_page" value="<%= auditsPagination.page %>" />
+      <input type="hidden" name="entitlements_page" value="<%= entitlementsPagination.page %>" />
+      <label>
+        타입
+        <select name="event_type">
+          <option value="all" <%= eventTypeFilter === 'all' ? 'selected' : '' %>>전체</option>
+          <% const hasCustomType = eventTypeFilter !== 'all' && !eventTypes.some((type) => type.key === eventTypeFilter); %>
+          <% if (hasCustomType) { %><option value="<%= eventTypeFilter %>" selected><%= eventTypeFilter %></option><% } %>
+          <% eventTypes.forEach((type) => { %>
+            <option value="<%= type.key %>" <%= eventTypeFilter === type.key ? 'selected' : '' %>><%= type.key %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>
+        시작일
+        <input type="date" name="from" value="<%= dateFrom %>" />
+      </label>
+      <label>
+        종료일
+        <input type="date" name="to" value="<%= dateTo %>" />
+      </label>
+      <button class="btn btn-primary" type="submit">필터 적용</button>
+      <% if (eventTypeFilter !== 'all' || dateFrom || dateTo) { %>
+        <a class="btn btn-ghost" href="<%= actionPath %><%= eventsClearQuery ? '?' + eventsClearQuery : '' %>">필터 초기화</a>
+      <% } %>
+    </form>
+    <div class="overflow-x-auto">
+      <table cellpadding="12" class="w-full text-sm" style="min-width: 760px; border-collapse: collapse;">
+        <thead>
+          <tr class="border-b border-white/10 text-left text-white/50">
+            <th>타입</th>
+            <th>디스코드 ID</th>
+            <th>IGN</th>
+            <% if (selectedChannelId === '__all') { %><th>채널</th><% } %>
+            <th>시각</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (events.length === 0) { %><tr class="border-b border-white/10"><td class="px-4 py-3" colspan="<%= selectedChannelId === '__all' ? 5 : 4 %>">아직 이벤트가 없습니다.</td></tr><% } %>
+          <% events.forEach((event) => { %>
+            <tr class="border-b border-white/10">
+              <td><%= event.event_type %></td>
+              <td class="mono"><%= event.discord_user_id %></td>
+              <td><%= event.mc_ign %></td>
+              <% if (selectedChannelId === '__all') { %><td><%= event.channel_id || '-' %></td><% } %>
+              <td><%= event.occurred_at_display %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <div class="section-header">
+      <p class="channel-hint">페이지 <%= eventsPagination.page %>/<%= eventsPagination.totalPages %></p>
+      <div class="action-stack">
+        <% if (eventsPagination.prevQuery) { %><a class="btn btn-ghost" href="<%= actionPath %>?<%= eventsPagination.prevQuery %>">이전</a><% } %>
+        <% if (eventsPagination.nextQuery) { %><a class="btn btn-ghost" href="<%= actionPath %>?<%= eventsPagination.nextQuery %>">다음</a><% } %>
+      </div>
+    </div>
+  </section>
+<% } %>
+
+<% if (logTab === 'all' || logTab === 'deliveries') { %>
+  <section class="card">
+    <div class="section-header">
+      <div>
+        <h2>푸시 전송</h2>
+        <p class="channel-hint">총 <%= deliveriesPagination.total %>건</p>
+      </div>
+    </div>
+    <form class="form channel-form" method="get" action="<%= actionPath %>">
+      <input type="hidden" name="log_tab" value="<%= logTab %>" />
+      <input type="hidden" name="channel_id" value="<%= selectedChannelId %>" />
+      <input type="hidden" name="event_type" value="<%= eventTypeFilter %>" />
+      <input type="hidden" name="from" value="<%= dateFrom %>" />
+      <input type="hidden" name="to" value="<%= dateTo %>" />
+      <input type="hidden" name="deliveries_page" value="1" />
+      <input type="hidden" name="events_page" value="<%= eventsPagination.page %>" />
+      <input type="hidden" name="audits_page" value="<%= auditsPagination.page %>" />
+      <input type="hidden" name="entitlements_page" value="<%= entitlementsPagination.page %>" />
+      <label>
+        상태
+        <select name="delivery_status">
+          <option value="all" <%= deliveryStatusFilter === 'all' ? 'selected' : '' %>>전체</option>
+          <option value="success" <%= deliveryStatusFilter === 'success' ? 'selected' : '' %>>성공</option>
+          <option value="failed" <%= deliveryStatusFilter === 'failed' ? 'selected' : '' %>>실패</option>
+          <option value="retrying" <%= deliveryStatusFilter === 'retrying' ? 'selected' : '' %>>재시도 중</option>
+          <option value="pending" <%= deliveryStatusFilter === 'pending' ? 'selected' : '' %>>대기</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" type="submit">필터 적용</button>
+      <% if (deliveryStatusFilter !== 'all') { %>
+        <a class="btn btn-ghost" href="<%= actionPath %><%= deliveryClearQuery ? '?' + deliveryClearQuery : '' %>">필터 초기화</a>
+      <% } %>
+    </form>
+    <div class="overflow-x-auto">
+      <table cellpadding="12" class="w-full text-sm" style="min-width: 760px; border-collapse: collapse;">
+        <thead>
+          <tr class="border-b border-white/10 text-left text-white/50">
+            <th>전송 ID</th>
+            <th>서버</th>
+            <th>상태</th>
+            <th>시도</th>
+            <th>HTTP</th>
+            <th>수정 시각</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (deliveries.length === 0) { %><tr class="border-b border-white/10"><td class="px-4 py-3" colspan="6">아직 전송 내역이 없습니다.</td></tr><% } %>
+          <% deliveries.forEach((delivery) => { %>
+            <% const meta = statusMeta(delivery.status); %>
+            <tr class="border-b border-white/10">
+              <td class="mono"><%= delivery.delivery_id %></td>
+              <td><%= delivery.server_id %></td>
+              <td><span class="badge <%= meta.cls %>"><%= meta.label %></span></td>
+              <td><%= delivery.attempt_count %></td>
+              <td><%= delivery.last_http_status || '-' %></td>
+              <td><%= delivery.updated_at_display %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <div class="section-header">
+      <p class="channel-hint">페이지 <%= deliveriesPagination.page %>/<%= deliveriesPagination.totalPages %></p>
+      <div class="action-stack">
+        <% if (deliveriesPagination.prevQuery) { %><a class="btn btn-ghost" href="<%= actionPath %>?<%= deliveriesPagination.prevQuery %>">이전</a><% } %>
+        <% if (deliveriesPagination.nextQuery) { %><a class="btn btn-ghost" href="<%= actionPath %>?<%= deliveriesPagination.nextQuery %>">다음</a><% } %>
+      </div>
+    </div>
+  </section>
+<% } %>
+
+<% if (logTab === 'all' || logTab === 'audits') { %>
+  <section class="card">
+    <div class="section-header">
+      <div>
+        <h2>감사 로그</h2>
+        <p class="channel-hint">총 <%= auditsPagination.total %>건</p>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table cellpadding="12" class="w-full text-sm" style="min-width: 640px; border-collapse: collapse;">
+        <thead>
+          <tr class="border-b border-white/10 text-left text-white/50">
+            <th>수행자</th>
+            <th>작업</th>
+            <th>시각</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (audits.length === 0) { %><tr class="border-b border-white/10"><td class="px-4 py-3" colspan="3">아직 감사 로그가 없습니다.</td></tr><% } %>
+          <% audits.forEach((audit) => { %>
+            <tr class="border-b border-white/10">
+              <td class="mono"><%= audit.actor_discord_id %></td>
+              <td><%= audit.action %></td>
+              <td><%= audit.created_at_display %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <div class="section-header">
+      <p class="channel-hint">페이지 <%= auditsPagination.page %>/<%= auditsPagination.totalPages %></p>
+      <div class="action-stack">
+        <% if (auditsPagination.prevQuery) { %><a class="btn btn-ghost" href="<%= actionPath %>?<%= auditsPagination.prevQuery %>">이전</a><% } %>
+        <% if (auditsPagination.nextQuery) { %><a class="btn btn-ghost" href="<%= actionPath %>?<%= auditsPagination.nextQuery %>">다음</a><% } %>
+      </div>
+    </div>
+  </section>
+<% } %>
+
+<% if (logTab === 'all' || logTab === 'entitlements') { %>
+  <section class="card">
+    <div class="section-header">
+      <div>
+        <h2>권한 로그</h2>
+        <p class="channel-hint">총 <%= entitlementsPagination.total %>건</p>
+      </div>
+    </div>
+    <div class="overflow-x-auto">
+      <table cellpadding="12" class="w-full text-sm" style="min-width: 760px; border-collapse: collapse;">
+        <thead>
+          <tr class="border-b border-white/10 text-left text-white/50">
+            <th>이벤트</th>
+            <th>디스코드 ID</th>
+            <th>UUID</th>
+            <th>시각</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% if (!entitlements || entitlements.length === 0) { %><tr class="border-b border-white/10"><td class="px-4 py-3" colspan="4">아직 권한 로그가 없습니다.</td></tr><% } %>
+          <% entitlements.forEach((row) => { %>
+            <tr class="border-b border-white/10">
+              <td class="mono"><%= row.event_id %></td>
+              <td><%= row.discord_user_id %></td>
+              <td><%= row.mc_uuid %></td>
+              <td><%= row.created_at_display %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <div class="section-header">
+      <p class="channel-hint">페이지 <%= entitlementsPagination.page %>/<%= entitlementsPagination.totalPages %></p>
+      <div class="action-stack">
+        <% if (entitlementsPagination.prevQuery) { %><a class="btn btn-ghost" href="<%= actionPath %>?<%= entitlementsPagination.prevQuery %>">이전</a><% } %>
+        <% if (entitlementsPagination.nextQuery) { %><a class="btn btn-ghost" href="<%= actionPath %>?<%= entitlementsPagination.nextQuery %>">다음</a><% } %>
+      </div>
+    </div>
+  </section>
+<% } %>
+
+<%- include('../partials/bottom') %>

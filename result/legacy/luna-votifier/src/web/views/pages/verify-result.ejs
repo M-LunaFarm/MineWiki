@@ -1,0 +1,24 @@
+<%- include('../partials/top', { currentGuild: null }) %>
+
+<section class="verify">
+  <div class="login-card">
+    <% const avatar = result.mc_ign ? `https://minotar.net/helm/${result.mc_ign}/128` : 'https://minotar.net/helm/steve/128'; %>
+    <p class="eyebrow">인증 완료</p>
+    <img src="<%= avatar %>" alt="Minecraft Avatar" width="72" height="72" style="image-rendering: pixelated; border-radius: 14px; margin: 0 auto 14px;" />
+    <h1>계정 연결이 완료되었습니다.</h1>
+    <p>Discord와 Minecraft 계정 연결 결과입니다.</p>
+    <div class="grid" style="text-align: left; margin: 18px 0;">
+      <div class="panel-card">
+        <p class="panel-label">Minecraft UUID</p>
+        <p class="mono"><%= result.mc_uuid %></p>
+      </div>
+      <div class="panel-card">
+        <p class="panel-label">Minecraft IGN</p>
+        <p><strong><%= result.mc_ign %></strong></p>
+      </div>
+    </div>
+    <a class="btn btn-ghost" href="/">홈으로 이동</a>
+  </div>
+</section>
+
+<%- include('../partials/bottom') %>
