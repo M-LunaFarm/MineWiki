@@ -9,6 +9,7 @@ import { SessionService } from '../session/session.service';
 import { PrismaService } from '../common/prisma.service';
 import { EmailService } from './email.service';
 import { UploadService } from '../upload/upload.service';
+import { FileService } from '../file/file.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -31,7 +32,8 @@ if (!hasDatabase) {
     const accounts = new AccountSeparationService(prisma);
     const sessions = new SessionService(prisma);
     const uploads = new UploadService(config);
-    return new AuthService(accounts, sessions, prisma, emailService, config, uploads);
+    const files = new FileService(prisma, uploads);
+    return new AuthService(accounts, sessions, prisma, emailService, config, files);
   };
 
   const getVerificationToken = async (accountId: string) => {

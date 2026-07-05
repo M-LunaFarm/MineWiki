@@ -32,7 +32,6 @@ import {
 } from '@minewiki/schemas';
 import { OAuthFlowService } from './oauth-flow.service';
 import { extractClientIp } from '../common/http/client-ip';
-import { decodeBase64 } from '../upload/upload.utils';
 
 @Controller('v1/auth')
 export class AuthController {
@@ -286,9 +285,8 @@ export class AuthController {
       throw new BadRequestException('이미지 데이터가 필요합니다.');
     }
 
-    const buffer = decodeBase64(data);
     return this.auth.updateAvatar(session.userId, {
-      buffer,
+      data,
       filename: filename?.trim() ? filename.trim() : undefined,
     });
   }

@@ -20,7 +20,7 @@ import {
 import { SessionService } from '../session/session.service';
 import { PrismaService } from '../common/prisma.service';
 import { EmailService } from './email.service';
-import { UploadService, type ImageUploadInput } from '../upload/upload.service';
+import { FileService, type FileImageUploadRequest } from '../file/file.service';
 
 interface EmailRegistrationDto {
   readonly email: string;
@@ -138,7 +138,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly config: ConfigService,
-    private readonly uploads: UploadService,
+    private readonly files: FileService,
   ) {
     this.accountLinkingEnabled = this.config.getOptional('ACCOUNT_LINKING_ENABLED') === 'true';
   }
@@ -408,13 +408,16 @@ export class AuthService {
     });
   }
 
-  async updateAvatar(accountId: string, upload: ImageUploadInput): Promise<AuthAccountView> {
+  async updateAvatar(accountId: string, upload: FileImageUploadRequest): Promise<AuthAccountView> {
     const account = await this.accounts.getAccount(accountId);
     if (!account) {
       throw new NotFoundAccountError();
     }
 
-    const stored = await this.uploads.storeImage(upload);
+    const stored = await this.files.createImage(account.id, {
+      ...upload,
+      usageContext: 'profile_avatar',
+    });
     await this.prisma.account.update({
       where: { id: account.id },
       data: { avatarUrl: stored.publicPath },
