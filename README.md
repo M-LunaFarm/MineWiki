@@ -25,3 +25,14 @@ MineWiki keeps the wiki as the main product, promotes the former VoteWeb code in
 - `apps/wiki` keeps its local `users.id` for wiki permissions and maps to `users.account_id`.
 - `Server.id` maps to wiki spaces through `Server.wikiSpaceId`, `Server.wikiPageId`, and `Server.wikiSlug`.
 - `server_wikis.vote_server_id` links wiki server pages back to the server directory.
+
+## Production Runtime Lock
+
+Production starts only the integrated runtime defined in `infra/pm2/ecosystem.config.cjs`:
+
+- `minewiki-web`
+- `minewiki-api`
+- `minewiki-worker`
+- `minewiki-bot`
+
+Use `pnpm deploy:build` before reload and `pnpm deploy:smoke` after reload. Do not run `legacy/mwiki-fastify`, `legacy/luna-votifier`, or any old VoteWeb runtime in production; those directories are migration references only.

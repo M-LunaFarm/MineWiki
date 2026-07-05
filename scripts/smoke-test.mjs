@@ -31,6 +31,16 @@ const checks = [
     url: `${apiBaseUrl}/v1/auth/providers`,
     expectedStatuses: [200],
   },
+  {
+    name: 'api wiki page',
+    url: `${apiBaseUrl}/v1/wiki/page/by-path?path=${encodeURIComponent('/wiki/대문')}`,
+    expectedStatuses: [200],
+  },
+  {
+    name: 'proxied api wiki page',
+    url: `${webBaseUrl}/api/v1/wiki/page/by-path?path=${encodeURIComponent('/wiki/대문')}`,
+    expectedStatuses: [200],
+  },
 ];
 
 if (dryRun) {

@@ -5,7 +5,9 @@ export class AppService {
   getHealth() {
     return {
       status: 'ok',
-      uptime: process.uptime()
+      service: 'minewiki-api',
+      uptime: process.uptime(),
+      checkedAt: new Date().toISOString()
     };
   }
 }

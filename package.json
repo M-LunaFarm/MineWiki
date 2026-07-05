@@ -22,6 +22,8 @@
     "build:worker": "pnpm --dir apps/worker build",
     "build:bot": "pnpm --dir apps/bot build",
     "check": "turbo run check build --continue",
+    "deploy:build": "pnpm exec prisma migrate deploy && pnpm build",
+    "deploy:smoke": "pnpm smoke",
     "lint": "turbo run lint --continue",
     "format": "pnpm lint -- --fix",
     "test": "turbo run test --continue",
