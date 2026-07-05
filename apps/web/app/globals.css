@@ -113,6 +113,55 @@
     @apply border border-white/10 bg-white/[0.04] text-slate-400;
   }
 
+  .wiki-rendered {
+    @apply rounded-lg border border-white/[0.07] bg-[#0d1219]/70 px-5 py-6 text-[15px] leading-7 text-slate-200 sm:px-7;
+  }
+  .wiki-rendered h2 {
+    @apply mt-8 border-b border-white/10 pb-2 text-2xl font-bold text-white first:mt-0;
+  }
+  .wiki-rendered h3 {
+    @apply mt-7 text-xl font-semibold text-white;
+  }
+  .wiki-rendered p,
+  .wiki-rendered ul,
+  .wiki-rendered ol,
+  .wiki-rendered table,
+  .wiki-rendered blockquote,
+  .wiki-rendered pre {
+    @apply mt-4;
+  }
+  .wiki-rendered a {
+    @apply text-emerald-300 underline decoration-emerald-300/30 underline-offset-4 hover:text-emerald-200;
+  }
+  .wiki-rendered a.missing {
+    @apply text-rose-300 decoration-rose-300/30;
+  }
+  .wiki-rendered ul {
+    @apply list-disc pl-6;
+  }
+  .wiki-rendered ol {
+    @apply list-decimal pl-6;
+  }
+  .wiki-rendered blockquote {
+    @apply border-l-2 border-emerald-300/40 pl-4 text-slate-300;
+  }
+  .wiki-rendered code {
+    @apply rounded bg-white/10 px-1.5 py-0.5 text-sm text-emerald-100;
+  }
+  .wiki-rendered pre {
+    @apply overflow-x-auto rounded-lg border border-white/10 bg-black/30 p-4;
+  }
+  .wiki-rendered table {
+    @apply w-full border-collapse overflow-hidden rounded-lg text-sm;
+  }
+  .wiki-rendered th,
+  .wiki-rendered td {
+    @apply border border-white/10 px-3 py-2 align-top;
+  }
+  .wiki-rendered th {
+    @apply bg-white/[0.06] text-left text-white;
+  }
+
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-lg bg-[#14c794] px-4 text-sm font-bold text-[#06140d] transition-all hover:bg-[#1ee6a4];
     box-shadow: 0 8px 20px -10px rgba(20, 199, 148, 0.55);
