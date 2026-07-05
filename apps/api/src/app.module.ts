@@ -18,6 +18,7 @@ import { AppConfigModule } from './config/config.module';
 import { PrismaModule } from './common/prisma.module';
 import { SupportModule } from './support/support.module';
 import { VerifyModule } from './verify/verify.module';
+import { WikiModule } from './wiki/wiki.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { VerifyModule } from './verify/verify.module';
     DashboardModule,
     SupportModule,
     VerifyModule,
+    WikiModule,
     TelemetryModule,
     AppConfigModule,
     PrismaModule
