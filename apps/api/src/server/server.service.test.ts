@@ -160,6 +160,9 @@ if (!hasDatabase) {
       assert.equal(detail.wikiSpaceId, link.wikiSpaceId);
       assert.equal(detail.wikiPageId, link.wikiPageId);
       assert.equal(detail.wikiSlug, link.wikiSlug);
+      const storedServer = await prisma.server.findUnique({ where: { id: server.id } });
+      assert.equal(typeof storedServer?.wikiSpaceId, 'bigint');
+      assert.equal(typeof storedServer?.wikiPageId, 'bigint');
 
       const serverWiki = await prisma.serverWiki.findUnique({
         where: { voteServerId: server.id }

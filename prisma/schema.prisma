@@ -237,8 +237,8 @@ model Server {
   id                    String            @id @default(uuid())
   shortCode             String?           @unique @db.VarChar(12)
   ownerAccountId        String?
-  wikiSpaceId           String?
-  wikiPageId            String?
+  wikiSpaceId           BigInt?           @db.UnsignedBigInt
+  wikiPageId            BigInt?           @db.UnsignedBigInt
   wikiSlug              String?
   name                  String
   joinHost              String

@@ -24,7 +24,7 @@ export type PluginSyncAction = (typeof PLUGIN_SYNC_ACTIONS)[number];
 
 export interface ServerWikiMapping {
   readonly voteServerId: string;
-  readonly wikiSpaceId?: string | null;
-  readonly wikiPageId?: string | null;
+  readonly wikiSpaceId?: bigint | null;
+  readonly wikiPageId?: bigint | null;
   readonly wikiSlug?: string | null;
 }

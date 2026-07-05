@@ -668,8 +668,8 @@ export class ServerService {
       const updatedServer = await tx.server.update({
         where: { id: server.id },
         data: {
-          wikiSpaceId: space.id.toString(),
-          wikiPageId: page.id.toString(),
+          wikiSpaceId: space.id,
+          wikiPageId: page.id,
           wikiSlug: slug,
         },
       });
@@ -719,8 +719,8 @@ export class ServerService {
       const updatedServer = await tx.server.update({
         where: { id: server.id },
         data: {
-          wikiSpaceId: serverWiki.spaceId.toString(),
-          wikiPageId: page?.id.toString() ?? null,
+          wikiSpaceId: serverWiki.spaceId,
+          wikiPageId: page?.id ?? null,
           wikiSlug: serverWiki.slug,
         },
       });
@@ -940,15 +940,15 @@ export class ServerService {
     throw new Error('Failed to generate unique server short code.');
   }
 
-  private async findServerWikiForServer(serverId: string, wikiSpaceId?: string | null) {
+  private async findServerWikiForServer(serverId: string, wikiSpaceId?: bigint | null) {
     const linkedByServer = await this.prisma.serverWiki.findUnique({
       where: { voteServerId: serverId },
     });
-    if (linkedByServer || !wikiSpaceId || !/^\d+$/.test(wikiSpaceId)) {
+    if (linkedByServer || !wikiSpaceId) {
       return linkedByServer;
     }
     return this.prisma.serverWiki.findFirst({
-      where: { spaceId: BigInt(wikiSpaceId) },
+      where: { spaceId: wikiSpaceId },
     });
   }
 
@@ -1128,20 +1128,20 @@ function toServerWikiLinkResponse(
   server: {
     id: string;
     shortCode?: string | null;
-    wikiSpaceId?: string | null;
-    wikiPageId?: string | null;
+    wikiSpaceId?: bigint | null;
+    wikiPageId?: bigint | null;
     wikiSlug?: string | null;
   },
   serverWiki: { id: bigint; spaceId: bigint; slug: string } | null,
 ): ServerWikiLinkResponse {
   const wikiSlug = server.wikiSlug ?? serverWiki?.slug ?? null;
-  const wikiSpaceId = server.wikiSpaceId ?? serverWiki?.spaceId.toString() ?? null;
+  const wikiSpaceId = server.wikiSpaceId?.toString() ?? serverWiki?.spaceId.toString() ?? null;
   const linked = Boolean(wikiSlug && wikiSpaceId);
   return {
     serverId: server.id,
     serverWikiId: serverWiki?.id.toString() ?? null,
     wikiSpaceId,
-    wikiPageId: server.wikiPageId ?? null,
+    wikiPageId: server.wikiPageId?.toString() ?? null,
     wikiSlug,
     wikiUrl: wikiSlug ? `/server/${encodeURIComponent(wikiSlug)}` : null,
     serverDirectoryPath: buildServerDirectoryPath(server),
@@ -1187,8 +1187,8 @@ function buildServerMainPageContent(server: {
 function toSummary(server: {
   id: string;
   shortCode?: string | null;
-  wikiSpaceId?: string | null;
-  wikiPageId?: string | null;
+  wikiSpaceId?: bigint | null;
+  wikiPageId?: bigint | null;
   wikiSlug?: string | null;
   name: string;
   joinHost: string;
@@ -1216,8 +1216,8 @@ function toSummary(server: {
   return {
     id: server.id,
     shortCode: server.shortCode ?? null,
-    wikiSpaceId: server.wikiSpaceId ?? null,
-    wikiPageId: server.wikiPageId ?? null,
+    wikiSpaceId: server.wikiSpaceId?.toString() ?? null,
+    wikiPageId: server.wikiPageId?.toString() ?? null,
     wikiSlug: server.wikiSlug ?? null,
     name: server.name,
     joinHost: server.joinHost,
@@ -1253,8 +1253,8 @@ function toDetail(
   server: {
     id: string;
     shortCode?: string | null;
-    wikiSpaceId?: string | null;
-    wikiPageId?: string | null;
+    wikiSpaceId?: bigint | null;
+    wikiPageId?: bigint | null;
     wikiSlug?: string | null;
     name: string;
     joinHost: string;
