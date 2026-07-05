@@ -37,6 +37,12 @@ const votifierPayloadSchema = z.object({
   targets: z.array(votifierTargetSchema).min(1)
 });
 
+const serverWikiLinkPayloadSchema = z.object({
+  serverWikiId: z.string().trim().min(1).optional(),
+  spaceId: z.string().trim().min(1).optional(),
+  wikiSlug: z.string().trim().min(1).optional()
+});
+
 type RequiredServerRegistrationPayload =
   Required<Omit<ServerRegistrationPayload, 'websiteUrl' | 'discordUrl'>> &
     Pick<ServerRegistrationPayload, 'websiteUrl' | 'discordUrl'>;
@@ -71,6 +77,11 @@ export class ServerController {
     return this.serverService.detail(id);
   }
 
+  @Get(':id/wiki')
+  async serverWiki(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.serverService.getServerWikiLink(id);
+  }
+
   @Get(':id/stats')
   async stats(@Param('id', new ParseUUIDPipe()) id: string): Promise<ServerStats> {
     return this.serverService.stats(id);
@@ -96,6 +107,28 @@ export class ServerController {
       ...payload,
       ownerAccountId: session.userId
     });
+  }
+
+  @UseGuards(SessionGuard)
+  @Post(':id/wiki')
+  async createServerWiki(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.ensureServerWikiAccess(id, session);
+    return this.serverService.createServerWiki(id, session.userId);
+  }
+
+  @UseGuards(SessionGuard)
+  @Patch(':id/wiki-link')
+  async linkServerWiki(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.ensureServerWikiAccess(id, session);
+    const payload = serverWikiLinkPayloadSchema.parse(body);
+    return this.serverService.linkServerWiki(id, payload);
   }
 
   @UseGuards(SessionGuard)
@@ -200,5 +233,14 @@ export class ServerController {
     const payload = votifierPayloadSchema.parse(body);
     await this.serverService.updateVotifierTargets(id, payload.targets);
     return { success: true };
+  }
+
+  private async ensureServerWikiAccess(id: string, session: SessionPayload): Promise<void> {
+    if (session.isElevated) {
+      return;
+    }
+    if (!(await this.claimService.isOwner(id, session.userId))) {
+      throw new BadRequestException('해당 서버 위키를 만들거나 연결할 권한이 없습니다.');
+    }
   }
 }

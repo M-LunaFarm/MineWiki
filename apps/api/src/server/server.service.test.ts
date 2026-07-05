@@ -9,6 +9,7 @@ import { ServerService } from './server.service';
 import { UploadService } from '../upload/upload.service';
 import { PrismaService } from '../common/prisma.service';
 import type { ConfigService } from '@minewiki/config';
+import { WikiProfileService } from '../wiki/wiki-profile.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -16,6 +17,7 @@ if (!hasDatabase) {
   test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});
 } else {
   const prisma = new PrismaService();
+  const wikiProfiles = new WikiProfileService(prisma);
 
   before(async () => {
     await prisma.$connect();
@@ -36,7 +38,7 @@ if (!hasDatabase) {
       }
     } as unknown as ConfigService;
     const uploadService = new UploadService(configStub);
-    const service = new ServerService(uploadService, prisma);
+    const service = new ServerService(uploadService, prisma, wikiProfiles);
     return {
       service,
       cleanup: () => rmSync(storageRoot, { recursive: true, force: true })
@@ -103,6 +105,92 @@ if (!hasDatabase) {
       assert.ok(stored.width <= 1200);
       assert.ok(statSync(stored.storagePath).isFile());
     } finally {
+      cleanup();
+    }
+  });
+
+  test('creates and links a server wiki space with a main page', async () => {
+    const { service, cleanup } = createService();
+    const unique = randomUUID().replace(/-/g, '').slice(0, 12);
+    let serverId: string | null = null;
+    let accountId: string | null = null;
+    let spaceId: string | null = null;
+    let pageId: string | null = null;
+
+    try {
+      const account = await prisma.account.create({
+        data: {
+          provider: 'email',
+          providerUserId: `server-wiki-${unique}`,
+          email: `server-wiki-${unique}@example.com`,
+          displayName: `ServerWiki_${unique}`,
+          emailVerified: true
+        }
+      });
+      accountId = account.id;
+
+      const server = await service.register({
+        name: `Wiki Link ${unique.slice(0, 6)}`,
+        joinHost: `wiki-${unique}.example.com`,
+        joinPort: 25565,
+        edition: 'java',
+        supportedVersions: ['1.20.1'],
+        tags: ['survival'],
+        shortDescription: 'Server wiki link test',
+        longDescription: 'Server wiki link integration test',
+        websiteUrl: null,
+        discordUrl: null,
+        ownerAccountId: account.id
+      });
+      serverId = server.id;
+
+      const link = await service.createServerWiki(server.id, account.id);
+      spaceId = link.wikiSpaceId;
+      pageId = link.wikiPageId;
+
+      assert.equal(link.status, 'linked');
+      assert.equal(link.serverId, server.id);
+      assert.ok(link.serverWikiId);
+      assert.ok(link.wikiSpaceId);
+      assert.ok(link.wikiPageId);
+      assert.ok(link.wikiSlug);
+      assert.equal(link.wikiUrl, `/server/${encodeURIComponent(link.wikiSlug ?? '')}`);
+
+      const detail = await service.detail(server.id);
+      assert.equal(detail.wikiSpaceId, link.wikiSpaceId);
+      assert.equal(detail.wikiPageId, link.wikiPageId);
+      assert.equal(detail.wikiSlug, link.wikiSlug);
+
+      const serverWiki = await prisma.serverWiki.findUnique({
+        where: { voteServerId: server.id }
+      });
+      assert.equal(serverWiki?.slug, link.wikiSlug);
+    } finally {
+      if (serverId) {
+        await prisma.server.update({
+          where: { id: serverId },
+          data: { wikiSpaceId: null, wikiPageId: null, wikiSlug: null }
+        }).catch(() => {});
+      }
+      if (pageId) {
+        const parsedPageId = BigInt(pageId);
+        await prisma.wikiRecentChange.deleteMany({ where: { pageId: parsedPageId } });
+        await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: parsedPageId } });
+        await prisma.wikiPageRevision.deleteMany({ where: { pageId: parsedPageId } });
+        await prisma.wikiPage.delete({ where: { id: parsedPageId } }).catch(() => {});
+      }
+      if (spaceId) {
+        const parsedSpaceId = BigInt(spaceId);
+        await prisma.serverWiki.deleteMany({ where: { spaceId: parsedSpaceId } });
+        await prisma.wikiSpace.delete({ where: { id: parsedSpaceId } }).catch(() => {});
+      }
+      if (serverId) {
+        await prisma.server.delete({ where: { id: serverId } }).catch(() => {});
+      }
+      if (accountId) {
+        await prisma.wikiProfile.deleteMany({ where: { accountId } });
+        await prisma.account.delete({ where: { id: accountId } }).catch(() => {});
+      }
       cleanup();
     }
   });

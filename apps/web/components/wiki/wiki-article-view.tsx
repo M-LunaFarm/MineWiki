@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 
 interface WikiArticleViewProps {
@@ -43,6 +44,15 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
           dangerouslySetInnerHTML={{ __html: page.html }}
         />
         <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+          {page.namespace === 'server' && page.serverDirectoryPath ? (
+            <Link
+              href={page.serverDirectoryPath}
+              className="flex items-center justify-between rounded-lg border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:border-amber-200/70 hover:bg-amber-300/15"
+            >
+              투표/리뷰
+              <Star className="h-4 w-4 text-amber-100" />
+            </Link>
+          ) : null}
           <section className="surface-flat p-4">
             <h2 className="text-sm font-semibold text-white">문서 정보</h2>
             <dl className="mt-3 space-y-2 text-sm text-slate-300">

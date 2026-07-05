@@ -12,6 +12,7 @@ import { AccountSeparationService } from '../auth/account-separation.service';
 import { MinecraftService } from '../minecraft/minecraft.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
+import { WikiProfileService } from '../wiki/wiki-profile.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -21,7 +22,7 @@ if (!hasDatabase) {
   const prisma = new PrismaService();
   const config = new ConfigService({} as NodeJS.ProcessEnv);
   const uploads = new UploadService(config);
-  const serverService = new ServerService(uploads, prisma);
+  const serverService = new ServerService(uploads, prisma, new WikiProfileService(prisma));
   const events = { track: async () => {} } as BusinessEventService;
   const voteStore = new VoteStore(prisma);
   const accounts = new AccountSeparationService(prisma);

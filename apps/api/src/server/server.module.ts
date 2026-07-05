@@ -6,9 +6,10 @@ import { UploadModule } from '../upload/upload.module';
 import { ClaimModule } from '../claim/claim.module';
 import { TelemetryModule } from '../telemetry/telemetry.module';
 import { SessionModule } from '../session/session.module';
+import { WikiModule } from '../wiki/wiki.module';
 
 @Module({
-  imports: [UploadModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule],
+  imports: [UploadModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule],
   providers: [ServerService],
   controllers: [ServerController, ServerVerificationController],
   exports: [ServerService]

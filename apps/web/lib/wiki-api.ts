@@ -23,6 +23,7 @@ export interface WikiPageResponse {
   readonly html: string;
   readonly links: string[];
   readonly categories: string[];
+  readonly serverDirectoryPath?: string | null;
 }
 
 export async function fetchWikiPageByPath(path: string): Promise<WikiPageResponse | null> {

@@ -23,6 +23,7 @@ export interface WikiPageResponse {
   readonly html: string;
   readonly links: string[];
   readonly categories: string[];
+  readonly serverDirectoryPath?: string | null;
 }
 
 export interface WikiRevisionSummary {
@@ -130,6 +131,7 @@ export class WikiReadService {
       orderBy: [{ createdAt: 'desc' }]
     });
     const parsed = parseMarkup(revision.contentRaw);
+    const serverDirectoryPath = await this.findServerDirectoryPath(namespace, page.spaceId);
     return {
       id: page.id.toString(),
       namespace,
@@ -150,8 +152,30 @@ export class WikiReadService {
       },
       html: cache?.html ?? renderDocument(parsed.ast),
       links: parsed.links,
-      categories: parsed.categories
+      categories: parsed.categories,
+      serverDirectoryPath
     };
+  }
+
+  private async findServerDirectoryPath(namespace: string, spaceId: bigint): Promise<string | null> {
+    if (namespace !== 'server') {
+      return null;
+    }
+    const serverWiki = await this.prisma.serverWiki.findFirst({
+      where: { spaceId },
+      select: { voteServerId: true }
+    });
+    if (!serverWiki?.voteServerId) {
+      return null;
+    }
+    const server = await this.prisma.server.findUnique({
+      where: { id: serverWiki.voteServerId },
+      select: { id: true, shortCode: true }
+    });
+    if (!server) {
+      return null;
+    }
+    return `/servers/${server.shortCode?.trim() || server.id}`;
   }
 
   private parseBigIntId(value: string, label: string): bigint {

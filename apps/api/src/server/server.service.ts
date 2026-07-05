@@ -1,6 +1,13 @@
-﻿import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+﻿import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { Logger } from '@minewiki/logger';
 import { UnsafeEndpointError, validateOutboundTarget } from '@minewiki/security';
+import { hashContent, parseMarkup } from '@minewiki/wiki-core';
 import type {
   ServerDetail,
   ServerStats,
@@ -18,6 +25,7 @@ import { type StoredVerificationGrade, type ServerFilters, type ServerSort } fro
 import { UploadService, type ImageUploadInput, type StoredImage } from '../upload/upload.service';
 import { FirestoreTelemetryService } from '../telemetry/firestore-telemetry.service';
 import type { ClaimMethod } from '../claim/claim.types';
+import { WikiProfileService } from '../wiki/wiki-profile.service';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
@@ -37,6 +45,7 @@ export class ServerService {
   constructor(
     private readonly uploads: UploadService,
     private readonly prisma: PrismaService,
+    private readonly wikiProfiles: WikiProfileService,
     @Optional() private readonly firestoreTelemetry?: FirestoreTelemetryService,
   ) {
     this.telemetry = firestoreTelemetry ?? {
@@ -518,6 +527,209 @@ export class ServerService {
     return server;
   }
 
+  async getServerWikiLink(serverId: string): Promise<ServerWikiLinkResponse> {
+    const server = await this.ensureExists(serverId);
+    const serverWiki = await this.findServerWikiForServer(server.id, server.wikiSpaceId);
+    return toServerWikiLinkResponse(server, serverWiki);
+  }
+
+  async createServerWiki(serverId: string, accountId: string): Promise<ServerWikiLinkResponse> {
+    const server = await this.ensureExists(serverId);
+    const existing = await this.findServerWikiForServer(server.id, server.wikiSpaceId);
+    if (existing) {
+      if (server.wikiSpaceId && server.wikiPageId && server.wikiSlug) {
+        return toServerWikiLinkResponse(server, existing);
+      }
+      return this.linkServerWiki(server.id, { serverWikiId: existing.id.toString() });
+    }
+
+    const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
+    const now = new Date();
+    const slug = await this.generateUniqueServerWikiSlug(
+      server.wikiSlug ?? server.shortCode ?? server.joinHost ?? server.name,
+      server.id,
+    );
+    const contentRaw = buildServerMainPageContent(server);
+
+    const linked = await this.prisma.$transaction(async (tx) => {
+      const namespace = await tx.wikiNamespace.upsert({
+        where: { code: 'server' },
+        create: {
+          code: 'server',
+          displayName: '서버',
+          pathPrefix: '/server',
+          isContent: true,
+        },
+        update: {
+          displayName: '서버',
+          pathPrefix: '/server',
+          isContent: true,
+        },
+      });
+      const space = await tx.wikiSpace.create({
+        data: {
+          code: `server-${server.id}`,
+          spaceKey: `server-${server.id}`,
+          name: `${server.name} 위키`,
+          title: `${server.name} 위키`,
+          slug,
+          spaceType: 'server_wiki',
+          rootNamespaceCode: 'server',
+          rootPath: `/server/${slug}`,
+          description: server.shortDescription,
+          status: 'active',
+          createdBy: actor.id,
+          ownerUserId: actor.id,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const serverWiki = await tx.serverWiki.create({
+        data: {
+          spaceId: space.id,
+          voteServerId: server.id,
+          serverName: server.name,
+          slug,
+          host: server.joinHost,
+          port: server.joinPort,
+          edition: server.edition,
+          supportedVersions: normalizeStringArray(server.supportedVersions).join(', ') || null,
+          genres: normalizeStringArray(server.tags).join(', ') || null,
+          verifiedStatus: server.verificationGrade === 'Unverified' ? 'none' : 'verified',
+          status: 'active',
+          createdBy: actor.id,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const parsed = parseMarkup(contentRaw);
+      const page = await tx.wikiPage.create({
+        data: {
+          namespaceId: namespace.id,
+          spaceId: space.id,
+          localPath: slug,
+          slug,
+          title: slug,
+          displayTitle: `${server.name} 대문`,
+          pageType: 'server',
+          protectionLevel: 'open',
+          status: 'normal',
+          createdBy: actor.id,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      const revision = await tx.wikiPageRevision.create({
+        data: {
+          pageId: page.id,
+          revisionNo: 1,
+          parentRevisionId: null,
+          contentRaw,
+          contentAst: parsed.ast as Prisma.InputJsonValue,
+          contentHash: hashContent(contentRaw),
+          contentSize: Buffer.byteLength(contentRaw, 'utf8'),
+          syntaxVersion: 'bwm-0.3',
+          editSummary: '서버 위키 대문 생성',
+          isMinor: false,
+          createdBy: actor.id,
+          actorType: 'user',
+          actorUserId: actor.id,
+          createdAt: now,
+          visibility: 'public',
+        },
+      });
+      await tx.wikiPage.update({
+        where: { id: page.id },
+        data: {
+          currentRevisionId: revision.id,
+          updatedAt: now,
+        },
+      });
+      await tx.wikiSpace.update({
+        where: { id: space.id },
+        data: {
+          rootPageId: page.id,
+          updatedAt: now,
+        },
+      });
+      await tx.wikiRecentChange.create({
+        data: {
+          pageId: page.id,
+          revisionId: revision.id,
+          actorId: actor.id,
+          changeType: 'create',
+          title: page.title,
+          namespaceCode: namespace.code,
+          summary: revision.editSummary,
+          isMinor: revision.isMinor,
+          createdAt: now,
+        },
+      });
+      const updatedServer = await tx.server.update({
+        where: { id: server.id },
+        data: {
+          wikiSpaceId: space.id.toString(),
+          wikiPageId: page.id.toString(),
+          wikiSlug: slug,
+        },
+      });
+      return { server: updatedServer, serverWiki };
+    });
+
+    return toServerWikiLinkResponse(linked.server, linked.serverWiki);
+  }
+
+  async linkServerWiki(
+    serverId: string,
+    input: ServerWikiLinkRequest,
+  ): Promise<ServerWikiLinkResponse> {
+    const server = await this.ensureExists(serverId);
+    const selector = normalizeServerWikiSelector(input);
+    if (!selector) {
+      throw new BadRequestException('serverWikiId, spaceId, or wikiSlug is required.');
+    }
+
+    const serverWiki = await this.prisma.serverWiki.findFirst({ where: selector });
+    if (!serverWiki) {
+      throw new NotFoundException('Server wiki link target not found.');
+    }
+    if (serverWiki.voteServerId && serverWiki.voteServerId !== server.id) {
+      throw new ConflictException('Server wiki is already linked to another server.');
+    }
+
+    const linked = await this.prisma.$transaction(async (tx) => {
+      const space = await tx.wikiSpace.findUnique({ where: { id: serverWiki.spaceId } });
+      const page = space?.rootPageId
+        ? await tx.wikiPage.findUnique({ where: { id: space.rootPageId } })
+        : await tx.wikiPage.findFirst({
+            where: { spaceId: serverWiki.spaceId, status: { not: 'deleted' } },
+            orderBy: [{ updatedAt: 'desc' }],
+          });
+      const updatedServerWiki = await tx.serverWiki.update({
+        where: { id: serverWiki.id },
+        data: {
+          voteServerId: server.id,
+          serverName: server.name,
+          host: server.joinHost,
+          port: server.joinPort,
+          edition: server.edition,
+          updatedAt: new Date(),
+        },
+      });
+      const updatedServer = await tx.server.update({
+        where: { id: server.id },
+        data: {
+          wikiSpaceId: serverWiki.spaceId.toString(),
+          wikiPageId: page?.id.toString() ?? null,
+          wikiSlug: serverWiki.slug,
+        },
+      });
+      return { server: updatedServer, serverWiki: updatedServerWiki };
+    });
+
+    return toServerWikiLinkResponse(linked.server, linked.serverWiki);
+  }
+
   async incrementReviewCount(id: string): Promise<void> {
     await this.prisma.server.update({
       where: { id },
@@ -728,6 +940,61 @@ export class ServerService {
     throw new Error('Failed to generate unique server short code.');
   }
 
+  private async findServerWikiForServer(serverId: string, wikiSpaceId?: string | null) {
+    const linkedByServer = await this.prisma.serverWiki.findUnique({
+      where: { voteServerId: serverId },
+    });
+    if (linkedByServer || !wikiSpaceId || !/^\d+$/.test(wikiSpaceId)) {
+      return linkedByServer;
+    }
+    return this.prisma.serverWiki.findFirst({
+      where: { spaceId: BigInt(wikiSpaceId) },
+    });
+  }
+
+  private async generateUniqueServerWikiSlug(source: string, serverId: string): Promise<string> {
+    const base = normalizeServerWikiSlug(source);
+    const suffix = serverId.replace(/-/g, '').slice(0, 8);
+    const first = `${base}-${suffix}`.slice(0, 255);
+    if (await this.isServerWikiSlugAvailable(first)) {
+      return first;
+    }
+    for (let attempt = 2; attempt < 20; attempt += 1) {
+      const candidate = `${base}-${suffix}-${attempt}`.slice(0, 255);
+      if (await this.isServerWikiSlugAvailable(candidate)) {
+        return candidate;
+      }
+    }
+    throw new Error('Failed to generate unique server wiki slug.');
+  }
+
+  private async isServerWikiSlugAvailable(slug: string): Promise<boolean> {
+    const [serverWiki, space, namespace] = await Promise.all([
+      this.prisma.serverWiki.findUnique({ where: { slug } }),
+      this.prisma.wikiSpace.findFirst({
+        where: {
+          OR: [{ slug }, { rootPath: `/server/${slug}` }],
+        },
+      }),
+      this.prisma.wikiNamespace.findUnique({ where: { code: 'server' } }),
+    ]);
+    if (serverWiki || space) {
+      return false;
+    }
+    if (!namespace) {
+      return true;
+    }
+    const page = await this.prisma.wikiPage.findUnique({
+      where: {
+        namespaceId_slug: {
+          namespaceId: namespace.id,
+          slug,
+        },
+      },
+    });
+    return !page;
+  }
+
   private async generateUniqueShortCode(): Promise<string> {
     for (let attempt = 0; attempt < 16; attempt += 1) {
       const shortCode = generateShortCode();
@@ -742,6 +1009,24 @@ export class ServerService {
     throw new Error('Failed to generate unique server short code.');
   }
 }
+
+export interface ServerWikiLinkRequest {
+  readonly serverWikiId?: string;
+  readonly spaceId?: string;
+  readonly wikiSlug?: string;
+}
+
+export interface ServerWikiLinkResponse {
+  readonly serverId: string;
+  readonly serverWikiId: string | null;
+  readonly wikiSpaceId: string | null;
+  readonly wikiPageId: string | null;
+  readonly wikiSlug: string | null;
+  readonly wikiUrl: string | null;
+  readonly serverDirectoryPath: string;
+  readonly status: 'linked' | 'unlinked';
+}
+
 export interface VerificationRecheckOptions {
   readonly passed: boolean;
   readonly checkedAt?: string;
@@ -802,6 +1087,101 @@ function generateShortCode(): string {
 
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+function normalizeServerWikiSelector(
+  input: ServerWikiLinkRequest,
+): Prisma.ServerWikiWhereInput | null {
+  if (input.serverWikiId?.trim()) {
+    return { id: parseUnsignedBigInt(input.serverWikiId, 'serverWikiId') };
+  }
+  if (input.spaceId?.trim()) {
+    return { spaceId: parseUnsignedBigInt(input.spaceId, 'spaceId') };
+  }
+  if (input.wikiSlug?.trim()) {
+    return { slug: input.wikiSlug.trim() };
+  }
+  return null;
+}
+
+function parseUnsignedBigInt(value: string, label: string): bigint {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new BadRequestException(`${label} must be an unsigned integer.`);
+  }
+  return BigInt(trimmed);
+}
+
+function normalizeServerWikiSlug(source: string): string {
+  const normalized = source
+    .trim()
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/['']/g, '')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+  return normalized || 'server';
+}
+
+function toServerWikiLinkResponse(
+  server: {
+    id: string;
+    shortCode?: string | null;
+    wikiSpaceId?: string | null;
+    wikiPageId?: string | null;
+    wikiSlug?: string | null;
+  },
+  serverWiki: { id: bigint; spaceId: bigint; slug: string } | null,
+): ServerWikiLinkResponse {
+  const wikiSlug = server.wikiSlug ?? serverWiki?.slug ?? null;
+  const wikiSpaceId = server.wikiSpaceId ?? serverWiki?.spaceId.toString() ?? null;
+  const linked = Boolean(wikiSlug && wikiSpaceId);
+  return {
+    serverId: server.id,
+    serverWikiId: serverWiki?.id.toString() ?? null,
+    wikiSpaceId,
+    wikiPageId: server.wikiPageId ?? null,
+    wikiSlug,
+    wikiUrl: wikiSlug ? `/server/${encodeURIComponent(wikiSlug)}` : null,
+    serverDirectoryPath: buildServerDirectoryPath(server),
+    status: linked ? 'linked' : 'unlinked',
+  };
+}
+
+function buildServerDirectoryPath(server: { id: string; shortCode?: string | null }): string {
+  return `/servers/${server.shortCode?.trim() || server.id}`;
+}
+
+function buildServerMainPageContent(server: {
+  name: string;
+  joinHost: string;
+  joinPort: number;
+  edition: ServerDetail['edition'];
+  supportedVersions: Prisma.JsonValue;
+  tags: Prisma.JsonValue;
+  shortDescription?: string | null;
+  longDescription: string;
+}): string {
+  const versions = normalizeStringArray(server.supportedVersions);
+  const tags = normalizeStringArray(server.tags);
+  return [
+    `= ${server.name} =`,
+    '',
+    server.longDescription.trim() || normalizeShortDescription(server.shortDescription),
+    '',
+    '== 서버 정보 ==',
+    `* 주소: ${server.joinHost}:${server.joinPort}`,
+    `* 에디션: ${server.edition}`,
+    versions.length > 0 ? `* 지원 버전: ${versions.join(', ')}` : null,
+    tags.length > 0 ? `* 태그: ${tags.join(', ')}` : null,
+    '',
+    '== 참여 안내 ==',
+    '서버 소개, 규칙, 시작 방법을 이 문서에 정리해 주세요.',
+    '',
+  ]
+    .filter((line): line is string => line !== null)
+    .join('\n');
 }
 
 function toSummary(server: {
