@@ -580,6 +580,24 @@ model LunaGuildChannelSetting {
   @@map("guild_channel_settings")
 }
 
+model LunaGuildServer {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  guildId      String    @map("guild_id") @db.VarChar(32)
+  serverId     String    @unique @map("server_id") @db.VarChar(32)
+  serverName   String    @map("server_name") @db.VarChar(100)
+  serverHost   String    @map("server_host") @db.VarChar(255)
+  serverPort   Int       @map("server_port")
+  endpointUrl  String?   @map("endpoint_url") @db.VarChar(512)
+  serverSecret String    @map("server_secret") @db.VarChar(128)
+  enabled      Boolean   @default(true)
+  createdAt    DateTime  @map("created_at")
+  updatedAt    DateTime  @map("updated_at")
+  lastSeenAt   DateTime? @map("last_seen_at")
+
+  @@index([guildId])
+  @@map("guild_servers")
+}
+
 model LunaDiscordAccountLink {
   discordUserId  String   @id @map("discord_user_id") @db.VarChar(32)
   minecraftUuid  String   @unique @map("mc_uuid") @db.Char(36)

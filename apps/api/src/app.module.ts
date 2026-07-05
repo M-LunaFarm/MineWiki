@@ -19,6 +19,7 @@ import { PrismaModule } from './common/prisma.module';
 import { SupportModule } from './support/support.module';
 import { VerifyModule } from './verify/verify.module';
 import { WikiModule } from './wiki/wiki.module';
+import { PluginSyncModule } from './plugin-sync/plugin-sync.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { WikiModule } from './wiki/wiki.module';
     DashboardModule,
     SupportModule,
     VerifyModule,
+    PluginSyncModule,
     WikiModule,
     TelemetryModule,
     AppConfigModule,
