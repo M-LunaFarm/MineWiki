@@ -17,6 +17,7 @@
       "@minewiki/db": ["packages/db/src"],
       "@minewiki/minecraft": ["packages/minecraft/src"],
       "@minewiki/security": ["packages/security/src"],
+      "@minewiki/wiki-core": ["packages/wiki-core/src"],
       "@minewiki/clients": ["packages/clients/src"],
       "@minewiki/ui": ["packages/ui/src"]
     },

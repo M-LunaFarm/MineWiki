@@ -19,6 +19,7 @@
     "@minewiki/minecraft": "workspace:*",
     "@minewiki/schemas": "workspace:*",
     "@minewiki/security": "workspace:*",
+    "@minewiki/wiki-core": "workspace:*",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^10.3.0",
     "@nestjs/core": "^10.3.0",
@@ -56,6 +57,7 @@
     "@minewiki/logger": "../../packages/logger/dist",
     "@minewiki/minecraft": "../../packages/minecraft/dist",
     "@minewiki/security": "../../packages/security/dist",
-    "@minewiki/schemas": "../../packages/schemas/dist"
+    "@minewiki/schemas": "../../packages/schemas/dist",
+    "@minewiki/wiki-core": "../../packages/wiki-core/dist"
   }
 }
