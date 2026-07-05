@@ -1,0 +1,504 @@
+import { z } from 'zod';
+
+export const authProviderSchema = z.enum(['email', 'discord', 'naver']);
+export const oauthProviderSchema = z.enum(['discord', 'naver']);
+
+export const linkedAccountSchema = z.object({
+  id: z.string().uuid(),
+  provider: authProviderSchema,
+  email: z.string().email().nullable().optional(),
+  displayName: z.string().min(1).max(32).nullable().optional(),
+});
+
+export const authAccountSchema = z.object({
+  id: z.string().uuid(),
+  provider: authProviderSchema,
+  providerUserId: z.string().min(1),
+  email: z.string().email().nullable().optional(),
+  displayName: z.string().min(1).max(32).nullable().optional(),
+  avatarUrl: z.string().url().nullable().optional(),
+  emailVerified: z.boolean(),
+  hasPassword: z.boolean(),
+  createdAt: z.string().datetime(),
+  lastLoginAt: z.string().datetime().nullable(),
+  linkedAccountIds: z.array(z.string().uuid()),
+  linkedAccounts: z.array(linkedAccountSchema),
+});
+
+export const oauthStartRequestSchema = z.object({
+  provider: oauthProviderSchema,
+  redirectUri: z.string().url().optional(),
+  returnTo: z.string().min(1).optional(),
+});
+
+export const oauthStartResponseSchema = z.object({
+  authorizationUrl: z.string().url(),
+  state: z.string().min(8),
+  expiresAt: z.string().datetime(),
+});
+
+export const oauthCompleteRequestSchema = z.object({
+  provider: oauthProviderSchema,
+  code: z.string().min(1),
+  state: z.string().min(8),
+  redirectUri: z.string().url().optional(),
+});
+
+export const oauthCompleteResponseSchema = z.object({
+  account: authAccountSchema,
+  sessionId: z.string().min(1),
+  expiresAt: z.string().datetime(),
+  returnTo: z.string().min(1).nullable(),
+  mode: z.enum(['login', 'link']),
+});
+
+export const emailRegistrationResultSchema = z.object({
+  status: z.literal('verification-required'),
+  accountId: z.string().uuid(),
+  email: z.string().email(),
+  expiresAt: z.string().datetime(),
+});
+
+export const resendVerificationResultSchema = z.object({
+  accountId: z.string().uuid(),
+  email: z.string().email(),
+  expiresAt: z.string().datetime(),
+});
+
+export const sessionSummarySchema = z.object({
+  sessionId: z.string().uuid(),
+  createdAt: z.string().datetime(),
+  lastActiveAt: z.string().datetime(),
+  ipAddress: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  isCurrent: z.boolean(),
+  tokenVersion: z.number().int().positive(),
+  isElevated: z.boolean(),
+});
+
+export const sessionListResponseSchema = z.object({
+  sessions: z.array(sessionSummarySchema),
+});
+
+export const minecraftIdentitySchema = z.object({
+  uuid: z.string().uuid(),
+  playerName: z.string().min(1).optional(),
+  msOwned: z.boolean(),
+  lastVerifiedAt: z.string().datetime(),
+});
+
+export const minecraftVerificationRequestSchema = z.object({
+  userId: z.string().uuid().optional(),
+  authorizationCode: z.string().min(1),
+  redirectUri: z.string().url().optional(),
+  codeVerifier: z.string().min(43).max(128).optional(),
+  state: z.string().min(8).optional(),
+});
+
+export const minecraftAuthorizationStartRequestSchema = z.object({
+  userId: z.string().uuid().optional(),
+  redirectUri: z.string().url().optional(),
+});
+
+export const minecraftAuthorizationStartResponseSchema = z.object({
+  authorizationUrl: z.string().url(),
+  state: z.string().min(8),
+  codeVerifier: z.string().min(43).max(128),
+});
+
+export const userAccountSchema = z.object({
+  id: z.string().uuid(),
+  displayName: z.string().min(1).max(32),
+  authProvider: authProviderSchema,
+  createdAt: z.string().datetime(),
+  minecraftIdentity: minecraftIdentitySchema.nullable(),
+});
+
+export const serverVerificationGradeSchema = z.enum(['Verified', 'Unverified']);
+export const claimMethodSchema = z.enum(['plugin', 'dns', 'motd']);
+
+export const serverSummarySchema = z.object({
+  id: z.string().uuid(),
+  shortCode: z.string().min(5).max(12).regex(/^[a-z0-9]+$/).nullable().optional(),
+  name: z.string().min(3).max(32),
+  joinHost: z.string().min(3),
+  joinPort: z.number().int().positive(),
+  edition: z.enum(['java', 'bedrock']),
+  supportedVersions: z.array(z.string().min(1)).min(1),
+  tags: z.array(z.string()),
+  shortDescription: z.string().min(1).max(160),
+  verificationGrade: serverVerificationGradeSchema,
+  verifiedAt: z.string().datetime().optional(),
+  votes24h: z.number().int().nonnegative(),
+  votesMonthly: z.number().int().nonnegative().optional(),
+  reviewsCount: z.number().int().nonnegative(),
+  voteRequiresOwnership: z.boolean().optional(),
+  bannerUrl: z.string().url().nullable().optional(),
+  websiteUrl: z.string().url().nullable().optional(),
+  playersOnline: z.number().int().nonnegative().nullable().optional(),
+  playersMax: z.number().int().nonnegative().nullable().optional(),
+  playersLastUpdatedAt: z.string().datetime().nullable().optional(),
+  isOnline: z.boolean().nullable().optional(),
+  latencyMs: z.number().int().nonnegative().nullable().optional(),
+});
+
+export const serverDetailSchema = serverSummarySchema.extend({
+  longDescription: z.string().min(1),
+  bannerUrl: z.string().url().nullable(),
+  websiteUrl: z.string().url().nullable(),
+  discordUrl: z.string().url().nullable(),
+  voteCooldownHours: z.number().int().positive(),
+  verificationMethods: z.array(claimMethodSchema),
+  createdAt: z.string().datetime(),
+  lastUpdatedAt: z.string().datetime(),
+});
+
+export const serverRegistrationSchema = z.object({
+  name: z.string().min(3).max(32),
+  joinHost: z.string().min(3).max(255),
+  joinPort: z.number().int().min(1).max(65535),
+  edition: z.enum(['java', 'bedrock']),
+  supportedVersions: z.array(z.string().min(1)).min(1).max(8),
+  tags: z.array(z.string().min(1)).max(12),
+  shortDescription: z.string().min(1).max(160),
+  longDescription: z.string().min(1),
+  websiteUrl: z.string().url().optional().nullable(),
+  discordUrl: z.string().url().optional().nullable(),
+});
+
+export const serverPingSampleSchema = z.object({
+  timestamp: z.string().datetime(),
+  online: z.boolean(),
+  players: z.number().int().nonnegative().nullable().optional(),
+  maxPlayers: z.number().int().nonnegative().nullable().optional(),
+  latency: z.number().int().nonnegative().nullable().optional(),
+});
+
+export const serverStatsSchema = z.object({
+  serverId: z.string().uuid(),
+  rank: z.object({
+    current: z.number().int().positive(),
+    delta24h: z.number().int(),
+    best: z.number().int().positive(),
+  }),
+  votes: z.object({
+    last24h: z.number().int().nonnegative(),
+    last7d: z.number().int().nonnegative(),
+    monthToDate: z.number().int().nonnegative().optional(),
+    total: z.number().int().nonnegative(),
+  }),
+  players: z.object({
+    online: z.number().int().nonnegative(),
+    max: z.number().int().nonnegative(),
+    lastUpdatedAt: z.string().datetime().nullable().optional(),
+  }),
+  uptimePercent: z.number().min(0).max(100),
+  sparkline: z.array(z.number()),
+  latencyMs: z.number().int().nonnegative().optional(),
+  lastPingAt: z.string().datetime().nullable().optional(),
+  pingSamples: z.array(serverPingSampleSchema).optional(),
+});
+
+export const serverUpdateTypeSchema = z.enum([
+  'system',
+  'verification',
+  'review',
+  'vote',
+  'claim',
+]);
+
+export const serverUpdateSchema = z.object({
+  id: z.string().min(1),
+  serverId: z.string().uuid(),
+  type: serverUpdateTypeSchema,
+  title: z.string().min(1).max(80),
+  description: z.string().min(1).max(300),
+  occurredAt: z.string().datetime(),
+  actorDisplayName: z.string().min(1).max(32).optional(),
+});
+
+export const reviewTagSchema = z.enum([
+  'performance',
+  'community',
+  'staff',
+  'stability',
+  'content',
+  'economy',
+]);
+
+export const reviewTrustLabelSchema = z.enum([
+  'ms_owned',
+  'vote_ack',
+  'plugin_in_game',
+  'discord_linked',
+]);
+
+export const reviewVisibilitySchema = z.enum(['public', 'staff']);
+
+export const reviewAdminReplySchema = z.object({
+  authorDisplayName: z.string().min(1).max(32),
+  body: z.string().min(1).max(300),
+  createdAt: z.string().datetime(),
+});
+
+export const serverReviewSchema = z.object({
+  id: z.string().uuid(),
+  serverId: z.string().uuid(),
+  authorDisplayName: z.string().min(1).max(24),
+  rating: z.number().int().min(1).max(5),
+  body: z.string().min(1).max(80),
+  tags: z.array(reviewTagSchema).max(3),
+  trustLabels: z.array(reviewTrustLabelSchema),
+  helpfulCount: z.number().int().nonnegative(),
+  reports: z.number().int().nonnegative(),
+  visibility: reviewVisibilitySchema,
+  isAnonymous: z.boolean(),
+  adminReply: reviewAdminReplySchema.nullable(),
+  createdAt: z.string().datetime(),
+  canManage: z.boolean().optional(),
+});
+
+export const createReviewSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  body: z.string().min(1).max(80),
+  tags: z.array(reviewTagSchema).max(3),
+  anonymous: z.boolean().optional(),
+  visibility: reviewVisibilitySchema.optional(),
+});
+
+export const reviewGateStatusSchema = z.object({
+  isLoggedIn: z.boolean(),
+  isMinecraftOwned: z.boolean(),
+  hasRecentVote: z.boolean(),
+  lastVoteAt: z.string().datetime().nullable(),
+  nextEligibleVoteAt: z.string().datetime().nullable(),
+  displayName: z.string().min(1).max(32).nullable(),
+  minecraftUuid: z.string().uuid().nullable(),
+});
+
+export const serverReferralSchema = z.object({
+  username: z.string().min(1).max(16),
+  votedAt: z.string().datetime(),
+});
+
+export const oauthProviderAvailabilitySchema = z.object({
+  discord: z.boolean(),
+  naver: z.boolean(),
+});
+
+export const dashboardServerSummarySchema = z.object({
+  id: z.string().uuid(),
+  shortCode: z.string().min(5).max(12).regex(/^[a-z0-9]+$/).nullable().optional(),
+  name: z.string().min(1),
+  votes24h: z.number().int().nonnegative(),
+  votesMonthly: z.number().int().nonnegative().optional(),
+  reviewsCount: z.number().int().nonnegative(),
+  verificationGrade: serverVerificationGradeSchema,
+  voteRequiresOwnership: z.boolean(),
+  lastSyncedAt: z.string().datetime().nullable().optional(),
+});
+
+export const dashboardActivityItemSchema = z.object({
+  id: z.string().uuid(),
+  serverId: z.string().uuid(),
+  serverName: z.string().min(1),
+  body: z.string().min(1),
+  tags: z.array(reviewTagSchema),
+  createdAt: z.string().datetime(),
+});
+
+export const dashboardVerificationTaskSchema = z.object({
+  serverId: z.string().uuid(),
+  serverName: z.string().min(1),
+  method: claimMethodSchema,
+  status: z.enum(['pending', 'verified', 'expired', 'failed']),
+  lastCheckedAt: z.string().datetime().nullable().optional(),
+  note: z.string().nullable().optional(),
+});
+
+export const dashboardOverviewSchema = z.object({
+  servers: z.array(dashboardServerSummarySchema),
+  activity: z.array(dashboardActivityItemSchema),
+  verification: z.array(dashboardVerificationTaskSchema),
+});
+
+export const supportTicketStatusSchema = z.enum(['open', 'pending', 'resolved', 'closed']);
+export const supportTicketPrioritySchema = z.enum(['low', 'normal', 'high', 'urgent']);
+export const supportMessageAuthorRoleSchema = z.enum(['customer', 'agent', 'system']);
+
+export const supportTicketAccountSchema = z.object({
+  id: z.string().uuid(),
+  displayName: z.string().min(1).max(64),
+});
+
+export const supportTicketServerSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1).max(64),
+});
+
+export const supportMessageSchema = z.object({
+  id: z.string().uuid(),
+  ticketId: z.string().uuid(),
+  authorAccountId: z.string().uuid().nullable(),
+  authorDisplayName: z.string().min(1).max(64),
+  authorRole: supportMessageAuthorRoleSchema,
+  body: z.string().min(1).max(2000),
+  isInternal: z.boolean(),
+  createdAt: z.string().datetime(),
+});
+
+export const supportTicketSchema = z.object({
+  id: z.string().uuid(),
+  subject: z.string().min(1).max(160),
+  status: supportTicketStatusSchema,
+  priority: supportTicketPrioritySchema,
+  category: z.string().min(1).max(40).nullable(),
+  lastMessageAt: z.string().datetime(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  requester: supportTicketAccountSchema,
+  assignee: supportTicketAccountSchema.nullable(),
+  server: supportTicketServerSchema.nullable(),
+  latestMessagePreview: z.string().nullable(),
+  messageCount: z.number().int().nonnegative(),
+});
+
+export const supportTicketListResponseSchema = z.object({
+  items: z.array(supportTicketSchema),
+  viewer: z.object({
+    isAgent: z.boolean(),
+  }),
+});
+
+export const supportTicketDetailSchema = z.object({
+  ticket: supportTicketSchema,
+  messages: z.array(supportMessageSchema),
+  viewer: z.object({
+    isAgent: z.boolean(),
+    canManage: z.boolean(),
+  }),
+});
+
+export const createSupportTicketSchema = z.object({
+  subject: z.string().min(1).max(160),
+  body: z.string().min(1).max(2000),
+  category: z.string().min(1).max(40).optional(),
+  priority: supportTicketPrioritySchema.optional(),
+  serverId: z.string().uuid().nullable().optional(),
+});
+
+export const createGuestSupportTicketSchema = createSupportTicketSchema.extend({
+  guestName: z.string().min(1).max(64).optional(),
+  guestEmail: z.string().email().max(120).optional(),
+  captchaToken: z.string().trim().min(1).optional(),
+});
+
+export const createSupportMessageSchema = z.object({
+  body: z.string().min(1).max(2000),
+  isInternal: z.boolean().optional(),
+});
+
+export const updateSupportTicketSchema = z.object({
+  status: supportTicketStatusSchema.optional(),
+  priority: supportTicketPrioritySchema.optional(),
+  assigneeAccountId: z.string().uuid().nullable().optional(),
+  category: z.string().min(1).max(40).nullable().optional(),
+});
+
+export const votifierTargetSchema = z.object({
+  protocol: z.enum(['v2', 'v1']),
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  token: z.string().min(1).optional(),
+  publicKey: z.string().min(1).optional(),
+});
+
+export const voteDispatchJobSchema = z.object({
+  serverId: z.string().uuid(),
+  username: z.string().min(3).max(16),
+  ipAddress: z.string().optional(),
+  votedAt: z.string().datetime(),
+  targets: z.array(votifierTargetSchema).min(1),
+});
+
+export const serverPingJobSchema = z.object({
+  serverId: z.string().uuid(),
+  host: z.string().min(3),
+  port: z.number().int().positive().max(65535),
+  edition: z.enum(['java', 'bedrock']),
+});
+
+export const claimVerificationJobSchema = z.object({
+  serverId: z.string().uuid(),
+  method: claimMethodSchema,
+  initiatedAt: z.string().datetime(),
+});
+
+export const rankAggregationJobSchema = z.object({
+  processedAt: z.string().datetime(),
+});
+
+export const discordDigestJobSchema = z.object({
+  guildId: z.string().min(1),
+  channelId: z.string().min(1),
+  scheduledFor: z.string().datetime(),
+  timezone: z.string().min(1),
+});
+
+export type UserAccount = z.infer<typeof userAccountSchema>;
+export type ServerSummary = z.infer<typeof serverSummarySchema>;
+export type ServerDetail = z.infer<typeof serverDetailSchema>;
+export type ServerStats = z.infer<typeof serverStatsSchema>;
+export type ServerUpdate = z.infer<typeof serverUpdateSchema>;
+export type ServerReview = z.infer<typeof serverReviewSchema>;
+export type CreateReviewPayload = z.infer<typeof createReviewSchema>;
+export type ReviewVisibility = z.infer<typeof reviewVisibilitySchema>;
+export type ReviewAdminReply = z.infer<typeof reviewAdminReplySchema>;
+export type MinecraftIdentity = z.infer<typeof minecraftIdentitySchema>;
+export type MinecraftVerificationRequest = z.infer<typeof minecraftVerificationRequestSchema>;
+export type MinecraftAuthorizationStartRequest = z.infer<
+  typeof minecraftAuthorizationStartRequestSchema
+>;
+export type MinecraftAuthorizationStartResponse = z.infer<
+  typeof minecraftAuthorizationStartResponseSchema
+>;
+export type VoteDispatchJob = z.infer<typeof voteDispatchJobSchema>;
+export type ReviewGateStatus = z.infer<typeof reviewGateStatusSchema>;
+export type VotifierTarget = z.infer<typeof votifierTargetSchema>;
+export type ServerPingJob = z.infer<typeof serverPingJobSchema>;
+export type ClaimVerificationJob = z.infer<typeof claimVerificationJobSchema>;
+export type RankAggregationJob = z.infer<typeof rankAggregationJobSchema>;
+export type DiscordDigestJob = z.infer<typeof discordDigestJobSchema>;
+export type AuthProvider = z.infer<typeof authProviderSchema>;
+export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
+export type AuthAccount = z.infer<typeof authAccountSchema>;
+export type LinkedAccount = z.infer<typeof linkedAccountSchema>;
+export type OAuthStartRequest = z.infer<typeof oauthStartRequestSchema>;
+export type OAuthStartResponse = z.infer<typeof oauthStartResponseSchema>;
+export type OAuthCompleteRequest = z.infer<typeof oauthCompleteRequestSchema>;
+export type OAuthCompleteResponse = z.infer<typeof oauthCompleteResponseSchema>;
+export type EmailRegistrationResult = z.infer<typeof emailRegistrationResultSchema>;
+export type ResendVerificationResult = z.infer<typeof resendVerificationResultSchema>;
+export type SessionSummary = z.infer<typeof sessionSummarySchema>;
+export type SessionListResponse = z.infer<typeof sessionListResponseSchema>;
+export type ServerRegistrationPayload = z.infer<typeof serverRegistrationSchema>;
+export type ServerPingSample = z.infer<typeof serverPingSampleSchema>;
+export type ServerReferral = z.infer<typeof serverReferralSchema>;
+export type OAuthProviderAvailability = z.infer<typeof oauthProviderAvailabilitySchema>;
+export type DashboardServerSummary = z.infer<typeof dashboardServerSummarySchema>;
+export type DashboardActivityItem = z.infer<typeof dashboardActivityItemSchema>;
+export type DashboardVerificationTask = z.infer<typeof dashboardVerificationTaskSchema>;
+export type DashboardOverview = z.infer<typeof dashboardOverviewSchema>;
+export type SupportTicketStatus = z.infer<typeof supportTicketStatusSchema>;
+export type SupportTicketPriority = z.infer<typeof supportTicketPrioritySchema>;
+export type SupportMessageAuthorRole = z.infer<typeof supportMessageAuthorRoleSchema>;
+export type SupportTicketAccount = z.infer<typeof supportTicketAccountSchema>;
+export type SupportTicketServer = z.infer<typeof supportTicketServerSchema>;
+export type SupportMessage = z.infer<typeof supportMessageSchema>;
+export type SupportTicket = z.infer<typeof supportTicketSchema>;
+export type SupportTicketListResponse = z.infer<typeof supportTicketListResponseSchema>;
+export type SupportTicketDetail = z.infer<typeof supportTicketDetailSchema>;
+export type CreateSupportTicketPayload = z.infer<typeof createSupportTicketSchema>;
+export type CreateGuestSupportTicketPayload = z.infer<typeof createGuestSupportTicketSchema>;
+export type CreateSupportMessagePayload = z.infer<typeof createSupportMessageSchema>;
+export type UpdateSupportTicketPayload = z.infer<typeof updateSupportTicketSchema>;

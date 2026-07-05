@@ -1,0 +1,51 @@
+import { Logger, ObservabilityExporter } from '@creepervote/logger';
+import { NestFactory } from '@nestjs/core';
+import {
+  FastifyAdapter,
+  NestFastifyApplication
+} from '@nestjs/platform-fastify';
+import { AppModule } from './app.module';
+import { ConfigService } from '@creepervote/config';
+import * as Sentry from '@sentry/node';
+import { TelemetryInterceptor } from './telemetry/telemetry.interceptor';
+
+async function bootstrap(): Promise<void> {
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ logger: false }),
+    {
+      bufferLogs: true
+    }
+  );
+
+  const config = new ConfigService();
+  const port = config.getNumber('API_PORT', 3000);
+  const host = config.get('API_HOST', '0.0.0.0');
+
+  const sentryDsn = config.getOptional('SENTRY_DSN');
+  const exporter = app.get(ObservabilityExporter);
+
+  if (sentryDsn) {
+    Sentry.init({ dsn: sentryDsn, environment: config.get('NODE_ENV', 'development') });
+    Sentry.addEventProcessor((event) => {
+      void exporter.report({
+        source: 'api',
+        type: 'sentry',
+        level: event.level,
+        message: event.message,
+        exception: event.exception?.values?.[0]?.value,
+        timestamp: new Date().toISOString()
+      });
+      return event;
+    });
+  }
+
+  app.useGlobalInterceptors(app.get(TelemetryInterceptor));
+  await app.listen({ port, host });
+  Logger.info({ port, host }, 'API server listening');
+}
+
+bootstrap().catch((error) => {
+  Logger.error({ err: error }, 'API bootstrap failed');
+  process.exitCode = 1;
+});

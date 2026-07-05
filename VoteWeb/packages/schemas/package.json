@@ -1,0 +1,21 @@
+{
+  "name": "@creepervote/schemas",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "^5.4.2"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  }
+}

@@ -1,0 +1,543 @@
+/* Public chrome layout — namu.wiki-inspired */
+
+/* ── Base ── */
+body.minewiki {
+  margin: 0;
+  background: var(--nw-bg);
+  color: var(--nw-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ── Topbar row 1: brand + nav + account ── */
+.minewiki .topbar.nav-wrapper {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: var(--nw-topbar-h);
+  background: var(--nw-brand);
+  border-bottom: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,.18);
+  padding: 0 16px;
+}
+
+/* Brand */
+.minewiki .topbar .brand {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--nw-brand-text);
+  text-decoration: none;
+  letter-spacing: -.3px;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.minewiki .topbar .brand:visited { color: var(--nw-brand-text); }
+
+/* Desktop nav */
+.minewiki .topbar .desktop-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.minewiki .desktop-nav a,
+.minewiki .desktop-nav a:visited {
+  display: flex;
+  align-items: center;
+  height: var(--nw-topbar-h);
+  padding: 0 11px;
+  font-size: 14px;
+  color: rgba(255,255,255,.88);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background .12s, color .12s;
+}
+.minewiki .desktop-nav a:hover {
+  background: rgba(255,255,255,.12);
+  color: #fff;
+}
+.minewiki .desktop-nav a.active-space {
+  background: rgba(255,255,255,.18);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* nav separator */
+.minewiki .desktop-nav .nav-separator {
+  flex: 1;
+}
+
+/* ── Search row (below topbar, full width) ── */
+.minewiki .topbar .desktop-search {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.minewiki .topbar .desktop-search input {
+  width: 220px;
+  height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 3px 0 0 3px;
+  font-size: 14px;
+  background: rgba(255,255,255,.92);
+  color: var(--nw-text);
+  outline: none;
+}
+.minewiki .topbar .desktop-search input:focus {
+  background: #fff;
+}
+.minewiki .topbar .desktop-search button {
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 0 3px 3px 0;
+  background: rgba(255,255,255,.2);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.minewiki .topbar .desktop-search button:hover {
+  background: rgba(255,255,255,.32);
+}
+
+/* ── User account area ── */
+.minewiki .topbar .user-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: rgba(255,255,255,.88);
+  flex-shrink: 0;
+}
+.minewiki .topbar .user-chip a,
+.minewiki .topbar .user-chip a:visited {
+  color: rgba(255,255,255,.88);
+  text-decoration: none;
+}
+.minewiki .topbar .user-chip a:hover { color: #fff; }
+.minewiki .topbar .user-role {
+  font-size: 11px;
+  padding: 1px 5px;
+  background: rgba(255,255,255,.18);
+  border-radius: 2px;
+}
+
+/* account links (when not logged in) */
+.minewiki .desktop-nav > a[href="/join"],
+.minewiki .desktop-nav > a[href="/login"] {
+  font-size: 13px;
+  opacity: .9;
+}
+
+/* ── Theme toggle ── */
+.minewiki .theme-toggle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: 4px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(255,255,255,.12);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.minewiki .theme-toggle:hover { background: rgba(255,255,255,.22); }
+
+/* nav-tools dropdown */
+.minewiki .nav-tools {
+  position: relative;
+  flex-shrink: 0;
+}
+.minewiki .nav-tools > summary {
+  display: flex;
+  align-items: center;
+  height: var(--nw-topbar-h);
+  padding: 0 11px;
+  font-size: 14px;
+  color: rgba(255,255,255,.88);
+  list-style: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s;
+}
+.minewiki .nav-tools > summary:hover { background: rgba(255,255,255,.12); color: #fff; }
+.minewiki .nav-tools[open] > summary { background: rgba(255,255,255,.18); color: #fff; }
+.minewiki .nav-tools > div {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  min-width: 140px;
+  background: var(--nw-surface);
+  border: 1px solid var(--nw-border);
+  box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  z-index: 200;
+  padding: 4px 0;
+}
+.minewiki .nav-tools > div a {
+  display: block;
+  padding: 8px 16px;
+  font-size: 14px;
+  color: var(--nw-text);
+  text-decoration: none;
+}
+.minewiki .nav-tools > div a:hover { background: var(--nw-surface-alt); }
+.minewiki .admin-tools > summary { font-weight: 600; }
+.minewiki .admin-entry { font-weight: 600; }
+
+/* ── Intent strip (breadcrumb/context bar) ── */
+.minewiki .page-intent-strip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  min-height: 36px;
+  margin-top: 0;
+  border: 0;
+  border-bottom: 1px solid var(--nw-border);
+  border-radius: 0;
+  background: var(--nw-surface);
+  box-shadow: none;
+  padding: 0 16px;
+  box-sizing: border-box;
+  font-size: 13px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.minewiki .page-intent-strip::-webkit-scrollbar { display: none; }
+
+.minewiki .intent-context {
+  flex-shrink: 0;
+  margin-right: 6px;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  color: var(--nw-text-muted);
+  font-weight: 400;
+}
+.minewiki .intent-title {
+  font-weight: 600;
+  color: var(--nw-text);
+  flex-shrink: 0;
+  margin-right: 12px;
+}
+.minewiki .intent-links {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+}
+.minewiki .intent-links a {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  min-height: 0;
+  padding: 0 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  color: var(--nw-link);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background .1s;
+}
+.minewiki .intent-links a:hover {
+  background: var(--nw-surface-alt);
+  color: var(--nw-text);
+}
+
+/* admin intent strip override */
+.minewiki .admin-intent-strip {
+  background: #f0f0f0;
+}
+:root[data-theme="dark"] .minewiki .admin-intent-strip {
+  background: var(--nw-surface-alt);
+}
+
+/* ── Main content wrapper ── */
+/* FIX: "narrow" class is used by documentToolChrome() for non-subwiki pages
+   (ACL, history, edit, discussion, etc.) — src/ui.ts:713
+   "tool-shell" / "tool-article" used for subwiki tool pages — src/ui.ts:721
+   All these need the same max-width centering as skin-article */
+.minewiki .wiki-shell,
+.minewiki main,
+.minewiki .content-shell,
+.minewiki main.narrow,
+.minewiki main.tool-shell {
+  max-width: var(--nw-content-max);
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+  box-sizing: border-box;
+}
+
+/* tool-shell has sidebar: keep it but constrain width */
+.minewiki main.tool-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .minewiki main.tool-shell {
+    display: block;
+  }
+}
+
+/* skin-article: namu-style no sidebar, full width content */
+.minewiki .wiki-shell.skin-article {
+  display: block;
+  width: 100%;
+  max-width: var(--nw-content-max);
+  padding-top: 0;
+}
+
+.minewiki .skin-article .wiki-sidebar {
+  display: none;
+}
+
+.minewiki .skin-article .article {
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+/* TOC — inline, above article */
+.minewiki .skin-article > .article-toc {
+  display: block;
+  max-width: var(--nw-content-max);
+  margin: 0 auto;
+  border: 1px solid var(--nw-border);
+  background: var(--nw-surface);
+  padding: 12px 16px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.minewiki .desktop-inline-toc,
+.minewiki .mobile-inline-toc {
+  display: block;
+}
+
+/* ── Footer ── */
+.minewiki .site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+  padding: 20px 16px;
+  border-top: 1px solid var(--nw-border);
+  background: var(--nw-surface);
+  font-size: 13px;
+  color: var(--nw-text-muted);
+  box-sizing: border-box;
+}
+.minewiki .site-footer a {
+  color: var(--nw-text-muted);
+  text-decoration: none;
+}
+.minewiki .site-footer a:hover { color: var(--nw-text); }
+
+/* ── Mobile ── */
+.minewiki .mobile-search,
+.minewiki .mobile-menu {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  /* hide desktop elements */
+  .minewiki .desktop-nav,
+  .minewiki .desktop-search,
+  .minewiki .user-chip {
+    display: none;
+  }
+
+  /* topbar layout: brand + search + menu */
+  .minewiki .topbar.nav-wrapper {
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .minewiki .topbar .brand {
+    flex: 1;
+    font-size: 16px;
+  }
+
+  /* mobile search */
+  .minewiki .mobile-search {
+    display: block;
+    flex-shrink: 0;
+  }
+  .minewiki .mobile-search > summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 3px;
+    background: rgba(255,255,255,.15);
+    color: #fff;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .minewiki .mobile-search[open] {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 300;
+    background: var(--nw-brand);
+    padding: 5px 10px;
+  }
+  .minewiki .mobile-search[open] > summary { display: none; }
+  .minewiki .mobile-search form {
+    display: flex;
+    gap: 0;
+  }
+  .minewiki .mobile-search form input {
+    flex: 1;
+    height: 36px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 3px 0 0 3px;
+    font-size: 15px;
+    background: #fff;
+    color: var(--nw-text);
+  }
+  .minewiki .mobile-search form button {
+    height: 36px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 0 3px 3px 0;
+    background: var(--nw-brand-dark);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  /* mobile menu */
+  .minewiki .mobile-menu {
+    display: block;
+    flex-shrink: 0;
+  }
+  .minewiki .mobile-menu > summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 3px;
+    background: rgba(255,255,255,.15);
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .minewiki .mobile-menu[open] {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 300;
+    background: var(--nw-surface);
+    overflow-y: auto;
+    padding: 0;
+  }
+  .minewiki .mobile-menu[open] > summary {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    width: 100%;
+    height: 44px;
+    background: var(--nw-brand);
+    border-radius: 0;
+    font-size: 22px;
+  }
+  .minewiki .mobile-menu nav {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0 24px;
+  }
+  .minewiki .mobile-menu nav a {
+    display: block;
+    padding: 13px 20px;
+    font-size: 16px;
+    color: var(--nw-text);
+    text-decoration: none;
+    border-bottom: 1px solid var(--nw-border-soft);
+  }
+  .minewiki .mobile-menu nav a:hover { background: var(--nw-surface-alt); }
+  .minewiki .mobile-menu .mobile-menu-section {
+    display: block;
+    padding: 16px 20px 6px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--nw-text-faint);
+  }
+  .minewiki .mobile-menu .nav-separator { display: none; }
+  .minewiki .mobile-menu .nav-tools { display: contents; }
+  .minewiki .mobile-menu .nav-tools > summary { display: none; }
+  .minewiki .mobile-menu .nav-tools > div {
+    display: contents;
+    position: static;
+    box-shadow: none;
+    border: none;
+  }
+  .minewiki .mobile-menu .nav-tools > div a {
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--nw-border-soft);
+    font-size: 16px;
+    color: var(--nw-text);
+  }
+  .minewiki .mobile-menu .theme-toggle {
+    margin: 16px 20px 0;
+    width: 40px;
+    height: 40px;
+    background: var(--nw-surface-alt);
+    color: var(--nw-text);
+    border: 1px solid var(--nw-border);
+  }
+
+  /* content */
+  .minewiki .wiki-shell,
+  .minewiki main,
+  .minewiki .content-shell {
+    padding: 16px 12px 32px;
+  }
+
+  /* intent strip scroll */
+  .minewiki .page-intent-strip {
+    padding: 0 12px;
+  }
+}

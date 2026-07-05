@@ -1,39 +1,50 @@
-node_modules/
-dist/
+# Local environment files
 .env
 .env.*
 !.env.example
-.lazyweb/
+!.env.*.example
+
+# Dependency directories
+node_modules/
+vendor/
+
+# Build and cache output
+dist/
+build/
+.next/
+.next*/
+cache/
+.cache/
+
+# Runtime storage, logs, and local test artifacts
+storage/
+logs/
+tmp/
+.tmp/
+.playwright-mcp/
+playwright-report/
+test-results/
 coverage/
+stitch-downloads/
+.lazyweb/
+design-extract-output/
+*.log
 npm-debug.log*
-*.tsbuildinfo
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Local planning/input documents. Keep them on disk, but do not ship them.
-plan.md
-Plan.md
-PLAN.md
-plan-*.md
-Plan-*.md
-PLAN-*.md
-.plan-*.swp
+# Screenshot artifacts kept outside source uploads
+/mwiki/*.png
 
-# Editor, OS, and runtime noise.
-*.swp
-*.swo
-*~
+# OS and editor files
 .DS_Store
 Thumbs.db
-logs/
-*.log
-tmp/
-temp/
-scripts/*
-!scripts/cleanup-placeholder-pages.ts
-!scripts/audit-mobile-render.ts
-!scripts/audit-desktop-render.ts
-!scripts/audit-render-shared.ts
-!scripts/audit-live-affordances.ts
-!scripts/audit-route-catalog.ts
-!scripts/audit-route-helpers.ts
-!scripts/audit-public-routes.ts
-!scripts/audit-route-coverage.ts
+.idea/
+.vscode/
+
+# Local backups
+*.bak
+*.backup
+*.cleanbak.*
+*.rebuild.*

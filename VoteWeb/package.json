@@ -1,0 +1,43 @@
+{
+  "name": "creepervote-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@11.6.1",
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
+  "scripts": {
+    "dev": "npm run dev:web",
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:api": "npm --prefix apps/api run dev",
+    "dev:bot": "npm --prefix apps/bot run dev",
+    "dev:worker": "npm --prefix apps/worker run dev",
+    "dev:cdn": "npm --prefix apps/cdn run dev",
+    "bootstrap": "npm run bootstrap:apps && npm run bootstrap:packages",
+    "bootstrap:apps": "npm --prefix apps/api install && npm --prefix apps/web install && npm --prefix apps/bot install && npm --prefix apps/worker install && npm --prefix apps/cdn install",
+    "bootstrap:packages": "npm --prefix packages/config install && npm --prefix packages/logger install && npm --prefix packages/schemas install && npm --prefix packages/clients install && npm --prefix packages/security install && npm --prefix packages/analytics install && npm --prefix packages/ui install",
+    "build": "npm run build:api && npm run build:worker && npm run build:bot && npm run build:web && npm run build:cdn",
+    "build:api": "npm --prefix apps/api run build",
+    "build:worker": "npm --prefix apps/worker run build",
+    "build:bot": "npm --prefix apps/bot run build",
+    "build:web": "npm --prefix apps/web run build",
+    "build:cdn": "npm --prefix apps/cdn run build",
+    "deploy:web:pm2": "bash scripts/deploy-web-pm2.sh",
+    "lint": "eslint \"apps\" \"packages\"",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css}\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.3.1",
+    "@typescript-eslint/parser": "^7.3.1",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "prisma": "^6.17.1",
+    "turbo": "^1.13.4",
+    "typescript": "^5.4.2",
+    "typescript-eslint": "^7.3.1"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2"
+  }
+}

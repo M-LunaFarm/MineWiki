@@ -1,0 +1,6 @@
+name: ${project.name}
+main: kr.lunaf.verify.LunaVotifierPlugin
+version: ${project.version}
+api-version: 1.19
+softdepend:
+  - Skript

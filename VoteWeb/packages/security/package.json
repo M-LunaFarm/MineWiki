@@ -1,0 +1,24 @@
+{
+  "name": "@creepervote/security",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx test/validateOutboundTarget.test.ts"
+  },
+  "dependencies": {
+    "file-type": "^18.7.0",
+    "sharp": "^0.33.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.2"
+  }
+}

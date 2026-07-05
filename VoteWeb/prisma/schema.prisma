@@ -1,0 +1,500 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuthProvider {
+  email
+  discord
+  naver
+}
+
+enum OAuthProvider {
+  discord
+  naver
+}
+
+enum OAuthMode {
+  login
+  link
+}
+
+enum ServerEdition {
+  java
+  bedrock
+}
+
+enum VerificationGrade {
+  A
+  B
+  C
+  Unverified
+}
+
+enum ReviewVisibility {
+  public
+  staff
+}
+
+enum ClaimMethod {
+  plugin
+  dns
+  motd
+}
+
+enum ClaimMethodState {
+  pending
+  verified
+  expired
+  failed
+}
+
+enum VotifierProtocol {
+  v1
+  v2
+}
+
+enum AccountLinkStatus {
+  pending
+  linked
+}
+
+enum SupportTicketStatus {
+  open
+  pending
+  resolved
+  closed
+}
+
+enum SupportTicketPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+enum SupportMessageAuthorRole {
+  customer
+  agent
+  system
+}
+
+model Account {
+  id             String       @id @default(uuid())
+  provider       AuthProvider
+  providerUserId String
+  email          String?
+  displayName    String?
+  avatarUrl      String?
+  emailVerified  Boolean      @default(false)
+  passwordHash   String?
+  createdAt      DateTime     @default(now())
+  lastLoginAt    DateTime?
+
+  sessions                Session[]
+  emailVerifications      EmailVerification[]
+  passwordResets          PasswordReset[]
+  minecraftIdentity       MinecraftIdentity?
+  minecraftAuthorizations MinecraftAuthorization[]
+  oauthStates             OAuthState[]
+  linkRequestsSent        AccountLinkRequest[]     @relation("LinkRequestPrimary")
+  linkRequestsReceived    AccountLinkRequest[]     @relation("LinkRequestTarget")
+  outgoingLinks           AccountLink[]            @relation("AccountLinkPrimary")
+  incomingLinks           AccountLink[]            @relation("AccountLinkTarget")
+  serversOwned            Server[]                 @relation("ServerOwner")
+  reviews                 ServerReview[]
+  votes                   Vote[]
+  reviewHelpfulVotes      ReviewHelpfulVote[]
+  reviewReports           ReviewReport[]
+  supportAgentProfile     SupportAgent?
+  requestedSupportTickets SupportTicket[]          @relation("SupportTicketRequester")
+  assignedSupportTickets  SupportTicket[]          @relation("SupportTicketAssignee")
+  supportMessages         SupportMessage[]         @relation("SupportMessageAuthor")
+  claimMethods            ServerClaimMethod[]
+
+  @@unique([provider, providerUserId])
+  @@index([email])
+}
+
+model AccountLink {
+  id               String   @id @default(uuid())
+  primaryAccountId String
+  linkedAccountId  String
+  createdAt        DateTime @default(now())
+
+  primaryAccount Account @relation("AccountLinkPrimary", fields: [primaryAccountId], references: [id], onDelete: Cascade)
+  linkedAccount  Account @relation("AccountLinkTarget", fields: [linkedAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([primaryAccountId, linkedAccountId])
+  @@index([linkedAccountId])
+}
+
+model AccountLinkRequest {
+  id               String            @id @default(uuid())
+  primaryAccountId String
+  targetAccountId  String
+  verificationCode String
+  status           AccountLinkStatus
+  createdAt        DateTime          @default(now())
+  confirmedAt      DateTime?
+
+  primaryAccount Account @relation("LinkRequestPrimary", fields: [primaryAccountId], references: [id], onDelete: Cascade)
+  targetAccount  Account @relation("LinkRequestTarget", fields: [targetAccountId], references: [id], onDelete: Cascade)
+
+  @@index([primaryAccountId])
+  @@index([targetAccountId])
+}
+
+model EmailVerification {
+  token     String   @id
+  accountId String
+  email     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([email])
+}
+
+model PasswordReset {
+  token     String   @id
+  accountId String
+  email     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  accountId    String
+  token        String   @unique
+  issuedAt     DateTime
+  expiresAt    DateTime
+  tokenVersion Int
+  isElevated   Boolean  @default(false)
+  ipAddress    String?
+  userAgent    String?
+  lastActiveAt DateTime
+  createdAt    DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([expiresAt])
+}
+
+model OAuthState {
+  state         String        @id
+  provider      OAuthProvider
+  redirectUri   String
+  returnTo      String?
+  createdAt     DateTime      @default(now())
+  expiresAt     DateTime
+  mode          OAuthMode     @default(login)
+  linkAccountId String?
+
+  linkAccount Account? @relation(fields: [linkAccountId], references: [id], onDelete: Cascade)
+}
+
+model MinecraftAuthorization {
+  state        String   @id
+  accountId    String
+  redirectUri  String
+  codeVerifier String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+model MinecraftIdentity {
+  accountId      String   @id
+  uuid           String
+  playerName     String?
+  msOwned        Boolean
+  lastVerifiedAt DateTime
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+model Server {
+  id                    String            @id @default(uuid())
+  shortCode             String?           @unique @db.VarChar(12)
+  ownerAccountId        String?
+  name                  String
+  joinHost              String
+  joinPort              Int
+  edition               ServerEdition
+  supportedVersions     Json
+  tags                  Json
+  shortDescription      String
+  longDescription       String
+  bannerUrl             String?
+  websiteUrl            String?
+  discordUrl            String?
+  voteCooldownHours     Int               @default(24)
+  verificationGrade     VerificationGrade @default(Unverified)
+  verifiedAt            DateTime?
+  votes24h              Int               @default(0)
+  votesMonthly          Int?
+  reviewsCount          Int               @default(0)
+  voteRequiresOwnership Boolean           @default(false)
+  playersOnline         Int?
+  playersMax            Int?
+  playersLastUpdatedAt  DateTime?
+  isOnline              Boolean?
+  latencyMs             Int?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  ownerAccount    Account?             @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
+  stats           ServerStats?
+  pingSamples     ServerPingSample[]
+  votes           Vote[]
+  reviews         ServerReview[]
+  claimMethods    ServerClaimMethod[]
+  votifierTargets VotifierTarget[]
+  rankSnapshots   ServerRankSnapshot[]
+  supportTickets  SupportTicket[]
+
+  @@index([ownerAccountId])
+  @@index([verificationGrade])
+  @@index([votes24h])
+  @@index([votesMonthly])
+  @@index([reviewsCount])
+}
+
+model ServerStats {
+  serverId             String    @id
+  rankCurrent          Int       @default(1)
+  rankDelta24h         Int       @default(0)
+  rankBest             Int       @default(1)
+  votesLast24h         Int       @default(0)
+  votesLast7d          Int       @default(0)
+  votesMonthToDate     Int       @default(0)
+  votesTotal           Int       @default(0)
+  playersOnline        Int       @default(0)
+  playersMax           Int       @default(0)
+  playersLastUpdatedAt DateTime?
+  uptimePercent        Float     @default(0)
+  sparkline            Json
+  latencyMs            Int       @default(0)
+  lastPingAt           DateTime?
+  lastUpdatedAt        DateTime  @default(now()) @updatedAt
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+}
+
+model ServerPingSample {
+  id         String   @id @default(uuid())
+  serverId   String
+  timestamp  DateTime
+  online     Boolean
+  players    Int?
+  maxPlayers Int?
+  latency    Int?
+  motd       String?
+  version    String?
+  createdAt  DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, timestamp])
+}
+
+model Vote {
+  id                 String   @id @default(uuid())
+  serverId           String
+  accountId          String?
+  minecraftUuid      String?
+  username           String
+  usernameNormalized String
+  ipAddress          String?
+  votedAt            DateTime
+  createdAt          DateTime @default(now())
+
+  server  Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([serverId, votedAt])
+  @@index([serverId, accountId])
+  @@index([serverId, minecraftUuid])
+  @@index([serverId, usernameNormalized])
+  @@index([serverId, ipAddress])
+}
+
+model ServerReview {
+  id                  String           @id @default(uuid())
+  serverId            String
+  authorAccountId     String
+  authorDisplayName   String
+  rating              Int
+  body                String
+  tags                Json
+  visibility          ReviewVisibility @default(public)
+  isAnonymous         Boolean          @default(false)
+  helpfulCount        Int              @default(0)
+  reports             Int              @default(0)
+  adminReplyBody      String?
+  adminReplyAuthor    String?
+  adminReplyCreatedAt DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  server        Server              @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  authorAccount Account             @relation(fields: [authorAccountId], references: [id], onDelete: Cascade)
+  helpfulVotes  ReviewHelpfulVote[]
+  reportsBy     ReviewReport[]
+
+  @@index([serverId, createdAt])
+  @@index([serverId, visibility])
+}
+
+model ReviewHelpfulVote {
+  id           String   @id @default(uuid())
+  reviewId     String
+  accountId    String
+  isHelpful    Boolean  @default(true)
+  lastMarkedAt DateTime
+  createdAt    DateTime @default(now())
+
+  review  ServerReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, accountId])
+  @@index([accountId])
+}
+
+model ReviewReport {
+  id        String   @id @default(uuid())
+  reviewId  String
+  accountId String
+  createdAt DateTime @default(now())
+
+  review  ServerReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, accountId])
+  @@index([accountId])
+}
+
+model ServerClaimMethod {
+  id            String           @id @default(uuid())
+  serverId      String
+  accountId     String?
+  method        ClaimMethod
+  token         String
+  issuedAt      DateTime
+  status        ClaimMethodState @default(pending)
+  verifiedAt    DateTime?
+  lastCheckedAt DateTime?
+  note          String?
+
+  server  Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@unique([serverId, method])
+  @@index([accountId])
+}
+
+model VotifierTarget {
+  id        String           @id @default(uuid())
+  serverId  String
+  protocol  VotifierProtocol
+  host      String
+  port      Int
+  token     String?
+  publicKey String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+}
+
+model ServerRankSnapshot {
+  id               String   @id @default(uuid())
+  serverId         String
+  rank             Int
+  votes24h         Int
+  votesMonthToDate Int
+  recordedAt       DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, recordedAt])
+}
+
+model SupportAgent {
+  accountId   String   @id
+  displayName String?
+  createdAt   DateTime @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+model SupportTicket {
+  id                 String                @id @default(uuid())
+  requesterAccountId String
+  assigneeAccountId  String?
+  serverId           String?
+  subject            String
+  status             SupportTicketStatus   @default(open)
+  priority           SupportTicketPriority @default(normal)
+  category           String?
+  lastMessageAt      DateTime              @default(now())
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  requesterAccount Account          @relation("SupportTicketRequester", fields: [requesterAccountId], references: [id], onDelete: Cascade)
+  assigneeAccount  Account?         @relation("SupportTicketAssignee", fields: [assigneeAccountId], references: [id], onDelete: SetNull)
+  server           Server?          @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  messages         SupportMessage[]
+
+  @@index([requesterAccountId, createdAt])
+  @@index([assigneeAccountId, status])
+  @@index([status, lastMessageAt])
+  @@index([serverId])
+}
+
+model SupportMessage {
+  id              String                   @id @default(uuid())
+  ticketId        String
+  authorAccountId String?
+  authorRole      SupportMessageAuthorRole
+  body            String
+  isInternal      Boolean                  @default(false)
+  createdAt       DateTime                 @default(now())
+
+  ticket        SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorAccount Account?      @relation("SupportMessageAuthor", fields: [authorAccountId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@index([authorAccountId])
+  @@index([isInternal])
+}
+
+model DiscordSubscription {
+  guildId      String   @id
+  channelId    String
+  timezone     String
+  roleRewardId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  nextDigestAt DateTime
+}

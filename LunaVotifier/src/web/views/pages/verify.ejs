@@ -1,0 +1,30 @@
+<%- include('../partials/top', { currentGuild: null }) %>
+
+<section class="verify">
+  <div class="login-card">
+    <% if (status === 'not_found') { %>
+      <p class="eyebrow">인증 세션</p>
+      <h1>세션을 찾을 수 없습니다.</h1>
+      <p>유효하지 않은 인증 링크입니다. Discord에서 인증을 다시 시작해 주세요.</p>
+      <a class="btn btn-ghost" href="/">홈으로 이동</a>
+    <% } else if (status === 'expired') { %>
+      <p class="eyebrow">인증 세션</p>
+      <h1>세션이 만료되었습니다.</h1>
+      <p>인증 시간이 지났습니다. Discord에서 <span class="mono">/verify</span>를 다시 실행해 주세요.</p>
+      <a class="btn btn-ghost" href="/">홈으로 이동</a>
+    <% } else if (status === 'completed') { %>
+      <p class="eyebrow">인증 완료</p>
+      <h1>이미 인증되었습니다.</h1>
+      <p>Discord와 Minecraft 계정 연결이 완료된 상태입니다.</p>
+      <a class="btn btn-ghost" href="/">홈으로 이동</a>
+    <% } else { %>
+      <p class="eyebrow">Minecraft 인증</p>
+      <h1>Minecraft 계정을 확인합니다.</h1>
+      <p>Microsoft 로그인으로 Minecraft 소유권을 확인합니다.</p>
+      <a class="btn btn-primary" href="/auth/microsoft?session_id=<%= session.session_id %>">Microsoft로 로그인</a>
+      <p class="login-note">로그인 후 Discord 서버 설정에 따라 인증 결과가 반영됩니다.</p>
+    <% } %>
+  </div>
+</section>
+
+<%- include('../partials/bottom') %>
