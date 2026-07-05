@@ -1,0 +1,21 @@
+{
+  "name": "@minewiki/logger",
+  "private": true,
+  "version": "0.1.0",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0"
+  },
+  "dependencies": {
+    "pino": "^8.17.1",
+    "pino-pretty": "^10.3.1"
+  }
+}

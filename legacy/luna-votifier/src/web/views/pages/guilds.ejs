@@ -1,0 +1,271 @@
+<%- include('../partials/top') %>
+
+<% if (selectedTab === 'managed') { %>
+  <% const withBot = managedGuilds.filter((guild) => guild.bot_present); %>
+  <% const withoutBot = managedGuilds.filter((guild) => !guild.bot_present); %>
+
+  <section class="section-header">
+    <div>
+      <p class="eyebrow">Admin</p>
+      <h1>관리 가능한 길드</h1>
+      <p class="channel-hint">봇 상태를 확인하고 서버 설정으로 이동합니다.</p>
+    </div>
+    <div class="stats" style="margin: 0; min-width: min(100%, 360px);">
+      <div class="stat-card">
+        <p class="stat-label">관리 가능</p>
+        <strong><%= withBot.length %></strong>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">초대 필요</p>
+        <strong><%= withoutBot.length %></strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom: 24px;">
+    <div class="channel-form">
+      <label>
+        길드 검색
+        <input id="guild-search" type="search" placeholder="길드 이름 또는 ID" autocomplete="off" />
+      </label>
+      <label>
+        상태
+        <select id="guild-filter">
+          <option value="all">전체</option>
+          <option value="ready">관리 가능</option>
+          <option value="invite">초대 필요</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="grid three" id="guild-grid">
+    <% if (managedGuilds.length === 0) { %>
+      <div class="card">
+        <p class="stat-label">표시할 길드가 없습니다.</p>
+      </div>
+    <% } %>
+
+    <% managedGuilds.forEach((guild) => { %>
+      <% const iconUrl = guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : ''; %>
+      <% const accessLabel = guild.access_info?.label || 'Member'; %>
+      <% const accessKey = guild.access_info?.key || 'member'; %>
+      <% const accessClass = accessKey === 'owner' || accessKey === 'admin' || accessKey === 'manager' ? 'badge-live' : 'badge-off'; %>
+      <% const statusKey = guild.bot_present ? 'ready' : 'invite'; %>
+      <article class="card guild-result" data-name="<%= (guild.name || '').toLowerCase() %>" data-id="<%= guild.id %>" data-status="<%= statusKey %>">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;">
+          <div style="display: flex; align-items: center; gap: 14px; min-width: 0;">
+            <div style="width: 56px; height: 56px; border-radius: 14px; overflow: hidden; background: rgba(148, 163, 184, 0.18); display: grid; place-items: center; flex: 0 0 auto;">
+              <% if (iconUrl) { %>
+                <img alt="Guild Icon" src="<%= iconUrl %>" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" />
+              <% } else { %>
+                <strong><%= (guild.name || '?').slice(0, 2) %></strong>
+              <% } %>
+            </div>
+            <div style="min-width: 0;">
+              <h2 style="margin: 0; font-size: 1.05rem; line-height: 1.3;"><%= guild.name %></h2>
+              <p class="stat-label mono" style="margin: 2px 0 0;">ID: <%= guild.id %></p>
+            </div>
+          </div>
+          <% if (guild.bot_present) { %>
+            <span class="badge badge-live">Bot</span>
+          <% } else { %>
+            <span class="badge badge-off">No bot</span>
+          <% } %>
+        </div>
+
+        <div class="guild-meta" style="margin-top: 18px;">
+          <span class="badge <%= accessClass %>"><%= accessLabel %></span>
+          <% if (guild.bot_member_count) { %>
+            <span class="badge badge-off">멤버 <%= guild.bot_member_count %></span>
+          <% } %>
+          <% if (guild.bot_presence_count) { %>
+            <span class="badge badge-live">접속 <%= guild.bot_presence_count %></span>
+          <% } %>
+        </div>
+
+        <div class="guild-actions">
+          <% if (guild.bot_present) { %>
+            <a class="btn btn-primary" href="/guilds/<%= guild.id %>">관리</a>
+          <% } else if (botInviteUrlBase) { %>
+            <a class="btn btn-secondary" href="<%= botInviteUrlBase %>&guild_id=<%= guild.id %>&disable_guild_select=true" target="_blank" rel="noopener noreferrer">봇 초대</a>
+          <% } %>
+        </div>
+      </article>
+    <% }) %>
+  </section>
+
+  <p id="guild-empty" class="card stat-label" style="display: none; margin-top: 20px;">검색 결과가 없습니다.</p>
+
+  <script>
+    (() => {
+      const search = document.getElementById('guild-search');
+      const filter = document.getElementById('guild-filter');
+      const cards = Array.from(document.querySelectorAll('.guild-result'));
+      const empty = document.getElementById('guild-empty');
+
+      const applyFilters = () => {
+        const term = search.value.trim().toLowerCase();
+        const status = filter.value;
+        let visible = 0;
+
+        cards.forEach((card) => {
+          const matchesTerm = !term || card.dataset.name.includes(term) || card.dataset.id.includes(term);
+          const matchesStatus = status === 'all' || card.dataset.status === status;
+          const show = matchesTerm && matchesStatus;
+          card.style.display = show ? '' : 'none';
+          if (show) visible += 1;
+        });
+
+        empty.style.display = visible === 0 ? '' : 'none';
+      };
+
+      search.addEventListener('input', applyFilters);
+      filter.addEventListener('change', applyFilters);
+    })();
+  </script>
+<% } else { %>
+  <% const links = (userLinks && userLinks.links) ? userLinks.links : []; %>
+  <% const verifiedLinks = links.filter((link) => link.status === 'verified'); %>
+
+  <section class="section-header">
+    <div>
+      <p class="eyebrow">Users</p>
+      <h1>인증된 서버</h1>
+      <p class="channel-hint">Discord 서버와 Minecraft 계정 연결 상태를 확인합니다.</p>
+    </div>
+    <div class="stats" style="margin: 0; min-width: min(100%, 360px);">
+      <div class="stat-card">
+        <p class="stat-label">전체 연결</p>
+        <strong><%= links.length %></strong>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">인증됨</p>
+        <strong><%= verifiedLinks.length %></strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom: 24px;">
+    <div class="channel-form">
+      <label>
+        연결 검색
+        <input id="link-search" type="search" placeholder="서버, 닉네임, UUID" autocomplete="off" />
+      </label>
+      <label>
+        상태
+        <select id="link-filter">
+          <option value="all">전체</option>
+          <option value="verified">Verified</option>
+          <option value="revoked">Revoked</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="grid three" id="link-grid">
+    <% if (links.length === 0) { %>
+      <div class="card">
+        <p class="stat-label">연동 내역이 없습니다.</p>
+      </div>
+    <% } %>
+
+    <% links.forEach((link) => { %>
+      <% const statusLabel = link.status === 'verified' ? 'Verified' : 'Revoked'; %>
+      <% const statusClass = link.status === 'verified' ? 'badge-live' : 'badge-off'; %>
+      <% const nickname = link.mc_ign || 'Unknown'; %>
+      <% const uuid = link.mc_uuid || '-'; %>
+      <% const verifiedAt = link.verified_at_display || link.verified_at || '-'; %>
+      <% const avatar = link.mc_ign ? `https://minotar.net/helm/${link.mc_ign}/128` : 'https://minotar.net/helm/steve/128'; %>
+      <% const guildIconUrl = link.guild_icon ? `https://cdn.discordapp.com/icons/${link.guild_id}/${link.guild_icon}.png?size=96` : ''; %>
+
+      <article class="card link-result" data-name="<%= `${link.guild_name || link.guild_id} ${nickname} ${uuid}`.toLowerCase() %>" data-status="<%= link.status %>">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;">
+          <div style="display: flex; align-items: center; gap: 14px; min-width: 0;">
+            <div style="width: 52px; height: 52px; border-radius: 14px; overflow: hidden; background: rgba(148, 163, 184, 0.18); display: grid; place-items: center; flex: 0 0 auto;">
+              <% if (guildIconUrl) { %>
+                <img alt="Guild Icon" src="<%= guildIconUrl %>" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: cover;" />
+              <% } else { %>
+                <strong><%= (link.guild_name || link.guild_id).slice(0, 2) %></strong>
+              <% } %>
+            </div>
+            <div style="min-width: 0;">
+              <h2 style="margin: 0; font-size: 1.05rem; line-height: 1.3;"><%= link.guild_name || link.guild_id %></h2>
+              <p class="stat-label mono" style="margin: 2px 0 0;">ID: <%= link.guild_id %></p>
+            </div>
+          </div>
+          <span class="badge <%= statusClass %>"><%= statusLabel %></span>
+        </div>
+
+        <div style="display: flex; gap: 14px; align-items: center; margin-top: 20px;">
+          <div style="width: 64px; height: 64px; border-radius: 14px; background: rgba(148, 163, 184, 0.14); display: grid; place-items: center; flex: 0 0 auto;">
+            <img alt="Minecraft Head" src="<%= avatar %>" loading="lazy" decoding="async" style="width: 48px; height: 48px;" />
+          </div>
+          <div style="min-width: 0;">
+            <p class="stat-label" style="margin: 0;">Minecraft</p>
+            <strong style="display: block;"><%= nickname %></strong>
+            <p class="mono" style="margin: 2px 0 0;"><%= uuid %></p>
+          </div>
+        </div>
+
+        <div class="guild-meta" style="margin-top: 18px;">
+          <span class="badge badge-off">인증 <%= verifiedAt %></span>
+        </div>
+
+        <div class="guild-actions">
+          <% if (link.has_access) { %>
+            <a class="btn btn-primary" href="/guilds/<%= link.guild_id %>">관리</a>
+          <% } %>
+          <label class="btn btn-danger" for="unlink-trigger-<%= link.guild_id %>">연동 해제</label>
+        </div>
+
+        <input class="peer hidden" id="unlink-trigger-<%= link.guild_id %>" type="checkbox" />
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 opacity-0 pointer-events-none peer-checked:opacity-100 peer-checked:pointer-events-auto transition-all duration-300" style="padding: 20px;">
+          <div class="card danger" style="width: min(100%, 420px);">
+            <h3 style="margin: 0 0 8px;">연동 해제</h3>
+            <p class="stat-label" style="margin-bottom: 18px;"><%= link.guild_name || link.guild_id %> 연결을 해제합니다.</p>
+            <div class="action-row">
+              <label class="btn btn-ghost" for="unlink-trigger-<%= link.guild_id %>">취소</label>
+              <form method="post" action="/guilds/<%= link.guild_id %>/unlink">
+                <input type="hidden" name="csrf_token" value="<%= csrfToken %>" />
+                <button class="btn btn-danger" type="submit">해제</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </article>
+    <% }) %>
+  </section>
+
+  <p id="link-empty" class="card stat-label" style="display: none; margin-top: 20px;">검색 결과가 없습니다.</p>
+
+  <script>
+    (() => {
+      const search = document.getElementById('link-search');
+      const filter = document.getElementById('link-filter');
+      const cards = Array.from(document.querySelectorAll('.link-result'));
+      const empty = document.getElementById('link-empty');
+
+      const applyFilters = () => {
+        const term = search.value.trim().toLowerCase();
+        const status = filter.value;
+        let visible = 0;
+
+        cards.forEach((card) => {
+          const matchesTerm = !term || card.dataset.name.includes(term);
+          const matchesStatus = status === 'all' || card.dataset.status === status;
+          const show = matchesTerm && matchesStatus;
+          card.style.display = show ? '' : 'none';
+          if (show) visible += 1;
+        });
+
+        empty.style.display = visible === 0 ? '' : 'none';
+      };
+
+      search.addEventListener('input', applyFilters);
+      filter.addEventListener('change', applyFilters);
+    })();
+  </script>
+<% } %>
+
+<%- include('../partials/bottom') %>

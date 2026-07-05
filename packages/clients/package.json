@@ -1,0 +1,16 @@
+{
+  "name": "@minewiki/clients",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@minewiki/schemas": "workspace:*",
+    "@nestjs/common": "^11.1.6",
+    "ky": "^1.0.4"
+  }
+}

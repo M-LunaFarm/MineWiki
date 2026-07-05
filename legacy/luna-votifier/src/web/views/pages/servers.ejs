@@ -1,0 +1,143 @@
+<%
+  const guildName = currentGuild?.name || 'Guild';
+  const guildId = currentGuild?.id || '';
+  const guildIconUrl = currentGuild?.icon ? `https://cdn.discordapp.com/icons/${guildId}/${currentGuild.icon}.png?size=160` : '';
+  const safeSelectedChannelId = typeof selectedChannelId !== 'undefined' ? selectedChannelId : '';
+  const safeChannelQuery = safeSelectedChannelId ? `?channel_id=${safeSelectedChannelId}` : '';
+  const hasConnectedServer = servers.some((server) => server.last_seen_at);
+  const activeServers = servers.filter((server) => server.enabled).length;
+  const navItems = [
+    { key: 'overview', label: '개요', href: `/guilds/${guildId}${safeChannelQuery}` },
+    { key: 'settings', label: '설정', href: `/guilds/${guildId}/settings${safeChannelQuery}` },
+    ...(canManageSettings ? [
+      { key: 'messages', label: '메시지', href: `/guilds/${guildId}/messages${safeChannelQuery}` },
+      { key: 'members', label: '멤버', href: `/guilds/${guildId}/members${safeChannelQuery}` },
+      { key: 'servers', label: '서버', href: `/guilds/${guildId}/servers${safeChannelQuery}` },
+      { key: 'actions', label: '액션', href: `/guilds/${guildId}/actions${safeChannelQuery}` },
+      { key: 'routing', label: '라우팅', href: `/guilds/${guildId}/routing${safeChannelQuery}` }
+    ] : []),
+    { key: 'logs', label: '로그', href: `/guilds/${guildId}/logs${safeChannelQuery}` }
+  ];
+%>
+<%- include('../partials/top', { bodyClass: 'dashboard-page' }) %>
+
+<section class="mx-auto flex w-full max-w-7xl flex-col gap-6">
+  <div class="flex flex-col gap-5 rounded-lg border border-slate-200 bg-white/85 p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+    <div class="flex min-w-0 items-center gap-4">
+      <div class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+        <% if (guildIconUrl) { %>
+          <img alt="Server Icon" class="h-full w-full object-cover" src="<%= guildIconUrl %>" />
+        <% } else { %>
+          <span class="text-lg font-semibold text-slate-500"><%= guildName.slice(0, 2) %></span>
+        <% } %>
+      </div>
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <h1 class="m-0 truncate font-['Space_Grotesk'] text-2xl font-semibold text-slate-950"><%= guildName %></h1>
+          <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">서버</span>
+        </div>
+        <p class="mt-1 font-mono text-xs text-slate-500">ID: <%= guildId %></p>
+      </div>
+    </div>
+  </div>
+
+  <nav class="flex gap-2 overflow-x-auto border-b border-slate-200 pb-3" aria-label="길드 관리 메뉴">
+    <% navItems.forEach((item) => { %>
+      <a class="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium <%= item.key === 'servers' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-white hover:text-slate-950' %>" href="<%= item.href %>"><%= item.label %></a>
+    <% }) %>
+  </nav>
+
+  <div class="stats">
+    <div class="stat-card">
+      <p class="stat-label">등록된 서버</p>
+      <strong><%= servers.length %></strong>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">활성 서버</p>
+      <strong><%= activeServers %></strong>
+    </div>
+    <div class="stat-card">
+      <p class="stat-label">연결 상태</p>
+      <strong><%= hasConnectedServer ? '연결됨' : '대기' %></strong>
+    </div>
+  </div>
+
+  <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <h2>서버 추가</h2>
+    <form class="form" method="post" action="/guilds/<%= guildId %>/servers">
+      <input type="hidden" name="csrf_token" value="<%= csrfToken %>" />
+      <label>
+        서버 이름
+        <input type="text" name="server_name" required />
+      </label>
+      <label>
+        서버 주소
+        <input type="text" name="server_host" placeholder="mc.example.com" required />
+      </label>
+      <label>
+        서버 포트
+        <input type="number" name="server_port" min="1" max="65535" placeholder="8192" required />
+      </label>
+      <button class="btn btn-primary" type="submit">추가</button>
+    </form>
+  </section>
+
+  <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <div class="section-header">
+      <div>
+        <h2>등록된 서버</h2>
+        <p class="channel-hint"><%= servers.length %>개 등록됨</p>
+      </div>
+    </div>
+
+    <% if (!hasConnectedServer) { %>
+      <div class="highlight">
+        <p>연결된 플러그인이 없습니다.</p>
+        <p class="channel-hint">플러그인을 설치하고 서버를 연결하면 마지막 연결 시각을 확인할 수 있습니다.</p>
+        <a class="btn btn-primary" href="https://github.com/M-LunaFarm/LunaVerifier-Plugin/releases/" target="_blank" rel="noopener noreferrer">플러그인 다운로드</a>
+      </div>
+    <% } %>
+
+    <% if (servers.length === 0) { %>
+      <p class="empty-state">등록된 서버가 없습니다.</p>
+    <% } %>
+
+    <div class="member-list">
+      <% servers.forEach((server) => { %>
+        <article class="member-item">
+          <div class="member-main">
+            <div class="member-avatar" data-initial="<%= (server.server_name || '서버').slice(0, 2) %>"></div>
+            <div class="member-copy">
+              <strong><%= server.server_name %></strong>
+              <p class="mono">ID: <%= server.server_id %></p>
+              <p class="channel-hint"><%= server.server_host && server.server_port ? `${server.server_host}:${server.server_port}` : '-' %></p>
+              <p class="channel-hint">마지막 연결: <%= server.last_seen_at_display || server.last_seen_at || '-' %></p>
+            </div>
+          </div>
+          <div class="member-actions">
+            <span class="badge <%= server.enabled ? 'badge-live' : 'badge-off' %>"><%= server.enabled ? '활성' : '비활성' %></span>
+            <form method="post" action="/guilds/<%= guildId %>/servers/<%= server.server_id %>/toggle">
+              <input type="hidden" name="csrf_token" value="<%= csrfToken %>" />
+              <input type="hidden" name="action" value="<%= server.enabled ? 'disable' : 'enable' %>" />
+              <button class="btn btn-ghost" type="submit"><%= server.enabled ? '비활성화' : '활성화' %></button>
+            </form>
+            <form method="post" action="/guilds/<%= guildId %>/servers/<%= server.server_id %>/rotate">
+              <input type="hidden" name="csrf_token" value="<%= csrfToken %>" />
+              <button class="btn btn-ghost" type="submit">시크릿 재발급</button>
+            </form>
+            <form method="post" action="/guilds/<%= guildId %>/servers/<%= server.server_id %>/test">
+              <input type="hidden" name="csrf_token" value="<%= csrfToken %>" />
+              <button class="btn btn-secondary" type="submit">테스트 푸시</button>
+            </form>
+            <form method="post" action="/guilds/<%= guildId %>/servers/<%= server.server_id %>/delete">
+              <input type="hidden" name="csrf_token" value="<%= csrfToken %>" />
+              <button class="btn btn-danger" type="submit" onclick="return confirm('등록된 서버를 삭제할까요?');">삭제</button>
+            </form>
+          </div>
+        </article>
+      <% }) %>
+    </div>
+  </section>
+</section>
+
+<%- include('../partials/bottom') %>

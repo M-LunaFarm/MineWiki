@@ -1,0 +1,17 @@
+{
+  "name": "MineWiki",
+  "short_name": "MineWiki",
+  "description": "Minecraft 정보를 한국어로 정리하는 MineWiki입니다.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f6f6",
+  "theme_color": "#00a495",
+  "icons": [
+    {
+      "src": "/assets/favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

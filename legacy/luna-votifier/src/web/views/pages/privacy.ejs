@@ -1,0 +1,120 @@
+<%- include('../partials/top', { currentGuild: null }) %>
+
+<article class="grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: start;">
+  <aside class="card">
+    <p class="eyebrow">개인정보처리방침</p>
+    <h2>문서 목차</h2>
+    <p class="stat-label">[2026.02.14 개정] 시행일: 2026. 02. 14.</p>
+    <nav class="grid" style="gap: 8px; margin-top: 16px;">
+      <a class="link-pill" href="#sec-1">처리 목적</a>
+      <a class="link-pill" href="#sec-2">처리 항목</a>
+      <a class="link-pill" href="#sec-3">보유 및 파기</a>
+      <a class="link-pill" href="#sec-4">제3자 제공 및 연동</a>
+      <a class="link-pill" href="#sec-5">국외 이전 가능성</a>
+      <a class="link-pill" href="#sec-6">이용자 권리</a>
+      <a class="link-pill" href="#sec-7">안전성 조치</a>
+      <a class="link-pill" href="#sec-8">문의 및 개정 고지</a>
+    </nav>
+  </aside>
+
+  <div class="card" style="min-width: 0;">
+    <header>
+      <p class="eyebrow">정책 문서</p>
+      <h1>[2026.02.14 개정] LunaF Verify 개인정보처리방침</h1>
+      <p class="stat-label">시행일: 2026. 02. 14.</p>
+      <p>
+        본 방침은 LunaF Verify 이용 과정에서 처리되는 개인정보의 기준을 안내합니다.
+        서비스 제공에 필요한 정보만 처리하며, 목적 외 이용은 하지 않습니다.
+      </p>
+    </header>
+
+    <section class="highlight">
+      <h2>이번 개정 주요 사항</h2>
+      <ul>
+        <li>운영 로그, 동의 기록, 세션 정보의 처리 범위를 구체화했습니다.</li>
+        <li>권리 행사 요청 절차와 제한 사유 안내 기준을 정리했습니다.</li>
+        <li>외부 API 연동 및 국외 처리 가능성을 명확히 안내했습니다.</li>
+      </ul>
+    </section>
+
+    <section id="sec-1">
+      <h2>제1조 (개인정보 처리 목적)</h2>
+      <ul>
+        <li>Discord 계정과 Minecraft 계정 간 소유권 확인 및 인증 연동 제공</li>
+        <li>길드 정책에 따른 역할 부여, 닉네임 반영, 서버 자동화 기능 수행</li>
+        <li>운영 안정성 확보, 장애 분석, 보안 사고 대응 및 감사 추적</li>
+      </ul>
+    </section>
+
+    <section id="sec-2">
+      <h2>제2조 (처리하는 개인정보 항목)</h2>
+      <ul>
+        <li>식별 정보: Discord 사용자 ID, 길드 ID, 역할 ID, 채널 ID</li>
+        <li>게임 계정 정보: Minecraft UUID, Minecraft 닉네임(IGN)</li>
+        <li>운영/감사 로그: 인증, 해제, 재인증 이벤트, 서버 전송 상태, 권한 변경 이력</li>
+        <li>서비스 설정 정보: 길드/채널 단위 정책, 메시지 템플릿, 라우팅 설정</li>
+        <li>동의 및 세션 정보: 동의 유형/시각, 로그인 유지 및 CSRF 보호를 위한 세션 식별 정보</li>
+      </ul>
+    </section>
+
+    <section id="sec-3">
+      <h2>제3조 (개인정보 보유기간 및 파기)</h2>
+      <ul>
+        <li>인증 및 설정 정보는 서비스 제공 기간 동안 보관하며, 연동 해제 또는 삭제 요청 시 처리합니다.</li>
+        <li>운영 및 보안 로그는 사고 대응과 무결성 검증 목적 범위 내에서 일정 기간 보관될 수 있습니다.</li>
+        <li>법령상 보존 의무가 있는 정보는 해당 기간 동안 보관 후 파기합니다.</li>
+        <li>파기는 복구가 불가능한 전자적 삭제 방식으로 수행합니다.</li>
+      </ul>
+    </section>
+
+    <section id="sec-4">
+      <h2>제4조 (제3자 제공 및 외부 서비스 연동)</h2>
+      <p>
+        서비스는 인증 기능 제공을 위해 Discord 및 Microsoft/Minecraft API와 통신합니다.
+        위 목적 외 마케팅, 판매, 임대 등의 사유로 개인정보를 제3자에게 제공하지 않습니다.
+      </p>
+    </section>
+
+    <section id="sec-5">
+      <h2>제5조 (개인정보의 국외 이전 가능성)</h2>
+      <p>
+        Discord 및 Microsoft 글로벌 인프라 연동 과정에서 개인정보가 국외에서 처리될 수 있습니다.
+        이용자는 본 방침 및 동의 절차를 통해 이를 확인할 수 있습니다.
+      </p>
+    </section>
+
+    <section id="sec-6">
+      <h2>제6조 (이용자의 권리 및 행사 방법)</h2>
+      <ul>
+        <li>이용자는 개인정보 열람, 정정, 삭제, 처리 제한을 요청할 수 있습니다.</li>
+        <li>요청은 본인 확인 후 처리되며, 법령 또는 보안상 제한 사유가 있는 경우 그 사유를 안내합니다.</li>
+      </ul>
+      <p>
+        문의 접수:
+        <a href="https://discord.gg/HPh2xYjSVH" target="_blank" rel="noopener noreferrer">https://discord.gg/HPh2xYjSVH</a>
+      </p>
+    </section>
+
+    <section id="sec-7">
+      <h2>제7조 (안전성 확보조치)</h2>
+      <ul>
+        <li>HTTPS 기반 통신 보호 및 핵심 요청 검증(CSRF 등) 적용</li>
+        <li>관리 기능 접근 권한 분리 및 로그 기반 변경 추적</li>
+        <li>보안 이벤트 모니터링 및 이상 징후 대응 절차 운영</li>
+      </ul>
+    </section>
+
+    <section id="sec-8">
+      <h2>제8조 (문의처 및 방침 개정 고지)</h2>
+      <p>
+        개인정보 처리 관련 문의 및 권리 행사 요청은 공식 Discord 채널을 통해 접수할 수 있습니다.
+        운영주체는 MineWiki Verify이며, 개인정보 보호책임자는 이승민, 이메일은 admin@minewiki.kr입니다.
+        본 방침 개정 시 시행일 및 주요 변경사항을 본 페이지를 통해 고지합니다.
+      </p>
+    </section>
+
+    <p class="highlight">본 정책 문서는 버전별로 관리되며, 실제 효력은 시행일 기준 최신 버전에 따릅니다.</p>
+  </div>
+</article>
+
+<%- include('../partials/bottom') %>

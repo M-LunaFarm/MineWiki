@@ -1,0 +1,324 @@
+<%
+  const guildName = currentGuild?.name || 'Guild';
+  const guildId = currentGuild?.id || '';
+  const guildIconUrl = currentGuild?.icon ? `https://cdn.discordapp.com/icons/${guildId}/${currentGuild.icon}.png?size=160` : '';
+  const cancelQuery = selectedChannelId ? `?channel_id=${selectedChannelId}` : '';
+  const navItems = [
+    { key: 'overview', label: '개요', href: `/guilds/${guildId}${channelQuery}` },
+    { key: 'settings', label: '설정', href: `/guilds/${guildId}/settings${channelQuery}` },
+    ...(canManageSettings ? [
+      { key: 'messages', label: '메시지', href: `/guilds/${guildId}/messages${channelQuery}` },
+      { key: 'members', label: '멤버', href: `/guilds/${guildId}/members${channelQuery}` },
+      { key: 'servers', label: '서버', href: `/guilds/${guildId}/servers${channelQuery}` },
+      { key: 'actions', label: '액션', href: `/guilds/${guildId}/actions${channelQuery}` },
+      { key: 'routing', label: '라우팅', href: `/guilds/${guildId}/routing${channelQuery}` }
+    ] : []),
+    { key: 'logs', label: '로그', href: `/guilds/${guildId}/logs${channelQuery}` }
+  ];
+%>
+<%- include('../partials/top', { bodyClass: 'dashboard-page' }) %>
+
+<style>
+  .dashboard-page .page { max-width: 1280px; margin: 0 auto; width: 100%; }
+  .bg-white\/85 { background: rgba(255,255,255,.85); }
+  .bg-slate-50 { background: #f8fafc; }
+  .bg-slate-100 { background: #f1f5f9; }
+  .bg-slate-950 { background: #020617; }
+  .bg-amber-50 { background: #fffbeb; }
+  .bg-amber-600 { background: #d97706; }
+  .border-slate-100 { border-color: #f1f5f9; }
+  .border-slate-200 { border-color: #e2e8f0; }
+  .border-slate-300 { border-color: #cbd5e1; }
+  .border-amber-200 { border-color: #fde68a; }
+  .text-slate-950 { color: #020617; }
+  .text-slate-900 { color: #0f172a; }
+  .text-slate-800 { color: #1e293b; }
+  .text-slate-700 { color: #334155; }
+  .text-slate-600 { color: #475569; }
+  .text-slate-500 { color: #64748b; }
+  .text-slate-400 { color: #94a3b8; }
+  .text-amber-800 { color: #92400e; }
+  .shadow-sm { box-shadow: 0 1px 2px rgba(15,23,42,.08); }
+  .shadow-xl { box-shadow: 0 20px 25px -5px rgba(15,23,42,.16), 0 8px 10px -6px rgba(15,23,42,.12); }
+  .inset-x-4 { left: 1rem; right: 1rem; }
+  .min-w-\[720px\] { min-width: 720px; }
+  .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #f1f5f9; }
+  @media (hover:hover) {
+    .hover\:bg-white:hover { background: #fff; }
+    .hover\:bg-slate-50:hover { background: #f8fafc; }
+    .hover\:bg-slate-100:hover { background: #f1f5f9; }
+    .hover\:bg-slate-800:hover { background: #1e293b; }
+    .hover\:bg-amber-700:hover { background: #b45309; }
+    .hover\:text-slate-950:hover { color: #020617; }
+  }
+  @media (min-width: 640px) { .sm\:flex-none { flex: none; } }
+  @media (min-width: 768px) {
+    .md\:left-1\/2 { left: 50%; }
+    .md\:right-auto { right: auto; }
+    .md\:w-auto { width: auto; }
+    .md\:-translate-x-1\/2 { transform: translateX(-50%); }
+  }
+  @media (min-width: 1024px) { .lg\:grid-cols-\[1fr_auto\] { grid-template-columns: 1fr auto; } }
+  @media (min-width: 1280px) {
+    .xl\:grid-cols-\[minmax\(0\,1fr\)_360px\] { grid-template-columns: minmax(0,1fr) 360px; }
+    .xl\:top-28 { top: 7rem; }
+  }
+  @media (max-width: 767px) { .min-w-\[720px\] { min-width: 640px; } }
+</style>
+
+<section class="mx-auto flex w-full max-w-7xl flex-col gap-6">
+  <div class="flex flex-col gap-5 rounded-lg border border-slate-200 bg-white/85 p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+    <div class="flex min-w-0 items-center gap-4">
+      <div class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+        <% if (guildIconUrl) { %>
+          <img alt="Server Icon" class="h-full w-full object-cover" src="<%= guildIconUrl %>" />
+        <% } else { %>
+          <span class="text-lg font-semibold text-slate-500"><%= guildName.slice(0, 2) %></span>
+        <% } %>
+      </div>
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <h1 class="m-0 truncate font-['Space_Grotesk'] text-2xl font-semibold text-slate-950"><%= guildName %></h1>
+          <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">설정</span>
+        </div>
+        <p class="mt-1 font-mono text-xs text-slate-500">ID: <%= guildId %></p>
+      </div>
+    </div>
+    <% if (!isAllChannels) { %>
+      <button class="inline-flex items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800" form="settingsForm" type="submit">
+        저장
+      </button>
+    <% } %>
+  </div>
+
+  <nav class="flex gap-2 overflow-x-auto border-b border-slate-200 pb-3">
+    <% navItems.forEach((item) => { %>
+      <a class="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium <%= item.key === 'settings' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-white hover:text-slate-950' %>" href="<%= item.href %>"><%= item.label %></a>
+    <% }) %>
+  </nav>
+
+  <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+    <form class="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end" method="get" action="<%= actionPath %>">
+      <div>
+        <label class="block text-sm font-semibold text-slate-700" for="channel_id">설정 적용 범위</label>
+        <select class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100" id="channel_id" name="channel_id">
+          <option value="">길드 기본값 (채널별 설정이 없을 때 적용)</option>
+          <% if (allowAllChannels) { %>
+            <option value="__all" <%= selectedChannelId === '__all' ? 'selected' : '' %>>채널별 설정 목록 보기 (편집은 채널 선택)</option>
+          <% } %>
+          <% channelOptions.forEach((channel) => { %>
+            <option value="<%= channel.id %>" <%= selectedChannelId === channel.id ? 'selected' : '' %>>#<%= channel.name %> (이 채널만)</option>
+          <% }) %>
+        </select>
+        <p class="mt-2 text-xs text-slate-500">길드 기본값은 채널별 설정이 없을 때 적용됩니다. 목록 보기는 저장된 값만 보여줍니다.</p>
+      </div>
+      <button class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50" type="submit">
+        범위 적용
+      </button>
+    </form>
+    <% if (!botPresent) { %>
+      <div class="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <span>봇이 길드에 초대되지 않아 채널 목록을 불러올 수 없습니다.</span>
+        <% if (botInviteUrl) { %>
+          <a class="inline-flex items-center justify-center rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700" href="<%= botInviteUrl %>" target="_blank" rel="noopener noreferrer">
+            봇 초대하기
+          </a>
+        <% } %>
+      </div>
+    <% } %>
+  </section>
+
+  <% if (isAllChannels) { %>
+    <% const channelMap = channelOptions.reduce((acc, channel) => { acc[channel.id] = channel.name; return acc; }, {}); %>
+    <section class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="border-b border-slate-200 px-5 py-4">
+        <h2 class="m-0 text-base font-semibold text-slate-950">채널별 설정</h2>
+        <p class="m-0 mt-1 text-sm text-slate-500">저장된 채널 override입니다.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[720px] text-left text-sm">
+          <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-5 py-3">Channel</th>
+              <th class="px-5 py-3">Verified Role</th>
+              <th class="px-5 py-3">Log Channel</th>
+              <th class="px-5 py-3">Nickname</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-slate-700">
+            <% if (!channelSettings || channelSettings.length === 0) { %>
+              <tr><td class="px-5 py-6 text-slate-500" colspan="4">아직 채널별 설정이 없습니다.</td></tr>
+            <% } %>
+            <% channelSettings.forEach((row) => { %>
+              <tr>
+                <td class="px-5 py-4 font-medium"><%= channelMap[row.channel_id] || row.channel_id %></td>
+                <td class="px-5 py-4 font-mono text-xs"><%= row.verified_role_id || '-' %></td>
+                <td class="px-5 py-4 font-mono text-xs"><%= row.log_channel_id || '-' %></td>
+                <td class="px-5 py-4"><%= row.nickname_format || '-' %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  <% } else { %>
+    <form id="settingsForm" method="post" action="/guilds/<%= guildId %>/settings">
+      <input type="hidden" name="csrf_token" value="<%= csrfToken %>" />
+      <input type="hidden" name="channel_id" value="<%= selectedChannelId %>" />
+
+      <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div class="space-y-5">
+          <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 class="m-0 text-base font-semibold text-slate-950">역할 및 닉네임</h2>
+                <p class="m-0 mt-1 text-sm text-slate-500">인증 완료 후 적용할 값을 설정합니다.</p>
+              </div>
+              <span class="material-symbols-outlined text-xl text-slate-400">badge</span>
+            </div>
+            <div class="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <div>
+                <label class="block text-sm font-semibold text-slate-700" for="verified_role_id">인증 완료 역할</label>
+                <select class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100" id="verified_role_id" name="verified_role_id">
+                  <option value="">None</option>
+                  <% (roleOptions || []).forEach((role) => { %>
+                    <option value="<%= role.id %>" <%= settings.verified_role_id === role.id ? 'selected' : '' %>><%= role.name %></option>
+                  <% }) %>
+                </select>
+                <p class="mt-2 text-xs text-slate-500">인증 완료 유저에게 지급할 역할입니다.</p>
+              </div>
+              <div>
+                <label class="block text-sm font-semibold text-slate-700" for="nicknameFormatInput">닉네임 포맷</label>
+                <input class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-mono text-sm text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100" id="nicknameFormatInput" name="nickname_format" type="text" value="<%= settings.nickname_format || '' %>" placeholder="{ign} | {user}" />
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <button class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100" type="button" data-target="nicknameFormatInput" data-insert="{ign}">{ign}</button>
+                  <button class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100" type="button" data-target="nicknameFormatInput" data-insert="{user}">{user}</button>
+                  <button class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 hover:bg-slate-100" type="button" data-target="nicknameFormatInput" data-insert="{tag}">{tag}</button>
+                </div>
+                <p class="mt-2 text-xs text-slate-500">예: {ign} | {user}</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 class="m-0 text-base font-semibold text-slate-950">로그</h2>
+                <p class="m-0 mt-1 text-sm text-slate-500">인증 시도와 역할 업데이트를 보낼 채널입니다.</p>
+              </div>
+              <span class="material-symbols-outlined text-xl text-slate-400">history_edu</span>
+            </div>
+            <label class="block text-sm font-semibold text-slate-700" for="log_channel_id">로그 채널</label>
+            <select class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100" id="log_channel_id" name="log_channel_id">
+              <option value="">None</option>
+              <% (channelOptions || []).forEach((channel) => { %>
+                <option value="<%= channel.id %>" <%= settings.log_channel_id === channel.id ? 'selected' : '' %>>#<%= channel.name %></option>
+              <% }) %>
+            </select>
+          </section>
+        </div>
+
+        <aside class="space-y-5 xl:sticky xl:top-28 xl:self-start">
+          <section class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 class="m-0 text-base font-semibold text-slate-950">연결 정책</h2>
+                <p class="m-0 mt-1 text-sm text-slate-500">기존 링크가 있을 때 처리 방식입니다.</p>
+              </div>
+              <span class="material-symbols-outlined text-xl text-slate-400">gavel</span>
+            </div>
+            <label class="block text-sm font-semibold text-slate-700" for="link_policy">정책</label>
+            <div class="relative">
+              <% const resolvedLinkPolicy = typeof selectedLinkPolicy === 'undefined' ? 'strict' : selectedLinkPolicy; %>
+              <select class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-100" id="link_policy" name="link_policy">
+                <option value="strict" <%= resolvedLinkPolicy === 'strict' ? 'selected' : '' %>>strict - 1:1 고정</option>
+                <option value="deny" <%= resolvedLinkPolicy === 'deny' ? 'selected' : '' %>>deny - 링크가 있으면 거부</option>
+                <option value="overwrite" <%= resolvedLinkPolicy === 'overwrite' ? 'selected' : '' %>>overwrite - 새 링크로 교체</option>
+              </select>
+            </div>
+            <div class="mt-4 space-y-2 text-xs leading-5 text-slate-600">
+              <p class="m-0"><strong>strict:</strong> 다른 디스코드/마인크래프트 계정으로 재연결하면 거부합니다.</p>
+              <p class="m-0"><strong>deny:</strong> 기존 링크가 있으면 새 링크를 거부합니다.</p>
+              <p class="m-0"><strong>overwrite:</strong> 새 링크로 교체하고 기존 UUID 연결은 해제합니다.</p>
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <div class="fixed inset-x-4 bottom-4 z-20 hidden rounded-lg border border-slate-200 bg-white p-3 shadow-xl md:left-1/2 md:right-auto md:w-auto md:-translate-x-1/2" id="settingsActionBar">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <span class="text-sm font-medium text-slate-700">설정이 변경되었습니다.</span>
+          <div class="flex items-center gap-2">
+            <button class="inline-flex flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 sm:flex-none" type="button" data-action="reset">
+              취소
+            </button>
+            <button class="inline-flex flex-1 items-center justify-center rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 sm:flex-none" type="submit" data-action="submit">
+              저장
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  <% } %>
+</section>
+
+<script>
+  (() => {
+    const form = document.getElementById('settingsForm');
+    const actionBar = document.getElementById('settingsActionBar');
+    if (!form || !actionBar) return;
+
+    const snapshot = () => {
+      const entries = Array.from(new FormData(form).entries());
+      entries.sort((a, b) => {
+        const keyCompare = a[0].localeCompare(b[0]);
+        return keyCompare !== 0 ? keyCompare : String(a[1]).localeCompare(String(b[1]));
+      });
+      return entries.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
+    };
+
+    const baseline = snapshot();
+    const updateState = () => {
+      actionBar.classList.toggle('hidden', snapshot() === baseline);
+    };
+
+    const resetButton = actionBar.querySelector('[data-action="reset"]');
+    if (resetButton) {
+      resetButton.addEventListener('click', () => {
+        form.reset();
+        updateState();
+      });
+    }
+
+    form.addEventListener('input', updateState);
+    form.addEventListener('change', updateState);
+
+    let lastFocusedId = null;
+    form.addEventListener('focusin', (event) => {
+      const target = event.target;
+      if (target && target.id) {
+        lastFocusedId = target.id;
+      }
+    });
+
+    document.querySelectorAll('[data-insert]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetId = button.getAttribute('data-target') || lastFocusedId;
+        const token = button.getAttribute('data-insert') || '';
+        const input = document.getElementById(targetId);
+        if (!input) return;
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? input.value.length;
+        input.value = `${input.value.slice(0, start)}${token}${input.value.slice(end)}`;
+        const caret = start + token.length;
+        input.focus();
+        if (input.setSelectionRange) {
+          input.setSelectionRange(caret, caret);
+        }
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    });
+  })();
+</script>
+
+<%- include('../partials/bottom') %>

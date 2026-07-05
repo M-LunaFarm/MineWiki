@@ -1,0 +1,253 @@
+/* Article surface — namu.wiki-inspired */
+
+/* ── Article shell ── */
+.minewiki .wiki-shell.skin-article {
+  padding: 0;
+}
+
+.minewiki .skin-article .article {
+  background: var(--nw-surface);
+}
+
+/* ── Article head ── */
+.minewiki .skin-article .article-head {
+  border: 0;
+  border-bottom: 1px solid var(--nw-border);
+  border-radius: 0;
+  background: transparent;
+  padding: 20px 24px 0;
+  box-shadow: none;
+}
+
+.minewiki .skin-article .article-title-row {
+  display: block;
+  border: 0;
+}
+
+.minewiki .skin-article .article h1 {
+  display: block;
+  margin: 0 0 4px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--nw-text);
+  font-size: 1.9rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.minewiki .skin-article .article-summary {
+  margin: 4px 0 0;
+  color: var(--nw-text-muted);
+  font-size: 12.5px;
+}
+
+/* ── Action tabs (문서/토론/편집/역사...) ── */
+.minewiki .skin-article .article-actions {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-top: 10px;
+  border-bottom: 2px solid var(--nw-border);
+}
+
+.minewiki .skin-article .article-actions > .document-mode-tabs,
+.minewiki .skin-article .article-actions > .document-tool-links {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.minewiki .skin-article .article-actions > .document-tool-links {
+  margin-left: auto;
+}
+
+.minewiki .skin-article .article-actions a,
+.minewiki .skin-article .article-actions button,
+.minewiki .skin-article .article-watch-control button {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  margin-bottom: -2px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--nw-text-muted);
+  padding: 0 12px;
+  font-size: 13.5px;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .1s, border-color .1s;
+}
+
+.minewiki .skin-article .article-actions a:hover,
+.minewiki .skin-article .article-actions button:hover,
+.minewiki .skin-article .article-watch-control button:hover {
+  color: var(--nw-text);
+  border-bottom-color: var(--nw-brand);
+  background: transparent;
+}
+
+.minewiki .skin-article .article-actions a.active {
+  color: var(--nw-brand);
+  border-bottom-color: var(--nw-brand);
+  font-weight: 700;
+}
+
+.minewiki .skin-article .article-watch-control {
+  margin-left: 0;
+  border-left: 1px solid var(--nw-border-soft);
+  padding-left: 0;
+}
+
+/* ── Article main ── */
+.minewiki .skin-article .article-main {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ── TOC / admin tools ── */
+.minewiki .article-inline-toc,
+.minewiki .article-admin-tools {
+  margin: 16px 24px 0;
+  border: 1px solid var(--nw-border);
+  border-radius: var(--nw-radius-sm);
+  background: var(--nw-surface-alt);
+  padding: 12px 14px;
+  box-shadow: none;
+}
+
+.minewiki .article-inline-toc > strong,
+.minewiki .article-inline-toc > summary {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--nw-text);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.minewiki .article-inline-toc > summary {
+  cursor: pointer;
+}
+
+.minewiki .mobile-inline-toc {
+  display: none;
+}
+
+.minewiki .skin-article .article-toc-tree,
+.minewiki .skin-article .article-toc-list {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.minewiki .skin-article .article-toc-link {
+  min-height: 24px;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  color: var(--nw-link);
+  text-decoration: none;
+}
+
+.minewiki .skin-article .article-toc-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Article body ── */
+.minewiki .skin-article .article-body {
+  padding: 20px 24px 48px;
+  color: var(--nw-text);
+  font-size: 15.5px;
+  line-height: 1.75;
+}
+
+.minewiki .skin-article .article-body h2 {
+  margin: 2rem 0 .7rem;
+  border: 0;
+  border-bottom: 1px solid var(--nw-border);
+  background: transparent;
+  box-shadow: none;
+  padding: 0 0 .3rem;
+  color: var(--nw-text);
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.minewiki .skin-article .article-body h3 {
+  margin: 1.6rem 0 .55rem;
+  border: 0;
+  border-bottom: 1px solid var(--nw-border-soft);
+  background: transparent;
+  padding-bottom: .2rem;
+  font-size: 1.18rem;
+  font-weight: 700;
+}
+
+.minewiki .skin-article .article-body h4,
+.minewiki .skin-article .article-body h5 {
+  margin: 1.3rem 0 .4rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.minewiki .skin-article .article-body p {
+  margin: .5rem 0 .8rem;
+  line-height: 1.75;
+}
+
+.minewiki .skin-article .article-body a {
+  color: var(--nw-link);
+  text-decoration: none;
+}
+.minewiki .skin-article .article-body a:visited { color: var(--nw-link-visited); }
+.minewiki .skin-article .article-body a:hover { text-decoration: underline; }
+.minewiki .skin-article .article-body a.wiki-new-link { color: var(--nw-link-new); }
+
+/* ── Mobile ── */
+@media (max-width: 760px) {
+  .minewiki .desktop-inline-toc {
+    display: none;
+  }
+  .minewiki .mobile-inline-toc {
+    display: block;
+  }
+
+  .minewiki .skin-article .article-head {
+    padding: 14px 14px 0;
+  }
+
+  .minewiki .skin-article .article h1 {
+    font-size: 1.55rem;
+  }
+
+  .minewiki .skin-article .article-actions {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .minewiki .skin-article .article-actions::-webkit-scrollbar { display: none; }
+
+  .minewiki .article-inline-toc,
+  .minewiki .article-admin-tools {
+    margin: 12px 14px 0;
+  }
+
+  .minewiki .mobile-inline-toc {
+    display: block;
+  }
+
+  .minewiki .skin-article .article-body {
+    padding: 16px 14px 36px;
+    font-size: 15px;
+  }
+}

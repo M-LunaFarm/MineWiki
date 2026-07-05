@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/public/fonts.css?v=<%= assetVersion %>" />
+    <link rel="icon" type="image/x-icon" href="/public/favicon.ico" />
+    <link rel="stylesheet" href="/public/tailwind.css?v=<%= assetVersion %>" />
+    <link rel="stylesheet" href="/public/styles.css?v=<%= assetVersion %>" />
+  </head>
+  <% const pageBodyClass = typeof bodyClass !== 'undefined' ? bodyClass : ''; %>
+  <body class="<%= pageBodyClass %>">
+    <div class="backdrop"></div>
+    <header class="topbar" data-site-header>
+      <a class="brand" href="/">
+        <div class="logo">
+          <img src="/public/favicon.ico" alt="" />
+        </div>
+        <div>
+          <p class="brand-title">Luna Verifier</p>
+          <p class="brand-sub">Discord-Minecraft 인증 관리</p>
+        </div>
+      </a>
+      <nav class="topnav">
+        <% if (user) { %>
+          <a class="nav-link" href="/guilds">내 인증</a>
+          <a class="nav-link" href="/guilds/select">관리</a>
+        <% } %>
+        <a class="nav-link" href="/info">소개</a>
+        <a class="nav-link" href="/privacy">개인정보</a>
+      </nav>
+      <div class="user-chip">
+        <% if (user) { %>
+          <% const avatarUrl = user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : 'https://cdn.discordapp.com/embed/avatars/0.png'; %>
+          <details class="profile-menu">
+            <summary class="profile-trigger">
+              <img class="profile-avatar" src="<%= avatarUrl %>" alt="avatar" />
+              <span class="user-name"><%= user.username %></span>
+              <span class="profile-caret" aria-hidden="true">▾</span>
+            </summary>
+            <div class="profile-card">
+              <p class="profile-title">Discord 계정</p>
+              <p><strong><%= user.username %></strong></p>
+              <p>ID: <%= user.id %></p>
+              <a class="btn btn-ghost" href="/logout">로그아웃</a>
+            </div>
+          </details>
+        <% } else { %>
+          <a class="btn btn-primary" href="/auth/discord">Discord 로그인</a>
+        <% } %>
+      </div>
+    </header>
+    <main class="page">
+      <% if (flash) { %>
+        <div class="toast toast-<%= flash.type %>">
+          <span><%= flash.message %></span>
+        </div>
+      <% } %>

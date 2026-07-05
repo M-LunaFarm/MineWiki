@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MineWiki">
+  <defs>
+    <linearGradient id="top" x1="10" y1="8" x2="54" y2="34" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6bd36b"/>
+      <stop offset="0.48" stop-color="#20b25f"/>
+      <stop offset="1" stop-color="#008c7a"/>
+    </linearGradient>
+    <linearGradient id="side" x1="14" y1="26" x2="52" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5c4033"/>
+      <stop offset="1" stop-color="#33221e"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#f5f7f8"/>
+  <path d="M10 18 32 8l22 10-22 10L10 18Z" fill="url(#top)"/>
+  <path d="M10 18v25l22 11V28L10 18Z" fill="url(#side)"/>
+  <path d="M54 18v25L32 54V28l22-10Z" fill="#4b332a"/>
+  <path d="M16 18.2 25 14l5.2 2.4-9.2 4.2L16 18.2Zm17.2 8 9.2-4.2 5.4 2.5-9.5 4.2-5.1-2.5Z" fill="#9be27a" opacity=".82"/>
+  <path d="M18 31.5 28 36v11l-10-5V31.5Z" fill="#f8f9fa" stroke="#d5d9de" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M28 36h8.5c4.6 0 8.5 3.6 8.5 8.2V47H28V36Z" fill="#fff" stroke="#d5d9de" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M32 39h8M32 43h9" stroke="#00a495" stroke-width="2" stroke-linecap="round"/>
+  <path d="M20 35.5 25.5 38M20 39.5 25.5 42" stroke="#00a495" stroke-width="2" stroke-linecap="round"/>
+  <path d="M32 28v26M10 18l22 10 22-10" fill="none" stroke="#1d2b23" stroke-opacity=".2" stroke-width="2" stroke-linejoin="round"/>
+</svg>
