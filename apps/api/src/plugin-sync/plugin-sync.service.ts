@@ -1,18 +1,19 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
   NotFoundException
 } from '@nestjs/common';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 
 const PLUGIN_SYNC_SKEW_SECONDS = 300;
 const PLUGIN_SYNC_COOLDOWN_SECONDS = 30;
-
-const lastSeenByServer = new Map<string, number>();
+const AUDIT_MINECRAFT_UUID = '00000000-0000-0000-0000-000000000000';
 
 export interface PluginSyncRequest {
   readonly timestamp: string;
@@ -34,9 +35,21 @@ export interface PluginSyncResponse {
   }>;
 }
 
+export interface PluginSyncSecurityStore {
+  claimNonce(serverId: string, nonce: string, ttlSeconds: number, now: Date): Promise<boolean>;
+  touchCooldown(serverId: string, cooldownSeconds: number, now: Date): Promise<number | null>;
+}
+
 @Injectable()
 export class PluginSyncService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly securityStore: PluginSyncSecurityStore;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    securityStore?: PluginSyncSecurityStore
+  ) {
+    this.securityStore = securityStore ?? new PrismaPluginSyncSecurityStore(prisma);
+  }
 
   async sync(request: PluginSyncRequest): Promise<PluginSyncResponse> {
     this.validateEnvelope(request);
@@ -53,9 +66,41 @@ export class PluginSyncService {
       throw new ForbiddenException({ error: 'server_disabled' });
     }
 
-    this.assertFreshTimestamp(request.timestamp);
-    this.assertValidSignature(server.serverSecret, request);
-    this.assertCooldown(serverId);
+    try {
+      this.assertFreshTimestamp(request.timestamp);
+    } catch (error) {
+      await this.auditSecurityEvent(serverId, 'stale', request);
+      throw error;
+    }
+    try {
+      this.assertValidSignature(server.serverSecret, request);
+    } catch (error) {
+      await this.auditSecurityEvent(serverId, 'bad_signature', request);
+      throw error;
+    }
+
+    const now = new Date();
+    const nonceAccepted = await this.securityStore.claimNonce(
+      serverId,
+      request.nonce,
+      PLUGIN_SYNC_SKEW_SECONDS,
+      now
+    );
+    if (!nonceAccepted) {
+      await this.auditSecurityEvent(serverId, 'replay', request);
+      throw new ConflictException({ error: 'replay' });
+    }
+    const retryAfter = await this.securityStore.touchCooldown(serverId, PLUGIN_SYNC_COOLDOWN_SECONDS, now);
+    if (retryAfter !== null) {
+      await this.auditSecurityEvent(serverId, 'rate_limited', request, { retry_after: retryAfter });
+      throw new HttpException(
+        {
+          error: 'rate_limited',
+          retry_after: retryAfter
+        },
+        HttpStatus.TOO_MANY_REQUESTS
+      );
+    }
 
     const verifications = await this.prisma.lunaGuildVerification.findMany({
       where: { guildId: server.guildId, status: 'verified' },
@@ -73,6 +118,7 @@ export class PluginSyncService {
       where: { serverId },
       data: { lastSeenAt: new Date() }
     });
+    await this.auditSecurityEvent(serverId, 'accepted', request);
 
     return {
       server_id: serverId,
@@ -113,19 +159,79 @@ export class PluginSyncService {
     }
   }
 
-  private assertCooldown(serverId: string): void {
-    const now = Math.floor(Date.now() / 1000);
-    const lastSeen = lastSeenByServer.get(serverId) ?? 0;
-    if (lastSeen && now - lastSeen < PLUGIN_SYNC_COOLDOWN_SECONDS) {
-      throw new HttpException(
-        {
-          error: 'rate_limited',
-          retry_after: PLUGIN_SYNC_COOLDOWN_SECONDS - (now - lastSeen)
-        },
-        HttpStatus.TOO_MANY_REQUESTS
+  private async auditSecurityEvent(
+    serverId: string,
+    action: 'accepted' | 'bad_signature' | 'rate_limited' | 'replay' | 'stale',
+    request: PluginSyncRequest,
+    extraPayload: Record<string, unknown> = {}
+  ): Promise<void> {
+    await this.prisma.serverPluginSyncEvent.create({
+      data: {
+        serverId: null,
+        pluginServerId: serverId,
+        discordUserId: null,
+        minecraftUuid: AUDIT_MINECRAFT_UUID,
+        playerName: null,
+        action,
+        payload: JSON.parse(JSON.stringify({
+          timestamp: request.timestamp,
+          nonce: request.nonce,
+          payload: request.payload,
+          ...extraPayload
+        })) as Prisma.InputJsonValue
+      }
+    });
+  }
+}
+
+class PrismaPluginSyncSecurityStore implements PluginSyncSecurityStore {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async claimNonce(serverId: string, nonce: string, ttlSeconds: number, now: Date): Promise<boolean> {
+    await this.prisma.$executeRawUnsafe(
+      'DELETE FROM `plugin_sync_replay_guards` WHERE `expires_at` < ?',
+      now
+    );
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+    try {
+      await this.prisma.$executeRawUnsafe(
+        'INSERT INTO `plugin_sync_replay_guards` (`id`, `server_id`, `nonce`, `expires_at`, `created_at`) VALUES (?, ?, ?, ?, ?)',
+        randomUUID(),
+        serverId,
+        nonce,
+        expiresAt,
+        now
       );
+      return true;
+    } catch (error) {
+      if (isDuplicateKeyError(error)) {
+        return false;
+      }
+      throw error;
     }
-    lastSeenByServer.set(serverId, now);
+  }
+
+  async touchCooldown(serverId: string, cooldownSeconds: number, now: Date): Promise<number | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRawUnsafe<Array<{ last_seen_at?: Date; lastSeenAt?: Date }>>(
+        'SELECT `last_seen_at` FROM `plugin_sync_cooldowns` WHERE `server_id` = ? FOR UPDATE',
+        serverId
+      );
+      const lastSeenAt = rows[0]?.last_seen_at ?? rows[0]?.lastSeenAt ?? null;
+      if (lastSeenAt) {
+        const elapsedSeconds = Math.floor((now.getTime() - new Date(lastSeenAt).getTime()) / 1000);
+        if (elapsedSeconds < cooldownSeconds) {
+          return cooldownSeconds - elapsedSeconds;
+        }
+      }
+      await tx.$executeRawUnsafe(
+        'INSERT INTO `plugin_sync_cooldowns` (`server_id`, `last_seen_at`, `updated_at`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `last_seen_at` = VALUES(`last_seen_at`), `updated_at` = VALUES(`updated_at`)',
+        serverId,
+        now,
+        now
+      );
+      return null;
+    });
   }
 }
 
@@ -147,4 +253,9 @@ function safeEquals(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
+  const serialized = JSON.stringify(error);
+  return serialized.includes('P2002') || serialized.includes('1062') || serialized.includes('Duplicate entry');
 }

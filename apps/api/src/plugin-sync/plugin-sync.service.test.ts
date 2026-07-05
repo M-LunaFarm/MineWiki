@@ -4,13 +4,45 @@ import {
   buildSignatureBody,
   hmacSha256Hex,
   PluginSyncService,
-  type PluginSyncRequest
+  type PluginSyncRequest,
+  type PluginSyncSecurityStore
 } from './plugin-sync.service';
 
-function createService(options: { enabled?: boolean; serverId?: string } = {}) {
+class SharedPluginSyncSecurityStore implements PluginSyncSecurityStore {
+  readonly nonces = new Set<string>();
+  readonly cooldowns = new Map<string, Date>();
+
+  async claimNonce(serverId: string, nonce: string): Promise<boolean> {
+    const key = `${serverId}:${nonce}`;
+    if (this.nonces.has(key)) {
+      return false;
+    }
+    this.nonces.add(key);
+    return true;
+  }
+
+  async touchCooldown(serverId: string, cooldownSeconds: number, now: Date): Promise<number | null> {
+    const lastSeenAt = this.cooldowns.get(serverId);
+    if (lastSeenAt) {
+      const elapsedSeconds = Math.floor((now.getTime() - lastSeenAt.getTime()) / 1000);
+      if (elapsedSeconds < cooldownSeconds) {
+        return cooldownSeconds - elapsedSeconds;
+      }
+    }
+    this.cooldowns.set(serverId, now);
+    return null;
+  }
+}
+
+function createService(options: {
+  enabled?: boolean;
+  serverId?: string;
+  securityStore?: PluginSyncSecurityStore;
+} = {}) {
   const serverId = options.serverId ?? `server-${Math.random().toString(36).slice(2)}`;
   const secret = 'secret';
   const updated: unknown[] = [];
+  const auditEvents: unknown[] = [];
   const prisma = {
     lunaGuildServer: {
       findUnique: async () => ({
@@ -39,14 +71,30 @@ function createService(options: { enabled?: boolean; serverId?: string } = {}) {
           minecraftName: 'PlayerOne'
         }
       ]
+    },
+    serverPluginSyncEvent: {
+      create: async (args: unknown) => {
+        auditEvents.push(args);
+        return { id: `audit-${auditEvents.length}` };
+      }
     }
   };
-  return { service: new PluginSyncService(prisma as never), serverId, secret, updated };
+  return {
+    service: new PluginSyncService(prisma as never, options.securityStore ?? new SharedPluginSyncSecurityStore()),
+    serverId,
+    secret,
+    updated,
+    auditEvents
+  };
 }
 
-function signedRequest(serverId: string, secret: string): PluginSyncRequest {
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const nonce = 'nonce-1';
+function signedRequest(
+  serverId: string,
+  secret: string,
+  options: { nonce?: string; timestamp?: string } = {}
+): PluginSyncRequest {
+  const timestamp = options.timestamp ?? String(Math.floor(Date.now() / 1000));
+  const nonce = options.nonce ?? 'nonce-1';
   const payload = { server_id: serverId };
   const signature = hmacSha256Hex(secret, buildSignatureBody(timestamp, nonce, payload));
   return { timestamp, nonce, payload, signature };
@@ -69,11 +117,51 @@ test('plugin sync rejects disabled servers', async () => {
 });
 
 test('plugin sync rejects bad hmac signatures', async () => {
-  const { service, serverId, secret } = createService();
+  const { service, serverId, secret, auditEvents } = createService();
   await assert.rejects(
     () => service.sync({ ...signedRequest(serverId, secret), signature: 'bad' }),
     hasErrorCode('bad_signature')
   );
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditAction(auditEvents[0]), 'bad_signature');
+});
+
+test('plugin sync rejects stale timestamps', async () => {
+  const { service, serverId, secret, auditEvents } = createService();
+  const staleTimestamp = String(Math.floor(Date.now() / 1000) - 301);
+
+  await assert.rejects(
+    () => service.sync(signedRequest(serverId, secret, { timestamp: staleTimestamp })),
+    hasErrorCode('stale')
+  );
+  assert.equal(auditEvents.length, 1);
+  assert.equal(auditAction(auditEvents[0]), 'stale');
+});
+
+test('plugin sync rejects repeated nonces', async () => {
+  const securityStore = new SharedPluginSyncSecurityStore();
+  const { service, serverId, secret, auditEvents } = createService({ securityStore });
+  await service.sync(signedRequest(serverId, secret, { nonce: 'repeat' }));
+
+  await assert.rejects(
+    () => service.sync(signedRequest(serverId, secret, { nonce: 'repeat' })),
+    hasErrorCode('replay')
+  );
+  assert.equal(auditAction(auditEvents.at(-1)), 'replay');
+});
+
+test('plugin sync cooldown works across service instances', async () => {
+  const securityStore = new SharedPluginSyncSecurityStore();
+  const serverId = 'shared-server';
+  const first = createService({ serverId, securityStore });
+  const second = createService({ serverId, securityStore });
+  await first.service.sync(signedRequest(serverId, first.secret, { nonce: 'first' }));
+
+  await assert.rejects(
+    () => second.service.sync(signedRequest(serverId, second.secret, { nonce: 'second' })),
+    hasErrorCode('rate_limited')
+  );
+  assert.equal(auditAction(second.auditEvents.at(-1)), 'rate_limited');
 });
 
 test('plugin sync returns legacy verified entries shape', async () => {
@@ -85,6 +173,10 @@ test('plugin sync returns legacy verified entries shape', async () => {
   assert.equal(response.entries[0]?.mc_ign, 'PlayerOne');
   assert.equal(updated.length, 1);
 });
+
+function auditAction(event: unknown): string | undefined {
+  return (event as { data?: { action?: string } } | undefined)?.data?.action;
+}
 
 function hasErrorCode(code: string) {
   return (error: unknown) => {

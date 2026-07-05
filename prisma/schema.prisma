@@ -547,6 +547,26 @@ model ServerPluginSyncEvent {
   @@index([discordUserId, createdAt])
 }
 
+model PluginSyncReplayGuard {
+  id        String   @id @default(uuid()) @db.Char(36)
+  serverId  String   @map("server_id") @db.VarChar(32)
+  nonce     String   @db.VarChar(128)
+  expiresAt DateTime @map("expires_at") @db.DateTime(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@unique([serverId, nonce])
+  @@index([expiresAt])
+  @@map("plugin_sync_replay_guards")
+}
+
+model PluginSyncCooldown {
+  serverId   String   @id @map("server_id") @db.VarChar(32)
+  lastSeenAt DateTime @map("last_seen_at") @db.DateTime(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@map("plugin_sync_cooldowns")
+}
+
 model LunaGuild {
   guildId            String   @id @map("guild_id") @db.VarChar(32)
   verifiedRoleId     String?  @map("verified_role_id") @db.VarChar(32)
