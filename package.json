@@ -18,12 +18,17 @@
     "build:worker": "pnpm --dir apps/worker build",
     "build:bot": "pnpm --dir apps/bot build",
     "check": "turbo run check build --continue",
+    "lint": "turbo run lint --continue",
+    "format": "pnpm lint -- --fix",
+    "test": "turbo run test --continue",
     "smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "prisma": "^6.17.1",
     "turbo": "^1.13.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.62.1"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2"

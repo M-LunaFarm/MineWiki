@@ -22,6 +22,7 @@ import type {
   DiscordVerifySyncJob,
   RankAggregationJob,
   ServerPingJob,
+  VoteDispatchJob,
 } from '@minewiki/schemas';
 
 const PING_INTERVAL_MS = 5 * 60 * 1000;
@@ -92,7 +93,14 @@ if (!discordToken) {
 const queues: Queue[] = [];
 const workers: BullWorker[] = [];
 const intervals: NodeJS.Timeout[] = [];
-type WorkerHandler = Processor<any, any, string>;
+type WorkerJobData =
+  | ClaimVerificationJob
+  | DiscordDigestJob
+  | DiscordVerifySyncJob
+  | RankAggregationJob
+  | ServerPingJob
+  | VoteDispatchJob;
+type WorkerHandler<Data extends WorkerJobData, Result = unknown> = Processor<Data, Result, string>;
 
 function createQueue(name: string, jobOptions?: JobsOptions): Queue {
   const queue = new Queue(name, {
@@ -107,7 +115,10 @@ function createQueue(name: string, jobOptions?: JobsOptions): Queue {
   return queue;
 }
 
-function withTelemetry(queueName: string, handler: WorkerHandler): WorkerHandler {
+function withTelemetry<Data extends WorkerJobData, Result>(
+  queueName: string,
+  handler: WorkerHandler<Data, Result>,
+): WorkerHandler<Data, Result> {
   return async (job) => {
     const span = tracer.startSpan(`worker.${queueName}`, {
       attributes: {
@@ -162,9 +173,13 @@ function withTelemetry(queueName: string, handler: WorkerHandler): WorkerHandler
   };
 }
 
-function createWorker(name: string, processor: WorkerHandler, jobOptions?: JobsOptions): Queue {
+function createWorker<Data extends WorkerJobData, Result = unknown>(
+  name: string,
+  processor: WorkerHandler<Data, Result>,
+  jobOptions?: JobsOptions,
+): Queue {
   const queue = createQueue(name, jobOptions);
-  const worker = new BullWorker(name, withTelemetry(name, processor), {
+  const worker = new BullWorker<Data, Result, string>(name, withTelemetry(name, processor), {
     connection,
     autorun: true,
   });
@@ -172,7 +187,7 @@ function createWorker(name: string, processor: WorkerHandler, jobOptions?: JobsO
   return queue;
 }
 
-const voteQueue = createWorker(
+const voteQueue = createWorker<VoteDispatchJob>(
   'vote-dispatch',
   async (job) => {
     Logger.info({ jobId: job.id, data: job.data }, 'Processing vote dispatch job');
@@ -195,31 +210,34 @@ const voteQueue = createWorker(
   dispatcher.jobOptions(),
 );
 
-const serverPingQueue = createWorker('server-ping', async (job) => {
+const serverPingQueue = createWorker<ServerPingJob>('server-ping', async (job) => {
   Logger.info({ jobId: job.id, data: job.data }, 'Processing server ping job');
   return pinger.ping(job.data);
 });
 
-const claimVerificationQueue = createWorker('claim-check', async (job) => {
+const claimVerificationQueue = createWorker<ClaimVerificationJob>('claim-check', async (job) => {
   Logger.info({ jobId: job.id, data: job.data }, 'Processing claim verification job');
   return claimVerifier.verify(job.data);
 });
 
-const rankAggregationQueue = createWorker('rank-aggregation', async (job) => {
+const rankAggregationQueue = createWorker<RankAggregationJob>('rank-aggregation', async (job) => {
   Logger.info({ jobId: job.id, data: job.data }, 'Processing rank aggregation job');
   return rankAggregator.aggregate(job.data);
 });
 
-const discordDigestQueue = createWorker('discord-digest', async (job) => {
+const discordDigestQueue = createWorker<DiscordDigestJob, DiscordDigestResult>(
+  'discord-digest',
+  async (job) => {
   Logger.info({ jobId: job.id, data: job.data }, 'Processing Discord digest job');
   const result = await discordDigestSender.send(job.data);
   await handleDigestOutcome(job.data, result);
   return result;
-});
+  },
+);
 
-createWorker('discord-verify-sync', async (job) => {
+createWorker<DiscordVerifySyncJob>('discord-verify-sync', async (job) => {
   Logger.info({ jobId: job.id, data: job.data }, 'Processing Discord verify sync job');
-  return discordVerifySyncer.sync(job.data as DiscordVerifySyncJob);
+  return discordVerifySyncer.sync(job.data);
 });
 
 function scheduleInterval(name: string, intervalMs: number, task: () => Promise<void>) {

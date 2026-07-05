@@ -3,7 +3,7 @@ import type { JobsOptions } from 'bullmq';
 import type { VoteDispatchJob, VotifierTarget } from '@minewiki/schemas';
 import { connect } from 'node:net';
 import { once } from 'node:events';
-import { createHash, publicEncrypt, constants } from 'node:crypto';
+import { publicEncrypt, constants } from 'node:crypto';
 import { TextEncoder } from 'node:util';
 
 const RETRYABLE_ERRORS = ['ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ECONNREFUSED'];
