@@ -39,3 +39,83 @@ export async function fetchWikiPageByPath(path: string): Promise<WikiPageRespons
   }
   return response.json();
 }
+
+export interface WikiRevisionResponse {
+  readonly id: string;
+  readonly pageId: string;
+  readonly revisionNo: number;
+  readonly parentRevisionId: string | null;
+  readonly contentRaw: string;
+  readonly contentHash: string;
+  readonly contentSize: number;
+  readonly syntaxVersion: string;
+  readonly editSummary: string | null;
+  readonly isMinor: boolean;
+  readonly createdBy: string | null;
+  readonly actorUserId: string | null;
+  readonly createdAt: string;
+  readonly visibility: string;
+}
+
+export interface WikiMutationResponse {
+  readonly pageId: string;
+  readonly revisionId: string;
+  readonly revisionNo: number;
+  readonly namespace: string;
+  readonly title: string;
+  readonly slug: string;
+}
+
+export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisionResponse> {
+  const response = await fetch(`${baseUrl}/v1/wiki/revisions/${revisionId}`, {
+    credentials: 'include'
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load wiki revision.');
+  }
+  return response.json();
+}
+
+export async function previewWikiMarkup(contentRaw: string): Promise<{ html: string; errors: string[] }> {
+  const response = await fetch(`${baseUrl}/v1/wiki/preview`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contentRaw })
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to render preview.');
+  }
+  return response.json();
+}
+
+export async function saveWikiPage(input: {
+  pageId?: string;
+  namespace: string;
+  title: string;
+  contentRaw: string;
+  editSummary: string;
+  isMinor: boolean;
+  baseRevisionId?: string;
+}): Promise<WikiMutationResponse> {
+  const response = await fetch(`${baseUrl}/v1/wiki/pages${input.pageId ? `/${input.pageId}` : ''}`, {
+    method: input.pageId ? 'PATCH' : 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      namespace: input.namespace,
+      title: input.title,
+      contentRaw: input.contentRaw,
+      editSummary: input.editSummary,
+      isMinor: input.isMinor,
+      baseRevisionId: input.baseRevisionId
+    })
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to save wiki page.');
+  }
+  return response.json();
+}

@@ -6,6 +6,7 @@ import {
   WikiEditService,
   type WikiMutationResponse,
   type WikiPageMutationRequest,
+  type WikiPreviewResponse,
   type WikiRevisionDiffResponse,
   type WikiRevisionResponse,
   type WikiSectionMutationRequest
@@ -55,6 +56,12 @@ export class WikiController {
     @Param('rightId') rightId: string
   ): Promise<WikiRevisionDiffResponse> {
     return this.wikiEdit.getRevisionDiff(leftId, rightId);
+  }
+
+  @Post('preview')
+  @UseGuards(SessionGuard)
+  previewPage(@Body() body: { contentRaw?: string }): WikiPreviewResponse {
+    return this.wikiEdit.preview(body.contentRaw);
   }
 
   @Post('pages')

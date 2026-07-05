@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException
 } from '@nestjs/common';
-import { hashContent, parseMarkup, slugifyTitle } from '@minewiki/wiki-core';
+import { hashContent, parseMarkup, renderDocument, slugifyTitle } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { WikiProfileService } from './wiki-profile.service';
 
@@ -65,6 +65,13 @@ export interface WikiRevisionDiffResponse {
     readonly leftLine: number | null;
     readonly rightLine: number | null;
   }>;
+}
+
+export interface WikiPreviewResponse {
+  readonly html: string;
+  readonly links: string[];
+  readonly categories: string[];
+  readonly errors: string[];
 }
 
 @Injectable()
@@ -252,6 +259,16 @@ export class WikiEditService {
       left,
       right,
       hunks: this.diffLines(left.contentRaw, right.contentRaw)
+    };
+  }
+
+  preview(contentRaw: string | undefined): WikiPreviewResponse {
+    const parsed = parseMarkup(contentRaw ?? '');
+    return {
+      html: renderDocument(parsed.ast),
+      links: parsed.links,
+      categories: parsed.categories,
+      errors: parsed.errors
     };
   }
 
