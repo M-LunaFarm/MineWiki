@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { parseMarkup, renderDocument, resolveWikiPath, slugifyTitle } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
+import { WikiPermissionService } from './wiki-permission.service';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -39,9 +40,12 @@ export interface WikiRevisionSummary {
 
 @Injectable()
 export class WikiReadService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly wikiPermissions: WikiPermissionService
+  ) {}
 
-  async getPage(namespaceCode: string, title: string): Promise<WikiPageResponse> {
+  async getPage(namespaceCode: string, title: string, accountId?: string | null): Promise<WikiPageResponse> {
     const normalizedNamespace = namespaceCode.trim() || 'main';
     const normalizedTitle = title.trim() || '대문';
     const namespace = await this.prisma.wikiNamespace.findUnique({
@@ -59,19 +63,27 @@ export class WikiReadService {
         }
       }
     });
-    if (!page || page.status === 'deleted' || page.status === 'hidden') {
+    if (!page) {
       throw new NotFoundException('Wiki page not found.');
     }
-    return this.renderPage(namespace.code, page);
+    return this.renderPage(namespace.code, page, accountId ?? null);
   }
 
-  getPageByPath(path: string): Promise<WikiPageResponse> {
+  getPageByPath(path: string, accountId?: string | null): Promise<WikiPageResponse> {
     const resolved = resolveWikiPath(path);
-    return this.getPage(resolved.namespace, resolved.title);
+    return this.getPage(resolved.namespace, resolved.title, accountId ?? null);
   }
 
-  async getRevisions(pageId: string): Promise<WikiRevisionSummary[]> {
+  async getRevisions(pageId: string, accountId?: string | null): Promise<WikiRevisionSummary[]> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
+    if (!page) {
+      throw new NotFoundException('Wiki page not found.');
+    }
+    await this.wikiPermissions.assertCanReadPage({
+      accountId: accountId ?? null,
+      page
+    });
     const revisions = await this.prisma.wikiPageRevision.findMany({
       where: {
         pageId: parsedPageId,
@@ -103,7 +115,7 @@ export class WikiReadService {
     protectionLevel: string;
     status: string;
     updatedAt: Date;
-  }): Promise<WikiPageResponse> {
+  }, accountId: string | null): Promise<WikiPageResponse> {
     const revision = page.currentRevisionId
       ? await this.prisma.wikiPageRevision.findFirst({
           where: {
@@ -123,6 +135,11 @@ export class WikiReadService {
     if (!revision) {
       throw new NotFoundException('Public wiki revision not found.');
     }
+    await this.wikiPermissions.assertCanReadPage({
+      accountId,
+      page,
+      revision
+    });
 
     const cache = await this.prisma.wikiPageRenderCache.findFirst({
       where: {

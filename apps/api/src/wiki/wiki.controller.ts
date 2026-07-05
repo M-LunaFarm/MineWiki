@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
+import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import {
@@ -23,39 +25,53 @@ export class WikiController {
   ) {}
 
   @Get('page')
+  @UseGuards(OptionalSessionGuard)
   getPage(
     @Query('namespace') namespace = 'main',
-    @Query('title') title = '대문'
+    @Query('title') title = '대문',
+    @Req() request: FastifyRequest
   ): Promise<WikiPageResponse> {
-    return this.wikiRead.getPage(namespace, title);
+    return this.wikiRead.getPage(namespace, title, request.sessionPayload?.userId ?? null);
   }
 
   @Get('page/by-path')
-  getPageByPath(@Query('path') path = '/wiki/대문'): Promise<WikiPageResponse> {
-    return this.wikiRead.getPageByPath(path);
+  @UseGuards(OptionalSessionGuard)
+  getPageByPath(
+    @Query('path') path = '/wiki/대문',
+    @Req() request: FastifyRequest
+  ): Promise<WikiPageResponse> {
+    return this.wikiRead.getPageByPath(path, request.sessionPayload?.userId ?? null);
   }
 
   @Get('page/:id/revisions')
-  getRevisions(@Param('id') pageId: string): Promise<WikiRevisionSummary[]> {
-    return this.wikiRead.getRevisions(pageId);
+  @UseGuards(OptionalSessionGuard)
+  getRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiRevisionSummary[]> {
+    return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null);
   }
 
   @Get('pages/:id/revisions')
-  getPageRevisions(@Param('id') pageId: string): Promise<WikiRevisionSummary[]> {
-    return this.wikiRead.getRevisions(pageId);
+  @UseGuards(OptionalSessionGuard)
+  getPageRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiRevisionSummary[]> {
+    return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null);
   }
 
   @Get('revisions/:revisionId')
-  getRevision(@Param('revisionId') revisionId: string): Promise<WikiRevisionResponse> {
-    return this.wikiEdit.getRevision(revisionId);
+  @UseGuards(OptionalSessionGuard)
+  getRevision(
+    @Param('revisionId') revisionId: string,
+    @Req() request: FastifyRequest
+  ): Promise<WikiRevisionResponse> {
+    return this.wikiEdit.getRevision(revisionId, request.sessionPayload?.userId ?? null);
   }
 
   @Get('revisions/:leftId/diff/:rightId')
+  @UseGuards(OptionalSessionGuard)
   getRevisionDiff(
     @Param('leftId') leftId: string,
-    @Param('rightId') rightId: string
+    @Param('rightId') rightId: string,
+    @Req() request: FastifyRequest
   ): Promise<WikiRevisionDiffResponse> {
-    return this.wikiEdit.getRevisionDiff(leftId, rightId);
+    return this.wikiEdit.getRevisionDiff(leftId, rightId, request.sessionPayload?.userId ?? null);
   }
 
   @Post('preview')

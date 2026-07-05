@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
 import { WikiEditService } from './wiki-edit.service';
+import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
 
@@ -13,8 +14,9 @@ if (!hasDatabase) {
 } else {
   const prisma = new PrismaService();
   const profiles = new WikiProfileService(prisma);
-  const edits = new WikiEditService(prisma, profiles);
-  const reads = new WikiReadService(prisma);
+  const permissions = new WikiPermissionService(prisma);
+  const edits = new WikiEditService(prisma, profiles, permissions);
+  const reads = new WikiReadService(prisma, permissions);
 
   before(async () => {
     await prisma.$connect();

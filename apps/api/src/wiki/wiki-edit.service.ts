@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { hashContent, parseMarkup, renderDocument, slugifyTitle } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
+import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 
 type ChangeType = 'create' | 'edit';
@@ -78,7 +79,8 @@ export interface WikiPreviewResponse {
 export class WikiEditService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly wikiProfiles: WikiProfileService
+    private readonly wikiProfiles: WikiProfileService,
+    private readonly wikiPermissions: WikiPermissionService
   ) {}
 
   async createPage(accountId: string, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
@@ -97,6 +99,17 @@ export class WikiEditService {
     const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
     const slug = slugifyTitle(title);
     const now = new Date();
+    await this.wikiPermissions.assertCanEditPage({
+      actor: this.wikiPermissions.actorFromProfile(accountId, actor),
+      page: {
+        id: 0n,
+        spaceId,
+        title,
+        protectionLevel: 'open',
+        status: 'normal',
+        createdBy: actor.id
+      }
+    });
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.wikiPage.findUnique({
@@ -180,6 +193,11 @@ export class WikiEditService {
       if (!namespace) {
         throw new NotFoundException('Wiki namespace not found.');
       }
+      await this.wikiPermissions.assertCanEditPage({
+        actor: this.wikiPermissions.actorFromProfile(accountId, actor),
+        page,
+        store: tx
+      });
       if (request.baseRevisionId && page.currentRevisionId?.toString() !== request.baseRevisionId) {
         throw new ConflictException('Base revision does not match current revision.');
       }
@@ -231,6 +249,11 @@ export class WikiEditService {
     if (!page) {
       throw new NotFoundException('Wiki page not found.');
     }
+    const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
+    await this.wikiPermissions.assertCanEditPage({
+      actor: this.wikiPermissions.actorFromProfile(accountId, actor),
+      page
+    });
     const latest = await this.findLatestRevision(this.prisma, page.id);
     if (!latest) {
       throw new NotFoundException('Public wiki revision not found.');
@@ -244,17 +267,26 @@ export class WikiEditService {
     });
   }
 
-  async getRevision(revisionId: string): Promise<WikiRevisionResponse> {
+  async getRevision(revisionId: string, accountId?: string | null): Promise<WikiRevisionResponse> {
     const id = this.parseBigIntId(revisionId, 'revisionId');
     const revision = await this.prisma.wikiPageRevision.findUnique({ where: { id } });
     if (!revision || revision.visibility !== 'public') {
       throw new NotFoundException('Wiki revision not found.');
     }
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: revision.pageId } });
+    await this.wikiPermissions.assertCanReadPage({
+      accountId: accountId ?? null,
+      page,
+      revision
+    });
     return this.toRevisionResponse(revision);
   }
 
-  async getRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {
-    const [left, right] = await Promise.all([this.getRevision(leftId), this.getRevision(rightId)]);
+  async getRevisionDiff(leftId: string, rightId: string, accountId?: string | null): Promise<WikiRevisionDiffResponse> {
+    const [left, right] = await Promise.all([
+      this.getRevision(leftId, accountId ?? null),
+      this.getRevision(rightId, accountId ?? null)
+    ]);
     return {
       left,
       right,
