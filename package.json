@@ -8,19 +8,19 @@
   },
   "scripts": {
     "dev": "turbo run dev --parallel",
-    "dev:wiki": "pnpm --dir apps/wiki dev",
     "dev:web": "pnpm --dir apps/web dev",
     "dev:api": "pnpm --dir apps/api dev",
     "dev:worker": "pnpm --dir apps/worker dev",
     "dev:bot": "pnpm --dir apps/bot dev",
     "build": "turbo run build",
-    "build:wiki": "pnpm --dir apps/wiki build",
     "build:web": "pnpm --dir apps/web build",
     "build:api": "pnpm --dir apps/api build",
     "build:worker": "pnpm --dir apps/worker build",
     "build:bot": "pnpm --dir apps/bot build",
     "check": "turbo run check build --continue",
-    "migrate:wiki": "pnpm --dir apps/wiki migrate",
+    "legacy:wiki": "pnpm --dir legacy/mwiki-fastify dev",
+    "legacy:wiki:build": "pnpm --dir legacy/mwiki-fastify build",
+    "legacy:wiki:migrate": "pnpm --dir legacy/mwiki-fastify migrate",
     "legacy:luna": "pnpm --dir legacy/luna-votifier start:web"
   },
   "devDependencies": {
