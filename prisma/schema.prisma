@@ -546,3 +546,220 @@ model ServerPluginSyncEvent {
   @@index([minecraftUuid, createdAt])
   @@index([discordUserId, createdAt])
 }
+
+model WikiProfile {
+  id                      BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  accountId               String?   @unique @map("account_id") @db.Char(36)
+  username                String    @unique @db.VarChar(64)
+  displayName             String    @map("display_name") @db.VarChar(64)
+  email                   String?   @unique @db.VarChar(255)
+  emailVerifiedAt         DateTime? @map("email_verified_at")
+  emailVerificationSentAt DateTime? @map("email_verification_sent_at")
+  passwordHash            String?   @map("password_hash") @db.VarChar(255)
+  status                  String    @default("active") @db.VarChar(32)
+  createdAt               DateTime  @map("created_at")
+  updatedAt               DateTime  @map("updated_at")
+
+  @@index([createdAt])
+  @@map("users")
+}
+
+model WikiSpace {
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  code              String   @unique @db.VarChar(64)
+  spaceKey          String?  @unique @map("space_key") @db.VarChar(64)
+  name              String   @db.VarChar(128)
+  title             String?  @db.VarChar(255)
+  slug              String?  @unique @db.VarChar(255)
+  spaceType         String   @default("basic") @map("space_type") @db.VarChar(32)
+  parentSpaceId     BigInt?  @map("parent_space_id") @db.UnsignedBigInt
+  rootPageId        BigInt?  @map("root_page_id") @db.UnsignedBigInt
+  rootNamespaceCode String   @map("root_namespace_code") @db.VarChar(32)
+  rootPath          String   @unique @map("root_path") @db.VarChar(128)
+  description       String?  @db.Text
+  status            String   @default("active") @db.VarChar(32)
+  createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
+  ownerUserId       BigInt?  @map("owner_user_id") @db.UnsignedBigInt
+  ownerPageId       BigInt?  @map("owner_page_id") @db.UnsignedBigInt
+  createdAt         DateTime @map("created_at")
+  updatedAt         DateTime @map("updated_at")
+
+  @@index([spaceType, status])
+  @@index([parentSpaceId])
+  @@map("wiki_spaces")
+}
+
+model WikiNamespace {
+  id          Int     @id @default(autoincrement()) @db.UnsignedInt
+  code        String  @unique @db.VarChar(32)
+  displayName String  @map("display_name") @db.VarChar(64)
+  pathPrefix  String  @map("path_prefix") @db.VarChar(64)
+  isContent   Boolean @default(true) @map("is_content")
+
+  @@map("namespaces")
+}
+
+model WikiPage {
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  namespaceId       Int      @map("namespace_id") @db.UnsignedInt
+  spaceId           BigInt   @map("space_id") @db.UnsignedBigInt
+  localPath         String   @map("local_path") @db.VarChar(500)
+  slug              String   @db.VarChar(255)
+  title             String   @db.VarChar(255)
+  displayTitle      String   @map("display_title") @db.VarChar(255)
+  currentRevisionId BigInt?  @map("current_revision_id") @db.UnsignedBigInt
+  pageType          String   @default("article") @map("page_type") @db.VarChar(32)
+  protectionLevel   String   @default("open") @map("protection_level") @db.VarChar(32)
+  status            String   @default("normal") @db.VarChar(32)
+  createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt         DateTime @map("created_at")
+  updatedAt         DateTime @map("updated_at")
+
+  @@unique([namespaceId, slug])
+  @@unique([spaceId, localPath])
+  @@index([spaceId])
+  @@index([title])
+  @@index([pageType])
+  @@index([updatedAt])
+  @@map("pages")
+}
+
+model WikiPageRevision {
+  id               BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId           BigInt   @map("page_id") @db.UnsignedBigInt
+  revisionNo       Int      @map("revision_no") @db.UnsignedInt
+  parentRevisionId BigInt?  @map("parent_revision_id") @db.UnsignedBigInt
+  contentRaw       String   @map("content_raw") @db.MediumText
+  contentAst       Json?    @map("content_ast")
+  contentHash      String   @map("content_hash") @db.Char(64)
+  contentSize      Int      @default(0) @map("content_size") @db.UnsignedInt
+  syntaxVersion    String   @default("bwm-0.3") @map("syntax_version") @db.VarChar(32)
+  editSummary      String?  @map("edit_summary") @db.VarChar(255)
+  isMinor          Boolean  @default(false) @map("is_minor")
+  editTags         Json?    @map("edit_tags")
+  createdBy        BigInt?  @map("created_by") @db.UnsignedBigInt
+  actorType        String   @default("user") @map("actor_type") @db.VarChar(16)
+  actorUserId      BigInt?  @map("actor_user_id") @db.UnsignedBigInt
+  actorIp          Bytes?   @map("actor_ip") @db.VarBinary(16)
+  actorIpText      String?  @map("actor_ip_text") @db.VarChar(45)
+  actorIpHash      String?  @map("actor_ip_hash") @db.Char(64)
+  createdAt        DateTime @map("created_at")
+  visibility       String   @default("public") @db.VarChar(32)
+
+  @@unique([pageId, revisionNo])
+  @@index([parentRevisionId])
+  @@index([pageId, createdAt])
+  @@index([createdAt])
+  @@index([createdBy, createdAt])
+  @@index([actorUserId])
+  @@index([actorIpHash])
+  @@index([visibility])
+  @@index([contentHash])
+  @@map("page_revisions")
+}
+
+model WikiPageRenderCache {
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId          BigInt   @map("page_id") @db.UnsignedBigInt
+  revisionId      BigInt   @map("revision_id") @db.UnsignedBigInt
+  rendererVersion String   @map("renderer_version") @db.VarChar(32)
+  html            String   @db.MediumText
+  tocJson         Json?    @map("toc_json")
+  headingsJson    Json?    @map("headings_json")
+  warningsJson    Json?    @map("warnings_json")
+  footnotesJson   Json?    @map("footnotes_json")
+  linksJson       Json?    @map("links_json")
+  categoriesJson  Json?    @map("categories_json")
+  componentsJson  Json?    @map("components_json")
+  createdAt       DateTime @map("created_at")
+
+  @@unique([revisionId, rendererVersion])
+  @@index([pageId])
+  @@map("page_render_cache")
+}
+
+model ServerWiki {
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId           BigInt   @map("space_id") @db.UnsignedBigInt
+  voteServerId      String?  @unique @map("vote_server_id") @db.Char(36)
+  serverName        String   @map("server_name") @db.VarChar(255)
+  slug              String   @unique @db.VarChar(255)
+  host              String?  @db.VarChar(255)
+  port              Int?     @db.UnsignedInt
+  edition           String   @default("unknown") @db.VarChar(16)
+  supportedVersions String?  @map("supported_versions") @db.VarChar(255)
+  genres            String?  @db.VarChar(255)
+  verifiedStatus    String   @default("none") @map("verified_status") @db.VarChar(32)
+  status            String   @default("active") @db.VarChar(32)
+  createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt         DateTime @map("created_at")
+  updatedAt         DateTime @map("updated_at")
+
+  @@index([spaceId])
+  @@index([status])
+  @@index([verifiedStatus])
+  @@map("server_wikis")
+}
+
+model ModWiki {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId           BigInt    @map("space_id") @db.UnsignedBigInt
+  modName           String    @map("mod_name") @db.VarChar(255)
+  category          String?   @db.VarChar(128)
+  slug              String    @unique @db.VarChar(255)
+  loaders           String?   @db.VarChar(255)
+  supportedVersions String?   @map("supported_versions") @db.Text
+  officialUrl       String?   @map("official_url") @db.VarChar(500)
+  sourceUrl         String?   @map("source_url") @db.VarChar(500)
+  license           String?   @db.VarChar(128)
+  creatorVerified   Boolean   @default(false) @map("creator_verified")
+  verifiedBy        BigInt?   @map("verified_by") @db.UnsignedBigInt
+  verifiedAt        DateTime? @map("verified_at")
+  status            String    @default("active") @db.VarChar(32)
+  lastChecked       DateTime? @map("last_checked") @db.Date
+  createdAt         DateTime  @map("created_at")
+  updatedAt         DateTime  @map("updated_at")
+
+  @@index([spaceId])
+  @@index([status])
+  @@map("mod_wikis")
+}
+
+model SubwikiRole {
+  id        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId   BigInt    @map("space_id") @db.UnsignedBigInt
+  userId    BigInt    @map("user_id") @db.UnsignedBigInt
+  role      String    @default("editor") @db.VarChar(64)
+  status    String    @default("active") @db.VarChar(32)
+  grantedBy BigInt?   @map("granted_by") @db.UnsignedBigInt
+  grantedAt DateTime  @map("granted_at")
+  revokedAt DateTime? @map("revoked_at")
+  revokedBy BigInt?   @map("revoked_by") @db.UnsignedBigInt
+
+  @@unique([spaceId, userId, role])
+  @@index([userId])
+  @@index([spaceId])
+  @@map("subwiki_roles")
+}
+
+model DocumentTemplate {
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId         BigInt?  @map("space_id") @db.UnsignedBigInt
+  templateKey     String   @map("template_key") @db.VarChar(128)
+  title           String   @db.VarChar(255)
+  description     String?  @db.Text
+  templateScope   String   @default("space") @map("template_scope") @db.VarChar(32)
+  targetArea      String   @default("any") @map("target_area") @db.VarChar(32)
+  defaultCategory String?  @map("default_category") @db.VarChar(255)
+  contentRaw      String   @map("content_raw") @db.MediumText
+  createdBy       BigInt?  @map("created_by") @db.UnsignedBigInt
+  status          String   @default("active") @db.VarChar(32)
+  createdAt       DateTime @map("created_at")
+  updatedAt       DateTime @map("updated_at")
+
+  @@unique([spaceId, templateKey])
+  @@index([spaceId])
+  @@index([templateScope])
+  @@index([status])
+  @@map("document_templates")
+}
