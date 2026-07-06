@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { VotifierTarget } from '@minewiki/schemas';
-import { Rocket } from 'lucide-react';
+import { BookOpen, ExternalLink, Rocket } from 'lucide-react';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { useAuth } from '../providers/auth-context';
 
@@ -11,6 +12,7 @@ interface ServerOwnerControlsProps {
   readonly serverId: string;
   readonly apiBaseUrl?: string;
   readonly initialPolicy: boolean;
+  readonly initialWikiSlug?: string | null;
   readonly className?: string;
 }
 
@@ -27,11 +29,21 @@ type FeedbackState = {
   readonly message: string;
 };
 
+type ServerWikiLinkResponse = {
+  readonly wikiSlug: string | null;
+  readonly wikiUrl: string | null;
+  readonly status: 'linked' | 'unlinked';
+};
+
 function createDefaultTargets(): EditableTarget[] {
   return [
     { protocol: 'v2', host: '', port: '8192', token: '', publicKey: '' },
     { protocol: 'v1', host: '', port: '8193', token: '', publicKey: '' },
   ];
+}
+
+function serverWikiUrl(slug?: string | null): string | null {
+  return slug ? `/server/${encodeURIComponent(slug)}` : null;
 }
 
 function mergeTargets(targets: ReadonlyArray<VotifierTarget>): EditableTarget[] {
@@ -52,11 +64,16 @@ export function ServerOwnerControls({
   serverId,
   apiBaseUrl,
   initialPolicy,
+  initialWikiSlug,
   className,
 }: ServerOwnerControlsProps) {
   const { account } = useAuth();
+  const router = useRouter();
   const [isOwner, setIsOwner] = useState(false);
   const [requiresOwnership, setRequiresOwnership] = useState(initialPolicy);
+  const [wikiUrl, setWikiUrl] = useState<string | null>(() => serverWikiUrl(initialWikiSlug));
+  const [creatingWiki, setCreatingWiki] = useState(false);
+  const [wikiFeedback, setWikiFeedback] = useState<FeedbackState | null>(null);
   const [saving, setSaving] = useState(false);
   const [votifierTargets, setVotifierTargets] = useState<EditableTarget[]>(createDefaultTargets());
   const [loadingVotifier, setLoadingVotifier] = useState(false);
@@ -96,6 +113,11 @@ export function ServerOwnerControls({
   }, [initialPolicy]);
 
   useEffect(() => {
+    setWikiUrl(serverWikiUrl(initialWikiSlug));
+    setWikiFeedback(null);
+  }, [initialWikiSlug]);
+
+  useEffect(() => {
     if (!account) {
       setIsOwner(false);
       setVotifierTargets(createDefaultTargets());
@@ -129,6 +151,45 @@ export function ServerOwnerControls({
     };
     void check();
   }, [account, baseUrl, serverId, fetchVotifierTargets]);
+
+  const handleCreateWiki = useCallback(async () => {
+    if (!isOwner || creatingWiki) {
+      return;
+    }
+    setCreatingWiki(true);
+    setWikiFeedback(null);
+    try {
+      const response = await fetch(`${baseUrl}/v1/servers/${serverId}/wiki`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error(`서버 위키를 만들지 못했습니다. (${response.status})`);
+      }
+      const payload = (await response.json()) as ServerWikiLinkResponse;
+      const nextUrl = payload.wikiUrl ?? serverWikiUrl(payload.wikiSlug);
+      if (!nextUrl || payload.status !== 'linked') {
+        throw new Error('서버 위키 링크가 생성되지 않았습니다.');
+      }
+      setWikiUrl(nextUrl);
+      setWikiFeedback({
+        type: 'success',
+        message: '서버 위키가 생성되었습니다.',
+      });
+      router.push(nextUrl);
+    } catch (error) {
+      console.warn('서버 위키 생성 실패', error);
+      setWikiFeedback({
+        type: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : '서버 위키를 만들지 못했습니다. 잠시 후 다시 시도해주세요.',
+      });
+    } finally {
+      setCreatingWiki(false);
+    }
+  }, [baseUrl, creatingWiki, isOwner, router, serverId]);
 
   const handleToggle = async () => {
     if (!isOwner || saving) {
@@ -301,6 +362,48 @@ export function ServerOwnerControls({
           <Rocket className="h-4 w-4" />
           프리미엄 등록하기
         </Link>
+      </div>
+
+      <div className="mt-5 rounded-lg border border-[#2a2a2d] bg-[#1c1c1f] p-4 text-sm text-slate-200">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <BookOpen className="h-4 w-4 text-[#13ec80]" />
+              <h4 className="text-base font-semibold text-white">서버 위키</h4>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-400">
+              서버 소개, 규칙, 명령어, 변경 이력을 운영자가 직접 관리할 수 있습니다.
+            </p>
+          </div>
+          {wikiUrl ? (
+            <Link
+              href={wikiUrl}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-[#13ec80]/30 bg-[#13ec80]/10 px-4 py-2 text-xs font-semibold text-[#13ec80] transition hover:bg-[#13ec80]/20"
+            >
+              위키 보기
+              <ExternalLink className="h-3.5 w-3.5" />
+            </Link>
+          ) : (
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-[#13ec80] px-4 py-2 text-xs font-semibold text-slate-100 transition hover:bg-[#0fb865] disabled:opacity-60"
+              onClick={() => void handleCreateWiki()}
+              disabled={creatingWiki}
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              {creatingWiki ? '생성 중…' : '서버 위키 만들기'}
+            </button>
+          )}
+        </div>
+        {wikiFeedback ? (
+          <p
+            className={`mt-3 text-xs ${
+              wikiFeedback.type === 'success' ? 'text-emerald-300' : 'text-red-400'
+            }`}
+          >
+            {wikiFeedback.message}
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-5">
