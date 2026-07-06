@@ -10,13 +10,14 @@ import { useAuth } from '../providers/auth-context';
 type NavigationLink = {
   readonly href: string;
   readonly label: string;
-  readonly key: 'servers' | 'register' | 'dashboard' | 'support' | 'policies';
+  readonly key: 'servers' | 'register' | 'dashboard' | 'guilds' | 'support' | 'policies';
 };
 
 const NAV_LINKS: readonly NavigationLink[] = [
   { href: '/servers', label: '서버 목록', key: 'servers' },
   { href: '/servers/register', label: '등록하기', key: 'register' },
   { href: '/dashboard', label: '대시보드', key: 'dashboard' },
+  { href: '/guilds', label: 'Discord', key: 'guilds' },
   { href: '/support', label: '고객센터', key: 'support' },
   { href: '/policies', label: '운영 정책', key: 'policies' },
 ];
@@ -204,6 +205,9 @@ function isActive(pathname: string | null, key: NavigationLink['key']): boolean 
       pathname === '/dashboard' ||
       (pathname.startsWith('/dashboard/') && pathname !== '/dashboard/support')
     );
+  }
+  if (key === 'guilds') {
+    return pathname === '/guilds' || pathname.startsWith('/guilds/');
   }
   if (key === 'support') {
     return (

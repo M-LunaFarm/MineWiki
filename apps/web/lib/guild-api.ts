@@ -1,0 +1,123 @@
+import { normalizeApiBaseUrl } from './runtime-config';
+
+const API_BASE = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL);
+
+export type GuildSettingsPayload = {
+  readonly channelId?: string;
+  readonly verifiedRoleId?: string | null;
+  readonly logChannelId?: string | null;
+  readonly nicknameFormat?: string | null;
+  readonly botMessageTemplate?: string | null;
+  readonly botMessagePayload?: unknown;
+  readonly verifyReplyPayload?: unknown;
+  readonly policyJson?: unknown;
+};
+
+export type GuildSummary = {
+  readonly guildId: string;
+  readonly verifiedRoleId: string | null;
+  readonly logChannelId: string | null;
+  readonly nicknameFormat: string | null;
+  readonly botMessageTemplate: string | null;
+  readonly botMessagePayload: unknown | null;
+  readonly verifyReplyPayload: unknown | null;
+  readonly policyJson: unknown | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
+
+export type GuildChannelSetting = GuildSummary & {
+  readonly channelId: string;
+};
+
+export type GuildActionProfile = {
+  readonly profileId: string;
+  readonly channelId: string | null;
+  readonly name: string;
+  readonly triggerEvent: string;
+  readonly enabled: boolean;
+  readonly updatedAt: string;
+};
+
+export type GuildDetail = GuildSummary & {
+  readonly verificationCount: number;
+  readonly channels: GuildChannelSetting[];
+  readonly actionProfiles: GuildActionProfile[];
+};
+
+export function buildDiscordBotInviteUrl(guildId?: string | null): string | null {
+  const clientId = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID ?? process.env.DISCORD_CLIENT_ID;
+  if (!clientId) {
+    return null;
+  }
+  const url = new URL('https://discord.com/oauth2/authorize');
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('scope', 'bot applications.commands');
+  url.searchParams.set('permissions', '268438528');
+  if (guildId) {
+    url.searchParams.set('guild_id', guildId);
+    url.searchParams.set('disable_guild_select', 'true');
+  }
+  return url.toString();
+}
+
+export async function fetchGuilds(): Promise<GuildSummary[]> {
+  return fetchGuildApi<GuildSummary[]>('/v1/guilds');
+}
+
+export async function fetchGuildDetail(guildId: string): Promise<GuildDetail | null> {
+  const response = await fetch(`${API_BASE}/v1/guilds/${encodeURIComponent(guildId)}`, {
+    headers: internalHeaders(),
+    cache: 'no-store',
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  return readGuildResponse<GuildDetail>(response);
+}
+
+export async function updateGuildSettings(
+  guildId: string,
+  payload: GuildSettingsPayload,
+): Promise<GuildSummary | GuildChannelSetting> {
+  return fetchGuildApi<GuildSummary | GuildChannelSetting>(
+    `/v1/guilds/${encodeURIComponent(guildId)}/settings`,
+    {
+      method: 'PATCH',
+      headers: {
+        ...internalHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+async function fetchGuildApi<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!headers.has('authorization')) {
+    headers.set('authorization', internalHeaders().authorization);
+  }
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+    cache: 'no-store',
+  });
+  return readGuildResponse<T>(response);
+}
+
+async function readGuildResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? `Guild API request failed. (${response.status})`);
+  }
+  return (await response.json()) as T;
+}
+
+function internalHeaders(): { authorization: string } {
+  const token = process.env.INTERNAL_BOT_API_TOKEN?.trim();
+  if (!token) {
+    throw new Error('INTERNAL_BOT_API_TOKEN is required for guild dashboard access.');
+  }
+  return { authorization: `Bearer ${token}` };
+}
