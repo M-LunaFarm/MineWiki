@@ -8,6 +8,8 @@ import { AppModule } from './app.module';
 import { ConfigService } from '@minewiki/config';
 import * as Sentry from '@sentry/node';
 import { TelemetryInterceptor } from './telemetry/telemetry.interceptor';
+import { randomUUID } from 'node:crypto';
+import { ApiExceptionFilter } from './common/api-exception.filter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -40,6 +42,17 @@ async function bootstrap(): Promise<void> {
     });
   }
 
+  app.getHttpAdapter().getInstance().addHook('onRequest', (request, reply, done) => {
+    const requestIdHeader = request.headers['x-request-id'];
+    const requestId = Array.isArray(requestIdHeader)
+      ? requestIdHeader[0]
+      : requestIdHeader || randomUUID();
+    (request as typeof request & { requestId?: string }).requestId = requestId;
+    reply.header('x-request-id', requestId);
+    done();
+  });
+
+  app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalInterceptors(app.get(TelemetryInterceptor));
   await app.listen({ port, host });
   Logger.info({ port, host }, 'API server listening');
