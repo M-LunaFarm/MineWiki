@@ -109,6 +109,30 @@ export interface WikiSearchResult {
   readonly updatedAt: string;
 }
 
+export interface WikiAdminRecentChange {
+  readonly id: string;
+  readonly pageId: string | null;
+  readonly revisionId: string | null;
+  readonly actorId: string | null;
+  readonly changeType: string;
+  readonly title: string;
+  readonly namespaceCode: string;
+  readonly summary: string | null;
+  readonly createdAt: string;
+}
+
+export interface WikiAdminPageSummary {
+  readonly id: string;
+  readonly namespaceId: number;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly protectionLevel: string;
+  readonly status: string;
+  readonly currentRevisionId: string | null;
+  readonly updatedAt: string;
+}
+
 export interface WikiMutationResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -186,6 +210,55 @@ export async function searchWiki(input: {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to search wiki.');
+  }
+  return response.json();
+}
+
+export async function fetchWikiAdminRecent(): Promise<WikiAdminRecentChange[]> {
+  return fetchWikiAdminJson('/recent');
+}
+
+export async function fetchWikiAdminPages(status?: string): Promise<WikiAdminPageSummary[]> {
+  return fetchWikiAdminJson(`/pages${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+}
+
+export async function updateWikiPageProtection(input: {
+  pageId: string;
+  protectionLevel: string;
+  reason?: string;
+}): Promise<WikiAdminPageSummary> {
+  return fetchWikiAdminJson(`/pages/${encodeURIComponent(input.pageId)}/protection`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      protectionLevel: input.protectionLevel,
+      reason: input.reason
+    })
+  });
+}
+
+export async function setWikiAdminPageDeleted(input: {
+  pageId: string;
+  deleted: boolean;
+  reason?: string;
+}): Promise<WikiAdminPageSummary> {
+  return fetchWikiAdminJson(`/pages/${encodeURIComponent(input.pageId)}/${input.deleted ? 'delete' : 'restore'}`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: input.reason })
+  });
+}
+
+async function fetchWikiAdminJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${baseUrl}/v1/admin/wiki${path}`, {
+    ...init,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...init?.headers
+    }
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load wiki admin data.');
   }
   return response.json();
 }
