@@ -590,6 +590,26 @@ model PluginSyncCooldown {
   @@map("plugin_sync_cooldowns")
 }
 
+model PluginServer {
+  id             String    @id @default(uuid()) @db.Char(36)
+  serverId       String?   @map("minewiki_server_id")
+  guildId        String    @map("guild_id") @db.VarChar(32)
+  pluginServerId String    @unique @map("plugin_server_id") @db.VarChar(32)
+  serverName     String    @map("server_name") @db.VarChar(100)
+  host           String    @db.VarChar(255)
+  port           Int
+  endpointUrl    String?   @map("endpoint_url") @db.VarChar(512)
+  serverSecret   String    @map("server_secret") @db.VarChar(128)
+  enabled        Boolean   @default(true)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  lastSeenAt     DateTime? @map("last_seen_at") @db.DateTime(3)
+
+  @@index([serverId])
+  @@index([guildId])
+  @@map("plugin_servers")
+}
+
 model UploadedFile {
   id             String   @id @default(uuid()) @db.Char(36)
   ownerAccountId String?  @map("owner_account_id") @db.Char(36)

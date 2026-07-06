@@ -36,21 +36,40 @@ class SharedPluginSyncSecurityStore implements PluginSyncSecurityStore {
 
 function createService(options: {
   enabled?: boolean;
+  canonical?: boolean;
   serverId?: string;
   securityStore?: PluginSyncSecurityStore;
 } = {}) {
   const serverId = options.serverId ?? `server-${Math.random().toString(36).slice(2)}`;
   const secret = 'secret';
   const updated: unknown[] = [];
+  const canonicalUpdated: unknown[] = [];
   const auditEvents: unknown[] = [];
   const prisma = {
+    pluginServer: {
+      findUnique: async () =>
+        options.canonical
+          ? {
+              pluginServerId: serverId,
+              guildId: 'guild-1',
+              serverSecret: secret,
+              enabled: options.enabled ?? true
+            }
+          : null,
+      update: async (args: unknown) => {
+        canonicalUpdated.push(args);
+      }
+    },
     lunaGuildServer: {
-      findUnique: async () => ({
-        serverId,
-        guildId: 'guild-1',
-        serverSecret: secret,
-        enabled: options.enabled ?? true
-      }),
+      findUnique: async () =>
+        options.canonical
+          ? null
+          : {
+              serverId,
+              guildId: 'guild-1',
+              serverSecret: secret,
+              enabled: options.enabled ?? true
+            },
       update: async (args: unknown) => {
         updated.push(args);
       }
@@ -84,6 +103,7 @@ function createService(options: {
     serverId,
     secret,
     updated,
+    canonicalUpdated,
     auditEvents
   };
 }
@@ -172,6 +192,17 @@ test('plugin sync returns legacy verified entries shape', async () => {
   assert.equal(response.entries.length, 1);
   assert.equal(response.entries[0]?.mc_ign, 'PlayerOne');
   assert.equal(updated.length, 1);
+});
+
+test('plugin sync uses canonical plugin server before legacy fallback', async () => {
+  const { service, serverId, secret, updated, canonicalUpdated } = createService({
+    canonical: true
+  });
+  const response = await service.sync(signedRequest(serverId, secret));
+  assert.equal(response.server_id, serverId);
+  assert.equal(response.guild_id, 'guild-1');
+  assert.equal(canonicalUpdated.length, 1);
+  assert.equal(updated.length, 0);
 });
 
 function auditAction(event: unknown): string | undefined {

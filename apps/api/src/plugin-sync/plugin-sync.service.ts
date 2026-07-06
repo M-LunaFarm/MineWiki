@@ -40,6 +40,14 @@ export interface PluginSyncSecurityStore {
   touchCooldown(serverId: string, cooldownSeconds: number, now: Date): Promise<number | null>;
 }
 
+type ResolvedPluginServer = {
+  readonly source: 'canonical' | 'legacy';
+  readonly pluginServerId: string;
+  readonly guildId: string;
+  readonly serverSecret: string;
+  readonly enabled: boolean;
+};
+
 @Injectable()
 export class PluginSyncService {
   private readonly securityStore: PluginSyncSecurityStore;
@@ -58,7 +66,7 @@ export class PluginSyncService {
       throw new BadRequestException({ error: 'missing_server_id' });
     }
 
-    const server = await this.prisma.lunaGuildServer.findUnique({ where: { serverId } });
+    const server = await this.resolvePluginServer(serverId);
     if (!server) {
       throw new NotFoundException({ error: 'server_not_found' });
     }
@@ -114,10 +122,7 @@ export class PluginSyncService {
       : [];
     const ignByUuid = new Map(links.map((link) => [link.minecraftUuid, link.minecraftName]));
 
-    await this.prisma.lunaGuildServer.update({
-      where: { serverId },
-      data: { lastSeenAt: new Date() }
-    });
+    await this.touchPluginServer(server);
     await this.auditSecurityEvent(serverId, 'accepted', request);
 
     return {
@@ -141,6 +146,48 @@ export class PluginSyncService {
     if (typeof request.payload !== 'object' || Array.isArray(request.payload)) {
       throw new BadRequestException({ error: 'invalid_payload' });
     }
+  }
+
+  private async resolvePluginServer(pluginServerId: string): Promise<ResolvedPluginServer | null> {
+    const canonical = await this.prisma.pluginServer.findUnique({
+      where: { pluginServerId }
+    });
+    if (canonical) {
+      return {
+        source: 'canonical',
+        pluginServerId: canonical.pluginServerId,
+        guildId: canonical.guildId,
+        serverSecret: canonical.serverSecret,
+        enabled: canonical.enabled
+      };
+    }
+    const legacy = await this.prisma.lunaGuildServer.findUnique({
+      where: { serverId: pluginServerId }
+    });
+    if (!legacy) {
+      return null;
+    }
+    return {
+      source: 'legacy',
+      pluginServerId: legacy.serverId,
+      guildId: legacy.guildId,
+      serverSecret: legacy.serverSecret,
+      enabled: legacy.enabled
+    };
+  }
+
+  private async touchPluginServer(server: ResolvedPluginServer): Promise<void> {
+    if (server.source === 'canonical') {
+      await this.prisma.pluginServer.update({
+        where: { pluginServerId: server.pluginServerId },
+        data: { lastSeenAt: new Date() }
+      });
+      return;
+    }
+    await this.prisma.lunaGuildServer.update({
+      where: { serverId: server.pluginServerId },
+      data: { lastSeenAt: new Date() }
+    });
   }
 
   private assertFreshTimestamp(timestamp: string): void {
