@@ -17,6 +17,7 @@ import {
   type UpdateSupportTicketPayload,
 } from '@minewiki/schemas';
 import { normalizeApiBaseUrl } from './runtime-config';
+import { csrfHeaders } from './csrf';
 
 const API_BASE = normalizeApiBaseUrl();
 
@@ -104,6 +105,7 @@ export async function createSupportTicket(
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(await csrfHeaders()),
     },
     body: JSON.stringify(parsed),
   });
@@ -127,6 +129,7 @@ export async function createSupportGuestTicket(
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(await csrfHeaders()),
     },
     body: JSON.stringify(parsed),
   });
@@ -146,6 +149,7 @@ export async function createSupportMessage(
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(await csrfHeaders()),
     },
     body: JSON.stringify(parsed),
   });
@@ -170,6 +174,7 @@ export async function updateSupportTicket(
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(await csrfHeaders()),
     },
     body: JSON.stringify(parsed),
   });

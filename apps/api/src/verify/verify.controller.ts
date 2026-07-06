@@ -8,6 +8,7 @@ import {
   Post,
   UseGuards
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   discordVerifyCompleteRequestSchema,
   discordVerifySessionCreateRequestSchema,
@@ -24,6 +25,7 @@ export class VerifyController {
   constructor(private readonly verifyService: VerifyService) {}
 
   @Post('discord/sessions')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   createDiscordSession(
     @Headers('authorization') authorization: string | undefined,
     @Body() body: unknown
@@ -43,6 +45,7 @@ export class VerifyController {
 
   @UseGuards(SessionGuard)
   @Post('discord/sessions/:sessionId/complete')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   completeDiscordSession(
     @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
     @CurrentSession() session: SessionPayload,
@@ -56,6 +59,7 @@ export class VerifyController {
   }
 
   @Post('plugin/sync')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
   recordPluginSync(
     @Headers('authorization') authorization: string | undefined,
     @Body() body: unknown

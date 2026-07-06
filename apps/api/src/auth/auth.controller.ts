@@ -13,6 +13,7 @@ import {
   UseGuards,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   AuthService,
@@ -25,6 +26,7 @@ import {
 import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionService, type SessionPayload } from '../session/session.service';
+import { issueCsrfToken } from '../session/csrf';
 import {
   oauthStartRequestSchema,
   oauthCompleteRequestSchema,
@@ -42,6 +44,7 @@ export class AuthController {
   ) {}
 
   @Post('oauth/start')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
   startOAuth(@Body() body: unknown) {
     const payload = oauthStartRequestSchema.parse(body);
     return this.oauthFlow.start(payload.provider, payload.redirectUri, payload.returnTo);
@@ -49,6 +52,7 @@ export class AuthController {
 
   @UseGuards(SessionGuard)
   @Post('oauth/link')
+  @Throttle({ default: { limit: 5, ttl: 60 } })
   startOAuthLink(@Body() body: unknown, @CurrentSession() session: SessionPayload) {
     const payload = oauthStartRequestSchema.parse(body);
     return this.oauthFlow.start(
@@ -61,6 +65,7 @@ export class AuthController {
   }
 
   @Post('oauth/complete')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
   async completeOAuth(
     @Body() body: unknown,
     @Res({ passthrough: true }) reply: FastifyReply,
@@ -115,6 +120,7 @@ export class AuthController {
   }
 
   @Post('email/register')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   registerEmail(
     @Body('email') email: string,
     @Body('password') password: string,
@@ -124,6 +130,7 @@ export class AuthController {
   }
 
   @Post('email/login')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
   async loginEmail(
     @Body('email') email: string,
     @Body('password') password: string,
@@ -143,6 +150,7 @@ export class AuthController {
   }
 
   @Post('email/verify')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
   async verifyEmail(
     @Body('token') token: string,
     @Res({ passthrough: true }) reply: FastifyReply,
@@ -158,12 +166,14 @@ export class AuthController {
   }
 
   @Post('email/resend')
+  @Throttle({ default: { limit: 3, ttl: 300 } })
   resendVerification(@Body('email') email: string): Promise<ResendVerificationResult> {
     return this.auth.resendVerification(email);
   }
 
   @UseGuards(SessionGuard)
   @Post('email/setup')
+  @Throttle({ default: { limit: 3, ttl: 300 } })
   setupEmailLogin(
     @CurrentSession() session: SessionPayload,
     @Body('email') email: string,
@@ -173,11 +183,13 @@ export class AuthController {
   }
 
   @Post('password/forgot')
+  @Throttle({ default: { limit: 3, ttl: 300 } })
   requestPasswordReset(@Body('email') email: string): Promise<PasswordResetRequestResult> {
     return this.auth.requestPasswordReset(email ?? '');
   }
 
   @Post('password/reset')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   resetPassword(
     @Body('token') token: string,
     @Body('newPassword') newPassword: string,
@@ -186,6 +198,7 @@ export class AuthController {
   }
 
   @Post('discord/callback')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
   async discordCallback(
     @Body('userId') userId: string,
     @Body('email') email: string | undefined,
@@ -210,6 +223,7 @@ export class AuthController {
   }
 
   @Post('naver/callback')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
   async naverCallback(
     @Body('userId') userId: string,
     @Body('email') email: string | undefined,
@@ -256,6 +270,7 @@ export class AuthController {
   }
 
   @Post('link-requests')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   createLinkRequest(
     @Body('primaryAccountId') primaryAccountId: string,
     @Body('targetAccountId') targetAccountId: string,
@@ -264,11 +279,21 @@ export class AuthController {
   }
 
   @Post('link-requests/:requestId/confirm')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   confirmLink(
     @Param('requestId') requestId: string,
     @Body('verificationCode') verificationCode: string,
   ) {
     return this.auth.confirmLink(requestId, verificationCode);
+  }
+
+  @UseGuards(SessionGuard)
+  @Get('csrf')
+  csrf(@Req() request: FastifyRequest) {
+    if (!request.sessionToken) {
+      throw new UnauthorizedException('로그인이 필요합니다.');
+    }
+    return { csrfToken: issueCsrfToken(request.sessionToken) };
   }
 
   @UseGuards(SessionGuard)
@@ -279,6 +304,7 @@ export class AuthController {
 
   @UseGuards(SessionGuard)
   @Patch('me')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   updateDisplayName(
     @CurrentSession() session: SessionPayload,
     @Body('displayName') displayName: string,
@@ -288,6 +314,7 @@ export class AuthController {
 
   @UseGuards(SessionGuard)
   @Post('me/avatar')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   updateAvatar(
     @CurrentSession() session: SessionPayload,
     @Body('data') data: string,
@@ -305,12 +332,14 @@ export class AuthController {
 
   @UseGuards(SessionGuard)
   @Delete('me/avatar')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   clearAvatar(@CurrentSession() session: SessionPayload) {
     return this.auth.clearAvatar(session.userId);
   }
 
   @UseGuards(SessionGuard)
   @Patch('password')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async changePassword(
     @CurrentSession() session: SessionPayload,
     @Body('currentPassword') currentPassword: string,

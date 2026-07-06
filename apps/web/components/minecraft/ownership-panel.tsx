@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, ShieldCheck, SquareArrowOutUpRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { MinecraftIdentity } from '@minewiki/schemas';
+import { createAccountMergeRequest } from '../../lib/auth-client';
 import { getApiBaseUrl } from '../../lib/runtime-config';
 
 const API_BASE_URL = getApiBaseUrl();
@@ -74,6 +75,9 @@ export function MinecraftOwnershipPanel() {
   const [flowStage, setFlowStage] = useState<FlowStage>('idle');
   const [avatarIndex, setAvatarIndex] = useState(0);
   const [discordVerifyStatus, setDiscordVerifyStatus] = useState<string | null>(null);
+  const [mergeTicketId, setMergeTicketId] = useState<string | null>(null);
+  const [mergeRequestStatus, setMergeRequestStatus] = useState<string | null>(null);
+  const [creatingMergeRequest, setCreatingMergeRequest] = useState(false);
 
   const isBusy =
     status !== 'idle' ||
@@ -103,6 +107,8 @@ export function MinecraftOwnershipPanel() {
       }
 
       setError(null);
+      setMergeTicketId(null);
+      setMergeRequestStatus(null);
       setFlowStage('verifying');
       setStatus('verifying');
 
@@ -190,6 +196,30 @@ export function MinecraftOwnershipPanel() {
       setStatus('idle');
     }
   }, [verifySessionId, verifyToken]);
+
+  const canCreateMergeRequest = Boolean(error && isRecoverableConflictError(error));
+
+  const handleCreateMergeRequest = useCallback(async () => {
+    if (!error) {
+      return;
+    }
+    setCreatingMergeRequest(true);
+    setMergeRequestStatus(null);
+    try {
+      const response = await createAccountMergeRequest({
+        source: 'minecraft_verify',
+        conflictMessage: error,
+      });
+      setMergeTicketId(response.ticketId);
+      setMergeRequestStatus('지원 요청이 접수되었습니다. 고객센터에서 처리 상태를 확인해 주세요.');
+    } catch (requestError) {
+      setMergeRequestStatus(
+        requestError instanceof Error ? requestError.message : '지원 요청을 만들지 못했습니다.',
+      );
+    } finally {
+      setCreatingMergeRequest(false);
+    }
+  }, [error]);
 
   useEffect(() => {
     void fetchIdentity();
@@ -483,9 +513,31 @@ export function MinecraftOwnershipPanel() {
         ) : null}
 
         {error ? (
-          <p className="mt-4 rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-            {error}
-          </p>
+          <div className="mt-4 rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            <p>{error}</p>
+            {canCreateMergeRequest ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-md border border-red-200/30 bg-red-100/10 px-3 py-1.5 font-semibold text-red-100 transition hover:bg-red-100/15 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => void handleCreateMergeRequest()}
+                  disabled={creatingMergeRequest || Boolean(mergeTicketId)}
+                >
+                  {creatingMergeRequest ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  {mergeTicketId ? '요청 접수됨' : '지원 요청 만들기'}
+                </button>
+                {mergeTicketId ? (
+                  <a
+                    href={`/support?ticket=${encodeURIComponent(mergeTicketId)}`}
+                    className="font-semibold text-red-100 underline-offset-2 hover:underline"
+                  >
+                    티켓 보기
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+            {mergeRequestStatus ? <p className="mt-2 text-red-100">{mergeRequestStatus}</p> : null}
+          </div>
         ) : null}
 
         {status === 'verifying' ? (
@@ -538,6 +590,10 @@ export function MinecraftOwnershipPanel() {
       </div>
     </section>
   );
+}
+
+function isRecoverableConflictError(message: string): boolean {
+  return /already linked|이미.*연결|충돌/.test(message);
 }
 
 function StepCard({

@@ -11,6 +11,7 @@ import {
   StreamableFile,
   UseGuards
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
@@ -27,6 +28,7 @@ export class FileController {
   constructor(private readonly files: FileService) {}
 
   @Post('images')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   @UseGuards(SessionGuard)
   uploadImage(
     @CurrentSession() session: SessionPayload,
@@ -76,6 +78,7 @@ export class FileController {
   }
 
   @Delete(':id')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   @UseGuards(SessionGuard)
   deleteFile(
     @Param('id') id: string,

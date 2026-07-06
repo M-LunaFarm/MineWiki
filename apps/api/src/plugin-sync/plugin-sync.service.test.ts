@@ -205,6 +205,41 @@ test('plugin sync uses canonical plugin server before legacy fallback', async ()
   assert.equal(updated.length, 0);
 });
 
+test('plugin sync audit events redact sensitive payload values', async () => {
+  const { service, serverId, secret, auditEvents } = createService();
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const nonce = 'redaction';
+  const payload = {
+    server_id: serverId,
+    access_token: 'access-token',
+    nested: {
+      serverSecret: 'server-secret',
+      verificationUrl: 'https://minewiki.test/verify?verifyToken=verify-token'
+    }
+  };
+  const signature = hmacSha256Hex(secret, buildSignatureBody(timestamp, nonce, payload));
+
+  await service.sync({ timestamp, nonce, payload, signature });
+
+  const eventPayload = (auditEvents.at(-1) as {
+    data?: {
+      payload?: {
+        payload?: {
+          access_token?: string;
+          nested?: {
+            serverSecret?: string;
+            verificationUrl?: string;
+          };
+        };
+      };
+    };
+  }).data?.payload?.payload;
+
+  assert.equal(eventPayload?.access_token, '[redacted]');
+  assert.equal(eventPayload?.nested?.serverSecret, '[redacted]');
+  assert.doesNotMatch(eventPayload?.nested?.verificationUrl ?? '', /verify-token/);
+});
+
 function auditAction(event: unknown): string | undefined {
   return (event as { data?: { action?: string } } | undefined)?.data?.action;
 }

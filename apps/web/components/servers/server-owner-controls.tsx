@@ -4,9 +4,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import type { VotifierTarget } from '@minewiki/schemas';
-import { BookOpen, ExternalLink, Rocket } from 'lucide-react';
+import { AlertCircle, BookOpen, CheckCircle2, Clock3, ExternalLink, Rocket, RotateCcw } from 'lucide-react';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { useAuth } from '../providers/auth-context';
+import { csrfHeaders } from '../../lib/csrf';
 
 interface ServerOwnerControlsProps {
   readonly serverId: string;
@@ -27,6 +28,27 @@ type EditableTarget = {
 type FeedbackState = {
   readonly type: 'success' | 'error';
   readonly message: string;
+};
+
+type DispatchAttemptSummary = {
+  readonly id: string;
+  readonly protocol: 'v1' | 'v2';
+  readonly status: string;
+  readonly attempts: number;
+  readonly error: string | null;
+  readonly lastAttemptAt: string | null;
+  readonly createdAt: string;
+  readonly username: string;
+  readonly votedAt: string;
+  readonly target: {
+    readonly host: string | null;
+    readonly port: number | null;
+  };
+};
+
+type DispatchSummary = {
+  readonly recent: DispatchAttemptSummary[];
+  readonly failed: DispatchAttemptSummary[];
 };
 
 type ServerWikiLinkResponse = {
@@ -60,6 +82,44 @@ function mergeTargets(targets: ReadonlyArray<VotifierTarget>): EditableTarget[] 
   return defaults;
 }
 
+function formatDateTime(value: string | null): string {
+  if (!value) {
+    return '-';
+  }
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function statusTone(status: string): string {
+  if (status === 'success') {
+    return 'text-emerald-300';
+  }
+  if (status === 'failed') {
+    return 'text-red-300';
+  }
+  if (status === 'processing') {
+    return 'text-sky-300';
+  }
+  return 'text-amber-300';
+}
+
+function statusLabel(status: string): string {
+  if (status === 'success') {
+    return '성공';
+  }
+  if (status === 'failed') {
+    return '실패';
+  }
+  if (status === 'processing') {
+    return '전달 중';
+  }
+  return '대기';
+}
+
 export function ServerOwnerControls({
   serverId,
   apiBaseUrl,
@@ -79,6 +139,13 @@ export function ServerOwnerControls({
   const [loadingVotifier, setLoadingVotifier] = useState(false);
   const [savingVotifier, setSavingVotifier] = useState(false);
   const [votifierFeedback, setVotifierFeedback] = useState<FeedbackState | null>(null);
+  const [dispatchSummary, setDispatchSummary] = useState<DispatchSummary>({
+    recent: [],
+    failed: [],
+  });
+  const [loadingDispatch, setLoadingDispatch] = useState(false);
+  const [replayingAttempt, setReplayingAttempt] = useState<string | null>(null);
+  const [dispatchFeedback, setDispatchFeedback] = useState<FeedbackState | null>(null);
   const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
 
   const fetchVotifierTargets = useCallback(async () => {
@@ -108,6 +175,36 @@ export function ServerOwnerControls({
     }
   }, [baseUrl, serverId]);
 
+  const fetchDispatchAttempts = useCallback(async () => {
+    setLoadingDispatch(true);
+    try {
+      const response = await fetch(`${baseUrl}/v1/servers/${serverId}/vote-dispatch-attempts`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        throw new Error(`투표 전달 기록을 불러오지 못했습니다. (${response.status})`);
+      }
+      const payload = (await response.json()) as DispatchSummary;
+      setDispatchSummary({
+        recent: payload.recent ?? [],
+        failed: payload.failed ?? [],
+      });
+      setDispatchFeedback(null);
+    } catch (error) {
+      console.warn('투표 전달 기록 로드 실패', error);
+      setDispatchSummary({ recent: [], failed: [] });
+      setDispatchFeedback({
+        type: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : '투표 전달 기록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.',
+      });
+    } finally {
+      setLoadingDispatch(false);
+    }
+  }, [baseUrl, serverId]);
+
   useEffect(() => {
     setRequiresOwnership(initialPolicy);
   }, [initialPolicy]);
@@ -122,6 +219,8 @@ export function ServerOwnerControls({
       setIsOwner(false);
       setVotifierTargets(createDefaultTargets());
       setVotifierFeedback(null);
+      setDispatchSummary({ recent: [], failed: [] });
+      setDispatchFeedback(null);
       return;
     }
     const check = async () => {
@@ -137,20 +236,24 @@ export function ServerOwnerControls({
         const owner = Boolean(payload?.isOwner);
         setIsOwner(owner);
         if (owner) {
-          await fetchVotifierTargets();
+          await Promise.all([fetchVotifierTargets(), fetchDispatchAttempts()]);
         } else {
           setVotifierTargets(createDefaultTargets());
           setVotifierFeedback(null);
+          setDispatchSummary({ recent: [], failed: [] });
+          setDispatchFeedback(null);
         }
       } catch (error) {
         console.warn('소유자 확인 실패', error);
         setIsOwner(false);
         setVotifierTargets(createDefaultTargets());
         setVotifierFeedback(null);
+        setDispatchSummary({ recent: [], failed: [] });
+        setDispatchFeedback(null);
       }
     };
     void check();
-  }, [account, baseUrl, serverId, fetchVotifierTargets]);
+  }, [account, baseUrl, serverId, fetchVotifierTargets, fetchDispatchAttempts]);
 
   const handleCreateWiki = useCallback(async () => {
     if (!isOwner || creatingWiki) {
@@ -335,6 +438,46 @@ export function ServerOwnerControls({
       }
     },
     [baseUrl, fetchVotifierTargets, isOwner, savingVotifier, serverId, votifierTargets],
+  );
+
+  const handleReplayDispatch = useCallback(
+    async (attemptId: string) => {
+      if (replayingAttempt) {
+        return;
+      }
+      setReplayingAttempt(attemptId);
+      setDispatchFeedback(null);
+      try {
+        const response = await fetch(
+          `${baseUrl}/v1/servers/${serverId}/vote-dispatch-attempts/${attemptId}/replay`,
+          {
+            method: 'POST',
+            headers: await csrfHeaders(),
+            credentials: 'include',
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`투표 전달 재시도에 실패했습니다. (${response.status})`);
+        }
+        await fetchDispatchAttempts();
+        setDispatchFeedback({
+          type: 'success',
+          message: '투표 전달을 다시 대기열에 등록했습니다.',
+        });
+      } catch (error) {
+        console.warn('투표 전달 재시도 실패', error);
+        setDispatchFeedback({
+          type: 'error',
+          message:
+            error instanceof Error
+              ? error.message
+              : '투표 전달을 재시도하지 못했습니다. 잠시 후 다시 시도해주세요.',
+        });
+      } finally {
+        setReplayingAttempt(null);
+      }
+    },
+    [baseUrl, fetchDispatchAttempts, replayingAttempt, serverId],
   );
 
   if (!isOwner) {
@@ -532,6 +675,114 @@ export function ServerOwnerControls({
             </div>
           </form>
         )}
+      </div>
+
+      <div className="mt-6 rounded-lg border border-[#2a2a2d] bg-[#1c1c1f] p-5 text-sm text-slate-200">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h4 className="text-base font-semibold text-white">투표 전달 상태</h4>
+            <p className="mt-2 text-xs text-slate-400">
+              최근 Votifier 전달 결과와 실패한 보상 전달을 확인할 수 있습니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-[#2a2a2d] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-[#25252a] disabled:opacity-60"
+            onClick={() => void fetchDispatchAttempts()}
+            disabled={loadingDispatch}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            새로고침
+          </button>
+        </div>
+
+        {dispatchFeedback ? (
+          <p
+            className={`mt-3 text-xs ${
+              dispatchFeedback.type === 'success' ? 'text-emerald-300' : 'text-red-400'
+            }`}
+          >
+            {dispatchFeedback.message}
+          </p>
+        ) : null}
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="min-w-0 rounded-lg border border-[#2a2a2d] bg-[#141416]">
+            <div className="flex items-center gap-2 border-b border-[#2a2a2d] px-4 py-3">
+              <Clock3 className="h-4 w-4 text-sky-300" />
+              <h5 className="text-sm font-semibold text-white">최근 전달</h5>
+            </div>
+            <div className="divide-y divide-[#2a2a2d]">
+              {loadingDispatch ? (
+                <p className="px-4 py-4 text-xs text-slate-400">전달 기록을 불러오는 중입니다…</p>
+              ) : dispatchSummary.recent.length === 0 ? (
+                <p className="px-4 py-4 text-xs text-slate-400">아직 전달 기록이 없습니다.</p>
+              ) : (
+                dispatchSummary.recent.slice(0, 8).map((attempt) => (
+                  <div key={attempt.id} className="grid gap-2 px-4 py-3 sm:grid-cols-[1fr_auto]">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{attempt.username}</p>
+                      <p className="mt-1 truncate text-xs text-slate-400">
+                        {attempt.protocol.toUpperCase()} · {attempt.target.host ?? '삭제된 대상'}:
+                        {attempt.target.port ?? '-'} · 투표 {formatDateTime(attempt.votedAt)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 sm:justify-end">
+                      {attempt.status === 'success' ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+                      ) : attempt.status === 'failed' ? (
+                        <AlertCircle className="h-4 w-4 text-red-300" />
+                      ) : (
+                        <Clock3 className="h-4 w-4 text-amber-300" />
+                      )}
+                      <span className={`text-xs font-semibold ${statusTone(attempt.status)}`}>
+                        {statusLabel(attempt.status)}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="min-w-0 rounded-lg border border-[#2a2a2d] bg-[#141416]">
+            <div className="flex items-center gap-2 border-b border-[#2a2a2d] px-4 py-3">
+              <AlertCircle className="h-4 w-4 text-red-300" />
+              <h5 className="text-sm font-semibold text-white">실패한 전달</h5>
+            </div>
+            <div className="divide-y divide-[#2a2a2d]">
+              {loadingDispatch ? (
+                <p className="px-4 py-4 text-xs text-slate-400">실패 기록을 불러오는 중입니다…</p>
+              ) : dispatchSummary.failed.length === 0 ? (
+                <p className="px-4 py-4 text-xs text-slate-400">재시도할 실패 기록이 없습니다.</p>
+              ) : (
+                dispatchSummary.failed.slice(0, 6).map((attempt) => (
+                  <div key={attempt.id} className="space-y-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{attempt.username}</p>
+                      <p className="mt-1 truncate text-xs text-slate-400">
+                        {attempt.protocol.toUpperCase()} · {attempt.target.host ?? '삭제된 대상'}:
+                        {attempt.target.port ?? '-'} · 시도 {attempt.attempts}회
+                      </p>
+                      {attempt.error ? (
+                        <p className="mt-1 line-clamp-2 text-xs text-red-300">{attempt.error}</p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#13ec80] px-4 py-2 text-xs font-semibold text-slate-100 transition hover:bg-[#0fb865] disabled:opacity-60"
+                      onClick={() => void handleReplayDispatch(attempt.id)}
+                      disabled={Boolean(replayingAttempt)}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      {replayingAttempt === attempt.id ? '재시도 등록 중…' : '다시 전달'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );

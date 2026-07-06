@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { AccountConflictController } from './account-conflict.controller';
+import { AccountConflictService } from './account-conflict.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AccountSeparationService } from './account-separation.service';
@@ -9,8 +11,14 @@ import { FileModule } from '../file/file.module';
 
 @Module({
   imports: [SessionModule, FileModule],
-  providers: [AuthService, AccountSeparationService, OAuthFlowService, EmailService],
-  controllers: [AuthController],
+  providers: [
+    AuthService,
+    AccountConflictService,
+    AccountSeparationService,
+    OAuthFlowService,
+    EmailService
+  ],
+  controllers: [AuthController, AccountConflictController],
   exports: [AuthService, AccountSeparationService, OAuthFlowService, EmailService]
 })
 export class AuthModule {}

@@ -508,7 +508,7 @@ function buildVoteReportSupportUrl(detail: ServerDetail, serverId: string): stri
   ].join('\n');
 
   const params = new URLSearchParams({
-    category: 'report',
+    category: 'plugin_sync',
     serverId,
     subject,
     body,
@@ -533,7 +533,7 @@ function buildServerCorrectionSupportUrl(detail: ServerDetail, serverId: string)
   ].join('\n');
 
   const params = new URLSearchParams({
-    category: 'server',
+    category: 'server_claim',
     serverId,
     subject,
     body,

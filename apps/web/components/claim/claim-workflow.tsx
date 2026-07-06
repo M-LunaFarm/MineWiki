@@ -124,7 +124,7 @@ const NOTE_COPY: Record<string, string> = {
   motd_token_not_found: 'MOTD에서 토큰을 찾지 못했습니다.',
   token_expired: '검증 만료 기간이 지나 만료되었습니다.',
 };
-const CLAIM_LOGS_HIDDEN_AFTER_KEY_PREFIX = 'lunaf_claim_logs_hidden_after';
+const CLAIM_LOGS_HIDDEN_AFTER_KEY_PREFIX = 'minewiki_claim_logs_hidden_after';
 
 function getClaimLogsHiddenAfterStorageKey(accountId: string, serverId: string): string {
   return `${CLAIM_LOGS_HIDDEN_AFTER_KEY_PREFIX}:${accountId}:${serverId}`;

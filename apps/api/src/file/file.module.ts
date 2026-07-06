@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { EventsModule } from '../events/events.module';
 import { SessionModule } from '../session/session.module';
 import { UploadModule } from '../upload/upload.module';
 import { FileController } from './file.controller';
@@ -6,7 +7,7 @@ import { FilePermissionService } from './file-permission.service';
 import { FileService } from './file.service';
 
 @Module({
-  imports: [SessionModule, UploadModule],
+  imports: [SessionModule, UploadModule, EventsModule],
   controllers: [FileController],
   providers: [FilePermissionService, FileService],
   exports: [FilePermissionService, FileService]

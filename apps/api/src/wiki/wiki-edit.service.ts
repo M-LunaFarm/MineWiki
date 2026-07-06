@@ -2,10 +2,12 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  Optional
 } from '@nestjs/common';
 import { hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
+import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
@@ -82,7 +84,8 @@ export class WikiEditService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly wikiProfiles: WikiProfileService,
-    private readonly wikiPermissions: WikiPermissionService
+    private readonly wikiPermissions: WikiPermissionService,
+    @Optional() private readonly events?: BusinessEventService
   ) {}
 
   async createPage(session: SessionPayload, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
@@ -109,7 +112,7 @@ export class WikiEditService {
       pageType: this.cleanOptional(request.pageType) ?? 'article'
     });
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.wikiPage.findUnique({
         where: {
           namespaceId_slug: {
@@ -174,6 +177,20 @@ export class WikiEditService {
         slug: page.slug
       };
     });
+    await this.events?.audit('wiki.create', {
+      category: 'wiki',
+      actorAccountId: session.userId,
+      actorProfileId: actor.id,
+      subjectType: 'wiki_page',
+      subjectId: result.pageId,
+      metadata: {
+        namespace: result.namespace,
+        title: result.title,
+        revisionId: result.revisionId,
+        revisionNo: result.revisionNo
+      }
+    });
+    return result;
   }
 
   async updatePage(session: SessionPayload, pageId: string, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
@@ -182,7 +199,7 @@ export class WikiEditService {
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const now = new Date();
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page || page.status === 'deleted') {
         throw new NotFoundException('Wiki page not found.');
@@ -237,6 +254,20 @@ export class WikiEditService {
         slug: page.slug
       };
     });
+    await this.events?.audit('wiki.edit', {
+      category: 'wiki',
+      actorAccountId: session.userId,
+      actorProfileId: actor.id,
+      subjectType: 'wiki_page',
+      subjectId: result.pageId,
+      metadata: {
+        namespace: result.namespace,
+        title: result.title,
+        revisionId: result.revisionId,
+        revisionNo: result.revisionNo
+      }
+    });
+    return result;
   }
 
   async appendSection(session: SessionPayload, pageId: string, request: WikiSectionMutationRequest): Promise<WikiMutationResponse> {

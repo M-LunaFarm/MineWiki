@@ -12,7 +12,7 @@ export function SiteFooter() {
           <div>
             <Link className="mb-4 flex items-center gap-2" href="/">
               <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-400/30 bg-emerald-400 text-xs font-bold text-[#0b0d10]">
-                L
+                M
               </div>
               <span className="text-lg font-bold text-white">
                 MineWiki<span className="text-[#13ec80]">.kr</span>
@@ -102,7 +102,7 @@ function FooterCol({ title, links }: { readonly title: string; readonly links: s
         return { href: '/support', external: false };
       }
       if (label === '서버 신고') {
-        return { href: '/support?type=report', external: false };
+        return { href: '/support?category=server_claim', external: false };
       }
     }
     return { href: '/', external: false };

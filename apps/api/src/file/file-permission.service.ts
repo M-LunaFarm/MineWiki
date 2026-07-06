@@ -33,6 +33,11 @@ export class FilePermissionService {
   }
 
   private isOwnerOrAdmin(file: FilePermissionSubject, session?: SessionPayload | null): boolean {
-    return Boolean(session && (session.isElevated || file.ownerAccountId === session.userId));
+    return Boolean(
+      session &&
+        (session.isElevated ||
+          session.permissions?.includes('file.admin') === true ||
+          file.ownerAccountId === session.userId),
+    );
   }
 }

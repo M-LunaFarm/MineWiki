@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Star } from 'lucide-react';
+import { PencilLine, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 
 interface WikiArticleViewProps {
@@ -62,7 +62,7 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
               href={page.serverDirectoryPath}
               className="flex items-center justify-between rounded-lg border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-100 transition hover:border-amber-200/70 hover:bg-amber-300/15"
             >
-              투표/리뷰
+              서버 디렉터리
               <Star className="h-4 w-4 text-amber-100" />
             </Link>
           ) : null}
@@ -83,6 +83,10 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
               </div>
             </dl>
             <div className="mt-4 flex flex-wrap gap-2">
+              <Link href={`${routePath}/edit`} className="chip chip-accent inline-flex items-center gap-1.5">
+                <PencilLine className="h-3.5 w-3.5" />
+                편집
+              </Link>
               <Link href={`${routePath}/history`} className="chip chip-accent">
                 역사
               </Link>

@@ -21,6 +21,8 @@ import { VerifyModule } from './verify/verify.module';
 import { WikiModule } from './wiki/wiki.module';
 import { PluginSyncModule } from './plugin-sync/plugin-sync.module';
 import { FileModule } from './file/file.module';
+import { RoleModule } from './roles/role.module';
+import { EventsModule } from './events/events.module';
 
 @Module({
   imports: [
@@ -47,7 +49,9 @@ import { FileModule } from './file/file.module';
     WikiModule,
     TelemetryModule,
     AppConfigModule,
-    PrismaModule
+    PrismaModule,
+    RoleModule,
+    EventsModule
   ],
   controllers: [AppController],
   providers: [

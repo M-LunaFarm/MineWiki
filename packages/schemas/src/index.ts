@@ -356,6 +356,10 @@ export const supportTicketSchema = z.object({
   status: supportTicketStatusSchema,
   priority: supportTicketPrioritySchema,
   category: z.string().min(1).max(40).nullable(),
+  pageId: z.string().min(1).max(64).nullable(),
+  verifySessionId: z.string().min(1).max(64).nullable(),
+  pluginServerId: z.string().min(1).max(64).nullable(),
+  fileId: z.string().min(1).max(64).nullable(),
   lastMessageAt: z.string().datetime(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -388,6 +392,10 @@ export const createSupportTicketSchema = z.object({
   category: z.string().min(1).max(40).optional(),
   priority: supportTicketPrioritySchema.optional(),
   serverId: z.string().uuid().nullable().optional(),
+  pageId: z.string().min(1).max(64).nullable().optional(),
+  verifySessionId: z.string().min(1).max(64).nullable().optional(),
+  pluginServerId: z.string().min(1).max(64).nullable().optional(),
+  fileId: z.string().min(1).max(64).nullable().optional(),
 });
 
 export const createGuestSupportTicketSchema = createSupportTicketSchema.extend({
@@ -416,12 +424,18 @@ export const votifierTargetSchema = z.object({
   publicKey: z.string().min(1).optional(),
 });
 
+export const voteDispatchTargetSchema = votifierTargetSchema.extend({
+  targetId: z.string().uuid(),
+  dispatchAttemptId: z.string().uuid(),
+});
+
 export const voteDispatchJobSchema = z.object({
+  voteId: z.string().uuid(),
   serverId: z.string().uuid(),
   username: z.string().min(3).max(16),
   ipAddress: z.string().optional(),
   votedAt: z.string().datetime(),
-  targets: z.array(votifierTargetSchema).min(1),
+  targets: z.array(voteDispatchTargetSchema).min(1),
 });
 
 export const serverPingJobSchema = z.object({
@@ -512,6 +526,7 @@ export type MinecraftAuthorizationStartResponse = z.infer<
   typeof minecraftAuthorizationStartResponseSchema
 >;
 export type VoteDispatchJob = z.infer<typeof voteDispatchJobSchema>;
+export type VoteDispatchTarget = z.infer<typeof voteDispatchTargetSchema>;
 export type ReviewGateStatus = z.infer<typeof reviewGateStatusSchema>;
 export type VotifierTarget = z.infer<typeof votifierTargetSchema>;
 export type ServerPingJob = z.infer<typeof serverPingJobSchema>;

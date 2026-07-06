@@ -10,6 +10,7 @@ import {
   Post,
   UseGuards
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   minecraftAuthorizationStartRequestSchema,
   minecraftVerificationRequestSchema,
@@ -31,6 +32,7 @@ export class MinecraftController {
   constructor(private readonly minecraftService: MinecraftService) {}
 
   @Post('oauth/start')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
   startOAuth(
     @Body() body: unknown,
     @CurrentSession() session: SessionPayload
@@ -44,6 +46,7 @@ export class MinecraftController {
   }
 
   @Post('verify')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   verify(
     @Body() body: unknown,
     @CurrentSession() session: SessionPayload
@@ -62,6 +65,7 @@ export class MinecraftController {
 
   @Delete('identity')
   @HttpCode(204)
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async revokeOwnIdentity(@CurrentSession() session: SessionPayload): Promise<void> {
     await this.minecraftService.revokeIdentity(session.userId);
   }

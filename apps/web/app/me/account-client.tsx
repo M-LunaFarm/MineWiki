@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {
   Activity,
+  AlertTriangle,
   Camera,
   CheckCircle2,
   Copy,
@@ -23,11 +24,14 @@ import { SiteHeader } from '../../components/layout/site-header';
 import {
   changePassword,
   clearProfileAvatar,
+  createAccountMergeRequest,
+  fetchAccountLinkConflicts,
   resendVerification,
   setupEmailLogin,
   startOAuthLink,
   updateDisplayName,
   updateProfileAvatar,
+  type AccountLinkConflict,
 } from '../../lib/auth-client';
 import { getApiBaseUrl } from '../../lib/runtime-config';
 
@@ -125,6 +129,12 @@ export function AccountClientPage() {
   const [removingAvatar, setRemovingAvatar] = useState(false);
   const [minecraftAvatarCandidates, setMinecraftAvatarCandidates] = useState<string[]>([]);
   const [minecraftAvatarIndex, setMinecraftAvatarIndex] = useState(0);
+  const [linkConflicts, setLinkConflicts] = useState<AccountLinkConflict[]>([]);
+  const [loadingConflicts, setLoadingConflicts] = useState(false);
+  const [mergeRequestMessage, setMergeRequestMessage] = useState('');
+  const [mergeRequestTicketId, setMergeRequestTicketId] = useState<string | null>(null);
+  const [mergeRequestFeedback, setMergeRequestFeedback] = useState<FeedbackState | null>(null);
+  const [creatingMergeRequest, setCreatingMergeRequest] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -138,6 +148,42 @@ export function AccountClientPage() {
     if (account) {
       setDisplayName(account.displayName ?? account.email ?? '');
     }
+  }, [account]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLinkConflicts([]);
+    setMergeRequestTicketId(null);
+
+    const loadConflicts = async () => {
+      if (!account) {
+        return;
+      }
+      setLoadingConflicts(true);
+      setMergeRequestFeedback(null);
+      try {
+        const response = await fetchAccountLinkConflicts();
+        if (!cancelled) {
+          setLinkConflicts(response.conflicts);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMergeRequestFeedback({
+            type: 'error',
+            text: error instanceof Error ? error.message : '계정 충돌 정보를 불러오지 못했습니다.',
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingConflicts(false);
+        }
+      }
+    };
+
+    void loadConflicts();
+    return () => {
+      cancelled = true;
+    };
   }, [account]);
 
   useEffect(() => {
@@ -538,6 +584,28 @@ export function AccountClientPage() {
     }
   };
 
+  const handleCreateMergeRequest = async () => {
+    setCreatingMergeRequest(true);
+    setMergeRequestFeedback(null);
+    try {
+      const response = await createAccountMergeRequest({
+        message: mergeRequestMessage.trim() || undefined,
+      });
+      setMergeRequestTicketId(response.ticketId);
+      setMergeRequestFeedback({
+        type: 'success',
+        text: '지원 요청이 접수되었습니다. 고객센터에서 처리 상태를 확인해 주세요.',
+      });
+    } catch (error) {
+      setMergeRequestFeedback({
+        type: 'error',
+        text: error instanceof Error ? error.message : '지원 요청을 만들지 못했습니다.',
+      });
+    } finally {
+      setCreatingMergeRequest(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#121212] px-4 text-[#a0a0a0]">
@@ -895,6 +963,17 @@ export function AccountClientPage() {
             </section>
           </div>
 
+          <AccountConflictPanel
+            conflicts={linkConflicts}
+            loading={loadingConflicts}
+            message={mergeRequestMessage}
+            feedback={mergeRequestFeedback}
+            ticketId={mergeRequestTicketId}
+            submitting={creatingMergeRequest}
+            onMessageChange={setMergeRequestMessage}
+            onCreateRequest={() => void handleCreateMergeRequest()}
+          />
+
           <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
             <section className="rounded-lg border border-[#30363d] bg-[#181a1d] p-6 shadow-sm">
               <h3 className="mb-6 flex items-center gap-2 text-lg font-bold text-white">
@@ -967,6 +1046,109 @@ export function AccountClientPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+function AccountConflictPanel({
+  conflicts,
+  loading,
+  message,
+  feedback,
+  ticketId,
+  submitting,
+  onMessageChange,
+  onCreateRequest,
+}: {
+  readonly conflicts: AccountLinkConflict[];
+  readonly loading: boolean;
+  readonly message: string;
+  readonly feedback: FeedbackState | null;
+  readonly ticketId: string | null;
+  readonly submitting: boolean;
+  readonly onMessageChange: (message: string) => void;
+  readonly onCreateRequest: () => void;
+}) {
+  if (!loading && conflicts.length === 0 && !feedback) {
+    return null;
+  }
+
+  return (
+    <section className="mb-6 rounded-lg border border-[#30363d] bg-[#181a1d] p-6 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-3xl">
+          <h3 className="flex items-center gap-2 text-lg font-bold text-white">
+            <AlertTriangle className="h-5 w-5 text-amber-300" />
+            계정 연동 충돌
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-[#a0a0a0]">
+            Discord 또는 Minecraft 계정이 다른 MineWiki 계정과 충돌하면 자동 병합하지 않고
+            지원팀 확인을 거칩니다.
+          </p>
+        </div>
+        {ticketId ? (
+          <Link
+            href={`/support?ticket=${encodeURIComponent(ticketId)}`}
+            className="inline-flex items-center justify-center rounded-md border border-[#13ec80]/35 bg-[#13ec80]/15 px-4 py-2 text-sm font-semibold text-[#13ec80] transition hover:bg-[#13ec80]/25"
+          >
+            티켓 보기
+          </Link>
+        ) : null}
+      </div>
+
+      {loading ? (
+        <div className="mt-4 flex items-center gap-2 text-sm text-[#a0a0a0]">
+          <Loader2 className="h-4 w-4 animate-spin text-[#13ec80]" />
+          계정 충돌을 확인하는 중입니다.
+        </div>
+      ) : null}
+
+      {conflicts.length > 0 ? (
+        <div className="mt-5 space-y-4">
+          <div className="space-y-2">
+            {conflicts.map((conflict) => (
+              <div
+                key={conflict.id}
+                className="rounded-md border border-amber-400/25 bg-amber-400/[.08] px-4 py-3"
+              >
+                <p className="text-sm font-semibold text-amber-100">{conflict.message}</p>
+                <p className="mt-1 break-all text-xs text-amber-100/75">
+                  {conflict.minecraftUuid ? `Minecraft: ${conflict.minecraftUuid}` : null}
+                  {conflict.minecraftUuid && conflict.discordUserId ? ' · ' : null}
+                  {conflict.discordUserId ? `Discord: ${conflict.discordUserId}` : null}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <textarea
+            value={message}
+            onChange={(event) => onMessageChange(event.target.value)}
+            placeholder="지원팀에 전달할 내용을 입력하세요. 예: 두 계정 모두 본인 소유입니다."
+            rows={3}
+            maxLength={1000}
+            className="w-full rounded-md border border-[#30363d] bg-[#111315] px-3 py-2 text-sm text-white outline-none transition placeholder:text-[#6f7882] focus:border-[#13ec80]"
+            disabled={submitting || Boolean(ticketId)}
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-[#8f98a3]">
+              요청은 고객센터 티켓으로 생성되며, 상담원이 승인 또는 반려 상태를 기록합니다.
+            </p>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-[#13ec80] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#35f29a] disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={onCreateRequest}
+              disabled={submitting || Boolean(ticketId)}
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {ticketId ? '요청 접수됨' : submitting ? '접수 중입니다.' : '지원 요청 만들기'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <FeedbackText feedback={feedback} />
+    </section>
   );
 }
 

@@ -70,7 +70,40 @@ connection.on('error', (error) => {
   Logger.error({ err: error }, 'Redis connection error');
 });
 
-const dispatcher = createVoteDispatcher();
+const dispatcher = createVoteDispatcher({
+  recorder: {
+    async markStarted(dispatchAttemptId: string): Promise<void> {
+      await prisma.voteDispatchAttempt.updateMany({
+        where: { id: dispatchAttemptId, status: { not: 'success' } },
+        data: {
+          status: 'processing',
+          attempts: { increment: 1 },
+          lastAttemptAt: new Date(),
+        },
+      });
+    },
+    async markSucceeded(dispatchAttemptId: string): Promise<void> {
+      await prisma.voteDispatchAttempt.update({
+        where: { id: dispatchAttemptId },
+        data: {
+          status: 'success',
+          error: null,
+          lastAttemptAt: new Date(),
+        },
+      });
+    },
+    async markFailed(dispatchAttemptId: string, error: unknown): Promise<void> {
+      await prisma.voteDispatchAttempt.update({
+        where: { id: dispatchAttemptId },
+        data: {
+          status: 'failed',
+          error: truncateDispatchError(error),
+          lastAttemptAt: new Date(),
+        },
+      });
+    },
+  },
+});
 const pinger = createServerPinger(prisma);
 const claimVerifier = createClaimVerifier(prisma);
 const rankAggregator = createRankAggregator(prisma);
@@ -194,7 +227,12 @@ const voteQueue = createWorker<VoteDispatchJob>(
     try {
       const result = await dispatcher.dispatch(job.data);
       Logger.info(
-        { serverId: job.data.serverId, protocol: result.protocol },
+        {
+          serverId: job.data.serverId,
+          voteId: job.data.voteId,
+          dispatchAttemptId: result.dispatchAttemptId,
+          protocol: result.protocol,
+        },
         'Vote dispatch completed',
       );
       return result;
@@ -209,6 +247,11 @@ const voteQueue = createWorker<VoteDispatchJob>(
   },
   dispatcher.jobOptions(),
 );
+
+function truncateDispatchError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.slice(0, 512);
+}
 
 const serverPingQueue = createWorker<ServerPingJob>('server-ping', async (job) => {
   Logger.info({ jobId: job.id, data: job.data }, 'Processing server ping job');

@@ -1,4 +1,5 @@
 ﻿import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
@@ -183,6 +184,19 @@ export class MinecraftService {
       msOwned: true,
       lastVerifiedAt: new Date().toISOString()
     };
+
+    const existingIdentity = await this.prisma.minecraftIdentity.findFirst({
+      where: {
+        uuid: identity.uuid,
+        accountId: { not: payload.userId }
+      },
+      select: { accountId: true }
+    });
+    if (existingIdentity) {
+      throw new ConflictException(
+        'Minecraft identity is already linked to another MineWiki account.'
+      );
+    }
 
     await this.prisma.minecraftIdentity.upsert({
       where: { accountId: payload.userId },

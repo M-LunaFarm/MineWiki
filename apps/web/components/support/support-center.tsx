@@ -50,7 +50,15 @@ const VIEW_OPTIONS: ReadonlyArray<{ value: TicketView; label: string }> = [
   { value: 'mine', label: '내 문의' },
 ];
 
-const QUICK_CATEGORIES = ['general', 'account', 'billing', 'report', 'server'];
+const QUICK_CATEGORIES = [
+  'account',
+  'minecraft_verify',
+  'discord_guild',
+  'server_claim',
+  'wiki_edit',
+  'plugin_sync',
+  'file_upload',
+];
 
 const QUICK_AGENT_REPLIES = [
   '안녕하세요. 문의 접수되었습니다. 확인 후 안내드리겠습니다.',
@@ -113,9 +121,13 @@ export function SupportCenter({ mode }: SupportCenterProps) {
 
   const [ticketSubject, setTicketSubject] = useState('');
   const [ticketBody, setTicketBody] = useState('');
-  const [ticketCategory, setTicketCategory] = useState('general');
+  const [ticketCategory, setTicketCategory] = useState('account');
   const [ticketPriority, setTicketPriority] = useState<TicketPriority>('normal');
   const [ticketServerId, setTicketServerId] = useState('');
+  const [ticketPageId, setTicketPageId] = useState('');
+  const [ticketVerifySessionId, setTicketVerifySessionId] = useState('');
+  const [ticketPluginServerId, setTicketPluginServerId] = useState('');
+  const [ticketFileId, setTicketFileId] = useState('');
 
   const [messageBody, setMessageBody] = useState('');
   const [messageInternal, setMessageInternal] = useState(false);
@@ -204,6 +216,10 @@ export function SupportCenter({ mode }: SupportCenterProps) {
     const queryBody = searchParams.get('body');
     const queryCategory = searchParams.get('category');
     const queryServerId = searchParams.get('serverId');
+    const queryPageId = searchParams.get('pageId');
+    const queryVerifySessionId = searchParams.get('verifySessionId');
+    const queryPluginServerId = searchParams.get('pluginServerId');
+    const queryFileId = searchParams.get('fileId');
 
     if (queryTicket) {
       setSelectedTicketId(queryTicket);
@@ -219,6 +235,18 @@ export function SupportCenter({ mode }: SupportCenterProps) {
     }
     if (queryServerId) {
       setTicketServerId(queryServerId);
+    }
+    if (queryPageId) {
+      setTicketPageId(queryPageId);
+    }
+    if (queryVerifySessionId) {
+      setTicketVerifySessionId(queryVerifySessionId);
+    }
+    if (queryPluginServerId) {
+      setTicketPluginServerId(queryPluginServerId);
+    }
+    if (queryFileId) {
+      setTicketFileId(queryFileId);
     }
   }, [searchParams]);
 
@@ -255,7 +283,16 @@ export function SupportCenter({ mode }: SupportCenterProps) {
 
     const params = new URLSearchParams(searchParams.toString());
     let changed = false;
-    for (const key of ['subject', 'body', 'category', 'serverId']) {
+    for (const key of [
+      'subject',
+      'body',
+      'category',
+      'serverId',
+      'pageId',
+      'verifySessionId',
+      'pluginServerId',
+      'fileId',
+    ]) {
       if (params.has(key)) {
         params.delete(key);
         changed = true;
@@ -458,11 +495,19 @@ export function SupportCenter({ mode }: SupportCenterProps) {
         category: ticketCategory.trim() || undefined,
         priority: ticketPriority,
         serverId: ticketServerId.trim() ? ticketServerId.trim() : undefined,
+        pageId: ticketPageId.trim() || undefined,
+        verifySessionId: ticketVerifySessionId.trim() || undefined,
+        pluginServerId: ticketPluginServerId.trim() || undefined,
+        fileId: ticketFileId.trim() || undefined,
       });
 
       setTicketSubject('');
       setTicketBody('');
       setTicketServerId('');
+      setTicketPageId('');
+      setTicketVerifySessionId('');
+      setTicketPluginServerId('');
+      setTicketFileId('');
       setDetail(created);
       setSelectedTicketId(created.ticket.id);
       await loadTickets(created.ticket.id);
@@ -497,6 +542,10 @@ export function SupportCenter({ mode }: SupportCenterProps) {
         category: ticketCategory.trim() || undefined,
         priority: ticketPriority,
         serverId: ticketServerId.trim() ? ticketServerId.trim() : undefined,
+        pageId: ticketPageId.trim() || undefined,
+        verifySessionId: ticketVerifySessionId.trim() || undefined,
+        pluginServerId: ticketPluginServerId.trim() || undefined,
+        fileId: ticketFileId.trim() || undefined,
         guestName: guestName.trim() || undefined,
         guestEmail: guestEmail.trim() || undefined,
         captchaToken: guestCaptchaToken ?? undefined,
@@ -505,6 +554,10 @@ export function SupportCenter({ mode }: SupportCenterProps) {
       setTicketSubject('');
       setTicketBody('');
       setTicketServerId('');
+      setTicketPageId('');
+      setTicketVerifySessionId('');
+      setTicketPluginServerId('');
+      setTicketFileId('');
       setGuestName('');
       setGuestEmail('');
       setGuestCaptchaToken(null);
@@ -674,7 +727,7 @@ export function SupportCenter({ mode }: SupportCenterProps) {
           <input
             value={ticketCategory}
             onChange={(event) => setTicketCategory(event.target.value)}
-            placeholder="카테고리 (예: account, billing)"
+            placeholder="카테고리 (예: account, plugin_sync)"
             className="h-10 w-full rounded-lg border border-[#333333] bg-[#161618] px-3 text-xs text-white placeholder:text-[#6b7280]"
           />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -839,7 +892,7 @@ export function SupportCenter({ mode }: SupportCenterProps) {
               <input
                 value={ticketCategory}
                 onChange={(event) => setTicketCategory(event.target.value)}
-                placeholder="카테고리 (예: billing, account)"
+                placeholder="카테고리 (예: account, server_claim)"
                 className="h-10 rounded-lg border border-[#333333] bg-[#161618] px-3 text-xs text-white placeholder:text-[#6b7280]"
               />
               <select
@@ -963,6 +1016,7 @@ export function SupportCenter({ mode }: SupportCenterProps) {
                       {selectedTicket?.server ? ` · 서버: ${selectedTicket.server.name}` : ''}
                       {selectedTicket?.category ? ` · 분류: ${selectedTicket.category}` : ''}
                     </p>
+                    {selectedTicket ? <SupportContextBadges ticket={selectedTicket} /> : null}
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <span className="rounded border border-[#333333] bg-[#161618] px-2 py-1 text-[#9ca3af]">
@@ -1176,6 +1230,32 @@ function statusBadgeClass(status: SupportTicketStatus): string {
 
 function priorityLabel(priority: TicketPriority): string {
   return PRIORITY_OPTIONS.find((item) => item.value === priority)?.label ?? priority;
+}
+
+function SupportContextBadges({ ticket }: { readonly ticket: SupportTicket }) {
+  const entries = [
+    ['pageId', ticket.pageId],
+    ['verifySessionId', ticket.verifySessionId],
+    ['pluginServerId', ticket.pluginServerId],
+    ['fileId', ticket.fileId],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {entries.map(([label, value]) => (
+        <span
+          key={`${label}-${value}`}
+          className="rounded border border-[#333333] bg-[#111113] px-2 py-0.5 text-[10px] text-[#9ca3af]"
+        >
+          {label}: {value}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function formatDateTime(value: string): string {

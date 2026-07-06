@@ -10,8 +10,7 @@ function hydrateEnvironment(): void {
     return;
   }
 
-  const customEnvFile =
-    process.env.MINEWIKI_ENV_FILE?.trim() ?? process.env.CREEPERVOTE_ENV_FILE?.trim();
+  const customEnvFile = process.env.MINEWIKI_ENV_FILE?.trim();
   const defaultFiles = ['.env.local', '.env'];
   const candidates = [
     ...(customEnvFile ? [customEnvFile] : []),
@@ -50,8 +49,11 @@ const envSchema = z.object({
   VERIFY_PUBLIC_BASE_URL: z.string().url().optional(),
   TURNSTILE_SECRET_KEY: z.string().optional(),
   HCAPTCHA_SECRET_KEY: z.string().optional(),
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().optional(),
+  NEXT_PUBLIC_HCAPTCHA_SITE_KEY: z.string().optional(),
   UPLOAD_STORAGE_ROOT: z.string().optional(),
   ACCOUNT_LINKING_ENABLED: z.string().optional(),
+  APP_ENCRYPTION_KEY: z.string().optional(),
   SENTRY_DSN: z.string().url().optional(),
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
@@ -77,6 +79,49 @@ const envSchema = z.object({
 
 type EnvSchema = z.infer<typeof envSchema>;
 
+const productionRequiredKeys: Array<keyof EnvSchema> = [
+  'DATABASE_URL',
+  'REDIS_URL',
+  'NEXT_PUBLIC_SITE_URL',
+  'NEXT_PUBLIC_API_BASE_URL',
+  'INTERNAL_API_BASE_URL',
+  'API_HOST',
+  'API_PORT',
+  'VERIFY_PUBLIC_BASE_URL',
+  'DISCORD_BOT_TOKEN',
+  'DISCORD_CLIENT_ID',
+  'DISCORD_CLIENT_SECRET',
+  'DISCORD_REDIRECT_URI',
+  'INTERNAL_BOT_API_TOKEN',
+  'PLUGIN_SYNC_TOKEN',
+  'MICROSOFT_CLIENT_ID',
+  'MICROSOFT_CLIENT_SECRET',
+  'MICROSOFT_REDIRECT_URI',
+  'NAVER_CLIENT_ID',
+  'NAVER_CLIENT_SECRET',
+  'NAVER_REDIRECT_URI',
+  'UPLOAD_STORAGE_ROOT',
+  'STORAGE_PUBLIC_BASE_URL',
+  'SMTP_HOST',
+  'SMTP_FROM',
+  'APP_ENCRYPTION_KEY'
+];
+
+const productionStorageKeys: Array<keyof EnvSchema> = [
+  'STORAGE_REGION',
+  'STORAGE_ACCESS_KEY',
+  'STORAGE_SECRET_KEY'
+];
+
+const unsafePlaceholderValues = new Set([
+  'change-me',
+  'changeme',
+  'replace-me',
+  'todo',
+  'secret',
+  'password'
+]);
+
 type NumericEnvKey = {
   [Key in keyof EnvSchema]: EnvSchema[Key] extends number | undefined ? Key : never;
 }[keyof EnvSchema];
@@ -86,6 +131,7 @@ export class ConfigService {
 
   constructor(source: NodeJS.ProcessEnv = process.env) {
     this.env = envSchema.parse(source);
+    validateProductionEnvironment(this.env);
   }
 
   get<Key extends keyof EnvSchema>(
@@ -127,4 +173,53 @@ export class ConfigService {
     }
     return parsed;
   }
+}
+
+function validateProductionEnvironment(env: EnvSchema): void {
+  if (env.NODE_ENV !== 'production') {
+    return;
+  }
+
+  const failures: string[] = [];
+  for (const key of productionRequiredKeys) {
+    const value = env[key];
+    if (isBlank(value)) {
+      failures.push(`${String(key)} is required`);
+      continue;
+    }
+    if (containsUnsafePlaceholder(value)) {
+      failures.push(`${String(key)} still contains a placeholder value`);
+    }
+  }
+
+  if (isBlank(env.TURNSTILE_SECRET_KEY) && isBlank(env.HCAPTCHA_SECRET_KEY)) {
+    failures.push('TURNSTILE_SECRET_KEY or HCAPTCHA_SECRET_KEY is required');
+  }
+
+  if (!isBlank(env.STORAGE_BUCKET)) {
+    for (const key of productionStorageKeys) {
+      if (isBlank(env[key])) {
+        failures.push(`${String(key)} is required when STORAGE_BUCKET is set`);
+      }
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`Production configuration is incomplete: ${failures.join('; ')}`);
+  }
+}
+
+function isBlank(value: unknown): boolean {
+  return value === undefined || value === null || value === '';
+}
+
+function containsUnsafePlaceholder(value: unknown): boolean {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (unsafePlaceholderValues.has(normalized)) {
+    return true;
+  }
+  return normalized.includes('change-me') || normalized.includes('replace-me');
 }

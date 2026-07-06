@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: minewiki_test
+          MYSQL_USER: minewiki
+          MYSQL_PASSWORD: minewiki
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: mysql://minewiki:minewiki@127.0.0.1:3306/minewiki_test
+      REDIS_URL: redis://127.0.0.1:6379
+      NODE_ENV: test
+      NEXT_PUBLIC_SITE_URL: http://127.0.0.1:4311
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:3000
+      INTERNAL_API_BASE_URL: http://127.0.0.1:3000
+      API_HOST: 127.0.0.1
+      API_PORT: 3000
+      VERIFY_PUBLIC_BASE_URL: http://127.0.0.1:4311
+      APP_ENCRYPTION_KEY: test-encryption-key
+      INTERNAL_BOT_API_TOKEN: test-internal-bot-token
+      PLUGIN_SYNC_TOKEN: test-plugin-sync-token
+      ACCOUNT_LINKING_ENABLED: "true"
+      DISCORD_CLIENT_ID: test-discord-client-id
+      DISCORD_CLIENT_SECRET: test-discord-client-secret
+      DISCORD_REDIRECT_URI: http://127.0.0.1:4311/auth/callback/discord
+      MICROSOFT_CLIENT_ID: test-microsoft-client-id
+      MICROSOFT_CLIENT_SECRET: test-microsoft-client-secret
+      MICROSOFT_REDIRECT_URI: http://127.0.0.1:4311/minecraft/callback
+      NAVER_CLIENT_ID: test-naver-client-id
+      NAVER_CLIENT_SECRET: test-naver-client-secret
+      NAVER_REDIRECT_URI: http://127.0.0.1:4311/auth/callback/naver
+      UPLOAD_STORAGE_ROOT: /tmp/minewiki-test-uploads
+      STORAGE_PUBLIC_BASE_URL: http://127.0.0.1:4311/uploads
+      SMTP_FROM: "MineWiki Test <test@example.invalid>"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+
+      - name: Apply test migrations
+        run: pnpm exec prisma migrate deploy
+
+      - name: Typecheck packages
+        run: pnpm typecheck
+
+      - name: Build API
+        run: pnpm build:api
+
+      - name: Build Web
+        run: pnpm build:web
+
+      - name: Unit tests
+        env:
+          DATABASE_URL: ""
+        run: pnpm test:unit
+
+      - name: Integration tests
+        run: pnpm test:integration

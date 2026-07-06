@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { hashContent, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
+import { BusinessEventService } from '../events/business-event.service';
 
 const ALLOWED_PROTECTION_LEVELS = new Set([
   'open',
@@ -41,7 +42,10 @@ export interface WikiAdminPageSummary {
 
 @Injectable()
 export class WikiAdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly events?: BusinessEventService
+  ) {}
 
   async getRecent(): Promise<WikiAdminRecentChange[]> {
     const changes = await this.prisma.wikiRecentChange.findMany({
@@ -102,6 +106,16 @@ export class WikiAdminService {
       namespaceCode: namespace,
       summary: input.reason?.trim() || `보호 수준 변경: ${page.protectionLevel} -> ${protectionLevel}`
     });
+    await this.auditAdmin('wiki.protect', {
+      actorProfileId: input.actorProfileId,
+      pageId: updated.id,
+      revisionId: updated.currentRevisionId,
+      metadata: {
+        previousProtectionLevel: page.protectionLevel,
+        protectionLevel,
+        reason: input.reason?.trim() || null
+      }
+    });
     return toPageSummary(updated);
   }
 
@@ -151,6 +165,15 @@ export class WikiAdminService {
         title: page.title,
         namespaceCode: await this.namespaceCode(page.namespaceId),
         summary: input.reason?.trim() || `리비전 표시 상태 변경: ${visibility}`
+      });
+      await this.auditAdmin('wiki.revision_visibility', {
+        actorProfileId: input.actorProfileId,
+        pageId: page.id,
+        revisionId: updated.id,
+        metadata: {
+          visibility,
+          reason: input.reason?.trim() || null
+        }
       });
     }
     return { revisionId: updated.id.toString(), visibility: updated.visibility };
@@ -235,6 +258,16 @@ export class WikiAdminService {
       namespaceCode: await this.namespaceCode(page.namespaceId),
       summary: revision.editSummary
     });
+    await this.auditAdmin('wiki.rollback', {
+      actorProfileId: input.actorProfileId,
+      pageId: page.id,
+      revisionId: revision.id,
+      metadata: {
+        sourceRevisionId: source.id.toString(),
+        sourceRevisionNo: source.revisionNo,
+        reason: input.reason?.trim() || null
+      }
+    });
     return { pageId: page.id.toString(), revisionId: revision.id.toString(), revisionNo: revision.revisionNo };
   }
 
@@ -265,6 +298,16 @@ export class WikiAdminService {
       namespaceCode: await this.namespaceCode(updated.namespaceId),
       summary: input.reason?.trim() || (input.status === 'deleted' ? '관리자 삭제' : '관리자 복구')
     });
+    await this.auditAdmin(input.status === 'deleted' ? 'wiki.delete' : 'wiki.restore', {
+      actorProfileId: input.actorProfileId,
+      pageId: updated.id,
+      revisionId: updated.currentRevisionId,
+      metadata: {
+        previousStatus: page.status,
+        status: input.status,
+        reason: input.reason?.trim() || null
+      }
+    });
     return toPageSummary(updated);
   }
 
@@ -288,6 +331,28 @@ export class WikiAdminService {
         summary: input.summary ?? null,
         isMinor: false,
         createdAt: new Date()
+      }
+    });
+  }
+
+  private async auditAdmin(
+    action: string,
+    input: {
+      readonly actorProfileId: bigint | null;
+      readonly pageId: bigint;
+      readonly revisionId?: bigint | null;
+      readonly metadata?: Record<string, unknown>;
+    }
+  ): Promise<void> {
+    await this.events?.audit(action, {
+      category: 'wiki',
+      actorProfileId: input.actorProfileId,
+      subjectType: 'wiki_page',
+      subjectId: input.pageId,
+      metadata: {
+        pageId: input.pageId,
+        revisionId: input.revisionId ?? null,
+        ...input.metadata
       }
     });
   }

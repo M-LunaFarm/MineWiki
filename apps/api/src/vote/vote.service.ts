@@ -7,7 +7,11 @@
 import { z } from 'zod';
 import { ServerService } from '../server/server.service';
 import { VoteQueueService } from './vote.queue';
-import { voteDispatchJobSchema, type VotifierTarget } from '@minewiki/schemas';
+import {
+  voteDispatchJobSchema,
+  type VoteDispatchTarget,
+  type VotifierTarget
+} from '@minewiki/schemas';
 import { CaptchaService } from '../captcha/captcha.service';
 import { BusinessEventService } from '../events/business-event.service';
 import { VoteStore } from './vote.store';
@@ -25,6 +29,15 @@ export interface VoteRequestContext {
   readonly accountId?: string;
   readonly minecraftUuid?: string;
   readonly ipAddress?: string;
+}
+
+interface ResolvedVotifierTarget extends VoteDispatchTarget {
+  readonly targetId: string;
+  readonly dispatchAttemptId: string;
+}
+
+interface StoredVotifierTarget extends VotifierTarget {
+  readonly targetId: string;
 }
 
 @Injectable()
@@ -92,8 +105,10 @@ export class VoteService {
       }
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.vote.create({
+    const targets = await this.resolveVotifierTargets(serverId);
+    const dispatchTargets: ResolvedVotifierTarget[] = [];
+    const vote = await this.prisma.$transaction(async (tx) => {
+      const createdVote = await tx.vote.create({
         data: {
           serverId,
           username: normalizedUsername,
@@ -104,6 +119,22 @@ export class VoteService {
           votedAt: now
         }
       });
+
+      for (const target of targets) {
+        const attempt = await tx.voteDispatchAttempt.create({
+          data: {
+            voteId: createdVote.id,
+            serverId,
+            targetId: target.targetId,
+            protocol: target.protocol,
+            status: 'queued'
+          }
+        });
+        dispatchTargets.push({
+          ...target,
+          dispatchAttemptId: attempt.id
+        });
+      }
 
       await tx.server.update({
         where: { id: serverId },
@@ -137,24 +168,30 @@ export class VoteService {
           votesTotal: { increment: 1 }
         }
       });
+
+      return createdVote;
     });
 
     this.logger.log(
       `Vote accepted for ${serverId} by ${normalizedUsername} (ip=${context.ipAddress ?? 'n/a'})`
     );
 
-    const targets = await this.resolveVotifierTargets(serverId);
-    if (targets.length > 0) {
+    if (dispatchTargets.length > 0) {
       try {
         const job = voteDispatchJobSchema.parse({
+          voteId: vote.id,
           serverId,
           username: normalizedUsername,
           ipAddress: context.ipAddress,
           votedAt: now.toISOString(),
-          targets
+          targets: dispatchTargets
         });
         await this.voteQueue.enqueue(job);
       } catch (error) {
+        await this.markDispatchEnqueueFailed(
+          dispatchTargets.map((target) => target.dispatchAttemptId),
+          error
+        );
         this.logger.error(
           {
             err: error,
@@ -185,6 +222,109 @@ export class VoteService {
       nextEligibleAt: nextKstResetAt.toISOString(),
       votesToday: await this.voteStore.getDailyCount(serverId, now)
     };
+  }
+
+  async listDispatchAttempts(
+    serverId: string
+  ): Promise<{
+    recent: VoteDispatchAttemptSummary[];
+    failed: VoteDispatchAttemptSummary[];
+  }> {
+    await this.serverService.ensureExists(serverId);
+    const [recent, failed] = await Promise.all([
+      this.prisma.voteDispatchAttempt.findMany({
+        where: { serverId },
+        include: {
+          vote: { select: { username: true, votedAt: true } },
+          target: { select: { host: true, port: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      }),
+      this.prisma.voteDispatchAttempt.findMany({
+        where: {
+          serverId,
+          status: 'failed',
+          vote: {
+            dispatchAttempts: {
+              none: { status: 'success' }
+            }
+          }
+        },
+        include: {
+          vote: { select: { username: true, votedAt: true } },
+          target: { select: { host: true, port: true } }
+        },
+        orderBy: [{ lastAttemptAt: 'desc' }, { createdAt: 'desc' }],
+        take: 20
+      })
+    ]);
+    return {
+      recent: recent.map(toDispatchAttemptSummary),
+      failed: failed.map(toDispatchAttemptSummary)
+    };
+  }
+
+  async replayDispatchAttempt(serverId: string, attemptId: string): Promise<{ queued: true }> {
+    await this.serverService.ensureExists(serverId);
+    const attempt = await this.prisma.voteDispatchAttempt.findFirst({
+      where: { id: attemptId, serverId },
+      include: {
+        vote: true,
+        target: true
+      }
+    });
+    if (!attempt) {
+      throw new BadRequestException('투표 전달 기록을 찾을 수 없습니다.');
+    }
+    if (attempt.status !== 'failed') {
+      throw new BadRequestException('실패한 투표 전달만 재시도할 수 있습니다.');
+    }
+    const succeededAttempts = await this.prisma.voteDispatchAttempt.count({
+      where: { voteId: attempt.voteId, status: 'success' }
+    });
+    if (succeededAttempts > 0) {
+      throw new BadRequestException('이미 성공한 투표 전달은 재시도할 수 없습니다.');
+    }
+    if (!attempt.target) {
+      throw new BadRequestException('삭제된 Votifier 대상은 재시도할 수 없습니다.');
+    }
+
+    const target = toStoredVotifierTarget(attempt.target);
+    if (!target) {
+      throw new BadRequestException('재시도 가능한 Votifier 인증 정보가 없습니다.');
+    }
+
+    await this.prisma.voteDispatchAttempt.update({
+      where: { id: attempt.id },
+      data: {
+        status: 'queued',
+        error: null
+      }
+    });
+
+    try {
+      await this.voteQueue.enqueue(
+        voteDispatchJobSchema.parse({
+          voteId: attempt.voteId,
+          serverId,
+          username: attempt.vote.username,
+          ipAddress: attempt.vote.ipAddress ?? undefined,
+          votedAt: attempt.vote.votedAt.toISOString(),
+          targets: [
+            {
+              ...target,
+              dispatchAttemptId: attempt.id
+            }
+          ]
+        })
+      );
+    } catch (error) {
+      await this.markDispatchEnqueueFailed([attempt.id], error);
+      throw error;
+    }
+
+    return { queued: true };
   }
 
   async listRecentVotes(
@@ -220,26 +360,112 @@ export class VoteService {
     this.logger.debug('CAPTCHA 토큰 검증 완료.');
   }
 
-  private async resolveVotifierTargets(serverId: string): Promise<VotifierTarget[]> {
+  private async resolveVotifierTargets(serverId: string): Promise<StoredVotifierTarget[]> {
     const targets = await this.prisma.votifierTarget.findMany({
       where: { serverId },
       orderBy: { createdAt: 'asc' }
     });
     return targets
-      .map((target) => {
-        const protocol: VotifierTarget['protocol'] = target.protocol === 'v1' ? 'v1' : 'v2';
-        return {
-          protocol,
-          host: target.host,
-          port: target.port,
-          token: decryptAppSecret(target.token) ?? undefined,
-          publicKey: target.publicKey ?? undefined
-        };
-      })
-      .filter((target) =>
-        target.protocol === 'v2' ? Boolean(target.token) : Boolean(target.publicKey)
-      );
+      .map(toStoredVotifierTarget)
+      .filter((target): target is StoredVotifierTarget => Boolean(target));
   }
+
+  private async markDispatchEnqueueFailed(attemptIds: string[], error: unknown): Promise<void> {
+    if (attemptIds.length === 0) {
+      return;
+    }
+    await this.prisma.voteDispatchAttempt.updateMany({
+      where: { id: { in: attemptIds } },
+      data: {
+        status: 'failed',
+        error: truncateDispatchError(error)
+      }
+    });
+  }
+}
+
+export interface VoteDispatchAttemptSummary {
+  readonly id: string;
+  readonly voteId: string;
+  readonly serverId: string;
+  readonly targetId: string | null;
+  readonly protocol: 'v1' | 'v2';
+  readonly status: string;
+  readonly attempts: number;
+  readonly error: string | null;
+  readonly lastAttemptAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly username: string;
+  readonly votedAt: string;
+  readonly target: {
+    readonly host: string | null;
+    readonly port: number | null;
+  };
+}
+
+function toStoredVotifierTarget(target: {
+  id: string;
+  protocol: 'v1' | 'v2';
+  host: string;
+  port: number;
+  token?: string | null;
+  publicKey?: string | null;
+}): StoredVotifierTarget | null {
+  const protocol: VotifierTarget['protocol'] = target.protocol === 'v1' ? 'v1' : 'v2';
+  const stored = {
+    targetId: target.id,
+    protocol,
+    host: target.host,
+    port: target.port,
+    token: decryptAppSecret(target.token ?? null) ?? undefined,
+    publicKey: target.publicKey ?? undefined
+  };
+  if (stored.protocol === 'v2') {
+    return stored.token ? stored : null;
+  }
+  return stored.publicKey ? stored : null;
+}
+
+function toDispatchAttemptSummary(attempt: {
+  id: string;
+  voteId: string;
+  serverId: string;
+  targetId: string | null;
+  protocol: 'v1' | 'v2';
+  status: string;
+  attempts: number;
+  error: string | null;
+  lastAttemptAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  vote: { username: string; votedAt: Date };
+  target: { host: string; port: number } | null;
+}): VoteDispatchAttemptSummary {
+  return {
+    id: attempt.id,
+    voteId: attempt.voteId,
+    serverId: attempt.serverId,
+    targetId: attempt.targetId,
+    protocol: attempt.protocol,
+    status: attempt.status,
+    attempts: attempt.attempts,
+    error: attempt.error,
+    lastAttemptAt: attempt.lastAttemptAt?.toISOString() ?? null,
+    createdAt: attempt.createdAt.toISOString(),
+    updatedAt: attempt.updatedAt.toISOString(),
+    username: attempt.vote.username,
+    votedAt: attempt.vote.votedAt.toISOString(),
+    target: {
+      host: attempt.target?.host ?? null,
+      port: attempt.target?.port ?? null
+    }
+  };
+}
+
+function truncateDispatchError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.slice(0, 512);
 }
 
 function derivePlayerKey(username: string, context: VoteRequestContext): string {

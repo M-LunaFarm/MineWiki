@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
@@ -22,6 +23,7 @@ import { Prisma } from '@prisma/client';
 import { CaptchaService } from '../captcha/captcha.service';
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
+import { RoleService } from '../roles/role.service';
 
 interface ListTicketOptions {
   readonly view?: string;
@@ -45,6 +47,10 @@ interface TicketRow {
   status: string;
   priority: string;
   category: string | null;
+  pageId: string | null;
+  verifySessionId: string | null;
+  pluginServerId: string | null;
+  fileId: string | null;
   lastMessageAt: Date | string;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -80,6 +86,7 @@ export class SupportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly captchaService: CaptchaService,
+    @Optional() private readonly roles?: RoleService,
   ) {
     this.captchaRequired = this.captchaService.isCaptchaRequired();
   }
@@ -125,6 +132,10 @@ export class SupportService {
         t.status,
         t.priority,
         t.category,
+        t.pageId,
+        t.verifySessionId,
+        t.pluginServerId,
+        t.fileId,
         t.lastMessageAt,
         t.createdAt,
         t.updatedAt,
@@ -196,6 +207,7 @@ export class SupportService {
     const subject = parsed.subject.trim();
     const body = parsed.body.trim();
     const category = parsed.category?.trim() || null;
+    const ticketContext = normalizeTicketContext(parsed);
 
     if (!subject) {
       throw new BadRequestException('제목을 입력해 주세요.');
@@ -214,6 +226,7 @@ export class SupportService {
       category,
       priority: parsed.priority ?? 'normal',
       serverId,
+      ...ticketContext,
       assigneeAccountId,
       authorRole: 'customer',
     });
@@ -229,6 +242,7 @@ export class SupportService {
     const subject = parsed.subject.trim();
     const body = parsed.body.trim();
     const category = parsed.category?.trim() || null;
+    const ticketContext = normalizeTicketContext(parsed);
 
     if (!subject) {
       throw new BadRequestException('제목을 입력해 주세요.');
@@ -261,6 +275,7 @@ export class SupportService {
       category,
       priority: parsed.priority ?? 'normal',
       serverId,
+      ...ticketContext,
       assigneeAccountId,
       authorRole: 'customer',
     });
@@ -396,6 +411,10 @@ export class SupportService {
     category: string | null;
     priority: TicketPriority;
     serverId: string | null;
+    pageId: string | null;
+    verifySessionId: string | null;
+    pluginServerId: string | null;
+    fileId: string | null;
     assigneeAccountId: string | null;
     authorRole: MessageAuthorRole;
   }): Promise<string> {
@@ -414,6 +433,10 @@ export class SupportService {
           status,
           priority,
           category,
+          pageId,
+          verifySessionId,
+          pluginServerId,
+          fileId,
           lastMessageAt,
           createdAt,
           updatedAt
@@ -426,6 +449,10 @@ export class SupportService {
           ${'open'},
           ${input.priority},
           ${input.category},
+          ${input.pageId},
+          ${input.verifySessionId},
+          ${input.pluginServerId},
+          ${input.fileId},
           ${now},
           ${now},
           ${now}
@@ -527,6 +554,9 @@ export class SupportService {
   }
 
   private async isAgent(accountId: string): Promise<boolean> {
+    if (await this.roles?.hasPermission(accountId, 'support.admin').catch(() => false)) {
+      return true;
+    }
     const rows = await this.prisma.$queryRaw<Array<{ accountId: string }>>(Prisma.sql`
       SELECT accountId
       FROM \`SupportAgent\`
@@ -588,6 +618,10 @@ export class SupportService {
         t.status,
         t.priority,
         t.category,
+        t.pageId,
+        t.verifySessionId,
+        t.pluginServerId,
+        t.fileId,
         t.lastMessageAt,
         t.createdAt,
         t.updatedAt,
@@ -653,6 +687,10 @@ export class SupportService {
       status: normalizeStatus(row.status),
       priority: normalizePriority(row.priority),
       category: row.category,
+      pageId: row.pageId,
+      verifySessionId: row.verifySessionId,
+      pluginServerId: row.pluginServerId,
+      fileId: row.fileId,
       lastMessageAt: toIsoString(row.lastMessageAt),
       createdAt: toIsoString(row.createdAt),
       updatedAt: toIsoString(row.updatedAt),
@@ -725,6 +763,30 @@ function normalizeAuthorRole(value: string): MessageAuthorRole {
     return value;
   }
   return 'system';
+}
+
+function normalizeTicketContext(input: {
+  readonly pageId?: string | null;
+  readonly verifySessionId?: string | null;
+  readonly pluginServerId?: string | null;
+  readonly fileId?: string | null;
+}): {
+  pageId: string | null;
+  verifySessionId: string | null;
+  pluginServerId: string | null;
+  fileId: string | null;
+} {
+  return {
+    pageId: cleanContextId(input.pageId),
+    verifySessionId: cleanContextId(input.verifySessionId),
+    pluginServerId: cleanContextId(input.pluginServerId),
+    fileId: cleanContextId(input.fileId),
+  };
+}
+
+function cleanContextId(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, 64) : null;
 }
 
 function toMessageAuthorDisplayName(

@@ -12,6 +12,7 @@ import {
   type OAuthProviderAvailability,
 } from '@minewiki/schemas';
 import { normalizeApiBaseUrl } from './runtime-config';
+import { clearCsrfToken, csrfHeaders } from './csrf';
 
 const API_BASE = normalizeApiBaseUrl();
 
@@ -29,11 +30,33 @@ interface PasswordResetConfirmResponse {
   readonly success: true;
 }
 
+export interface AccountLinkConflict {
+  readonly id: string;
+  readonly kind:
+    | 'minecraft_identity_duplicate'
+    | 'discord_identity_duplicate'
+    | 'discord_minecraft_mismatch';
+  readonly message: string;
+  readonly minecraftUuid: string | null;
+  readonly discordUserId: string | null;
+  readonly conflictingAccountId: string | null;
+}
+
+export interface AccountLinkConflictResponse {
+  readonly conflicts: AccountLinkConflict[];
+}
+
+export interface AccountMergeRequestResponse {
+  readonly ticketId: string;
+  readonly status: 'created';
+  readonly conflicts: AccountLinkConflict[];
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify(body),
   });
   if (!response.ok) {
@@ -88,6 +111,7 @@ export async function resetPassword(payload: {
 
 export async function logout(): Promise<void> {
   await postJson('/v1/auth/logout', {});
+  clearCsrfToken();
 }
 
 export async function fetchCurrentAccount(): Promise<AuthAccount | null> {
@@ -161,6 +185,7 @@ export async function revokeSession(sessionId: string): Promise<void> {
   const response = await fetch(`${API_BASE}/v1/sessions/${sessionId}`, {
     method: 'DELETE',
     credentials: 'include',
+    headers: await csrfHeaders(),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -172,6 +197,7 @@ export async function revokeOtherSessions(): Promise<void> {
   const response = await fetch(`${API_BASE}/v1/sessions/others`, {
     method: 'DELETE',
     credentials: 'include',
+    headers: await csrfHeaders(),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -183,7 +209,7 @@ export async function updateDisplayName(displayName: string): Promise<AuthAccoun
   const response = await fetch(`${API_BASE}/v1/auth/me`, {
     method: 'PATCH',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify({ displayName }),
   });
   if (!response.ok) {
@@ -201,7 +227,7 @@ export async function updateProfileAvatar(payload: {
   const response = await fetch(`${API_BASE}/v1/auth/me/avatar`, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -216,6 +242,7 @@ export async function clearProfileAvatar(): Promise<AuthAccount> {
   const response = await fetch(`${API_BASE}/v1/auth/me/avatar`, {
     method: 'DELETE',
     credentials: 'include',
+    headers: await csrfHeaders(),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -225,6 +252,25 @@ export async function clearProfileAvatar(): Promise<AuthAccount> {
   return authAccountSchema.parse(body);
 }
 
+export async function fetchAccountLinkConflicts(): Promise<AccountLinkConflictResponse> {
+  const response = await fetch(`${API_BASE}/v1/account/link-conflicts`, {
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load account link conflicts.');
+  }
+  return (await response.json()) as AccountLinkConflictResponse;
+}
+
+export async function createAccountMergeRequest(payload: {
+  message?: string;
+  conflictMessage?: string;
+  source?: 'account_center' | 'minecraft_verify' | 'discord_verify';
+}): Promise<AccountMergeRequestResponse> {
+  return postJson<AccountMergeRequestResponse>('/v1/account/merge-requests', payload);
+}
+
 export async function changePassword(payload: {
   currentPassword: string;
   newPassword: string;
@@ -232,7 +278,7 @@ export async function changePassword(payload: {
   const response = await fetch(`${API_BASE}/v1/auth/password`, {
     method: 'PATCH',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify(payload),
   });
   if (!response.ok) {

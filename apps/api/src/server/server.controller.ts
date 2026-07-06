@@ -11,6 +11,7 @@
   Query,
   UseGuards
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
 import { ServerService } from './server.service';
 import type {
@@ -99,6 +100,7 @@ export class ServerController {
 
   @UseGuards(SessionGuard)
   @Post()
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async register(
     @Body() body: unknown,
     @CurrentSession() session: SessionPayload
@@ -112,6 +114,7 @@ export class ServerController {
 
   @UseGuards(SessionGuard)
   @Post(':id/wiki')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async createServerWiki(
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentSession() session: SessionPayload
@@ -122,6 +125,7 @@ export class ServerController {
 
   @UseGuards(SessionGuard)
   @Patch(':id/wiki-link')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async linkServerWiki(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() body: unknown,
@@ -129,11 +133,12 @@ export class ServerController {
   ) {
     await this.ensureServerWikiAccess(id, session);
     const payload = serverWikiLinkPayloadSchema.parse(body);
-    return this.serverService.linkServerWiki(id, payload);
+    return this.serverService.linkServerWiki(id, payload, session.userId);
   }
 
   @UseGuards(SessionGuard)
   @Delete(':id')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async remove(
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentSession() session: SessionPayload
@@ -147,6 +152,7 @@ export class ServerController {
 
   @UseGuards(SessionGuard)
   @Post('assets/images')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async uploadDescriptionImage(
     @CurrentSession() session: SessionPayload,
     @Body('data') data: string,
@@ -182,6 +188,7 @@ export class ServerController {
 
   @UseGuards(SessionGuard)
   @Post(':id/banner')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async uploadBanner(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body('data') data: string,
@@ -199,12 +206,13 @@ export class ServerController {
 
   @UseGuards(SessionGuard)
   @Patch(':id/vote-policy')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   async updateVotePolicy(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body('requiresOwnership') requiresOwnership: boolean,
     @CurrentSession() session: SessionPayload
   ) {
-    if (!(await this.claimService.isOwner(id, session.userId))) {
+    if (!(await this.canManageServer(id, session))) {
       throw new BadRequestException('해당 서버의 투표 정책을 변경할 권한이 없습니다.');
     }
     return this.serverService.updateVotePolicy(id, Boolean(requiresOwnership));
@@ -216,7 +224,7 @@ export class ServerController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentSession() session: SessionPayload
   ) {
-    if (!(await this.claimService.isOwner(id, session.userId))) {
+    if (!(await this.canManageServer(id, session))) {
       throw new BadRequestException('해당 서버의 Votifier 설정을 볼 권한이 없습니다.');
     }
     const targets = await this.serverService.listVotifierTargets(id);
@@ -225,12 +233,13 @@ export class ServerController {
 
   @UseGuards(SessionGuard)
   @Patch(':id/votifier')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async updateVotifierTargets(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() body: unknown,
     @CurrentSession() session: SessionPayload
   ) {
-    if (!(await this.claimService.isOwner(id, session.userId))) {
+    if (!(await this.canManageServer(id, session))) {
       throw new BadRequestException('해당 서버의 Votifier 설정을 변경할 권한이 없습니다.');
     }
     const payload = votifierPayloadSchema.parse(body);
@@ -239,11 +248,19 @@ export class ServerController {
   }
 
   private async ensureServerWikiAccess(id: string, session: SessionPayload): Promise<void> {
-    if (session.isElevated) {
+    if (session.isElevated || session.permissions?.includes('server.admin') === true) {
       return;
     }
     if (!(await this.claimService.isOwner(id, session.userId))) {
       throw new BadRequestException('해당 서버 위키를 만들거나 연결할 권한이 없습니다.');
     }
+  }
+
+  private async canManageServer(id: string, session: SessionPayload): Promise<boolean> {
+    return (
+      session.isElevated ||
+      session.permissions?.includes('server.admin') === true ||
+      (await this.claimService.isOwner(id, session.userId))
+    );
   }
 }

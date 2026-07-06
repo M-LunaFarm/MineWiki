@@ -23,6 +23,16 @@ test('rejects loopback IPv4 target', async () => {
   );
 });
 
+test('rejects localhost hostname before DNS lookup', async () => {
+  await assert.rejects(
+    () => validateOutboundTarget('localhost', 25565),
+    (error: unknown) =>
+      error instanceof UnsafeEndpointError &&
+      error.reason === 'invalid_host' &&
+      error.message.includes('localhost')
+  );
+});
+
 test('rejects RFC1918 private IPv4 target', async () => {
   await assert.rejects(
     () => validateOutboundTarget('192.168.1.10', 25565),

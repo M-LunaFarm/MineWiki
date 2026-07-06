@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
@@ -111,12 +112,14 @@ export class WikiController {
   }
 
   @Post('preview')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
   @UseGuards(SessionGuard)
   previewPage(@Body() body: { contentRaw?: string }): WikiPreviewResponse {
     return this.wikiEdit.preview(body.contentRaw);
   }
 
   @Post('pages')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
   @UseGuards(SessionGuard)
   createPage(
     @Body() body: WikiPageMutationRequest,
@@ -126,6 +129,7 @@ export class WikiController {
   }
 
   @Patch('pages/:id')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
   @UseGuards(SessionGuard)
   updatePage(
     @Param('id') pageId: string,
@@ -136,6 +140,7 @@ export class WikiController {
   }
 
   @Post('pages/:id/sections')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
   @UseGuards(SessionGuard)
   appendSection(
     @Param('id') pageId: string,

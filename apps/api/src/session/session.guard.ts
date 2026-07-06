@@ -7,6 +7,7 @@
 import type { FastifyRequest } from 'fastify';
 import { SessionService, type SessionPayload } from './session.service';
 import { extractClientIp } from '../common/http/client-ip';
+import { assertCsrfToken } from './csrf';
 
 function parseCookie(header: string | undefined, name: string): string | undefined {
   if (!header) {
@@ -45,6 +46,7 @@ export class SessionGuard implements CanActivate {
       extractClientIp(request) ?? null,
       request.headers['user-agent'] ?? null
     );
+    assertCsrfToken(request, session.token);
     request.sessionPayload = this.sessions.toPayload(session);
     request.sessionToken = session.token;
     return true;

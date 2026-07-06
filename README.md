@@ -36,3 +36,11 @@ Production starts only the integrated runtime defined in `infra/pm2/ecosystem.co
 - `minewiki-bot`
 
 Use `pnpm deploy:build` before reload and `pnpm deploy:smoke` after reload. Do not run `legacy/mwiki-fastify`, `legacy/luna-votifier`, or any old VoteWeb runtime in production; those directories are migration references only.
+
+## Data Validation
+
+Run `pnpm data:validate` before deploys to check migration integrity across wiki pages, server wiki links, account/profile mappings, uploads, replay guards, and render cache readiness. The command is read-only by default. Use `pnpm data:validate -- --fix` only when you want safe repairs for expired plugin replay guards and missing current render cache entries.
+
+## First-Run Seed
+
+Run `pnpm seed -- --dry-run` to preview first-run seed changes, then `pnpm seed` after migrations. The seed is idempotent and never overwrites existing `/wiki/대문`, `/help/대문`, or `/project/대문` pages. To create the first admin, create an account through the app, then run `pnpm seed -- --admin-email=you@example.com` or set `SEED_ADMIN_EMAIL`. Verify the result with `pnpm smoke` or by opening `/wiki/대문`.

@@ -1,6 +1,6 @@
 import { Logger } from '@minewiki/logger';
 import type { JobsOptions } from 'bullmq';
-import type { VoteDispatchJob, VotifierTarget } from '@minewiki/schemas';
+import type { VoteDispatchJob, VoteDispatchTarget } from '@minewiki/schemas';
 import { connect } from 'node:net';
 import { once } from 'node:events';
 import { publicEncrypt, constants } from 'node:crypto';
@@ -13,25 +13,38 @@ const V1_TIMEOUT_MS = 2000;
 interface DispatchResult {
   readonly success: boolean;
   readonly protocol: 'v2' | 'v1';
+  readonly dispatchAttemptId: string;
 }
 
-export function createVoteDispatcher() {
+export interface VoteDispatchRecorder {
+  markStarted(dispatchAttemptId: string): Promise<void>;
+  markSucceeded(dispatchAttemptId: string): Promise<void>;
+  markFailed(dispatchAttemptId: string, error: unknown): Promise<void>;
+}
+
+export function createVoteDispatcher(options: { recorder?: VoteDispatchRecorder } = {}) {
   async function dispatch(job: VoteDispatchJob): Promise<DispatchResult> {
     let lastError: unknown;
     for (const target of job.targets) {
       try {
+        await options.recorder?.markStarted(target.dispatchAttemptId);
         if (target.protocol === 'v2') {
           await sendV2(job, target);
-          return { success: true, protocol: 'v2' };
+          await options.recorder?.markSucceeded(target.dispatchAttemptId);
+          return { success: true, protocol: 'v2', dispatchAttemptId: target.dispatchAttemptId };
         }
         await sendV1(job, target);
-        return { success: true, protocol: 'v1' };
+        await options.recorder?.markSucceeded(target.dispatchAttemptId);
+        return { success: true, protocol: 'v1', dispatchAttemptId: target.dispatchAttemptId };
       } catch (error) {
         lastError = error;
+        await options.recorder?.markFailed(target.dispatchAttemptId, error);
         Logger.warn(
           {
             err: error,
             serverId: job.serverId,
+            voteId: job.voteId,
+            dispatchAttemptId: target.dispatchAttemptId,
             protocol: target.protocol,
             host: target.host,
             port: target.port
@@ -67,7 +80,7 @@ export function createVoteDispatcher() {
   };
 }
 
-async function sendV2(job: VoteDispatchJob, target: VotifierTarget): Promise<void> {
+async function sendV2(job: VoteDispatchJob, target: VoteDispatchTarget): Promise<void> {
   if (!target.token) {
     throw new Error('V2 target is missing token');
   }
@@ -96,7 +109,7 @@ async function sendV2(job: VoteDispatchJob, target: VotifierTarget): Promise<voi
   }
 }
 
-async function sendV1(job: VoteDispatchJob, target: VotifierTarget): Promise<void> {
+async function sendV1(job: VoteDispatchJob, target: VoteDispatchTarget): Promise<void> {
   if (!target.publicKey) {
     throw new Error('V1 target is missing publicKey');
   }
@@ -136,7 +149,7 @@ async function sendV1(job: VoteDispatchJob, target: VotifierTarget): Promise<voi
   }
 }
 
-function buildV1Payload(job: VoteDispatchJob, target: VotifierTarget): Buffer {
+function buildV1Payload(job: VoteDispatchJob, target: VoteDispatchTarget): Buffer {
   const timestamp = Math.floor(Date.parse(job.votedAt) / 1000);
   const lines = [
     'VOTE',

@@ -25,11 +25,13 @@ type InquiryTab = 'member' | 'guest';
 const AUTO_REFRESH_INTERVAL_MS = 20_000;
 
 const CATEGORY_OPTIONS = [
-  { value: 'general', label: '일반 문의' },
   { value: 'account', label: '계정 및 로그인' },
-  { value: 'billing', label: '결제 및 환불' },
-  { value: 'server', label: '서버 등록 및 관리' },
-  { value: 'report', label: '신고 및 제재 이의' },
+  { value: 'minecraft_verify', label: 'Minecraft 인증' },
+  { value: 'discord_guild', label: 'Discord 길드' },
+  { value: 'server_claim', label: '서버 소유권' },
+  { value: 'wiki_edit', label: '위키 편집' },
+  { value: 'plugin_sync', label: '플러그인 동기화' },
+  { value: 'file_upload', label: '파일 업로드' },
 ] as const;
 
 const STATUS_FILTERS: ReadonlyArray<{ value: TicketStatusFilter; label: string }> = [
@@ -56,25 +58,25 @@ const SUPPORT_TOPICS = [
     detail: '계정 식별 정보와 발생 시각을 함께 남겨 주세요.',
   },
   {
-    category: 'server',
+    category: 'server_claim',
     icon: 'dns',
-    title: '서버 등록',
-    description: '서버 심사, 노출 정보, 접속 주소, 소유권 확인을 안내합니다.',
+    title: '서버 소유권',
+    description: '서버 등록, 노출 정보, 접속 주소, 소유권 확인을 안내합니다.',
     detail: '가능하면 서버를 선택해 주시면 확인 시간이 단축됩니다.',
   },
   {
-    category: 'billing',
-    icon: 'receipt_long',
-    title: '결제 및 환불',
-    description: '결제 내역, 청구 오류, 환불 가능 여부를 검토합니다.',
-    detail: '결제일과 주문 번호를 문의 내용에 포함해 주세요.',
+    category: 'minecraft_verify',
+    icon: 'verified',
+    title: 'Minecraft 인증',
+    description: 'Minecraft 소유권 인증, Discord verify 충돌을 확인합니다.',
+    detail: '오류 메시지와 인증을 시도한 계정을 함께 남겨 주세요.',
   },
   {
-    category: 'report',
-    icon: 'gavel',
-    title: '신고 및 제재',
-    description: '서비스 정책 위반 신고와 제재 결과 이의 신청을 접수합니다.',
-    detail: '증빙 자료와 관련 서버 정보를 구체적으로 작성해 주세요.',
+    category: 'plugin_sync',
+    icon: 'sync',
+    title: '플러그인 동기화',
+    description: '플러그인 연동, 투표 전달, 서버 데이터 동기화 문제를 접수합니다.',
+    detail: 'pluginServerId나 발생 시각이 있으면 함께 전달해 주세요.',
   },
 ] as const;
 
@@ -130,8 +132,12 @@ export function SupportRedesignPage() {
   const [activeInquiryTab, setActiveInquiryTab] = useState<InquiryTab>('guest');
 
   const [memberSubject, setMemberSubject] = useState('');
-  const [memberCategory, setMemberCategory] = useState('general');
+  const [memberCategory, setMemberCategory] = useState('account');
   const [memberServerId, setMemberServerId] = useState('');
+  const [memberPageId, setMemberPageId] = useState('');
+  const [memberVerifySessionId, setMemberVerifySessionId] = useState('');
+  const [memberPluginServerId, setMemberPluginServerId] = useState('');
+  const [memberFileId, setMemberFileId] = useState('');
   const [memberPriority, setMemberPriority] = useState<TicketPriority>('normal');
   const [memberBody, setMemberBody] = useState('');
   const [memberSubmitting, setMemberSubmitting] = useState(false);
@@ -139,8 +145,12 @@ export function SupportRedesignPage() {
   const [guestName, setGuestName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
   const [guestSubject, setGuestSubject] = useState('');
-  const [guestCategory, setGuestCategory] = useState('general');
+  const [guestCategory, setGuestCategory] = useState('account');
   const [guestServerId, setGuestServerId] = useState('');
+  const [guestPageId, setGuestPageId] = useState('');
+  const [guestVerifySessionId, setGuestVerifySessionId] = useState('');
+  const [guestPluginServerId, setGuestPluginServerId] = useState('');
+  const [guestFileId, setGuestFileId] = useState('');
   const [guestBody, setGuestBody] = useState('');
   const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [guestCaptchaToken, setGuestCaptchaToken] = useState<string | null>(null);
@@ -242,6 +252,10 @@ export function SupportRedesignPage() {
     const queryBody = searchParams.get('body');
     const queryCategory = searchParams.get('category') ?? searchParams.get('type');
     const queryServerId = searchParams.get('serverId');
+    const queryPageId = searchParams.get('pageId');
+    const queryVerifySessionId = searchParams.get('verifySessionId');
+    const queryPluginServerId = searchParams.get('pluginServerId');
+    const queryFileId = searchParams.get('fileId');
     const normalizedCategory = CATEGORY_OPTIONS.some((item) => item.value === queryCategory)
       ? queryCategory
       : undefined;
@@ -262,6 +276,22 @@ export function SupportRedesignPage() {
       setMemberServerId(queryServerId);
       setGuestServerId(queryServerId);
     }
+    if (queryPageId) {
+      setMemberPageId(queryPageId);
+      setGuestPageId(queryPageId);
+    }
+    if (queryVerifySessionId) {
+      setMemberVerifySessionId(queryVerifySessionId);
+      setGuestVerifySessionId(queryVerifySessionId);
+    }
+    if (queryPluginServerId) {
+      setMemberPluginServerId(queryPluginServerId);
+      setGuestPluginServerId(queryPluginServerId);
+    }
+    if (queryFileId) {
+      setMemberFileId(queryFileId);
+      setGuestFileId(queryFileId);
+    }
   }, [searchParams]);
 
   useEffect(() => {
@@ -277,7 +307,16 @@ export function SupportRedesignPage() {
 
     const params = new URLSearchParams(searchParams.toString());
     let changed = false;
-    for (const key of ['subject', 'body', 'category', 'serverId']) {
+    for (const key of [
+      'subject',
+      'body',
+      'category',
+      'serverId',
+      'pageId',
+      'verifySessionId',
+      'pluginServerId',
+      'fileId',
+    ]) {
       if (params.has(key)) {
         params.delete(key);
         changed = true;
@@ -519,11 +558,19 @@ export function SupportRedesignPage() {
           category: memberCategory.trim() || undefined,
           priority: memberPriority,
           serverId: memberServerId.trim() || undefined,
+          pageId: memberPageId.trim() || undefined,
+          verifySessionId: memberVerifySessionId.trim() || undefined,
+          pluginServerId: memberPluginServerId.trim() || undefined,
+          fileId: memberFileId.trim() || undefined,
         });
 
         setMemberSubject('');
         setMemberBody('');
         setMemberServerId('');
+        setMemberPageId('');
+        setMemberVerifySessionId('');
+        setMemberPluginServerId('');
+        setMemberFileId('');
         setFormSuccess(`문의가 등록되었습니다. 문의 번호: ${created.ticket.id}`);
         setSelectedTicketId(created.ticket.id);
         setDetail(created);
@@ -541,9 +588,13 @@ export function SupportRedesignPage() {
       loadTickets,
       memberBody,
       memberCategory,
+      memberFileId,
+      memberPageId,
+      memberPluginServerId,
       memberPriority,
       memberServerId,
       memberSubject,
+      memberVerifySessionId,
     ],
   );
 
@@ -576,6 +627,10 @@ export function SupportRedesignPage() {
           category: guestCategory.trim() || undefined,
           priority: 'normal',
           serverId: guestServerId.trim() || undefined,
+          pageId: guestPageId.trim() || undefined,
+          verifySessionId: guestVerifySessionId.trim() || undefined,
+          pluginServerId: guestPluginServerId.trim() || undefined,
+          fileId: guestFileId.trim() || undefined,
           guestName: guestName.trim() || undefined,
           guestEmail: guestEmail.trim() || undefined,
           captchaToken: guestCaptchaToken ?? undefined,
@@ -586,6 +641,10 @@ export function SupportRedesignPage() {
         setGuestSubject('');
         setGuestBody('');
         setGuestServerId('');
+        setGuestPageId('');
+        setGuestVerifySessionId('');
+        setGuestPluginServerId('');
+        setGuestFileId('');
         setGuestCaptchaToken(null);
         setGuestCaptchaKey((current) => current + 1);
 
@@ -605,9 +664,13 @@ export function SupportRedesignPage() {
       guestCaptchaToken,
       guestCategory,
       guestEmail,
+      guestFileId,
       guestName,
+      guestPageId,
+      guestPluginServerId,
       guestServerId,
       guestSubject,
+      guestVerifySessionId,
       captchaRequired,
     ],
   );
@@ -889,6 +952,7 @@ export function SupportRedesignPage() {
                               {categoryLabel(selectedTicket.category)} ·{' '}
                               {formatDate(selectedTicket.createdAt)}
                             </p>
+                            <SupportContextBadges ticket={selectedTicket} />
                           </div>
                           <button
                             className="inline-flex items-center gap-2 rounded-md border border-[#34363A] px-3 py-2 text-xs text-[#D8D9DC] transition hover:border-[#13ec80]/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -1451,9 +1515,35 @@ function statusBadgeClass(status: SupportTicketStatus): string {
 
 function categoryLabel(value: string | null | undefined): string {
   if (!value) {
-    return '일반 문의';
+    return '계정 및 로그인';
   }
   return CATEGORY_OPTIONS.find((item) => item.value === value)?.label ?? value;
+}
+
+function SupportContextBadges({ ticket }: { readonly ticket: SupportTicket }) {
+  const entries = [
+    ['pageId', ticket.pageId],
+    ['verifySessionId', ticket.verifySessionId],
+    ['pluginServerId', ticket.pluginServerId],
+    ['fileId', ticket.fileId],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]));
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {entries.map(([label, value]) => (
+        <span
+          key={`${label}-${value}`}
+          className="rounded border border-[#34363A] bg-[#151619] px-2 py-1 text-[11px] text-[#A7A9AF]"
+        >
+          {label}: {value}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function displayInitial(value: string): string {

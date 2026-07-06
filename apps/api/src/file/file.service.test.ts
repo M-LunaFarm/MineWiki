@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { FilePermissionService } from './file-permission.service';
 import { FileService } from './file.service';
 
-function session(userId: string, isElevated = false) {
+function session(userId: string, isElevated = false, permissions: string[] = []) {
   return {
     sessionId: `session-${userId}`,
     userId,
-    isElevated
+    isElevated,
+    permissions,
+    groups: []
   };
 }
 
@@ -123,6 +125,12 @@ test('file service list hides private files from anonymous users', async () => {
 
   const elevated = await service.listFiles({ usageContext: 'wiki_editor', session: session('admin', true) });
   assert.equal(elevated.length, 2);
+
+  const fileAdmin = await service.listFiles({
+    usageContext: 'wiki_editor',
+    session: session('file-admin', false, ['file.admin'])
+  });
+  assert.equal(fileAdmin.length, 2);
 });
 
 test('file service requires owner before delete', async () => {

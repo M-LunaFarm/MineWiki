@@ -104,7 +104,11 @@ export class WikiAdminController {
   }
 
   private async assertAdmin(session: SessionPayload): Promise<{ id: bigint }> {
-    if (!session.isElevated) {
+    if (
+      !session.isElevated &&
+      session.permissions?.includes('wiki.admin') !== true &&
+      session.groups?.includes('admin') !== true
+    ) {
       throw new ForbiddenException('Wiki admin permission is required.');
     }
     return this.wikiProfiles.ensureWikiProfile(session.userId);

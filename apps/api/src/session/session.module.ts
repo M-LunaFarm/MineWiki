@@ -3,8 +3,10 @@ import { SessionService } from './session.service';
 import { SessionController } from './session.controller';
 import { SessionGuard } from './session.guard';
 import { OptionalSessionGuard } from './optional-session.guard';
+import { RoleModule } from '../roles/role.module';
 
 @Module({
+  imports: [RoleModule],
   providers: [SessionService, SessionGuard, OptionalSessionGuard],
   exports: [SessionService, SessionGuard, OptionalSessionGuard],
   controllers: [SessionController]

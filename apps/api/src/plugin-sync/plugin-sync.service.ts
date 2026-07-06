@@ -5,12 +5,20 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  Optional
 } from '@nestjs/common';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
-import { decryptAppSecret } from '../common/secret-codec';
+import { BusinessEventService } from '../events/business-event.service';
+import {
+  DiscordMinecraftLinkRepository,
+  GuildEventRepository,
+  GuildVerificationRepository,
+  PluginServerRepository
+} from '../verify/guild.repositories';
+import type { ResolvedPluginServer } from '../verify/guild.types';
 
 const PLUGIN_SYNC_SKEW_SECONDS = 300;
 const PLUGIN_SYNC_COOLDOWN_SECONDS = 30;
@@ -41,23 +49,29 @@ export interface PluginSyncSecurityStore {
   touchCooldown(serverId: string, cooldownSeconds: number, now: Date): Promise<number | null>;
 }
 
-type ResolvedPluginServer = {
-  readonly source: 'canonical' | 'legacy';
-  readonly pluginServerId: string;
-  readonly guildId: string;
-  readonly serverSecret: string;
-  readonly enabled: boolean;
-};
-
 @Injectable()
 export class PluginSyncService {
   private readonly securityStore: PluginSyncSecurityStore;
+  private readonly pluginServers: PluginServerRepository;
+  private readonly guildVerifications: GuildVerificationRepository;
+  private readonly discordMinecraftLinks: DiscordMinecraftLinkRepository;
+  private readonly guildEvents: GuildEventRepository;
 
   constructor(
     private readonly prisma: PrismaService,
-    securityStore?: PluginSyncSecurityStore
+    @Optional() securityStore?: PluginSyncSecurityStore,
+    @Optional() private readonly events?: BusinessEventService,
+    @Optional() pluginServers?: PluginServerRepository,
+    @Optional() guildVerifications?: GuildVerificationRepository,
+    @Optional() discordMinecraftLinks?: DiscordMinecraftLinkRepository,
+    @Optional() guildEvents?: GuildEventRepository
   ) {
     this.securityStore = securityStore ?? new PrismaPluginSyncSecurityStore(prisma);
+    this.pluginServers = pluginServers ?? new PluginServerRepository(prisma);
+    this.guildVerifications = guildVerifications ?? new GuildVerificationRepository(prisma);
+    this.discordMinecraftLinks =
+      discordMinecraftLinks ?? new DiscordMinecraftLinkRepository(prisma);
+    this.guildEvents = guildEvents ?? new GuildEventRepository(prisma);
   }
 
   async sync(request: PluginSyncRequest): Promise<PluginSyncResponse> {
@@ -111,15 +125,10 @@ export class PluginSyncService {
       );
     }
 
-    const verifications = await this.prisma.lunaGuildVerification.findMany({
-      where: { guildId: server.guildId, status: 'verified' },
-      orderBy: [{ verifiedAt: 'desc' }]
-    });
+    const verifications = await this.guildVerifications.listVerifiedByGuild(server.guildId);
     const uuids = Array.from(new Set(verifications.map((row) => row.minecraftUuid)));
     const links = uuids.length
-      ? await this.prisma.lunaDiscordAccountLink.findMany({
-          where: { minecraftUuid: { in: uuids } }
-        })
+      ? await this.discordMinecraftLinks.listByMinecraftUuids(uuids)
       : [];
     const ignByUuid = new Map(links.map((link) => [link.minecraftUuid, link.minecraftName]));
 
@@ -150,45 +159,11 @@ export class PluginSyncService {
   }
 
   private async resolvePluginServer(pluginServerId: string): Promise<ResolvedPluginServer | null> {
-    const canonical = await this.prisma.pluginServer.findUnique({
-      where: { pluginServerId }
-    });
-    if (canonical) {
-      return {
-        source: 'canonical',
-        pluginServerId: canonical.pluginServerId,
-        guildId: canonical.guildId,
-        serverSecret: decryptAppSecret(canonical.serverSecret) ?? canonical.serverSecret,
-        enabled: canonical.enabled
-      };
-    }
-    const legacy = await this.prisma.lunaGuildServer.findUnique({
-      where: { serverId: pluginServerId }
-    });
-    if (!legacy) {
-      return null;
-    }
-    return {
-      source: 'legacy',
-      pluginServerId: legacy.serverId,
-      guildId: legacy.guildId,
-      serverSecret: legacy.serverSecret,
-      enabled: legacy.enabled
-    };
+    return this.pluginServers.find(pluginServerId);
   }
 
   private async touchPluginServer(server: ResolvedPluginServer): Promise<void> {
-    if (server.source === 'canonical') {
-      await this.prisma.pluginServer.update({
-        where: { pluginServerId: server.pluginServerId },
-        data: { lastSeenAt: new Date() }
-      });
-      return;
-    }
-    await this.prisma.lunaGuildServer.update({
-      where: { serverId: server.pluginServerId },
-      data: { lastSeenAt: new Date() }
-    });
+    await this.pluginServers.touch(server);
   }
 
   private assertFreshTimestamp(timestamp: string): void {
@@ -213,20 +188,27 @@ export class PluginSyncService {
     request: PluginSyncRequest,
     extraPayload: Record<string, unknown> = {}
   ): Promise<void> {
-    await this.prisma.serverPluginSyncEvent.create({
-      data: {
-        serverId: null,
-        pluginServerId: serverId,
-        discordUserId: null,
-        minecraftUuid: AUDIT_MINECRAFT_UUID,
-        playerName: null,
-        action,
-        payload: JSON.parse(JSON.stringify({
-          timestamp: request.timestamp,
-          nonce: request.nonce,
-          payload: request.payload,
-          ...extraPayload
-        })) as Prisma.InputJsonValue
+    await this.guildEvents.recordPluginSyncAudit({
+      pluginServerId: serverId,
+      minecraftUuid: AUDIT_MINECRAFT_UUID,
+      action,
+      payload: {
+        timestamp: request.timestamp,
+        nonce: request.nonce,
+        payload: request.payload,
+        ...extraPayload
+      }
+    });
+    await this.events?.audit(`plugin.sync.${action}`, {
+      category: 'plugin.sync',
+      severity: action === 'accepted' ? 'info' : 'warning',
+      subjectType: 'plugin_server',
+      subjectId: serverId,
+      metadata: {
+        timestamp: request.timestamp,
+        nonce: request.nonce,
+        payload: request.payload,
+        ...extraPayload
       }
     });
   }

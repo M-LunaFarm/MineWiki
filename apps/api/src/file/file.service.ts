@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { promises as fs } from 'node:fs';
 import { PrismaService } from '../common/prisma.service';
+import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
 import { UploadService, type StoredImage } from '../upload/upload.service';
 import { decodeBase64 } from '../upload/upload.utils';
@@ -49,7 +50,8 @@ export class FileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly uploads: UploadService,
-    private readonly permissions: FilePermissionService
+    private readonly permissions: FilePermissionService,
+    @Optional() private readonly events?: BusinessEventService
   ) {}
 
   async createImage(accountId: string, request: FileImageUploadRequest): Promise<FileImageUploadResponse> {
@@ -95,6 +97,19 @@ export class FileService {
         visibility: normalizeVisibility(request.visibility)
       }
     });
+    await this.events?.audit('file.upload', {
+      category: 'file',
+      actorAccountId: accountId,
+      subjectType: 'file',
+      subjectId: created.id,
+      metadata: {
+        filename: created.filename,
+        mimeType: created.mimeType,
+        sizeBytes: created.sizeBytes,
+        usageContext: created.usageContext,
+        visibility: created.visibility
+      }
+    });
     return {
       ...toFileMetadata(created),
       url: stored.publicPath
@@ -122,7 +137,7 @@ export class FileService {
         usageContext: usageContext ?? undefined,
         OR: [
           { visibility: { in: ['public', 'unlisted'] } },
-          ...(input.session?.isElevated
+          ...(input.session?.isElevated || input.session?.permissions?.includes('file.admin')
             ? [{}]
             : input.session
               ? [{ ownerAccountId: input.session.userId }]
@@ -174,6 +189,17 @@ export class FileService {
     await this.prisma.uploadedFile.update({
       where: { id },
       data: { status: 'deleted' }
+    });
+    await this.events?.audit('file.delete', {
+      category: 'file',
+      actorAccountId: session.userId,
+      subjectType: 'file',
+      subjectId: id,
+      metadata: {
+        ownerAccountId: file.ownerAccountId,
+        usageContext: file.usageContext,
+        visibility: file.visibility
+      }
     });
     return { deleted: true };
   }

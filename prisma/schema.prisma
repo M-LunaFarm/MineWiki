@@ -116,9 +116,96 @@ model Account {
   assignedSupportTickets  SupportTicket[]          @relation("SupportTicketAssignee")
   supportMessages         SupportMessage[]         @relation("SupportMessageAuthor")
   claimMethods            ServerClaimMethod[]
+  accountRoles            AccountRole[]
 
   @@unique([provider, providerUserId])
   @@index([email])
+}
+
+model GlobalRole {
+  id          String   @id @default(uuid())
+  code        String   @unique @db.VarChar(64)
+  displayName String   @map("display_name") @db.VarChar(128)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  accountRoles    AccountRole[]
+  rolePermissions RolePermission[]
+
+  @@map("global_roles")
+}
+
+model AccountRole {
+  id        String   @id @default(uuid())
+  accountId String   @map("account_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  account Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  role    GlobalRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, roleId])
+  @@index([roleId])
+  @@map("account_roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique @db.VarChar(128)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  role       GlobalRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model AuditEvent {
+  id             String   @id @default(uuid()) @db.Char(36)
+  category       String   @db.VarChar(64)
+  action         String   @db.VarChar(128)
+  severity       String   @default("info") @db.VarChar(16)
+  actorAccountId String?  @map("actor_account_id")
+  actorProfileId BigInt?  @map("actor_profile_id")
+  subjectType    String?  @map("subject_type") @db.VarChar(64)
+  subjectId      String?  @map("subject_id") @db.VarChar(128)
+  requestId      String?  @map("request_id") @db.VarChar(64)
+  ipAddress      String?  @map("ip_address") @db.VarChar(64)
+  userAgent      String?  @map("user_agent") @db.VarChar(512)
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([category, createdAt])
+  @@index([action, createdAt])
+  @@index([actorAccountId, createdAt])
+  @@index([subjectType, subjectId, createdAt])
+  @@map("audit_events")
+}
+
+model SiteSetting {
+  key         String   @id @db.VarChar(128)
+  value       Json
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@map("site_settings")
 }
 
 model AccountLink {
@@ -288,15 +375,16 @@ model Server {
   createdAt             DateTime          @default(now())
   updatedAt             DateTime          @updatedAt
 
-  ownerAccount    Account?             @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
-  stats           ServerStats?
-  pingSamples     ServerPingSample[]
-  votes           Vote[]
-  reviews         ServerReview[]
-  claimMethods    ServerClaimMethod[]
-  votifierTargets VotifierTarget[]
-  rankSnapshots   ServerRankSnapshot[]
-  supportTickets  SupportTicket[]
+  ownerAccount         Account?              @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
+  stats                ServerStats?
+  pingSamples          ServerPingSample[]
+  votes                Vote[]
+  voteDispatchAttempts VoteDispatchAttempt[]
+  reviews              ServerReview[]
+  claimMethods         ServerClaimMethod[]
+  votifierTargets      VotifierTarget[]
+  rankSnapshots        ServerRankSnapshot[]
+  supportTickets       SupportTicket[]
 
   @@index([ownerAccountId])
   @@index([wikiSpaceId])
@@ -356,14 +444,39 @@ model Vote {
   votedAt            DateTime
   createdAt          DateTime @default(now())
 
-  server  Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  server           Server                @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  account          Account?              @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  dispatchAttempts VoteDispatchAttempt[]
 
   @@index([serverId, votedAt])
   @@index([serverId, accountId])
   @@index([serverId, minecraftUuid])
   @@index([serverId, usernameNormalized])
   @@index([serverId, ipAddress])
+}
+
+model VoteDispatchAttempt {
+  id            String           @id @default(uuid()) @db.Char(36)
+  voteId        String           @map("vote_id")
+  serverId      String           @map("server_id")
+  targetId      String?          @map("target_id")
+  protocol      VotifierProtocol
+  status        String           @default("queued") @db.VarChar(32)
+  attempts      Int              @default(0)
+  error         String?          @db.VarChar(512)
+  lastAttemptAt DateTime?        @map("last_attempt_at") @db.DateTime(3)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.DateTime(3)
+
+  vote   Vote            @relation(fields: [voteId], references: [id], onDelete: Cascade)
+  server Server          @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  target VotifierTarget? @relation(fields: [targetId], references: [id], onDelete: SetNull)
+
+  @@index([voteId])
+  @@index([serverId, createdAt])
+  @@index([serverId, status, createdAt])
+  @@index([targetId])
+  @@map("vote_dispatch_attempts")
 }
 
 model ServerReview {
@@ -451,7 +564,8 @@ model VotifierTarget {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
-  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  server           Server                @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  dispatchAttempts VoteDispatchAttempt[]
 
   @@index([serverId])
 }
@@ -486,6 +600,10 @@ model SupportTicket {
   status             SupportTicketStatus   @default(open)
   priority           SupportTicketPriority @default(normal)
   category           String?
+  pageId             String?
+  verifySessionId    String?
+  pluginServerId     String?
+  fileId             String?
   lastMessageAt      DateTime              @default(now())
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
@@ -499,6 +617,10 @@ model SupportTicket {
   @@index([assigneeAccountId, status])
   @@index([status, lastMessageAt])
   @@index([serverId])
+  @@index([pageId])
+  @@index([verifySessionId])
+  @@index([pluginServerId])
+  @@index([fileId])
 }
 
 model SupportMessage {

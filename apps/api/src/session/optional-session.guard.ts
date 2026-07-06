@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { extractClientIp } from '../common/http/client-ip';
 import { SessionService } from './session.service';
+import { assertCsrfToken } from './csrf';
 
 function parseCookie(header: string | undefined, name: string): string | undefined {
   if (!header) {
@@ -33,6 +34,7 @@ export class OptionalSessionGuard implements CanActivate {
       extractClientIp(request) ?? null,
       request.headers['user-agent'] ?? null
     );
+    assertCsrfToken(request, session.token);
     request.sessionPayload = this.sessions.toPayload(session);
     request.sessionToken = session.token;
     return true;

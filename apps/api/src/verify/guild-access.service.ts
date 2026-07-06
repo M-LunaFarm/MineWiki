@@ -1,10 +1,10 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
 import type { SessionPayload } from '../session/session.service';
-import type { LunaGuildResponse } from './verify.service';
+import { GuildSettingsRepository, toGuildResponse } from './guild.repositories';
+import type { GuildSummaryResponse } from './guild.types';
 
 const DISCORD_MANAGE_GUILD = 0x20n;
 const TOKEN_REFRESH_SKEW_MS = 60_000;
@@ -28,17 +28,19 @@ type OAuthCredentialRecord = {
 
 @Injectable()
 export class GuildAccessService {
+  private readonly guildSettings: GuildSettingsRepository;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-  ) {}
+    @Optional() guildSettings?: GuildSettingsRepository
+  ) {
+    this.guildSettings = guildSettings ?? new GuildSettingsRepository(prisma);
+  }
 
-  async listAccessibleGuilds(session: SessionPayload): Promise<LunaGuildResponse[]> {
-    if (session.isElevated) {
-      const guilds = await this.prisma.lunaGuild.findMany({
-        orderBy: [{ updatedAt: 'desc' }],
-        take: 100,
-      });
+  async listAccessibleGuilds(session: SessionPayload): Promise<GuildSummaryResponse[]> {
+    if (this.hasGuildAdmin(session)) {
+      const guilds = await this.guildSettings.list();
       return guilds.map(toGuildResponse);
     }
 
@@ -46,11 +48,7 @@ export class GuildAccessService {
     if (accessibleIds.size === 0) {
       return [];
     }
-    const guilds = await this.prisma.lunaGuild.findMany({
-      where: { guildId: { in: [...accessibleIds] } },
-      orderBy: [{ updatedAt: 'desc' }],
-      take: 100,
-    });
+    const guilds = await this.guildSettings.listByIds([...accessibleIds]);
     return guilds.map(toGuildResponse);
   }
 
@@ -59,13 +57,17 @@ export class GuildAccessService {
   }
 
   async assertCanManageGuild(session: SessionPayload, guildId: string): Promise<void> {
-    if (session.isElevated) {
+    if (this.hasGuildAdmin(session)) {
       return;
     }
     const accessibleIds = await this.resolveManageableGuildIds(session.userId);
     if (!accessibleIds.has(guildId)) {
       throw new ForbiddenException('Discord guild management permission is required.');
     }
+  }
+
+  private hasGuildAdmin(session: SessionPayload): boolean {
+    return session.isElevated || session.permissions?.includes('guild.admin') === true;
   }
 
   private async resolveManageableGuildIds(accountId: string): Promise<Set<string>> {
@@ -214,30 +216,4 @@ function canManageDiscordGuild(guild: DiscordGuild): boolean {
   } catch {
     return false;
   }
-}
-
-function toGuildResponse(guild: {
-  guildId: string;
-  verifiedRoleId: string | null;
-  logChannelId: string | null;
-  nicknameFormat: string | null;
-  botMessageTemplate: string | null;
-  botMessagePayload: Prisma.JsonValue | null;
-  verifyReplyPayload: Prisma.JsonValue | null;
-  policyJson: Prisma.JsonValue | null;
-  createdAt: Date;
-  updatedAt: Date;
-}): LunaGuildResponse {
-  return {
-    guildId: guild.guildId,
-    verifiedRoleId: guild.verifiedRoleId,
-    logChannelId: guild.logChannelId,
-    nicknameFormat: guild.nicknameFormat,
-    botMessageTemplate: guild.botMessageTemplate,
-    botMessagePayload: guild.botMessagePayload,
-    verifyReplyPayload: guild.verifyReplyPayload,
-    policyJson: guild.policyJson,
-    createdAt: guild.createdAt.toISOString(),
-    updatedAt: guild.updatedAt.toISOString(),
-  };
 }

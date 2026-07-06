@@ -6,11 +6,33 @@ import { EventsModule } from '../events/events.module';
 import { DiscordVerifyController } from './discord-verify.controller';
 import { GuildController } from './guild.controller';
 import { GuildAccessService } from './guild-access.service';
+import {
+  DiscordMinecraftLinkRepository,
+  GuildChannelSettingsRepository,
+  GuildEventRepository,
+  GuildSettingsRepository,
+  GuildVerificationRepository
+} from './guild.repositories';
 
 @Module({
   imports: [SessionModule, EventsModule],
   controllers: [VerifyController, DiscordVerifyController, GuildController],
-  providers: [VerifyService, GuildAccessService],
-  exports: [VerifyService]
+  providers: [
+    VerifyService,
+    GuildAccessService,
+    GuildSettingsRepository,
+    GuildChannelSettingsRepository,
+    DiscordMinecraftLinkRepository,
+    GuildVerificationRepository,
+    GuildEventRepository
+  ],
+  exports: [
+    VerifyService,
+    GuildSettingsRepository,
+    GuildChannelSettingsRepository,
+    DiscordMinecraftLinkRepository,
+    GuildVerificationRepository,
+    GuildEventRepository
+  ]
 })
 export class VerifyModule {}

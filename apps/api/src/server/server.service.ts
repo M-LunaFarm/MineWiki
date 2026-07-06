@@ -27,6 +27,7 @@ import { FirestoreTelemetryService } from '../telemetry/firestore-telemetry.serv
 import type { ClaimMethod } from '../claim/claim.types';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
 import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
+import { BusinessEventService } from '../events/business-event.service';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
@@ -48,6 +49,7 @@ export class ServerService {
     private readonly prisma: PrismaService,
     private readonly wikiProfiles: WikiProfileService,
     @Optional() private readonly firestoreTelemetry?: FirestoreTelemetryService,
+    @Optional() private readonly events?: BusinessEventService,
   ) {
     this.telemetry = firestoreTelemetry ?? {
       record: async () => {},
@@ -541,7 +543,7 @@ export class ServerService {
       if (server.wikiSpaceId && server.wikiPageId && server.wikiSlug) {
         return toServerWikiLinkResponse(server, existing);
       }
-      return this.linkServerWiki(server.id, { serverWikiId: existing.id.toString() });
+      return this.linkServerWiki(server.id, { serverWikiId: existing.id.toString() }, accountId);
     }
 
     const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
@@ -677,12 +679,25 @@ export class ServerService {
       return { server: updatedServer, serverWiki };
     });
 
-    return toServerWikiLinkResponse(linked.server, linked.serverWiki);
+    const response = toServerWikiLinkResponse(linked.server, linked.serverWiki);
+    await this.events?.audit('server.wiki.create', {
+      category: 'server',
+      actorAccountId: accountId,
+      subjectType: 'server',
+      subjectId: server.id,
+      metadata: {
+        wikiSpaceId: response.wikiSpaceId,
+        wikiPageId: response.wikiPageId,
+        wikiSlug: response.wikiSlug
+      }
+    });
+    return response;
   }
 
   async linkServerWiki(
     serverId: string,
     input: ServerWikiLinkRequest,
+    accountId?: string | null,
   ): Promise<ServerWikiLinkResponse> {
     const server = await this.ensureExists(serverId);
     const selector = normalizeServerWikiSelector(input);
@@ -728,7 +743,20 @@ export class ServerService {
       return { server: updatedServer, serverWiki: updatedServerWiki };
     });
 
-    return toServerWikiLinkResponse(linked.server, linked.serverWiki);
+    const response = toServerWikiLinkResponse(linked.server, linked.serverWiki);
+    await this.events?.audit('server.wiki.link', {
+      category: 'server',
+      actorAccountId: accountId ?? null,
+      subjectType: 'server',
+      subjectId: server.id,
+      metadata: {
+        serverWikiId: serverWiki.id,
+        wikiSpaceId: response.wikiSpaceId,
+        wikiPageId: response.wikiPageId,
+        wikiSlug: response.wikiSlug
+      }
+    });
+    return response;
   }
 
   async incrementReviewCount(id: string): Promise<void> {
@@ -1371,8 +1399,12 @@ async function resolveLiveProbeTarget(input: {
   } as const;
   try {
     const target = await validateOutboundTarget(input.host, input.port, baseOptions);
+    const address = target.addresses.find((entry) => entry.family === 4) ?? target.addresses[0];
+    if (!address) {
+      throw new UnsafeEndpointError('resolve_failed', 'Server stats live probe: no validated address');
+    }
     return {
-      host: target.host,
+      host: address.address,
       port: target.port,
     };
   } catch (error) {
@@ -1388,8 +1420,12 @@ async function resolveLiveProbeTarget(input: {
             ...baseOptions,
             label: 'Server stats live probe (SRV)',
           });
+          const address = validated.addresses.find((entry) => entry.family === 4) ?? validated.addresses[0];
+          if (!address) {
+            throw new UnsafeEndpointError('resolve_failed', 'Server stats live probe (SRV): no validated address');
+          }
           return {
-            host: validated.host,
+            host: address.address,
             port: validated.port,
           };
         } catch (srvError) {

@@ -6,27 +6,35 @@ import { usePathname } from 'next/navigation';
 import { Menu, Search, X } from 'lucide-react';
 import { AccountDropdown } from '../account/account-dropdown';
 import { useAuth } from '../providers/auth-context';
+import { getApiBaseUrl } from '../../lib/runtime-config';
 
 type NavigationLink = {
   readonly href: string;
   readonly label: string;
-  readonly key: 'servers' | 'register' | 'dashboard' | 'guilds' | 'support' | 'policies';
+  readonly key: 'wiki' | 'servers' | 'recent' | 'search' | 'guilds' | 'support' | 'account' | 'admin';
+  readonly requiresAccount?: boolean;
+  readonly requiresAdmin?: boolean;
 };
 
 const NAV_LINKS: readonly NavigationLink[] = [
+  { href: '/wiki', label: '위키', key: 'wiki' },
   { href: '/servers', label: '서버 목록', key: 'servers' },
-  { href: '/servers/register', label: '등록하기', key: 'register' },
-  { href: '/dashboard', label: '대시보드', key: 'dashboard' },
-  { href: '/guilds', label: 'Discord', key: 'guilds' },
-  { href: '/support', label: '고객센터', key: 'support' },
-  { href: '/policies', label: '운영 정책', key: 'policies' },
+  { href: '/recent', label: '최근 변경', key: 'recent' },
+  { href: '/search', label: '검색', key: 'search' },
+  { href: '/guilds', label: '길드', key: 'guilds' },
+  { href: '/support', label: '지원', key: 'support' },
+  { href: '/me', label: '계정', key: 'account', requiresAccount: true },
+  { href: '/admin/support', label: '관리자', key: 'admin', requiresAdmin: true },
 ];
+
+const API_BASE_URL = getApiBaseUrl();
 
 export function SiteHeader() {
   const pathname = usePathname();
   const { account, loading } = useAuth();
   const [currentSearch, setCurrentSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [hasAdminAccess, setHasAdminAccess] = useState(false);
 
   useEffect(() => {
     const syncSearchFromLocation = () => {
@@ -74,6 +82,45 @@ export function SiteHeader() {
     setMobileOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!account) {
+      setHasAdminAccess(false);
+      return;
+    }
+
+    const checkAdminAccess = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/v1/admin/audit?limit=1`, {
+          credentials: 'include',
+        });
+        if (!cancelled) {
+          setHasAdminAccess(response.ok);
+        }
+      } catch {
+        if (!cancelled) {
+          setHasAdminAccess(false);
+        }
+      }
+    };
+
+    void checkAdminAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [account]);
+
+  const visibleLinks = NAV_LINKS.filter((link) => {
+    if (link.requiresAccount && !account) {
+      return false;
+    }
+    if (link.requiresAdmin && !hasAdminAccess) {
+      return false;
+    }
+    return true;
+  });
+
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#07090c]/80 backdrop-blur-xl">
       <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
@@ -92,8 +139,8 @@ export function SiteHeader() {
                 MineWiki<span className="text-[#14c794]">.kr</span>
               </span>
             </Link>
-            <nav className="hidden items-center gap-0.5 text-sm font-medium md:flex">
-              {NAV_LINKS.map((link) => {
+            <nav className="hidden items-center gap-0.5 text-sm font-medium lg:flex">
+              {visibleLinks.map((link) => {
                 const active = isActive(pathname, link.key);
                 return (
                   <Link
@@ -116,7 +163,7 @@ export function SiteHeader() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="hidden border-l border-white/[0.08] pl-4 text-xs text-slate-500 xl:block">
+            <div className="hidden border-l border-white/[0.08] pl-4 text-xs text-slate-500 2xl:block">
               {loading
                 ? '세션 확인 중'
                 : account
@@ -124,7 +171,7 @@ export function SiteHeader() {
                   : '비로그인'}
             </div>
 
-            <form action="/search" className="relative hidden lg:block">
+            <form action="/search" className="relative hidden xl:block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input
                 name="q"
@@ -140,7 +187,7 @@ export function SiteHeader() {
             <AccountDropdown />
             <button
               type="button"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-300 transition hover:border-white/20 hover:text-white md:hidden"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-300 transition hover:border-white/20 hover:text-white lg:hidden"
               aria-label={mobileOpen ? '메뉴 닫기' : '메뉴 열기'}
               onClick={() => setMobileOpen((open) => !open)}
             >
@@ -150,7 +197,7 @@ export function SiteHeader() {
         </div>
 
         {mobileOpen ? (
-          <div className="border-t border-white/[0.06] py-3 md:hidden">
+          <div className="border-t border-white/[0.06] py-3 lg:hidden">
             <form action="/search" className="relative mb-3">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input
@@ -164,7 +211,7 @@ export function SiteHeader() {
               />
             </form>
             <nav className="grid gap-0.5">
-              {NAV_LINKS.map((link) => {
+              {visibleLinks.map((link) => {
                 const active = isActive(pathname, link.key);
                 return (
                   <Link
@@ -192,19 +239,27 @@ function isActive(pathname: string | null, key: NavigationLink['key']): boolean 
   if (!pathname) {
     return false;
   }
-  const isRegisterRoute =
-    pathname === '/servers/register' || pathname.startsWith('/servers/register/');
-  if (key === 'servers') {
-    return pathname === '/servers' || (pathname.startsWith('/servers/') && !isRegisterRoute);
-  }
-  if (key === 'register') {
-    return isRegisterRoute;
-  }
-  if (key === 'dashboard') {
+  if (key === 'wiki') {
     return (
-      pathname === '/dashboard' ||
-      (pathname.startsWith('/dashboard/') && pathname !== '/dashboard/support')
+      pathname === '/wiki' ||
+      pathname.startsWith('/wiki/') ||
+      pathname.startsWith('/server/') ||
+      pathname.startsWith('/mod/') ||
+      pathname.startsWith('/modpack/') ||
+      pathname.startsWith('/project/') ||
+      pathname.startsWith('/file/') ||
+      pathname.startsWith('/dev/') ||
+      pathname.startsWith('/help/')
     );
+  }
+  if (key === 'servers') {
+    return pathname === '/servers' || pathname.startsWith('/servers/');
+  }
+  if (key === 'recent') {
+    return pathname === '/recent';
+  }
+  if (key === 'search') {
+    return pathname === '/search';
   }
   if (key === 'guilds') {
     return pathname === '/guilds' || pathname.startsWith('/guilds/');
@@ -216,7 +271,10 @@ function isActive(pathname: string | null, key: NavigationLink['key']): boolean 
       pathname === '/dashboard/support'
     );
   }
-  return pathname === '/policies' || pathname.startsWith('/policies/');
+  if (key === 'account') {
+    return pathname === '/me';
+  }
+  return pathname === '/admin' || pathname.startsWith('/admin/');
 }
 
 function formatProviderLabel(provider: 'email' | 'discord' | 'naver'): string {

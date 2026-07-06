@@ -1,0 +1,118 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { VoteService } from './vote.service';
+
+const serverId = '8d5d43eb-5e53-4ce9-90a0-dfd8fbfa9b6b';
+const voteId = '6ebd0b54-5864-46c2-a835-942937b0f6ec';
+const targetId = 'f8be13d6-b155-44c9-ad90-2f7efa96b7d7';
+const dispatchAttemptId = '6396003e-0956-4a2e-bf2b-a2ad83d7102f';
+
+test('vote accepted creates dispatch attempts and queues vote id', async () => {
+  const queuedJobs: unknown[] = [];
+  const createdAttempts: unknown[] = [];
+  const service = new VoteService(
+    {
+      ensureExists: async () => ({
+        id: serverId,
+        voteRequiresOwnership: false,
+        votesMonthly: 10
+      })
+    } as never,
+    {
+      enqueue: async (job: unknown) => {
+        queuedJobs.push(job);
+      }
+    } as never,
+    {
+      isCaptchaRequired: () => false
+    } as never,
+    {
+      track: async () => undefined
+    } as never,
+    {
+      getLastVoteForUsernameGlobal: async () => null,
+      getLastVoteForAccountGlobal: async () => null,
+      getLastVoteForMinecraftGlobal: async () => null,
+      getLastVoteForIpGlobal: async () => null,
+      getDailyCount: async () => 1
+    } as never,
+    createPrismaMock(createdAttempts) as never
+  );
+
+  const result = await service.submitVote(
+    serverId,
+    {
+      username: 'DemoPlayer',
+      agreeTerms: true,
+      agreePrivacy: true
+    },
+    { ipAddress: '192.0.2.10' }
+  );
+
+  assert.equal(result.acknowledged, true);
+  assert.equal(createdAttempts.length, 1);
+  assert.deepEqual(createdAttempts[0], {
+    voteId,
+    serverId,
+    targetId,
+    protocol: 'v2',
+    status: 'queued'
+  });
+  assert.equal(queuedJobs.length, 1);
+  assert.deepEqual(queuedJobs[0], {
+    voteId,
+    serverId,
+    username: 'DemoPlayer',
+    ipAddress: '192.0.2.10',
+    votedAt: (queuedJobs[0] as { votedAt: string }).votedAt,
+    targets: [
+      {
+        targetId,
+        dispatchAttemptId,
+        protocol: 'v2',
+        host: 'vote.example.com',
+        port: 8192,
+        token: 'secret-token',
+        publicKey: undefined
+      }
+    ]
+  });
+});
+
+function createPrismaMock(createdAttempts: unknown[]) {
+  const tx = {
+    vote: {
+      create: async () => ({ id: voteId })
+    },
+    voteDispatchAttempt: {
+      create: async (args: { data: unknown }) => {
+        createdAttempts.push(args.data);
+        return { id: dispatchAttemptId };
+      }
+    },
+    server: {
+      update: async () => ({})
+    },
+    serverStats: {
+      upsert: async () => ({})
+    }
+  };
+  return {
+    votifierTarget: {
+      findMany: async () => [
+        {
+          id: targetId,
+          protocol: 'v2',
+          host: 'vote.example.com',
+          port: 8192,
+          token: 'secret-token',
+          publicKey: null
+        }
+      ]
+    },
+    voteDispatchAttempt: {
+      updateMany: async () => ({ count: 0 })
+    },
+    $transaction: async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx)
+  };
+}

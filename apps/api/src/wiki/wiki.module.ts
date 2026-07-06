@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { EventsModule } from '../events/events.module';
 import { SessionModule } from '../session/session.module';
 import { WikiAdminController } from './wiki-admin.controller';
 import { WikiAdminService } from './wiki-admin.service';
@@ -10,7 +11,7 @@ import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
 
 @Module({
-  imports: [SessionModule],
+  imports: [SessionModule, EventsModule],
   controllers: [WikiController, WikiAdminController],
   providers: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiReadService, WikiEditService],
   exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiReadService, WikiEditService]

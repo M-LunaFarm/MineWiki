@@ -9,14 +9,15 @@ import {
   UnauthorizedException,
   UseGuards
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import {
-  type LunaGuildDetailResponse,
-  type LunaGuildResponse,
-  type LunaGuildSettingsRequest,
-  VerifyService
-} from './verify.service';
+import { VerifyService } from './verify.service';
+import type {
+  GuildDetailResponse,
+  GuildSettingsRequest,
+  GuildSummaryResponse
+} from './guild.types';
 import { GuildAccessService } from './guild-access.service';
 import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
@@ -46,7 +47,7 @@ export class GuildController {
   list(
     @Headers('authorization') authorization: string | undefined,
     @Req() request: FastifyRequest
-  ): Promise<LunaGuildResponse[]> {
+  ): Promise<GuildSummaryResponse[]> {
     if (this.verifyService.isInternalBotToken(authorization)) {
       return this.verifyService.listGuilds();
     }
@@ -55,7 +56,7 @@ export class GuildController {
 
   @UseGuards(SessionGuard)
   @Get('me')
-  listMine(@CurrentSession() session: SessionPayload): Promise<LunaGuildResponse[]> {
+  listMine(@CurrentSession() session: SessionPayload): Promise<GuildSummaryResponse[]> {
     return this.guildAccess.listAccessibleGuilds(session);
   }
 
@@ -65,7 +66,7 @@ export class GuildController {
     @Headers('authorization') authorization: string | undefined,
     @Param('guildId') guildId: string,
     @Req() request: FastifyRequest
-  ): Promise<LunaGuildDetailResponse> {
+  ): Promise<GuildDetailResponse> {
     if (!this.verifyService.isInternalBotToken(authorization)) {
       await this.guildAccess.assertCanViewGuild(requireSession(request), guildId);
     }
@@ -74,6 +75,7 @@ export class GuildController {
 
   @UseGuards(OptionalSessionGuard)
   @Patch(':guildId/settings')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async updateSettings(
     @Headers('authorization') authorization: string | undefined,
     @Param('guildId') guildId: string,
@@ -83,7 +85,7 @@ export class GuildController {
     if (!this.verifyService.isInternalBotToken(authorization)) {
       await this.guildAccess.assertCanManageGuild(requireSession(request), guildId);
     }
-    const payload = guildSettingsSchema.parse(body) as LunaGuildSettingsRequest;
+    const payload = guildSettingsSchema.parse(body) as GuildSettingsRequest;
     return this.verifyService.updateGuildSettings(guildId, payload);
   }
 }

@@ -1,4 +1,5 @@
 import { normalizeApiBaseUrl } from './runtime-config';
+import { csrfHeaders } from './csrf';
 
 const baseUrl = normalizeApiBaseUrl();
 
@@ -271,6 +272,7 @@ async function fetchWikiAdminJson<T>(path: string, init?: RequestInit): Promise<
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(init?.method && init.method !== 'GET' ? await csrfHeaders() : {}),
       ...init?.headers
     }
   });
@@ -285,7 +287,7 @@ export async function previewWikiMarkup(contentRaw: string): Promise<{ html: str
   const response = await fetch(`${baseUrl}/v1/wiki/preview`, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify({ contentRaw })
   });
   if (!response.ok) {
@@ -307,7 +309,7 @@ export async function saveWikiPage(input: {
   const response = await fetch(`${baseUrl}/v1/wiki/pages${input.pageId ? `/${input.pageId}` : ''}`, {
     method: input.pageId ? 'PATCH' : 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify({
       namespace: input.namespace,
       title: input.title,
@@ -331,7 +333,7 @@ export async function uploadWikiImage(input: {
   const response = await fetch(`${baseUrl}/v1/files/images`, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify({
       data: input.data,
       filename: input.filename,

@@ -1,8 +1,9 @@
-﻿import { Injectable, UnauthorizedException } from '@nestjs/common';
+﻿import { Injectable, Optional, UnauthorizedException } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { serialize } from 'cookie';
 import { DEFAULT_SESSION_TTL_SECONDS, MINEWIKI_SESSION_COOKIE } from '@minewiki/auth';
 import { PrismaService } from '../common/prisma.service';
+import { RoleService } from '../roles/role.service';
 
 interface SessionRecord {
   readonly sessionId: string;
@@ -12,6 +13,8 @@ interface SessionRecord {
   readonly token: string;
   tokenVersion: number;
   isElevated: boolean;
+  permissions: string[];
+  groups: string[];
   ipAddress: string | null;
   userAgent: string | null;
   lastActiveAt: Date;
@@ -35,6 +38,8 @@ export interface SessionPayload {
   readonly sessionId: string;
   readonly userId: string;
   readonly isElevated: boolean;
+  readonly permissions?: readonly string[];
+  readonly groups?: readonly string[];
 }
 
 export interface SessionSummary {
@@ -50,7 +55,10 @@ export interface SessionSummary {
 
 @Injectable()
 export class SessionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly roles?: RoleService
+  ) {}
 
   async issueSession(options: IssueSessionOptions): Promise<RotatedSession> {
     const token = this.generateToken();
@@ -85,6 +93,8 @@ export class SessionService {
         token,
         tokenVersion: 1,
         isElevated: Boolean(options.elevated),
+        permissions: [],
+        groups: [],
         ipAddress: options.ipAddress ?? null,
         userAgent: options.userAgent ?? null,
         lastActiveAt: issuedAt
@@ -128,6 +138,8 @@ export class SessionService {
         token: updated.token,
         tokenVersion: updated.tokenVersion,
         isElevated: updated.isElevated,
+        permissions: [],
+        groups: [],
         ipAddress: updated.ipAddress,
         userAgent: updated.userAgent,
         lastActiveAt: updated.lastActiveAt
@@ -172,6 +184,7 @@ export class SessionService {
       await this.revokeSession(sessionId);
       return undefined;
     }
+    const access = await this.roles?.getAccountAccess(record.accountId).catch(() => undefined);
     return {
       sessionId: record.id,
       userId: record.accountId,
@@ -180,6 +193,8 @@ export class SessionService {
       token: record.token,
       tokenVersion: record.tokenVersion,
       isElevated: record.isElevated,
+      permissions: access?.permissions ?? [],
+      groups: access?.roles ?? [],
       ipAddress: record.ipAddress,
       userAgent: record.userAgent,
       lastActiveAt: record.lastActiveAt
@@ -203,7 +218,9 @@ export class SessionService {
     return {
       sessionId: record.sessionId,
       userId: record.userId,
-      isElevated: record.isElevated
+      isElevated: record.isElevated,
+      permissions: record.permissions,
+      groups: record.groups
     };
   }
 

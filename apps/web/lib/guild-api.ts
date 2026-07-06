@@ -87,6 +87,7 @@ export async function updateGuildSettings(
       method: 'PATCH',
       headers: {
         ...(await sessionHeaders()),
+        ...(await csrfHeader()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -122,4 +123,14 @@ async function sessionHeaders(): Promise<{ cookie: string }> {
     throw new Error('로그인이 필요합니다.');
   }
   return { cookie: cookieHeader };
+}
+
+async function csrfHeader(): Promise<Record<string, string>> {
+  const session = await sessionHeaders();
+  const response = await fetch(`${API_BASE}/v1/auth/csrf`, {
+    headers: session,
+    cache: 'no-store'
+  });
+  const body = await response.json().catch(() => ({}));
+  return typeof body.csrfToken === 'string' ? { 'x-csrf-token': body.csrfToken } : {};
 }

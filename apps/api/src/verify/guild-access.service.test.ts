@@ -36,6 +36,40 @@ test('elevated session can list all configured guilds', async () => {
   assert.equal(guilds[0].guildId, 'guild-1');
 });
 
+test('guild admin permission can list all configured guilds', async () => {
+  const prisma = {
+    lunaGuild: {
+      async findMany() {
+        return [
+          {
+            guildId: 'guild-1',
+            verifiedRoleId: null,
+            logChannelId: null,
+            nicknameFormat: null,
+            botMessageTemplate: null,
+            botMessagePayload: null,
+            verifyReplyPayload: null,
+            policyJson: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+          },
+        ];
+      },
+    },
+  };
+  const service = new GuildAccessService(prisma as never, config() as never);
+  const guilds = await service.listAccessibleGuilds({
+    sessionId: 'session-1',
+    userId: 'account-1',
+    isElevated: false,
+    permissions: ['guild.admin'],
+    groups: [],
+  });
+
+  assert.equal(guilds.length, 1);
+  assert.equal(guilds[0].guildId, 'guild-1');
+});
+
 test('discord oauth guild permission allows manage guild access only', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () =>
