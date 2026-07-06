@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   Res,
   StreamableFile,
@@ -32,6 +33,22 @@ export class FileController {
     @Body() body: { data?: string; filename?: string; usageContext?: string; visibility?: string }
   ): Promise<FileImageUploadResponse> {
     return this.files.createImage(session.userId, body);
+  }
+
+  @Get()
+  @UseGuards(OptionalSessionGuard)
+  listFiles(
+    @Req() request: FastifyRequest,
+    @Query('search') search?: string,
+    @Query('usageContext') usageContext?: string,
+    @Query('limit') limit?: string
+  ): Promise<FileMetadataResponse[]> {
+    return this.files.listFiles({
+      session: request.sessionPayload ?? null,
+      search,
+      usageContext,
+      limit
+    });
   }
 
   @Get(':id')

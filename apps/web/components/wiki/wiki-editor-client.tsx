@@ -2,14 +2,16 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Eye, ImagePlus, Loader2, Save } from 'lucide-react';
+import { AlertTriangle, Eye, FileImage, ImagePlus, Loader2, Save } from 'lucide-react';
 import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
 import {
   fetchWikiRevision,
+  listWikiFiles,
   previewWikiMarkup,
   saveWikiPage,
   uploadWikiImage,
+  type UploadedFileMetadata,
   type WikiPageResponse
 } from '../../lib/wiki-api';
 
@@ -31,6 +33,10 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [feedback, setFeedback] = useState<string | null>(null);
   const [blockingErrors, setBlockingErrors] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [filePickerOpen, setFilePickerOpen] = useState(false);
+  const [fileSearch, setFileSearch] = useState('');
+  const [wikiFiles, setWikiFiles] = useState<UploadedFileMetadata[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
   const [loadingRevision, setLoadingRevision] = useState(Boolean(page));
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
@@ -118,6 +124,26 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     });
   }
 
+  async function loadWikiFiles(search = fileSearch) {
+    setLoadingFiles(true);
+    setFeedback(null);
+    try {
+      const files = await listWikiFiles({ search, limit: 40 });
+      setWikiFiles(files);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : '파일 목록을 불러오지 못했습니다.');
+    } finally {
+      setLoadingFiles(false);
+    }
+  }
+
+  function insertFileMarkup(filename: string, caption?: string | null) {
+    const cleanCaption = caption?.trim() || filename;
+    setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${filename}|섬네일|${cleanCaption}]]\n`);
+    setFilePickerOpen(false);
+    setBlockingErrors([]);
+  }
+
   async function handleImageSelect(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -134,7 +160,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       const data = await readFileAsDataUrl(file);
       const uploaded = await uploadWikiImage({ data, filename: file.name });
       const alt = normalizeAltText(file.name);
-      setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${uploaded.filename}|${alt}]]\n`);
+      setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${uploaded.filename}|섬네일|${alt}]]\n`);
+      setBlockingErrors([]);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : '이미지 업로드 중 오류가 발생했습니다.');
     } finally {
@@ -246,7 +273,64 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
               className="hidden"
               onChange={(event) => void handleImageSelect(event)}
             />
+            <button
+              type="button"
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => {
+                const nextOpen = !filePickerOpen;
+                setFilePickerOpen(nextOpen);
+                if (nextOpen && wikiFiles.length === 0) {
+                  void loadWikiFiles();
+                }
+              }}
+              disabled={saving || loadingRevision}
+            >
+              <FileImage className="h-3.5 w-3.5" />
+              파일
+            </button>
           </div>
+          {filePickerOpen ? (
+            <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <input
+                  value={fileSearch}
+                  onChange={(event) => setFileSearch(event.target.value)}
+                  placeholder="파일명 검색"
+                  className="h-9 flex-1 rounded-md border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-emerald-300/50"
+                />
+                <button
+                  type="button"
+                  onClick={() => void loadWikiFiles(fileSearch)}
+                  disabled={loadingFiles}
+                  className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:opacity-50"
+                >
+                  {loadingFiles ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+                  검색
+                </button>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {wikiFiles.map((file) => (
+                  <button
+                    key={file.id}
+                    type="button"
+                    onClick={() => insertFileMarkup(file.filename, file.originalName)}
+                    className="flex min-h-16 items-center gap-3 rounded-md border border-white/10 bg-[#0d1219] p-3 text-left text-sm text-slate-200 hover:border-emerald-300/40"
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-md bg-white/[0.05] text-emerald-200">
+                      <FileImage className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold text-white">{file.originalName ?? file.filename}</span>
+                      <span className="block truncate text-xs text-slate-500">{file.filename}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {!loadingFiles && wikiFiles.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">사용 가능한 위키 파일이 없습니다.</p>
+              ) : null}
+            </section>
+          ) : null}
         </section>
 
         <aside className="space-y-4">

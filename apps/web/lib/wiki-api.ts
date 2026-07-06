@@ -142,6 +142,24 @@ export interface WikiMutationResponse {
   readonly slug: string;
 }
 
+export interface UploadedFileMetadata {
+  readonly id: string;
+  readonly ownerAccountId: string | null;
+  readonly filename: string;
+  readonly originalName: string | null;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly width: number | null;
+  readonly height: number | null;
+  readonly hash: string;
+  readonly publicPath: string;
+  readonly usageContext: string;
+  readonly visibility: string;
+  readonly status: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisionResponse> {
   const response = await fetch(`${baseUrl}/v1/wiki/revisions/${revisionId}`, {
     credentials: 'include'
@@ -330,4 +348,25 @@ export async function uploadWikiImage(input: {
     url: String(body.url ?? body.publicPath),
     publicPath: String(body.publicPath ?? body.url)
   };
+}
+
+export async function listWikiFiles(input: {
+  search?: string;
+  limit?: number;
+} = {}): Promise<UploadedFileMetadata[]> {
+  const params = new URLSearchParams({
+    usageContext: 'wiki_editor',
+    limit: String(input.limit ?? 40)
+  });
+  if (input.search?.trim()) {
+    params.set('search', input.search.trim());
+  }
+  const response = await fetch(`${baseUrl}/v1/files?${params.toString()}`, {
+    credentials: 'include'
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to list wiki files.');
+  }
+  return response.json();
 }

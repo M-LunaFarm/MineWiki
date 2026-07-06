@@ -107,6 +107,44 @@ export class FileService {
     return toFileMetadata(file);
   }
 
+  async listFiles(input: {
+    readonly session?: SessionPayload | null;
+    readonly search?: string;
+    readonly usageContext?: string;
+    readonly limit?: string | number;
+  }): Promise<FileMetadataResponse[]> {
+    const limit = Math.min(Math.max(Number(input.limit ?? 50) || 50, 1), 100);
+    const search = input.search?.trim();
+    const usageContext = input.usageContext?.trim() ? normalizeUsageContext(input.usageContext) : null;
+    const files = await this.prisma.uploadedFile.findMany({
+      where: {
+        status: 'active',
+        usageContext: usageContext ?? undefined,
+        OR: [
+          { visibility: { in: ['public', 'unlisted'] } },
+          ...(input.session?.isElevated
+            ? [{}]
+            : input.session
+              ? [{ ownerAccountId: input.session.userId }]
+              : [])
+        ],
+        ...(search
+          ? {
+              AND: [{
+                OR: [
+                  { filename: { contains: search } },
+                  { originalName: { contains: search } }
+                ]
+              }]
+            }
+          : {})
+      },
+      orderBy: [{ createdAt: 'desc' }],
+      take: limit
+    });
+    return files.map(toFileMetadata);
+  }
+
   async getRawFile(
     id: string,
     session?: SessionPayload | null
