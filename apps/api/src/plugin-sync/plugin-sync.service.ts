@@ -10,6 +10,7 @@ import {
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+import { decryptAppSecret } from '../common/secret-codec';
 
 const PLUGIN_SYNC_SKEW_SECONDS = 300;
 const PLUGIN_SYNC_COOLDOWN_SECONDS = 30;
@@ -157,7 +158,7 @@ export class PluginSyncService {
         source: 'canonical',
         pluginServerId: canonical.pluginServerId,
         guildId: canonical.guildId,
-        serverSecret: canonical.serverSecret,
+        serverSecret: decryptAppSecret(canonical.serverSecret) ?? canonical.serverSecret,
         enabled: canonical.enabled
       };
     }

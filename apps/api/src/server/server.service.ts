@@ -26,6 +26,7 @@ import { FileService, type FileImageUploadRequest, type FileImageUploadResponse 
 import { FirestoreTelemetryService } from '../telemetry/firestore-telemetry.service';
 import type { ClaimMethod } from '../claim/claim.types';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
+import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
@@ -801,7 +802,7 @@ export class ServerService {
       protocol: target.protocol === 'v1' ? 'v1' : 'v2',
       host: target.host,
       port: target.port,
-      token: target.token ?? undefined,
+      token: decryptAppSecret(target.token) ?? undefined,
       publicKey: target.publicKey ?? undefined,
     }));
   }
@@ -815,7 +816,7 @@ export class ServerService {
           protocol: target.protocol,
           host: target.host,
           port: target.port,
-          token: target.token ?? null,
+          token: encryptAppSecret(target.token),
           publicKey: target.publicKey ?? null,
         })),
       }),

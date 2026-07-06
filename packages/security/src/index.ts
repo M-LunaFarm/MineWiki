@@ -196,3 +196,4 @@ export async function validateOutboundTarget(
 
 export { validateImageUpload, ImageValidationError } from './upload';
 export type { SanitizedImage } from './upload';
+export { decryptSecret, encryptSecret, hashSecret, isEncryptedSecret } from './secrets';

@@ -9,6 +9,7 @@ import { ConfigService } from '@minewiki/config';
 import type { OAuthProvider } from '@minewiki/schemas';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
+import { encryptAppSecret } from '../common/secret-codec';
 
 interface PendingOAuthState {
   readonly provider: OAuthProvider;
@@ -261,15 +262,15 @@ export class OAuthFlowService {
         accountId,
         provider,
         providerUserId,
-        accessToken: credential.accessToken,
-        refreshToken: credential.refreshToken ?? null,
+        accessToken: encryptAppSecret(credential.accessToken) ?? credential.accessToken,
+        refreshToken: encryptAppSecret(credential.refreshToken),
         tokenType: credential.tokenType ?? null,
         scope: credential.scope ?? null,
         expiresAt: credential.expiresAt ?? null
       },
       update: {
-        accessToken: credential.accessToken,
-        refreshToken: credential.refreshToken ?? null,
+        accessToken: encryptAppSecret(credential.accessToken) ?? credential.accessToken,
+        refreshToken: encryptAppSecret(credential.refreshToken),
         tokenType: credential.tokenType ?? null,
         scope: credential.scope ?? null,
         expiresAt: credential.expiresAt ?? null

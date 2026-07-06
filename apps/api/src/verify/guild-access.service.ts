@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/c
 import { ConfigService } from '@minewiki/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
 import type { SessionPayload } from '../session/session.service';
 import type { LunaGuildResponse } from './verify.service';
 
@@ -125,7 +126,7 @@ export class GuildAccessService {
       !credential.expiresAt ||
       credential.expiresAt.getTime() - Date.now() > TOKEN_REFRESH_SKEW_MS
     ) {
-      return credential;
+      return decryptCredential(credential);
     }
     if (!credential.refreshToken) {
       throw new UnauthorizedException('Discord OAuth credential has expired.');
@@ -146,7 +147,7 @@ export class GuildAccessService {
       client_id: clientId,
       client_secret: clientSecret,
       grant_type: 'refresh_token',
-      refresh_token: credential.refreshToken ?? '',
+      refresh_token: decryptAppSecret(credential.refreshToken) ?? '',
     });
     const response = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
@@ -169,14 +170,14 @@ export class GuildAccessService {
     const updated = await this.prisma.oAuthCredential.update({
       where: { id: credential.id },
       data: {
-        accessToken: payload.access_token,
-        refreshToken: payload.refresh_token ?? credential.refreshToken,
+        accessToken: encryptAppSecret(payload.access_token) ?? payload.access_token,
+        refreshToken: encryptAppSecret(payload.refresh_token ?? decryptAppSecret(credential.refreshToken)),
         tokenType: payload.token_type ?? credential.tokenType,
         scope: payload.scope ?? credential.scope,
         expiresAt: payload.expires_in ? new Date(Date.now() + payload.expires_in * 1000) : null,
       },
     });
-    return updated;
+    return decryptCredential(updated);
   }
 
   private async fetchDiscordGuilds(credential: OAuthCredentialRecord): Promise<DiscordGuild[]> {
@@ -189,6 +190,14 @@ export class GuildAccessService {
     const payload = await response.json().catch(() => []);
     return Array.isArray(payload) ? (payload as DiscordGuild[]) : [];
   }
+}
+
+function decryptCredential(credential: OAuthCredentialRecord): OAuthCredentialRecord {
+  return {
+    ...credential,
+    accessToken: decryptAppSecret(credential.accessToken) ?? credential.accessToken,
+    refreshToken: decryptAppSecret(credential.refreshToken),
+  };
 }
 
 function hasScope(scope: string | null, required: string): boolean {

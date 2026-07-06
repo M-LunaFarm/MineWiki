@@ -12,6 +12,7 @@ import { CaptchaService } from '../captcha/captcha.service';
 import { BusinessEventService } from '../events/business-event.service';
 import { VoteStore } from './vote.store';
 import { PrismaService } from '../common/prisma.service';
+import { decryptAppSecret } from '../common/secret-codec';
 
 const votePayloadSchema = z.object({
   username: z.string().trim().min(3).max(16),
@@ -231,7 +232,7 @@ export class VoteService {
           protocol,
           host: target.host,
           port: target.port,
-          token: target.token ?? undefined,
+          token: decryptAppSecret(target.token) ?? undefined,
           publicKey: target.publicKey ?? undefined
         };
       })
