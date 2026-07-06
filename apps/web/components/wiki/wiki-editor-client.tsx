@@ -29,6 +29,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [isMinor, setIsMinor] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [blockingErrors, setBlockingErrors] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [loadingRevision, setLoadingRevision] = useState(Boolean(page));
   const [previewing, startPreviewTransition] = useTransition();
@@ -69,16 +70,20 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   }, [page]);
 
   const canSubmit = useMemo(() => {
-    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision);
-  }, [account, contentRaw, editSummary, loadingRevision]);
+    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0);
+  }, [account, contentRaw, editSummary, loadingRevision, blockingErrors.length]);
 
   function renderPreview() {
     setFeedback(null);
+    setBlockingErrors([]);
     startPreviewTransition(async () => {
       try {
         const preview = await previewWikiMarkup(contentRaw);
         setPreviewHtml(preview.html);
-        if (preview.errors.length > 0) {
+        setBlockingErrors(preview.blockingErrors);
+        if (preview.blockingErrors.length > 0) {
+          setFeedback(null);
+        } else if (preview.errors.length > 0) {
           setFeedback(preview.errors.join('\n'));
         }
       } catch (error) {
@@ -89,7 +94,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
 
   function submit() {
     if (!canSubmit) {
-      setFeedback('본문과 편집 요약을 입력해야 합니다.');
+      setFeedback(blockingErrors.length > 0 ? null : '본문과 편집 요약을 입력해야 합니다.');
       return;
     }
     setFeedback(null);
@@ -179,12 +184,21 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
           <p className="whitespace-pre-wrap">{feedback}</p>
         </div>
       ) : null}
+      {blockingErrors.length > 0 ? (
+        <div className="flex gap-3 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100">
+          <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
+          <p className="whitespace-pre-wrap">{blockingErrors.join('\n')}</p>
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="space-y-4">
           <textarea
             value={contentRaw}
-            onChange={(event) => setContentRaw(event.target.value)}
+            onChange={(event) => {
+              setContentRaw(event.target.value);
+              setBlockingErrors([]);
+            }}
             disabled={loadingRevision || saving}
             className="min-h-[520px] w-full resize-y rounded-lg border border-white/10 bg-[#0d1219] p-4 font-mono text-sm leading-6 text-slate-100 outline-none transition focus:border-emerald-300/50"
             spellCheck={false}

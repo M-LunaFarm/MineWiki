@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
+import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 
@@ -73,6 +74,7 @@ export interface WikiPreviewResponse {
   readonly links: string[];
   readonly categories: string[];
   readonly errors: string[];
+  readonly blockingErrors: string[];
 }
 
 @Injectable()
@@ -83,7 +85,7 @@ export class WikiEditService {
     private readonly wikiPermissions: WikiPermissionService
   ) {}
 
-  async createPage(accountId: string, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
+  async createPage(session: SessionPayload, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
     const namespaceCode = this.cleanNamespace(request.namespace);
     const title = this.requiredString(request.title, 'title');
     const contentRaw = this.requiredString(request.contentRaw, 'contentRaw');
@@ -96,19 +98,15 @@ export class WikiEditService {
     const spaceId = request.spaceId
       ? this.parseBigIntId(request.spaceId, 'spaceId')
       : await this.findDefaultSpaceId(namespaceCode);
-    const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
+    const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const slug = slugifyTitle(title);
     const now = new Date();
-    await this.wikiPermissions.assertCanEditPage({
-      actor: this.wikiPermissions.actorFromProfile(accountId, actor),
-      page: {
-        id: 0n,
-        spaceId,
-        title,
-        protectionLevel: 'open',
-        status: 'normal',
-        createdBy: actor.id
-      }
+    await this.wikiPermissions.assertCanCreatePage({
+      actor: this.wikiPermissions.actorFromSession(session, actor),
+      namespaceCode,
+      spaceId,
+      title,
+      pageType: this.cleanOptional(request.pageType) ?? 'article'
     });
 
     return this.prisma.$transaction(async (tx) => {
@@ -178,10 +176,10 @@ export class WikiEditService {
     });
   }
 
-  async updatePage(accountId: string, pageId: string, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
+  async updatePage(session: SessionPayload, pageId: string, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const contentRaw = this.requiredString(request.contentRaw, 'contentRaw');
-    const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
+    const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const now = new Date();
 
     return this.prisma.$transaction(async (tx) => {
@@ -194,7 +192,7 @@ export class WikiEditService {
         throw new NotFoundException('Wiki namespace not found.');
       }
       await this.wikiPermissions.assertCanEditPage({
-        actor: this.wikiPermissions.actorFromProfile(accountId, actor),
+        actor: this.wikiPermissions.actorFromSession(session, actor),
         page,
         store: tx
       });
@@ -241,7 +239,7 @@ export class WikiEditService {
     });
   }
 
-  async appendSection(accountId: string, pageId: string, request: WikiSectionMutationRequest): Promise<WikiMutationResponse> {
+  async appendSection(session: SessionPayload, pageId: string, request: WikiSectionMutationRequest): Promise<WikiMutationResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const heading = this.requiredString(request.heading, 'heading');
     const sectionContent = this.requiredString(request.contentRaw, 'contentRaw');
@@ -249,9 +247,9 @@ export class WikiEditService {
     if (!page) {
       throw new NotFoundException('Wiki page not found.');
     }
-    const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
+    const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     await this.wikiPermissions.assertCanEditPage({
-      actor: this.wikiPermissions.actorFromProfile(accountId, actor),
+      actor: this.wikiPermissions.actorFromSession(session, actor),
       page
     });
     const latest = await this.findLatestRevision(this.prisma, page.id);
@@ -259,7 +257,7 @@ export class WikiEditService {
       throw new NotFoundException('Public wiki revision not found.');
     }
     const appended = `${latest.contentRaw.trimEnd()}\n\n== ${heading} ==\n${sectionContent.trim()}\n`;
-    return this.updatePage(accountId, pageId, {
+    return this.updatePage(session, pageId, {
       contentRaw: appended,
       editSummary: request.editSummary ?? `섹션 추가: ${heading}`,
       isMinor: request.isMinor,
@@ -300,7 +298,8 @@ export class WikiEditService {
       html: renderDocument(parsed.ast),
       links: parsed.links,
       categories: parsed.categories,
-      errors: parsed.errors
+      errors: parsed.errors,
+      blockingErrors: parsed.blockingErrors
     };
   }
 
@@ -349,6 +348,9 @@ export class WikiEditService {
     }
   ) {
     const parsed = parseMarkup(input.contentRaw);
+    if (parsed.blockingErrors.length > 0) {
+      throw new BadRequestException(`Wiki markup contains blocking errors: ${parsed.blockingErrors.join(', ')}`);
+    }
     const revision = await tx.wikiPageRevision.create({
       data: {
         pageId: input.pageId,

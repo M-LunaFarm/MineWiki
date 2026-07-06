@@ -3,7 +3,7 @@ import { fetchWikiPageByPath } from '../../lib/wiki-api';
 import { WikiArticleView } from './wiki-article-view';
 
 interface WikiRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'help' | 'project' | 'file';
   readonly segments?: string[];
 }
 

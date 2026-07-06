@@ -17,7 +17,8 @@ import {
   WikiReadService,
   type WikiPageResponse,
   type WikiRecentChangeSummary,
-  type WikiRevisionSummary
+  type WikiRevisionSummary,
+  type WikiSearchResult
 } from './wiki-read.service';
 import { WikiProfileService, type WikiMeResponse } from './wiki-profile.service';
 
@@ -34,18 +35,26 @@ export class WikiController {
   getPage(
     @Query('namespace') namespace = 'main',
     @Query('title') title = '대문',
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
+    @Query('redirect') redirect?: string,
+    @Query('noRedirect') noRedirect?: string
   ): Promise<WikiPageResponse> {
-    return this.wikiRead.getPage(namespace, title, request.sessionPayload?.userId ?? null);
+    return this.wikiRead.getPage(namespace, title, request.sessionPayload?.userId ?? null, {
+      followRedirects: shouldFollowRedirects(redirect, noRedirect)
+    });
   }
 
   @Get('page/by-path')
   @UseGuards(OptionalSessionGuard)
   getPageByPath(
     @Query('path') path = '/wiki/대문',
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
+    @Query('redirect') redirect?: string,
+    @Query('noRedirect') noRedirect?: string
   ): Promise<WikiPageResponse> {
-    return this.wikiRead.getPageByPath(path, request.sessionPayload?.userId ?? null);
+    return this.wikiRead.getPageByPath(path, request.sessionPayload?.userId ?? null, {
+      followRedirects: shouldFollowRedirects(redirect, noRedirect)
+    });
   }
 
   @Get('page/:id/revisions')
@@ -64,6 +73,22 @@ export class WikiController {
   @UseGuards(OptionalSessionGuard)
   getRecent(@Req() request: FastifyRequest): Promise<WikiRecentChangeSummary[]> {
     return this.wikiRead.getRecent(request.sessionPayload?.userId ?? null);
+  }
+
+  @Get('search')
+  @UseGuards(OptionalSessionGuard)
+  search(
+    @Req() request: FastifyRequest,
+    @Query('q') q: string | undefined,
+    @Query('namespace') namespace: string | undefined,
+    @Query('limit') limit: string | undefined
+  ): Promise<WikiSearchResult[]> {
+    return this.wikiRead.search({
+      q,
+      namespace,
+      limit,
+      accountId: request.sessionPayload?.userId ?? null
+    });
   }
 
   @Get('revisions/:revisionId')
@@ -97,7 +122,7 @@ export class WikiController {
     @Body() body: WikiPageMutationRequest,
     @CurrentSession() session: SessionPayload
   ): Promise<WikiMutationResponse> {
-    return this.wikiEdit.createPage(session.userId, body);
+    return this.wikiEdit.createPage(session, body);
   }
 
   @Patch('pages/:id')
@@ -107,7 +132,7 @@ export class WikiController {
     @Body() body: WikiPageMutationRequest,
     @CurrentSession() session: SessionPayload
   ): Promise<WikiMutationResponse> {
-    return this.wikiEdit.updatePage(session.userId, pageId, body);
+    return this.wikiEdit.updatePage(session, pageId, body);
   }
 
   @Post('pages/:id/sections')
@@ -117,7 +142,7 @@ export class WikiController {
     @Body() body: WikiSectionMutationRequest,
     @CurrentSession() session: SessionPayload
   ): Promise<WikiMutationResponse> {
-    return this.wikiEdit.appendSection(session.userId, pageId, body);
+    return this.wikiEdit.appendSection(session, pageId, body);
   }
 
   @Get('me')
@@ -125,4 +150,8 @@ export class WikiController {
   getMe(@CurrentSession() session: SessionPayload): Promise<WikiMeResponse> {
     return this.wikiProfiles.getMe(session.userId);
   }
+}
+
+function shouldFollowRedirects(redirect?: string, noRedirect?: string): boolean {
+  return redirect !== '0' && noRedirect !== '1' && noRedirect !== 'true';
 }

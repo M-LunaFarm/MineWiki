@@ -9,6 +9,22 @@ import { WikiReadService } from './wiki-read.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
+function session(userId: string, isElevated = false) {
+  return {
+    sessionId: `test-session-${userId}`,
+    userId,
+    isElevated
+  };
+}
+
+test('preview returns blocking markup errors', () => {
+  const edits = new WikiEditService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+  const preview = edits.preview('<script>alert(1)</script>');
+
+  assert.ok(preview.blockingErrors.length > 0);
+  assert.ok(preview.blockingErrors.some((error) => error.includes('HTML')));
+});
+
 if (!hasDatabase) {
   test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});
 } else {
@@ -91,7 +107,7 @@ if (!hasDatabase) {
     const fixture = await createFixture();
     let pageId: string | undefined;
     try {
-      const created = await edits.createPage(fixture.account.id, {
+      const created = await edits.createPage(session(fixture.account.id), {
         namespace: fixture.namespace.code,
         title: `대문 ${fixture.unique}`,
         spaceId: fixture.space.id.toString(),
@@ -129,7 +145,7 @@ if (!hasDatabase) {
     const fixture = await createFixture();
     let pageId: string | undefined;
     try {
-      const created = await edits.createPage(fixture.account.id, {
+      const created = await edits.createPage(session(fixture.account.id), {
         namespace: fixture.namespace.code,
         title: `수정 ${fixture.unique}`,
         spaceId: fixture.space.id.toString(),
@@ -137,7 +153,7 @@ if (!hasDatabase) {
         editSummary: '생성'
       });
       pageId = created.pageId;
-      const edited = await edits.updatePage(fixture.account.id, created.pageId, {
+      const edited = await edits.updatePage(session(fixture.account.id), created.pageId, {
         contentRaw: '첫 내용\n두 번째 줄',
         editSummary: '내용 보강',
         isMinor: true,

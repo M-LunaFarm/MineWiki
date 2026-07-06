@@ -23,6 +23,12 @@ export interface WikiPageResponse {
   readonly html: string;
   readonly links: string[];
   readonly categories: string[];
+  readonly redirectTarget: string | null;
+  readonly redirectedFrom?: {
+    readonly namespace: string;
+    readonly title: string;
+    readonly path: string;
+  } | null;
   readonly serverDirectoryPath?: string | null;
 }
 
@@ -93,6 +99,16 @@ export interface WikiRecentChangeSummary {
   readonly createdAt: string;
 }
 
+export interface WikiSearchResult {
+  readonly pageId: string;
+  readonly namespace: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly routePath: string;
+  readonly snippet: string;
+  readonly updatedAt: string;
+}
+
 export interface WikiMutationResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -151,7 +167,30 @@ export async function fetchWikiRecent(): Promise<WikiRecentChangeSummary[]> {
   return response.json();
 }
 
-export async function previewWikiMarkup(contentRaw: string): Promise<{ html: string; errors: string[] }> {
+export async function searchWiki(input: {
+  q: string;
+  namespace?: string;
+  limit?: number;
+}): Promise<WikiSearchResult[]> {
+  const params = new URLSearchParams({
+    q: input.q,
+    limit: String(input.limit ?? 20)
+  });
+  if (input.namespace) {
+    params.set('namespace', input.namespace);
+  }
+  const response = await fetch(`${baseUrl}/v1/wiki/search?${params.toString()}`, {
+    credentials: 'include',
+    next: { revalidate: 30 }
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to search wiki.');
+  }
+  return response.json();
+}
+
+export async function previewWikiMarkup(contentRaw: string): Promise<{ html: string; errors: string[]; blockingErrors: string[] }> {
   const response = await fetch(`${baseUrl}/v1/wiki/preview`, {
     method: 'POST',
     credentials: 'include',

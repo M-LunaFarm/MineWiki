@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { fetchWikiPageByPath, fetchWikiRevisions } from '../../lib/wiki-api';
 
 interface WikiHistoryRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'help' | 'project' | 'file';
   readonly segments?: string[];
 }
 

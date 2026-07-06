@@ -1,16 +1,39 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
+import type { SessionPayload } from '../session/session.service';
+import { WikiAclService, type WikiAclAction, type WikiAclDecision } from './wiki-acl.service';
 
 type WikiPermissionStore = Pick<
   PrismaService,
-  'wikiProfile' | 'wikiSpace' | 'subwikiRole' | 'serverWiki' | 'server' | 'modWiki'
+  | 'wikiProfile'
+  | 'wikiSpace'
+  | 'subwikiRole'
+  | 'serverWiki'
+  | 'server'
+  | 'modWiki'
+  | 'aclRule'
+  | 'aclGroup'
+  | 'aclGroupMember'
+  | 'wikiGroup'
+  | 'wikiUserGroup'
+  | 'wikiGroupPermission'
+  | 'wikiPage'
+  | 'wikiPageRevision'
 >;
 
 export interface WikiPermissionActor {
   readonly accountId: string;
   readonly profileId: bigint;
   readonly status: string;
+  readonly isElevated?: boolean;
+  readonly permissions?: readonly string[];
+  readonly groups?: readonly string[];
 }
+
+type WikiPermissionSession = SessionPayload & {
+  readonly permissions?: readonly string[];
+  readonly groups?: readonly string[];
+};
 
 export interface WikiPermissionPage {
   readonly id: bigint;
@@ -37,6 +60,7 @@ const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published']);
 const PUBLIC_REVISION_VISIBILITIES = new Set(['public']);
 const ACTIVE_SPACE_STATUSES = new Set(['active']);
 const ACTIVE_PROFILE_STATUSES = new Set(['active']);
+const RESTRICTED_CREATE_NAMESPACES = new Set(['dev', 'help', 'project', 'template', 'file']);
 const PUBLIC_READ_PROTECTION_LEVELS = new Set([
   'open',
   'login_required',
@@ -51,7 +75,10 @@ const PUBLIC_READ_PROTECTION_LEVELS = new Set([
 
 @Injectable()
 export class WikiPermissionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly wikiAcl?: WikiAclService
+  ) {}
 
   async resolveActor(accountId: string | null | undefined, store: WikiPermissionStore = this.prisma) {
     if (!accountId) {
@@ -107,11 +134,15 @@ export class WikiPermissionService {
     if (input.revision && !PUBLIC_REVISION_VISIBILITIES.has(input.revision.visibility)) {
       return deny('revision_not_public');
     }
+    const actor = await this.resolveActor(input.accountId, store);
     if (!PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)) {
-      const actor = await this.resolveActor(input.accountId, store);
       if (!actor || !(await this.canManagePageArea(store, actor, page))) {
         return deny('protection_not_readable');
       }
+    }
+    const acl = await this.evaluateAcl('read', actor, { pageId: page.id, spaceId: page.spaceId, title: page.title, createdBy: page.createdBy }, store);
+    if (acl.matched && !acl.allowed) {
+      return deny(acl.reason);
     }
     return allow('public_read');
   }
@@ -155,6 +186,13 @@ export class WikiPermissionService {
       return deny('page_not_editable');
     }
     const protectionLevel = page.protectionLevel || 'open';
+    if (this.isAdminActor(actor)) {
+      return allow('admin_edit');
+    }
+    const acl = await this.evaluateAcl('edit', actor, { pageId: page.id, spaceId: page.spaceId, title: page.title, createdBy: page.createdBy }, store);
+    if (acl.matched) {
+      return acl.allowed ? allow(acl.reason) : deny(acl.reason);
+    }
     if (protectionLevel === 'open' || protectionLevel === 'login_required' || protectionLevel === 'review_required') {
       return allow('open_edit');
     }
@@ -175,6 +213,109 @@ export class WikiPermissionService {
     return deny('unknown_protection_level');
   }
 
+  async assertCanCreatePage(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly namespaceCode: string;
+    readonly spaceId: bigint;
+    readonly title: string;
+    readonly pageType?: string | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const decision = await this.canCreatePage(input);
+    if (!decision.allowed) {
+      throw new ForbiddenException(`Wiki page creation is not allowed: ${decision.reason}`);
+    }
+  }
+
+  async canCreatePage(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly namespaceCode: string;
+    readonly spaceId: bigint;
+    readonly title: string;
+    readonly pageType?: string | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPermissionDecision> {
+    const store = input.store ?? this.prisma;
+    const actor = input.actor;
+    if (!actor) {
+      return deny('actor_required');
+    }
+    if (!ACTIVE_PROFILE_STATUSES.has(actor.status)) {
+      return deny('actor_not_active');
+    }
+    if (this.isAdminActor(actor)) {
+      return allow('admin_create');
+    }
+    const space = await store.wikiSpace.findUnique({
+      where: { id: input.spaceId },
+      select: { id: true, status: true, spaceType: true, ownerUserId: true, createdBy: true }
+    });
+    if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) {
+      return deny('space_not_active');
+    }
+    const acl = await this.evaluateAcl('create', actor, {
+      spaceId: input.spaceId,
+      namespaceCode: input.namespaceCode,
+      title: input.title
+    }, store);
+    if (acl.matched) {
+      return acl.allowed ? allow(acl.reason) : deny(acl.reason);
+    }
+    if (RESTRICTED_CREATE_NAMESPACES.has(input.namespaceCode)) {
+      return deny('restricted_namespace');
+    }
+    if (space.spaceType === 'basic') {
+      return allow('basic_create');
+    }
+    if (space.spaceType === 'server_wiki') {
+      if (space.ownerUserId === actor.profileId || space.createdBy === actor.profileId) {
+        return allow('server_owner_create');
+      }
+      if (await this.hasAnySubwikiRole(store, actor.profileId, input.spaceId, EDITOR_ROLES)) {
+        return allow('server_role_create');
+      }
+      const serverWiki = await store.serverWiki.findFirst({
+        where: {
+          spaceId: input.spaceId,
+          status: { not: 'deleted' }
+        },
+        select: { voteServerId: true, createdBy: true }
+      });
+      if (serverWiki?.createdBy === actor.profileId) {
+        return allow('server_wiki_creator_create');
+      }
+      if (serverWiki?.voteServerId) {
+        const server = await store.server.findUnique({
+          where: { id: serverWiki.voteServerId },
+          select: { ownerAccountId: true }
+        });
+        if (server?.ownerAccountId === actor.accountId) {
+          return allow('linked_server_owner_create');
+        }
+      }
+      return deny('server_wiki_role_required');
+    }
+    if (space.spaceType === 'mod_wiki') {
+      if (space.ownerUserId === actor.profileId || space.createdBy === actor.profileId) {
+        return allow('mod_owner_create');
+      }
+      if (await this.hasAnySubwikiRole(store, actor.profileId, input.spaceId, EDITOR_ROLES)) {
+        return allow('mod_role_create');
+      }
+      const modWiki = await store.modWiki.findFirst({
+        where: {
+          spaceId: input.spaceId,
+          status: { not: 'deleted' }
+        },
+        select: { verifiedBy: true }
+      });
+      return modWiki?.verifiedBy === actor.profileId
+        ? allow('mod_verified_create')
+        : deny('mod_wiki_role_required');
+    }
+    return deny('unsupported_space_type');
+  }
+
   actorFromProfile(accountId: string, profile: { id: bigint; status: string }): WikiPermissionActor {
     return {
       accountId,
@@ -183,11 +324,68 @@ export class WikiPermissionService {
     };
   }
 
+  actorFromSession(session: WikiPermissionSession, profile: { id: bigint; status: string }): WikiPermissionActor {
+    return {
+      accountId: session.userId,
+      profileId: profile.id,
+      status: profile.status,
+      isElevated: session.isElevated,
+      permissions: session.permissions,
+      groups: session.groups
+    };
+  }
+
+  async assertCanUsePageAction(input: {
+    readonly accountId?: string | null;
+    readonly action: WikiAclAction;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const decision = await this.canUsePageAction(input);
+    if (!decision.allowed) {
+      throw new NotFoundException('Wiki page not found.');
+    }
+  }
+
+  async canUsePageAction(input: {
+    readonly accountId?: string | null;
+    readonly action: WikiAclAction;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPermissionDecision> {
+    const store = input.store ?? this.prisma;
+    if (!input.page) {
+      return deny('page_missing');
+    }
+    const readDecision = await this.canReadPage({
+      accountId: input.accountId,
+      page: input.page,
+      store
+    });
+    if (!readDecision.allowed) {
+      return readDecision;
+    }
+    const actor = await this.resolveActor(input.accountId, store);
+    const acl = await this.evaluateAcl(input.action, actor, {
+      pageId: input.page.id,
+      spaceId: input.page.spaceId,
+      title: input.page.title,
+      createdBy: input.page.createdBy
+    }, store);
+    if (acl.matched) {
+      return acl.allowed ? allow(acl.reason) : deny(acl.reason);
+    }
+    return allow('readable_action');
+  }
+
   private async canManagePageArea(
     store: WikiPermissionStore,
     actor: WikiPermissionActor,
     page: WikiPermissionPage
   ): Promise<boolean> {
+    if (this.isAdminActor(actor)) {
+      return true;
+    }
     if (page.createdBy === actor.profileId) {
       return true;
     }
@@ -243,6 +441,29 @@ export class WikiPermissionService {
       select: { role: true }
     });
     return roles.some((role) => allowedRoles.has(role.role));
+  }
+
+  private isAdminActor(actor: WikiPermissionActor): boolean {
+    return actor.isElevated === true ||
+      actor.permissions?.includes('wiki.admin') === true ||
+      actor.permissions?.includes('wiki.edit.locked') === true ||
+      actor.groups?.includes('admin') === true;
+  }
+
+  private evaluateAcl(
+    action: WikiAclAction,
+    actor: WikiPermissionActor | null,
+    resource: {
+      readonly pageId?: bigint | null;
+      readonly spaceId?: bigint | null;
+      readonly namespaceCode?: string | null;
+      readonly title?: string | null;
+      readonly createdBy?: bigint | null;
+    },
+    store: WikiPermissionStore
+  ): Promise<WikiAclDecision> {
+    return this.wikiAcl?.evaluate({ actor, action, resource, store }) ??
+      Promise.resolve({ matched: false, allowed: false, reason: 'acl_disabled' });
   }
 }
 

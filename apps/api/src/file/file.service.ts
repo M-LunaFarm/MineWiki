@@ -1,19 +1,23 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { promises as fs } from 'node:fs';
 import { PrismaService } from '../common/prisma.service';
+import type { SessionPayload } from '../session/session.service';
 import { UploadService, type StoredImage } from '../upload/upload.service';
 import { decodeBase64 } from '../upload/upload.utils';
+import { FilePermissionService } from './file-permission.service';
 
 export interface FileImageUploadRequest {
   readonly data?: string;
   readonly filename?: string;
   readonly usageContext?: string;
+  readonly visibility?: string;
 }
 
 export interface FileImageBufferUploadRequest {
   readonly buffer: Buffer;
   readonly filename?: string;
   readonly usageContext?: string;
+  readonly visibility?: string;
 }
 
 export interface FileMetadataResponse {
@@ -28,6 +32,9 @@ export interface FileMetadataResponse {
   readonly hash: string;
   readonly publicPath: string;
   readonly usageContext: string;
+  readonly visibility: string;
+  readonly linkedResourceType: string | null;
+  readonly linkedResourceId: string | null;
   readonly status: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -41,7 +48,8 @@ export interface FileImageUploadResponse extends FileMetadataResponse {
 export class FileService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly uploads: UploadService
+    private readonly uploads: UploadService,
+    private readonly permissions: FilePermissionService
   ) {}
 
   async createImage(accountId: string, request: FileImageUploadRequest): Promise<FileImageUploadResponse> {
@@ -83,7 +91,8 @@ export class FileService {
         sha256: stored.hash,
         storagePath: stored.storagePath,
         publicPath: stored.publicPath,
-        usageContext: normalizeUsageContext(request.usageContext)
+        usageContext: normalizeUsageContext(request.usageContext),
+        visibility: normalizeVisibility(request.visibility)
       }
     });
     return {
@@ -92,40 +101,38 @@ export class FileService {
     };
   }
 
-  async getFile(id: string): Promise<FileMetadataResponse> {
+  async getFile(id: string, session?: SessionPayload | null): Promise<FileMetadataResponse> {
     const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
-    if (!file || file.status === 'deleted') {
-      throw new NotFoundException('File not found.');
-    }
+    this.permissions.assertCanRead(file, session);
     return toFileMetadata(file);
   }
 
-  async getRawFile(id: string): Promise<{ buffer?: Buffer; redirectUrl?: string; mimeType: string; filename: string }> {
+  async getRawFile(
+    id: string,
+    session?: SessionPayload | null
+  ): Promise<{ buffer?: Buffer; redirectUrl?: string; mimeType: string; filename: string; cacheControl: string }> {
     const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
-    if (!file || file.status === 'deleted') {
-      throw new NotFoundException('File not found.');
-    }
+    this.permissions.assertCanRead(file, session);
+    const cacheControl = file.visibility === 'public' || file.visibility === 'unlisted'
+      ? 'public, max-age=31536000, immutable'
+      : 'private, no-store';
     if (/^https?:\/\//i.test(file.publicPath)) {
-      return { redirectUrl: file.publicPath, mimeType: file.mimeType, filename: file.filename };
+      return { redirectUrl: file.publicPath, mimeType: file.mimeType, filename: file.filename, cacheControl };
     }
     if (file.storagePath.startsWith('s3://')) {
-      return { redirectUrl: file.publicPath, mimeType: file.mimeType, filename: file.filename };
+      return { redirectUrl: file.publicPath, mimeType: file.mimeType, filename: file.filename, cacheControl };
     }
     return {
       buffer: await fs.readFile(file.storagePath),
       mimeType: file.mimeType,
-      filename: file.filename
+      filename: file.filename,
+      cacheControl
     };
   }
 
-  async deleteFile(id: string, accountId: string): Promise<{ deleted: true }> {
+  async deleteFile(id: string, session: SessionPayload): Promise<{ deleted: true }> {
     const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
-    if (!file || file.status === 'deleted') {
-      throw new NotFoundException('File not found.');
-    }
-    if (file.ownerAccountId && file.ownerAccountId !== accountId) {
-      throw new ForbiddenException('File owner is required.');
-    }
+    this.permissions.assertCanDelete(file, session);
     await this.prisma.uploadedFile.update({
       where: { id },
       data: { status: 'deleted' }
@@ -137,6 +144,11 @@ export class FileService {
 function normalizeUsageContext(value?: string): string {
   const normalized = value?.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   return normalized ? normalized.slice(0, 64) : 'general';
+}
+
+function normalizeVisibility(value?: string): string {
+  const normalized = value?.trim().toLowerCase();
+  return normalized && ['public', 'unlisted', 'private', 'restricted'].includes(normalized) ? normalized : 'public';
 }
 
 function toFileMetadata(file: {
@@ -151,6 +163,9 @@ function toFileMetadata(file: {
   sha256: string;
   publicPath: string;
   usageContext: string;
+  visibility: string;
+  linkedResourceType: string | null;
+  linkedResourceId: string | null;
   status: string;
   createdAt: Date;
   updatedAt: Date;
@@ -167,6 +182,9 @@ function toFileMetadata(file: {
     hash: file.sha256,
     publicPath: file.publicPath,
     usageContext: file.usageContext,
+    visibility: file.visibility,
+    linkedResourceType: file.linkedResourceType,
+    linkedResourceId: file.linkedResourceId,
     status: file.status,
     createdAt: file.createdAt.toISOString(),
     updatedAt: file.updatedAt.toISOString()

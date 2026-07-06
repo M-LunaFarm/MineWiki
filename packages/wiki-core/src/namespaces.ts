@@ -31,6 +31,8 @@ const prefixToNamespace: Array<[string, NamespaceCode]> = [
   ['help', 'help'],
   ['project', 'project'],
   ['template', 'template'],
+  ['file', 'file'],
+  ['files', 'file'],
   ['모드팩', 'modpack'],
   ['모드', 'mod'],
   ['서버', 'server'],
@@ -39,7 +41,8 @@ const prefixToNamespace: Array<[string, NamespaceCode]> = [
   ['데이터', 'data'],
   ['도움말', 'help'],
   ['프로젝트', 'project'],
-  ['틀', 'template']
+  ['틀', 'template'],
+  ['파일', 'file']
 ];
 
 export function resolveWikiPath(path: string) {

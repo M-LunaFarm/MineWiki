@@ -130,3 +130,127 @@ test('wiki read ignores stale renderer cache and writes current version', async 
   assert.equal(data.html, page.html);
   assert.equal(data.createdAt instanceof Date, true);
 });
+
+function createRedirectReadService(pages: Record<string, { id: bigint; title: string; contentRaw: string }>) {
+  const now = new Date('2026-07-05T00:00:00.000Z');
+  let currentSlug = '대문';
+  const prisma = {
+    wikiNamespace: {
+      async findUnique() {
+        return { id: 1, code: 'main' };
+      }
+    },
+    wikiPage: {
+      async findUnique(args: { where: { namespaceId_slug: { slug: string } } }) {
+        currentSlug = args.where.namespaceId_slug.slug;
+        const page = pages[currentSlug];
+        if (!page) {
+          return null;
+        }
+        return {
+          id: page.id,
+          spaceId: 20n,
+          slug: currentSlug,
+          title: page.title,
+          displayTitle: page.title,
+          currentRevisionId: page.id + 100n,
+          pageType: 'article',
+          protectionLevel: 'open',
+          status: 'normal',
+          updatedAt: now
+        };
+      }
+    },
+    wikiPageRevision: {
+      async findFirst() {
+        const page = pages[currentSlug];
+        return page
+          ? {
+              id: page.id + 100n,
+              pageId: page.id,
+              revisionNo: 1,
+              contentHash: 'b'.repeat(64),
+              contentRaw: page.contentRaw,
+              createdAt: now,
+              createdBy: 40n,
+              visibility: 'public'
+            }
+          : null;
+      }
+    },
+    wikiPageRenderCache: {
+      async findUnique() {
+        return null;
+      },
+      async create() {
+        return { id: 1n };
+      }
+    },
+    uploadedFile: {
+      async findMany() {
+        return [];
+      }
+    },
+    serverWiki: {
+      async findFirst() {
+        return null;
+      }
+    },
+    server: {
+      async findUnique() {
+        return null;
+      }
+    }
+  };
+  const permissions = {
+    async assertCanReadPage() {
+      return undefined;
+    },
+    async assertCanUsePageAction() {
+      return undefined;
+    }
+  };
+  return new WikiReadService(
+    prisma as unknown as PrismaService,
+    permissions as unknown as WikiPermissionService
+  );
+}
+
+test('wiki read follows redirect pages by default', async () => {
+  const service = createRedirectReadService({
+    대문: { id: 10n, title: '대문', contentRaw: '#REDIRECT [[목표]]' },
+    목표: { id: 11n, title: '목표', contentRaw: "'''목표''' 문서" }
+  });
+
+  const page = await service.getPage('main', '대문');
+
+  assert.equal(page.id, '11');
+  assert.equal(page.redirectTarget, null);
+  assert.deepEqual(page.redirectedFrom, {
+    namespace: 'main',
+    title: '대문',
+    path: '/wiki/%EB%8C%80%EB%AC%B8'
+  });
+});
+
+test('wiki read can return redirect page when redirect is disabled', async () => {
+  const service = createRedirectReadService({
+    대문: { id: 10n, title: '대문', contentRaw: '#REDIRECT [[목표]]' },
+    목표: { id: 11n, title: '목표', contentRaw: "'''목표''' 문서" }
+  });
+
+  const page = await service.getPage('main', '대문', null, { followRedirects: false });
+
+  assert.equal(page.id, '10');
+  assert.equal(page.redirectTarget, '목표');
+  assert.equal(page.redirectedFrom, null);
+});
+
+test('wiki read detects redirect loops', async () => {
+  const service = createRedirectReadService({
+    대문: { id: 10n, title: '대문', contentRaw: '#REDIRECT [[목표]]' },
+    목표: { id: 11n, title: '목표', contentRaw: '#REDIRECT [[대문]]' }
+  });
+
+  await assert.rejects(() => service.getPage('main', '대문'), /redirect loop/i);
+});

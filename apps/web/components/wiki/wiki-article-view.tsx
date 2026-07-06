@@ -32,10 +32,23 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
           <span className="chip chip-muted">rev {page.revision.revisionNo}</span>
           <span className="chip chip-muted">{page.protectionLevel}</span>
         </div>
+        {page.redirectedFrom ? (
+          <div className="mb-4 rounded-md border border-sky-300/30 bg-sky-300/10 px-4 py-3 text-sm text-sky-100">
+            <Link href={`${page.redirectedFrom.path}?redirect=0`} className="font-semibold text-sky-50 hover:underline">
+              {page.redirectedFrom.title}
+            </Link>
+            에서 넘어왔습니다.
+          </div>
+        ) : null}
         <h1 className="max-w-4xl text-3xl font-bold text-white sm:text-4xl">{page.displayTitle}</h1>
         <p className="mt-3 text-sm text-slate-400">
           {routePath} · 최근 수정 {updatedAt}
         </p>
+        {page.redirectTarget ? (
+          <p className="mt-3 text-sm text-slate-300">
+            넘겨주기 대상: <span className="font-semibold text-slate-100">{page.redirectTarget}</span>
+          </p>
+        ) : null}
       </header>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">

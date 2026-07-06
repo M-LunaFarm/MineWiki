@@ -125,7 +125,7 @@ export class VerifyService {
     return {
       sessionId: session.id,
       status,
-      verificationUrl: session.verificationUrl ?? this.buildVerificationUrl('https://minewiki.kr', session.id),
+      verificationUrl: this.publicVerificationUrl(session.verificationUrl, session.id),
       expiresAt: session.expiresAt.toISOString()
     };
   }
@@ -220,7 +220,7 @@ export class VerifyService {
     return {
       sessionId: updated.id,
       status: 'sync_pending',
-      verificationUrl: updated.verificationUrl ?? this.buildVerificationUrl('https://minewiki.kr', updated.id),
+      verificationUrl: this.publicVerificationUrl(updated.verificationUrl, updated.id),
       expiresAt: updated.expiresAt.toISOString()
     };
   }
@@ -693,6 +693,23 @@ export class VerifyService {
       url.searchParams.set('verifyToken', completionToken);
     }
     return url.toString();
+  }
+
+  private sanitizeVerificationUrl(url: string | null | undefined): string | null {
+    if (!url) {
+      return null;
+    }
+    try {
+      const parsed = new URL(url);
+      parsed.searchParams.delete('verifyToken');
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  private publicVerificationUrl(url: string | null | undefined, sessionId: string): string {
+    return this.sanitizeVerificationUrl(url) ?? this.buildVerificationUrl('https://minewiki.kr', sessionId);
   }
 
   private normalizeStatus(status: string, expiresAt: Date): DiscordVerifySessionResponse['status'] {

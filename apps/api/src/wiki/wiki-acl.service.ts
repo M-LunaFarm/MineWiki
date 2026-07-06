@@ -1,0 +1,372 @@
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../common/prisma.service';
+import type { WikiPermissionActor } from './wiki-permission.service';
+
+type WikiAclStore = Pick<
+  PrismaService,
+  | 'aclRule'
+  | 'aclGroup'
+  | 'aclGroupMember'
+  | 'wikiGroup'
+  | 'wikiUserGroup'
+  | 'wikiGroupPermission'
+  | 'wikiSpace'
+  | 'subwikiRole'
+  | 'serverWiki'
+  | 'server'
+  | 'modWiki'
+  | 'wikiPage'
+  | 'wikiPageRevision'
+>;
+
+export type WikiAclAction =
+  | 'read'
+  | 'edit'
+  | 'create'
+  | 'move'
+  | 'delete'
+  | 'revert'
+  | 'history'
+  | 'raw'
+  | 'upload_file'
+  | 'acl';
+
+export interface WikiAclResource {
+  readonly pageId?: bigint | null;
+  readonly spaceId?: bigint | null;
+  readonly namespaceCode?: string | null;
+  readonly title?: string | null;
+  readonly createdBy?: bigint | null;
+}
+
+export interface WikiAclDecision {
+  readonly matched: boolean;
+  readonly allowed: boolean;
+  readonly reason: string;
+}
+
+const ROLE_GROUPS = {
+  admin: new Set(['admin', 'developer']),
+  moderator: new Set(['moderator', 'admin', 'developer']),
+  trusted: new Set(['trusted', 'moderator', 'admin', 'developer']),
+  autoconfirmed: new Set(['autoconfirmed', 'trusted', 'moderator', 'admin', 'developer'])
+};
+
+@Injectable()
+export class WikiAclService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async evaluate(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly action: WikiAclAction;
+    readonly resource: WikiAclResource;
+    readonly store?: WikiAclStore;
+  }): Promise<WikiAclDecision> {
+    const store = input.store ?? this.prisma;
+    const now = new Date();
+    const targetFilters: Array<{ targetType: string; targetId?: bigint | null }> = [{ targetType: 'site', targetId: null }];
+    if (input.resource.spaceId) {
+      targetFilters.push({ targetType: 'space', targetId: input.resource.spaceId });
+    }
+    if (input.resource.pageId) {
+      targetFilters.push({ targetType: 'page', targetId: input.resource.pageId });
+    }
+
+    const rules = await store.aclRule.findMany({
+      where: {
+        action: input.action,
+        OR: targetFilters.map((target) => ({
+          targetType: target.targetType,
+          targetId: target.targetId ?? null
+        })),
+        AND: [
+          {
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+          }
+        ]
+      }
+    });
+    const sorted = rules
+      .filter((rule) =>
+        rule.action === input.action &&
+        targetFilters.some((target) => rule.targetType === target.targetType && (rule.targetId ?? null) === (target.targetId ?? null)) &&
+        (!rule.expiresAt || rule.expiresAt.getTime() > now.getTime())
+      )
+      .sort((left, right) => {
+      const targetDelta = targetSpecificity(left.targetType) - targetSpecificity(right.targetType);
+      return targetDelta === 0 ? left.sortOrder - right.sortOrder : targetDelta;
+    });
+
+    let allowReason: string | null = null;
+    for (const rule of sorted) {
+      const matches = await this.subjectMatches(store, rule, input.actor, input.resource);
+      if (!matches) {
+        continue;
+      }
+      if (rule.effect === 'deny') {
+        return { matched: true, allowed: false, reason: rule.reason ?? 'acl_deny' };
+      }
+      if (rule.effect === 'allow') {
+        allowReason = rule.reason ?? 'acl_allow';
+      } else {
+        return { matched: true, allowed: false, reason: 'acl_unsupported_effect' };
+      }
+    }
+
+    return allowReason
+      ? { matched: true, allowed: true, reason: allowReason }
+      : { matched: false, allowed: false, reason: 'acl_no_match' };
+  }
+
+  private async subjectMatches(
+    store: WikiAclStore,
+    rule: {
+      readonly subjectType: string;
+      readonly subjectValue: string;
+    },
+    actor: WikiPermissionActor | null,
+    resource: WikiAclResource
+  ): Promise<boolean> {
+    const subjectType = rule.subjectType;
+    const subjectValue = stripAclPrefix(rule.subjectValue, subjectType);
+    if (subjectType === 'perm') {
+      return this.permissionMatches(store, subjectValue, actor);
+    }
+    if (subjectType === 'user') {
+      return Boolean(actor && actor.profileId === BigInt(subjectValue));
+    }
+    if (subjectType === 'aclgroup') {
+      return this.aclGroupMatches(store, subjectValue, actor);
+    }
+    if (subjectType === 'role') {
+      return this.roleMatches(store, subjectValue, actor, resource);
+    }
+    return false;
+  }
+
+  private async permissionMatches(
+    store: WikiAclStore,
+    permission: string,
+    actor: WikiPermissionActor | null
+  ): Promise<boolean> {
+    if (permission === 'any') {
+      return true;
+    }
+    if (permission === 'guest') {
+      return !actor;
+    }
+    if (permission === 'member') {
+      return Boolean(actor);
+    }
+    if (!actor) {
+      return false;
+    }
+    const groups = await this.groupCodes(store, actor);
+    const permissions = await this.permissionCodes(store, groups);
+    if (permission === 'admin') {
+      return actor.isElevated === true || groups.some((group) => ROLE_GROUPS.admin.has(group));
+    }
+    if (permission === 'developer') {
+      return groups.includes('developer');
+    }
+    if (permission === 'moderator' || permission === 'trusted' || permission === 'autoconfirmed') {
+      return groups.some((group) => ROLE_GROUPS[permission].has(group));
+    }
+    return actor.permissions?.includes(permission) === true || permissions.includes(permission);
+  }
+
+  private async roleMatches(
+    store: WikiAclStore,
+    role: string,
+    actor: WikiPermissionActor | null,
+    resource: WikiAclResource
+  ): Promise<boolean> {
+    if (!actor) {
+      return false;
+    }
+    if (role === 'owner_user') {
+      return resource.createdBy === actor.profileId;
+    }
+    if (role === 'page_contributor' && resource.pageId) {
+      const revision = await store.wikiPageRevision.findFirst({
+        where: {
+          pageId: resource.pageId,
+          createdBy: actor.profileId
+        },
+        select: { id: true }
+      });
+      return Boolean(revision);
+    }
+    if (role === 'space_contributor' && resource.spaceId) {
+      const pages = await store.wikiPage.findMany({
+        where: { spaceId: resource.spaceId },
+        select: { id: true },
+        take: 500
+      });
+      if (pages.length === 0) {
+        return false;
+      }
+      const revision = await store.wikiPageRevision.findFirst({
+        where: {
+          pageId: { in: pages.map((page) => page.id) },
+          createdBy: actor.profileId,
+        },
+        select: { id: true }
+      });
+      return Boolean(revision);
+    }
+    if (!resource.spaceId) {
+      return false;
+    }
+    if (role === 'server_owner' || role === 'server_manager' || role === 'server_editor') {
+      return this.serverRoleMatches(store, role, actor, resource.spaceId);
+    }
+    if (role === 'mod_wiki_manager' || role === 'mod_wiki_editor') {
+      return this.modRoleMatches(store, role, actor, resource.spaceId);
+    }
+    return false;
+  }
+
+  private async serverRoleMatches(
+    store: WikiAclStore,
+    role: string,
+    actor: WikiPermissionActor,
+    spaceId: bigint
+  ): Promise<boolean> {
+    const allowedRoles = role === 'server_owner'
+      ? ['owner']
+      : role === 'server_manager'
+        ? ['owner', 'manager']
+        : ['owner', 'manager', 'editor'];
+    if (await this.hasSubwikiRole(store, actor.profileId, spaceId, allowedRoles)) {
+      return true;
+    }
+    const serverWiki = await store.serverWiki.findFirst({
+      where: {
+        spaceId,
+        status: { not: 'deleted' }
+      },
+      select: { voteServerId: true, createdBy: true }
+    });
+    if (serverWiki?.createdBy === actor.profileId) {
+      return true;
+    }
+    if (!serverWiki?.voteServerId) {
+      return false;
+    }
+    const server = await store.server.findUnique({
+      where: { id: serverWiki.voteServerId },
+      select: { ownerAccountId: true }
+    });
+    return server?.ownerAccountId === actor.accountId;
+  }
+
+  private async modRoleMatches(
+    store: WikiAclStore,
+    role: string,
+    actor: WikiPermissionActor,
+    spaceId: bigint
+  ): Promise<boolean> {
+    const allowedRoles = role === 'mod_wiki_manager'
+      ? ['owner', 'manager', 'maintainer']
+      : ['owner', 'manager', 'maintainer', 'editor', 'reviewer'];
+    if (await this.hasSubwikiRole(store, actor.profileId, spaceId, allowedRoles)) {
+      return true;
+    }
+    const modWiki = await store.modWiki.findFirst({
+      where: {
+        spaceId,
+        status: { not: 'deleted' }
+      },
+      select: { verifiedBy: true }
+    });
+    return modWiki?.verifiedBy === actor.profileId;
+  }
+
+  private async aclGroupMatches(store: WikiAclStore, groupKey: string, actor: WikiPermissionActor | null): Promise<boolean> {
+    if (!actor) {
+      return false;
+    }
+    const group = await store.aclGroup.findUnique({
+      where: { groupKey },
+      select: { id: true, status: true }
+    });
+    if (!group || group.status !== 'active') {
+      return false;
+    }
+    const member = await store.aclGroupMember.findFirst({
+      where: {
+        groupId: group.id,
+        memberType: 'user',
+        userId: actor.profileId,
+        removedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
+      },
+      select: { id: true }
+    });
+    return Boolean(member);
+  }
+
+  private async groupCodes(store: WikiAclStore, actor: WikiPermissionActor): Promise<string[]> {
+    const explicit = actor.groups ? [...actor.groups] : [];
+    const memberships = await store.wikiUserGroup.findMany({
+      where: { userId: actor.profileId },
+      select: { groupId: true }
+    });
+    if (memberships.length === 0) {
+      return explicit;
+    }
+    const groups = await store.wikiGroup.findMany({
+      where: { id: { in: memberships.map((membership) => membership.groupId) } },
+      select: { code: true }
+    });
+    return [...new Set([...explicit, ...groups.map((group) => group.code)])];
+  }
+
+  private async permissionCodes(store: WikiAclStore, groupCodes: readonly string[]): Promise<string[]> {
+    if (groupCodes.length === 0) {
+      return [];
+    }
+    const groups = await store.wikiGroup.findMany({
+      where: { code: { in: [...groupCodes] } },
+      select: { id: true }
+    });
+    if (groups.length === 0) {
+      return [];
+    }
+    const permissions = await store.wikiGroupPermission.findMany({
+      where: { groupId: { in: groups.map((group) => group.id) } },
+      select: { permissionCode: true }
+    });
+    return permissions.map((permission) => permission.permissionCode);
+  }
+
+  private async hasSubwikiRole(
+    store: WikiAclStore,
+    profileId: bigint,
+    spaceId: bigint,
+    allowedRoles: readonly string[]
+  ): Promise<boolean> {
+    const role = await store.subwikiRole.findFirst({
+      where: {
+        spaceId,
+        userId: profileId,
+        status: 'active',
+        role: { in: [...allowedRoles] }
+      },
+      select: { id: true }
+    });
+    return Boolean(role);
+  }
+}
+
+function targetSpecificity(targetType: string): number {
+  if (targetType === 'site') return 0;
+  if (targetType === 'space') return 1;
+  if (targetType === 'page') return 2;
+  return 3;
+}
+
+function stripAclPrefix(value: string, subjectType: string): string {
+  return value.replace(new RegExp(`^${subjectType}:`), '');
+}

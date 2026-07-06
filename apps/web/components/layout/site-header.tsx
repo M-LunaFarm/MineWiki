@@ -29,12 +29,12 @@ export function SiteHeader() {
 
   useEffect(() => {
     const syncSearchFromLocation = () => {
-      if (typeof window === 'undefined' || window.location.pathname !== '/servers') {
+      if (typeof window === 'undefined' || window.location.pathname !== '/search') {
         setCurrentSearch('');
         return;
       }
       const params = new URLSearchParams(window.location.search);
-      setCurrentSearch(params.get('search') ?? '');
+      setCurrentSearch(params.get('q') ?? '');
     };
 
     syncSearchFromLocation();
@@ -123,15 +123,15 @@ export function SiteHeader() {
                   : '비로그인'}
             </div>
 
-            <form action="/servers" className="relative hidden lg:block">
+            <form action="/search" className="relative hidden lg:block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input
-                name="search"
+                name="q"
                 type="search"
-                aria-label="서버 검색"
+                aria-label="위키 검색"
                 value={currentSearch}
                 onChange={(event) => setCurrentSearch(event.target.value)}
-                placeholder="서버명 · 주소 · 태그"
+                placeholder="위키 문서 검색"
                 className="h-10 w-64 rounded-xl border border-white/[0.08] bg-white/[0.03] pl-10 pr-3 text-sm text-white placeholder:text-slate-500 transition-colors focus:border-[#14c794]/60 focus:bg-white/[0.05] focus:outline-none focus:ring-2 focus:ring-[#14c794]/15"
               />
             </form>
@@ -150,15 +150,15 @@ export function SiteHeader() {
 
         {mobileOpen ? (
           <div className="border-t border-white/[0.06] py-3 md:hidden">
-            <form action="/servers" className="relative mb-3">
+            <form action="/search" className="relative mb-3">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input
-                name="search"
+                name="q"
                 type="search"
-                aria-label="서버 검색"
+                aria-label="위키 검색"
                 value={currentSearch}
                 onChange={(event) => setCurrentSearch(event.target.value)}
-                placeholder="서버명 · 주소 · 태그"
+                placeholder="위키 문서 검색"
                 className="h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 pl-10 text-sm text-white placeholder:text-slate-500 focus:border-[#14c794]/60 focus:outline-none"
               />
             </form>

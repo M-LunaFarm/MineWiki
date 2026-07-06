@@ -581,12 +581,17 @@ model UploadedFile {
   storagePath    String   @map("storage_path") @db.VarChar(1024)
   publicPath     String   @map("public_path") @db.VarChar(1024)
   usageContext   String   @default("general") @map("usage_context") @db.VarChar(64)
+  visibility     String   @default("public") @db.VarChar(32)
+  linkedResourceType String? @map("linked_resource_type") @db.VarChar(64)
+  linkedResourceId   String? @map("linked_resource_id") @db.VarChar(128)
   status         String   @default("active") @db.VarChar(32)
   createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.DateTime(3)
 
   @@index([ownerAccountId])
   @@index([usageContext])
+  @@index([visibility])
+  @@index([linkedResourceType, linkedResourceId])
   @@index([sha256])
   @@index([status])
   @@map("uploaded_files")
@@ -939,6 +944,118 @@ model SubwikiRole {
   @@index([userId])
   @@index([spaceId])
   @@map("subwiki_roles")
+}
+
+model AclGroup {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  groupKey    String   @map("group_key") @db.VarChar(64)
+  title       String   @db.VarChar(255)
+  description String?  @db.Text
+  status      String   @default("active") @db.VarChar(32)
+  createdAt   DateTime @map("created_at")
+  updatedAt   DateTime @map("updated_at")
+
+  @@unique([groupKey], map: "uk_acl_groups_key")
+  @@map("acl_groups")
+}
+
+model AclGroupMember {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  groupId    BigInt    @map("group_id") @db.UnsignedBigInt
+  memberType String    @map("member_type") @db.VarChar(16)
+  userId     BigInt?   @map("user_id") @db.UnsignedBigInt
+  ip         Bytes?
+  cidr       String?   @db.VarChar(64)
+  reason     String?   @db.Text
+  expiresAt  DateTime? @map("expires_at")
+  addedBy    BigInt?   @map("added_by") @db.UnsignedBigInt
+  addedAt    DateTime  @map("added_at")
+  removedAt  DateTime? @map("removed_at")
+
+  @@index([groupId], map: "idx_acl_group_members_group")
+  @@index([userId], map: "idx_acl_group_members_user")
+  @@index([expiresAt], map: "idx_acl_group_members_expires")
+  @@map("acl_group_members")
+}
+
+model AclRule {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  targetType   String    @map("target_type") @db.VarChar(16)
+  targetId     BigInt?   @map("target_id") @db.UnsignedBigInt
+  action       String    @db.VarChar(32)
+  effect       String    @db.VarChar(32)
+  subjectType  String    @map("subject_type") @db.VarChar(32)
+  subjectValue String    @map("subject_value") @db.VarChar(255)
+  sortOrder    Int       @default(0) @map("sort_order") @db.UnsignedInt
+  reason       String?   @db.Text
+  expiresAt    DateTime? @map("expires_at")
+  createdBy    BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt    DateTime  @map("created_at")
+  updatedAt    DateTime  @map("updated_at")
+
+  @@index([targetType, targetId], map: "idx_acl_target")
+  @@index([action], map: "idx_acl_action")
+  @@index([expiresAt], map: "idx_acl_expires")
+  @@map("acl_rules")
+}
+
+model AclChangeLog {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  targetType  String   @map("target_type") @db.VarChar(16)
+  targetId    BigInt?  @map("target_id") @db.UnsignedBigInt
+  actionType  String   @map("action_type") @db.VarChar(16)
+  oldRuleJson Json?    @map("old_rule_json")
+  newRuleJson Json?    @map("new_rule_json")
+  reason      String?  @db.Text
+  changedBy   BigInt?  @map("changed_by") @db.UnsignedBigInt
+  createdAt   DateTime @map("created_at")
+
+  @@index([targetType, targetId], map: "idx_acl_logs_target")
+  @@index([createdAt], map: "idx_acl_logs_created")
+  @@map("acl_change_logs")
+}
+
+model PageSectionLock {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId     BigInt   @map("page_id") @db.UnsignedBigInt
+  anchor     String   @db.VarChar(255)
+  heading    String   @db.VarChar(255)
+  lockType   String   @default("admin_only") @map("lock_type") @db.VarChar(32)
+  ownerGroup String?  @map("owner_group") @db.VarChar(64)
+  reason     String?  @db.VarChar(255)
+  createdBy  BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt  DateTime @map("created_at")
+  updatedAt  DateTime @map("updated_at")
+
+  @@unique([pageId, anchor], map: "uk_section_locks_page_anchor")
+  @@index([pageId], map: "idx_section_locks_page")
+  @@index([lockType], map: "idx_section_locks_type")
+  @@map("page_section_locks")
+}
+
+model WikiGroup {
+  id          Int    @id @default(autoincrement()) @db.UnsignedInt
+  code        String @db.VarChar(32)
+  displayName String @map("display_name") @db.VarChar(64)
+
+  @@unique([code], map: "uk_groups_code")
+  @@map("groups")
+}
+
+model WikiUserGroup {
+  userId  BigInt @map("user_id") @db.UnsignedBigInt
+  groupId Int    @map("group_id") @db.UnsignedInt
+
+  @@id([userId, groupId])
+  @@map("user_groups")
+}
+
+model WikiGroupPermission {
+  groupId        Int    @map("group_id") @db.UnsignedInt
+  permissionCode String @map("permission_code") @db.VarChar(64)
+
+  @@id([groupId, permissionCode])
+  @@map("group_permissions")
 }
 
 model DocumentTemplate {

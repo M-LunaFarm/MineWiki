@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { FilePermissionService } from './file-permission.service';
 import { FileService } from './file.service';
+
+function session(userId: string, isElevated = false) {
+  return {
+    sessionId: `session-${userId}`,
+    userId,
+    isElevated
+  };
+}
 
 function createService() {
   const files = new Map<string, any>();
@@ -25,6 +34,9 @@ function createService() {
         const file = {
           id: 'file-1',
           status: 'active',
+          visibility: 'public',
+          linkedResourceType: null,
+          linkedResourceId: null,
           createdAt: now,
           updatedAt: now,
           ...args.data
@@ -43,7 +55,7 @@ function createService() {
       }
     }
   };
-  return { service: new FileService(prisma as never, uploads as never), files };
+  return { service: new FileService(prisma as never, uploads as never, new FilePermissionService()), files };
 }
 
 test('file service stores canonical image metadata', async () => {
@@ -59,6 +71,7 @@ test('file service stores canonical image metadata', async () => {
   assert.equal(uploaded.originalName, 'wiki.png');
   assert.equal(uploaded.ownerAccountId, 'account-1');
   assert.equal(uploaded.usageContext, 'wiki_editor');
+  assert.equal(uploaded.visibility, 'public');
   assert.equal(uploaded.url, 'upload://stored.webp');
 });
 
@@ -69,6 +82,27 @@ test('file service requires owner before delete', async () => {
     filename: 'wiki.png'
   });
 
-  await assert.rejects(() => service.deleteFile(uploaded.id, 'account-2'), /owner is required/);
-  await assert.doesNotReject(() => service.deleteFile(uploaded.id, 'account-1'));
+  await assert.rejects(() => service.deleteFile(uploaded.id, session('account-2')), /owner is required/);
+  await assert.doesNotReject(() => service.deleteFile(uploaded.id, session('account-1')));
+});
+
+test('private raw file is only readable by owner or elevated session', async () => {
+  const { service, files } = createService();
+  const uploaded = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'wiki.png',
+    visibility: 'private'
+  });
+  files.set(uploaded.id, {
+    ...files.get(uploaded.id),
+    publicPath: 'https://cdn.example.test/private.webp'
+  });
+
+  await assert.rejects(() => service.getRawFile(uploaded.id, null), /File not found/);
+  await assert.rejects(() => service.getRawFile(uploaded.id, session('account-2')), /File not found/);
+  const ownerRaw = await service.getRawFile(uploaded.id, session('account-1'));
+  assert.equal(ownerRaw.redirectUrl, 'https://cdn.example.test/private.webp');
+  assert.equal(ownerRaw.cacheControl, 'private, no-store');
+  const adminRaw = await service.getRawFile(uploaded.id, session('admin', true));
+  assert.equal(adminRaw.redirectUrl, 'https://cdn.example.test/private.webp');
 });

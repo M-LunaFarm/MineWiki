@@ -2,7 +2,7 @@ import { fetchWikiPageByPath } from '../../lib/wiki-api';
 import { WikiEditorClient } from './wiki-editor-client';
 
 interface WikiEditRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'help' | 'project' | 'file';
   readonly segments?: string[];
 }
 
@@ -11,7 +11,10 @@ const namespaceByPrefix = {
   mod: 'mod',
   modpack: 'modpack',
   server: 'server',
-  dev: 'dev'
+  dev: 'dev',
+  help: 'help',
+  project: 'project',
+  file: 'file'
 } as const;
 
 export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoutePageProps) {

@@ -142,6 +142,26 @@ test('discord verify completes with a valid completion token', async () => {
   });
 
   assert.equal(completed.status, 'sync_pending');
+  assert.equal(new URL(completed.verificationUrl).searchParams.has('verifyToken'), false);
+});
+
+test('discord verify create response includes one-time completion token', async () => {
+  const harness = createHarness();
+  const { response, completionToken } = await createPendingSession(harness);
+
+  assert.equal(new URL(response.verificationUrl).searchParams.get('verifySessionId'), response.sessionId);
+  assert.equal(new URL(response.verificationUrl).searchParams.get('verifyToken'), completionToken);
+});
+
+test('discord verify public session lookup removes completion token', async () => {
+  const harness = createHarness();
+  const { response } = await createPendingSession(harness);
+
+  const fetched = await harness.service.getDiscordSession(response.sessionId);
+  const url = new URL(fetched.verificationUrl);
+
+  assert.equal(url.searchParams.get('verifySessionId'), response.sessionId);
+  assert.equal(url.searchParams.has('verifyToken'), false);
 });
 
 test('discord verify rejects missing completion token', async () => {
