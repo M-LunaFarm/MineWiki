@@ -101,6 +101,7 @@ model Account {
   minecraftIdentity       MinecraftIdentity?
   minecraftAuthorizations MinecraftAuthorization[]
   oauthStates             OAuthState[]
+  oauthCredentials        OAuthCredential[]
   linkRequestsSent        AccountLinkRequest[]     @relation("LinkRequestPrimary")
   linkRequestsReceived    AccountLinkRequest[]     @relation("LinkRequestTarget")
   outgoingLinks           AccountLink[]            @relation("AccountLinkPrimary")
@@ -206,6 +207,27 @@ model OAuthState {
   linkAccountId String?
 
   linkAccount Account? @relation(fields: [linkAccountId], references: [id], onDelete: Cascade)
+}
+
+model OAuthCredential {
+  id             String        @id @default(uuid())
+  accountId      String
+  provider       OAuthProvider
+  providerUserId String
+  accessToken    String        @db.Text
+  refreshToken   String?       @db.Text
+  tokenType      String?       @db.VarChar(32)
+  scope          String?       @db.VarChar(512)
+  expiresAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, provider, providerUserId])
+  @@index([provider, providerUserId])
+  @@index([expiresAt])
+  @@map("oauth_credentials")
 }
 
 model MinecraftAuthorization {

@@ -1,0 +1,234 @@
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@minewiki/config';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../common/prisma.service';
+import type { SessionPayload } from '../session/session.service';
+import type { LunaGuildResponse } from './verify.service';
+
+const DISCORD_MANAGE_GUILD = 0x20n;
+const TOKEN_REFRESH_SKEW_MS = 60_000;
+
+type DiscordGuild = {
+  readonly id?: string;
+  readonly owner?: boolean;
+  readonly permissions?: string;
+};
+
+type OAuthCredentialRecord = {
+  readonly id: string;
+  readonly accountId: string;
+  readonly providerUserId: string;
+  readonly accessToken: string;
+  readonly refreshToken: string | null;
+  readonly tokenType: string | null;
+  readonly scope: string | null;
+  readonly expiresAt: Date | null;
+};
+
+@Injectable()
+export class GuildAccessService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
+
+  async listAccessibleGuilds(session: SessionPayload): Promise<LunaGuildResponse[]> {
+    if (session.isElevated) {
+      const guilds = await this.prisma.lunaGuild.findMany({
+        orderBy: [{ updatedAt: 'desc' }],
+        take: 100,
+      });
+      return guilds.map(toGuildResponse);
+    }
+
+    const accessibleIds = await this.resolveManageableGuildIds(session.userId);
+    if (accessibleIds.size === 0) {
+      return [];
+    }
+    const guilds = await this.prisma.lunaGuild.findMany({
+      where: { guildId: { in: [...accessibleIds] } },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 100,
+    });
+    return guilds.map(toGuildResponse);
+  }
+
+  async assertCanViewGuild(session: SessionPayload, guildId: string): Promise<void> {
+    await this.assertCanManageGuild(session, guildId);
+  }
+
+  async assertCanManageGuild(session: SessionPayload, guildId: string): Promise<void> {
+    if (session.isElevated) {
+      return;
+    }
+    const accessibleIds = await this.resolveManageableGuildIds(session.userId);
+    if (!accessibleIds.has(guildId)) {
+      throw new ForbiddenException('Discord guild management permission is required.');
+    }
+  }
+
+  private async resolveManageableGuildIds(accountId: string): Promise<Set<string>> {
+    const accountIds = await this.collectConnectedAccountIds(accountId);
+    const credentials = await this.prisma.oAuthCredential.findMany({
+      where: {
+        accountId: { in: [...accountIds] },
+        provider: 'discord',
+      },
+      orderBy: [{ updatedAt: 'desc' }],
+    });
+
+    const manageable = new Set<string>();
+    for (const credential of credentials) {
+      if (!hasScope(credential.scope, 'guilds')) {
+        continue;
+      }
+      const guilds = await this.fetchDiscordGuilds(await this.ensureFreshCredential(credential));
+      for (const guild of guilds) {
+        if (guild.id && canManageDiscordGuild(guild)) {
+          manageable.add(guild.id);
+        }
+      }
+    }
+    return manageable;
+  }
+
+  private async collectConnectedAccountIds(accountId: string): Promise<Set<string>> {
+    const visited = new Set<string>([accountId]);
+    let frontier = [accountId];
+    while (frontier.length > 0) {
+      const links = await this.prisma.accountLink.findMany({
+        where: {
+          OR: [{ primaryAccountId: { in: frontier } }, { linkedAccountId: { in: frontier } }],
+        },
+        select: { primaryAccountId: true, linkedAccountId: true },
+      });
+      const next: string[] = [];
+      for (const link of links) {
+        if (!visited.has(link.primaryAccountId)) {
+          visited.add(link.primaryAccountId);
+          next.push(link.primaryAccountId);
+        }
+        if (!visited.has(link.linkedAccountId)) {
+          visited.add(link.linkedAccountId);
+          next.push(link.linkedAccountId);
+        }
+      }
+      frontier = next;
+    }
+    return visited;
+  }
+
+  private async ensureFreshCredential(
+    credential: OAuthCredentialRecord,
+  ): Promise<OAuthCredentialRecord> {
+    if (
+      !credential.expiresAt ||
+      credential.expiresAt.getTime() - Date.now() > TOKEN_REFRESH_SKEW_MS
+    ) {
+      return credential;
+    }
+    if (!credential.refreshToken) {
+      throw new UnauthorizedException('Discord OAuth credential has expired.');
+    }
+    return this.refreshDiscordCredential(credential);
+  }
+
+  private async refreshDiscordCredential(
+    credential: OAuthCredentialRecord,
+  ): Promise<OAuthCredentialRecord> {
+    const clientId = this.config.getOptional('DISCORD_CLIENT_ID');
+    const clientSecret = this.config.getOptional('DISCORD_CLIENT_SECRET');
+    if (!clientId || !clientSecret) {
+      throw new UnauthorizedException('Discord OAuth refresh is not configured.');
+    }
+
+    const body = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: credential.refreshToken ?? '',
+    });
+    const response = await fetch('https://discord.com/api/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    if (!response.ok) {
+      throw new UnauthorizedException('Discord OAuth credential refresh failed.');
+    }
+    const payload = (await response.json().catch(() => ({}))) as {
+      access_token?: string;
+      refresh_token?: string;
+      token_type?: string;
+      scope?: string;
+      expires_in?: number;
+    };
+    if (!payload.access_token) {
+      throw new UnauthorizedException('Discord OAuth refresh did not return an access token.');
+    }
+    const updated = await this.prisma.oAuthCredential.update({
+      where: { id: credential.id },
+      data: {
+        accessToken: payload.access_token,
+        refreshToken: payload.refresh_token ?? credential.refreshToken,
+        tokenType: payload.token_type ?? credential.tokenType,
+        scope: payload.scope ?? credential.scope,
+        expiresAt: payload.expires_in ? new Date(Date.now() + payload.expires_in * 1000) : null,
+      },
+    });
+    return updated;
+  }
+
+  private async fetchDiscordGuilds(credential: OAuthCredentialRecord): Promise<DiscordGuild[]> {
+    const response = await fetch('https://discord.com/api/users/@me/guilds', {
+      headers: { Authorization: `Bearer ${credential.accessToken}` },
+    });
+    if (!response.ok) {
+      throw new UnauthorizedException('Discord guild list could not be loaded.');
+    }
+    const payload = await response.json().catch(() => []);
+    return Array.isArray(payload) ? (payload as DiscordGuild[]) : [];
+  }
+}
+
+function hasScope(scope: string | null, required: string): boolean {
+  return Boolean(scope?.split(/\s+/).includes(required));
+}
+
+function canManageDiscordGuild(guild: DiscordGuild): boolean {
+  if (guild.owner) {
+    return true;
+  }
+  try {
+    const permissions = BigInt(guild.permissions ?? '0');
+    return (permissions & DISCORD_MANAGE_GUILD) === DISCORD_MANAGE_GUILD;
+  } catch {
+    return false;
+  }
+}
+
+function toGuildResponse(guild: {
+  guildId: string;
+  verifiedRoleId: string | null;
+  logChannelId: string | null;
+  nicknameFormat: string | null;
+  botMessageTemplate: string | null;
+  botMessagePayload: Prisma.JsonValue | null;
+  verifyReplyPayload: Prisma.JsonValue | null;
+  policyJson: Prisma.JsonValue | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): LunaGuildResponse {
+  return {
+    guildId: guild.guildId,
+    verifiedRoleId: guild.verifiedRoleId,
+    logChannelId: guild.logChannelId,
+    nicknameFormat: guild.nicknameFormat,
+    botMessageTemplate: guild.botMessageTemplate,
+    botMessagePayload: guild.botMessagePayload,
+    verifyReplyPayload: guild.verifyReplyPayload,
+    policyJson: guild.policyJson,
+    createdAt: guild.createdAt.toISOString(),
+    updatedAt: guild.updatedAt.toISOString(),
+  };
+}

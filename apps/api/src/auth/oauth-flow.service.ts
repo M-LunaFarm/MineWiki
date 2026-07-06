@@ -33,9 +33,18 @@ interface OAuthCompleteResult {
   readonly returnTo?: string;
   readonly mode: 'login' | 'link';
   readonly linkAccountId?: string;
+  readonly credential?: OAuthCredentialSnapshot;
 }
 
 type OAuthProfile = Pick<OAuthCompleteResult, 'providerUserId' | 'email' | 'displayName'>;
+
+interface OAuthCredentialSnapshot {
+  readonly accessToken: string;
+  readonly refreshToken?: string;
+  readonly tokenType?: string;
+  readonly scope?: string;
+  readonly expiresAt?: Date;
+}
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 export type { OAuthStartResult, OAuthCompleteResult };
@@ -131,7 +140,7 @@ export class OAuthFlowService {
     const url = new URL('https://discord.com/oauth2/authorize');
     url.searchParams.set('client_id', clientId);
     url.searchParams.set('response_type', 'code');
-    url.searchParams.set('scope', 'identify email');
+    url.searchParams.set('scope', 'identify email guilds');
     url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('prompt', 'consent');
     url.searchParams.set('state', state);
@@ -141,7 +150,7 @@ export class OAuthFlowService {
   private async exchangeDiscordCode(
     code: string,
     redirectUri: string
-  ): Promise<OAuthProfile> {
+  ): Promise<OAuthProfile & { credential: OAuthCredentialSnapshot }> {
     const clientId = this.config.getOptional('DISCORD_CLIENT_ID');
     const clientSecret = this.config.getOptional('DISCORD_CLIENT_SECRET');
     if (!clientId || !clientSecret) {
@@ -176,7 +185,10 @@ export class OAuthFlowService {
 
     const tokenPayload = (await tokenResponse.json().catch(() => ({}))) as {
       access_token?: string;
+      refresh_token?: string;
       token_type?: string;
+      expires_in?: number;
+      scope?: string;
     };
 
     if (!tokenPayload?.access_token) {
@@ -215,8 +227,54 @@ export class OAuthFlowService {
     return {
       providerUserId: user.id,
       email: user.email?.toLowerCase(),
-      displayName: user.global_name ?? user.username ?? undefined
+      displayName: user.global_name ?? user.username ?? undefined,
+      credential: {
+        accessToken: tokenPayload.access_token,
+        refreshToken: tokenPayload.refresh_token,
+        tokenType: tokenPayload.token_type,
+        scope: tokenPayload.scope,
+        expiresAt: tokenPayload.expires_in
+          ? new Date(Date.now() + tokenPayload.expires_in * 1000)
+          : undefined
+      }
     };
+  }
+
+  async storeCredential(
+    accountId: string,
+    provider: OAuthProvider,
+    providerUserId: string,
+    credential?: OAuthCredentialSnapshot
+  ): Promise<void> {
+    if (!credential?.accessToken) {
+      return;
+    }
+    await this.prisma.oAuthCredential.upsert({
+      where: {
+        accountId_provider_providerUserId: {
+          accountId,
+          provider,
+          providerUserId
+        }
+      },
+      create: {
+        accountId,
+        provider,
+        providerUserId,
+        accessToken: credential.accessToken,
+        refreshToken: credential.refreshToken ?? null,
+        tokenType: credential.tokenType ?? null,
+        scope: credential.scope ?? null,
+        expiresAt: credential.expiresAt ?? null
+      },
+      update: {
+        accessToken: credential.accessToken,
+        refreshToken: credential.refreshToken ?? null,
+        tokenType: credential.tokenType ?? null,
+        scope: credential.scope ?? null,
+        expiresAt: credential.expiresAt ?? null
+      }
+    });
   }
 
   private createNaverAuthorizationUrl(state: string, redirectUri: string): string {

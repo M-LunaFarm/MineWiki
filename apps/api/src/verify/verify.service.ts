@@ -46,10 +46,14 @@ export class VerifyService {
   }
 
   assertInternalBotToken(headerValue: string | undefined): void {
-    const expected = this.config.getOptional('INTERNAL_BOT_API_TOKEN');
-    if (!expected || headerValue !== `Bearer ${expected}`) {
+    if (!this.isInternalBotToken(headerValue)) {
       throw new UnauthorizedException('Internal bot token is invalid.');
     }
+  }
+
+  isInternalBotToken(headerValue: string | undefined): boolean {
+    const expected = this.config.getOptional('INTERNAL_BOT_API_TOKEN');
+    return Boolean(expected && headerValue === `Bearer ${expected}`);
   }
 
   assertPluginSyncToken(headerValue: string | undefined): void {

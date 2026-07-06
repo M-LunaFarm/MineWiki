@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers';
 import { normalizeApiBaseUrl } from './runtime-config';
 
 const API_BASE = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL);
@@ -62,12 +63,12 @@ export function buildDiscordBotInviteUrl(guildId?: string | null): string | null
 }
 
 export async function fetchGuilds(): Promise<GuildSummary[]> {
-  return fetchGuildApi<GuildSummary[]>('/v1/guilds');
+  return fetchGuildApi<GuildSummary[]>('/v1/guilds/me');
 }
 
 export async function fetchGuildDetail(guildId: string): Promise<GuildDetail | null> {
   const response = await fetch(`${API_BASE}/v1/guilds/${encodeURIComponent(guildId)}`, {
-    headers: internalHeaders(),
+    headers: await sessionHeaders(),
     cache: 'no-store',
   });
   if (response.status === 404) {
@@ -85,7 +86,7 @@ export async function updateGuildSettings(
     {
       method: 'PATCH',
       headers: {
-        ...internalHeaders(),
+        ...(await sessionHeaders()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -95,8 +96,9 @@ export async function updateGuildSettings(
 
 async function fetchGuildApi<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (!headers.has('authorization')) {
-    headers.set('authorization', internalHeaders().authorization);
+  const session = await sessionHeaders();
+  if (!headers.has('cookie')) {
+    headers.set('cookie', session.cookie);
   }
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -114,10 +116,10 @@ async function readGuildResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-function internalHeaders(): { authorization: string } {
-  const token = process.env.INTERNAL_BOT_API_TOKEN?.trim();
-  if (!token) {
-    throw new Error('INTERNAL_BOT_API_TOKEN is required for guild dashboard access.');
+async function sessionHeaders(): Promise<{ cookie: string }> {
+  const cookieHeader = (await cookies()).toString();
+  if (!cookieHeader) {
+    throw new Error('로그인이 필요합니다.');
   }
-  return { authorization: `Bearer ${token}` };
+  return { cookie: cookieHeader };
 }

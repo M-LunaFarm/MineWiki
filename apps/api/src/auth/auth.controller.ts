@@ -83,6 +83,12 @@ export class AuthController {
         email: profile.email,
         displayName: profile.displayName,
       });
+      await this.oauthFlow.storeCredential(
+        sessionRecord.userId,
+        payload.provider,
+        profile.providerUserId,
+        profile.credential,
+      );
       return {
         account,
         sessionId: sessionRecord.sessionId,
@@ -93,6 +99,12 @@ export class AuthController {
     }
 
     const session = await this.finalizeOAuth(payload.provider, profile, reply, request);
+    await this.oauthFlow.storeCredential(
+      session.account.id,
+      payload.provider,
+      profile.providerUserId,
+      profile.credential,
+    );
     return {
       account: session.account,
       sessionId: session.sessionId,
