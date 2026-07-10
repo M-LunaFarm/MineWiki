@@ -39,6 +39,18 @@ Use `pnpm deploy:build` before reload and `pnpm deploy:smoke` after reload. Do n
 
 `pnpm db:deploy` safely bootstraps a completely empty database from the current Prisma schema, or applies additive migrations when application tables already exist. It never replaces a non-empty database with `db push`.
 
+## Container Builds
+
+Build the production images from the repository root so pnpm workspace packages are available:
+
+```bash
+docker build -f apps/api/Dockerfile -t minewiki-api .
+docker build -f apps/worker/Dockerfile -t minewiki-worker .
+docker build -f apps/web/Dockerfile -t minewiki-web .
+```
+
+Set `INTERNAL_API_BASE_URL` on the web container to the API container's internal URL, for example `http://minewiki-api:3000`. Browser requests continue to use `NEXT_PUBLIC_API_BASE_URL` (normally `/api` behind the web container or reverse proxy).
+
 ## Data Validation
 
 Run `pnpm data:validate` before deploys to check migration integrity across wiki pages, server wiki links, account/profile mappings, uploads, replay guards, and render cache readiness. The command is read-only by default. Use `pnpm data:validate -- --fix` only when you want safe repairs for expired plugin replay guards and missing current render cache entries.

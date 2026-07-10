@@ -8,7 +8,7 @@ cd "$repo_root"
 git fetch --all --tags --prune
 git checkout "$release_ref"
 pnpm install --frozen-lockfile
-pnpm exec prisma migrate deploy
+pnpm db:deploy
 pnpm build
 pm2 startOrReload infra/pm2/ecosystem.config.cjs --update-env
 nginx -t

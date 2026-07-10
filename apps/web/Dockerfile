@@ -1,22 +1,34 @@
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm install --omit=dev
+FROM node:22-bookworm-slim AS builder
 
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+RUN corepack enable
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY prisma/schema.prisma prisma/schema.prisma
+COPY apps/web/package.json apps/web/package.json
+COPY packages/clients/package.json packages/clients/package.json
+COPY packages/schemas/package.json packages/schemas/package.json
+COPY packages/ui/package.json packages/ui/package.json
+RUN pnpm install --filter @minewiki/web... --frozen-lockfile
 COPY . .
-RUN npm run build
+RUN pnpm --filter @minewiki/web... --if-present build
+RUN pnpm --filter @minewiki/web deploy --prod /opt/minewiki-web
 
-FROM node:20-alpine AS production
-WORKDIR /app
+FROM node:22-bookworm-slim AS production
+
 ENV NODE_ENV=production
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/package-lock.json ./
-RUN npm install --omit=dev
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/next.config.js ./next.config.js
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/minewiki-web ./
+
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["node_modules/.bin/next", "start", "-H", "0.0.0.0", "-p", "3000"]

@@ -20,7 +20,7 @@ export const metadata = createPageMetadata({
   path: '/',
 });
 
-export const revalidate = 60;
+export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
   let servers: ServerSummary[] = [];

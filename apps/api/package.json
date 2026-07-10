@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "nest start --watch",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node -r module-alias/register dist/apps/api/src/main.js",
+    "start": "node dist/apps/api/src/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "tsx --test \"src/**/*.test.ts\"",
-    "test:runtime": "node -r module-alias/register --test --test-force-exit \"runtime-tests/*.test.cjs\""
+    "test:runtime": "node --test --test-force-exit \"runtime-tests/*.test.cjs\""
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.637.0",
@@ -36,7 +36,6 @@
     "file-type": "^18.7.0",
     "ioredis": "5.10.1",
     "minecraft-server-util": "^5.4.4",
-    "module-alias": "^2.2.2",
     "nodemailer": "^6.9.14",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.1",
@@ -47,18 +46,9 @@
     "@nestjs/cli": "^10.3.0",
     "@nestjs/schematics": "^10.0.1",
     "@types/node": "^20.11.19",
+    "prisma": "^6.17.1",
     "ts-node": "^10.9.2",
     "tsx": "^4.7.0",
     "typescript": "^5.4.2"
-  },
-  "_moduleAliases": {
-    "@minewiki/analytics": "../../packages/analytics/dist",
-    "@minewiki/auth": "../../packages/auth/dist",
-    "@minewiki/config": "../../packages/config/dist",
-    "@minewiki/logger": "../../packages/logger/dist",
-    "@minewiki/minecraft": "../../packages/minecraft/dist",
-    "@minewiki/security": "../../packages/security/dist",
-    "@minewiki/schemas": "../../packages/schemas/dist",
-    "@minewiki/wiki-core": "../../packages/wiki-core/dist"
   }
 }

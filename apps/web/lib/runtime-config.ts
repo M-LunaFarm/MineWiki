@@ -13,7 +13,12 @@ function browserFallbackApiBase(): string {
 
 export function normalizeApiBaseUrl(baseUrl?: string): string {
   const envBase = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  const raw = baseUrl?.trim() || envBase || browserFallbackApiBase();
+  const internalBase = process.env.INTERNAL_API_BASE_URL?.trim();
+  const fallback =
+    typeof window === 'undefined'
+      ? internalBase || (envBase?.startsWith('http') ? envBase : DEFAULT_API_BASE)
+      : envBase || browserFallbackApiBase();
+  const raw = baseUrl?.trim() || fallback;
   return raw.replace(/\/$/, '');
 }
 

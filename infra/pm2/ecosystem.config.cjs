@@ -20,7 +20,6 @@ module.exports = {
       name: 'minewiki-api',
       cwd: path.join(repoRoot, 'apps/api'),
       script: 'dist/apps/api/src/main.js',
-      node_args: '-r module-alias/register',
       env: {
         NODE_ENV: 'production',
         API_HOST: '127.0.0.1',
