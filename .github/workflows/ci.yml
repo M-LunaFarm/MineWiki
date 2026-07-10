@@ -79,8 +79,8 @@ jobs:
       - name: Generate Prisma client
         run: pnpm exec prisma generate
 
-      - name: Apply test migrations
-        run: pnpm exec prisma migrate deploy
+      - name: Deploy test database
+        run: pnpm db:deploy
 
       - name: Typecheck packages
         run: pnpm typecheck

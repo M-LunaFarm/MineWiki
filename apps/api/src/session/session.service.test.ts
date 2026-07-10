@@ -20,52 +20,89 @@ if (!hasDatabase) {
     await prisma.$disconnect();
   });
 
+  async function createTestAccount() {
+    const id = randomUUID();
+    await prisma.account.create({
+      data: {
+        id,
+        provider: 'email',
+        providerUserId: `session-test-${id}`,
+        email: `session-test-${id}@example.com`,
+        emailVerified: true
+      }
+    });
+    return id;
+  }
+
+  async function cleanupTestAccount(id: string) {
+    await prisma.session.deleteMany({ where: { accountId: id } });
+    await prisma.account.delete({ where: { id } }).catch(() => undefined);
+  }
+
   test('issues session cookie with secure httpOnly samesite strict flags', async () => {
-    const result = await service.issueSession({ userId: randomUUID() });
-    assert.ok(result.sessionId);
-    assert.match(result.sessionId, /^[0-9a-f-]{36}$/);
-    assert.ok(result.cookie.includes('HttpOnly'));
-    assert.ok(result.cookie.includes('Secure'));
-    assert.ok(result.cookie.includes('SameSite=Strict'));
+    const userId = await createTestAccount();
+    try {
+      const result = await service.issueSession({ userId });
+      assert.ok(result.sessionId);
+      assert.match(result.sessionId, /^[0-9a-f-]{36}$/);
+      assert.ok(result.cookie.includes('HttpOnly'));
+      assert.ok(result.cookie.includes('Secure'));
+      assert.ok(result.cookie.includes('SameSite=Strict'));
+    } finally {
+      await cleanupTestAccount(userId);
+    }
   });
 
   test('rotates session and increments version while keeping expiry', async () => {
-    const userId = randomUUID();
-    const initial = await service.issueSession({ userId, ttlSeconds: 60 });
-    const rotated = await service.rotateSession(initial.sessionId, true);
-    assert.notEqual(rotated.cookie, initial.cookie);
-    assert.ok(rotated.cookie.includes('HttpOnly'));
-    const session = await service.getSession(initial.sessionId);
-    assert.ok(session?.isElevated);
-    assert.equal(session?.tokenVersion, 2);
-    assert.equal(session?.lastActiveAt instanceof Date, true);
+    const userId = await createTestAccount();
+    try {
+      const initial = await service.issueSession({ userId, ttlSeconds: 60 });
+      const rotated = await service.rotateSession(initial.sessionId, true);
+      assert.notEqual(rotated.cookie, initial.cookie);
+      assert.ok(rotated.cookie.includes('HttpOnly'));
+      const session = await service.getSession(initial.sessionId);
+      assert.ok(session?.isElevated);
+      assert.equal(session?.tokenVersion, 2);
+      assert.equal(session?.lastActiveAt instanceof Date, true);
+    } finally {
+      await cleanupTestAccount(userId);
+    }
   });
 
   test('revokes session and prevents reuse', async () => {
-    const issued = await service.issueSession({ userId: randomUUID() });
-    await service.revokeSession(issued.sessionId);
-    const session = await service.getSession(issued.sessionId);
-    assert.equal(session, undefined);
+    const userId = await createTestAccount();
+    try {
+      const issued = await service.issueSession({ userId });
+      await service.revokeSession(issued.sessionId);
+      const session = await service.getSession(issued.sessionId);
+      assert.equal(session, undefined);
+    } finally {
+      await cleanupTestAccount(userId);
+    }
   });
 
   test('lists sessions for user and marks current session', async () => {
-    const userId = randomUUID();
-    const first = await service.issueSession({
-      userId,
-      userAgent: 'TestAgent',
-      ipAddress: '127.0.0.1'
-    });
-    const second = await service.issueSession({
-      userId,
-      userAgent: 'Mobile',
-      ipAddress: '192.0.2.1'
-    });
+    const userId = await createTestAccount();
+    try {
+      const first = await service.issueSession({
+        userId,
+        userAgent: 'TestAgent',
+        ipAddress: '127.0.0.1'
+      });
+      const second = await service.issueSession({
+        userId,
+        userAgent: 'Mobile',
+        ipAddress: '192.0.2.1'
+      });
 
-    const summaries = await service.listSessionsForUser(userId, second.sessionId);
-    assert.equal(summaries.length, 2);
-    const current = summaries.find((summary) => summary.sessionId === second.sessionId);
-    assert.ok(current?.isCurrent);
-    const previous = summaries.find((summary) => summary.sessionId === first.sessionId);
-    assert.equal(previous?.isCurrent, false);
+      const summaries = await service.listSessionsForUser(userId, second.sessionId);
+      assert.equal(summaries.length, 2);
+      const current = summaries.find((summary) => summary.sessionId === second.sessionId);
+      assert.ok(current?.isCurrent);
+      const previous = summaries.find((summary) => summary.sessionId === first.sessionId);
+      assert.equal(previous?.isCurrent, false);
+    } finally {
+      await cleanupTestAccount(userId);
+    }
   });
 }

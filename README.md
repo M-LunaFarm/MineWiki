@@ -37,6 +37,8 @@ Production starts only the integrated runtime defined in `infra/pm2/ecosystem.co
 
 Use `pnpm deploy:build` before reload and `pnpm deploy:smoke` after reload. Do not run `legacy/mwiki-fastify`, `legacy/luna-votifier`, or any old VoteWeb runtime in production; those directories are migration references only.
 
+`pnpm db:deploy` safely bootstraps a completely empty database from the current Prisma schema, or applies additive migrations when application tables already exist. It never replaces a non-empty database with `db push`.
+
 ## Data Validation
 
 Run `pnpm data:validate` before deploys to check migration integrity across wiki pages, server wiki links, account/profile mappings, uploads, replay guards, and render cache readiness. The command is read-only by default. Use `pnpm data:validate -- --fix` only when you want safe repairs for expired plugin replay guards and missing current render cache entries.

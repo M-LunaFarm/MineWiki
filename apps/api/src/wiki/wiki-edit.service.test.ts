@@ -87,7 +87,7 @@ if (!hasDatabase) {
     spaceId: bigint;
     pageId?: string;
   }) {
-    const pageFilter = input.pageId ? { pageId: BigInt(input.pageId) } : { spaceId: input.spaceId };
+    const pageFilter = input.pageId ? { id: BigInt(input.pageId) } : { spaceId: input.spaceId };
     await prisma.wikiRecentChange.deleteMany(
       input.pageId ? { where: { pageId: BigInt(input.pageId) } } : { where: { namespaceCode: input.namespaceCode } }
     );
