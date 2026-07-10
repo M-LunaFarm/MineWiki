@@ -5,6 +5,11 @@
     "moduleResolution": "node",
     "declaration": true,
     "outDir": "dist",
+    "rootDir": "src",
+    "baseUrl": "../..",
+    "paths": {
+      "@minewiki/logger": ["packages/logger/dist"]
+    },
     "sourceMap": true,
     "types": ["node"]
   },

@@ -91,6 +91,9 @@ jobs:
       - name: Build API
         run: pnpm build:api
 
+      - name: API runtime wiring
+        run: pnpm --dir apps/api test:runtime
+
       - name: Build Web
         run: pnpm build:web
 
