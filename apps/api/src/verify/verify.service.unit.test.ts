@@ -10,7 +10,7 @@ function createHarness(options: {
   readonly existingMinecraftLink?: { discordUserId: string; minecraftUuid: string };
   readonly conflictingMinecraftAccountId?: string;
 } = {}) {
-  let session: any = null;
+  let session: Record<string, unknown> | null = null;
   const prisma = {
     discordVerificationSession: {
       async create(args: { data: Record<string, unknown> }) {
@@ -113,7 +113,7 @@ function createHarness(options: {
     get session() {
       return session;
     },
-    setSession(next: any) {
+    setSession(next: Record<string, unknown>) {
       session = next;
     },
     service: new VerifyService(prisma as never, config, events)

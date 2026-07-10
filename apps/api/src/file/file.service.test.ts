@@ -3,6 +3,44 @@ import assert from 'node:assert/strict';
 import { FilePermissionService } from './file-permission.service';
 import { FileService } from './file.service';
 
+interface TestFile {
+  id: string;
+  ownerAccountId: string | null;
+  filename: string;
+  originalName: string | null;
+  mimeType: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  sha256: string;
+  storagePath: string;
+  publicPath: string;
+  usageContext: string;
+  visibility: string;
+  linkedResourceType: string | null;
+  linkedResourceId: string | null;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface VisibilityCondition {
+  visibility?: { in: string[] };
+  ownerAccountId?: string;
+}
+
+interface SearchCondition {
+  filename?: { contains: string };
+  originalName?: { contains: string };
+}
+
+interface TestFileWhere {
+  status?: string;
+  usageContext?: string;
+  OR?: VisibilityCondition[];
+  AND?: Array<{ OR?: SearchCondition[] }>;
+}
+
 function session(userId: string, isElevated = false, permissions: string[] = []) {
   return {
     sessionId: `session-${userId}`,
@@ -14,7 +52,7 @@ function session(userId: string, isElevated = false, permissions: string[] = [])
 }
 
 function createService() {
-  const files = new Map<string, any>();
+  const files = new Map<string, TestFile>();
   const uploads = {
     async storeImage() {
       return {
@@ -31,7 +69,7 @@ function createService() {
   };
   const prisma = {
     uploadedFile: {
-      async create(args: { data: any }) {
+      async create(args: { data: Record<string, unknown> }) {
         const now = new Date('2026-07-05T00:00:00.000Z');
         const file = {
           id: `file-${files.size + 1}`,
@@ -42,19 +80,19 @@ function createService() {
           createdAt: now,
           updatedAt: now,
           ...args.data
-        };
+        } as TestFile;
         files.set(file.id, file);
         return file;
       },
       async findUnique(args: { where: { id: string } }) {
         return files.get(args.where.id) ?? null;
       },
-      async findMany(args: { where: any; take: number }) {
+      async findMany(args: { where: TestFileWhere; take: number }) {
         const rows = [...files.values()].filter((file) => {
           if (args.where.status && file.status !== args.where.status) return false;
           if (args.where.usageContext && file.usageContext !== args.where.usageContext) return false;
           if (args.where.OR?.length) {
-            const visible = args.where.OR.some((condition: any) => {
+            const visible = args.where.OR.some((condition) => {
               if (Object.keys(condition).length === 0) return true;
               if (condition.visibility?.in) return condition.visibility.in.includes(file.visibility);
               if (condition.ownerAccountId) return file.ownerAccountId === condition.ownerAccountId;
@@ -64,7 +102,7 @@ function createService() {
           }
           const searchOr = args.where.AND?.[0]?.OR;
           if (searchOr?.length) {
-            const matches = searchOr.some((condition: any) => {
+            const matches = searchOr.some((condition) => {
               if (condition.filename?.contains) return file.filename.includes(condition.filename.contains);
               if (condition.originalName?.contains) return file.originalName?.includes(condition.originalName.contains);
               return false;
@@ -75,8 +113,9 @@ function createService() {
         });
         return rows.slice(0, args.take);
       },
-      async update(args: { where: { id: string }; data: any }) {
+      async update(args: { where: { id: string }; data: Partial<TestFile> }) {
         const current = files.get(args.where.id);
+        assert.ok(current);
         const next = { ...current, ...args.data };
         files.set(args.where.id, next);
         return next;
@@ -104,13 +143,13 @@ test('file service stores canonical image metadata', async () => {
 });
 
 test('file service list hides private files from anonymous users', async () => {
-  const { service, files } = createService();
+  const { service } = createService();
   const publicFile = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'public.png',
     usageContext: 'wiki_editor'
   });
-  const privateFile = await service.createImage('account-1', {
+  await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'private.png',
     usageContext: 'wiki_editor',

@@ -25,12 +25,12 @@ test('api exception filter preserves plugin sync legacy error body', () => {
 function createHost(path: string) {
   const reply = {
     statusCode: 0,
-    body: undefined as any,
+    body: {} as Record<string, unknown>,
     status(code: number) {
       this.statusCode = code;
       return this;
     },
-    send(body: unknown) {
+    send(body: Record<string, unknown>) {
       this.body = body;
       return this;
     },

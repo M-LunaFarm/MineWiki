@@ -9,16 +9,17 @@ import { extractClientIp } from '../http/client-ip';
 export class LoggingThrottlerGuard extends ThrottlerGuard {
   private readonly logger = new Logger(LoggingThrottlerGuard.name);
 
-  protected override async getTracker(request: Record<string, any>): Promise<string> {
+  protected override async getTracker(request: Record<string, unknown>): Promise<string> {
     const pluginServerId = pluginSyncServerId(request.body);
     if (pluginServerId) {
       return `plugin:${pluginServerId}`;
     }
-    const sessionToken = extractCookie(request.headers?.cookie, 'mw_session');
+    const fastifyRequest = request as unknown as FastifyRequest;
+    const sessionToken = extractCookie(fastifyRequest.headers.cookie, 'mw_session');
     if (sessionToken) {
       return `session:${sha256(sessionToken)}`;
     }
-    return extractClientIp(request as FastifyRequest) ?? request.ip ?? 'unknown';
+    return extractClientIp(fastifyRequest) ?? fastifyRequest.ip ?? 'unknown';
   }
 
   protected async throwThrottlingException(

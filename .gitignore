@@ -13,6 +13,7 @@ dist/
 build/
 .next/
 .next*/
+*.tsbuildinfo
 cache/
 .cache/
 

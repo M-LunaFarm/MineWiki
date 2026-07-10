@@ -10,10 +10,8 @@ import {
 import { createPageMetadata } from '../../../../lib/metadata';
 
 interface PageProps {
-  readonly params: { guildId: string } | Promise<{ guildId: string }>;
-  readonly searchParams?:
-    | { saved?: string | string[]; error?: string | string[] }
-    | Promise<{ saved?: string | string[]; error?: string | string[] }>;
+  readonly params: Promise<{ guildId: string }>;
+  readonly searchParams?: Promise<{ saved?: string | string[]; error?: string | string[] }>;
 }
 
 export const dynamic = 'force-dynamic';
@@ -30,8 +28,7 @@ export async function generateMetadata({ params }: PageProps) {
 
 export default async function GuildSettingsPage({ params, searchParams }: PageProps) {
   const { guildId } = await params;
-  const resolvedSearchParams =
-    searchParams instanceof Promise ? await searchParams : (searchParams ?? {});
+  const resolvedSearchParams = (await searchParams) ?? {};
   let guild: GuildDetail | null = null;
   let loadError: string | null = null;
 

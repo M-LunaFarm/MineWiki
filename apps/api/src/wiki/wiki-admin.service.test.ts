@@ -3,6 +3,26 @@ import assert from 'node:assert/strict';
 import type { PrismaService } from '../common/prisma.service';
 import { WikiAdminService } from './wiki-admin.service';
 
+interface TestRevision {
+  id: bigint;
+  pageId: bigint;
+  revisionNo: number;
+  contentRaw: string;
+  visibility: string;
+  [key: string]: unknown;
+}
+
+interface TestRecentChange extends Record<string, unknown> {
+  changeType?: string;
+  summary?: string;
+}
+
+interface RevisionWhere {
+  pageId?: bigint;
+  visibility?: string;
+  id?: { not?: bigint };
+}
+
 function createService() {
   const now = new Date('2026-07-06T00:00:00.000Z');
   const page = {
@@ -21,7 +41,7 @@ function createService() {
     createdAt: now,
     updatedAt: now
   };
-  const revisions = new Map<bigint, any>([
+  const revisions = new Map<bigint, TestRevision>([
     [100n, {
       id: 100n,
       pageId: 10n,
@@ -57,14 +77,14 @@ function createService() {
       visibility: 'public'
     }]
   ]);
-  const changes: any[] = [];
-  const renderCaches: any[] = [];
+  const changes: TestRecentChange[] = [];
+  const renderCaches: Array<Record<string, unknown>> = [];
   const prisma = {
     wikiRecentChange: {
       async findMany() {
         return changes;
       },
-      async create(args: { data: any }) {
+      async create(args: { data: Record<string, unknown> }) {
         changes.push({ id: BigInt(changes.length + 1), ...args.data });
         return changes[changes.length - 1];
       }
@@ -76,7 +96,7 @@ function createService() {
       async findUnique(args: { where: { id: bigint } }) {
         return args.where.id === page.id ? page : null;
       },
-      async update(args: { where: { id: bigint }; data: any }) {
+      async update(args: { where: { id: bigint }; data: Record<string, unknown> }) {
         assert.equal(args.where.id, page.id);
         Object.assign(page, args.data);
         return page;
@@ -91,7 +111,7 @@ function createService() {
       async findUnique(args: { where: { id: bigint } }) {
         return revisions.get(args.where.id) ?? null;
       },
-      async findFirst(args: { where: any; orderBy?: Array<Record<string, string>> }) {
+      async findFirst(args: { where: RevisionWhere; orderBy?: Array<Record<string, string>> }) {
         const list = [...revisions.values()].filter((revision) => {
           if (args.where.pageId !== undefined && revision.pageId !== args.where.pageId) return false;
           if (args.where.visibility !== undefined && revision.visibility !== args.where.visibility) return false;
@@ -105,19 +125,20 @@ function createService() {
         }
         return list[0] ?? null;
       },
-      async update(args: { where: { id: bigint }; data: any }) {
+      async update(args: { where: { id: bigint }; data: Partial<TestRevision> }) {
         const revision = revisions.get(args.where.id);
+        assert.ok(revision);
         Object.assign(revision, args.data);
         return revision;
       },
-      async create(args: { data: any }) {
-        const revision = { id: 102n, ...args.data };
+      async create(args: { data: Record<string, unknown> }) {
+        const revision = { id: 102n, ...args.data } as TestRevision;
         revisions.set(revision.id, revision);
         return revision;
       }
     },
     wikiPageRenderCache: {
-      async create(args: { data: any }) {
+      async create(args: { data: Record<string, unknown> }) {
         renderCaches.push(args.data);
         return { id: BigInt(renderCaches.length), ...args.data };
       }

@@ -85,6 +85,9 @@ jobs:
       - name: Typecheck packages
         run: pnpm typecheck
 
+      - name: Lint
+        run: pnpm lint
+
       - name: Build API
         run: pnpm build:api
 

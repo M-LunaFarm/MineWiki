@@ -11,7 +11,7 @@ import {
 import { createPageMetadata } from '../../../lib/metadata';
 
 interface PageProps {
-  readonly params: { guildId: string } | Promise<{ guildId: string }>;
+  readonly params: Promise<{ guildId: string }>;
 }
 
 export const dynamic = 'force-dynamic';
