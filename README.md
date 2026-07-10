@@ -46,6 +46,7 @@ Build the production images from the repository root so pnpm workspace packages 
 ```bash
 docker build -f apps/api/Dockerfile -t minewiki-api .
 docker build -f apps/worker/Dockerfile -t minewiki-worker .
+docker build -f apps/bot/Dockerfile -t minewiki-bot .
 docker build -f apps/web/Dockerfile -t minewiki-web .
 ```
 

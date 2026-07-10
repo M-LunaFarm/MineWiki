@@ -234,26 +234,33 @@ if (!token || !clientId) {
     }
   });
 
-  setInterval(() => {
+  const scheduler = setInterval(() => {
     processDueDigests(subscriptions, digestQueue).catch((error) => {
       Logger.error({ err: error }, 'Digest scheduling loop failed');
     });
   }, 60_000);
 
-  client.login(token).catch((error) => {
-    Logger.error({ err: error }, 'Failed to log in to Discord');
-  });
-
-  const shutdown = async (signal: string) => {
+  let shuttingDown = false;
+  const shutdown = async (signal: string, exitCode = 0) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
     Logger.warn({ signal }, 'Shutting down Discord bot');
+    clearInterval(scheduler);
     await digestQueue.close();
     await prisma.$disconnect();
     client.destroy();
-    process.exit(0);
+    process.exit(exitCode);
   };
 
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+
+  void client.login(token).catch((error) => {
+    Logger.error({ err: error }, 'Failed to log in to Discord');
+    return shutdown('discord-login-failed', 1);
+  });
 }
 
 async function registerCommands(rest: REST, clientId: string): Promise<void> {

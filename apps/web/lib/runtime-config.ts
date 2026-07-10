@@ -4,11 +4,7 @@ function browserFallbackApiBase(): string {
   if (typeof window === 'undefined') {
     return DEFAULT_API_BASE;
   }
-  const { hostname, origin } = window.location;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return DEFAULT_API_BASE;
-  }
-  return `${origin}/api`;
+  return `${window.location.origin}/api`;
 }
 
 export function normalizeApiBaseUrl(baseUrl?: string): string {

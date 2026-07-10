@@ -69,6 +69,7 @@ export class UploadService {
     if (configuredRoot) {
       const root = resolve(configuredRoot);
       this.storageRoot = root;
+      this.publicBaseUrl = publicBaseUrl?.replace(/\/$/, '');
       this.storageMode = 'local';
       if (!existsSync(root)) {
         mkdirSync(root, { recursive: true });
@@ -136,7 +137,9 @@ export class UploadService {
       height: sanitized.height,
       hash,
       storagePath,
-      publicPath: `upload://${filename}`
+      publicPath: this.publicBaseUrl
+        ? `${this.publicBaseUrl}/${filename}`
+        : `upload://${filename}`
     };
   }
 }

@@ -46,6 +46,37 @@ test('stores valid png image after sanitisation', async () => {
   rmSync(storageRoot, { recursive: true, force: true });
 });
 
+test('uses configured public base URL for locally stored images', async () => {
+  const storageRoot = mkdtempSync(join(tmpdir(), 'uploads-'));
+  const configStub = {
+    getOptional(key: string) {
+      if (key === 'UPLOAD_STORAGE_ROOT') {
+        return storageRoot;
+      }
+      if (key === 'STORAGE_PUBLIC_BASE_URL') {
+        return 'https://minewiki.example/uploads/';
+      }
+      return undefined;
+    }
+  } as unknown as ConfigService;
+  const service = new UploadService(configStub);
+  const buffer = await sharp({
+    create: {
+      width: 4,
+      height: 4,
+      channels: 3,
+      background: '#13ec80'
+    }
+  })
+    .png()
+    .toBuffer();
+
+  const stored = await service.storeImage({ buffer, filename: 'banner.png' });
+
+  assert.match(stored.publicPath, /^https:\/\/minewiki\.example\/uploads\/.+\.webp$/);
+  rmSync(storageRoot, { recursive: true, force: true });
+});
+
 test('rejects oversized files', async () => {
   const service = createService();
   const hugeBuffer = Buffer.alloc(2 * 1024 * 1024 + 1, 0xff);
