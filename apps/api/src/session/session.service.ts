@@ -108,7 +108,7 @@ export class SessionService {
       where: { id: sessionId }
     });
     if (!current) {
-      throw new UnauthorizedException('?몄뀡??議댁옱?섏? ?딆뒿?덈떎.');
+      throw new UnauthorizedException('세션이 존재하지 않습니다.');
     }
 
     const token = this.generateToken();

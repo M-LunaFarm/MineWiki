@@ -122,7 +122,7 @@ export class AccountSeparationService {
     targetAccountId: string
   ): Promise<AccountLinkRequest> {
     if (primaryAccountId === targetAccountId) {
-      throw new BadRequestException('?숈씪??怨꾩젙? ?곌껐?????놁뒿?덈떎.');
+      throw new BadRequestException('동일한 계정은 연결할 수 없습니다.');
     }
 
     const [primary, target] = await Promise.all([
@@ -130,10 +130,10 @@ export class AccountSeparationService {
       this.prisma.account.findUnique({ where: { id: targetAccountId } })
     ]);
     if (!primary || !target) {
-      throw new NotFoundException('怨꾩젙 ?뺣낫瑜?李얠쓣 ???놁뒿?덈떎.');
+      throw new NotFoundException('계정 정보를 찾을 수 없습니다.');
     }
     if (primary.provider === target.provider) {
-      throw new BadRequestException('媛숈? ?쒓났??怨꾩젙? ?곌껐?????놁뒿?덈떎.');
+      throw new BadRequestException('같은 공급자의 계정은 연결할 수 없습니다.');
     }
 
     const existingLink = await this.prisma.accountLink.findUnique({
@@ -145,7 +145,7 @@ export class AccountSeparationService {
       }
     });
     if (existingLink) {
-      throw new BadRequestException('?대? ?곌껐??怨꾩젙?낅땲??');
+      throw new BadRequestException('이미 연결된 계정입니다.');
     }
 
     const request = await this.prisma.accountLinkRequest.create({
@@ -172,13 +172,13 @@ export class AccountSeparationService {
       where: { id: requestId }
     });
     if (!request) {
-      throw new NotFoundException('?곌껐 ?붿껌??李얠쓣 ???놁뒿?덈떎.');
+      throw new NotFoundException('연결 요청을 찾을 수 없습니다.');
     }
     if (request.status !== 'pending') {
-      throw new BadRequestException('?대? 泥섎━???곌껐 ?붿껌?낅땲??');
+      throw new BadRequestException('이미 처리된 연결 요청입니다.');
     }
     if (request.verificationCode !== code) {
-      throw new BadRequestException('寃利?肄붾뱶媛 ?쇱튂?섏? ?딆뒿?덈떎.');
+      throw new BadRequestException('검증 코드가 일치하지 않습니다.');
     }
 
     await this.prisma.$transaction([
@@ -244,7 +244,7 @@ export class AccountSeparationService {
       where: { id: accountId }
     });
     if (!account) {
-      throw new NotFoundException('怨꾩젙 ?뺣낫瑜?李얠쓣 ???놁뒿?덈떎.');
+      throw new NotFoundException('계정 정보를 찾을 수 없습니다.');
     }
     return account;
   }

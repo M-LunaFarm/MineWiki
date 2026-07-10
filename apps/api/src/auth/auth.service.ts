@@ -146,16 +146,16 @@ export class AuthService {
   async registerEmail(payload: EmailRegistrationDto): Promise<EmailRegistrationResult> {
     const email = payload.email.trim().toLowerCase();
     if (!email) {
-      throw new BadRequestException('?대찓?쇱씠 ?꾩슂?⑸땲??');
+      throw new BadRequestException('이메일이 필요합니다.');
     }
     if (!payload.password || !PASSWORD_POLICY.test(payload.password)) {
       throw new BadRequestException(
-        '鍮꾨?踰덊샇??8???댁긽?대ŉ ?臾몄옄? ?뱀닔臾몄옄瑜?理쒖냼 1???댁긽 ?ы븿? 댁빞 ?⑸땲??',
+        '비밀번호는 8자 이상이며 대문자와 특수문자를 최소 1자 이상 포함해야 합니다.',
       );
     }
     const existing = await this.accounts.findByProvider('email', email);
     if (existing) {
-      throw new ConflictException('?대? ?깅줉???대찓?쇱엯?덈떎.');
+      throw new ConflictException('이미 등록된 이메일입니다.');
     }
 
     const passwordHash = await hash(payload.password, ARGON_OPTIONS);
@@ -185,7 +185,7 @@ export class AuthService {
   ): Promise<AuthSessionResult> {
     const email = payload.email.trim().toLowerCase();
     if (!email || !payload.password) {
-      throw new UnauthorizedException('?대찓???먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.');
+      throw new UnauthorizedException('이메일 또는 비밀번호가 올바르지 않습니다.');
     }
 
     const passwordAccounts = await this.findPasswordAccountsByEmail(email);
@@ -197,7 +197,7 @@ export class AuthService {
       if (await verify(candidate.passwordHash, payload.password)) {
         if (account) {
           throw new ConflictException(
-            '?숈씪??대찓?쇰줈 濡쒓렇???쒕뒗 怨꾩젙???덉뼱?쒖? ?먯썝??臾몄쓽媛 ?꾩슂?⑸땲??',
+            '동일한 이메일로 로그인되는 계정이 여러 개입니다. 고객 지원에 문의해 주세요.',
           );
         }
         account = candidate;
@@ -205,10 +205,10 @@ export class AuthService {
     }
 
     if (!account) {
-      throw new UnauthorizedException('?대찓???먮뒗 鍮꾨?踰덊샇媛 ?щ컮瑜댁? ?딆뒿?덈떎.');
+      throw new UnauthorizedException('이메일 또는 비밀번호가 올바르지 않습니다.');
     }
     if (!account.emailVerified) {
-      throw new ForbiddenException('?대찓???몄쬆???꾨즺?????ㅼ떆 濡쒓렇?명빐 二쇱꽭??');
+      throw new ForbiddenException('이메일 인증을 완료한 후 다시 로그인해 주세요.');
     }
     await this.accounts.updateLastLogin(account.id, new Date());
     const session = await this.sessions.issueSession({
@@ -237,11 +237,11 @@ export class AuthService {
   ): Promise<ResendVerificationResult> {
     const email = payload.email.trim().toLowerCase();
     if (!email) {
-      throw new BadRequestException('?대찓?쇱씠 ?꾩슂?⑸땲??');
+      throw new BadRequestException('이메일이 필요합니다.');
     }
     if (!payload.password || !PASSWORD_POLICY.test(payload.password)) {
       throw new BadRequestException(
-        '鍮꾨?踰덊샇??8???댁긽?대ŉ ?臾몄옄? ?뱀닔臾몄옄瑜?理쒖냼 1???댁긽 ?ы븿? 댁빞 ?⑸땲??',
+        '비밀번호는 8자 이상이며 대문자와 특수문자를 최소 1자 이상 포함해야 합니다.',
       );
     }
 
@@ -250,7 +250,7 @@ export class AuthService {
       throw new NotFoundAccountError();
     }
     if (account.passwordHash) {
-      throw new BadRequestException('?대? 鍮꾨?踰덊샇 濡쒓렇?몄씠 ?ㅼ젙??怨꾩젙?낅땲??');
+      throw new BadRequestException('이미 비밀번호 로그인이 설정된 계정입니다.');
     }
 
     const existingPasswordAccount = (await this.findPasswordAccountsByEmail(email)).find(
@@ -258,7 +258,7 @@ export class AuthService {
     );
     if (existingPasswordAccount) {
       throw new ConflictException(
-        '?대? ?대찓?쇰줈 鍮꾨?踰덊샇 濡쒓렇?몄씠 媛?ν븳 怨꾩젙??議댁옱?⑸땲??',
+        '이미 이 이메일로 비밀번호 로그인이 가능한 계정이 존재합니다.',
       );
     }
 
@@ -284,15 +284,15 @@ export class AuthService {
   async resendVerification(email: string): Promise<ResendVerificationResult> {
     const normalized = email.trim().toLowerCase();
     if (!normalized) {
-      throw new BadRequestException('?대찓?쇱씠 ?꾩슂?⑸땲??');
+      throw new BadRequestException('이메일이 필요합니다.');
     }
 
     const account = await this.findSinglePasswordAccountByEmail(normalized);
     if (!account) {
-      throw new NotFoundException('?대떦 ?대찓?쇰줈 ?깅줉??怨꾩젙??李얠쓣 ???놁뒿?덈떎.');
+      throw new NotFoundException('해당 이메일로 등록된 계정을 찾을 수 없습니다.');
     }
     if (account.emailVerified) {
-      throw new BadRequestException('?대? ?대찓???몄쬆???꾨즺??怨꾩젙?낅땲??');
+      throw new BadRequestException('이미 이메일 인증을 완료한 계정입니다.');
     }
     const verification = await this.createEmailVerification(account.id, normalized);
     await this.dispatchVerificationEmail(verification);
@@ -359,14 +359,14 @@ export class AuthService {
     targetAccountId: string,
   ): Promise<AccountLinkRequest> {
     if (!this.accountLinkingEnabled) {
-      throw new ForbiddenException('怨꾩젙 ?곕룞 湲곕뒫??鍮꾪솢?깊솕?섏뼱 ?덉뒿?덈떎.');
+      throw new ForbiddenException('계정 연동 기능이 비활성화되어 있습니다.');
     }
     return this.accounts.createLinkRequest(primaryAccountId, targetAccountId);
   }
 
   async confirmLink(requestId: string, verificationCode: string): Promise<AccountLinkResult> {
     if (!this.accountLinkingEnabled) {
-      throw new ForbiddenException('怨꾩젙 ?곕룞 湲곕뒫??鍮꾪솢?깊솕?섏뼱 ?덉뒿?덈떎.');
+      throw new ForbiddenException('계정 연동 기능이 비활성화되어 있습니다.');
     }
     return this.accounts.confirmLink(requestId, verificationCode);
   }
@@ -522,7 +522,7 @@ export class AuthService {
     context: SessionContext = {},
   ): Promise<AuthSessionResult> {
     if (!payload.userId) {
-      throw new BadRequestException('OAuth ?ъ슜???앸퀎?먭? ?꾩슂?⑸땲??');
+      throw new BadRequestException('OAuth 사용자 식별자가 필요합니다.');
     }
     const providerUserId = payload.userId;
     const existing = await this.accounts.findByProvider(provider, providerUserId);
@@ -674,7 +674,7 @@ export class AuthService {
       return candidates[0];
     }
     throw new ConflictException(
-      '?숈씪??대찓?쇰줈 鍮꾨?踰덊샇 濡쒓렇???쒕뒗 怨꾩젙???덉뼱?쒖? ?먯썝??臾몄쓽媛 ?꾩슂?⑸땲??',
+      '동일한 이메일로 로그인되는 계정이 여러 개입니다. 고객 지원에 문의해 주세요.',
     );
   }
 
@@ -716,11 +716,11 @@ export class AuthService {
       where: { token },
     });
     if (!pending) {
-      throw new BadRequestException('?좏슚?섏? ?딄굅??留뚮즺???몄쬆 ?좏겙?낅땲???');
+      throw new BadRequestException('유효하지 않거나 만료된 인증 토큰입니다.');
     }
     if (pending.expiresAt.getTime() < Date.now()) {
       await this.prisma.emailVerification.delete({ where: { token } });
-      throw new BadRequestException('?좏슚?섏? ?딄굅??留뚮즺???몄쬆 ?좏겙?낅땲???');
+      throw new BadRequestException('유효하지 않거나 만료된 인증 토큰입니다.');
     }
     await this.prisma.emailVerification.delete({ where: { token } });
     return {
@@ -834,6 +834,6 @@ export class AuthService {
 
 class NotFoundAccountError extends NotFoundException {
   constructor() {
-    super('怨꾩젙??李얠쓣 ???놁뒿?덈떎.');
+    super('계정을 찾을 수 없습니다.');
   }
 }

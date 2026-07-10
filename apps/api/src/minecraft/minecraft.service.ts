@@ -309,14 +309,13 @@ export class MinecraftService {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      this.logger.warn({ status: response.status, body }, 'Microsoft token exchange failed');
+      this.logger.warn({ status: response.status }, 'Microsoft token exchange failed');
       if (response.status === 403) {
         throw new ServiceUnavailableException(
           'Verification temporarily unavailable. Please try again later.'
         );
       }
-      throw new ForbiddenException('Microsoft ?몄쬆 肄붾뱶媛 ?좏슚?섏? ?딆뒿?덈떎.');
+      throw new ForbiddenException('Microsoft 인증 코드가 유효하지 않습니다.');
     }
 
     const data: {
@@ -325,7 +324,7 @@ export class MinecraftService {
 
     if (!data.access_token) {
       this.logger.error('Microsoft token exchange succeeded without access_token');
-      throw new ForbiddenException('Microsoft ?몄쬆 肄붾뱶媛 ?좏슚?섏? ?딆뒿?덈떎.');
+      throw new ForbiddenException('Microsoft 인증 코드가 유효하지 않습니다.');
     }
 
     return data.access_token;
@@ -356,14 +355,13 @@ export class MinecraftService {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      this.logger.warn({ status: response.status, body }, 'Xbox Live authentication failed');
+      this.logger.warn({ status: response.status }, 'Xbox Live authentication failed');
       if (response.status === 403) {
         throw new ServiceUnavailableException(
           'Verification temporarily unavailable. Please try again later.'
         );
       }
-      throw new ForbiddenException('Xbox Live ?몄쬆???ㅽ뙣?덉뒿?덈떎.');
+      throw new ForbiddenException('Xbox Live 인증에 실패했습니다.');
     }
 
     const data: XboxAuthResponse = await response.json();
@@ -371,8 +369,8 @@ export class MinecraftService {
     const userHash = data.DisplayClaims?.xui?.[0]?.uhs;
 
     if (!token || !userHash) {
-      this.logger.error({ data }, 'Xbox Live response missing token or user hash');
-      throw new ForbiddenException('Xbox Live ?몄쬆???ㅽ뙣?덉뒿?덈떎.');
+      this.logger.error('Xbox Live response missing token or user hash');
+      throw new ForbiddenException('Xbox Live 인증에 실패했습니다.');
     }
 
     return { token, userHash };
@@ -402,14 +400,13 @@ export class MinecraftService {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      this.logger.warn({ status: response.status, body }, 'XSTS authorization failed');
+      this.logger.warn({ status: response.status }, 'XSTS authorization failed');
       if (response.status === 403) {
         throw new ServiceUnavailableException(
           'Verification temporarily unavailable. Please try again later.'
         );
       }
-      throw new ForbiddenException('XSTS ?좏겙 諛쒓툒???ㅽ뙣?덉뒿?덈떎.');
+      throw new ForbiddenException('XSTS 토큰 발급에 실패했습니다.');
     }
 
     const data: XboxAuthResponse = await response.json();
@@ -417,8 +414,8 @@ export class MinecraftService {
     const nextUserHash = data.DisplayClaims?.xui?.[0]?.uhs ?? userHash;
 
     if (!token || !nextUserHash) {
-      this.logger.error({ data }, 'XSTS response missing token or user hash');
-      throw new ForbiddenException('XSTS ?좏겙 諛쒓툒???ㅽ뙣?덉뒿?덈떎.');
+      this.logger.error('XSTS response missing token or user hash');
+      throw new ForbiddenException('XSTS 토큰 발급에 실패했습니다.');
     }
 
     return { token, userHash: nextUserHash };
@@ -441,20 +438,19 @@ export class MinecraftService {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      this.logger.warn({ status: response.status, body }, 'Minecraft login failed');
+      this.logger.warn({ status: response.status }, 'Minecraft login failed');
       if (response.status === 403) {
         throw new ServiceUnavailableException(
           'Verification temporarily unavailable. Please try again later.'
         );
       }
-      throw new ForbiddenException('Minecraft ?쒕퉬???몄쬆???ㅽ뙣?덉뒿?덈떎.');
+      throw new ForbiddenException('Minecraft 서비스 인증에 실패했습니다.');
     }
 
     const data: MinecraftLoginResponse = await response.json();
     if (!data.access_token) {
-      this.logger.error({ data }, 'Minecraft login response missing access_token');
-      throw new ForbiddenException('Minecraft ?쒕퉬???몄쬆???ㅽ뙣?덉뒿?덈떎.');
+      this.logger.error('Minecraft login response missing access_token');
+      throw new ForbiddenException('Minecraft 서비스 인증에 실패했습니다.');
     }
     return data.access_token;
   }
@@ -472,20 +468,19 @@ export class MinecraftService {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      this.logger.warn({ status: response.status, body }, 'Entitlement lookup failed');
+      this.logger.warn({ status: response.status }, 'Entitlement lookup failed');
       if (response.status === 403) {
         throw new ServiceUnavailableException(
           'Verification temporarily unavailable. Please try again later.'
         );
       }
-      throw new ForbiddenException('Minecraft ?뚯쑀 ?뺤씤???ㅽ뙣?덉뒿?덈떎.');
+      throw new ForbiddenException('Minecraft 소유 확인에 실패했습니다.');
     }
 
     const data: EntitlementResponse = await response.json();
     const hasMinecraft = data.items?.some((item) => item.name === 'game_minecraft') ?? false;
     if (!hasMinecraft) {
-      throw new ForbiddenException('Minecraft ?뚯쑀媛 ?뺤씤?섏? ?딆븯?듬땲??');
+      throw new ForbiddenException('Minecraft 소유가 확인되지 않았습니다.');
     }
   }
 
@@ -502,21 +497,20 @@ export class MinecraftService {
     );
 
     if (!response.ok) {
-      const body = await response.text();
-      this.logger.warn({ status: response.status, body }, 'Minecraft profile lookup failed');
+      this.logger.warn({ status: response.status }, 'Minecraft profile lookup failed');
       if (response.status === 403) {
         throw new ServiceUnavailableException(
           'Verification temporarily unavailable. Please try again later.'
         );
       }
-      throw new ForbiddenException('Minecraft ?꾨줈??議고쉶???ㅽ뙣?덉뒿?덈떎.');
+      throw new ForbiddenException('Minecraft 프로필 조회에 실패했습니다.');
     }
 
     const data: MinecraftProfileResponse = await response.json();
     const rawId = data.id;
     if (!rawId) {
-      this.logger.error({ data }, 'Minecraft profile response missing id');
-      throw new ForbiddenException('Minecraft ?꾨줈??議고쉶???ㅽ뙣?덉뒿?덈떎.');
+      this.logger.error('Minecraft profile response missing id');
+      throw new ForbiddenException('Minecraft 프로필 조회에 실패했습니다.');
     }
     const playerName = typeof data.name === 'string' ? data.name : undefined;
     return { uuid: this.formatUuid(rawId), playerName };
@@ -526,7 +520,7 @@ export class MinecraftService {
     try {
       return normalizeMinecraftUuid(raw);
     } catch {
-      throw new ForbiddenException('Minecraft ?꾨줈??UUID ?뺤떇???щ컮瑜댁? ?딆뒿?덈떎.');
+      throw new ForbiddenException('Minecraft 프로필 UUID 형식이 올바르지 않습니다.');
     }
   }
 
@@ -536,10 +530,10 @@ export class MinecraftService {
       where: { state }
     });
     if (!pending) {
-      throw new ForbiddenException('留뚮즺?섏뿀嫄곕굹 ?좏슚?섏? ?딆? ?몄쬆 ?곹깭?낅땲??');
+      throw new ForbiddenException('만료되었거나 유효하지 않은 인증 상태입니다.');
     }
     if (pending.accountId !== userId) {
-      throw new ForbiddenException('?몄쬆 ?곹깭媛 ?ㅻⅨ ?ъ슜?먯? ?곌껐?섏뼱 ?덉뒿?덈떎.');
+      throw new ForbiddenException('인증 상태가 다른 사용자와 연결되어 있습니다.');
     }
     await this.prisma.minecraftAuthorization.delete({ where: { state } });
     return pending;

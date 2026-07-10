@@ -111,7 +111,7 @@ export class OAuthFlowService {
     await this.evictExpiredStates();
     const pending = await this.consumeState(state, provider);
     if (redirectUri && redirectUri !== pending.redirectUri) {
-      throw new BadRequestException('OAuth redirect URI媛 ?쇱튂?섏? ?딆뒿?덈떎.');
+      throw new BadRequestException('OAuth 리디렉션 URI가 일치하지 않습니다.');
     }
 
     const effectiveRedirect = pending.redirectUri;
@@ -136,7 +136,7 @@ export class OAuthFlowService {
   private createDiscordAuthorizationUrl(state: string, redirectUri: string): string {
     const clientId = this.config.getOptional('DISCORD_CLIENT_ID');
     if (!clientId) {
-      throw new InternalServerErrorException('DISCORD_CLIENT_ID媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
+      throw new InternalServerErrorException('DISCORD_CLIENT_ID가 설정되지 않았습니다.');
     }
     const url = new URL('https://discord.com/oauth2/authorize');
     url.searchParams.set('client_id', clientId);
@@ -155,7 +155,7 @@ export class OAuthFlowService {
     const clientId = this.config.getOptional('DISCORD_CLIENT_ID');
     const clientSecret = this.config.getOptional('DISCORD_CLIENT_SECRET');
     if (!clientId || !clientSecret) {
-      throw new InternalServerErrorException('Discord OAuth ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??');
+      throw new InternalServerErrorException('Discord OAuth 환경 변수가 설정되지 않았습니다.');
     }
 
     const body = new URLSearchParams({
@@ -171,17 +171,13 @@ export class OAuthFlowService {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString()
     }).catch((error) => {
-      this.logger.error({ err: error }, 'Discord ?좏겙 ?붿껌 ?ㅽ뙣');
-      throw new UnauthorizedException('Discord OAuth ?붿껌???ㅽ뙣?덉뒿?덈떎.');
+      this.logger.error({ err: error }, 'Discord 토큰 요청 실패');
+      throw new UnauthorizedException('Discord OAuth 요청에 실패했습니다.');
     });
 
     if (!tokenResponse.ok) {
-      const payload = await tokenResponse.text().catch(() => '');
-      this.logger.warn(
-        { status: tokenResponse.status, body: payload },
-        'Discord ?좏겙 援먰솚 ?ㅽ뙣'
-      );
-      throw new UnauthorizedException('Discord OAuth 肄붾뱶媛 ?좏슚?섏? ?딆뒿?덈떎.');
+      this.logger.warn({ status: tokenResponse.status }, 'Discord 토큰 교환 실패');
+      throw new UnauthorizedException('Discord OAuth 코드가 유효하지 않습니다.');
     }
 
     const tokenPayload = (await tokenResponse.json().catch(() => ({}))) as {
@@ -193,7 +189,7 @@ export class OAuthFlowService {
     };
 
     if (!tokenPayload?.access_token) {
-      throw new UnauthorizedException('Discord access token??諛쏆쓣 ???놁뒿?덈떎.');
+      throw new UnauthorizedException('Discord 액세스 토큰을 받지 못했습니다.');
     }
 
     const userResponse = await fetch('https://discord.com/api/users/@me', {
@@ -201,17 +197,13 @@ export class OAuthFlowService {
         Authorization: `Bearer ${tokenPayload.access_token}`
       }
     }).catch((error) => {
-      this.logger.error({ err: error }, 'Discord ?ъ슜???뺣낫 ?붿껌 ?ㅽ뙣');
-      throw new UnauthorizedException('Discord ?ъ슜???뺣낫瑜??뺤씤?????놁뒿?덈떎.');
+      this.logger.error({ err: error }, 'Discord 사용자 정보 요청 실패');
+      throw new UnauthorizedException('Discord 사용자 정보를 확인할 수 없습니다.');
     });
 
     if (!userResponse.ok) {
-      const payload = await userResponse.text().catch(() => '');
-      this.logger.warn(
-        { status: userResponse.status, body: payload },
-        'Discord ?ъ슜???뺣낫 議고쉶 ?ㅽ뙣'
-      );
-      throw new UnauthorizedException('Discord ?ъ슜???뺣낫瑜??뺤씤?????놁뒿?덈떎.');
+      this.logger.warn({ status: userResponse.status }, 'Discord 사용자 정보 조회 실패');
+      throw new UnauthorizedException('Discord 사용자 정보를 확인할 수 없습니다.');
     }
 
     const user = (await userResponse.json().catch(() => ({}))) as {
@@ -222,7 +214,7 @@ export class OAuthFlowService {
     };
 
     if (!user?.id) {
-      throw new UnauthorizedException('Discord ?ъ슜???앸퀎?먮? 李얠쓣 ???놁뒿?덈떎.');
+      throw new UnauthorizedException('Discord 사용자 식별자를 찾을 수 없습니다.');
     }
 
     return {
@@ -281,7 +273,7 @@ export class OAuthFlowService {
   private createNaverAuthorizationUrl(state: string, redirectUri: string): string {
     const clientId = this.config.getOptional('NAVER_CLIENT_ID');
     if (!clientId) {
-      throw new InternalServerErrorException('NAVER_CLIENT_ID媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
+      throw new InternalServerErrorException('NAVER_CLIENT_ID가 설정되지 않았습니다.');
     }
     const url = new URL('https://nid.naver.com/oauth2.0/authorize');
     url.searchParams.set('client_id', clientId);
@@ -300,7 +292,7 @@ export class OAuthFlowService {
     const clientId = this.config.getOptional('NAVER_CLIENT_ID');
     const clientSecret = this.config.getOptional('NAVER_CLIENT_SECRET');
     if (!clientId || !clientSecret) {
-      throw new InternalServerErrorException('NAVER OAuth ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??');
+      throw new InternalServerErrorException('NAVER OAuth 환경 변수가 설정되지 않았습니다.');
     }
 
     const body = new URLSearchParams({
@@ -317,17 +309,13 @@ export class OAuthFlowService {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString()
     }).catch((error) => {
-      this.logger.error({ err: error }, 'NAVER ?좏겙 ?붿껌 ?ㅽ뙣');
-      throw new UnauthorizedException('NAVER OAuth ?붿껌???ㅽ뙣?덉뒿?덈떎.');
+      this.logger.error({ err: error }, 'NAVER 토큰 요청 실패');
+      throw new UnauthorizedException('NAVER OAuth 요청에 실패했습니다.');
     });
 
     if (!tokenResponse.ok) {
-      const payload = await tokenResponse.text().catch(() => '');
-      this.logger.warn(
-        { status: tokenResponse.status, body: payload },
-        'NAVER ?좏겙 援먰솚 ?ㅽ뙣'
-      );
-      throw new UnauthorizedException('NAVER OAuth 肄붾뱶媛 ?좏슚?섏? ?딆뒿?덈떎.');
+      this.logger.warn({ status: tokenResponse.status }, 'NAVER 토큰 교환 실패');
+      throw new UnauthorizedException('NAVER OAuth 코드가 유효하지 않습니다.');
     }
 
     const tokenPayload = (await tokenResponse.json().catch(() => ({}))) as {
@@ -336,7 +324,7 @@ export class OAuthFlowService {
     };
 
     if (!tokenPayload?.access_token) {
-      throw new UnauthorizedException('NAVER access token??諛쏆쓣 ???놁뒿?덈떎.');
+      throw new UnauthorizedException('NAVER 액세스 토큰을 받지 못했습니다.');
     }
 
     const userResponse = await fetch('https://openapi.naver.com/v1/nid/me', {
@@ -344,17 +332,13 @@ export class OAuthFlowService {
         Authorization: `Bearer ${tokenPayload.access_token}`
       }
     }).catch((error) => {
-      this.logger.error({ err: error }, 'NAVER ?ъ슜???뺣낫 ?붿껌 ?ㅽ뙣');
-      throw new UnauthorizedException('NAVER ?ъ슜???뺣낫瑜??뺤씤?????놁뒿?덈떎.');
+      this.logger.error({ err: error }, 'NAVER 사용자 정보 요청 실패');
+      throw new UnauthorizedException('NAVER 사용자 정보를 확인할 수 없습니다.');
     });
 
     if (!userResponse.ok) {
-      const payload = await userResponse.text().catch(() => '');
-      this.logger.warn(
-        { status: userResponse.status, body: payload },
-        'NAVER ?ъ슜???뺣낫 議고쉶 ?ㅽ뙣'
-      );
-      throw new UnauthorizedException('NAVER ?ъ슜???뺣낫瑜??뺤씤?????놁뒿?덈떎.');
+      this.logger.warn({ status: userResponse.status }, 'NAVER 사용자 정보 조회 실패');
+      throw new UnauthorizedException('NAVER 사용자 정보를 확인할 수 없습니다.');
     }
 
     const data = (await userResponse.json().catch(() => ({}))) as {
@@ -368,7 +352,7 @@ export class OAuthFlowService {
 
     const user = data.response;
     if (!user?.id) {
-      throw new UnauthorizedException('NAVER ?ъ슜???앸퀎?먮? 李얠쓣 ???놁뒿?덈떎.');
+      throw new UnauthorizedException('NAVER 사용자 식별자를 찾을 수 없습니다.');
     }
 
     return {
@@ -383,10 +367,10 @@ export class OAuthFlowService {
       where: { state }
     });
     if (!pending) {
-      throw new BadRequestException('留뚮즺?섏뿀嫄곕굹 ?좏슚?섏? ?딆? OAuth ?곹깭?낅땲??');
+      throw new BadRequestException('만료되었거나 유효하지 않은 OAuth 상태입니다.');
     }
     if (pending.provider !== provider) {
-      throw new BadRequestException('OAuth 怨듦툒???뺣낫媛 ?쇱튂?섏? ?딆뒿?덈떎.');
+      throw new BadRequestException('OAuth 공급자 정보가 일치하지 않습니다.');
     }
     await this.prisma.oAuthState.delete({ where: { state } });
     return {
@@ -419,9 +403,9 @@ export class OAuthFlowService {
 
   private throwMissingRedirect(provider: OAuthProvider): never {
     if (provider === 'discord') {
-      throw new InternalServerErrorException('Discord OAuth redirect URI媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
+      throw new InternalServerErrorException('Discord OAuth 리디렉션 URI가 설정되지 않았습니다.');
     }
-    throw new InternalServerErrorException('NAVER OAuth redirect URI媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
+    throw new InternalServerErrorException('NAVER OAuth 리디렉션 URI가 설정되지 않았습니다.');
   }
 
   private sanitizeReturnTo(returnTo?: string): string | undefined {

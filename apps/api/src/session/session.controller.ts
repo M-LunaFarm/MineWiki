@@ -49,7 +49,7 @@ export class SessionController {
     @CurrentSession() session: SessionPayload
   ) {
     if (session.sessionId === sessionId) {
-      throw new BadRequestException('?꾩옱 ?ъ슜 以묒씤 ?몄뀡? ?ш린???댁젣?????놁뒿?덈떎.');
+      throw new BadRequestException('현재 사용 중인 세션은 여기서 해제할 수 없습니다.');
     }
     await this.sessions.revokeUserSession(session.userId, sessionId);
     return { success: true };

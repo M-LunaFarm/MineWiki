@@ -81,7 +81,7 @@ export class UploadService {
 
   async storeImage(input: ImageUploadInput): Promise<StoredImage> {
     if (!input.buffer || input.buffer.length === 0) {
-      throw new BadRequestException('?대?吏 ?곗씠?곌? 鍮꾩뼱 ?덉뒿?덈떎.');
+      throw new BadRequestException('이미지 데이터가 비어 있습니다.');
     }
     let sanitized: SanitizedImage;
     try {

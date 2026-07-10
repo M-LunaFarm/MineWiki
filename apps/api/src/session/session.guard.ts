@@ -39,7 +39,7 @@ export class SessionGuard implements CanActivate {
     const token = parseCookie(request.headers.cookie, 'mw_session');
     const session = await this.sessions.getSessionByToken(token);
     if (!session) {
-      throw new UnauthorizedException('濡쒓렇?몄씠 ?꾩슂?⑸땲??');
+      throw new UnauthorizedException('로그인이 필요합니다.');
     }
     await this.sessions.touchSession(
       session.sessionId,

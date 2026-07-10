@@ -22,7 +22,8 @@ const RECENT_VOTE_WINDOW_MS = 1000 * 60 * 60 * 24; // 24시간 내 투표 필요
 const WILSON_Z = 1.96;
 const HELPFUL_COOLDOWN_MS = 1000 * 60 * 5; // 5분
 const ADMIN_REPLY_AUTHOR_FALLBACK = '운영진';
-const CORRUPTED_ADMIN_REPLY_AUTHORS = new Set(['?댁쁺吏?']);
+// Keep matching the legacy mojibake value without reintroducing unreadable source text.
+const CORRUPTED_ADMIN_REPLY_AUTHORS = new Set(['\u003f\ub301\uc07a\uf9de\u003f']);
 
 export type ReviewSort = 'wilson' | 'newest';
 
