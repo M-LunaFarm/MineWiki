@@ -790,7 +790,7 @@ export class AuthService {
   private async dispatchVerificationEmail(verification: PendingEmailVerification): Promise<void> {
     if (!this.emailService.isEnabled()) {
       this.logger.debug(
-        { token: verification.token, accountId: verification.accountId },
+        { accountId: verification.accountId },
         'Issued email verification token (SMTP not configured)',
       );
       return;
@@ -809,7 +809,7 @@ export class AuthService {
   private async dispatchPasswordResetEmail(reset: PendingPasswordReset): Promise<void> {
     if (!this.emailService.isEnabled()) {
       this.logger.debug(
-        { token: reset.token, accountId: reset.accountId },
+        { accountId: reset.accountId },
         'Issued password reset token (SMTP not configured)',
       );
       return;
