@@ -1,3 +1,6 @@
 packages:
-  - apps/*
+  - apps/api
+  - apps/bot
+  - apps/web
+  - apps/worker
   - packages/*

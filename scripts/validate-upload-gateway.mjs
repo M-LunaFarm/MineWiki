@@ -10,6 +10,9 @@ const nginxFiles = [
 
 for (const file of nginxFiles) {
   const source = await readFile(file, 'utf8');
+  if (/location \/cdn\//.test(source) || source.includes('apps/cdn')) {
+    throw new Error(`${file} must not expose the retired legacy CDN.`);
+  }
   const healthLocation = source.match(/location = \/api\/health\s*\{([\s\S]*?)\n\s*\}/)?.[1];
   if (!healthLocation?.includes('proxy_pass http://minewiki_api/health;')) {
     throw new Error(`${file} must proxy /api/health to the API /health endpoint.`);

@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "packageManager": "pnpm@9.15.9",
   "workspaces": [
-    "apps/*",
+    "apps/api",
+    "apps/bot",
+    "apps/web",
+    "apps/worker",
     "packages/*"
   ],
   "prisma": {
