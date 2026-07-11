@@ -104,3 +104,53 @@ jobs:
 
       - name: Integration tests
         run: pnpm test:integration
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install smoke-test dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare disposable Compose environment
+        run: |
+          cp .env.example .env
+          sed -i \
+            -e 's/^MINEWIKI_DB_PASSWORD=.*/MINEWIKI_DB_PASSWORD=ci-db-password-2026/' \
+            -e 's/^MINEWIKI_DB_ROOT_PASSWORD=.*/MINEWIKI_DB_ROOT_PASSWORD=ci-root-password-2026/' \
+            -e 's/^INTERNAL_BOT_API_TOKEN=.*/INTERNAL_BOT_API_TOKEN=ci-bot-token-2026/' \
+            -e 's/^PLUGIN_SYNC_TOKEN=.*/PLUGIN_SYNC_TOKEN=ci-plugin-token-2026/' \
+            -e 's/^APP_ENCRYPTION_KEY=.*/APP_ENCRYPTION_KEY=ci-encryption-key-2026/' \
+            -e 's/^NEXT_PUBLIC_TURNSTILE_SITE_KEY=.*/NEXT_PUBLIC_TURNSTILE_SITE_KEY=ci-turnstile-site-2026/' \
+            -e 's/^TURNSTILE_SECRET_KEY=.*/TURNSTILE_SECRET_KEY=ci-turnstile-secret-2026/' \
+            -e 's/^SMTP_HOST=.*/SMTP_HOST=mail.invalid/' \
+            .env
+
+      - name: Build and start fresh Compose stack
+        run: docker compose up -d --build
+
+      - name: Smoke-test gateway and seeded application
+        env:
+          SMOKE_WEB_BASE_URL: http://127.0.0.1:8080
+          SMOKE_API_BASE_URL: http://127.0.0.1:8080/api
+        run: pnpm smoke
+
+      - name: Show Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=300
+
+      - name: Tear down Compose stack
+        if: always()
+        run: docker compose down -v
