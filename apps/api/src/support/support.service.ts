@@ -280,9 +280,7 @@ export class SupportService {
       authorRole: 'customer',
     });
 
-    this.logger.log(
-      `Guest support ticket created: ${ticketId} (ip=${context.ipAddress ?? 'n/a'})`,
-    );
+    this.logger.log(`Guest support ticket created: ${ticketId}`);
 
     return {
       accepted: true,

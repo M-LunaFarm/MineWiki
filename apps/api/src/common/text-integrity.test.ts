@@ -24,3 +24,16 @@ test('API source does not contain common Korean mojibake sequences', () => {
 
   assert.deepEqual(corruptedFiles, []);
 });
+
+test('guest support logs do not persist client network identifiers', () => {
+  const supportSource = readFileSync(
+    join(__dirname, '..', 'support', 'support.service.ts'),
+    'utf8',
+  );
+  const guestLog = supportSource.match(
+    /this\.logger\.log\([\s\S]*?Guest support ticket created[\s\S]*?\);/,
+  )?.[0];
+
+  assert.ok(guestLog, 'guest support creation should remain operationally logged');
+  assert.doesNotMatch(guestLog, /ipAddress|userAgent|\bip=/i);
+});
