@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import './load-environment.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 

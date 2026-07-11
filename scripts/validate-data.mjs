@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import './load-environment.mjs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -12,6 +13,13 @@ const args = parseArgs(process.argv.slice(2));
 if (args.help) {
   printHelp();
   process.exit(0);
+}
+
+if (!process.env.DATABASE_URL?.trim()) {
+  console.error(
+    'DATABASE_URL is required. Set it directly or provide it through .env, .env.local, or MINEWIKI_ENV_FILE.',
+  );
+  process.exit(1);
 }
 
 const prisma = new PrismaClient();

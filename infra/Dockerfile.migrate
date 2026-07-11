@@ -25,5 +25,6 @@ RUN pnpm --dir packages/wiki-core build
 COPY scripts/deploy-database.mjs scripts/deploy-database.mjs
 COPY scripts/seed.mjs scripts/seed.mjs
 COPY scripts/validate-data.mjs scripts/validate-data.mjs
+COPY scripts/load-environment.mjs scripts/load-environment.mjs
 
 CMD ["sh", "-c", "node scripts/deploy-database.mjs && node scripts/seed.mjs && node scripts/validate-data.mjs --fix && node scripts/validate-data.mjs"]

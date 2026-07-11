@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import './load-environment.mjs';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { readdir } from 'node:fs/promises';

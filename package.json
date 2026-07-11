@@ -48,6 +48,7 @@
     "typescript-eslint": "^8.62.1"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.2"
+    "@prisma/client": "^6.19.2",
+    "dotenv": "^16.6.1"
   }
 }

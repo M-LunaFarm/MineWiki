@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import './load-environment.mjs';
+
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
 const webBaseUrl = normalizeBaseUrl(process.env.SMOKE_WEB_BASE_URL ?? 'http://127.0.0.1:4311');
