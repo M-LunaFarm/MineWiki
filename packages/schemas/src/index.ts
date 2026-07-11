@@ -60,7 +60,6 @@ export const emailRegistrationResultSchema = z.object({
 });
 
 export const resendVerificationResultSchema = z.object({
-  accountId: z.string().uuid(),
   email: z.string().email(),
   expiresAt: z.string().datetime(),
 });

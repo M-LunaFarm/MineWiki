@@ -95,6 +95,18 @@ if (!hasDatabase) {
     );
     const session = await service.verifyEmail(secondToken);
     assert.equal(session.account.id, registration.accountId);
+
+    const verifiedResponse = await service.resendVerification(email);
+    const missingEmail = 'missing-' + randomUUID() + '@example.com';
+    const missingResponse = await service.resendVerification(missingEmail);
+    assert.deepEqual(Object.keys(verifiedResponse).sort(), ['email', 'expiresAt']);
+    assert.deepEqual(Object.keys(missingResponse).sort(), ['email', 'expiresAt']);
+    assert.equal(verifiedResponse.email, email);
+    assert.equal(missingResponse.email, missingEmail);
+    assert.equal(
+      await prisma.emailVerification.count({ where: { accountId: registration.accountId } }),
+      0,
+    );
   });
 
   test('password reset updates credentials', async () => {
@@ -133,7 +145,7 @@ if (!hasDatabase) {
       email,
       password: 'EnablePW1!',
     });
-    assert.equal(setup.accountId, oauth.account.id);
+    assert.deepEqual(Object.keys(setup).sort(), ['email', 'expiresAt']);
     assert.equal(setup.email, email);
 
     await assert.rejects(

@@ -102,7 +102,6 @@ export interface EmailRegistrationPendingResult {
 export type EmailRegistrationResult = EmailRegistrationPendingResult;
 
 export interface ResendVerificationResult {
-  readonly accountId: string;
   readonly email: string;
   readonly expiresAt: string;
 }
@@ -275,7 +274,6 @@ export class AuthService {
     const verification = await this.createEmailVerification(account.id, email);
     await this.dispatchVerificationEmail(verification);
     return {
-      accountId: account.id,
       email,
       expiresAt: verification.expiresAt.toISOString(),
     };
@@ -287,17 +285,17 @@ export class AuthService {
       throw new BadRequestException('이메일이 필요합니다.');
     }
 
-    const account = await this.findSinglePasswordAccountByEmail(normalized);
-    if (!account) {
-      throw new NotFoundException('해당 이메일로 등록된 계정을 찾을 수 없습니다.');
-    }
-    if (account.emailVerified) {
-      throw new BadRequestException('이미 이메일 인증을 완료한 계정입니다.');
+    const candidates = await this.findPasswordAccountsByEmail(normalized);
+    const account = candidates.length === 1 ? candidates[0] : undefined;
+    if (!account || account.emailVerified) {
+      return {
+        email: normalized,
+        expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS).toISOString(),
+      };
     }
     const verification = await this.createEmailVerification(account.id, normalized);
     await this.dispatchVerificationEmail(verification);
     return {
-      accountId: account.id,
       email: normalized,
       expiresAt: verification.expiresAt.toISOString(),
     };
