@@ -688,6 +688,7 @@ model ServerPluginSyncEvent {
   createdAt      DateTime @default(now())
 
   @@index([serverId, createdAt])
+  @@index([pluginServerId, createdAt])
   @@index([minecraftUuid, createdAt])
   @@index([discordUserId, createdAt])
 }
