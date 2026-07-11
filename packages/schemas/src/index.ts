@@ -471,9 +471,6 @@ export const voteDispatchJobSchema = z.object({
 
 export const serverPingJobSchema = z.object({
   serverId: z.string().uuid(),
-  host: z.string().min(3),
-  port: z.number().int().positive().max(65535),
-  edition: z.enum(['java', 'bedrock']),
 });
 
 export const claimVerificationJobSchema = z.object({

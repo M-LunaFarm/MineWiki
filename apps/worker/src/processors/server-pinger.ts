@@ -18,13 +18,26 @@ type PrismaHandle = Pick<
 
 export function createServerPinger(prisma: PrismaHandle) {
   async function ping(job: ServerPingJob) {
-    const target = await resolvePingTarget(job);
+    const server = await prisma.server.findUnique({
+      where: { id: job.serverId },
+      select: { joinHost: true, joinPort: true, edition: true },
+    });
+    if (!server) {
+      throw new Error('server_ping_server_not_found');
+    }
+    const executionJob: ServerPingExecutionJob = {
+      ...job,
+      host: server.joinHost,
+      port: server.joinPort,
+      edition: server.edition === 'bedrock' ? 'bedrock' : 'java',
+    };
+    const target = await resolvePingTarget(executionJob);
     const now = new Date();
     const context = {
       serverId: job.serverId,
-      host: target?.host ?? job.host,
-      port: target?.port ?? job.port,
-      edition: job.edition,
+      host: target?.host ?? executionJob.host,
+      port: target?.port ?? executionJob.port,
+      edition: executionJob.edition,
     };
 
     let online = false;
@@ -39,7 +52,7 @@ export function createServerPinger(prisma: PrismaHandle) {
         throw new Error('server_ping_target_unresolved');
       }
       const response =
-        job.edition === 'bedrock'
+        executionJob.edition === 'bedrock'
           ? await statusBedrock(target.host, target.port, {
               timeout: PING_TIMEOUT_MS,
             })
@@ -161,7 +174,7 @@ export function createServerPinger(prisma: PrismaHandle) {
 }
 
 async function resolvePingTarget(
-  job: ServerPingJob,
+  job: ServerPingExecutionJob,
 ): Promise<{ host: string; port: number } | null> {
   const baseOptions = {
     label: 'Server ping probe',
@@ -215,6 +228,12 @@ async function resolvePingTarget(
     );
     return null;
   }
+}
+
+interface ServerPingExecutionJob extends ServerPingJob {
+  readonly host: string;
+  readonly port: number;
+  readonly edition: 'java' | 'bedrock';
 }
 
 async function resolveJavaSrvTarget(host: string): Promise<{ host: string; port: number } | null> {

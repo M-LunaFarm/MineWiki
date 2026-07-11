@@ -395,7 +395,7 @@ async function enqueueServerPings(): Promise<void> {
         { stats: { is: { lastPingAt: { lt: threshold } } } },
       ],
     },
-    select: { id: true, joinHost: true, joinPort: true, edition: true },
+    select: { id: true },
     take: MAX_PING_BATCH,
   });
 
@@ -408,9 +408,6 @@ async function enqueueServerPings(): Promise<void> {
     dueServers.map((server) => {
       const data: ServerPingJob = {
         serverId: server.id,
-        host: server.joinHost,
-        port: server.joinPort,
-        edition: server.edition,
       };
       return enqueueOrRunDirectly(
         serverPingQueue,

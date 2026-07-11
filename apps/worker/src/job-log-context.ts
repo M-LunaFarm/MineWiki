@@ -12,7 +12,7 @@ export function voteDispatchLogContext(job: VoteDispatchJob) {
 }
 
 export function serverPingLogContext(job: ServerPingJob) {
-  return { serverId: job.serverId, edition: job.edition };
+  return { serverId: job.serverId };
 }
 
 export function claimVerificationLogContext(job: ClaimVerificationJob) {
