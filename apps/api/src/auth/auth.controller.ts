@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   ParseUUIDPipe,
@@ -366,7 +367,14 @@ export class AuthController {
   }
 
   @Get('accounts/:accountId')
-  getAccount(@Param('accountId', new ParseUUIDPipe()) accountId: string) {
+  @UseGuards(SessionGuard)
+  getAccount(
+    @Param('accountId', new ParseUUIDPipe()) accountId: string,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    if (accountId !== session.userId) {
+      throw new ForbiddenException('본인 계정만 조회할 수 있습니다.');
+    }
     return this.auth.getAccountView(accountId);
   }
 
