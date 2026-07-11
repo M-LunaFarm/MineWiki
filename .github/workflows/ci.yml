@@ -85,6 +85,15 @@ jobs:
       - name: Typecheck packages
         run: pnpm typecheck
 
+      - name: Seed test baseline
+        run: pnpm seed
+
+      - name: Repair safe seeded-data invariants
+        run: pnpm data:validate -- --fix
+
+      - name: Validate seeded data integrity
+        run: pnpm data:validate
+
       - name: Lint
         run: pnpm lint
 
