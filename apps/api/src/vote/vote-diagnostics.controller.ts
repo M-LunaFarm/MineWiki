@@ -7,6 +7,7 @@ import {
   Post,
   UseGuards
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { VoteDiagnosticsService, type DiagnosticsResult } from './vote-diagnostics.service';
 import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
@@ -22,6 +23,7 @@ export class VoteDiagnosticsController {
 
   @UseGuards(SessionGuard)
   @Post('test')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async runDiagnostics(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Body() body: unknown,

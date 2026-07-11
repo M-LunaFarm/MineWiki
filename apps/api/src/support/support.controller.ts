@@ -10,6 +10,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { extractClientIp } from '../common/http/client-ip';
 import { CurrentSession } from '../session/session.decorator';
@@ -48,11 +49,13 @@ export class SupportController {
 
   @UseGuards(SessionGuard)
   @Post('tickets')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   createTicket(@CurrentSession() session: SessionPayload, @Body() body: unknown) {
     return this.support.createTicket(session, body);
   }
 
   @Post('tickets/guest')
+  @Throttle({ default: { limit: 3, ttl: 600 } })
   createGuestTicket(@Body() body: unknown, @Req() request: FastifyRequest) {
     return this.support.createGuestTicket(body, {
       ipAddress: extractClientIp(request),
@@ -62,6 +65,7 @@ export class SupportController {
 
   @UseGuards(SessionGuard)
   @Post('tickets/:ticketId/messages')
+  @Throttle({ default: { limit: 20, ttl: 300 } })
   createMessage(
     @Param('ticketId', new ParseUUIDPipe()) ticketId: string,
     @CurrentSession() session: SessionPayload,
@@ -72,6 +76,7 @@ export class SupportController {
 
   @UseGuards(SessionGuard)
   @Patch('tickets/:ticketId')
+  @Throttle({ default: { limit: 20, ttl: 300 } })
   updateTicket(
     @Param('ticketId', new ParseUUIDPipe()) ticketId: string,
     @CurrentSession() session: SessionPayload,

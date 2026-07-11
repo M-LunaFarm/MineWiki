@@ -1,5 +1,6 @@
 ﻿import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
 import { z } from 'zod';
+import { Throttle } from '@nestjs/throttler';
 import { ClaimService } from './claim.service';
 import { PrismaService } from '../common/prisma.service';
 
@@ -17,6 +18,7 @@ export class PluginClaimController {
   ) {}
 
   @Post('complete')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async complete(@Body() body: unknown) {
     const parsed = payloadSchema.safeParse(body);
     if (!parsed.success) {

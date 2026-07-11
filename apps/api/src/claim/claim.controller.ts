@@ -8,6 +8,7 @@
   Post,
   UseGuards
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ForbiddenException } from '@nestjs/common';
 import { ClaimService } from './claim.service';
 import type { ClaimMethod, ClaimMethodStatus, ClaimStatusResponse } from './claim.types';
@@ -31,6 +32,7 @@ export class ClaimController {
   constructor(private readonly claimService: ClaimService) {}
 
   @Post('start')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async start(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Body() body: StartRequest,
@@ -41,6 +43,7 @@ export class ClaimController {
   }
 
   @Post('verify')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async verify(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Body() body: VerifyRequest,

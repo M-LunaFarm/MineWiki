@@ -8,6 +8,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
 import {
   ServerService,
@@ -34,6 +35,7 @@ export class ServerVerificationController {
 
   @UseGuards(SessionGuard)
   @Post('recheck')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async recheck(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Body() body: unknown,

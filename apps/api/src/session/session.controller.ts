@@ -7,6 +7,7 @@
   UseGuards,
   BadRequestException
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { SessionService } from './session.service';
 import { SessionGuard } from './session.guard';
 import { CurrentSession } from './session.decorator';
@@ -38,12 +39,14 @@ export class SessionController {
   }
 
   @Delete('others')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
   async revokeOtherSessions(@CurrentSession() session: SessionPayload) {
     await this.sessions.revokeAllSessions(session.userId, session.sessionId);
     return { success: true };
   }
 
   @Delete(':sessionId')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async revokeSession(
     @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
     @CurrentSession() session: SessionPayload

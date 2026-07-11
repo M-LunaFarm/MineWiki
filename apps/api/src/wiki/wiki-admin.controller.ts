@@ -1,4 +1,5 @@
 import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
@@ -29,6 +30,7 @@ export class WikiAdminController {
   }
 
   @Patch('pages/:id/protection')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
   async updateProtection(
     @Param('id') pageId: string,
     @Body() body: { protectionLevel?: string; reason?: string },
@@ -44,6 +46,7 @@ export class WikiAdminController {
   }
 
   @Patch('revisions/:id/visibility')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
   async updateRevisionVisibility(
     @Param('id') revisionId: string,
     @Body() body: { visibility?: string; reason?: string },
@@ -59,6 +62,7 @@ export class WikiAdminController {
   }
 
   @Post('pages/:id/rollback')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
   async rollback(
     @Param('id') pageId: string,
     @Body() body: { revisionId?: string; reason?: string },
@@ -74,6 +78,7 @@ export class WikiAdminController {
   }
 
   @Post('pages/:id/delete')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
   async deletePage(
     @Param('id') pageId: string,
     @Body() body: { reason?: string },
@@ -89,6 +94,7 @@ export class WikiAdminController {
   }
 
   @Post('pages/:id/restore')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
   async restorePage(
     @Param('id') pageId: string,
     @Body() body: { reason?: string },

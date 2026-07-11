@@ -143,6 +143,7 @@ export class ReviewController {
 
   @UseGuards(SessionGuard)
   @Post(':reviewId/reply')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
   async reply(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Param('reviewId', new ParseUUIDPipe()) reviewId: string,

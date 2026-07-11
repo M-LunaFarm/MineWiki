@@ -10,6 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { BusinessEventService } from '../events/business-event.service';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
@@ -48,6 +49,7 @@ export class RoleAdminController {
   }
 
   @Post('accounts/:accountId')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   async assignRole(
     @Param('accountId') accountId: string,
     @Body() body: { roleCode?: string },
@@ -66,6 +68,7 @@ export class RoleAdminController {
   }
 
   @Delete('accounts/:accountId/:roleCode')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   async removeRole(
     @Param('accountId') accountId: string,
     @Param('roleCode') roleCodeInput: string,
