@@ -1,5 +1,5 @@
-import type { ServerSummary } from '@minewiki/schemas';
-import { fetchServerSummaries } from '../../lib/api';
+import type { ServerRankingResponse } from '@minewiki/schemas';
+import { fetchServerRankings } from '../../lib/api';
 import {
   ServerListExplorer,
   type ServerListInitialFilters,
@@ -62,12 +62,28 @@ export default async function ServerListPage({ searchParams }: PageProps) {
     page: pageParam && Number(pageParam) > 0 ? Number(pageParam) : 1,
   };
 
-  let servers: ServerSummary[] = [];
+  let ranking: ServerRankingResponse = {
+    items: [],
+    total: 0,
+    summary: { online: 0, verified: 0, votes24h: 0 },
+    page: initialFilters.page,
+    pageSize: 6,
+    totalPages: 0,
+    rankUpdatedAt: null,
+  };
   try {
-    servers = await fetchServerSummaries();
+    ranking = await fetchServerRankings({
+      edition: initialFilters.edition === 'all' ? undefined : initialFilters.edition,
+      grade: initialFilters.grade === 'all' ? undefined : initialFilters.grade,
+      tag: initialFilters.tags[0],
+      search: initialFilters.search || undefined,
+      sort: initialFilters.sort,
+      page: initialFilters.page,
+      pageSize: 6,
+    });
   } catch (error) {
     console.error('Failed to load server list page data', error);
   }
 
-  return <ServerListExplorer servers={servers} initialFilters={initialFilters} />;
+  return <ServerListExplorer initialRanking={ranking} initialFilters={initialFilters} />;
 }

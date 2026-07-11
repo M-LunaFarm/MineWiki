@@ -4,6 +4,7 @@ import {
   serverDetailSchema,
   serverReviewSchema,
   serverStatsSchema,
+  serverRankingResponseSchema,
   serverSummarySchema,
   minecraftIdentitySchema,
   minecraftVerificationRequestSchema,
@@ -17,6 +18,7 @@ import {
   type ServerDetail,
   type ServerReview,
   type ServerStats,
+  type ServerRankingResponse,
   type ServerSummary,
   reviewGateStatusSchema,
   type ReviewGateStatus
@@ -74,6 +76,29 @@ export class ApiClient {
         searchParams: searchParams.size > 0 ? searchParams : undefined
       }),
       (data) => serverSummarySchema.array().parse(data)
+    );
+  }
+
+  async listServerRankings(options?: {
+    edition?: 'java' | 'bedrock';
+    grade?: 'Verified' | 'Unverified';
+    tag?: string;
+    search?: string;
+    sort?: 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'latest' | 'name_asc';
+    page?: number;
+    pageSize?: number;
+  }): Promise<ServerRankingResponse> {
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(options ?? {})) {
+      if (value !== undefined && value !== '') {
+        searchParams.set(key, String(value));
+      }
+    }
+    return ApiClient.unwrapResponse(
+      this.http.get('v1/servers/rankings', {
+        searchParams: searchParams.size > 0 ? searchParams : undefined
+      }),
+      (data) => serverRankingResponseSchema.parse(data)
     );
   }
 

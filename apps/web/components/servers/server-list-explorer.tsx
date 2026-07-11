@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { ServerSummary } from '@minewiki/schemas';
+import type { ServerRankingResponse, ServerSummary } from '@minewiki/schemas';
 import {
   Activity,
   BadgeCheck,
@@ -30,6 +30,7 @@ import {
   getServerPreviewSeed,
 } from '../../lib/server-preview';
 import { buildServerPath } from '../../lib/server-routes';
+import { fetchServerRankings } from '../../lib/api';
 
 const PAGE_SIZE = 6;
 
@@ -76,11 +77,14 @@ export interface ServerListInitialFilters {
 }
 
 interface ServerListExplorerProps {
-  readonly servers: ServerSummary[];
+  readonly initialRanking: ServerRankingResponse;
   readonly initialFilters: ServerListInitialFilters;
 }
 
-export function ServerListExplorer({ servers, initialFilters }: ServerListExplorerProps) {
+export function ServerListExplorer({ initialRanking, initialFilters }: ServerListExplorerProps) {
+  const [ranking, setRanking] = useState(initialRanking);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(initialFilters.search);
   const [edition, setEdition] = useState<EditionFilter>(initialFilters.edition);
   const [grade, setGrade] = useState<GradeFilter>(initialFilters.grade);
@@ -91,6 +95,7 @@ export function ServerListExplorer({ servers, initialFilters }: ServerListExplor
   const [currentPage, setCurrentPage] = useState(initialFilters.page);
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
   const didMountRef = useRef(false);
+  const didFetchRef = useRef(false);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -102,55 +107,7 @@ export function ServerListExplorer({ servers, initialFilters }: ServerListExplor
     };
   }, [mobileFilterOpen]);
 
-  const filteredServers = useMemo(() => {
-    const needle = normalizeValue(searchQuery);
-
-    const items = servers.filter((server) => {
-      if (edition !== 'all' && server.edition !== edition) {
-        return false;
-      }
-      if (grade !== 'all' && server.verificationGrade !== grade) {
-        return false;
-      }
-      if (selectedGenres.length > 0) {
-        const hasAllGenres = selectedGenres.every((genre) => matchesGenre(server, genre));
-        if (!hasAllGenres) {
-          return false;
-        }
-      }
-      if (!needle) {
-        return true;
-      }
-      const searchable = [
-        server.name,
-        server.joinHost,
-        `${server.joinHost}:${server.joinPort}`,
-        server.shortDescription,
-        ...server.tags,
-      ];
-      return searchable.some((value) => normalizeValue(value).includes(needle));
-    });
-
-    const sorted = [...items];
-    sorted.sort((left, right) => {
-      if (sort === 'reviews_desc') {
-        return right.reviewsCount - left.reviewsCount;
-      }
-      if (sort === 'latest') {
-        const leftTime = toTimestamp(left.verifiedAt);
-        const rightTime = toTimestamp(right.verifiedAt);
-        if (leftTime !== rightTime) {
-          return rightTime - leftTime;
-        }
-        return right.votes24h - left.votes24h;
-      }
-      if (right.votes24h !== left.votes24h) {
-        return right.votes24h - left.votes24h;
-      }
-      return right.reviewsCount - left.reviewsCount;
-    });
-    return sorted;
-  }, [servers, edition, grade, searchQuery, selectedGenres, sort]);
+  const servers = ranking.items;
 
   const hasActiveFilters =
     searchQuery.trim().length > 0 ||
@@ -167,21 +124,16 @@ export function ServerListExplorer({ servers, initialFilters }: ServerListExplor
     setCurrentPage(1);
   }, [searchQuery, edition, grade, sort, selectedGenres]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredServers.length / PAGE_SIZE));
-  const onlineCount = servers.filter(resolveOnline).length;
-  const verifiedCount = servers.filter((server) => server.verificationGrade === 'Verified').length;
-  const totalVotes24h = servers.reduce((total, server) => total + server.votes24h, 0);
+  const totalPages = Math.max(1, ranking.totalPages);
+  const onlineCount = ranking.summary.online;
+  const verifiedCount = ranking.summary.verified;
+  const totalVotes24h = ranking.summary.votes24h;
 
   useEffect(() => {
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
-
-  const pagedServers = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return filteredServers.slice(start, start + PAGE_SIZE);
-  }, [filteredServers, currentPage]);
 
   const pageTokens = useMemo(
     () => buildPageTokens(totalPages, currentPage),
@@ -198,10 +150,54 @@ export function ServerListExplorer({ servers, initialFilters }: ServerListExplor
   };
 
   const toggleGenre = (genre: GenreKey) => {
-    setSelectedGenres((current) =>
-      current.includes(genre) ? current.filter((item) => item !== genre) : [...current, genre],
-    );
+    setSelectedGenres((current) => (current.includes(genre) ? [] : [genre]));
   };
+
+  useEffect(() => {
+    if (!didFetchRef.current) {
+      didFetchRef.current = true;
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const nextRanking = await fetchServerRankings({
+          edition: edition === 'all' ? undefined : edition,
+          grade: grade === 'all' ? undefined : grade,
+          tag: selectedGenres[0],
+          search: searchQuery.trim() || undefined,
+          sort,
+          page: currentPage,
+          pageSize: PAGE_SIZE,
+        });
+        if (controller.signal.aborted) return;
+        setRanking(nextRanking);
+
+        const params = new URLSearchParams();
+        if (searchQuery.trim()) params.set('search', searchQuery.trim());
+        if (edition !== 'all') params.set('edition', edition);
+        if (grade !== 'all') params.set('grade', grade);
+        if (selectedGenres[0]) params.set('tag', selectedGenres[0]);
+        if (sort !== 'votes24h_desc') params.set('sort', sort);
+        if (currentPage > 1) params.set('page', String(currentPage));
+        const query = params.toString();
+        window.history.replaceState(null, '', query ? `/servers?${query}` : '/servers');
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setLoadError(error instanceof Error ? error.message : '서버 순위를 불러오지 못했습니다.');
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [currentPage, edition, grade, searchQuery, selectedGenres, sort]);
 
   return (
     <div className="min-h-screen bg-[#090d12] text-gray-100 antialiased">
@@ -223,7 +219,7 @@ export function ServerListExplorer({ servers, initialFilters }: ServerListExplor
             </div>
 
             <div className="grid gap-2 sm:grid-cols-[repeat(3,minmax(116px,1fr))_auto] lg:min-w-[560px]">
-              <HeaderStat label="등록" value={servers.length.toLocaleString('ko-KR')} />
+              <HeaderStat label="등록" value={ranking.total.toLocaleString('ko-KR')} />
               <HeaderStat label="온라인" value={onlineCount.toLocaleString('ko-KR')} tone="cyan" />
               <HeaderStat
                 label="24h 투표"
@@ -298,10 +294,17 @@ export function ServerListExplorer({ servers, initialFilters }: ServerListExplor
                 <span>
                   결과{' '}
                   <strong className="text-white">
-                    {filteredServers.length.toLocaleString('ko-KR')}
+                    {ranking.total.toLocaleString('ko-KR')}
                   </strong>
                   개
                 </span>
+                {ranking.rankUpdatedAt ? (
+                  <span className="hidden text-xs text-gray-500 sm:inline">
+                    순위 기준 {formatRankUpdatedAt(ranking.rankUpdatedAt)}
+                  </span>
+                ) : null}
+                {loading ? <span className="text-xs text-[#13ec80]">순위 갱신 중</span> : null}
+                {loadError ? <span className="text-xs text-red-300">{loadError}</span> : null}
                 {hasActiveFilters ? (
                   <button
                     type="button"
@@ -407,7 +410,7 @@ export function ServerListExplorer({ servers, initialFilters }: ServerListExplor
           </aside>
 
           <div className="min-w-0">
-            {pagedServers.length === 0 ? (
+            {servers.length === 0 ? (
               <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-800 bg-[#111821] px-6 py-16 text-center">
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-[#1A1A1E]">
                   <SearchX className="h-7 w-7 text-gray-500" />
@@ -426,11 +429,11 @@ export function ServerListExplorer({ servers, initialFilters }: ServerListExplor
               </section>
             ) : (
               <section className="mb-12 grid gap-3">
-                {pagedServers.map((server, index) => (
+                {servers.map((server, index) => (
                   <ServerCard
                     key={server.id}
                     server={server}
-                    rank={(currentPage - 1) * PAGE_SIZE + index + 1}
+                    rank={server.rank?.current ?? (currentPage - 1) * PAGE_SIZE + index + 1}
                   />
                 ))}
               </section>
@@ -892,32 +895,8 @@ function buildPageTokens(totalPages: number, currentPage: number): Array<number 
   return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages];
 }
 
-function normalizeValue(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, '');
-}
-
-function toTimestamp(value?: string): number {
-  if (!value) {
-    return 0;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function isGenreKey(value: string): value is GenreKey {
   return GENRE_OPTIONS.some((option) => option.key === value);
-}
-
-function matchesGenre(server: ServerSummary, genre: GenreKey): boolean {
-  const option = GENRE_OPTIONS.find((item) => item.key === genre);
-  if (!option) {
-    return false;
-  }
-  const candidates = [server.name, server.shortDescription, ...server.tags].map(normalizeValue);
-  return option.aliases.some((alias) => {
-    const needle = normalizeValue(alias);
-    return candidates.some((candidate) => candidate.includes(needle));
-  });
 }
 
 function resolveOnline(server: ServerSummary): boolean {
@@ -959,6 +938,19 @@ function formatUpdatedAt(value?: string | null): string {
     return '접속 정보 없음';
   }
   return `업데이트 ${new Date(timestamp).toLocaleString('ko-KR')}`;
+}
+
+function formatRankUpdatedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '집계 대기';
+  }
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }
 
 function formatReviewMetric(server: ServerSummary): string {

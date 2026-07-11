@@ -218,6 +218,11 @@ export const serverDetailSchema = serverSummarySchema.extend({
 export const serverRankingResponseSchema = z.object({
   items: z.array(serverSummarySchema),
   total: z.number().int().nonnegative(),
+  summary: z.object({
+    online: z.number().int().nonnegative(),
+    verified: z.number().int().nonnegative(),
+    votes24h: z.number().int().nonnegative(),
+  }),
   page: z.number().int().positive(),
   pageSize: z.number().int().positive(),
   totalPages: z.number().int().nonnegative(),

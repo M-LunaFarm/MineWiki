@@ -133,24 +133,43 @@ export class ServerService {
         : undefined,
     };
     const skip = (input.page - 1) * input.pageSize;
-    const [servers, total] = await this.prisma.$transaction([
-      this.prisma.server.findMany({
-        where,
-        orderBy: buildOrder(input.sort),
-        include: { stats: true },
-        skip,
-        take: input.pageSize,
-      }),
-      this.prisma.server.count({ where }),
-    ]);
+    const [servers, total, online, verified, voteAggregate, rankAggregate] =
+      await this.prisma.$transaction([
+        this.prisma.server.findMany({
+          where,
+          orderBy: buildOrder(input.sort),
+          include: { stats: true },
+          skip,
+          take: input.pageSize,
+        }),
+        this.prisma.server.count({ where }),
+        this.prisma.server.count({
+          where: { AND: [where, { isOnline: true }] },
+        }),
+        this.prisma.server.count({
+          where: {
+            AND: [where, { verificationGrade: { in: ['A', 'B', 'C'] } }],
+          },
+        }),
+        this.prisma.server.aggregate({
+          where,
+          _sum: { votes24h: true },
+        }),
+        this.prisma.serverStats.aggregate({
+          where: { server: where },
+          _max: { lastUpdatedAt: true },
+        }),
+      ]);
     const items = servers.map((server) => toSummary(server));
-    const rankUpdatedAt = items.reduce<string | null>((latest, item) => {
-      const candidate = item.rank?.updatedAt;
-      return candidate && (!latest || candidate > latest) ? candidate : latest;
-    }, null);
+    const rankUpdatedAt = rankAggregate._max.lastUpdatedAt?.toISOString() ?? null;
     return {
       items,
       total,
+      summary: {
+        online,
+        verified,
+        votes24h: voteAggregate._sum.votes24h ?? 0,
+      },
       page: input.page,
       pageSize: input.pageSize,
       totalPages: total === 0 ? 0 : Math.ceil(total / input.pageSize),

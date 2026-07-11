@@ -143,6 +143,16 @@ test('paginated rankings apply server-side filters and return page metadata', as
         queries.push(query);
         return 25;
       },
+      aggregate: async (query: unknown) => {
+        queries.push(query);
+        return { _sum: { votes24h: 420 } };
+      },
+    },
+    serverStats: {
+      aggregate: async (query: unknown) => {
+        queries.push(query);
+        return { _max: { lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z') } };
+      },
     },
     $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
   };
@@ -162,9 +172,10 @@ test('paginated rankings apply server-side filters and return page metadata', as
   assert.equal(result.page, 2);
   assert.equal(result.pageSize, 12);
   assert.equal(result.totalPages, 3);
+  assert.deepEqual(result.summary, { online: 25, verified: 25, votes24h: 420 });
   assert.equal(result.rankUpdatedAt, '2026-07-11T01:00:00.000Z');
   assert.equal(result.items[0]?.rank?.current, 2);
-  assert.equal(queries.length, 2);
+  assert.equal(queries.length, 6);
   assert.deepEqual((queries[0] as { skip: number; take: number }).skip, 12);
   assert.deepEqual((queries[0] as { skip: number; take: number }).take, 12);
   assert.deepEqual(

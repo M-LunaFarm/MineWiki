@@ -4,11 +4,13 @@ import {
   serverDetailSchema,
   serverUpdateSchema,
   serverStatsSchema,
+  serverRankingResponseSchema,
   serverReviewSchema,
   serverReferralSchema,
   type ServerDetail,
   type ServerReview,
   type ServerStats,
+  type ServerRankingResponse,
   type ServerUpdate,
   type ServerSummary,
   type ServerReferral
@@ -32,6 +34,16 @@ interface ServerSummaryOptions {
   readonly sort?: 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'name_asc';
 }
 
+export interface ServerRankingOptions {
+  readonly edition?: 'java' | 'bedrock';
+  readonly grade?: 'Verified' | 'Unverified';
+  readonly tag?: string;
+  readonly search?: string;
+  readonly sort?: 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'latest' | 'name_asc';
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
 interface ServerReviewOptions {
   readonly limit?: number;
   readonly sort?: 'wilson' | 'newest';
@@ -44,6 +56,26 @@ export async function fetchServerSummaries(
 ): Promise<ServerSummary[]> {
   const api = createApiClient(baseUrl);
   return api.listServers(options);
+}
+
+export async function fetchServerRankings(
+  options: ServerRankingOptions = {}
+): Promise<ServerRankingResponse> {
+  const searchParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined && value !== '') {
+      searchParams.set(key, String(value));
+    }
+  }
+  const response = await fetch(
+    `${baseUrl}/v1/servers/rankings?${searchParams.toString()}`,
+    { cache: 'no-store' }
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load server rankings.');
+  }
+  return serverRankingResponseSchema.parse(await response.json());
 }
 
 export async function fetchServerDetail(id: string): Promise<ServerDetail | null> {

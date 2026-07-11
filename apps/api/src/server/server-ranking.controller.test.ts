@@ -12,6 +12,7 @@ test('ranking controller normalizes filters and pagination', async () => {
         return {
           items: [],
           total: 0,
+          summary: { online: 0, verified: 0, votes24h: 0 },
           page: 2,
           pageSize: 12,
           totalPages: 0,
