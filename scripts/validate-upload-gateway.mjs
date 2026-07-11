@@ -2,7 +2,11 @@
 
 import { readFile } from 'node:fs/promises';
 
-const nginxFiles = ['infra/nginx/container.conf', 'infra/nginx/minewiki.conf'];
+const nginxFiles = [
+  'infra/nginx/container.conf',
+  'infra/nginx/minewiki.conf',
+  'infra/nginx/minewiki.routes.conf',
+];
 
 for (const file of nginxFiles) {
   const source = await readFile(file, 'utf8');
