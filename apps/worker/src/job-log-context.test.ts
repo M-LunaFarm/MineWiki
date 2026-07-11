@@ -21,23 +21,9 @@ test('Discord sync logs exclude linked identities and message templates', () => 
   const context = discordVerifySyncLogContext({
     action: 'link',
     sessionId: '11111111-1111-4111-8111-111111111111',
-    guildId: 'guild-1',
-    discordUserId: 'private-discord-user',
-    accountId: '22222222-2222-4222-8222-222222222222',
-    minecraftUuid: '33333333-3333-4333-8333-333333333333',
-    playerName: 'PrivatePlayer',
-    dmTemplate: 'secret direct message',
   });
   const serialized = JSON.stringify(context);
 
-  assert.deepEqual(Object.keys(context).sort(), ['action', 'guildId', 'sessionId']);
-  for (const secret of [
-    'private-discord-user',
-    '22222222-2222-4222-8222-222222222222',
-    '33333333-3333-4333-8333-333333333333',
-    'PrivatePlayer',
-    'secret direct message',
-  ]) {
-    assert.equal(serialized.includes(secret), false);
-  }
+  assert.deepEqual(Object.keys(context).sort(), ['action', 'sessionId']);
+  assert.equal(serialized.includes('private-discord-user'), false);
 });

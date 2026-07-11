@@ -25,6 +25,7 @@ import {
   voteDispatchLogContext,
 } from './job-log-context';
 import { loadVoteDispatchExecutionJob } from './vote-job-loader';
+import { loadDiscordVerifyExecutionJob } from './discord-sync-job-loader';
 import type {
   ClaimVerificationJob,
   DiscordDigestJob,
@@ -312,7 +313,22 @@ createWorker<DiscordVerifySyncJob>('discord-verify-sync', async (job) => {
     { jobId: job.id, ...discordVerifySyncLogContext(job.data) },
     'Processing Discord verify sync job',
   );
-  return discordVerifySyncer.sync(job.data);
+  let executionJob;
+  try {
+    executionJob = await loadDiscordVerifyExecutionJob(prisma, job.data);
+  } catch (error) {
+    await prisma.discordVerificationSession.updateMany({
+      where: { id: job.data.sessionId, status: { not: 'synced' } },
+      data: {
+        status: 'failed',
+        syncAttempts: { increment: 1 },
+        lastSyncStatus: truncateDispatchError(error).slice(0, 160),
+        lastSyncAt: new Date(),
+      },
+    });
+    throw error;
+  }
+  return discordVerifySyncer.sync(executionJob);
 });
 
 function scheduleInterval(name: string, intervalMs: number, task: () => Promise<void>) {

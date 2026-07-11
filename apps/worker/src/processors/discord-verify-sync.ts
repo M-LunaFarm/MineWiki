@@ -1,5 +1,4 @@
 import { Logger } from '@minewiki/logger';
-import type { DiscordVerifySyncJob } from '@minewiki/schemas';
 import type { PrismaClient } from '@prisma/client';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
@@ -14,13 +13,28 @@ export interface DiscordVerifySyncResult {
   readonly logSent: boolean;
 }
 
+export interface DiscordVerifyExecutionJob {
+  readonly action?: 'link' | 'revoke';
+  readonly sessionId: string;
+  readonly guildId: string;
+  readonly discordUserId: string;
+  readonly accountId: string;
+  readonly minecraftUuid: string;
+  readonly playerName?: string;
+  readonly roleId?: string;
+  readonly nicknameTemplate?: string;
+  readonly dmTemplate?: string;
+  readonly logChannelId?: string;
+  readonly logMessageTemplate?: string;
+}
+
 export function createDiscordVerifySyncer(options: {
   prisma: PrismaHandle;
   token: string;
 }) {
   const { prisma, token } = options;
 
-  async function sync(job: DiscordVerifySyncJob): Promise<DiscordVerifySyncResult> {
+  async function sync(job: DiscordVerifyExecutionJob): Promise<DiscordVerifySyncResult> {
     let roleApplied = false;
     let nicknameApplied = false;
     let dmSent = false;
@@ -182,7 +196,7 @@ async function postChannelMessage(token: string, channelId: string, content: str
   }
 }
 
-function renderMessage(template: string, job: DiscordVerifySyncJob): string {
+function renderMessage(template: string, job: DiscordVerifyExecutionJob): string {
   return template
     .replace(/\{player\}/gu, job.playerName ?? 'unknown')
     .replace(/\{uuid\}/gu, job.minecraftUuid)

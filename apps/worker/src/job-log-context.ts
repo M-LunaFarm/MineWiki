@@ -29,5 +29,5 @@ export function discordDigestLogContext(job: DiscordDigestJob) {
 }
 
 export function discordVerifySyncLogContext(job: DiscordVerifySyncJob) {
-  return { sessionId: job.sessionId, guildId: job.guildId, action: job.action ?? 'link' };
+  return { sessionId: job.sessionId, action: job.action ?? 'link' };
 }

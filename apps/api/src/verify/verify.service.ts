@@ -232,27 +232,9 @@ export class VerifyService {
       minecraftUuid
     });
 
-    const syncOptions = await this.resolveGuildVerificationOptions(
-      updated.guildId,
-      updated.channelId,
-      {
-        roleId: updated.roleId ?? undefined,
-        nicknameTemplate: updated.nicknameTemplate ?? undefined
-      }
-    );
     await this.enqueueDiscordSync({
       action: 'link',
-      sessionId: updated.id,
-      guildId: updated.guildId,
-      discordUserId: updated.requesterDiscordId,
-      accountId,
-      minecraftUuid,
-      playerName: minecraftName,
-      roleId: syncOptions.roleId,
-      nicknameTemplate: syncOptions.nicknameTemplate,
-      dmTemplate: syncOptions.dmTemplate,
-      logChannelId: syncOptions.logChannelId,
-      logMessageTemplate: syncOptions.logMessageTemplate
+      sessionId: updated.id
     });
 
     return {
