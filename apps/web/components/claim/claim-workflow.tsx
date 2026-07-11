@@ -28,7 +28,7 @@ type ClaimMethodState = 'pending' | 'verified' | 'expired' | 'failed';
 
 interface ClaimMethodStatus {
   readonly method: ClaimMethod;
-  readonly token: string;
+  readonly token?: string;
   readonly issuedAt: string;
   readonly status: ClaimMethodState;
   readonly verified: boolean;
@@ -178,7 +178,11 @@ function mergeMethods(
     map.set(method.method, method);
   }
   for (const method of incoming) {
-    map.set(method.method, method);
+    const previousMethod = map.get(method.method);
+    map.set(method.method, {
+      ...method,
+      ...(method.token ? {} : previousMethod?.token ? { token: previousMethod.token } : {}),
+    });
   }
   return METHOD_ORDER.map((method) => map.get(method)).filter(Boolean) as ClaimMethodStatus[];
 }
@@ -631,7 +635,10 @@ export function ClaimWorkflow() {
           throw new Error(formatClaimApiError(response.status, message, 'status'));
         }
         const result = (await response.json()) as ClaimStatusResponse;
-        setStatus(result);
+        setStatus((current) => ({
+          ...result,
+          methods: mergeMethods(current?.methods, result.methods),
+        }));
         if (!silent) {
           setNotice('검증 상태를 최신 정보로 갱신했습니다.');
         }
@@ -747,7 +754,10 @@ export function ClaimWorkflow() {
         throw new Error(formatClaimApiError(response.status, message, 'verify'));
       }
       const result = (await response.json()) as ClaimStatusResponse;
-      setStatus(result);
+      setStatus((current) => ({
+        ...result,
+        methods: mergeMethods(current?.methods, result.methods),
+      }));
       const selected = result.methods.find((method) => method.method === selectedMethod);
       if (selected?.status === 'verified') {
         setNotice(`${formatMethodLabel(selectedMethod)} 검증이 완료되었습니다.`);

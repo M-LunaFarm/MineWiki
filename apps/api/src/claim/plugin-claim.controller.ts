@@ -1,7 +1,7 @@
 ﻿import { BadRequestException, Body, Controller, Post } from '@nestjs/common';
 import { z } from 'zod';
 import { Throttle } from '@nestjs/throttler';
-import { ClaimService } from './claim.service';
+import { ClaimService, matchesClaimToken } from './claim.service';
 import { PrismaService } from '../common/prisma.service';
 
 const payloadSchema = z.object({
@@ -59,7 +59,7 @@ export class PluginClaimController {
     ) {
       throw new BadRequestException('현재 서버 소유 계정에서 토큰을 다시 발급해주세요.');
     }
-    if (method.token !== payload.token.trim()) {
+    if (!matchesClaimToken(method.token, payload.token.trim())) {
       throw new BadRequestException('플러그인 검증 토큰이 일치하지 않습니다.');
     }
     await this.claims.applyVerificationResult(payload.serverId, 'plugin', {

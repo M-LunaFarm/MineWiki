@@ -6,7 +6,7 @@
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { resolveTxt } from 'node:dns/promises';
 import { ServerService } from '../server/server.service';
 import type {
@@ -48,6 +48,7 @@ export class ClaimService {
       throw new ForbiddenException('해당 서버를 검증할 권한이 없습니다.');
     }
     const targets = methods && methods.length > 0 ? methods : ALL_METHODS;
+    const issuedTokens = new Map(targets.map((method) => [method, generateToken()]));
 
     const now = new Date();
     const updates = await this.prisma.$transaction(
@@ -63,7 +64,7 @@ export class ClaimService {
             serverId,
             accountId,
             method,
-            token: generateToken(),
+            token: hashClaimToken(issuedTokens.get(method)!),
             issuedAt: now,
             status: 'pending',
             lastCheckedAt: now,
@@ -71,7 +72,7 @@ export class ClaimService {
           },
           update: {
             accountId,
-            token: generateToken(),
+            token: hashClaimToken(issuedTokens.get(method)!),
             issuedAt: now,
             status: 'pending',
             verifiedAt: null,
@@ -83,7 +84,9 @@ export class ClaimService {
     );
 
     await this.syncGrade(serverId);
-    return updates.map((method) => this.serializeMethod(method));
+    return updates.map((method) =>
+      this.serializeMethod(method, issuedTokens.get(method.method as ClaimMethod)),
+    );
   }
 
   async verifyMethod(
@@ -109,11 +112,12 @@ export class ClaimService {
 
     this.assertCanUseClaimMethod(server.ownerAccountId, methodState.accountId, accountId);
 
-    if (!proof || proof.trim() !== methodState.token) {
+    const normalizedProof = proof?.trim();
+    if (!normalizedProof || !matchesClaimToken(methodState.token, normalizedProof)) {
       throw new BadRequestException('검증 토큰이 일치하지 않습니다. 토큰을 다시 발급받아 주세요.');
     }
 
-    const result = await this.runVerificationCheck(method, methodState.token, serverId);
+    const result = await this.runVerificationCheck(method, normalizedProof, serverId);
     await this.applyVerificationResult(serverId, method, result);
     return this.getStatus(serverId);
   }
@@ -325,7 +329,7 @@ export class ClaimService {
     verifiedAt: Date | null;
     lastCheckedAt: Date | null;
     note: string | null;
-  }): ClaimMethodStatus {
+  }, revealedToken?: string): ClaimMethodStatus {
     if (!isSupportedClaimMethod(method.method)) {
       throw new BadRequestException('지원하지 않는 검증 방식입니다.');
     }
@@ -334,7 +338,7 @@ export class ClaimService {
       : undefined;
     return {
       method: method.method as ClaimMethod,
-      token: method.token,
+      ...(revealedToken ? { token: revealedToken } : {}),
       issuedAt: method.issuedAt.toISOString(),
       status: method.status,
       verified: method.status === 'verified',
@@ -360,6 +364,20 @@ export class ClaimService {
 
 function generateToken(): string {
   return randomBytes(8).toString('hex');
+}
+
+const CLAIM_TOKEN_HASH_PREFIX = 'sha256:';
+
+export function hashClaimToken(token: string): string {
+  return `${CLAIM_TOKEN_HASH_PREFIX}${createHash('sha256').update(token).digest('hex')}`;
+}
+
+export function matchesClaimToken(storedToken: string, presentedToken: string): boolean {
+  const expected = storedToken.startsWith(CLAIM_TOKEN_HASH_PREFIX)
+    ? storedToken
+    : hashClaimToken(storedToken);
+  const actual = hashClaimToken(presentedToken);
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(actual));
 }
 
 async function verifyDnsToken(

@@ -4,7 +4,8 @@ export type ClaimMethodState = 'pending' | 'verified' | 'expired' | 'failed';
 
 export interface ClaimMethodStatus {
   readonly method: ClaimMethod;
-  readonly token: string;
+  /** Only present in the one-time token issuance response. */
+  readonly token?: string;
   readonly issuedAt: string;
   readonly status: ClaimMethodState;
   readonly verified: boolean;
