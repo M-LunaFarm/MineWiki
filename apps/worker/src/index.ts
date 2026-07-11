@@ -1,7 +1,7 @@
 ﻿import { Queue, Worker as BullWorker, type JobsOptions, type Processor } from 'bullmq';
 import Redis from 'ioredis';
 import { Logger, ObservabilityExporter } from '@minewiki/logger';
-import { ConfigService } from '@minewiki/config';
+import { ConfigService, assertSupportedQueueServer } from '@minewiki/config';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import * as Sentry from '@sentry/node';
 import { PrismaClient } from '@prisma/client';
@@ -16,7 +16,6 @@ import {
   type DiscordDigestResult,
 } from './processors/discord-digest';
 import { createDiscordVerifySyncer } from './processors/discord-verify-sync';
-import { assertSupportedQueueServer } from './redis-compat';
 import type {
   ClaimVerificationJob,
   DiscordDigestJob,

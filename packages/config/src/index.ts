@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 
+export { assertSupportedQueueServer } from './redis-compat';
+
 let environmentLoaded = false;
 
 function hydrateEnvironment(): void {

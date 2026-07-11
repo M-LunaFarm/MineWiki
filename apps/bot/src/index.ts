@@ -6,10 +6,11 @@ import {
 } from 'discord-api-types/v10';
 import { Client, GatewayIntentBits, Interaction } from 'discord.js';
 import { DateTime } from 'luxon';
-import { ConfigService } from '@minewiki/config';
+import { ConfigService, assertSupportedQueueServer } from '@minewiki/config';
 import { Logger } from '@minewiki/logger';
 import { PrismaClient } from '@prisma/client';
 import { Queue } from 'bullmq';
+import Redis from 'ioredis';
 import { discordDigestJobSchema } from '@minewiki/schemas';
 import { SubscriptionStore } from './subscriptions';
 import {
@@ -38,23 +39,23 @@ if (!token || !clientId) {
   const prisma = new PrismaClient();
   const subscriptions = new SubscriptionStore(prisma);
   const redisUrl = config.get('REDIS_URL', 'redis://localhost:6379');
+  const redis = new Redis(redisUrl, { maxRetriesPerRequest: null });
   const digestQueue = new Queue('discord-digest', {
-    connection: { url: redisUrl },
+    connection: redis,
     defaultJobOptions: {
       removeOnComplete: 100,
       removeOnFail: 500
     }
   });
 
-  client.once('ready', async () => {
+  client.once('ready', () => {
     Logger.info({ tag: client.user?.tag }, 'Discord bot ready');
-    try {
-      await registerCommands(rest, clientId);
-      Logger.info('Registered global Discord application commands.');
-    } catch (error) {
-      Logger.error({ err: error }, 'Failed to register Discord commands');
-    }
-    await processDueDigests(subscriptions, digestQueue);
+    void registerCommands(rest, clientId)
+      .then(() => Logger.info('Registered global Discord application commands.'))
+      .catch((error) => Logger.error({ err: error }, 'Failed to register Discord commands'));
+    void processDueDigests(subscriptions, digestQueue).catch((error) => {
+      Logger.error({ err: error }, 'Initial digest scheduling failed');
+    });
   });
 
   client.on('interactionCreate', async (interaction: Interaction) => {
@@ -234,11 +235,7 @@ if (!token || !clientId) {
     }
   });
 
-  const scheduler = setInterval(() => {
-    processDueDigests(subscriptions, digestQueue).catch((error) => {
-      Logger.error({ err: error }, 'Digest scheduling loop failed');
-    });
-  }, 60_000);
+  let scheduler: NodeJS.Timeout | undefined;
 
   let shuttingDown = false;
   const shutdown = async (signal: string, exitCode = 0) => {
@@ -247,9 +244,13 @@ if (!token || !clientId) {
     }
     shuttingDown = true;
     Logger.warn({ signal }, 'Shutting down Discord bot');
-    clearInterval(scheduler);
-    await digestQueue.close();
-    await prisma.$disconnect();
+    if (scheduler) {
+      clearInterval(scheduler);
+    }
+    await Promise.allSettled([digestQueue.close(), prisma.$disconnect()]);
+    if (redis.status !== 'end') {
+      await redis.quit().catch(() => redis.disconnect());
+    }
     client.destroy();
     process.exit(exitCode);
   };
@@ -257,9 +258,22 @@ if (!token || !clientId) {
   process.once('SIGINT', () => void shutdown('SIGINT'));
   process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
-  void client.login(token).catch((error) => {
-    Logger.error({ err: error }, 'Failed to log in to Discord');
-    return shutdown('discord-login-failed', 1);
+  const bootstrapBot = async () => {
+    await prisma.$connect();
+    await digestQueue.waitUntilReady();
+    assertSupportedQueueServer(await redis.info('server'));
+    await client.login(token);
+    scheduler = setInterval(() => {
+      void processDueDigests(subscriptions, digestQueue).catch((error) => {
+        Logger.error({ err: error }, 'Digest scheduling loop failed');
+      });
+    }, 60_000);
+    Logger.info('Discord bot dependencies are ready and scheduler is active');
+  };
+
+  void bootstrapBot().catch((error) => {
+    Logger.error({ err: error }, 'Discord bot bootstrap failed');
+    return shutdown('bot-bootstrap-failed', 1);
   });
 }
 

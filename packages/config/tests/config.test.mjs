@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ConfigService } from '../dist/index.js';
+import { ConfigService, assertSupportedQueueServer } from '../dist/index.js';
+
+test('queue backend validation accepts Redis 7 and rejects incompatible servers', () => {
+  assert.doesNotThrow(() =>
+    assertSupportedQueueServer('redis_version:7.4.2\r\nredis_mode:standalone\r\n'),
+  );
+  assert.throws(
+    () => assertSupportedQueueServer('redis_version:7.0.0\r\ndragonfly_version:1.30.3\r\n'),
+    /Dragonfly is not supported/,
+  );
+  assert.throws(() => assertSupportedQueueServer('redis_version:6.2.14\r\n'), /Redis 7 or newer/);
+});
 
 test('production config rejects missing required secrets', () => {
   assert.throws(
