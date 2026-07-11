@@ -9,6 +9,7 @@ const prisma = hasDatabase ? new PrismaClient() : null;
 let serverId = '';
 let serverName = '';
 let sessionToken = '';
+let accountId = '';
 
 test.describe('End-to-end flows', () => {
   test.skip(!hasDatabase, 'DATABASE_URL is not configured.');
@@ -18,7 +19,7 @@ test.describe('End-to-end flows', () => {
       return;
     }
     await prisma.$connect();
-    const accountId = randomUUID();
+    accountId = randomUUID();
     const email = 'e2e-' + randomUUID() + '@example.com';
 
     await prisma.account.create({
@@ -93,6 +94,12 @@ test.describe('End-to-end flows', () => {
 
   test.afterAll(async () => {
     if (prisma) {
+      if (serverId) {
+        await prisma.server.deleteMany({ where: { id: serverId } });
+      }
+      if (accountId) {
+        await prisma.account.deleteMany({ where: { id: accountId } });
+      }
       await prisma.$disconnect();
     }
   });
