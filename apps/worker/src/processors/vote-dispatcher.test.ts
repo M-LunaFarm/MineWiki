@@ -5,6 +5,11 @@ import { once } from 'node:events';
 import { generateKeyPairSync, privateDecrypt, constants } from 'node:crypto';
 import { createVoteDispatcher, type VoteDispatchExecutionJob } from './vote-dispatcher';
 
+const allowTestTarget = async (target: { host: string; port: number }) => ({
+  host: target.host,
+  port: target.port,
+});
+
 test('dispatch prefers Votifier v2 when available', async () => {
   const server = createServer((socket) => {
     socket.once('data', (chunk) => {
@@ -27,7 +32,7 @@ test('dispatch prefers Votifier v2 when available', async () => {
     throw new Error('Unexpected server address');
   }
 
-  const dispatcher = createVoteDispatcher();
+  const dispatcher = createVoteDispatcher({ resolveTarget: allowTestTarget });
   const job: VoteDispatchExecutionJob = {
     voteId: '6ebd0b54-5864-46c2-a835-942937b0f6ec',
     serverId: '8d5d43eb-5e53-4ce9-90a0-dfd8fbfa9b6b',
@@ -80,7 +85,7 @@ test('dispatch falls back to v1 when v2 fails', async () => {
     throw new Error('Unexpected server address');
   }
 
-  const dispatcher = createVoteDispatcher();
+  const dispatcher = createVoteDispatcher({ resolveTarget: allowTestTarget });
   const job: VoteDispatchExecutionJob = {
     voteId: '6f59484d-fb35-4a3d-b269-3d7a8d17f612',
     serverId: '22fe3ae4-685b-4bb0-9d30-35bbf83de4a3',
@@ -118,6 +123,7 @@ test('dispatch falls back to v1 when v2 fails', async () => {
 test('retryable failure is recorded', async () => {
   const events: Array<{ type: string; id: string; error?: unknown }> = [];
   const dispatcher = createVoteDispatcher({
+    resolveTarget: allowTestTarget,
     recorder: {
       async markStarted(dispatchAttemptId) {
         events.push({ type: 'started', id: dispatchAttemptId });
@@ -161,6 +167,7 @@ test('retryable failure is recorded', async () => {
 test('non-retryable failure is recorded', async () => {
   const events: Array<{ type: string; id: string; error?: unknown }> = [];
   const dispatcher = createVoteDispatcher({
+    resolveTarget: allowTestTarget,
     recorder: {
       async markStarted(dispatchAttemptId) {
         events.push({ type: 'started', id: dispatchAttemptId });
@@ -198,4 +205,26 @@ test('non-retryable failure is recorded', async () => {
       ['failed', '84acf734-427c-47aa-bf3a-6464dc9478a5']
     ]
   );
+});
+
+test('production resolver rejects private Votifier destinations before dialing', async () => {
+  const dispatcher = createVoteDispatcher();
+  const job: VoteDispatchExecutionJob = {
+    voteId: '7e290113-7341-46c0-a624-081f0c6a7746',
+    serverId: '3393701e-3ec5-4b13-9873-87565fc4bc05',
+    username: 'PrivateTarget',
+    votedAt: new Date().toISOString(),
+    targets: [
+      {
+        targetId: '69501a7f-8cf7-44a5-b66f-b3bb5d9a01e0',
+        dispatchAttemptId: 'b8f475cc-b903-4200-be3e-5c9535aa996c',
+        protocol: 'v2',
+        host: '127.0.0.1',
+        port: 8192,
+        token: 'token',
+      },
+    ],
+  };
+
+  await assert.rejects(() => dispatcher.dispatch(job), /not reachable from public internet/);
 });

@@ -5,6 +5,7 @@ import { connect } from 'node:net';
 import { once } from 'node:events';
 import { publicEncrypt, constants } from 'node:crypto';
 import { TextEncoder } from 'node:util';
+import { validateOutboundTarget } from '@minewiki/security';
 
 const RETRYABLE_ERRORS = ['ECONNRESET', 'ETIMEDOUT', 'EHOSTUNREACH', 'ECONNREFUSED'];
 const V2_TIMEOUT_MS = 2000;
@@ -19,6 +20,8 @@ interface DispatchResult {
 export interface VoteDispatchExecutionTarget extends VotifierTarget {
   readonly targetId: string;
   readonly dispatchAttemptId: string;
+  readonly host: string;
+  readonly port: number;
 }
 
 export interface VoteDispatchExecutionJob {
@@ -36,18 +39,27 @@ export interface VoteDispatchRecorder {
   markFailed(dispatchAttemptId: string, error: unknown): Promise<void>;
 }
 
-export function createVoteDispatcher(options: { recorder?: VoteDispatchRecorder } = {}) {
+type ResolveDispatchTarget = (
+  target: VoteDispatchExecutionTarget,
+) => Promise<{ readonly host: string; readonly port: number }>;
+
+export function createVoteDispatcher(options: {
+  recorder?: VoteDispatchRecorder;
+  resolveTarget?: ResolveDispatchTarget;
+} = {}) {
+  const resolveTarget = options.resolveTarget ?? resolvePublicDispatchTarget;
+
   async function dispatch(job: VoteDispatchExecutionJob): Promise<DispatchResult> {
     let lastError: unknown;
     for (const target of job.targets) {
       try {
         await options.recorder?.markStarted(target.dispatchAttemptId);
         if (target.protocol === 'v2') {
-          await sendV2(job, target);
+          await sendV2(job, target, await resolveTarget(target));
           await options.recorder?.markSucceeded(target.dispatchAttemptId);
           return { success: true, protocol: 'v2', dispatchAttemptId: target.dispatchAttemptId };
         }
-        await sendV1(job, target);
+        await sendV1(job, target, await resolveTarget(target));
         await options.recorder?.markSucceeded(target.dispatchAttemptId);
         return { success: true, protocol: 'v1', dispatchAttemptId: target.dispatchAttemptId };
       } catch (error) {
@@ -94,11 +106,28 @@ export function createVoteDispatcher(options: { recorder?: VoteDispatchRecorder 
   };
 }
 
-async function sendV2(job: VoteDispatchExecutionJob, target: VoteDispatchExecutionTarget): Promise<void> {
+async function resolvePublicDispatchTarget(
+  target: VoteDispatchExecutionTarget,
+): Promise<{ readonly host: string; readonly port: number }> {
+  const validated = await validateOutboundTarget(target.host, target.port, {
+    label: 'Votifier dispatch target',
+  });
+  const address = validated.addresses[0];
+  if (!address) {
+    throw new Error('Votifier dispatch target did not resolve to a public address.');
+  }
+  return { host: address.address, port: validated.port };
+}
+
+async function sendV2(
+  job: VoteDispatchExecutionJob,
+  target: VoteDispatchExecutionTarget,
+  destination: { readonly host: string; readonly port: number },
+): Promise<void> {
   if (!target.token) {
     throw new Error('V2 target is missing token');
   }
-  const socket = connect({ host: target.host, port: target.port });
+  const socket = connect(destination);
   socket.setTimeout(V2_TIMEOUT_MS);
   const payload = JSON.stringify({
     method: 'token',
@@ -123,11 +152,15 @@ async function sendV2(job: VoteDispatchExecutionJob, target: VoteDispatchExecuti
   }
 }
 
-async function sendV1(job: VoteDispatchExecutionJob, target: VoteDispatchExecutionTarget): Promise<void> {
+async function sendV1(
+  job: VoteDispatchExecutionJob,
+  target: VoteDispatchExecutionTarget,
+  destination: { readonly host: string; readonly port: number },
+): Promise<void> {
   if (!target.publicKey) {
     throw new Error('V1 target is missing publicKey');
   }
-  const socket = connect({ host: target.host, port: target.port });
+  const socket = connect(destination);
   socket.setTimeout(V1_TIMEOUT_MS);
   const handshakePromise = new Promise<void>((resolve, reject) => {
     const onData = (chunk: Buffer) => {
