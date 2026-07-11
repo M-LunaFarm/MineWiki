@@ -9,7 +9,8 @@
   Patch,
   Post,
   Query,
-  UseGuards
+  UseGuards,
+  ForbiddenException
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
@@ -33,6 +34,7 @@ import type { SessionPayload } from '../session/session.service';
 import { ClaimService } from '../claim/claim.service';
 import { FileService } from '../file/file.service';
 import { serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schemas';
+import { PluginCredentialService } from './plugin-credential.service';
 
 const votifierPayloadSchema = z.object({
   targets: z.array(votifierTargetSchema).min(1)
@@ -43,6 +45,13 @@ const serverWikiLinkPayloadSchema = z.object({
   spaceId: z.string().trim().min(1).optional(),
   wikiSlug: z.string().trim().min(1).optional()
 });
+
+const pluginCredentialPayloadSchema = z.object({
+  guildId: z.string().trim().regex(/^\d{5,32}$/),
+  endpointUrl: z.string().trim().url().max(512).nullable().optional(),
+});
+
+const pluginCredentialStatusSchema = z.object({ enabled: z.boolean() });
 
 type RequiredServerRegistrationPayload =
   Required<Omit<ServerRegistrationPayload, 'websiteUrl' | 'discordUrl'>> &
@@ -55,7 +64,8 @@ export class ServerController {
   constructor(
     private readonly serverService: ServerService,
     private readonly claimService: ClaimService,
-    private readonly files: FileService
+    private readonly files: FileService,
+    private readonly pluginCredentials: PluginCredentialService
   ) {}
 
   @Get()
@@ -110,6 +120,59 @@ export class ServerController {
       ...payload,
       ownerAccountId: session.userId
     });
+  }
+
+  @UseGuards(SessionGuard)
+  @Get(':id/plugin-credentials')
+  async listPluginCredentials(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    return this.pluginCredentials.list(id);
+  }
+
+  @UseGuards(SessionGuard)
+  @Post(':id/plugin-credentials')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
+  async createPluginCredential(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    const payload = pluginCredentialPayloadSchema.parse(body);
+    return this.pluginCredentials.create(
+      id,
+      payload as { guildId: string; endpointUrl?: string | null },
+      session.userId
+    );
+  }
+
+  @UseGuards(SessionGuard)
+  @Post(':id/plugin-credentials/:credentialId/rotate')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
+  async rotatePluginCredential(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('credentialId', new ParseUUIDPipe()) credentialId: string,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    return this.pluginCredentials.rotate(id, credentialId, session.userId);
+  }
+
+  @UseGuards(SessionGuard)
+  @Patch(':id/plugin-credentials/:credentialId')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
+  async updatePluginCredential(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('credentialId', new ParseUUIDPipe()) credentialId: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    const payload = pluginCredentialStatusSchema.parse(body);
+    return this.pluginCredentials.setEnabled(id, credentialId, payload.enabled, session.userId);
   }
 
   @UseGuards(SessionGuard)
@@ -262,5 +325,11 @@ export class ServerController {
       session.permissions?.includes('server.admin') === true ||
       (await this.claimService.isOwner(id, session.userId))
     );
+  }
+
+  private async assertCanManageServer(id: string, session: SessionPayload): Promise<void> {
+    if (!(await this.canManageServer(id, session))) {
+      throw new ForbiddenException('해당 서버의 플러그인 자격증명을 관리할 권한이 없습니다.');
+    }
   }
 }
