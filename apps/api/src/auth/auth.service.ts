@@ -130,8 +130,8 @@ const DUMMY_PASSWORD_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$MjQUBk0H7jTj+SgNScFhCA$LHY2v6BYTGSHHMuOrWQyGqAbW3Xjzpa0jGwLN1CbdA0';
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 30; // 30 minutes
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30; // 30 minutes
-const TERMS_POLICY_VERSION = '2026-02-17-v1.0';
-const PRIVACY_POLICY_VERSION = '2026-02-17-v1.0';
+const TERMS_POLICY_VERSION = '2026-07-11-v1.1';
+const PRIVACY_POLICY_VERSION = '2026-07-11-v1.1';
 
 @Injectable()
 export class AuthService {

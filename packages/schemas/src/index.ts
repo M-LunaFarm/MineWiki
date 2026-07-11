@@ -193,6 +193,14 @@ export const serverSummarySchema = z.object({
   playersLastUpdatedAt: z.string().datetime().nullable().optional(),
   isOnline: z.boolean().nullable().optional(),
   latencyMs: z.number().int().nonnegative().nullable().optional(),
+  rank: z
+    .object({
+      current: z.number().int().positive(),
+      delta24h: z.number().int(),
+      best: z.number().int().positive(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export const serverDetailSchema = serverSummarySchema.extend({

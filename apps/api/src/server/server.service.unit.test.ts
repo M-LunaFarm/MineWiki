@@ -3,6 +3,49 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ServerService } from './server.service';
 
+test('server list exposes the aggregated global rank metadata', async () => {
+  const serverId = randomUUID();
+  const prisma = {
+    server: {
+      findMany: async () => [
+        {
+          id: serverId,
+          shortCode: 'abcde',
+          wikiSpaceId: null,
+          wikiPageId: null,
+          wikiSlug: null,
+          name: 'Ranked Server',
+          joinHost: 'play.example.com',
+          joinPort: 25565,
+          edition: 'java',
+          supportedVersions: ['1.21'],
+          tags: ['survival'],
+          shortDescription: 'Ranked server',
+          verificationGrade: 'A',
+          verifiedAt: new Date('2026-07-11T00:00:00.000Z'),
+          votes24h: 42,
+          votesMonthly: 300,
+          reviewsCount: 7,
+          voteRequiresOwnership: true,
+          bannerUrl: null,
+          websiteUrl: null,
+          playersOnline: 12,
+          playersMax: 100,
+          playersLastUpdatedAt: new Date('2026-07-11T00:00:00.000Z'),
+          isOnline: true,
+          latencyMs: 25,
+          stats: { rankCurrent: 2, rankDelta24h: 3, rankBest: 1 },
+        },
+      ],
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const [server] = await service.list();
+
+  assert.deepEqual(server.rank, { current: 2, delta24h: 3, best: 1 });
+});
+
 test('server banner upload uses canonical file service metadata path', async () => {
   const serverId = randomUUID();
   const accountId = randomUUID();

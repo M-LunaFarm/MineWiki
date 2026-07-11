@@ -69,6 +69,7 @@ export class ServerService {
           edition: filters.edition,
         },
         orderBy: buildOrder(sort),
+        include: { stats: true },
       });
       const result = servers
         .filter((server) => {
@@ -1258,6 +1259,11 @@ function toSummary(server: {
   playersLastUpdatedAt: Date | null;
   isOnline: boolean | null;
   latencyMs: number | null;
+  stats?: {
+    rankCurrent: number;
+    rankDelta24h: number;
+    rankBest: number;
+  } | null;
 }): ServerSummary {
   const supportedVersions = normalizeStringArray(server.supportedVersions);
   const tags = normalizeStringArray(server.tags);
@@ -1289,6 +1295,13 @@ function toSummary(server: {
       : null,
     isOnline: server.isOnline ?? null,
     latencyMs: server.latencyMs ?? null,
+    rank: server.stats
+      ? {
+          current: server.stats.rankCurrent,
+          delta24h: server.stats.rankDelta24h,
+          best: server.stats.rankBest,
+        }
+      : null,
   };
 }
 
