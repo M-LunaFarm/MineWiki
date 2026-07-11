@@ -26,7 +26,7 @@ export interface ClaimVerificationResult {
   readonly note?: string;
 }
 
-const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
+const ALL_METHODS: ClaimMethod[] = ['dns', 'motd'];
 const METHOD_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24h
 type StoredVerificationGrade = 'A' | 'B' | 'C' | 'Unverified';
 
@@ -49,6 +49,11 @@ export class ClaimService {
       throw new ForbiddenException('해당 서버를 검증할 권한이 없습니다.');
     }
     const targets = methods && methods.length > 0 ? methods : ALL_METHODS;
+    if (targets.includes('plugin')) {
+      throw new BadRequestException(
+        'Plugin ownership verification is unavailable until an authenticated plugin proof is configured.',
+      );
+    }
     const issuedTokens = new Map(targets.map((method) => [method, generateToken()]));
 
     const now = new Date();

@@ -47,7 +47,7 @@ test('token issuance stores a hash plus encrypted proof and reveals the token on
   };
   try {
     const service = new ClaimService(serverService as never, prisma as never);
-    const [issued] = await service.issueTokens('server-1', 'account-1', ['plugin']);
+    const [issued] = await service.issueTokens('server-1', 'account-1', ['dns']);
 
     assert.ok(issued?.token);
     assert.match(storedToken, /^sha256:[a-f0-9]{64}$/);
@@ -63,4 +63,16 @@ test('token issuance stores a hash plus encrypted proof and reveals the token on
       process.env.APP_ENCRYPTION_KEY = previousKey;
     }
   }
+});
+
+test('plugin claim tokens cannot be issued without an authenticated plugin proof', async () => {
+  const service = new ClaimService(
+    { ensureExists: async () => ({ ownerAccountId: null }) } as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    () => service.issueTokens('server-1', 'account-1', ['plugin']),
+    /Plugin ownership verification is unavailable/,
+  );
 });

@@ -49,7 +49,7 @@ interface QueryServerTarget {
   readonly name: string;
 }
 
-const METHOD_ORDER: ClaimMethod[] = ['plugin', 'dns', 'motd'];
+const METHOD_ORDER: ClaimMethod[] = ['dns', 'motd'];
 
 const METHOD_OPTIONS: Array<{
   readonly method: ClaimMethod;
@@ -63,23 +63,6 @@ const METHOD_OPTIONS: Array<{
   readonly steps: readonly string[];
   readonly helper: string;
 }> = [
-  {
-    method: 'plugin',
-    title: '플러그인',
-    icon: 'extension',
-    difficulty: '쉬움',
-    estimate: '~2분',
-    featured: true,
-    summary: '서버 플러그인이 MineWiki 콜백 엔드포인트로 토큰을 전달하여 소유권을 확인합니다.',
-    recommendedWhen: '플러그인을 설치해 자동화된 검증 및 운영 흐름을 구성할 수 있는 경우',
-    steps: [
-      '플러그인 검증 토큰을 발급합니다.',
-      '서버 플러그인 또는 백엔드에서 콜백 엔드포인트로 serverId와 token을 POST 합니다.',
-      '콜백 완료 후 상태를 새로고침하여 검증 완료 상태를 확인합니다.',
-    ],
-    helper:
-      '플러그인 방식은 화면의 검증 실행 버튼만으로 완료되지 않습니다. 서버 플러그인이 complete 콜백을 호출해야 합니다.',
-  },
   {
     method: 'dns',
     title: 'DNS TXT',
@@ -372,7 +355,7 @@ export function ClaimWorkflow() {
   const [ownedServers, setOwnedServers] = useState<DashboardServerSummary[]>([]);
   const [serversLoading, setServersLoading] = useState(false);
   const [serverId, setServerId] = useState('');
-  const [selectedMethod, setSelectedMethod] = useState<ClaimMethod>('plugin');
+  const [selectedMethod, setSelectedMethod] = useState<ClaimMethod>('dns');
   const [status, setStatus] = useState<ClaimStatusResponse | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -16,7 +16,7 @@ import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
 
-const METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
+const METHODS: ClaimMethod[] = ['dns', 'motd'];
 interface StartRequest {
   readonly methods?: ClaimMethod[];
 }
