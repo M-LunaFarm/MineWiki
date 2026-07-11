@@ -18,6 +18,7 @@ import type {
 import { PrismaService } from '../common/prisma.service';
 import { validateOutboundTarget } from '@minewiki/security';
 import { status, statusBedrock } from 'minecraft-server-util';
+import { encryptAppSecret } from '../common/secret-codec';
 
 export interface ClaimVerificationResult {
   readonly status: ClaimMethodState;
@@ -65,6 +66,7 @@ export class ClaimService {
             accountId,
             method,
             token: hashClaimToken(issuedTokens.get(method)!),
+            tokenCiphertext: encryptAppSecret(issuedTokens.get(method)!),
             issuedAt: now,
             status: 'pending',
             lastCheckedAt: now,
@@ -73,6 +75,7 @@ export class ClaimService {
           update: {
             accountId,
             token: hashClaimToken(issuedTokens.get(method)!),
+            tokenCiphertext: encryptAppSecret(issuedTokens.get(method)!),
             issuedAt: now,
             status: 'pending',
             verifiedAt: null,

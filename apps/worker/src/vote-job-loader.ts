@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import type { VoteDispatchJob } from '@minewiki/schemas';
-import { decryptSecret, isEncryptedSecret } from '@minewiki/security';
+import { decryptStoredSecret } from './stored-secret';
 import type {
   VoteDispatchExecutionJob,
   VoteDispatchExecutionTarget,
@@ -38,7 +38,7 @@ export async function loadVoteDispatchExecutionJob(
       protocol: target.protocol === 'v1' ? 'v1' : 'v2',
       host: target.host,
       port: target.port,
-      token: decryptStoredToken(target.token) ?? undefined,
+      token: decryptStoredSecret(target.token) ?? undefined,
       publicKey: target.publicKey ?? undefined,
     };
   });
@@ -51,15 +51,4 @@ export async function loadVoteDispatchExecutionJob(
     votedAt: vote.votedAt.toISOString(),
     targets,
   };
-}
-
-function decryptStoredToken(value: string | null): string | null {
-  if (!value || !isEncryptedSecret(value)) {
-    return value;
-  }
-  const key = process.env.APP_ENCRYPTION_KEY?.trim();
-  if (!key) {
-    throw new Error('APP_ENCRYPTION_KEY is required to load Votifier credentials.');
-  }
-  return decryptSecret(value, key);
 }

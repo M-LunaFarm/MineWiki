@@ -4,6 +4,7 @@ import type { ClaimVerificationJob } from '@minewiki/schemas';
 import type { PrismaClient } from '@prisma/client';
 import { resolveTxt } from 'node:dns/promises';
 import { status, statusBedrock } from 'minecraft-server-util';
+import { decryptStoredSecret } from '../stored-secret';
 
 const CHECK_TIMEOUT_MS = 5000;
 const METHOD_EXPIRY_MS = 24 * 60 * 60 * 1000;
@@ -65,12 +66,47 @@ export function createClaimVerifier(prisma: PrismaHandle) {
       return result;
     }
 
-    const result = await runVerificationCheck(job.method, methodRecord.token, job.serverId, prisma);
+    const proof = resolveVerificationProof(methodRecord.token, methodRecord.tokenCiphertext);
+    if (job.method !== 'plugin' && !proof) {
+      const result = {
+        status: methodRecord.status as ClaimMethodState,
+        checkedAt,
+        note: 'verification_proof_unavailable',
+      };
+      await prisma.serverClaimMethod.update({
+        where: {
+          serverId_method: {
+            serverId: job.serverId,
+            method: job.method,
+          },
+        },
+        data: {
+          lastCheckedAt: new Date(checkedAt),
+          note: result.note,
+        },
+      });
+      return result;
+    }
+
+    const result = await runVerificationCheck(job.method, proof ?? '', job.serverId, prisma);
     await applyVerificationResult(prisma, job.serverId, job.method, result);
     return result;
   }
 
   return { verify };
+}
+
+export function resolveVerificationProof(
+  storedToken: string,
+  tokenCiphertext: string | null | undefined,
+): string | null {
+  const decrypted = decryptStoredSecret(tokenCiphertext);
+  if (decrypted) {
+    return decrypted;
+  }
+  return storedToken.startsWith('sha256:') || /^[a-f0-9]{64}$/i.test(storedToken)
+    ? null
+    : storedToken;
 }
 
 async function applyVerificationResult(

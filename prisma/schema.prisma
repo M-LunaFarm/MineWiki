@@ -540,6 +540,7 @@ model ServerClaimMethod {
   accountId     String?
   method        ClaimMethod
   token         String
+  tokenCiphertext String?      @map("token_ciphertext") @db.Text
   issuedAt      DateTime
   status        ClaimMethodState @default(pending)
   verifiedAt    DateTime?

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ClaimService, hashClaimToken, matchesClaimToken } from './claim.service';
+import { decryptAppSecret } from '../common/secret-codec';
 
 test('claim tokens are stored as deterministic one-way hashes', () => {
   const token = 'claim-token-that-must-not-be-stored';
@@ -17,8 +18,11 @@ test('legacy plaintext claim tokens remain verifiable during rotation', () => {
   assert.equal(matchesClaimToken('legacy-token', 'wrong-token'), false);
 });
 
-test('token issuance stores only a hash and reveals the token once', async () => {
+test('token issuance stores a hash plus encrypted proof and reveals the token once', async () => {
   let storedToken = '';
+  let storedCiphertext = '';
+  const previousKey = process.env.APP_ENCRYPTION_KEY;
+  process.env.APP_ENCRYPTION_KEY = 'claim-token-test-key';
   const serverService = {
     ensureExists: async () => ({ ownerAccountId: null }),
   };
@@ -26,6 +30,7 @@ test('token issuance stores only a hash and reveals the token once', async () =>
     serverClaimMethod: {
       upsert: async ({ create }: { create: Record<string, unknown> }) => {
         storedToken = String(create.token);
+        storedCiphertext = String(create.tokenCiphertext);
         return {
           ...create,
           id: 'claim-method-1',
@@ -40,12 +45,22 @@ test('token issuance stores only a hash and reveals the token once', async () =>
     },
     $transaction: async (operations: Array<Promise<unknown>>) => Promise.all(operations),
   };
-  const service = new ClaimService(serverService as never, prisma as never);
+  try {
+    const service = new ClaimService(serverService as never, prisma as never);
+    const [issued] = await service.issueTokens('server-1', 'account-1', ['plugin']);
 
-  const [issued] = await service.issueTokens('server-1', 'account-1', ['plugin']);
-
-  assert.ok(issued?.token);
-  assert.match(storedToken, /^sha256:[a-f0-9]{64}$/);
-  assert.notEqual(storedToken, issued.token);
-  assert.equal(matchesClaimToken(storedToken, issued.token), true);
+    assert.ok(issued?.token);
+    assert.match(storedToken, /^sha256:[a-f0-9]{64}$/);
+    assert.match(storedCiphertext, /^enc:v1:/);
+    assert.notEqual(storedToken, issued.token);
+    assert.notEqual(storedCiphertext, issued.token);
+    assert.equal(matchesClaimToken(storedToken, issued.token), true);
+    assert.equal(decryptAppSecret(storedCiphertext), issued.token);
+  } finally {
+    if (previousKey === undefined) {
+      delete process.env.APP_ENCRYPTION_KEY;
+    } else {
+      process.env.APP_ENCRYPTION_KEY = previousKey;
+    }
+  }
 });
