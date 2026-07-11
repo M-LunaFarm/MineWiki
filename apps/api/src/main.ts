@@ -54,6 +54,7 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalInterceptors(app.get(TelemetryInterceptor));
+  app.enableShutdownHooks();
   await app.listen({ port, host });
   Logger.info({ port, host }, 'API server listening');
 }
