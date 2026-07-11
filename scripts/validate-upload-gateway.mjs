@@ -10,6 +10,10 @@ const nginxFiles = [
 
 for (const file of nginxFiles) {
   const source = await readFile(file, 'utf8');
+  const healthLocation = source.match(/location = \/api\/health\s*\{([\s\S]*?)\n\s*\}/)?.[1];
+  if (!healthLocation?.includes('proxy_pass http://minewiki_api/health;')) {
+    throw new Error(`${file} must proxy /api/health to the API /health endpoint.`);
+  }
   const location = source.match(/location \/uploads\/\s*\{([\s\S]*?)\n\s*\}/)?.[1];
   if (!location) {
     throw new Error(`${file} is missing the /uploads/ location.`);
