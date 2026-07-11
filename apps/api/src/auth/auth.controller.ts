@@ -130,7 +130,12 @@ export class AuthController {
   @Post('email/register')
   @Throttle({ default: { limit: 5, ttl: 300 } })
   registerEmail(@Body() body: unknown): Promise<EmailRegistrationResult> {
-    return this.auth.registerEmail(emailRegistrationRequestSchema.parse(body));
+    const payload = emailRegistrationRequestSchema.parse(body);
+    return this.auth.registerEmail({
+      email: payload.email!,
+      password: payload.password!,
+      displayName: payload.displayName,
+    });
   }
 
   @Post('email/login')
@@ -142,7 +147,7 @@ export class AuthController {
   ) {
     const payload = emailLoginRequestSchema.parse(body);
     const result = await this.auth.loginEmail(
-      payload,
+      { email: payload.email!, password: payload.password! },
       this.extractSessionContext(request),
     );
     reply.header('Set-Cookie', result.cookie);
@@ -184,7 +189,11 @@ export class AuthController {
     @CurrentSession() session: SessionPayload,
     @Body() body: unknown,
   ): Promise<ResendVerificationResult> {
-    return this.auth.setupEmailLogin(session.userId, emailLoginSetupRequestSchema.parse(body));
+    const payload = emailLoginSetupRequestSchema.parse(body);
+    return this.auth.setupEmailLogin(session.userId, {
+      email: payload.email!,
+      password: payload.password!,
+    });
   }
 
   @Post('password/forgot')
