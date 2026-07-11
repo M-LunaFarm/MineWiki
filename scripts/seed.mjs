@@ -92,6 +92,7 @@ const roles = [
   ['moderator', 'Moderator', 'Moderation staff'],
   ['wiki_admin', 'Wiki Admin', 'Wiki administrator'],
   ['server_admin', 'Server Admin', 'Server administrator'],
+  ['vote_moderator', 'Vote Moderator', 'Vote integrity moderator'],
   ['support_agent', 'Support Agent', 'Support staff'],
 ];
 
@@ -100,6 +101,7 @@ const permissions = [
   ['wiki.edit.locked', 'Edit locked wiki pages'],
   ['wiki.admin', 'Manage wiki administration'],
   ['server.admin', 'Manage server administration'],
+  ['vote.admin', 'Invalidate abusive votes and manage vote integrity'],
   ['guild.admin', 'Manage Discord guild administration'],
   ['support.admin', 'Manage support tickets'],
   ['file.admin', 'Manage uploaded files'],
@@ -110,6 +112,7 @@ const rolePermissions = {
   admin: permissions.map(([code]) => code),
   wiki_admin: ['wiki.admin', 'wiki.edit.locked', 'wiki.read.restricted'],
   server_admin: ['server.admin'],
+  vote_moderator: ['vote.admin'],
   support_agent: ['support.admin'],
   moderator: ['wiki.edit.locked', 'wiki.read.restricted'],
 };

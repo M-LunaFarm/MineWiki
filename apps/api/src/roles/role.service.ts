@@ -8,6 +8,7 @@ export const BUILT_IN_ROLE_CODES = [
   'moderator',
   'wiki_admin',
   'server_admin',
+  'vote_moderator',
   'support_agent',
 ] as const;
 
@@ -16,6 +17,7 @@ export const BUILT_IN_PERMISSION_CODES = [
   'wiki.edit.locked',
   'wiki.admin',
   'server.admin',
+  'vote.admin',
   'guild.admin',
   'support.admin',
   'file.admin',

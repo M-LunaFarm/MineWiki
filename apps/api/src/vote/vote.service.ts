@@ -361,6 +361,8 @@ export class VoteService {
       throw new BadRequestException('투표 상태가 변경되어 다시 확인해야 합니다.');
     }
 
+    await this.refreshVoteCounters(vote.serverId);
+
     await this.events.audit('vote.invalidated', {
       category: 'vote',
       severity: 'warning',
@@ -369,7 +371,36 @@ export class VoteService {
       subjectId: voteId,
       metadata: { serverId: vote.serverId, reason: normalizedReason },
     });
-    return { id: voteId, serverId: vote.serverId, status: 'invalid' as const };
+    return {
+      id: voteId,
+      serverId: vote.serverId,
+      status: 'invalid' as const,
+      rankRecalculationPending: true,
+    };
+  }
+
+  private async refreshVoteCounters(serverId: string): Promise<void> {
+    const now = new Date();
+    const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const last7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthStart = startOfMonthKst(now);
+    const valid = { serverId, status: 'valid' } as const;
+    const [votesLast24h, votesLast7d, votesMonthToDate, votesTotal] = await Promise.all([
+      this.prisma.vote.count({ where: { ...valid, votedAt: { gte: last24h } } }),
+      this.prisma.vote.count({ where: { ...valid, votedAt: { gte: last7d } } }),
+      this.prisma.vote.count({ where: { ...valid, votedAt: { gte: monthStart } } }),
+      this.prisma.vote.count({ where: valid }),
+    ]);
+    await this.prisma.$transaction([
+      this.prisma.server.update({
+        where: { id: serverId },
+        data: { votes24h: votesLast24h, votesMonthly: votesMonthToDate },
+      }),
+      this.prisma.serverStats.updateMany({
+        where: { serverId },
+        data: { votesLast24h, votesLast7d, votesMonthToDate, votesTotal },
+      }),
+    ]);
   }
 
   private async verifyCaptchaToken(token?: string | null, ipAddress?: string): Promise<void> {
@@ -499,6 +530,12 @@ function getKstDayStartUtc(date: Date): Date {
   const shifted = date.getTime() + kstOffsetMs;
   const startShifted = Math.floor(shifted / dayMs) * dayMs;
   return new Date(startShifted - kstOffsetMs);
+}
+
+function startOfMonthKst(date: Date): Date {
+  const kstOffsetMs = 9 * 60 * 60 * 1000;
+  const shifted = new Date(date.getTime() + kstOffsetMs);
+  return new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), 1) - kstOffsetMs);
 }
 
 function getNextKstResetAt(date: Date): Date {

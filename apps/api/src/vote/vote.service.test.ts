@@ -75,6 +75,66 @@ test('vote accepted creates dispatch attempts and queues vote id', async () => {
   }
 });
 
+test('invalidating a vote refreshes valid counters and writes an audit event', async () => {
+  let countCall = 0;
+  const serverUpdates: unknown[] = [];
+  const statsUpdates: unknown[] = [];
+  const auditEvents: unknown[] = [];
+  const service = new VoteService(
+    {} as never,
+    {} as never,
+    { isCaptchaRequired: () => false } as never,
+    {
+      audit: async (...args: unknown[]) => {
+        auditEvents.push(args);
+      },
+    } as never,
+    {} as never,
+    {
+      vote: {
+        findUnique: async () => ({ id: voteId, serverId, status: 'valid' }),
+        updateMany: async () => ({ count: 1 }),
+        count: async () => [4, 10, 20, 100][countCall++] ?? 0,
+      },
+      server: {
+        update: (args: unknown) => {
+          serverUpdates.push(args);
+          return { operation: 'server.update' };
+        },
+      },
+      serverStats: {
+        updateMany: (args: unknown) => {
+          statsUpdates.push(args);
+          return { operation: 'serverStats.updateMany' };
+        },
+      },
+      $transaction: async (operations: unknown[]) => operations,
+    } as never,
+  );
+
+  const result = await service.invalidateVote(voteId, 'account-1', 'automated pattern');
+
+  assert.deepEqual(result, {
+    id: voteId,
+    serverId,
+    status: 'invalid',
+    rankRecalculationPending: true,
+  });
+  assert.deepEqual(serverUpdates, [
+    {
+      where: { id: serverId },
+      data: { votes24h: 4, votesMonthly: 20 },
+    },
+  ]);
+  assert.deepEqual(statsUpdates, [
+    {
+      where: { serverId },
+      data: { votesLast24h: 4, votesLast7d: 10, votesMonthToDate: 20, votesTotal: 100 },
+    },
+  ]);
+  assert.equal(auditEvents.length, 1);
+});
+
 function createPrismaMock(createdAttempts: unknown[]) {
   const tx = {
     vote: {
