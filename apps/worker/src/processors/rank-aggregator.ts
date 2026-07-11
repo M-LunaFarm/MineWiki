@@ -24,7 +24,8 @@ export function createRankAggregator(prisma: PrismaHandle) {
     const last7dStart = now.minus({ days: 7 }).toJSDate();
     const monthStart = now.setZone(KST_ZONE).startOf('month').toUTC().toJSDate();
 
-    const [votes24h, votes7d, votesMonth, votesTotal, servers, stats] = await Promise.all([
+    const [votes24h, votes7d, votesMonth, votesTotal, servers, historicalBestRanks] =
+      await Promise.all([
       prisma.vote.groupBy({
         by: ['serverId'],
         where: { votedAt: { gte: last24hStart } },
@@ -47,8 +48,9 @@ export function createRankAggregator(prisma: PrismaHandle) {
       prisma.server.findMany({
         select: { id: true, name: true, reviewsCount: true }
       }),
-      prisma.serverStats.findMany({
-        select: { serverId: true, rankBest: true }
+      prisma.serverRankSnapshot.groupBy({
+        by: ['serverId'],
+        _min: { rank: true }
       })
     ]);
 
@@ -56,7 +58,11 @@ export function createRankAggregator(prisma: PrismaHandle) {
     const votes7dMap = toCountMap(votes7d);
     const votesMonthMap = toCountMap(votesMonth);
     const votesTotalMap = toCountMap(votesTotal);
-    const rankBestMap = new Map(stats.map((entry) => [entry.serverId, entry.rankBest]));
+    const rankBestMap = new Map(
+      historicalBestRanks.flatMap((entry) =>
+        entry._min.rank === null ? [] : [[entry.serverId, entry._min.rank] as const]
+      )
+    );
 
     const ranked = servers
       .map((server) => ({
