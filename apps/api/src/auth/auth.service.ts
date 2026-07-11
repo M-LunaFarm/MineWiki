@@ -123,6 +123,8 @@ const ARGON_OPTIONS = {
 } as const;
 
 const PASSWORD_POLICY = /^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}$/;
+const DUMMY_PASSWORD_HASH =
+  '$argon2id$v=19$m=19456,t=2,p=1$MjQUBk0H7jTj+SgNScFhCA$LHY2v6BYTGSHHMuOrWQyGqAbW3Xjzpa0jGwLN1CbdA0';
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 30; // 30 minutes
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30; // 30 minutes
 
@@ -188,6 +190,9 @@ export class AuthService {
     }
 
     const passwordAccounts = await this.findPasswordAccountsByEmail(email);
+    if (passwordAccounts.length === 0) {
+      await verify(DUMMY_PASSWORD_HASH, payload.password);
+    }
     let account: AccountRecord | undefined;
     for (const candidate of passwordAccounts) {
       if (!candidate.passwordHash) {

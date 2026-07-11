@@ -6,6 +6,25 @@ import { Algorithm, hash } from '@node-rs/argon2';
 import { ConfigService } from '@minewiki/config';
 import { AuthService } from './auth.service';
 
+test('login performs password work even when the email is unknown', async () => {
+  const service = new AuthService(
+    { listAccountsByEmail: async () => [] } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    new ConfigService({} as NodeJS.ProcessEnv),
+    {} as never,
+  );
+  const startedAt = performance.now();
+
+  await assert.rejects(
+    () => service.loginEmail({ email: 'missing@example.com', password: 'UnknownPW1!' }),
+    /이메일 또는 비밀번호가 올바르지 않습니다/,
+  );
+
+  assert.ok(performance.now() - startedAt >= 5);
+});
+
 test('password change atomically clears pending reset tokens', async () => {
   const accountId = randomUUID();
   const account = {
