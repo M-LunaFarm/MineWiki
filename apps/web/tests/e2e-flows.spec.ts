@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { PrismaClient } from '@prisma/client';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 const baseUrl = process.env.E2E_BASE_URL || 'http://localhost:3000';
@@ -79,7 +79,7 @@ test.describe('End-to-end flows', () => {
       data: {
         id: randomUUID(),
         accountId,
-        token: sessionToken,
+        token: `sha256:${createHash('sha256').update(sessionToken).digest('hex')}`,
         issuedAt,
         expiresAt,
         tokenVersion: 1,

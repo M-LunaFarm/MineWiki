@@ -1,5 +1,5 @@
 ﻿import { Injectable, Optional, UnauthorizedException } from '@nestjs/common';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { serialize } from 'cookie';
 import { DEFAULT_SESSION_TTL_SECONDS, MINEWIKI_SESSION_COOKIE } from '@minewiki/auth';
 import { PrismaService } from '../common/prisma.service';
@@ -74,7 +74,7 @@ export class SessionService {
         accountId: options.userId,
         issuedAt,
         expiresAt,
-        token,
+        token: hashSessionToken(token),
         tokenVersion: 1,
         isElevated: Boolean(options.elevated),
         ipAddress: options.ipAddress ?? null,
@@ -119,7 +119,7 @@ export class SessionService {
     const updated = await this.prisma.session.update({
       where: { id: sessionId },
       data: {
-        token,
+        token: hashSessionToken(token),
         issuedAt,
         expiresAt,
         tokenVersion: current.tokenVersion + 1,
@@ -135,7 +135,7 @@ export class SessionService {
         userId: updated.accountId,
         issuedAt: updated.issuedAt,
         expiresAt: updated.expiresAt,
-        token: updated.token,
+        token,
         tokenVersion: updated.tokenVersion,
         isElevated: updated.isElevated,
         permissions: [],
@@ -173,7 +173,10 @@ export class SessionService {
     });
   }
 
-  async getSession(sessionId: string): Promise<SessionRecord | undefined> {
+  async getSession(
+    sessionId: string,
+    presentedToken?: string,
+  ): Promise<SessionRecord | undefined> {
     const record = await this.prisma.session.findUnique({
       where: { id: sessionId }
     });
@@ -190,7 +193,7 @@ export class SessionService {
       userId: record.accountId,
       issuedAt: record.issuedAt,
       expiresAt: record.expiresAt,
-      token: record.token,
+      token: presentedToken ?? record.token,
       tokenVersion: record.tokenVersion,
       isElevated: record.isElevated,
       permissions: access?.permissions ?? [],
@@ -205,13 +208,17 @@ export class SessionService {
     if (!token) {
       return undefined;
     }
-    const record = await this.prisma.session.findUnique({
-      where: { token }
-    });
+    const record =
+      (await this.prisma.session.findUnique({
+        where: { token: hashSessionToken(token) },
+      })) ??
+      (isLegacyRawSessionToken(token)
+        ? await this.prisma.session.findUnique({ where: { token } })
+        : null);
     if (!record) {
       return undefined;
     }
-    return this.getSession(record.id);
+    return this.getSession(record.id, token);
   }
 
   toPayload(record: SessionRecord): SessionPayload {
@@ -284,4 +291,14 @@ export class SessionService {
   private generateToken(): string {
     return randomBytes(32).toString('base64url');
   }
+}
+
+const SESSION_TOKEN_HASH_PREFIX = 'sha256:';
+
+export function hashSessionToken(token: string): string {
+  return `${SESSION_TOKEN_HASH_PREFIX}${createHash('sha256').update(token).digest('hex')}`;
+}
+
+function isLegacyRawSessionToken(token: string): boolean {
+  return /^[A-Za-z0-9_-]{43}$/.test(token);
 }

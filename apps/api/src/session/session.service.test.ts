@@ -1,7 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { SessionService } from './session.service';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { SessionService, hashSessionToken } from './session.service';
 import { PrismaService } from '../common/prisma.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
@@ -48,6 +48,39 @@ if (!hasDatabase) {
       assert.ok(result.cookie.includes('HttpOnly'));
       assert.ok(result.cookie.includes('Secure'));
       assert.ok(result.cookie.includes('SameSite=Strict'));
+      const rawToken = tokenFromCookie(result.cookie);
+      const stored = await prisma.session.findUnique({ where: { id: result.sessionId } });
+      assert.ok(rawToken);
+      assert.equal(stored?.token, hashSessionToken(rawToken));
+      assert.notEqual(stored?.token, rawToken);
+      assert.equal(await service.getSessionByToken(stored?.token), undefined);
+      assert.equal((await service.getSessionByToken(rawToken))?.sessionId, result.sessionId);
+    } finally {
+      await cleanupTestAccount(userId);
+    }
+  });
+
+  test('accepts legacy raw session tokens without accepting arbitrary stored hashes', async () => {
+    const userId = await createTestAccount();
+    const token = randomBytes(32).toString('base64url');
+    const now = new Date();
+    const sessionId = randomUUID();
+    try {
+      await prisma.session.create({
+        data: {
+          id: sessionId,
+          accountId: userId,
+          token,
+          issuedAt: now,
+          expiresAt: new Date(now.getTime() + 60_000),
+          tokenVersion: 1,
+          isElevated: false,
+          lastActiveAt: now,
+        },
+      });
+
+      assert.equal((await service.getSessionByToken(token))?.sessionId, sessionId);
+      assert.equal(await service.getSessionByToken(hashSessionToken(token)), undefined);
     } finally {
       await cleanupTestAccount(userId);
     }
@@ -105,4 +138,9 @@ if (!hasDatabase) {
       await cleanupTestAccount(userId);
     }
   });
+}
+
+function tokenFromCookie(cookie: string): string | undefined {
+  const value = cookie.split(';', 1)[0]?.split('=', 2)[1];
+  return value ? decodeURIComponent(value) : undefined;
 }
