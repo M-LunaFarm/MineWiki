@@ -58,3 +58,38 @@ test('vote admin permission can invalidate a vote with a bounded reason', async 
   assert.deepEqual(result, { id: voteId, status: 'invalid' });
   assert.deepEqual(calls, [[voteId, session.userId, 'automated vote pattern']]);
 });
+
+test('vote moderator can filter the private moderation feed', async () => {
+  const calls: unknown[] = [];
+  const controller = new VoteAdminController({
+    listVotesForModeration: async (query: unknown) => {
+      calls.push(query);
+      return [];
+    },
+  } as never);
+  const session = {
+    sessionId: 'session-1',
+    userId: '22222222-2222-4222-8222-222222222222',
+    isElevated: false,
+    groups: ['vote_moderator'],
+    permissions: ['vote.admin'],
+  } satisfies SessionPayload;
+
+  const result = await controller.list(
+    session,
+    '33333333-3333-4333-8333-333333333333',
+    'invalid',
+    '  Player  ',
+    '25',
+  );
+
+  assert.deepEqual(result, []);
+  assert.deepEqual(calls, [
+    {
+      serverId: '33333333-3333-4333-8333-333333333333',
+      status: 'invalid',
+      search: 'Player',
+      limit: 25,
+    },
+  ]);
+});

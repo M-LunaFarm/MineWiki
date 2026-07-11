@@ -135,6 +135,51 @@ test('invalidating a vote refreshes valid counters and writes an audit event', a
   assert.equal(auditEvents.length, 1);
 });
 
+test('moderation feed exposes bounded private evidence only to the admin service path', async () => {
+  const findInputs: unknown[] = [];
+  const service = new VoteService(
+    {} as never,
+    {} as never,
+    { isCaptchaRequired: () => false } as never,
+    {} as never,
+    {} as never,
+    {
+      vote: {
+        findMany: async (input: unknown) => {
+          findInputs.push(input);
+          return [
+            {
+              id: voteId,
+              serverId,
+              accountId: 'account-1',
+              minecraftUuid: null,
+              username: 'DemoPlayer',
+              ipAddress: '192.0.2.10',
+              votedAt: new Date('2026-07-11T00:00:00.000Z'),
+              status: 'invalid',
+              invalidatedAt: new Date('2026-07-11T01:00:00.000Z'),
+              invalidatedBy: 'admin-1',
+              invalidationReason: 'automated pattern',
+            },
+          ];
+        },
+      },
+    } as never,
+  );
+
+  const rows = await service.listVotesForModeration({
+    serverId,
+    status: 'invalid',
+    search: 'DemoPlayer',
+    limit: 25,
+  });
+
+  assert.equal(rows[0]?.votedAt, '2026-07-11T00:00:00.000Z');
+  assert.equal(rows[0]?.invalidatedAt, '2026-07-11T01:00:00.000Z');
+  assert.equal(rows[0]?.ipAddress, '192.0.2.10');
+  assert.equal(findInputs.length, 1);
+});
+
 function createPrismaMock(createdAttempts: unknown[]) {
   const tx = {
     vote: {

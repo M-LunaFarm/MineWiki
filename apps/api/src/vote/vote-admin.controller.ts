@@ -2,9 +2,11 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  Get,
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -22,6 +24,36 @@ const invalidateVoteSchema = z
 @UseGuards(SessionGuard)
 export class VoteAdminController {
   constructor(private readonly votes: VoteService) {}
+
+  @Get()
+  list(
+    @CurrentSession() session: SessionPayload,
+    @Query('serverId') serverId?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+  ) {
+    this.assertAdmin(session);
+    const query = z
+      .object({
+        serverId: z.string().uuid().optional(),
+        status: z.enum(['valid', 'invalid']).optional(),
+        search: z.string().trim().min(1).max(64).optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(100),
+      })
+      .parse({
+        serverId: serverId?.trim() || undefined,
+        status: status?.trim() || undefined,
+        search: search?.trim() || undefined,
+        limit: limit?.trim() || undefined,
+      });
+    return this.votes.listVotesForModeration({
+      serverId: query.serverId,
+      status: query.status,
+      search: query.search,
+      limit: query.limit ?? 100,
+    });
+  }
 
   @Post(':voteId/invalidate')
   @Throttle({ default: { limit: 30, ttl: 300 } })

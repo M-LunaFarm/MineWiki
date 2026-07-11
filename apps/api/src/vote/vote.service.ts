@@ -30,6 +30,13 @@ export interface VoteRequestContext {
   readonly ipAddress?: string;
 }
 
+export interface VoteModerationQuery {
+  readonly serverId?: string;
+  readonly status?: 'valid' | 'invalid';
+  readonly search?: string;
+  readonly limit: number;
+}
+
 interface StoredVotifierTargetReference {
   readonly targetId: string;
   readonly protocol: 'v1' | 'v2';
@@ -377,6 +384,44 @@ export class VoteService {
       status: 'invalid' as const,
       rankRecalculationPending: true,
     };
+  }
+
+  async listVotesForModeration(query: VoteModerationQuery) {
+    const search = query.search?.toLowerCase();
+    const votes = await this.prisma.vote.findMany({
+      where: {
+        serverId: query.serverId,
+        status: query.status,
+        OR: search
+          ? [
+              { usernameNormalized: { contains: search } },
+              { ipAddress: { contains: query.search } },
+              { accountId: query.search },
+              { minecraftUuid: query.search },
+            ]
+          : undefined,
+      },
+      orderBy: { votedAt: 'desc' },
+      take: query.limit,
+      select: {
+        id: true,
+        serverId: true,
+        accountId: true,
+        minecraftUuid: true,
+        username: true,
+        ipAddress: true,
+        votedAt: true,
+        status: true,
+        invalidatedAt: true,
+        invalidatedBy: true,
+        invalidationReason: true,
+      },
+    });
+    return votes.map((vote) => ({
+      ...vote,
+      votedAt: vote.votedAt.toISOString(),
+      invalidatedAt: vote.invalidatedAt?.toISOString() ?? null,
+    }));
   }
 
   private async refreshVoteCounters(serverId: string): Promise<void> {
