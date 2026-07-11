@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { ServerService } from './server.service';
 import type {
   ServerDetail,
+  ServerRankingResponse,
   ServerRegistrationPayload,
   ServerStats,
   ServerSummary,
@@ -54,6 +55,18 @@ const pluginCredentialPayloadSchema = z.object({
 
 const pluginCredentialStatusSchema = z.object({ enabled: z.boolean() });
 
+const rankingQuerySchema = z.object({
+  edition: z.enum(['java', 'bedrock']).optional(),
+  grade: z.enum(['Verified', 'Unverified']).optional(),
+  tag: z.string().trim().min(1).max(64).optional(),
+  search: z.string().trim().min(1).max(100).optional(),
+  sort: z
+    .enum(['votes24h_desc', 'votesMonthly_desc', 'reviews_desc', 'latest', 'name_asc'])
+    .default('votes24h_desc'),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(24),
+});
+
 type RequiredServerRegistrationPayload =
   Required<Omit<ServerRegistrationPayload, 'websiteUrl' | 'discordUrl'>> &
     Pick<ServerRegistrationPayload, 'websiteUrl' | 'discordUrl'>;
@@ -84,6 +97,36 @@ export class ServerController {
     };
     const sortOption: ServerSort = isServerSort(sort) ? sort : 'votes24h_desc';
     return this.serverService.list(filters, sortOption);
+  }
+
+  @Get('rankings')
+  rankings(
+    @Query('edition') edition?: string,
+    @Query('grade') grade?: string,
+    @Query('tag') tag?: string,
+    @Query('search') search?: string,
+    @Query('sort') sort?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ): Promise<ServerRankingResponse> {
+    const query = rankingQuerySchema.parse({
+      edition: edition?.trim() || undefined,
+      grade: grade?.trim() || undefined,
+      tag: tag?.trim() || undefined,
+      search: search?.trim() || undefined,
+      sort: sort?.trim() || undefined,
+      page: page?.trim() || undefined,
+      pageSize: pageSize?.trim() || undefined,
+    });
+    return this.serverService.rankings({
+      edition: query.edition,
+      grade: query.grade,
+      tag: query.tag,
+      search: query.search,
+      sort: query.sort ?? 'votes24h_desc',
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? 24,
+    });
   }
 
   @Get(':id')

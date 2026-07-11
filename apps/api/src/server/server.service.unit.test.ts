@@ -100,6 +100,75 @@ test('server list marks zero-vote servers as awaiting rank aggregation', async (
   assert.equal(server.rank, null);
 });
 
+test('paginated rankings apply server-side filters and return page metadata', async () => {
+  const serverId = randomUUID();
+  const queries: unknown[] = [];
+  const rankedServer = {
+    id: serverId,
+    name: 'Ranked Server',
+    joinHost: 'ranked.example.com',
+    joinPort: 25565,
+    edition: 'java',
+    supportedVersions: ['1.21'],
+    tags: ['survival'],
+    shortDescription: 'Ranked server',
+    verificationGrade: 'A',
+    verifiedAt: new Date('2026-07-11T00:00:00.000Z'),
+    votes24h: 42,
+    votesMonthly: 300,
+    reviewsCount: 7,
+    voteRequiresOwnership: true,
+    bannerUrl: null,
+    websiteUrl: null,
+    playersOnline: 12,
+    playersMax: 100,
+    playersLastUpdatedAt: new Date('2026-07-11T00:00:00.000Z'),
+    isOnline: true,
+    latencyMs: 25,
+    createdAt: new Date('2026-07-10T00:00:00.000Z'),
+    stats: {
+      rankCurrent: 2,
+      rankDelta24h: 3,
+      rankBest: 1,
+      lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
+    },
+  };
+  const prisma = {
+    server: {
+      findMany: async (query: unknown) => {
+        queries.push(query);
+        return [rankedServer];
+      },
+      count: async (query: unknown) => {
+        queries.push(query);
+        return 25;
+      },
+    },
+    $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const result = await service.rankings({
+    edition: 'java',
+    grade: 'Verified',
+    tag: 'survival',
+    search: 'ranked',
+    sort: 'latest',
+    page: 2,
+    pageSize: 12,
+  });
+
+  assert.equal(result.total, 25);
+  assert.equal(result.page, 2);
+  assert.equal(result.pageSize, 12);
+  assert.equal(result.totalPages, 3);
+  assert.equal(result.rankUpdatedAt, '2026-07-11T01:00:00.000Z');
+  assert.equal(result.items[0]?.rank?.current, 2);
+  assert.equal(queries.length, 2);
+  assert.deepEqual((queries[0] as { skip: number; take: number }).skip, 12);
+  assert.deepEqual((queries[0] as { skip: number; take: number }).take, 12);
+});
+
 test('server banner upload uses canonical file service metadata path', async () => {
   const serverId = randomUUID();
   const accountId = randomUUID();

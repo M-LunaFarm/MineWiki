@@ -104,6 +104,59 @@ export class ServerService {
       throw error;
     }
   }
+
+  async rankings(input: {
+    readonly edition?: 'java' | 'bedrock';
+    readonly grade?: 'Verified' | 'Unverified';
+    readonly tag?: string;
+    readonly search?: string;
+    readonly sort: ServerSort;
+    readonly page: number;
+    readonly pageSize: number;
+  }) {
+    const search = input.search?.trim();
+    const where: Prisma.ServerWhereInput = {
+      edition: input.edition,
+      verificationGrade:
+        input.grade === 'Verified'
+          ? { in: ['A', 'B', 'C'] }
+          : input.grade === 'Unverified'
+            ? 'Unverified'
+            : undefined,
+      tags: input.tag ? { array_contains: input.tag } : undefined,
+      OR: search
+        ? [
+            { name: { contains: search } },
+            { joinHost: { contains: search } },
+            { shortDescription: { contains: search } },
+          ]
+        : undefined,
+    };
+    const skip = (input.page - 1) * input.pageSize;
+    const [servers, total] = await this.prisma.$transaction([
+      this.prisma.server.findMany({
+        where,
+        orderBy: buildOrder(input.sort),
+        include: { stats: true },
+        skip,
+        take: input.pageSize,
+      }),
+      this.prisma.server.count({ where }),
+    ]);
+    const items = servers.map((server) => toSummary(server));
+    const rankUpdatedAt = items.reduce<string | null>((latest, item) => {
+      const candidate = item.rank?.updatedAt;
+      return candidate && (!latest || candidate > latest) ? candidate : latest;
+    }, null);
+    return {
+      items,
+      total,
+      page: input.page,
+      pageSize: input.pageSize,
+      totalPages: total === 0 ? 0 : Math.ceil(total / input.pageSize),
+      rankUpdatedAt,
+    };
+  }
   async detail(idOrShortCode: string): Promise<ServerDetail> {
     const startedAt = Date.now();
     const lookup = normalizeServerLookup(idOrShortCode);
@@ -1109,6 +1162,8 @@ function buildOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationInput[] {
       return [{ reviewsCount: 'desc' }, { name: 'asc' }];
     case 'name_asc':
       return [{ name: 'asc' }];
+    case 'latest':
+      return [{ createdAt: 'desc' }, { name: 'asc' }];
     case 'votes24h_desc':
     default:
       return [{ votes24h: 'desc' }, { name: 'asc' }];

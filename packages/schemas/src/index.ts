@@ -215,6 +215,15 @@ export const serverDetailSchema = serverSummarySchema.extend({
   lastUpdatedAt: z.string().datetime(),
 });
 
+export const serverRankingResponseSchema = z.object({
+  items: z.array(serverSummarySchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+  totalPages: z.number().int().nonnegative(),
+  rankUpdatedAt: z.string().datetime().nullable(),
+});
+
 export const serverRegistrationSchema = z.object({
   name: z.string().min(3).max(32),
   joinHost: z.string().min(3).max(255),
@@ -552,6 +561,7 @@ export const pluginSyncEventSchema = z.object({
 export type UserAccount = z.infer<typeof userAccountSchema>;
 export type ServerSummary = z.infer<typeof serverSummarySchema>;
 export type ServerDetail = z.infer<typeof serverDetailSchema>;
+export type ServerRankingResponse = z.infer<typeof serverRankingResponseSchema>;
 export type ServerStats = z.infer<typeof serverStatsSchema>;
 export type ServerUpdate = z.infer<typeof serverUpdateSchema>;
 export type ServerReview = z.infer<typeof serverReviewSchema>;

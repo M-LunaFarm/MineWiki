@@ -4,7 +4,12 @@ export interface ServerFilters {
   readonly search?: string;
 }
 
-export type ServerSort = 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'name_asc';
+export type ServerSort =
+  | 'votes24h_desc'
+  | 'votesMonthly_desc'
+  | 'reviews_desc'
+  | 'latest'
+  | 'name_asc';
 
 export type StoredVerificationGrade = 'A' | 'B' | 'C' | 'Unverified';
 
@@ -15,6 +20,7 @@ export function isServerSort(value: unknown): value is ServerSort {
     value === 'votes24h_desc' ||
     value === 'votesMonthly_desc' ||
     value === 'reviews_desc' ||
+    value === 'latest' ||
     value === 'name_asc'
   );
 }
