@@ -1,6 +1,9 @@
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { decryptAppSecret } from '../common/secret-codec';
+import { PrismaService } from '../common/prisma.service';
+import { PluginServerRepository } from '../verify/guild.repositories';
 import { PluginCredentialService } from './plugin-credential.service';
 
 const baseRow = {
@@ -105,4 +108,61 @@ function restoreEnvironment(key: string, value: string | undefined): void {
   } else {
     process.env[key] = value;
   }
+}
+
+const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+if (!hasDatabase) {
+  test('plugin credential database integration', { skip: 'DATABASE_URL is not configured.' }, () => {});
+} else {
+  const prisma = new PrismaService();
+
+  before(async () => {
+    await prisma.$connect();
+  });
+
+  after(async () => {
+    await prisma.$disconnect();
+  });
+
+  test('issued credentials work through canonical plugin repository and rotation', async () => {
+    const unique = randomUUID().replace(/-/g, '').slice(0, 12);
+    const server = await prisma.server.create({
+      data: {
+        name: `Plugin Test ${unique}`,
+        joinHost: `plugin-${unique}.example.com`,
+        joinPort: 25565,
+        edition: 'java',
+        supportedVersions: ['1.21'],
+        tags: ['integration'],
+        shortDescription: 'Plugin credential integration test',
+        longDescription: 'Plugin credential integration test server',
+      },
+    });
+    const service = new PluginCredentialService(prisma);
+    const repository = new PluginServerRepository(prisma);
+
+    try {
+      const issued = await service.create(
+        server.id,
+        { guildId: `9${unique.replace(/\D/g, '').padEnd(17, '1').slice(0, 17)}` },
+        'integration-actor',
+      );
+      const resolved = await repository.find(issued.pluginServerId);
+      assert.equal(resolved?.source, 'canonical');
+      assert.equal(resolved?.serverSecret, issued.secret);
+
+      const rotated = await service.rotate(server.id, issued.id, 'integration-actor');
+      assert.notEqual(rotated.secret, issued.secret);
+      const resolvedAfterRotation = await repository.find(issued.pluginServerId);
+      assert.equal(resolvedAfterRotation?.serverSecret, rotated.secret);
+
+      await service.setEnabled(server.id, issued.id, false, 'integration-actor');
+      const disabled = await repository.find(issued.pluginServerId);
+      assert.equal(disabled?.enabled, false);
+    } finally {
+      await prisma.pluginServer.deleteMany({ where: { serverId: server.id } });
+      await prisma.server.delete({ where: { id: server.id } });
+    }
+  });
 }
