@@ -73,6 +73,8 @@ pnpm data:validate
 pnpm build
 ```
 
+The Compose migration container performs the same migration and idempotent seed sequence automatically before API and worker startup.
+
 If `pnpm data:validate` reports only safe warnings for expired replay guards or missing render cache, run:
 
 ```bash

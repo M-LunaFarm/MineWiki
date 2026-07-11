@@ -59,7 +59,7 @@ docker compose up -d --build
 curl http://localhost:8080/api/health
 ```
 
-The default stack includes MySQL, Redis, migrations, API, worker, web, and the Nginx gateway. Start the Discord bot after setting its token and client ID with `docker compose --profile bot up -d --build`. Change `MINEWIKI_PUBLIC_URL` and terminate TLS in an external reverse proxy for a public deployment.
+The default stack includes MySQL, Redis, migrations, idempotent baseline seeding, API, worker, web, and the Nginx gateway. Start the Discord bot after setting its token and client ID with `docker compose --profile bot up -d --build`. Change `MINEWIKI_PUBLIC_URL` and terminate TLS in an external reverse proxy for a public deployment.
 
 ## Data Validation
 

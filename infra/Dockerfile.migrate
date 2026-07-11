@@ -13,9 +13,12 @@ WORKDIR /workspace
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY prisma/schema.prisma prisma/schema.prisma
-RUN pnpm install --filter . --frozen-lockfile
+# Prisma CLI is intentionally a root devDependency, but this runtime image needs
+# it to execute migrate deploy and the fresh-database baseline fallback.
+RUN pnpm install --filter . --frozen-lockfile --prod=false
 
 COPY prisma prisma
 COPY scripts/deploy-database.mjs scripts/deploy-database.mjs
+COPY scripts/seed.mjs scripts/seed.mjs
 
-CMD ["node", "scripts/deploy-database.mjs"]
+CMD ["sh", "-c", "node scripts/deploy-database.mjs && node scripts/seed.mjs"]
