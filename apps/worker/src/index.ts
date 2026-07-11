@@ -16,6 +16,7 @@ import {
   type DiscordDigestResult,
 } from './processors/discord-digest';
 import { createDiscordVerifySyncer } from './processors/discord-verify-sync';
+import { assertSupportedQueueServer } from './redis-compat';
 import type {
   ClaimVerificationJob,
   DiscordDigestJob,
@@ -505,6 +506,7 @@ process.once('SIGTERM', shutdown);
 async function bootstrapWorker(): Promise<void> {
   await prisma.$connect();
   await connection.ping();
+  assertSupportedQueueServer(await connection.info('server'));
 
   for (const worker of workers) {
     void worker.run().catch((error) => {
