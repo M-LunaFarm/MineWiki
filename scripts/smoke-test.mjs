@@ -23,7 +23,7 @@ const checks = [
   },
   {
     name: 'api health',
-    url: `${apiBaseUrl}/api/health`,
+    url: `${apiBaseUrl}/health`,
     expectedStatuses: [200],
   },
   {
