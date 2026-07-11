@@ -4,6 +4,8 @@ import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle } from './normalize.js';
 
 export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.0';
+const MAX_DOCUMENT_BYTES = 1024 * 1024;
+const MAX_FOLDING_DEPTH = 16;
 
 const componentNameMap: Record<string, string> = {
   '문서 상태': 'document_status',
@@ -90,7 +92,13 @@ const allowedTags = [
   'summary'
 ];
 
-export function parseMarkup(raw: string): ParsedDocument {
+export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
+  if (Buffer.byteLength(raw, 'utf8') > MAX_DOCUMENT_BYTES) {
+    return rejectedDocument('문서 크기 제한을 초과했습니다.');
+  }
+  if (foldingDepth > MAX_FOLDING_DEPTH) {
+    return rejectedDocument('접기 블록 중첩 제한을 초과했습니다.');
+  }
   const lines = raw.replace(/\r\n/g, '\n').split('\n');
   const ast: AstNode[] = [];
   const links = new Set<string>();
@@ -144,7 +152,7 @@ export function parseMarkup(raw: string): ParsedDocument {
         bodyLines.push(lines[i] ?? '');
         i += 1;
       }
-      const nested = parseMarkup(bodyLines.join('\n'));
+      const nested = parseMarkup(bodyLines.join('\n'), foldingDepth + 1);
       nested.links.forEach((link) => links.add(link));
       nested.categories.forEach((categoryTitle) => categories.add(categoryTitle));
       nested.components.forEach((component) => components.push(component));
@@ -281,7 +289,6 @@ export function parseMarkup(raw: string): ParsedDocument {
   if (!components.some((component) => ['mob_info', 'item_info', 'block_info', 'mod_info', 'server_info', 'api_info', 'packet_info', 'data_type_info', 'develop_status'].includes(component.name))) {
     errors.push('정보 컴포넌트가 없습니다.');
   }
-  if (raw.length > 1024 * 1024) blockingErrors.push('문서 크기 제한을 초과했습니다.');
   if (/<\s*(script|style|iframe|object|embed|img)\b/i.test(raw) || /\son[a-z]+\s*=/i.test(raw)) {
     blockingErrors.push('허용되지 않은 HTML이 포함되어 있습니다.');
   }
@@ -310,6 +317,21 @@ export function parseMarkup(raw: string): ParsedDocument {
       .trim(),
     errors,
     blockingErrors
+  };
+}
+
+function rejectedDocument(message: string): ParsedDocument {
+  return {
+    ast: [],
+    links: [],
+    categories: [],
+    components: [],
+    headings: [],
+    footnotes: [],
+    redirectTarget: null,
+    plainText: '',
+    errors: [],
+    blockingErrors: [message]
   };
 }
 

@@ -45,3 +45,17 @@ test('parses links, categories, components, and safe HTML', () => {
   assert.equal(html.includes('<script>'), false);
   assert.equal(html.includes('class="wiki-link missing"'), true);
 });
+
+test('rejects oversized documents before parsing their contents', () => {
+  const parsed = parseMarkup('가'.repeat(400_000));
+
+  assert.deepEqual(parsed.ast, []);
+  assert.deepEqual(parsed.blockingErrors, ['문서 크기 제한을 초과했습니다.']);
+});
+
+test('limits recursive folding blocks', () => {
+  const nested = `${'{{{#!folding nested\n'.repeat(32)}body\n}}}`;
+  const parsed = parseMarkup(nested);
+
+  assert.equal(parsed.blockingErrors.includes('접기 블록 중첩 제한을 초과했습니다.'), true);
+});
