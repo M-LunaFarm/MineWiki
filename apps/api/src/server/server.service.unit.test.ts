@@ -167,6 +167,10 @@ test('paginated rankings apply server-side filters and return page metadata', as
   assert.equal(queries.length, 2);
   assert.deepEqual((queries[0] as { skip: number; take: number }).skip, 12);
   assert.deepEqual((queries[0] as { skip: number; take: number }).take, 12);
+  assert.deepEqual(
+    (queries[0] as { where: { tags: unknown } }).where.tags,
+    { array_contains: ['survival'] },
+  );
 });
 
 test('server banner upload uses canonical file service metadata path', async () => {

@@ -123,7 +123,7 @@ export class ServerService {
           : input.grade === 'Unverified'
             ? 'Unverified'
             : undefined,
-      tags: input.tag ? { array_contains: input.tag } : undefined,
+      tags: input.tag ? { array_contains: [input.tag] } : undefined,
       OR: search
         ? [
             { name: { contains: search } },
