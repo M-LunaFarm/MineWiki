@@ -29,8 +29,15 @@ import { CurrentSession } from '../session/session.decorator';
 import { SessionService, type SessionPayload } from '../session/session.service';
 import { issueCsrfToken } from '../session/csrf';
 import {
+  emailLoginRequestSchema,
+  emailLoginSetupRequestSchema,
+  emailRegistrationRequestSchema,
+  emailResendRequestSchema,
+  emailVerificationRequestSchema,
   oauthStartRequestSchema,
   oauthCompleteRequestSchema,
+  passwordResetConfirmRequestSchema,
+  passwordResetRequestSchema,
   type OAuthProvider,
 } from '@minewiki/schemas';
 import { OAuthFlowService } from './oauth-flow.service';
@@ -122,24 +129,20 @@ export class AuthController {
 
   @Post('email/register')
   @Throttle({ default: { limit: 5, ttl: 300 } })
-  registerEmail(
-    @Body('email') email: string,
-    @Body('password') password: string,
-    @Body('displayName') displayName: string | undefined,
-  ): Promise<EmailRegistrationResult> {
-    return this.auth.registerEmail({ email, password, displayName });
+  registerEmail(@Body() body: unknown): Promise<EmailRegistrationResult> {
+    return this.auth.registerEmail(emailRegistrationRequestSchema.parse(body));
   }
 
   @Post('email/login')
   @Throttle({ default: { limit: 8, ttl: 60 } })
   async loginEmail(
-    @Body('email') email: string,
-    @Body('password') password: string,
+    @Body() body: unknown,
     @Res({ passthrough: true }) reply: FastifyReply,
     @Req() request: FastifyRequest,
   ) {
+    const payload = emailLoginRequestSchema.parse(body);
     const result = await this.auth.loginEmail(
-      { email, password },
+      payload,
       this.extractSessionContext(request),
     );
     reply.header('Set-Cookie', result.cookie);
@@ -153,11 +156,12 @@ export class AuthController {
   @Post('email/verify')
   @Throttle({ default: { limit: 8, ttl: 60 } })
   async verifyEmail(
-    @Body('token') token: string,
+    @Body() body: unknown,
     @Res({ passthrough: true }) reply: FastifyReply,
     @Req() request: FastifyRequest,
   ) {
-    const result = await this.auth.verifyEmail(token, this.extractSessionContext(request));
+    const payload = emailVerificationRequestSchema.parse(body);
+    const result = await this.auth.verifyEmail(payload.token, this.extractSessionContext(request));
     reply.header('Set-Cookie', result.cookie);
     return {
       account: result.account,
@@ -168,8 +172,9 @@ export class AuthController {
 
   @Post('email/resend')
   @Throttle({ default: { limit: 3, ttl: 300 } })
-  resendVerification(@Body('email') email: string): Promise<ResendVerificationResult> {
-    return this.auth.resendVerification(email);
+  resendVerification(@Body() body: unknown): Promise<ResendVerificationResult> {
+    const payload = emailResendRequestSchema.parse(body);
+    return this.auth.resendVerification(payload.email);
   }
 
   @UseGuards(SessionGuard)
@@ -177,25 +182,23 @@ export class AuthController {
   @Throttle({ default: { limit: 3, ttl: 300 } })
   setupEmailLogin(
     @CurrentSession() session: SessionPayload,
-    @Body('email') email: string,
-    @Body('password') password: string,
+    @Body() body: unknown,
   ): Promise<ResendVerificationResult> {
-    return this.auth.setupEmailLogin(session.userId, { email, password });
+    return this.auth.setupEmailLogin(session.userId, emailLoginSetupRequestSchema.parse(body));
   }
 
   @Post('password/forgot')
   @Throttle({ default: { limit: 3, ttl: 300 } })
-  requestPasswordReset(@Body('email') email: string): Promise<PasswordResetRequestResult> {
-    return this.auth.requestPasswordReset(email ?? '');
+  requestPasswordReset(@Body() body: unknown): Promise<PasswordResetRequestResult> {
+    const payload = passwordResetRequestSchema.parse(body);
+    return this.auth.requestPasswordReset(payload.email);
   }
 
   @Post('password/reset')
   @Throttle({ default: { limit: 5, ttl: 300 } })
-  resetPassword(
-    @Body('token') token: string,
-    @Body('newPassword') newPassword: string,
-  ): Promise<PasswordResetConfirmResult> {
-    return this.auth.resetPassword(token ?? '', newPassword ?? '');
+  resetPassword(@Body() body: unknown): Promise<PasswordResetConfirmResult> {
+    const payload = passwordResetConfirmRequestSchema.parse(body);
+    return this.auth.resetPassword(payload.token, payload.newPassword);
   }
 
   private async finalizeOAuth(

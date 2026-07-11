@@ -52,6 +52,41 @@ export const oauthCompleteResponseSchema = z.object({
   mode: z.enum(['login', 'link']),
 });
 
+const emailAddressSchema = z.string().trim().email().max(254);
+const authPasswordSchema = z.string().min(1).max(128);
+
+export const emailRegistrationRequestSchema = z
+  .object({
+    email: emailAddressSchema,
+    password: authPasswordSchema,
+    displayName: z.string().trim().min(1).max(32).optional(),
+  })
+  .strict();
+
+export const emailLoginRequestSchema = z
+  .object({
+    email: emailAddressSchema,
+    password: authPasswordSchema,
+  })
+  .strict();
+
+export const emailVerificationRequestSchema = z
+  .object({ token: z.string().trim().min(1).max(512) })
+  .strict();
+
+export const emailResendRequestSchema = z.object({ email: emailAddressSchema }).strict();
+
+export const emailLoginSetupRequestSchema = emailLoginRequestSchema;
+
+export const passwordResetRequestSchema = z.object({ email: emailAddressSchema }).strict();
+
+export const passwordResetConfirmRequestSchema = z
+  .object({
+    token: z.string().trim().min(1).max(512),
+    newPassword: authPasswordSchema,
+  })
+  .strict();
+
 export const emailRegistrationResultSchema = z.object({
   status: z.literal('verification-required'),
   accountId: z.string().uuid(),
@@ -549,6 +584,13 @@ export type OAuthStartRequest = z.infer<typeof oauthStartRequestSchema>;
 export type OAuthStartResponse = z.infer<typeof oauthStartResponseSchema>;
 export type OAuthCompleteRequest = z.infer<typeof oauthCompleteRequestSchema>;
 export type OAuthCompleteResponse = z.infer<typeof oauthCompleteResponseSchema>;
+export type EmailRegistrationRequest = z.infer<typeof emailRegistrationRequestSchema>;
+export type EmailLoginRequest = z.infer<typeof emailLoginRequestSchema>;
+export type EmailVerificationRequest = z.infer<typeof emailVerificationRequestSchema>;
+export type EmailResendRequest = z.infer<typeof emailResendRequestSchema>;
+export type EmailLoginSetupRequest = z.infer<typeof emailLoginSetupRequestSchema>;
+export type PasswordResetRequest = z.infer<typeof passwordResetRequestSchema>;
+export type PasswordResetConfirmRequest = z.infer<typeof passwordResetConfirmRequestSchema>;
 export type EmailRegistrationResult = z.infer<typeof emailRegistrationResultSchema>;
 export type ResendVerificationResult = z.infer<typeof resendVerificationResultSchema>;
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;

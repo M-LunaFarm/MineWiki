@@ -5,6 +5,7 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AuthController } from './auth.controller';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { ZodError } from 'zod';
 
 test('me endpoint requires session guard', () => {
   const guards = Reflect.getMetadata(GUARDS_METADATA, AuthController.prototype.me) as
@@ -57,4 +58,71 @@ test('unverified identity and manual account-link callbacks are not exposed', ()
   assert.equal(prototype.naverCallback, undefined);
   assert.equal(prototype.createLinkRequest, undefined);
   assert.equal(prototype.confirmLink, undefined);
+});
+
+test('email auth endpoints reject malformed request bodies before calling the service', async () => {
+  let serviceCalls = 0;
+  const controller = new AuthController(
+    new Proxy(
+      {},
+      {
+        get() {
+          return async () => {
+            serviceCalls += 1;
+          };
+        },
+      },
+    ) as never,
+    {} as never,
+    {} as never,
+  );
+
+  const invalidCalls = [
+    () => controller.registerEmail({}),
+    () => controller.resendVerification({ email: 'not-an-email' }),
+    () => controller.setupEmailLogin(
+      { userId: '11111111-1111-4111-8111-111111111111' } as SessionPayload,
+      { email: 'player@example.com' },
+    ),
+    () => controller.requestPasswordReset(null),
+    () => controller.resetPassword({ token: '', newPassword: 'ValidPassword1!' }),
+  ];
+
+  for (const invoke of invalidCalls) {
+    assert.throws(invoke, (error: unknown) => error instanceof ZodError);
+  }
+  assert.equal(serviceCalls, 0);
+});
+
+test('email auth request parsing trims canonical text fields', async () => {
+  let registrationPayload: unknown;
+  let resendEmail: string | undefined;
+  const controller = new AuthController(
+    {
+      async registerEmail(payload: unknown) {
+        registrationPayload = payload;
+        return {};
+      },
+      async resendVerification(email: string) {
+        resendEmail = email;
+        return {};
+      },
+    } as never,
+    {} as never,
+    {} as never,
+  );
+
+  await controller.registerEmail({
+    email: '  Player@Example.com  ',
+    password: 'ValidPassword1!',
+    displayName: '  Player  ',
+  });
+  await controller.resendVerification({ email: '  Player@Example.com  ' });
+
+  assert.deepEqual(registrationPayload, {
+    email: 'Player@Example.com',
+    password: 'ValidPassword1!',
+    displayName: 'Player',
+  });
+  assert.equal(resendEmail, 'Player@Example.com');
 });
