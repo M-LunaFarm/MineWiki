@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { motion, AnimatePresence } from 'framer-motion';
+import { csrfHeaders } from '../../lib/csrf';
 import {
   CheckCircle2,
   AlertCircle,
@@ -141,6 +142,7 @@ export function VoteModalModern({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(await csrfHeaders()),
         },
         credentials: 'include',
         body: JSON.stringify({

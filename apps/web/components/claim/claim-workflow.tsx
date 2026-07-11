@@ -21,6 +21,7 @@ import type { LucideIcon } from 'lucide-react';
 import { getApiBaseUrl } from '../../lib/runtime-config';
 import { useAuth } from '../providers/auth-context';
 import { fetchDashboardOverview, type DashboardServerSummary } from '../../lib/dashboard-api';
+import { csrfHeaders } from '../../lib/csrf';
 
 type ClaimMethod = 'plugin' | 'dns' | 'motd';
 type ClaimMethodState = 'pending' | 'verified' | 'expired' | 'failed';
@@ -680,7 +681,7 @@ export function ClaimWorkflow() {
     try {
       const response = await fetch(`${apiBase}/v1/servers/${serverId}/claim/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
         body: JSON.stringify({ methods: [selectedMethod] }),
       });
@@ -737,7 +738,7 @@ export function ClaimWorkflow() {
     try {
       const response = await fetch(`${apiBase}/v1/servers/${serverId}/claim/verify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
         body: JSON.stringify({ method: selectedMethod, proof }),
       });

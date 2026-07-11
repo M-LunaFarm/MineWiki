@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ServerReview } from '@minewiki/schemas';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
+import { csrfHeaders } from '../../lib/csrf';
 
 interface ReviewListProps {
   readonly serverId: string;
@@ -138,7 +139,7 @@ export function ReviewList({
     try {
       const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews/${reviewId}/report`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
       });
       if (!response.ok) {
@@ -162,7 +163,7 @@ export function ReviewList({
     try {
       const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews/${reviewId}/reply`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
         body: JSON.stringify({ body: draft }),
       });
@@ -238,6 +239,7 @@ export function ReviewList({
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(await csrfHeaders()),
           },
           credentials: 'include',
           body: JSON.stringify({ isHelpful: nextHelpful }),
@@ -317,6 +319,7 @@ export function ReviewList({
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
+          ...(await csrfHeaders()),
         },
         credentials: 'include',
         body: JSON.stringify({
@@ -366,6 +369,7 @@ export function ReviewList({
       const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews/${review.id}`, {
         method: 'DELETE',
         credentials: 'include',
+        headers: await csrfHeaders(),
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));

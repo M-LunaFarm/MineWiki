@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@minewiki/ui';
 import type { ServerReview, ReviewGateStatus } from '@minewiki/schemas';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
+import { csrfHeaders } from '../../lib/csrf';
 
 type ReviewTag = 'performance' | 'community' | 'staff' | 'stability' | 'content' | 'economy';
 
@@ -83,7 +84,8 @@ export function ReviewComposer({
       const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(await csrfHeaders())
         },
         credentials: 'include',
         body: JSON.stringify({

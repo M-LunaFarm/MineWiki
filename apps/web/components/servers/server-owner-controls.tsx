@@ -265,6 +265,7 @@ export function ServerOwnerControls({
       const response = await fetch(`${baseUrl}/v1/servers/${serverId}/wiki`, {
         method: 'POST',
         credentials: 'include',
+        headers: await csrfHeaders(),
       });
       if (!response.ok) {
         throw new Error(`서버 위키를 만들지 못했습니다. (${response.status})`);
@@ -304,7 +305,7 @@ export function ServerOwnerControls({
     try {
       const response = await fetch(`${baseUrl}/v1/servers/${serverId}/vote-policy`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
         body: JSON.stringify({ requiresOwnership: next }),
       });
@@ -412,7 +413,7 @@ export function ServerOwnerControls({
       try {
         const response = await fetch(`${baseUrl}/v1/servers/${serverId}/votifier`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
           credentials: 'include',
           body: JSON.stringify({ targets: normalized }),
         });

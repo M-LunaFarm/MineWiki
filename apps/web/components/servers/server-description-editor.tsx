@@ -21,6 +21,7 @@ import {
   renderSafeMarkdown,
   stripMarkdownImages,
 } from '../../lib/markdown';
+import { csrfHeaders } from '../../lib/csrf';
 
 const MAX_EDITOR_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
 
@@ -183,7 +184,7 @@ export function ServerDescriptionEditor({
         const dataUrl = await readFileAsDataUrl(file);
         const response = await fetch(`${apiBaseUrl}/v1/files/images`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
           credentials: 'include',
           body: JSON.stringify({
             data: dataUrl,

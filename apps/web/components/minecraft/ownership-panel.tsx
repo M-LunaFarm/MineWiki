@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { MinecraftIdentity } from '@minewiki/schemas';
 import { createAccountMergeRequest } from '../../lib/auth-client';
 import { getApiBaseUrl } from '../../lib/runtime-config';
+import { csrfHeaders } from '../../lib/csrf';
 
 const API_BASE_URL = getApiBaseUrl();
 
@@ -43,7 +44,7 @@ async function completeDiscordVerifySession(
     {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
       body: JSON.stringify({
         completionToken,
         minecraftUuid: identity.uuid,
@@ -115,7 +116,7 @@ export function MinecraftOwnershipPanel() {
       try {
         const response = await fetch(`${API_BASE_URL}/v1/minecraft/verify`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
           credentials: 'include',
           body: JSON.stringify({
             authorizationCode: trimmedCode,
@@ -291,7 +292,7 @@ export function MinecraftOwnershipPanel() {
     try {
       const response = await fetch(`${API_BASE_URL}/v1/minecraft/oauth/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
         body: JSON.stringify({}),
       });
@@ -357,6 +358,7 @@ export function MinecraftOwnershipPanel() {
       const response = await fetch(`${API_BASE_URL}/v1/minecraft/identity`, {
         method: 'DELETE',
         credentials: 'include',
+        headers: await csrfHeaders(),
       });
 
       if (!response.ok) {

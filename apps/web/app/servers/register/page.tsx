@@ -33,6 +33,7 @@ import {
 import { useAuth } from '../../../components/providers/auth-context';
 import { normalizeApiBaseUrl } from '../../../lib/runtime-config';
 import { buildServerPath } from '../../../lib/server-routes';
+import { csrfHeaders } from '../../../lib/csrf';
 import { SiteHeader } from '../../../components/layout/site-header';
 import { ServerDescriptionEditor } from '../../../components/servers/server-description-editor';
 import {
@@ -328,7 +329,7 @@ export default function ServerRegisterPage() {
       try {
         const response = await fetch(`${apiBaseUrl}/v1/servers/${serverId}/banner`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
           credentials: 'include',
           body: JSON.stringify({ data: dataUrl }),
         });
@@ -439,7 +440,7 @@ export default function ServerRegisterPage() {
     try {
       const response = await fetch(`${apiBaseUrl}/v1/servers`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
         body: JSON.stringify(parsed.data),
       });

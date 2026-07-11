@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { X, Shield, ChevronRight, Vote } from 'lucide-react';
+import { csrfHeaders } from '../../lib/csrf';
 
 interface VoteResponse {
   acknowledged: boolean;
@@ -132,6 +133,7 @@ export function VoteModal({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(await csrfHeaders()),
         },
         credentials: 'include',
         body: JSON.stringify({
