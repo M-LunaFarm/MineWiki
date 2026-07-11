@@ -6,7 +6,7 @@ Last reviewed: 2026-07-06
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Auth cookies | Pass | `SessionService` issues `mw_session` as `httpOnly`, `secure`, `sameSite=strict`, scoped to `/`. |
+| Auth cookies | Pass | `SessionService` issues `mw_session` as `httpOnly`, `secure`, `sameSite=strict`, scoped to `/`. OAuth provider choice never grants elevated access; roles and permissions are resolved for every request. |
 | CSRF | Pass | Unsafe cookie-auth requests require `x-csrf-token`; bearer and same-origin safe cases are covered by `session/csrf.test.ts`. |
 | OAuth state | Pass | OAuth and Microsoft flows bind state to redirect URI/account context and reject mismatches. |
 | Discord verify token | Pass | Create response keeps `verifyToken` for bot flow; public get/complete responses sanitize it. |

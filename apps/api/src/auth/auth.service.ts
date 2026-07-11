@@ -541,7 +541,7 @@ export class AuthService {
 
     const session = await this.sessions.issueSession({
       userId: updatedSessionAccount.id,
-      elevated: provider === 'discord',
+      elevated: false,
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
     });

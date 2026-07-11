@@ -168,10 +168,16 @@ if (!hasDatabase) {
       displayName: 'DiscordUser',
     });
 
+    const discordSession = await prisma.session.findUnique({
+      where: { id: discordAccount.sessionId },
+      select: { isElevated: true },
+    });
+
     assert.notEqual(emailAccount.account.id, discordAccount.account.id);
     assert.equal(discordAccount.account.provider, 'discord');
     assert.equal(discordAccount.account.email, email);
     assert.equal(discordAccount.account.linkedAccountIds.length, 0);
+    assert.equal(discordSession?.isElevated, false);
   });
 
   test('manual account linking requires feature flag and confirmation', async () => {

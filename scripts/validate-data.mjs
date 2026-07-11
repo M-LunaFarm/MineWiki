@@ -150,6 +150,16 @@ async function runValidation() {
     `,
   );
 
+  await errorIfRows(
+    'sessions use role-based access instead of elevated bypass',
+    `
+      SELECT s.id
+      FROM Session s
+      WHERE s.isElevated = TRUE
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
   await validatePluginCredentials();
   await validateExpiredReplayGuards();
   await validateRenderCache();
