@@ -8,6 +8,11 @@ const nginxFiles = [
   'infra/nginx/minewiki.routes.conf',
 ];
 
+const exampleEnvironment = await readFile('.env.example', 'utf8');
+if (exampleEnvironment.includes('apps/cdn')) {
+  throw new Error('.env.example must not send new uploads to the retired legacy CDN.');
+}
+
 for (const file of nginxFiles) {
   const source = await readFile(file, 'utf8');
   if (/location \/cdn\//.test(source) || source.includes('apps/cdn')) {

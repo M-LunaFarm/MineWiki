@@ -4,20 +4,19 @@ MineWiki keeps the wiki as the main product, promotes the former VoteWeb code in
 
 ## Product Routing
 
-- `/`, `/wiki/*`, `/mod/*`, `/server/*`, `/dev/*`: `apps/wiki`
-- `/servers`, `/servers/:id`: `apps/web`
+- `/`, `/wiki/*`, `/mod/*`, `/server/*`, `/dev/*`: `apps/web`
+- `/servers`, `/servers/:id`, `/support`, `/me`, `/guilds/*`: `apps/web`
 - `/api/*`: `apps/api`
-- `/cdn/*`: `apps/cdn`
-- `/verify` and Minecraft account linking: migrate into `apps/api`, `apps/bot`, and `apps/worker`
+- `/uploads/*`: permission-aware file reads through `apps/api`
+- Discord verification and Minecraft account linking: `apps/api`, `apps/bot`, and `apps/worker`
 
 ## App Boundaries
 
-- `apps/wiki`: Fastify MineWiki engine and server wiki documents
-- `apps/web`: MineWiki Servers Next.js UI
+- `apps/web`: unified Next.js UI for wiki, server ranking, accounts, support, and guild management
 - `apps/api`: Nest API for accounts, server directory, voting, ownership, Minecraft auth, and support
 - `apps/worker`: BullMQ workers for pinging, vote dispatch, claims, ranks, and digest jobs
 - `apps/bot`: Discord command surface, now under the `/minewiki` command family
-- `legacy/luna-votifier`: migration-only source for Discord/Minecraft verification behavior
+- `legacy/*` and `apps/cdn`: migration-only references; neither is an active workspace or production service
 
 ## Data Integration
 

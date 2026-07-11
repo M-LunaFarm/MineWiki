@@ -146,7 +146,7 @@ function validProductionEnv() {
     NAVER_REDIRECT_URI: 'https://minewiki.kr/auth/callback/naver',
     TURNSTILE_SECRET_KEY: 'turnstile-secret',
     NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'turnstile-site-key',
-    UPLOAD_STORAGE_ROOT: '/var/www/MineWiki/apps/cdn/storage',
+    UPLOAD_STORAGE_ROOT: '/var/www/MineWiki/storage/uploads',
     STORAGE_PUBLIC_BASE_URL: 'https://minewiki.kr/uploads',
     SMTP_HOST: 'smtp.example.com',
     SMTP_FROM: 'MineWiki <no-reply@minewiki.kr>',
