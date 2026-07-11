@@ -76,3 +76,45 @@ test('plugin claim tokens cannot be issued without an authenticated plugin proof
     /Plugin ownership verification is unavailable/,
   );
 });
+
+test('pending claim tokens expire 24 hours after issuance and cannot be verified', async () => {
+  const staleMethod = {
+    id: 'claim-method-stale',
+    serverId: 'server-1',
+    accountId: 'account-1',
+    method: 'dns',
+    token: hashClaimToken('stale-token'),
+    issuedAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    status: 'pending',
+    verifiedAt: null,
+    lastCheckedAt: null,
+    note: 'token_issued',
+  };
+  const updates: Array<Record<string, unknown>> = [];
+  const prisma = {
+    serverClaimMethod: {
+      findMany: async () => [staleMethod],
+      findUnique: async () => ({ ...staleMethod, status: updates.length > 0 ? 'expired' : 'pending' }),
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        updates.push(data);
+        return { ...staleMethod, ...data };
+      },
+    },
+    server: {
+      update: async () => ({}),
+    },
+    $transaction: async (operations: Array<Promise<unknown>>) => Promise.all(operations),
+  };
+  const service = new ClaimService(
+    { ensureExists: async () => ({ ownerAccountId: null }) } as never,
+    prisma as never,
+  );
+
+  await assert.rejects(
+    () => service.verifyMethod('server-1', 'dns', 'stale-token', 'account-1'),
+    /만료되었습니다/,
+  );
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0]?.status, 'expired');
+  assert.equal(updates[0]?.note, 'token_expired');
+});

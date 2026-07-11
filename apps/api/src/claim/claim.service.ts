@@ -104,6 +104,7 @@ export class ClaimService {
     accountId: string,
   ): Promise<ClaimStatusResponse> {
     const server = await this.serverService.ensureExists(serverId);
+    await this.expireMethodsIfNeeded(serverId);
 
     const methodState = await this.prisma.serverClaimMethod.findUnique({
       where: {
@@ -116,6 +117,9 @@ export class ClaimService {
 
     if (!methodState) {
       throw new BadRequestException('검증 토큰을 먼저 발급해주세요.');
+    }
+    if (methodState.status === 'expired') {
+      throw new BadRequestException('검증 토큰이 만료되었습니다. 토큰을 다시 발급받아 주세요.');
     }
 
     this.assertCanUseClaimMethod(server.ownerAccountId, methodState.accountId, accountId);
@@ -218,11 +222,11 @@ export class ClaimService {
   private async expireMethodsIfNeeded(serverId: string): Promise<void> {
     const now = Date.now();
     const methods = await this.prisma.serverClaimMethod.findMany({
-      where: { serverId, status: 'verified' },
+      where: { serverId, status: { in: ['pending', 'verified'] } },
     });
 
     const expired = methods.filter(
-      (method) => method.verifiedAt && now - method.verifiedAt.getTime() > METHOD_EXPIRY_MS,
+      (method) => now - (method.verifiedAt ?? method.issuedAt).getTime() > METHOD_EXPIRY_MS,
     );
 
     if (expired.length === 0) {
@@ -341,8 +345,8 @@ export class ClaimService {
     if (!isSupportedClaimMethod(method.method)) {
       throw new BadRequestException('지원하지 않는 검증 방식입니다.');
     }
-    const expiresAt = method.verifiedAt
-      ? new Date(method.verifiedAt.getTime() + METHOD_EXPIRY_MS)
+    const expiresAt = method.status === 'pending' || method.status === 'verified'
+      ? new Date((method.verifiedAt ?? method.issuedAt).getTime() + METHOD_EXPIRY_MS)
       : undefined;
     return {
       method: method.method as ClaimMethod,
