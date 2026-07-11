@@ -46,10 +46,6 @@ const observabilityExporter = new ObservabilityExporter({
   source: 'worker',
 });
 
-prisma.$connect().catch((error) => {
-  Logger.error({ err: error }, 'Prisma connection failed');
-});
-
 const sentryDsn = config.getOptional('SENTRY_DSN');
 if (sentryDsn) {
   Sentry.init({ dsn: sentryDsn, environment: config.get('NODE_ENV', 'development') });
@@ -214,7 +210,7 @@ function createWorker<Data extends WorkerJobData, Result = unknown>(
   const queue = createQueue(name, jobOptions);
   const worker = new BullWorker<Data, Result, string>(name, withTelemetry(name, processor), {
     connection,
-    autorun: true,
+    autorun: false,
   });
   workers.push(worker);
   return queue;
@@ -301,10 +297,6 @@ function scheduleInterval(name: string, intervalMs: number, task: () => Promise<
   void run();
   intervals.push(setInterval(run, intervalMs));
 }
-
-scheduleInterval('server-ping', PING_INTERVAL_MS, enqueueServerPings);
-scheduleInterval('claim-check', CLAIM_SCAN_INTERVAL_MS, enqueueClaimChecks);
-scheduleInterval('rank-aggregation', RANK_INTERVAL_MS, enqueueRankAggregation);
 
 async function addJobSafely(
   queue: Queue,
@@ -484,13 +476,25 @@ function computeNextDigest(timezone: string, reference: DateTime): DateTime {
   return zonedNow <= startOfToday ? startOfToday : startOfToday.plus({ days: 1 });
 }
 
-async function shutdown(signal: string) {
-  Logger.warn({ signal }, 'Received shutdown signal, closing workers');
+let shuttingDown = false;
+
+async function closeResources(): Promise<void> {
   intervals.forEach((interval) => clearInterval(interval));
-  await Promise.all(workers.map((worker) => worker.close()));
-  await Promise.all(queues.map((queue) => queue.close()));
-  await connection.quit();
-  await prisma.$disconnect();
+  await Promise.allSettled(workers.map((worker) => worker.close()));
+  await Promise.allSettled(queues.map((queue) => queue.close()));
+  if (connection.status !== 'end') {
+    await connection.quit().catch(() => connection.disconnect());
+  }
+  await prisma.$disconnect().catch(() => undefined);
+}
+
+async function shutdown(signal: string) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  Logger.warn({ signal }, 'Received shutdown signal, closing workers');
+  await closeResources();
   Logger.info('Workers shut down gracefully');
   process.exit(0);
 }
@@ -498,7 +502,28 @@ async function shutdown(signal: string) {
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);
 
-Logger.info({ redisUrl }, 'Worker bootstrapped and waiting for jobs');
+async function bootstrapWorker(): Promise<void> {
+  await prisma.$connect();
+  await connection.ping();
+
+  for (const worker of workers) {
+    void worker.run().catch((error) => {
+      Logger.error({ err: error, worker: worker.name }, 'Worker run loop stopped unexpectedly');
+    });
+  }
+
+  scheduleInterval('server-ping', PING_INTERVAL_MS, enqueueServerPings);
+  scheduleInterval('claim-check', CLAIM_SCAN_INTERVAL_MS, enqueueClaimChecks);
+  scheduleInterval('rank-aggregation', RANK_INTERVAL_MS, enqueueRankAggregation);
+  Logger.info({ redisUrl, workerCount: workers.length }, 'Worker bootstrapped and waiting for jobs');
+}
+
+void bootstrapWorker().catch(async (error) => {
+  Logger.error({ err: error }, 'Worker bootstrap failed');
+  shuttingDown = true;
+  await closeResources();
+  process.exit(1);
+});
 
 export {
   voteQueue,
