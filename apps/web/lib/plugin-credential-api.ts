@@ -20,6 +20,12 @@ export interface IssuedPluginCredential extends PluginCredentialSummary {
   readonly secret: string;
 }
 
+export interface PluginCredentialEvent {
+  readonly id: string;
+  readonly action: string;
+  readonly createdAt: string;
+}
+
 export async function fetchPluginCredentials(
   serverId: string,
   apiBaseUrl?: string,
@@ -36,6 +42,20 @@ export async function createPluginCredential(
     serverId,
     '',
     { method: 'POST', body: JSON.stringify(payload) },
+    apiBaseUrl,
+  );
+}
+
+export async function fetchPluginCredentialEvents(
+  serverId: string,
+  credentialId: string,
+  limit = 50,
+  apiBaseUrl?: string,
+): Promise<PluginCredentialEvent[]> {
+  return pluginCredentialRequest<PluginCredentialEvent[]>(
+    serverId,
+    `/${encodeURIComponent(credentialId)}/events?limit=${encodeURIComponent(String(limit))}`,
+    undefined,
     apiBaseUrl,
   );
 }

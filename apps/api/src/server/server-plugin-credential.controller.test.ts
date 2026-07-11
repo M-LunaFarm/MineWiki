@@ -112,6 +112,40 @@ test('credential can be disabled without current guild access', async () => {
   assert.equal(enabledValue, false);
 });
 
+test('plugin diagnostics require current access to the bound guild', async () => {
+  let eventsRead = false;
+  const controller = createController(
+    {
+      async assertCanManageGuild() {
+        throw new ForbiddenException('Discord guild management permission is required.');
+      },
+    },
+    {
+      async create() {
+        throw new Error('create should not run');
+      },
+      async get() {
+        return { guildId: '1234567890' };
+      },
+      async listEvents() {
+        eventsRead = true;
+        return [];
+      },
+    },
+  );
+
+  await assert.rejects(
+    () => controller.listPluginCredentialEvents(
+      'server-1',
+      'credential-1',
+      '50',
+      session,
+    ),
+    ForbiddenException,
+  );
+  assert.equal(eventsRead, false);
+});
+
 function createController(
   guildAccess: { assertCanManageGuild(session: SessionPayload, guildId: string): Promise<void> },
   pluginCredentials: { create(serverId: string, input: { guildId: string }, actor: string): Promise<any>; [key: string]: any } = {

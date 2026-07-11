@@ -135,6 +135,20 @@ export class ServerController {
   }
 
   @UseGuards(SessionGuard)
+  @Get(':id/plugin-credentials/:credentialId/events')
+  async listPluginCredentialEvents(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('credentialId', new ParseUUIDPipe()) credentialId: string,
+    @Query('limit') limit: string | undefined,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    const credential = await this.pluginCredentials.get(id, credentialId);
+    await this.guildAccess.assertCanManageGuild(session, credential.guildId);
+    return this.pluginCredentials.listEvents(id, credentialId, limit);
+  }
+
+  @UseGuards(SessionGuard)
   @Post(':id/plugin-credentials')
   @Throttle({ default: { limit: 5, ttl: 300 } })
   async createPluginCredential(

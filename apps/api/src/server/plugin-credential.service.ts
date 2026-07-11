@@ -24,6 +24,12 @@ export interface IssuedPluginCredential extends PluginCredentialSummary {
   readonly secret: string;
 }
 
+export interface PluginCredentialEvent {
+  readonly id: string;
+  readonly action: string;
+  readonly createdAt: string;
+}
+
 @Injectable()
 export class PluginCredentialService {
   constructor(
@@ -41,6 +47,26 @@ export class PluginCredentialService {
 
   async get(serverId: string, credentialId: string): Promise<PluginCredentialSummary> {
     return toSummary(await this.findOwnedCredential(serverId, credentialId));
+  }
+
+  async listEvents(
+    serverId: string,
+    credentialId: string,
+    limitInput?: string | number,
+  ): Promise<PluginCredentialEvent[]> {
+    const credential = await this.findOwnedCredential(serverId, credentialId);
+    const limit = Math.min(Math.max(Number(limitInput ?? 50) || 50, 1), 100);
+    const events = await this.prisma.serverPluginSyncEvent.findMany({
+      where: { pluginServerId: credential.pluginServerId },
+      select: { id: true, action: true, createdAt: true },
+      orderBy: [{ createdAt: 'desc' }],
+      take: limit,
+    });
+    return events.map((event) => ({
+      id: event.id,
+      action: event.action,
+      createdAt: event.createdAt.toISOString(),
+    }));
   }
 
   async create(

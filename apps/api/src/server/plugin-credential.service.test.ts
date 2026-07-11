@@ -76,6 +76,46 @@ test('plugin credential list never includes stored secrets', async () => {
   assert.equal('serverSecret' in (rows[0] ?? {}), false);
 });
 
+test('plugin credential diagnostics exclude identities and payloads', async () => {
+  let query: unknown;
+  const service = new PluginCredentialService({
+    pluginServer: {
+      async findFirst() {
+        return { ...baseRow, serverSecret: 'hidden' };
+      },
+    },
+    serverPluginSyncEvent: {
+      async findMany(input: unknown) {
+        query = input;
+        return [
+          {
+            id: 'event-1',
+            action: 'bad_signature',
+            createdAt: new Date('2026-01-02T00:00:00.000Z'),
+            minecraftUuid: 'must-not-leak',
+            discordUserId: 'must-not-leak',
+            payload: { nonce: 'must-not-leak' },
+          },
+        ];
+      },
+    },
+  } as never);
+
+  const events = await service.listEvents('server-1', 'credential-1', 500);
+
+  assert.deepEqual(query, {
+    where: { pluginServerId: 'plugin-server-1' },
+    select: { id: true, action: true, createdAt: true },
+    orderBy: [{ createdAt: 'desc' }],
+    take: 100,
+  });
+  assert.deepEqual(events, [
+    { id: 'event-1', action: 'bad_signature', createdAt: '2026-01-02T00:00:00.000Z' },
+  ]);
+  assert.equal('payload' in (events[0] ?? {}), false);
+  assert.equal('minecraftUuid' in (events[0] ?? {}), false);
+});
+
 test('plugin credential rotation replaces the stored secret', async () => {
   const previousKey = process.env.APP_ENCRYPTION_KEY;
   process.env.APP_ENCRYPTION_KEY = 'plugin-credential-rotation-key';
