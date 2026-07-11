@@ -19,8 +19,7 @@ export function SiteFooter() {
               </span>
             </Link>
             <p className="max-w-sm text-sm leading-6">
-              한국 마인크래프트 서버를 등록하고, 검증 상태와 리뷰를 기준으로 비교할 수 있는 서버
-              목록 서비스입니다.
+              서버 랭킹과 위키 지식을 연결해 발견부터 플레이까지 돕는 한국 마인크래프트 커뮤니티입니다.
             </p>
           </div>
 
@@ -54,7 +53,7 @@ export function SiteFooter() {
         </div>
 
         <div className="flex flex-col items-start justify-between gap-4 border-t border-[#272c33] pt-8 md:flex-row md:items-center">
-          <p className="text-xs">© 2026 MineWiki. Mojang Studios와 공식 제휴 관계가 없습니다.</p>
+          <p className="text-xs">© 2026 MineWiki · minewiki.kr · support@minewiki.kr · Mojang Studios와 공식 제휴 관계가 없습니다.</p>
           <div className="flex gap-4 text-sm">
             <a
               className="inline-flex items-center gap-1 transition-colors hover:text-[#13ec80]"
