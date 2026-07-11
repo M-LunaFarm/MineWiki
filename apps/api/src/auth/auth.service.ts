@@ -710,13 +710,7 @@ export class AuthService {
     await this.prisma.emailVerification.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
-    const pending =
-      (await this.prisma.emailVerification.findUnique({
-        where: { token: hashAuthToken(token) },
-      })) ??
-      (await this.prisma.emailVerification.findUnique({
-        where: { token },
-      }));
+    const pending = await this.findEmailVerificationByPresentedToken(token);
     if (!pending) {
       throw new BadRequestException('유효하지 않거나 만료된 인증 토큰입니다.');
     }
@@ -762,13 +756,7 @@ export class AuthService {
     await this.prisma.passwordReset.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
-    const pending =
-      (await this.prisma.passwordReset.findUnique({
-        where: { token: hashAuthToken(token) },
-      })) ??
-      (await this.prisma.passwordReset.findUnique({
-        where: { token },
-      }));
+    const pending = await this.findPasswordResetByPresentedToken(token);
     if (!pending) {
       throw new BadRequestException('유효하지 않거나 만료된 비밀번호 재설정 토큰입니다.');
     }
@@ -791,6 +779,32 @@ export class AuthService {
       return undefined;
     }
     return `${baseUrl.replace(/\/$/, '')}/login/reset-password?token=${encodeURIComponent(token)}`;
+  }
+
+  private async findEmailVerificationByPresentedToken(token: string) {
+    const hashed = hashAuthToken(token);
+    return (
+      (await this.prisma.emailVerification.findUnique({ where: { token: hashed } })) ??
+      (await this.prisma.emailVerification.findUnique({
+        where: { token: hashed.slice(AUTH_TOKEN_HASH_PREFIX.length) },
+      })) ??
+      (isLegacyRawAuthToken(token)
+        ? await this.prisma.emailVerification.findUnique({ where: { token } })
+        : null)
+    );
+  }
+
+  private async findPasswordResetByPresentedToken(token: string) {
+    const hashed = hashAuthToken(token);
+    return (
+      (await this.prisma.passwordReset.findUnique({ where: { token: hashed } })) ??
+      (await this.prisma.passwordReset.findUnique({
+        where: { token: hashed.slice(AUTH_TOKEN_HASH_PREFIX.length) },
+      })) ??
+      (isLegacyRawAuthToken(token)
+        ? await this.prisma.passwordReset.findUnique({ where: { token } })
+        : null)
+    );
   }
 
   private async dispatchVerificationEmail(verification: PendingEmailVerification): Promise<void> {
@@ -844,6 +858,12 @@ class NotFoundAccountError extends NotFoundException {
   }
 }
 
+const AUTH_TOKEN_HASH_PREFIX = 'sha256:';
+
 export function hashAuthToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
+  return `${AUTH_TOKEN_HASH_PREFIX}${createHash('sha256').update(token).digest('hex')}`;
+}
+
+function isLegacyRawAuthToken(token: string): boolean {
+  return /^[a-f0-9]{48}$/i.test(token);
 }

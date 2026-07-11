@@ -83,6 +83,14 @@ if (!hasDatabase) {
 
     assert.equal(registration.status, 'verification-required');
     const token = await getVerificationToken(registration.accountId);
+    const storedVerification = await prisma.emailVerification.findFirst({
+      where: { accountId: registration.accountId },
+    });
+    assert.ok(storedVerification?.token);
+    await assert.rejects(
+      () => service.verifyEmail(storedVerification.token),
+      (error: unknown) => error instanceof BadRequestException,
+    );
 
     await assert.rejects(
       () => service.loginEmail({ email, password: 'SupersafePW1!' }),
@@ -147,6 +155,14 @@ if (!hasDatabase) {
 
     await service.requestPasswordReset(email);
     const resetToken = await getPasswordResetToken(registration.accountId);
+    const storedReset = await prisma.passwordReset.findFirst({
+      where: { accountId: registration.accountId },
+    });
+    assert.ok(storedReset?.token);
+    await assert.rejects(
+      () => service.resetPassword(storedReset.token, 'AttackerPW1!'),
+      (error: unknown) => error instanceof BadRequestException,
+    );
     await service.resetPassword(resetToken, 'UpdatedPW1!');
 
     await assert.rejects(
