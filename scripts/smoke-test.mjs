@@ -27,6 +27,11 @@ const checks = [
     expectedStatuses: [200],
   },
   {
+    name: 'api readiness',
+    url: `${apiBaseUrl}/ready`,
+    expectedStatuses: [200],
+  },
+  {
     name: 'auth providers',
     url: `${apiBaseUrl}/v1/auth/providers`,
     expectedStatuses: [200],
@@ -39,6 +44,11 @@ const checks = [
   {
     name: 'proxied api wiki page',
     url: `${webBaseUrl}/api/v1/wiki/page/by-path?path=${encodeURIComponent('/wiki/대문')}`,
+    expectedStatuses: [200],
+  },
+  {
+    name: 'proxied api readiness',
+    url: `${webBaseUrl}/api/ready`,
     expectedStatuses: [200],
   },
 ];
