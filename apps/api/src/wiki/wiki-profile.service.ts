@@ -67,28 +67,28 @@ export class WikiProfileService {
       const legacyByEmail = await this.prisma.wikiProfile.findUnique({
         where: { email: account.email }
       });
-      if (legacyByEmail && !legacyByEmail.accountId) {
-        return this.prisma.wikiProfile.update({
-          where: { id: legacyByEmail.id },
-          data: {
-            accountId,
-            displayName: this.displayNameFor(account.displayName, account.email, legacyByEmail.displayName),
-            updatedAt: new Date()
-          }
-        });
-      }
       if (legacyByEmail?.accountId === accountId) {
         return legacyByEmail;
       }
+      if (legacyByEmail) {
+        return this.createWikiProfile(account, null);
+      }
     }
 
+    return this.createWikiProfile(account, account.email);
+  }
+
+  private createWikiProfile(
+    account: { id: string; provider: string; displayName: string | null; email: string | null },
+    profileEmail: string | null
+  ) {
     const now = new Date();
     return this.prisma.wikiProfile.create({
       data: {
-        accountId,
+        accountId: account.id,
         username: this.usernameFor(account.provider, account.id),
         displayName: this.displayNameFor(account.displayName, account.email),
-        email: account.email,
+        email: profileEmail,
         status: 'active',
         createdAt: now,
         updatedAt: now
