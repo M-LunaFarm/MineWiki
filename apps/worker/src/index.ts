@@ -14,6 +14,7 @@ import {
   createDiscordDigestSender,
   createDiscordDigestDeliverer,
   type DiscordDigestResult,
+  type DiscordDigestExecutionJob,
 } from './processors/discord-digest';
 import { createDiscordVerifySyncer } from './processors/discord-verify-sync';
 import {
@@ -26,6 +27,7 @@ import {
 } from './job-log-context';
 import { loadVoteDispatchExecutionJob } from './vote-job-loader';
 import { loadDiscordVerifyExecutionJob } from './discord-sync-job-loader';
+import { loadDiscordDigestExecutionJob } from './discord-digest-job-loader';
 import type {
   ClaimVerificationJob,
   DiscordDigestJob,
@@ -302,8 +304,9 @@ const discordDigestQueue = createWorker<DiscordDigestJob, DiscordDigestResult>(
     { jobId: job.id, ...discordDigestLogContext(job.data) },
     'Processing Discord digest job',
   );
-  const result = await discordDigestSender.send(job.data);
-  await handleDigestOutcome(job.data, result);
+  const executionJob = await loadDiscordDigestExecutionJob(prisma, job.data);
+  const result = await discordDigestSender.send(executionJob);
+  await handleDigestOutcome(executionJob, result);
   return result;
   },
 );
@@ -479,7 +482,7 @@ async function enqueueRankAggregation(): Promise<void> {
 }
 
 async function handleDigestOutcome(
-  job: DiscordDigestJob,
+  job: DiscordDigestExecutionJob,
   result: DiscordDigestResult,
 ): Promise<void> {
   if (result.delivered) {

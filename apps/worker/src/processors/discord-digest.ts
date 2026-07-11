@@ -48,9 +48,15 @@ export interface DigestMessage {
   readonly allowedMentions?: DiscordAllowedMentions;
 }
 
-type DiscordDeliver = (job: DiscordDigestJob) => Promise<void>;
+export interface DiscordDigestExecutionJob extends DiscordDigestJob {
+  readonly channelId: string;
+  readonly timezone: string;
+  readonly roleRewardId?: string;
+}
 
-type PrismaHandle = Pick<PrismaClient, 'discordSubscription' | 'serverStats' | 'server' | 'serverReview' | 'vote'>;
+type DiscordDeliver = (job: DiscordDigestExecutionJob) => Promise<void>;
+
+type PrismaHandle = Pick<PrismaClient, 'serverStats' | 'server' | 'serverReview' | 'vote'>;
 
 interface DiscordEmbed {
   title?: string;
@@ -73,7 +79,7 @@ interface DiscordMessagePayload {
 }
 
 export function createDiscordDigestSender(deliver: DiscordDeliver) {
-  async function send(job: DiscordDigestJob): Promise<DiscordDigestResult> {
+  async function send(job: DiscordDigestExecutionJob): Promise<DiscordDigestResult> {
     try {
       await deliver(job);
       return {
@@ -120,27 +126,17 @@ export function createDiscordDigestDeliverer(options: {
       throw error;
     }
 
-    const subscription = await prisma.discordSubscription.findUnique({
-      where: { guildId: job.guildId }
-    });
-
-    if (!subscription) {
-      const error = new Error('Subscription not found') as Error & { status?: number };
-      error.status = 404;
-      throw error;
-    }
-
     const reference = DateTime.fromISO(job.scheduledFor, { zone: 'utc' });
     const effectiveReference = reference.isValid ? reference : DateTime.utc();
     const summary = await buildDigestSummary(prisma, effectiveReference);
-    const nextDigestAt = computeNextDigest(subscription.timezone, effectiveReference.plus({ minutes: 1 }));
+    const nextDigestAt = computeNextDigest(job.timezone, effectiveReference.plus({ minutes: 1 }));
     const message = buildDigestMessage(summary, {
-      timezone: subscription.timezone,
+      timezone: job.timezone,
       nextDigestAt,
-      roleRewardId: subscription.roleRewardId ?? undefined
+      roleRewardId: job.roleRewardId
     });
 
-    await sendDiscordMessage(token, subscription.channelId, message);
+    await sendDiscordMessage(token, job.channelId, message);
   };
 }
 

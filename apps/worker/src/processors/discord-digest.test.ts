@@ -1,9 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { DiscordDigestJob } from '@minewiki/schemas';
-import { createDiscordDigestSender } from './discord-digest';
+import { createDiscordDigestSender, type DiscordDigestExecutionJob } from './discord-digest';
 
-const baseJob: DiscordDigestJob = {
+const baseJob: DiscordDigestExecutionJob = {
   guildId: '123',
   channelId: '456',
   scheduledFor: new Date('2024-01-02T00:00:00Z').toISOString(),

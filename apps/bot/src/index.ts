@@ -397,9 +397,7 @@ async function processDueDigests(
   for (const subscription of due) {
     const job = discordDigestJobSchema.parse({
       guildId: subscription.guildId,
-      channelId: subscription.channelId,
-      scheduledFor: subscription.nextDigestAt,
-      timezone: subscription.timezone
+      scheduledFor: subscription.nextDigestAt
     });
 
     try {
