@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@minewiki/config';
+import { ConfigService, assertSupportedQueueServer } from '@minewiki/config';
 import Redis from 'ioredis';
 import { PrismaService } from './common/prisma.service';
 
@@ -59,6 +59,7 @@ export class AppService implements OnModuleDestroy {
               await this.redis!.connect();
             }
             await this.redis!.ping();
+            assertSupportedQueueServer(await this.redis!.info('server'));
           })
         : Promise.resolve<DependencyCheck>({ status: 'disabled', latencyMs: 0 }),
     ]);
