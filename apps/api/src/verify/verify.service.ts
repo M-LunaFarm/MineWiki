@@ -192,7 +192,20 @@ export class VerifyService {
     this.assertCompletionToken(session.completionTokenHash, payload.completionToken);
 
     const minecraftUuid = normalizeMinecraftUuid(payload.minecraftUuid);
-    const minecraftName = payload.playerName ?? minecraftUuid.replace(/-/g, '').slice(0, 16);
+    const ownedIdentity = await this.prisma.minecraftIdentity.findFirst({
+      where: {
+        accountId,
+        uuid: minecraftUuid,
+        msOwned: true,
+      },
+      select: { playerName: true },
+    });
+    if (!ownedIdentity) {
+      throw new ForbiddenException(
+        'Microsoft account verification is required for this Minecraft identity.',
+      );
+    }
+    const minecraftName = ownedIdentity.playerName;
     await this.assertDiscordVerifyLinkConflicts(session, accountId, minecraftUuid);
     const result = await this.prisma.discordVerificationSession.updateMany({
       where: { id: session.id, status: 'pending' },

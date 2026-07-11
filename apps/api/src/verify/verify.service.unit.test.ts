@@ -9,6 +9,7 @@ function createHarness(options: {
   readonly existingDiscordLink?: { discordUserId: string; minecraftUuid: string };
   readonly existingMinecraftLink?: { discordUserId: string; minecraftUuid: string };
   readonly conflictingMinecraftAccountId?: string;
+  readonly ownsMinecraftIdentity?: boolean;
 } = {}) {
   let session: Record<string, unknown> | null = null;
   const prisma = {
@@ -61,7 +62,12 @@ function createHarness(options: {
       }
     },
     minecraftIdentity: {
-      async findFirst() {
+      async findFirst(args: { where: { accountId?: string | { not: string }; uuid?: string } }) {
+        if (typeof args.where.accountId === 'string') {
+          return options.ownsMinecraftIdentity === false
+            ? null
+            : { accountId: args.where.accountId, playerName: 'VerifiedPlayer' };
+        }
         return options.conflictingMinecraftAccountId
           ? { accountId: options.conflictingMinecraftAccountId }
           : null;
@@ -143,6 +149,23 @@ test('discord verify completes with a valid completion token', async () => {
 
   assert.equal(completed.status, 'sync_pending');
   assert.equal(new URL(completed.verificationUrl).searchParams.has('verifyToken'), false);
+});
+
+test('discord verify rejects Minecraft identities without Microsoft ownership proof', async () => {
+  const harness = createHarness({ ownsMinecraftIdentity: false });
+  const { response, completionToken } = await createPendingSession(harness);
+
+  await assert.rejects(
+    () =>
+      harness.service.completeDiscordSession(response.sessionId, randomUUID(), {
+        completionToken,
+        minecraftUuid: randomUUID(),
+        playerName: 'UnverifiedPlayer',
+      }),
+    /Microsoft account verification is required/,
+  );
+
+  assert.equal((harness.session as { status?: string })?.status, 'pending');
 });
 
 test('discord verify create response includes one-time completion token', async () => {
