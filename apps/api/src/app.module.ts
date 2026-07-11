@@ -23,6 +23,7 @@ import { PluginSyncModule } from './plugin-sync/plugin-sync.module';
 import { FileModule } from './file/file.module';
 import { RoleModule } from './roles/role.module';
 import { EventsModule } from './events/events.module';
+import { RoleAdminModule } from './roles/role-admin.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { EventsModule } from './events/events.module';
     AppConfigModule,
     PrismaModule,
     RoleModule,
+    RoleAdminModule,
     EventsModule
   ],
   controllers: [AppController],

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RoleService } from './role.service';
+import { ConflictException } from '@nestjs/common';
 
 test('role service resolves role and permission codes for an account', async () => {
   const prisma = {
@@ -26,4 +27,75 @@ test('role service resolves role and permission codes for an account', async () 
   assert.deepEqual(access.roles, ['wiki_admin']);
   assert.deepEqual(access.permissions, ['wiki.admin', 'wiki.edit.locked']);
   assert.equal(await service.hasPermission('account-1', 'wiki.admin'), true);
+});
+
+test('role service assigns an existing role idempotently', async () => {
+  let upsertInput: unknown;
+  const prisma = {
+    globalRole: {
+      async findUnique() {
+        return { id: 'role-1', code: 'support_agent' };
+      },
+    },
+    account: {
+      async findUnique() {
+        return { id: 'account-1' };
+      },
+    },
+    accountRole: {
+      async upsert(input: unknown) {
+        upsertInput = input;
+      },
+      async findMany() {
+        return [{ role: { code: 'support_agent', rolePermissions: [] } }];
+      },
+    },
+  };
+  const service = new RoleService(prisma as never);
+
+  const access = await service.assignRole('account-1', 'support_agent');
+
+  assert.deepEqual(access.roles, ['support_agent']);
+  assert.deepEqual(upsertInput, {
+    where: { accountId_roleId: { accountId: 'account-1', roleId: 'role-1' } },
+    update: {},
+    create: { accountId: 'account-1', roleId: 'role-1' },
+  });
+});
+
+test('role service refuses to remove the final owner', async () => {
+  const prisma = {
+    async $transaction(operation: (transaction: unknown) => Promise<unknown>) {
+      return operation({
+        globalRole: {
+          async findUnique() {
+            return { id: 'owner-role', code: 'owner' };
+          },
+        },
+        account: {
+          async findUnique() {
+            return { id: 'account-1' };
+          },
+        },
+        accountRole: {
+          async findUnique() {
+            return { id: 'assignment-1' };
+          },
+          async count() {
+            return 1;
+          },
+          async deleteMany() {
+            throw new Error('delete should not run');
+          },
+        },
+      });
+    },
+  };
+  const service = new RoleService(prisma as never);
+
+  await assert.rejects(
+    () => service.removeRole('account-1', 'owner'),
+    (error: unknown) =>
+      error instanceof ConflictException && /last owner/i.test(error.message),
+  );
 });
