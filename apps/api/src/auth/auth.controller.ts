@@ -291,6 +291,7 @@ export class AuthController {
     @Body('newPassword') newPassword: string,
   ) {
     await this.auth.changePassword(session.userId, currentPassword ?? '', newPassword ?? '');
+    await this.sessions.revokeAllSessions(session.userId, session.sessionId);
     return { success: true };
   }
 

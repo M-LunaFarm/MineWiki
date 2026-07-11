@@ -126,3 +126,33 @@ test('email auth request parsing trims canonical text fields', async () => {
   });
   assert.equal(resendEmail, 'Player@Example.com');
 });
+
+test('changing a password revokes every other active session', async () => {
+  const calls: string[] = [];
+  const controller = new AuthController(
+    {
+      async changePassword(accountId: string) {
+        calls.push(`password:${accountId}`);
+      },
+    } as never,
+    {
+      async revokeAllSessions(accountId: string, exceptSessionId: string) {
+        calls.push(`revoke:${accountId}:${exceptSessionId}`);
+      },
+    } as never,
+    {} as never,
+  );
+  const session = {
+    sessionId: 'session-current',
+    userId: '11111111-1111-4111-8111-111111111111',
+    isElevated: false,
+  } satisfies SessionPayload;
+
+  const result = await controller.changePassword(session, 'CurrentPW1!', 'UpdatedPW1!');
+
+  assert.deepEqual(result, { success: true });
+  assert.deepEqual(calls, [
+    `password:${session.userId}`,
+    `revoke:${session.userId}:${session.sessionId}`,
+  ]);
+});
