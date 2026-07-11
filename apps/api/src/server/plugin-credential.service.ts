@@ -39,6 +39,10 @@ export class PluginCredentialService {
     return rows.map(toSummary);
   }
 
+  async get(serverId: string, credentialId: string): Promise<PluginCredentialSummary> {
+    return toSummary(await this.findOwnedCredential(serverId, credentialId));
+  }
+
   async create(
     serverId: string,
     input: { guildId: string; endpointUrl?: string | null },

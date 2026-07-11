@@ -28,6 +28,7 @@ import {
   ],
   exports: [
     VerifyService,
+    GuildAccessService,
     GuildSettingsRepository,
     GuildChannelSettingsRepository,
     DiscordMinecraftLinkRepository,

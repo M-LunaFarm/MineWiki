@@ -9,9 +9,10 @@ import { WikiModule } from '../wiki/wiki.module';
 import { FileModule } from '../file/file.module';
 import { EventsModule } from '../events/events.module';
 import { PluginCredentialService } from './plugin-credential.service';
+import { VerifyModule } from '../verify/verify.module';
 
 @Module({
-  imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule],
+  imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
   providers: [ServerService, PluginCredentialService],
   controllers: [ServerController, ServerVerificationController],
   exports: [ServerService]

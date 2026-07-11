@@ -35,6 +35,7 @@ import { ClaimService } from '../claim/claim.service';
 import { FileService } from '../file/file.service';
 import { serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schemas';
 import { PluginCredentialService } from './plugin-credential.service';
+import { GuildAccessService } from '../verify/guild-access.service';
 
 const votifierPayloadSchema = z.object({
   targets: z.array(votifierTargetSchema).min(1)
@@ -65,7 +66,8 @@ export class ServerController {
     private readonly serverService: ServerService,
     private readonly claimService: ClaimService,
     private readonly files: FileService,
-    private readonly pluginCredentials: PluginCredentialService
+    private readonly pluginCredentials: PluginCredentialService,
+    private readonly guildAccess: GuildAccessService
   ) {}
 
   @Get()
@@ -142,6 +144,7 @@ export class ServerController {
   ) {
     await this.assertCanManageServer(id, session);
     const payload = pluginCredentialPayloadSchema.parse(body);
+    await this.guildAccess.assertCanManageGuild(session, payload.guildId ?? '');
     return this.pluginCredentials.create(
       id,
       payload as { guildId: string; endpointUrl?: string | null },
@@ -158,6 +161,8 @@ export class ServerController {
     @CurrentSession() session: SessionPayload
   ) {
     await this.assertCanManageServer(id, session);
+    const credential = await this.pluginCredentials.get(id, credentialId);
+    await this.guildAccess.assertCanManageGuild(session, credential.guildId);
     return this.pluginCredentials.rotate(id, credentialId, session.userId);
   }
 
@@ -172,6 +177,10 @@ export class ServerController {
   ) {
     await this.assertCanManageServer(id, session);
     const payload = pluginCredentialStatusSchema.parse(body);
+    if (payload.enabled) {
+      const credential = await this.pluginCredentials.get(id, credentialId);
+      await this.guildAccess.assertCanManageGuild(session, credential.guildId);
+    }
     return this.pluginCredentials.setEnabled(id, credentialId, payload.enabled, session.userId);
   }
 
