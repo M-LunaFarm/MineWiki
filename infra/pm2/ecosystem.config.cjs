@@ -12,7 +12,6 @@ module.exports = {
       args: 'start -H 127.0.0.1 -p 4311',
       env: {
         NODE_ENV: 'production',
-        MINEWIKI_SERVICE: 'api',
         PORT: '4311',
         MINEWIKI_ENV_FILE: envFile,
       },
@@ -23,7 +22,7 @@ module.exports = {
       script: 'dist/apps/api/src/main.js',
       env: {
         NODE_ENV: 'production',
-        MINEWIKI_SERVICE: 'worker',
+        MINEWIKI_SERVICE: 'api',
         API_HOST: '127.0.0.1',
         API_PORT: '3000',
         MINEWIKI_ENV_FILE: envFile,
@@ -35,7 +34,7 @@ module.exports = {
       script: 'dist/apps/worker/src/index.js',
       env: {
         NODE_ENV: 'production',
-        MINEWIKI_SERVICE: 'bot',
+        MINEWIKI_SERVICE: 'worker',
         MINEWIKI_ENV_FILE: envFile,
       },
     },
@@ -45,6 +44,7 @@ module.exports = {
       script: 'dist/apps/bot/src/index.js',
       env: {
         NODE_ENV: 'production',
+        MINEWIKI_SERVICE: 'bot',
         MINEWIKI_ENV_FILE: envFile,
       },
     },

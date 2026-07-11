@@ -88,6 +88,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Validate PM2 service configuration
+        run: pnpm pm2:validate
+
       - name: Build API
         run: pnpm build:api
 
