@@ -58,6 +58,40 @@ test('password change atomically clears pending reset tokens', async () => {
   assert.deepEqual(operations, ['password', 'reset-tokens']);
 });
 
+test('password change rejects reusing the current password', async () => {
+  const accountId = randomUUID();
+  const currentPassword = 'CurrentPW1!';
+  const account = {
+    id: accountId,
+    passwordHash: await hash(currentPassword, {
+      memoryCost: 19456,
+      timeCost: 2,
+      parallelism: 1,
+      outputLen: 32,
+      algorithm: Algorithm.Argon2id,
+    }),
+  };
+  let transactionCalled = false;
+  const service = new AuthService(
+    { getAccount: async () => account } as never,
+    {} as never,
+    {
+      $transaction: async () => {
+        transactionCalled = true;
+      },
+    } as never,
+    {} as never,
+    new ConfigService({} as NodeJS.ProcessEnv),
+    {} as never,
+  );
+
+  await assert.rejects(
+    () => service.changePassword(accountId, currentPassword, currentPassword),
+    /새 비밀번호는 현재 비밀번호와 달라야 합니다/,
+  );
+  assert.equal(transactionCalled, false);
+});
+
 test('avatar upload uses canonical file service metadata path', async () => {
   const account = {
     id: randomUUID(),

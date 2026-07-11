@@ -36,6 +36,7 @@ import {
   emailVerificationRequestSchema,
   oauthStartRequestSchema,
   oauthCompleteRequestSchema,
+  passwordChangeRequestSchema,
   passwordResetConfirmRequestSchema,
   passwordResetRequestSchema,
   type OAuthProvider,
@@ -295,10 +296,10 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 300 } })
   async changePassword(
     @CurrentSession() session: SessionPayload,
-    @Body('currentPassword') currentPassword: string,
-    @Body('newPassword') newPassword: string,
+    @Body() body: unknown,
   ) {
-    await this.auth.changePassword(session.userId, currentPassword ?? '', newPassword ?? '');
+    const payload = passwordChangeRequestSchema.parse(body);
+    await this.auth.changePassword(session.userId, payload.currentPassword, payload.newPassword);
     await this.sessions.revokeAllSessions(session.userId, session.sessionId);
     return { success: true };
   }

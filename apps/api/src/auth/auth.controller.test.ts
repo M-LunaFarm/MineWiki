@@ -177,11 +177,36 @@ test('changing a password revokes every other active session', async () => {
     isElevated: false,
   } satisfies SessionPayload;
 
-  const result = await controller.changePassword(session, 'CurrentPW1!', 'UpdatedPW1!');
+  const result = await controller.changePassword(session, {
+    currentPassword: 'CurrentPW1!',
+    newPassword: 'UpdatedPW1!',
+  });
 
   assert.deepEqual(result, { success: true });
   assert.deepEqual(calls, [
     `password:${session.userId}`,
     `revoke:${session.userId}:${session.sessionId}`,
   ]);
+});
+
+test('password change rejects malformed and oversized request bodies', async () => {
+  const controller = new AuthController({} as never, {} as never, {} as never);
+  const session = {
+    sessionId: 'session-current',
+    userId: '11111111-1111-4111-8111-111111111111',
+    isElevated: false,
+  } satisfies SessionPayload;
+
+  const invalidBodies = [
+    {},
+    { currentPassword: 'CurrentPW1!' },
+    { currentPassword: 'CurrentPW1!', newPassword: 'UpdatedPW1!', elevated: true },
+    { currentPassword: 'x'.repeat(129), newPassword: 'UpdatedPW1!' },
+  ];
+  for (const body of invalidBodies) {
+    await assert.rejects(
+      () => controller.changePassword(session, body),
+      (error: unknown) => error instanceof ZodError,
+    );
+  }
 });

@@ -453,6 +453,9 @@ export class AuthService {
     if (!(await verify(account.passwordHash, currentPassword))) {
       throw new UnauthorizedException('현재 비밀번호가 올바르지 않습니다.');
     }
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('새 비밀번호는 현재 비밀번호와 달라야 합니다.');
+    }
     if (!PASSWORD_POLICY.test(newPassword)) {
       throw new BadRequestException('비밀번호는 8자 이상이며 대문자/특수문자를 포함해야 합니다.');
     }

@@ -94,6 +94,13 @@ export const passwordResetConfirmRequestSchema = z
   })
   .strict();
 
+export const passwordChangeRequestSchema = z
+  .object({
+    currentPassword: authPasswordSchema,
+    newPassword: authPasswordSchema,
+  })
+  .strict();
+
 export const emailRegistrationResultSchema = z.object({
   status: z.literal('verification-required'),
   accountId: z.string().uuid(),
