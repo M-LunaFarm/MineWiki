@@ -108,6 +108,18 @@ test('bot production config only requires bot runtime dependencies', () => {
   assert.equal(config.get('MINEWIKI_SERVICE'), 'bot');
 });
 
+test('worker production config requires the credential encryption key', () => {
+  const source = {
+    NODE_ENV: 'production',
+    MINEWIKI_SERVICE: 'worker',
+    DATABASE_URL: 'mysql://minewiki:strong@mysql:3306/minewiki',
+    REDIS_URL: 'redis://redis:6379'
+  };
+  assert.throws(() => new ConfigService(source), /APP_ENCRYPTION_KEY is required/);
+  const config = new ConfigService({ ...source, APP_ENCRYPTION_KEY: 'worker-encryption-key' });
+  assert.equal(config.get('MINEWIKI_SERVICE'), 'worker');
+});
+
 function validProductionEnv() {
   return {
     NODE_ENV: 'production',

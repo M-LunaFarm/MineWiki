@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer, type Socket } from 'node:net';
 import { once } from 'node:events';
 import { generateKeyPairSync, privateDecrypt, constants } from 'node:crypto';
-import { createVoteDispatcher } from './vote-dispatcher';
-import type { VoteDispatchJob } from '@minewiki/schemas';
+import { createVoteDispatcher, type VoteDispatchExecutionJob } from './vote-dispatcher';
 
 test('dispatch prefers Votifier v2 when available', async () => {
   const server = createServer((socket) => {
@@ -29,7 +28,7 @@ test('dispatch prefers Votifier v2 when available', async () => {
   }
 
   const dispatcher = createVoteDispatcher();
-  const job: VoteDispatchJob = {
+  const job: VoteDispatchExecutionJob = {
     voteId: '6ebd0b54-5864-46c2-a835-942937b0f6ec',
     serverId: '8d5d43eb-5e53-4ce9-90a0-dfd8fbfa9b6b',
     username: 'DemoPlayer',
@@ -82,7 +81,7 @@ test('dispatch falls back to v1 when v2 fails', async () => {
   }
 
   const dispatcher = createVoteDispatcher();
-  const job: VoteDispatchJob = {
+  const job: VoteDispatchExecutionJob = {
     voteId: '6f59484d-fb35-4a3d-b269-3d7a8d17f612',
     serverId: '22fe3ae4-685b-4bb0-9d30-35bbf83de4a3',
     username: 'FallbackUser',
@@ -131,7 +130,7 @@ test('retryable failure is recorded', async () => {
       }
     }
   });
-  const job: VoteDispatchJob = {
+  const job: VoteDispatchExecutionJob = {
     voteId: '13232073-7a1a-4108-bd77-627ec0b91906',
     serverId: '29830a11-830b-4965-89dd-7438ba509a66',
     username: 'RetryUser',
@@ -174,7 +173,7 @@ test('non-retryable failure is recorded', async () => {
       }
     }
   });
-  const job: VoteDispatchJob = {
+  const job: VoteDispatchExecutionJob = {
     voteId: 'd7d2bbde-1409-48b8-ad35-fd27fd1e0b46',
     serverId: '80ad55fe-4552-4ca4-9a65-0432ce8e9e0e',
     username: 'BadConfig',

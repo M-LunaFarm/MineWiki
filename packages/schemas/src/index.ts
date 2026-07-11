@@ -458,7 +458,7 @@ export const votifierTargetSchema = z.object({
   publicKey: z.string().min(1).optional(),
 });
 
-export const voteDispatchTargetSchema = votifierTargetSchema.extend({
+export const voteDispatchTargetSchema = z.object({
   targetId: z.string().uuid(),
   dispatchAttemptId: z.string().uuid(),
 });
@@ -466,9 +466,6 @@ export const voteDispatchTargetSchema = votifierTargetSchema.extend({
 export const voteDispatchJobSchema = z.object({
   voteId: z.string().uuid(),
   serverId: z.string().uuid(),
-  username: z.string().min(3).max(16),
-  ipAddress: z.string().optional(),
-  votedAt: z.string().datetime(),
   targets: z.array(voteDispatchTargetSchema).min(1),
 });
 

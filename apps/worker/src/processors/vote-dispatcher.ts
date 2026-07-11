@@ -1,6 +1,6 @@
 import { Logger } from '@minewiki/logger';
 import type { JobsOptions } from 'bullmq';
-import type { VoteDispatchJob, VoteDispatchTarget } from '@minewiki/schemas';
+import type { VotifierTarget } from '@minewiki/schemas';
 import { connect } from 'node:net';
 import { once } from 'node:events';
 import { publicEncrypt, constants } from 'node:crypto';
@@ -16,6 +16,20 @@ interface DispatchResult {
   readonly dispatchAttemptId: string;
 }
 
+export interface VoteDispatchExecutionTarget extends VotifierTarget {
+  readonly targetId: string;
+  readonly dispatchAttemptId: string;
+}
+
+export interface VoteDispatchExecutionJob {
+  readonly voteId: string;
+  readonly serverId: string;
+  readonly username: string;
+  readonly ipAddress?: string;
+  readonly votedAt: string;
+  readonly targets: VoteDispatchExecutionTarget[];
+}
+
 export interface VoteDispatchRecorder {
   markStarted(dispatchAttemptId: string): Promise<void>;
   markSucceeded(dispatchAttemptId: string): Promise<void>;
@@ -23,7 +37,7 @@ export interface VoteDispatchRecorder {
 }
 
 export function createVoteDispatcher(options: { recorder?: VoteDispatchRecorder } = {}) {
-  async function dispatch(job: VoteDispatchJob): Promise<DispatchResult> {
+  async function dispatch(job: VoteDispatchExecutionJob): Promise<DispatchResult> {
     let lastError: unknown;
     for (const target of job.targets) {
       try {
@@ -80,7 +94,7 @@ export function createVoteDispatcher(options: { recorder?: VoteDispatchRecorder 
   };
 }
 
-async function sendV2(job: VoteDispatchJob, target: VoteDispatchTarget): Promise<void> {
+async function sendV2(job: VoteDispatchExecutionJob, target: VoteDispatchExecutionTarget): Promise<void> {
   if (!target.token) {
     throw new Error('V2 target is missing token');
   }
@@ -109,7 +123,7 @@ async function sendV2(job: VoteDispatchJob, target: VoteDispatchTarget): Promise
   }
 }
 
-async function sendV1(job: VoteDispatchJob, target: VoteDispatchTarget): Promise<void> {
+async function sendV1(job: VoteDispatchExecutionJob, target: VoteDispatchExecutionTarget): Promise<void> {
   if (!target.publicKey) {
     throw new Error('V1 target is missing publicKey');
   }
@@ -149,7 +163,7 @@ async function sendV1(job: VoteDispatchJob, target: VoteDispatchTarget): Promise
   }
 }
 
-function buildV1Payload(job: VoteDispatchJob, target: VoteDispatchTarget): Buffer {
+function buildV1Payload(job: VoteDispatchExecutionJob, target: VoteDispatchExecutionTarget): Buffer {
   const timestamp = Math.floor(Date.parse(job.votedAt) / 1000);
   const lines = [
     'VOTE',

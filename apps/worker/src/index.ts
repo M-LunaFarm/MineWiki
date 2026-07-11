@@ -24,6 +24,7 @@ import {
   serverPingLogContext,
   voteDispatchLogContext,
 } from './job-log-context';
+import { loadVoteDispatchExecutionJob } from './vote-job-loader';
 import type {
   ClaimVerificationJob,
   DiscordDigestJob,
@@ -232,7 +233,8 @@ const voteQueue = createWorker<VoteDispatchJob>(
       'Processing vote dispatch job',
     );
     try {
-      const result = await dispatcher.dispatch(job.data);
+      const executionJob = await loadVoteDispatchExecutionJob(prisma, job.data);
+      const result = await dispatcher.dispatch(executionJob);
       Logger.info(
         {
           serverId: job.data.serverId,
@@ -244,6 +246,17 @@ const voteQueue = createWorker<VoteDispatchJob>(
       );
       return result;
     } catch (error) {
+      await prisma.voteDispatchAttempt.updateMany({
+        where: {
+          id: { in: job.data.targets.map((target) => target.dispatchAttemptId) },
+          status: { not: 'success' },
+        },
+        data: {
+          status: 'failed',
+          error: truncateDispatchError(error),
+          lastAttemptAt: new Date(),
+        },
+      });
       const retryable = dispatcher.isRetryable(error);
       Logger.error({ err: error, jobId: job.id, retryable }, 'Vote dispatch failed');
       if (!retryable) {

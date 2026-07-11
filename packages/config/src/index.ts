@@ -116,6 +116,11 @@ const botProductionKeys: Array<keyof EnvSchema> = [
   'INTERNAL_API_BASE_URL'
 ];
 
+const workerProductionKeys: Array<keyof EnvSchema> = [
+  ...commonProductionKeys,
+  'APP_ENCRYPTION_KEY',
+];
+
 const productionStorageKeys: Array<keyof EnvSchema> = [
   'STORAGE_REGION',
   'STORAGE_ACCESS_KEY',
@@ -247,7 +252,7 @@ function resolveRequiredKeys(service: EnvSchema['MINEWIKI_SERVICE']): Array<keyo
     case 'api':
       return apiProductionKeys;
     case 'worker':
-      return commonProductionKeys;
+      return workerProductionKeys;
     case 'bot':
       return botProductionKeys;
     case 'migration':

@@ -62,21 +62,17 @@ test('vote accepted creates dispatch attempts and queues vote id', async () => {
   assert.deepEqual(queuedJobs[0], {
     voteId,
     serverId,
-    username: 'DemoPlayer',
-    ipAddress: '192.0.2.10',
-    votedAt: (queuedJobs[0] as { votedAt: string }).votedAt,
     targets: [
       {
         targetId,
-        dispatchAttemptId,
-        protocol: 'v2',
-        host: 'vote.example.com',
-        port: 8192,
-        token: 'secret-token',
-        publicKey: undefined
+        dispatchAttemptId
       }
     ]
   });
+  const serializedJob = JSON.stringify(queuedJobs[0]);
+  for (const sensitive of ['DemoPlayer', '192.0.2.10', 'vote.example.com', 'secret-token']) {
+    assert.equal(serializedJob.includes(sensitive), false);
+  }
 });
 
 function createPrismaMock(createdAttempts: unknown[]) {

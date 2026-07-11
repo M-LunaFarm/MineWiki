@@ -10,13 +10,11 @@ import { VoteQueueService } from './vote.queue';
 import {
   voteDispatchJobSchema,
   type VoteDispatchTarget,
-  type VotifierTarget
 } from '@minewiki/schemas';
 import { CaptchaService } from '../captcha/captcha.service';
 import { BusinessEventService } from '../events/business-event.service';
 import { VoteStore } from './vote.store';
 import { PrismaService } from '../common/prisma.service';
-import { decryptAppSecret } from '../common/secret-codec';
 
 const votePayloadSchema = z.object({
   username: z.string().trim().min(3).max(16),
@@ -31,13 +29,9 @@ export interface VoteRequestContext {
   readonly ipAddress?: string;
 }
 
-interface ResolvedVotifierTarget extends VoteDispatchTarget {
+interface StoredVotifierTargetReference {
   readonly targetId: string;
-  readonly dispatchAttemptId: string;
-}
-
-interface StoredVotifierTarget extends VotifierTarget {
-  readonly targetId: string;
+  readonly protocol: 'v1' | 'v2';
 }
 
 @Injectable()
@@ -106,7 +100,7 @@ export class VoteService {
     }
 
     const targets = await this.resolveVotifierTargets(serverId);
-    const dispatchTargets: ResolvedVotifierTarget[] = [];
+    const dispatchTargets: VoteDispatchTarget[] = [];
     const vote = await this.prisma.$transaction(async (tx) => {
       const createdVote = await tx.vote.create({
         data: {
@@ -131,7 +125,7 @@ export class VoteService {
           }
         });
         dispatchTargets.push({
-          ...target,
+          targetId: target.targetId,
           dispatchAttemptId: attempt.id
         });
       }
@@ -172,18 +166,13 @@ export class VoteService {
       return createdVote;
     });
 
-    this.logger.log(
-      `Vote accepted for ${serverId} by ${normalizedUsername} (ip=${context.ipAddress ?? 'n/a'})`
-    );
+    this.logger.log({ serverId, voteId: vote.id }, 'Vote accepted');
 
     if (dispatchTargets.length > 0) {
       try {
         const job = voteDispatchJobSchema.parse({
           voteId: vote.id,
           serverId,
-          username: normalizedUsername,
-          ipAddress: context.ipAddress,
-          votedAt: now.toISOString(),
           targets: dispatchTargets
         });
         await this.voteQueue.enqueue(job);
@@ -195,8 +184,7 @@ export class VoteService {
         this.logger.error(
           {
             err: error,
-            serverId,
-            username: normalizedUsername
+            serverId
           },
           'Vote dispatch enqueue failed'
         );
@@ -212,7 +200,7 @@ export class VoteService {
       });
     } catch (error) {
       this.logger.error(
-        { err: error, serverId, username: normalizedUsername },
+        { err: error, serverId },
         'Failed to track vote.submitted event'
       );
     }
@@ -290,7 +278,7 @@ export class VoteService {
       throw new BadRequestException('삭제된 Votifier 대상은 재시도할 수 없습니다.');
     }
 
-    const target = toStoredVotifierTarget(attempt.target);
+    const target = toStoredVotifierTargetReference(attempt.target);
     if (!target) {
       throw new BadRequestException('재시도 가능한 Votifier 인증 정보가 없습니다.');
     }
@@ -308,12 +296,9 @@ export class VoteService {
         voteDispatchJobSchema.parse({
           voteId: attempt.voteId,
           serverId,
-          username: attempt.vote.username,
-          ipAddress: attempt.vote.ipAddress ?? undefined,
-          votedAt: attempt.vote.votedAt.toISOString(),
           targets: [
             {
-              ...target,
+              targetId: target.targetId,
               dispatchAttemptId: attempt.id
             }
           ]
@@ -354,20 +339,20 @@ export class VoteService {
     }
     const result = await this.captchaService.verifyCaptcha(token, ipAddress);
     if (!result.success) {
-      this.logger.warn({ errors: result.errors, ipAddress }, 'CAPTCHA 검증 실패');
+      this.logger.warn({ errors: result.errors }, 'CAPTCHA 검증 실패');
       throw new ForbiddenException('CAPTCHA 검증에 실패했습니다. 새로고침 후 다시 시도해주세요.');
     }
     this.logger.debug('CAPTCHA 토큰 검증 완료.');
   }
 
-  private async resolveVotifierTargets(serverId: string): Promise<StoredVotifierTarget[]> {
+  private async resolveVotifierTargets(serverId: string): Promise<StoredVotifierTargetReference[]> {
     const targets = await this.prisma.votifierTarget.findMany({
       where: { serverId },
       orderBy: { createdAt: 'asc' }
     });
     return targets
-      .map(toStoredVotifierTarget)
-      .filter((target): target is StoredVotifierTarget => Boolean(target));
+      .map(toStoredVotifierTargetReference)
+      .filter((target): target is StoredVotifierTargetReference => Boolean(target));
   }
 
   private async markDispatchEnqueueFailed(attemptIds: string[], error: unknown): Promise<void> {
@@ -404,27 +389,18 @@ export interface VoteDispatchAttemptSummary {
   };
 }
 
-function toStoredVotifierTarget(target: {
+function toStoredVotifierTargetReference(target: {
   id: string;
   protocol: 'v1' | 'v2';
   host: string;
   port: number;
   token?: string | null;
   publicKey?: string | null;
-}): StoredVotifierTarget | null {
-  const protocol: VotifierTarget['protocol'] = target.protocol === 'v1' ? 'v1' : 'v2';
-  const stored = {
-    targetId: target.id,
-    protocol,
-    host: target.host,
-    port: target.port,
-    token: decryptAppSecret(target.token ?? null) ?? undefined,
-    publicKey: target.publicKey ?? undefined
-  };
-  if (stored.protocol === 'v2') {
-    return stored.token ? stored : null;
+}): StoredVotifierTargetReference | null {
+  if (target.protocol === 'v2') {
+    return target.token ? { targetId: target.id, protocol: 'v2' } : null;
   }
-  return stored.publicKey ? stored : null;
+  return target.publicKey ? { targetId: target.id, protocol: 'v1' } : null;
 }
 
 function toDispatchAttemptSummary(attempt: {
