@@ -218,7 +218,7 @@ export class ServerController {
     if (!(await this.claimService.isOwner(id, session.userId))) {
       throw new BadRequestException('해당 서버를 제거할 권한이 없습니다.');
     }
-    await this.serverService.remove(id);
+    await this.serverService.remove(id, session.userId);
     return { success: true };
   }
 

@@ -851,12 +851,25 @@ export class ServerService {
     ]);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, actorAccountId?: string): Promise<void> {
     const startedAt = Date.now();
     try {
       await this.ensureExists(id);
-      await this.prisma.server.delete({
-        where: { id },
+      const [disabledCredentials] = await this.prisma.$transaction([
+        this.prisma.pluginServer.updateMany({
+          where: { serverId: id, enabled: true },
+          data: { enabled: false },
+        }),
+        this.prisma.server.delete({
+          where: { id },
+        }),
+      ]);
+      await this.events?.audit('server.deleted', {
+        category: 'server',
+        actorAccountId: actorAccountId ?? null,
+        subjectType: 'server',
+        subjectId: id,
+        metadata: { disabledPluginCredentials: disabledCredentials.count },
       });
       void this.telemetry.record('delete', 'servers', Date.now() - startedAt, true);
     } catch (error) {
