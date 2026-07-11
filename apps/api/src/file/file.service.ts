@@ -45,6 +45,14 @@ export interface FileImageUploadResponse extends FileMetadataResponse {
   readonly url: string;
 }
 
+export interface RawFileResponse {
+  readonly buffer?: Buffer;
+  readonly redirectUrl?: string;
+  readonly mimeType: string;
+  readonly filename: string;
+  readonly cacheControl: string;
+}
+
 @Injectable()
 export class FileService {
   constructor(
@@ -163,16 +171,37 @@ export class FileService {
   async getRawFile(
     id: string,
     session?: SessionPayload | null
-  ): Promise<{ buffer?: Buffer; redirectUrl?: string; mimeType: string; filename: string; cacheControl: string }> {
+  ): Promise<RawFileResponse> {
     const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
+    return this.readRawFile(file, session);
+  }
+
+  async getRawFileByFilename(filename: string, session?: SessionPayload | null): Promise<RawFileResponse> {
+    const normalized = filename.trim();
+    if (!normalized || normalized.includes('/') || normalized.includes('\\')) {
+      return this.readRawFile(null, session);
+    }
+    const file = await this.prisma.uploadedFile.findFirst({ where: { filename: normalized } });
+    return this.readRawFile(file, session);
+  }
+
+  private async readRawFile(
+    file: Awaited<ReturnType<PrismaService['uploadedFile']['findUnique']>>,
+    session?: SessionPayload | null
+  ): Promise<RawFileResponse> {
     this.permissions.assertCanRead(file, session);
     const cacheControl = file.visibility === 'public' || file.visibility === 'unlisted'
       ? 'public, max-age=31536000, immutable'
       : 'private, no-store';
-    if (/^https?:\/\//i.test(file.publicPath)) {
-      return { redirectUrl: file.publicPath, mimeType: file.mimeType, filename: file.filename, cacheControl };
-    }
     if (file.storagePath.startsWith('s3://')) {
+      if (file.visibility !== 'public' && file.visibility !== 'unlisted') {
+        return {
+          buffer: await this.uploads.readPrivateObject(file.storagePath),
+          mimeType: file.mimeType,
+          filename: file.filename,
+          cacheControl
+        };
+      }
       return { redirectUrl: file.publicPath, mimeType: file.mimeType, filename: file.filename, cacheControl };
     }
     return {

@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { FilePermissionService } from './file-permission.service';
 import { FileService } from './file.service';
 
@@ -65,6 +68,9 @@ function createService() {
         storagePath: '/tmp/stored.webp',
         publicPath: 'upload://stored.webp'
       };
+    },
+    async readPrivateObject() {
+      return Buffer.from('private s3 image');
     }
   };
   const prisma = {
@@ -86,6 +92,9 @@ function createService() {
       },
       async findUnique(args: { where: { id: string } }) {
         return files.get(args.where.id) ?? null;
+      },
+      async findFirst(args: { where: { filename: string } }) {
+        return [...files.values()].find((file) => file.filename === args.where.filename) ?? null;
       },
       async findMany(args: { where: TestFileWhere; take: number }) {
         const rows = [...files.values()].filter((file) => {
@@ -185,6 +194,9 @@ test('file service requires owner before delete', async () => {
 
 test('private raw file is only readable by owner or elevated session', async () => {
   const { service, files } = createService();
+  const directory = mkdtempSync(join(tmpdir(), 'minewiki-file-test-'));
+  const storagePath = join(directory, 'private.webp');
+  writeFileSync(storagePath, 'private image');
   const uploaded = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'wiki.png',
@@ -192,14 +204,42 @@ test('private raw file is only readable by owner or elevated session', async () 
   });
   files.set(uploaded.id, {
     ...files.get(uploaded.id),
+    storagePath,
     publicPath: 'https://cdn.example.test/private.webp'
   });
 
-  await assert.rejects(() => service.getRawFile(uploaded.id, null), /File not found/);
-  await assert.rejects(() => service.getRawFile(uploaded.id, session('account-2')), /File not found/);
-  const ownerRaw = await service.getRawFile(uploaded.id, session('account-1'));
-  assert.equal(ownerRaw.redirectUrl, 'https://cdn.example.test/private.webp');
+  try {
+    await assert.rejects(() => service.getRawFile(uploaded.id, null), /File not found/);
+    await assert.rejects(() => service.getRawFile(uploaded.id, session('account-2')), /File not found/);
+    const ownerRaw = await service.getRawFile(uploaded.id, session('account-1'));
+    assert.equal(ownerRaw.redirectUrl, undefined);
+    assert.equal(ownerRaw.buffer?.toString(), 'private image');
+    assert.equal(ownerRaw.cacheControl, 'private, no-store');
+    const adminRaw = await service.getRawFile(uploaded.id, session('admin', true));
+    assert.equal(adminRaw.redirectUrl, undefined);
+    assert.equal(adminRaw.cacheControl, 'private, no-store');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('public upload path resolves through the same visibility policy', async () => {
+  const { service, files } = createService();
+  const uploaded = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'wiki.png',
+    visibility: 'private'
+  });
+  files.set(uploaded.id, {
+    ...files.get(uploaded.id),
+    storagePath: 's3://minewiki/uploads/stored.webp',
+    publicPath: 'https://cdn.example.test/uploads/stored.webp'
+  });
+
+  await assert.rejects(() => service.getRawFileByFilename('../stored.webp', session('account-1')), /File not found/);
+  await assert.rejects(() => service.getRawFileByFilename(uploaded.filename, null), /File not found/);
+  const ownerRaw = await service.getRawFileByFilename(uploaded.filename, session('account-1'));
+  assert.equal(ownerRaw.redirectUrl, undefined);
+  assert.equal(ownerRaw.buffer?.toString(), 'private s3 image');
   assert.equal(ownerRaw.cacheControl, 'private, no-store');
-  const adminRaw = await service.getRawFile(uploaded.id, session('admin', true));
-  assert.equal(adminRaw.redirectUrl, 'https://cdn.example.test/private.webp');
 });

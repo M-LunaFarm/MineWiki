@@ -4,7 +4,7 @@ import { mkdirSync, existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import {
   validateImageUpload,
   ImageValidationError,
@@ -141,5 +141,24 @@ export class UploadService {
         ? `${this.publicBaseUrl}/${filename}`
         : `upload://${filename}`
     };
+  }
+
+  async readPrivateObject(storagePath: string): Promise<Buffer> {
+    if (this.storageMode !== 's3' || !this.s3 || !this.bucket) {
+      throw new Error('Private object reads require configured S3 storage.');
+    }
+    const prefix = `s3://${this.bucket}/`;
+    if (!storagePath.startsWith(prefix)) {
+      throw new Error('Stored object does not belong to the configured bucket.');
+    }
+    const key = storagePath.slice(prefix.length);
+    if (!key || !key.startsWith(`${UPLOAD_PREFIX}/`) || key.includes('..')) {
+      throw new Error('Stored object key is invalid.');
+    }
+    const response = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    if (!response.Body) {
+      throw new Error('Stored object body is missing.');
+    }
+    return Buffer.from(await response.Body.transformToByteArray());
   }
 }

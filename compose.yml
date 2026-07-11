@@ -155,7 +155,6 @@ services:
       - "${MINEWIKI_PORT:-8080}:80"
     volumes:
       - ./infra/nginx/container.conf:/etc/nginx/nginx.conf:ro
-      - uploads:/data/uploads:ro
     depends_on:
       api:
         condition: service_healthy

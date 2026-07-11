@@ -67,6 +67,24 @@ export class FileController {
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<StreamableFile | undefined> {
     const raw = await this.files.getRawFile(id, request.sessionPayload ?? null);
+    return this.sendRawFile(raw, reply);
+  }
+
+  @Get('public/:filename/raw')
+  @UseGuards(OptionalSessionGuard)
+  async getRawFileByFilename(
+    @Param('filename') filename: string,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<StreamableFile | undefined> {
+    const raw = await this.files.getRawFileByFilename(filename, request.sessionPayload ?? null);
+    return this.sendRawFile(raw, reply);
+  }
+
+  private sendRawFile(
+    raw: Awaited<ReturnType<FileService['getRawFile']>>,
+    reply: FastifyReply
+  ): StreamableFile | undefined {
     reply.header('Cache-Control', raw.cacheControl);
     if (raw.redirectUrl) {
       reply.redirect(302, raw.redirectUrl);
