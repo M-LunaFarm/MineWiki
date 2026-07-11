@@ -9,7 +9,7 @@
 } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
 import { hash, verify, Algorithm } from '@node-rs/argon2';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { AuthProvider } from './account-separation.service';
 import {
   AccountSeparationService,
@@ -692,7 +692,7 @@ export class AuthService {
     });
     const record = await this.prisma.emailVerification.create({
       data: {
-        token,
+        token: hashAuthToken(token),
         accountId,
         email,
         expiresAt,
@@ -701,7 +701,7 @@ export class AuthService {
     return {
       accountId: record.accountId,
       email: record.email,
-      token: record.token,
+      token,
       expiresAt: record.expiresAt,
     };
   }
@@ -710,21 +710,25 @@ export class AuthService {
     await this.prisma.emailVerification.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
-    const pending = await this.prisma.emailVerification.findUnique({
-      where: { token },
-    });
+    const pending =
+      (await this.prisma.emailVerification.findUnique({
+        where: { token: hashAuthToken(token) },
+      })) ??
+      (await this.prisma.emailVerification.findUnique({
+        where: { token },
+      }));
     if (!pending) {
       throw new BadRequestException('유효하지 않거나 만료된 인증 토큰입니다.');
     }
     if (pending.expiresAt.getTime() < Date.now()) {
-      await this.prisma.emailVerification.delete({ where: { token } });
+      await this.prisma.emailVerification.delete({ where: { token: pending.token } });
       throw new BadRequestException('유효하지 않거나 만료된 인증 토큰입니다.');
     }
-    await this.prisma.emailVerification.delete({ where: { token } });
+    await this.prisma.emailVerification.delete({ where: { token: pending.token } });
     return {
       accountId: pending.accountId,
       email: pending.email,
-      token: pending.token,
+      token,
       expiresAt: pending.expiresAt,
     };
   }
@@ -740,7 +744,7 @@ export class AuthService {
     });
     const record = await this.prisma.passwordReset.create({
       data: {
-        token,
+        token: hashAuthToken(token),
         accountId,
         email,
         expiresAt,
@@ -749,7 +753,7 @@ export class AuthService {
     return {
       accountId: record.accountId,
       email: record.email,
-      token: record.token,
+      token,
       expiresAt: record.expiresAt,
     };
   }
@@ -758,21 +762,25 @@ export class AuthService {
     await this.prisma.passwordReset.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
-    const pending = await this.prisma.passwordReset.findUnique({
-      where: { token },
-    });
+    const pending =
+      (await this.prisma.passwordReset.findUnique({
+        where: { token: hashAuthToken(token) },
+      })) ??
+      (await this.prisma.passwordReset.findUnique({
+        where: { token },
+      }));
     if (!pending) {
       throw new BadRequestException('유효하지 않거나 만료된 비밀번호 재설정 토큰입니다.');
     }
     if (pending.expiresAt.getTime() < Date.now()) {
-      await this.prisma.passwordReset.delete({ where: { token } });
+      await this.prisma.passwordReset.delete({ where: { token: pending.token } });
       throw new BadRequestException('유효하지 않거나 만료된 비밀번호 재설정 토큰입니다.');
     }
-    await this.prisma.passwordReset.delete({ where: { token } });
+    await this.prisma.passwordReset.delete({ where: { token: pending.token } });
     return {
       accountId: pending.accountId,
       email: pending.email,
-      token: pending.token,
+      token,
       expiresAt: pending.expiresAt,
     };
   }
@@ -834,4 +842,8 @@ class NotFoundAccountError extends NotFoundException {
   constructor() {
     super('계정을 찾을 수 없습니다.');
   }
+}
+
+export function hashAuthToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }

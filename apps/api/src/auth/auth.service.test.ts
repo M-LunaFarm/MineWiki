@@ -3,11 +3,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
-import { AuthService } from './auth.service';
+import { AuthService, hashAuthToken } from './auth.service';
 import { AccountSeparationService } from './account-separation.service';
 import { SessionService } from '../session/session.service';
 import { PrismaService } from '../common/prisma.service';
-import { EmailService } from './email.service';
 import { UploadService } from '../upload/upload.service';
 import { FileService } from '../file/file.service';
 
@@ -17,6 +16,8 @@ if (!hasDatabase) {
   test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});
 } else {
   const prisma = new PrismaService();
+  const verificationTokens = new Map<string, string>();
+  const passwordResetTokens = new Map<string, string>();
 
   before(async () => {
     await prisma.$connect();
@@ -28,24 +29,47 @@ if (!hasDatabase) {
 
   const createAuthService = (configValues: Record<string, string | undefined> = {}) => {
     const config = new ConfigService({ ...configValues } as NodeJS.ProcessEnv);
-    const emailService = new EmailService(config);
+    const emailService = {
+      isEnabled: () => true,
+      sendVerificationEmail: async (payload: { email: string; token: string }) => {
+        verificationTokens.set(payload.email, payload.token);
+      },
+      sendPasswordResetEmail: async (payload: { email: string; token: string }) => {
+        passwordResetTokens.set(payload.email, payload.token);
+      },
+      logDeliveryFailure: (error: unknown) => {
+        throw error;
+      },
+    };
     const accounts = new AccountSeparationService(prisma);
     const sessions = new SessionService(prisma);
     const uploads = new UploadService(config);
     const files = new FileService(prisma, uploads);
-    return new AuthService(accounts, sessions, prisma, emailService, config, files);
+    return new AuthService(accounts, sessions, prisma, emailService as never, config, files);
   };
 
   const getVerificationToken = async (accountId: string) => {
     const pending = await prisma.emailVerification.findFirst({ where: { accountId } });
     assert.ok(pending?.token);
-    return pending.token;
+    const account = await prisma.account.findUnique({ where: { id: accountId } });
+    assert.ok(account?.email);
+    const token = verificationTokens.get(account.email);
+    assert.ok(token);
+    assert.equal(pending.token, hashAuthToken(token));
+    assert.notEqual(pending.token, token);
+    return token;
   };
 
   const getPasswordResetToken = async (accountId: string) => {
     const pending = await prisma.passwordReset.findFirst({ where: { accountId } });
     assert.ok(pending?.token);
-    return pending.token;
+    const account = await prisma.account.findUnique({ where: { id: accountId } });
+    assert.ok(account?.email);
+    const token = passwordResetTokens.get(account.email);
+    assert.ok(token);
+    assert.equal(pending.token, hashAuthToken(token));
+    assert.notEqual(pending.token, token);
+    return token;
   };
 
   test('email registration requires verification before login', async () => {
