@@ -50,3 +50,11 @@ test('account detail endpoint only returns the current account', async () => {
   assert.deepEqual(account, { id: session.userId });
   assert.equal(requestedAccountId, session.userId);
 });
+
+test('unverified identity and manual account-link callbacks are not exposed', () => {
+  const prototype = AuthController.prototype as unknown as Record<string, unknown>;
+  assert.equal(prototype.discordCallback, undefined);
+  assert.equal(prototype.naverCallback, undefined);
+  assert.equal(prototype.createLinkRequest, undefined);
+  assert.equal(prototype.confirmLink, undefined);
+});

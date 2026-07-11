@@ -8,6 +8,7 @@ Last reviewed: 2026-07-06
 | --- | --- | --- |
 | Auth cookies | Pass | `SessionService` issues `mw_session` as `httpOnly`, `secure`, `sameSite=strict`, scoped to `/`. OAuth provider choice never grants elevated access; roles and permissions are resolved for every request. |
 | Account privacy | Pass | Full account details are available only through session-protected self lookup; arbitrary account IDs cannot expose email, provider identity, linked accounts, or login history. |
+| OAuth identity proof | Pass | Login requires the state-bound `oauth/start` and `oauth/complete` exchange. Raw provider user IDs and client-supplied manual link codes cannot create sessions or account links. |
 | CSRF | Pass | Unsafe cookie-auth requests require `x-csrf-token`; bearer and same-origin safe cases are covered by `session/csrf.test.ts`. |
 | OAuth state | Pass | OAuth and Microsoft flows bind state to redirect URI/account context and reject mismatches. |
 | Discord verify token | Pass | Create response keeps `verifyToken` for bot flow; public get/complete responses sanitize it. |

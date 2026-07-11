@@ -198,56 +198,6 @@ export class AuthController {
     return this.auth.resetPassword(token ?? '', newPassword ?? '');
   }
 
-  @Post('discord/callback')
-  @Throttle({ default: { limit: 8, ttl: 60 } })
-  async discordCallback(
-    @Body('userId') userId: string,
-    @Body('email') email: string | undefined,
-    @Body('username') username: string | undefined,
-    @Res({ passthrough: true }) reply: FastifyReply,
-    @Req() request: FastifyRequest,
-  ) {
-    const result = await this.auth.handleDiscordCallback(
-      {
-        userId,
-        email,
-        displayName: username,
-      },
-      this.extractSessionContext(request),
-    );
-    reply.header('Set-Cookie', result.cookie);
-    return {
-      account: result.account,
-      sessionId: result.sessionId,
-      expiresAt: result.expiresAt,
-    };
-  }
-
-  @Post('naver/callback')
-  @Throttle({ default: { limit: 8, ttl: 60 } })
-  async naverCallback(
-    @Body('userId') userId: string,
-    @Body('email') email: string | undefined,
-    @Body('nickname') nickname: string | undefined,
-    @Res({ passthrough: true }) reply: FastifyReply,
-    @Req() request: FastifyRequest,
-  ) {
-    const result = await this.auth.handleNaverCallback(
-      {
-        userId,
-        email,
-        displayName: nickname,
-      },
-      this.extractSessionContext(request),
-    );
-    reply.header('Set-Cookie', result.cookie);
-    return {
-      account: result.account,
-      sessionId: result.sessionId,
-      expiresAt: result.expiresAt,
-    };
-  }
-
   private async finalizeOAuth(
     provider: OAuthProvider,
     profile: { providerUserId: string; email?: string; displayName?: string },
@@ -268,24 +218,6 @@ export class AuthController {
     );
     reply.header('Set-Cookie', result.cookie);
     return result;
-  }
-
-  @Post('link-requests')
-  @Throttle({ default: { limit: 5, ttl: 300 } })
-  createLinkRequest(
-    @Body('primaryAccountId') primaryAccountId: string,
-    @Body('targetAccountId') targetAccountId: string,
-  ) {
-    return this.auth.createLinkRequest(primaryAccountId, targetAccountId);
-  }
-
-  @Post('link-requests/:requestId/confirm')
-  @Throttle({ default: { limit: 5, ttl: 300 } })
-  confirmLink(
-    @Param('requestId') requestId: string,
-    @Body('verificationCode') verificationCode: string,
-  ) {
-    return this.auth.confirmLink(requestId, verificationCode);
   }
 
   @UseGuards(SessionGuard)
