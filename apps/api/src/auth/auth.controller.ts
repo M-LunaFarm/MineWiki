@@ -243,8 +243,16 @@ export class AuthController {
 
   @UseGuards(SessionGuard)
   @Get('me')
-  me(@CurrentSession() session: SessionPayload) {
-    return this.auth.getAccountView(session.userId);
+  async me(@CurrentSession() session: SessionPayload) {
+    const account = await this.auth.getAccountView(session.userId);
+    return {
+      ...account,
+      access: {
+        isElevated: session.isElevated,
+        roles: [...(session.groups ?? [])],
+        permissions: [...(session.permissions ?? [])],
+      },
+    };
   }
 
   @UseGuards(SessionGuard)

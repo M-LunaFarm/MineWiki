@@ -457,7 +457,15 @@ export class AuthService {
       throw new BadRequestException('비밀번호는 8자 이상이며 대문자/특수문자를 포함해야 합니다.');
     }
     const passwordHash = await hash(newPassword, ARGON_OPTIONS);
-    await this.accounts.setPasswordHash(account.id, passwordHash);
+    await this.prisma.$transaction([
+      this.prisma.account.update({
+        where: { id: account.id },
+        data: { passwordHash },
+      }),
+      this.prisma.passwordReset.deleteMany({
+        where: { accountId: account.id },
+      }),
+    ]);
   }
 
   async linkOAuthAccount(

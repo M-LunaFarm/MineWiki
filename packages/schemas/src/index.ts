@@ -23,6 +23,13 @@ export const authAccountSchema = z.object({
   lastLoginAt: z.string().datetime().nullable(),
   linkedAccountIds: z.array(z.string().uuid()),
   linkedAccounts: z.array(linkedAccountSchema),
+  access: z
+    .object({
+      isElevated: z.boolean(),
+      roles: z.array(z.string()),
+      permissions: z.array(z.string()),
+    })
+    .optional(),
 });
 
 export const oauthStartRequestSchema = z.object({

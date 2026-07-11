@@ -173,6 +173,37 @@ if (!hasDatabase) {
     assert.equal(login.account.email, email);
   });
 
+  test('password change invalidates every outstanding reset token', async () => {
+    const service = createAuthService();
+    const email = 'change-' + randomUUID() + '@example.com';
+    const initialPassword = 'InitialPW1!';
+    const registration = await service.registerEmail({
+      email,
+      password: initialPassword,
+      displayName: 'Player',
+    });
+    await service.verifyEmail(await getVerificationToken(registration.accountId));
+    await service.requestPasswordReset(email);
+    const resetToken = await getPasswordResetToken(registration.accountId);
+
+    await service.changePassword(registration.accountId, initialPassword, 'ChangedPW1!');
+
+    assert.equal(
+      await prisma.passwordReset.count({ where: { accountId: registration.accountId } }),
+      0,
+    );
+    await assert.rejects(
+      () => service.resetPassword(resetToken, 'AttackerPW1!'),
+      (error: unknown) => error instanceof BadRequestException,
+    );
+    await assert.rejects(
+      () => service.loginEmail({ email, password: initialPassword }),
+      (error: unknown) => error instanceof UnauthorizedException,
+    );
+    const login = await service.loginEmail({ email, password: 'ChangedPW1!' });
+    assert.equal(login.account.id, registration.accountId);
+  });
+
   test('oauth account can enable email/password login on the same account', async () => {
     const service = createAuthService();
     const oauth = await service.handleNaverCallback({

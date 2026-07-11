@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 import { Menu, Search, X } from 'lucide-react';
 import { AccountDropdown } from '../account/account-dropdown';
 import { useAuth } from '../providers/auth-context';
-import { getApiBaseUrl } from '../../lib/runtime-config';
 
 type NavigationLink = {
   readonly href: string;
@@ -27,14 +26,11 @@ const NAV_LINKS: readonly NavigationLink[] = [
   { href: '/admin/support', label: '관리자', key: 'admin', requiresAdmin: true },
 ];
 
-const API_BASE_URL = getApiBaseUrl();
-
 export function SiteHeader() {
   const pathname = usePathname();
   const { account, loading } = useAuth();
   const [currentSearch, setCurrentSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [hasAdminAccess, setHasAdminAccess] = useState(false);
 
   useEffect(() => {
     const syncSearchFromLocation = () => {
@@ -82,34 +78,11 @@ export function SiteHeader() {
     setMobileOpen(false);
   }, [pathname]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!account) {
-      setHasAdminAccess(false);
-      return;
-    }
-
-    const checkAdminAccess = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/v1/admin/audit?limit=1`, {
-          credentials: 'include',
-        });
-        if (!cancelled) {
-          setHasAdminAccess(response.ok);
-        }
-      } catch {
-        if (!cancelled) {
-          setHasAdminAccess(false);
-        }
-      }
-    };
-
-    void checkAdminAccess();
-    return () => {
-      cancelled = true;
-    };
-  }, [account]);
+  const hasAdminAccess = Boolean(
+    account?.access?.isElevated ||
+      account?.access?.roles.some((role) => role === 'admin' || role === 'owner') ||
+      account?.access?.permissions.some((permission) => permission.startsWith('admin.')),
+  );
 
   const visibleLinks = NAV_LINKS.filter((link) => {
     if (link.requiresAccount && !account) {

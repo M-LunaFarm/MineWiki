@@ -15,6 +15,35 @@ test('me endpoint requires session guard', () => {
   assert.ok(guards.includes(SessionGuard));
 });
 
+test('me endpoint returns session-derived access without probing an admin resource', async () => {
+  const controller = new AuthController(
+    {
+      async getAccountView(accountId: string) {
+        return { id: accountId, displayName: 'Operator' };
+      },
+    } as never,
+    {} as never,
+    {} as never,
+  );
+  const session = {
+    sessionId: 'session-1',
+    userId: '11111111-1111-4111-8111-111111111111',
+    isElevated: true,
+    groups: ['owner'],
+    permissions: ['admin.audit.read'],
+  } satisfies SessionPayload;
+
+  assert.deepEqual(await controller.me(session), {
+    id: session.userId,
+    displayName: 'Operator',
+    access: {
+      isElevated: true,
+      roles: ['owner'],
+      permissions: ['admin.audit.read'],
+    },
+  });
+});
+
 test('account detail endpoint requires session guard', () => {
   const guards = Reflect.getMetadata(GUARDS_METADATA, AuthController.prototype.getAccount) as
     | unknown[]
