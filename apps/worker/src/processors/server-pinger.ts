@@ -183,8 +183,12 @@ async function resolvePingTarget(
 
   try {
     const target = await validateOutboundTarget(job.host, job.port, baseOptions);
+    const address = target.addresses.find((entry) => entry.family === 4) ?? target.addresses[0];
+    if (!address) {
+      throw new UnsafeEndpointError('resolve_failed', 'Server ping probe: no validated address');
+    }
     return {
-      host: target.host,
+      host: address.address,
       port: target.port,
     };
   } catch (error) {
@@ -200,6 +204,10 @@ async function resolvePingTarget(
             ...baseOptions,
             label: 'Server ping probe (SRV)',
           });
+          const address = validated.addresses.find((entry) => entry.family === 4) ?? validated.addresses[0];
+          if (!address) {
+            throw new UnsafeEndpointError('resolve_failed', 'Server ping probe (SRV): no validated address');
+          }
           Logger.info(
             {
               host: job.host,
@@ -210,7 +218,7 @@ async function resolvePingTarget(
             'Resolved server ping target via SRV record',
           );
           return {
-            host: validated.host,
+            host: address.address,
             port: validated.port,
           };
         } catch (srvError) {

@@ -422,15 +422,19 @@ async function verifyMotdToken(
 ): Promise<boolean> {
   const server = await serverService.ensureExists(serverId);
   const host = normalizeHost(server.joinHost);
-  await validateOutboundTarget(host, server.joinPort, { label: 'MOTD verification' });
+  const target = await validateOutboundTarget(host, server.joinPort, { label: 'MOTD verification' });
+  const address = target.addresses.find((entry) => entry.family === 4) ?? target.addresses[0];
+  if (!address) {
+    throw new Error('MOTD verification: no validated address');
+  }
 
   const timeout = 5000;
   if (server.edition === 'bedrock') {
-    const response = await statusBedrock(host, server.joinPort, { timeout });
+    const response = await statusBedrock(address.address, target.port, { timeout });
     const motd = extractMotd(response.motd);
     return motd.includes(token);
   }
-  const response = await status(host, server.joinPort, { timeout });
+  const response = await status(address.address, target.port, { timeout });
   const motd = extractMotd(response.motd);
   return motd.includes(token);
 }
