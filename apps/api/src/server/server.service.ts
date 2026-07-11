@@ -1263,6 +1263,7 @@ function toSummary(server: {
     rankCurrent: number;
     rankDelta24h: number;
     rankBest: number;
+    lastUpdatedAt: Date;
   } | null;
 }): ServerSummary {
   const supportedVersions = normalizeStringArray(server.supportedVersions);
@@ -1295,11 +1296,12 @@ function toSummary(server: {
       : null,
     isOnline: server.isOnline ?? null,
     latencyMs: server.latencyMs ?? null,
-    rank: server.stats
+    rank: server.stats && server.votes24h > 0
       ? {
           current: server.stats.rankCurrent,
           delta24h: server.stats.rankDelta24h,
           best: server.stats.rankBest,
+          updatedAt: server.stats.lastUpdatedAt.toISOString(),
         }
       : null,
   };

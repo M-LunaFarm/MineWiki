@@ -198,6 +198,7 @@ export const serverSummarySchema = z.object({
       current: z.number().int().positive(),
       delta24h: z.number().int(),
       best: z.number().int().positive(),
+      updatedAt: z.string().datetime(),
     })
     .nullable()
     .optional(),

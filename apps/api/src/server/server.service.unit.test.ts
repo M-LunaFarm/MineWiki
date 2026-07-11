@@ -34,7 +34,12 @@ test('server list exposes the aggregated global rank metadata', async () => {
           playersLastUpdatedAt: new Date('2026-07-11T00:00:00.000Z'),
           isOnline: true,
           latencyMs: 25,
-          stats: { rankCurrent: 2, rankDelta24h: 3, rankBest: 1 },
+          stats: {
+            rankCurrent: 2,
+            rankDelta24h: 3,
+            rankBest: 1,
+            lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
+          },
         },
       ],
     },
@@ -43,7 +48,56 @@ test('server list exposes the aggregated global rank metadata', async () => {
 
   const [server] = await service.list();
 
-  assert.deepEqual(server.rank, { current: 2, delta24h: 3, best: 1 });
+  assert.deepEqual(server.rank, {
+    current: 2,
+    delta24h: 3,
+    best: 1,
+    updatedAt: '2026-07-11T01:00:00.000Z',
+  });
+});
+
+test('server list marks zero-vote servers as awaiting rank aggregation', async () => {
+  const serverId = randomUUID();
+  const prisma = {
+    server: {
+      findMany: async () => [
+        {
+          id: serverId,
+          name: 'New Server',
+          joinHost: 'new.example.com',
+          joinPort: 25565,
+          edition: 'java',
+          supportedVersions: ['1.21'],
+          tags: [],
+          shortDescription: 'New server',
+          verificationGrade: 'Unverified',
+          verifiedAt: null,
+          votes24h: 0,
+          votesMonthly: 0,
+          reviewsCount: 0,
+          voteRequiresOwnership: false,
+          bannerUrl: null,
+          websiteUrl: null,
+          playersOnline: 0,
+          playersMax: 0,
+          playersLastUpdatedAt: null,
+          isOnline: true,
+          latencyMs: 30,
+          stats: {
+            rankCurrent: 9,
+            rankDelta24h: 0,
+            rankBest: 9,
+            lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
+          },
+        },
+      ],
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const [server] = await service.list();
+
+  assert.equal(server.rank, null);
 });
 
 test('server banner upload uses canonical file service metadata path', async () => {
