@@ -207,6 +207,9 @@ export class WikiPermissionService {
         ? allow('owner_edit')
         : deny('owner_required');
     }
+    if (protectionLevel === 'locked' && actor.permissions?.includes('wiki.edit.locked') === true) {
+      return allow('locked_editor');
+    }
     if (protectionLevel === 'admin_only' || protectionLevel === 'locked') {
       return deny('admin_required');
     }
@@ -446,7 +449,6 @@ export class WikiPermissionService {
   private isAdminActor(actor: WikiPermissionActor): boolean {
     return actor.isElevated === true ||
       actor.permissions?.includes('wiki.admin') === true ||
-      actor.permissions?.includes('wiki.edit.locked') === true ||
       actor.groups?.includes('admin') === true;
   }
 

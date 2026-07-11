@@ -190,6 +190,34 @@ test('wiki admin permission can edit admin-only page', async () => {
   assert.equal(decision.allowed, true);
 });
 
+test('locked editor can edit a locked page after ACL evaluation', async () => {
+  const service = createService();
+  const decision = await service.canEditPage({
+    actor: actor({ permissions: ['wiki.edit.locked'], profileId: 200n }),
+    page: page({ protectionLevel: 'locked', createdBy: 100n })
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.reason, 'locked_editor');
+});
+
+test('ACL deny still blocks a locked editor', async () => {
+  const service = createService({
+    acl: {
+      async evaluate() {
+        return { matched: true, allowed: false, reason: 'acl_denied' };
+      }
+    } as WikiAclService
+  });
+  const decision = await service.canEditPage({
+    actor: actor({ permissions: ['wiki.edit.locked'], profileId: 200n }),
+    page: page({ protectionLevel: 'locked', createdBy: 100n })
+  });
+
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reason, 'acl_denied');
+});
+
 test('linked server owner can edit owner-only server wiki page', async () => {
   const service = createService({
     serverWiki: { voteServerId: 'server-1', createdBy: 300n },
@@ -282,6 +310,19 @@ test('elevated user can create in restricted namespace', async () => {
   });
 
   assert.equal(decision.allowed, true);
+});
+
+test('locked editor cannot create in a restricted namespace', async () => {
+  const service = createService();
+  const decision = await service.canCreatePage({
+    actor: actor({ permissions: ['wiki.edit.locked'], profileId: 200n }),
+    namespaceCode: 'template',
+    spaceId: 10n,
+    title: '틀 문서'
+  });
+
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reason, 'restricted_namespace');
 });
 
 test('blocked wiki profile cannot create a page', async () => {
