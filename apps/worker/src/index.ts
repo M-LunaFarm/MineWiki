@@ -16,6 +16,14 @@ import {
   type DiscordDigestResult,
 } from './processors/discord-digest';
 import { createDiscordVerifySyncer } from './processors/discord-verify-sync';
+import {
+  claimVerificationLogContext,
+  discordDigestLogContext,
+  discordVerifySyncLogContext,
+  rankAggregationLogContext,
+  serverPingLogContext,
+  voteDispatchLogContext,
+} from './job-log-context';
 import type {
   ClaimVerificationJob,
   DiscordDigestJob,
@@ -219,7 +227,10 @@ function createWorker<Data extends WorkerJobData, Result = unknown>(
 const voteQueue = createWorker<VoteDispatchJob>(
   'vote-dispatch',
   async (job) => {
-    Logger.info({ jobId: job.id, data: job.data }, 'Processing vote dispatch job');
+    Logger.info(
+      { jobId: job.id, ...voteDispatchLogContext(job.data) },
+      'Processing vote dispatch job',
+    );
     try {
       const result = await dispatcher.dispatch(job.data);
       Logger.info(
@@ -250,24 +261,33 @@ function truncateDispatchError(error: unknown): string {
 }
 
 const serverPingQueue = createWorker<ServerPingJob>('server-ping', async (job) => {
-  Logger.info({ jobId: job.id, data: job.data }, 'Processing server ping job');
+  Logger.info({ jobId: job.id, ...serverPingLogContext(job.data) }, 'Processing server ping job');
   return pinger.ping(job.data);
 });
 
 const claimVerificationQueue = createWorker<ClaimVerificationJob>('claim-check', async (job) => {
-  Logger.info({ jobId: job.id, data: job.data }, 'Processing claim verification job');
+  Logger.info(
+    { jobId: job.id, ...claimVerificationLogContext(job.data) },
+    'Processing claim verification job',
+  );
   return claimVerifier.verify(job.data);
 });
 
 const rankAggregationQueue = createWorker<RankAggregationJob>('rank-aggregation', async (job) => {
-  Logger.info({ jobId: job.id, data: job.data }, 'Processing rank aggregation job');
+  Logger.info(
+    { jobId: job.id, ...rankAggregationLogContext(job.data) },
+    'Processing rank aggregation job',
+  );
   return rankAggregator.aggregate(job.data);
 });
 
 const discordDigestQueue = createWorker<DiscordDigestJob, DiscordDigestResult>(
   'discord-digest',
   async (job) => {
-  Logger.info({ jobId: job.id, data: job.data }, 'Processing Discord digest job');
+  Logger.info(
+    { jobId: job.id, ...discordDigestLogContext(job.data) },
+    'Processing Discord digest job',
+  );
   const result = await discordDigestSender.send(job.data);
   await handleDigestOutcome(job.data, result);
   return result;
@@ -275,7 +295,10 @@ const discordDigestQueue = createWorker<DiscordDigestJob, DiscordDigestResult>(
 );
 
 createWorker<DiscordVerifySyncJob>('discord-verify-sync', async (job) => {
-  Logger.info({ jobId: job.id, data: job.data }, 'Processing Discord verify sync job');
+  Logger.info(
+    { jobId: job.id, ...discordVerifySyncLogContext(job.data) },
+    'Processing Discord verify sync job',
+  );
   return discordVerifySyncer.sync(job.data);
 });
 
