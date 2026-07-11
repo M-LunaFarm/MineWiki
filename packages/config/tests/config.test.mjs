@@ -26,9 +26,81 @@ test('production config accepts complete environment', () => {
   assert.equal(config.get('APP_ENCRYPTION_KEY'), 'base64-production-key');
 });
 
+test('API production config allows optional OAuth integrations to be absent', () => {
+  const source = validProductionEnv();
+  source.MINEWIKI_SERVICE = 'api';
+  delete source.DISCORD_BOT_TOKEN;
+  delete source.DISCORD_CLIENT_ID;
+  delete source.DISCORD_CLIENT_SECRET;
+  delete source.DISCORD_REDIRECT_URI;
+  delete source.MICROSOFT_CLIENT_ID;
+  delete source.MICROSOFT_CLIENT_SECRET;
+  delete source.MICROSOFT_REDIRECT_URI;
+  delete source.NAVER_CLIENT_ID;
+  delete source.NAVER_CLIENT_SECRET;
+  delete source.NAVER_REDIRECT_URI;
+
+  const config = new ConfigService(source);
+  assert.equal(config.get('MINEWIKI_SERVICE'), 'api');
+});
+
+test('API production config accepts blank optional OAuth groups from the example file', () => {
+  const source = validProductionEnv();
+  source.MINEWIKI_SERVICE = 'api';
+  source.DISCORD_CLIENT_ID = '';
+  source.DISCORD_CLIENT_SECRET = '';
+  source.DISCORD_REDIRECT_URI = '';
+  source.MICROSOFT_CLIENT_ID = '';
+  source.MICROSOFT_CLIENT_SECRET = '';
+  source.MICROSOFT_REDIRECT_URI = '';
+  source.NAVER_CLIENT_ID = '';
+  source.NAVER_CLIENT_SECRET = '';
+  source.NAVER_REDIRECT_URI = '';
+
+  const config = new ConfigService(source);
+  assert.equal(config.get('MINEWIKI_SERVICE'), 'api');
+});
+
+test('API production config rejects a partial OAuth integration', () => {
+  const source = validProductionEnv();
+  source.MINEWIKI_SERVICE = 'api';
+  delete source.NAVER_CLIENT_SECRET;
+
+  assert.throws(
+    () => new ConfigService(source),
+    /NAVER_CLIENT_SECRET is required when NAVER OAuth is configured/
+  );
+});
+
+test('API production config requires matching captcha site and secret keys', () => {
+  const source = validProductionEnv();
+  source.MINEWIKI_SERVICE = 'api';
+  delete source.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+
+  assert.throws(
+    () => new ConfigService(source),
+    /NEXT_PUBLIC_TURNSTILE_SITE_KEY is required when Turnstile is configured/
+  );
+});
+
+test('bot production config only requires bot runtime dependencies', () => {
+  const config = new ConfigService({
+    NODE_ENV: 'production',
+    MINEWIKI_SERVICE: 'bot',
+    DATABASE_URL: 'mysql://minewiki:strong@mysql:3306/minewiki',
+    REDIS_URL: 'redis://redis:6379',
+    DISCORD_BOT_TOKEN: 'discord-bot-token',
+    DISCORD_CLIENT_ID: 'discord-client-id',
+    INTERNAL_BOT_API_TOKEN: 'internal-bot-token',
+    INTERNAL_API_BASE_URL: 'http://api:3000'
+  });
+  assert.equal(config.get('MINEWIKI_SERVICE'), 'bot');
+});
+
 function validProductionEnv() {
   return {
     NODE_ENV: 'production',
+    MINEWIKI_SERVICE: 'all',
     DATABASE_URL: 'mysql://minewiki:strong@127.0.0.1:3306/minewiki',
     REDIS_URL: 'redis://127.0.0.1:6379',
     NEXT_PUBLIC_SITE_URL: 'https://minewiki.kr',
@@ -50,6 +122,7 @@ function validProductionEnv() {
     NAVER_CLIENT_SECRET: 'naver-client-secret',
     NAVER_REDIRECT_URI: 'https://minewiki.kr/auth/callback/naver',
     TURNSTILE_SECRET_KEY: 'turnstile-secret',
+    NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'turnstile-site-key',
     UPLOAD_STORAGE_ROOT: '/var/www/MineWiki/apps/cdn/storage',
     STORAGE_PUBLIC_BASE_URL: 'https://minewiki.kr/uploads',
     SMTP_HOST: 'smtp.example.com',

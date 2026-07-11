@@ -1,0 +1,168 @@
+name: minewiki
+
+x-app-environment: &app-environment
+  NODE_ENV: production
+  DATABASE_URL: mysql://minewiki:${MINEWIKI_DB_PASSWORD}@mysql:3306/minewiki
+  REDIS_URL: redis://redis:6379
+  NEXT_PUBLIC_SITE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}
+  NEXT_PUBLIC_API_BASE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}/api
+  INTERNAL_API_BASE_URL: http://api:3000
+  VERIFY_PUBLIC_BASE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: minewiki
+      MYSQL_USER: minewiki
+      MYSQL_PASSWORD: ${MINEWIKI_DB_PASSWORD:?Set MINEWIKI_DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MINEWIKI_DB_ROOT_PASSWORD:?Set MINEWIKI_DB_ROOT_PASSWORD in .env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.migrate
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      MINEWIKI_SERVICE: migration
+      DATABASE_URL: mysql://minewiki:${MINEWIKI_DB_PASSWORD}@mysql:3306/minewiki
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ${MINEWIKI_COMPOSE_ENV_FILE:-.env}
+        required: false
+    environment:
+      <<: *app-environment
+      MINEWIKI_SERVICE: api
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      UPLOAD_STORAGE_ROOT: /data/uploads
+      STORAGE_PUBLIC_BASE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}/uploads
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ${MINEWIKI_COMPOSE_ENV_FILE:-.env}
+        required: false
+    environment:
+      <<: *app-environment
+      MINEWIKI_SERVICE: worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  bot:
+    profiles: ["bot"]
+    build:
+      context: .
+      dockerfile: apps/bot/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ${MINEWIKI_COMPOSE_ENV_FILE:-.env}
+        required: false
+    environment:
+      <<: *app-environment
+      MINEWIKI_SERVICE: bot
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      INTERNAL_API_BASE_URL: http://api:3000
+      NEXT_PUBLIC_SITE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}
+      NEXT_PUBLIC_API_BASE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}/api
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${MINEWIKI_PORT:-8080}:80"
+    volumes:
+      - ./infra/nginx/container.conf:/etc/nginx/nginx.conf:ro
+      - uploads:/data/uploads:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+volumes:
+  mysql-data:
+  redis-data:
+  uploads:

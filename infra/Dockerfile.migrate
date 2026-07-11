@@ -1,0 +1,21 @@
+FROM node:22-bookworm-slim
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV NODE_ENV=production
+ENV MINEWIKI_SERVICE=migration
+
+RUN corepack enable
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates openssl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY prisma/schema.prisma prisma/schema.prisma
+RUN pnpm install --filter . --frozen-lockfile
+
+COPY prisma prisma
+COPY scripts/deploy-database.mjs scripts/deploy-database.mjs
+
+CMD ["node", "scripts/deploy-database.mjs"]
