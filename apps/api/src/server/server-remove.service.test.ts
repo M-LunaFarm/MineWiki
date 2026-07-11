@@ -2,9 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ServerService } from './server.service';
 
+interface RecordedAuditInput {
+  readonly actorAccountId?: string | null;
+  readonly metadata?: unknown;
+}
+
 test('server removal disables plugin credentials in the delete transaction', async () => {
   const operations: string[] = [];
-  const audits: Array<{ action: string; input: any }> = [];
+  const audits: Array<{ action: string; input: RecordedAuditInput }> = [];
   const prisma = {
     server: {
       async findUnique() {
@@ -37,7 +42,7 @@ test('server removal disables plugin credentials in the delete transaction', asy
     undefined,
     {
       async audit(action: string, input: unknown) {
-        audits.push({ action, input });
+        audits.push({ action, input: input as RecordedAuditInput });
       },
     } as never,
   );

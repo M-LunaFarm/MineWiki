@@ -12,6 +12,11 @@ const session: SessionPayload = {
   groups: [],
 };
 
+interface PluginCredentialStub {
+  create(serverId: string, input: { guildId: string }, actor: string): Promise<unknown>;
+  [key: string]: unknown;
+}
+
 test('plugin credential creation requires Discord guild management access', async () => {
   const controller = createController({
     async assertCanManageGuild() {
@@ -148,7 +153,7 @@ test('plugin diagnostics require current access to the bound guild', async () =>
 
 function createController(
   guildAccess: { assertCanManageGuild(session: SessionPayload, guildId: string): Promise<void> },
-  pluginCredentials: { create(serverId: string, input: { guildId: string }, actor: string): Promise<any>; [key: string]: any } = {
+  pluginCredentials: PluginCredentialStub = {
     async create() {
       throw new Error('create should not run');
     },
