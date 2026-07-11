@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { buildApiTargetUrl } from '../../../lib/api-proxy-target.mjs';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -26,13 +27,7 @@ function resolveApiBaseUrl(): URL {
 }
 
 function buildTargetUrl(request: NextRequest, path: readonly string[]): URL {
-  const baseUrl = resolveApiBaseUrl();
-  const upstreamPath = path.length === 1 && path[0] === 'health' ? ['api', 'health'] : path;
-  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/${upstreamPath
-    .map((segment) => encodeURIComponent(segment))
-    .join('/')}`;
-  baseUrl.search = request.nextUrl.search;
-  return baseUrl;
+  return buildApiTargetUrl(resolveApiBaseUrl(), path, request.nextUrl.search);
 }
 
 async function proxy(request: NextRequest, context: RouteContext): Promise<Response> {
