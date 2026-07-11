@@ -130,12 +130,18 @@ export class AuthController {
 
   @Post('email/register')
   @Throttle({ default: { limit: 5, ttl: 300 } })
-  registerEmail(@Body() body: unknown): Promise<EmailRegistrationResult> {
+  registerEmail(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+  ): Promise<EmailRegistrationResult> {
     const payload = emailRegistrationRequestSchema.parse(body);
     return this.auth.registerEmail({
       email: payload.email!,
       password: payload.password!,
       displayName: payload.displayName,
+      agreeTerms: payload.agreeTerms,
+      agreePrivacy: payload.agreePrivacy,
+      context: this.extractSessionContext(request),
     });
   }
 

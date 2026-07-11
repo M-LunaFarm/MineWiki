@@ -67,6 +67,8 @@ export const emailRegistrationRequestSchema = z
     email: emailAddressSchema,
     password: authPasswordSchema,
     displayName: z.string().trim().min(1).max(32).optional(),
+    agreeTerms: z.literal(true),
+    agreePrivacy: z.literal(true),
   })
   .strict();
 

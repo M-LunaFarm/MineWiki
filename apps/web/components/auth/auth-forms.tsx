@@ -106,6 +106,8 @@ export function AuthForms() {
           email,
           password,
           displayName: displayName.trim(),
+          agreeTerms: true,
+          agreePrivacy: true,
         });
         setPendingVerification({
           email: result.email,

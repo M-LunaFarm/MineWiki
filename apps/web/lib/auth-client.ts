@@ -70,6 +70,8 @@ export async function registerEmail(payload: {
   email: string;
   password: string;
   displayName?: string;
+  agreeTerms: true;
+  agreePrivacy: true;
 }): Promise<EmailRegistrationResult> {
   return postJson<EmailRegistrationResult>('/v1/auth/email/register', payload);
 }

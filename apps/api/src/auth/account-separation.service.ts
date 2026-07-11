@@ -31,6 +31,12 @@ export interface RegisterAccountInput {
   readonly displayName?: string;
   readonly emailVerified?: boolean;
   readonly passwordHash?: string;
+  readonly consents?: readonly {
+    readonly consentType: string;
+    readonly policyVersion: string;
+    readonly ipAddress?: string | null;
+    readonly userAgent?: string | null;
+  }[];
 }
 
 @Injectable()
@@ -59,7 +65,17 @@ export class AccountSeparationService {
         displayName: input.displayName ?? null,
         emailVerified:
           input.emailVerified ?? (input.provider === 'email' ? false : Boolean(emailNormalized)),
-        passwordHash: input.passwordHash ?? null
+        passwordHash: input.passwordHash ?? null,
+        consents: input.consents?.length
+          ? {
+              create: input.consents.map((consent) => ({
+                consentType: consent.consentType,
+                policyVersion: consent.policyVersion,
+                ipAddress: consent.ipAddress ?? null,
+                userAgent: consent.userAgent?.slice(0, 512) ?? null
+              }))
+            }
+          : undefined
       }
     });
 

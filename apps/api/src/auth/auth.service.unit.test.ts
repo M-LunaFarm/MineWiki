@@ -233,6 +233,8 @@ test('auth fallback logs never include verification or password reset tokens', a
       email,
       password: 'SupersafePW1!',
       displayName: 'Security Test',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
     await service.requestPasswordReset(email);
   } finally {

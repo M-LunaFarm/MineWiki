@@ -117,9 +117,26 @@ model Account {
   supportMessages         SupportMessage[]         @relation("SupportMessageAuthor")
   claimMethods            ServerClaimMethod[]
   accountRoles            AccountRole[]
+  consents                AccountConsent[]
 
   @@unique([provider, providerUserId])
   @@index([email])
+}
+
+model AccountConsent {
+  id            String   @id @default(uuid())
+  accountId     String   @map("account_id")
+  consentType   String   @map("consent_type") @db.VarChar(32)
+  policyVersion String   @map("policy_version") @db.VarChar(32)
+  consentedAt   DateTime @default(now()) @map("consented_at") @db.DateTime(3)
+  ipAddress     String?  @map("ip_address") @db.VarChar(45)
+  userAgent     String?  @map("user_agent") @db.VarChar(512)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, consentType, policyVersion])
+  @@index([consentType, policyVersion])
+  @@map("account_consents")
 }
 
 model GlobalRole {
@@ -535,17 +552,17 @@ model ReviewReport {
 }
 
 model ServerClaimMethod {
-  id            String           @id @default(uuid())
-  serverId      String
-  accountId     String?
-  method        ClaimMethod
-  token         String
-  tokenCiphertext String?      @map("token_ciphertext") @db.Text
-  issuedAt      DateTime
-  status        ClaimMethodState @default(pending)
-  verifiedAt    DateTime?
-  lastCheckedAt DateTime?
-  note          String?
+  id              String           @id @default(uuid())
+  serverId        String
+  accountId       String?
+  method          ClaimMethod
+  token           String
+  tokenCiphertext String?          @map("token_ciphertext") @db.Text
+  issuedAt        DateTime
+  status          ClaimMethodState @default(pending)
+  verifiedAt      DateTime?
+  lastCheckedAt   DateTime?
+  note            String?
 
   server  Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
   account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
@@ -652,25 +669,25 @@ model DiscordSubscription {
 }
 
 model DiscordVerificationSession {
-  id                 String    @id @default(uuid())
-  status             String    @default("pending")
-  guildId            String
-  channelId          String
-  requesterDiscordId String
-  accountId          String?
-  minecraftUuid      String?
-  minecraftName      String?
-  roleId             String?
-  nicknameTemplate   String?
-  verificationUrl    String?
+  id                  String    @id @default(uuid())
+  status              String    @default("pending")
+  guildId             String
+  channelId           String
+  requesterDiscordId  String
+  accountId           String?
+  minecraftUuid       String?
+  minecraftName       String?
+  roleId              String?
+  nicknameTemplate    String?
+  verificationUrl     String?
   completionTokenHash String?   @map("completion_token_hash") @db.Char(64)
-  eventLog           Json?
-  syncAttempts       Int       @default(0)
-  lastSyncStatus     String?
-  createdAt          DateTime  @default(now())
-  expiresAt          DateTime
-  completedAt        DateTime?
-  lastSyncAt         DateTime?
+  eventLog            Json?
+  syncAttempts        Int       @default(0)
+  lastSyncStatus      String?
+  createdAt           DateTime  @default(now())
+  expiresAt           DateTime
+  completedAt         DateTime?
+  lastSyncAt          DateTime?
 
   @@index([guildId, requesterDiscordId])
   @@index([accountId])
@@ -735,24 +752,24 @@ model PluginServer {
 }
 
 model UploadedFile {
-  id             String   @id @default(uuid()) @db.Char(36)
-  ownerAccountId String?  @map("owner_account_id") @db.Char(36)
-  filename       String   @db.VarChar(255)
-  originalName   String?  @map("original_name") @db.VarChar(255)
-  mimeType       String   @map("mime_type") @db.VarChar(128)
-  sizeBytes      Int      @map("size_bytes") @db.UnsignedInt
-  width          Int?     @db.UnsignedInt
-  height         Int?     @db.UnsignedInt
-  sha256         String   @db.Char(64)
-  storagePath    String   @map("storage_path") @db.VarChar(1024)
-  publicPath     String   @map("public_path") @db.VarChar(1024)
-  usageContext   String   @default("general") @map("usage_context") @db.VarChar(64)
-  visibility     String   @default("public") @db.VarChar(32)
-  linkedResourceType String? @map("linked_resource_type") @db.VarChar(64)
-  linkedResourceId   String? @map("linked_resource_id") @db.VarChar(128)
-  status         String   @default("active") @db.VarChar(32)
-  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+  id                 String   @id @default(uuid()) @db.Char(36)
+  ownerAccountId     String?  @map("owner_account_id") @db.Char(36)
+  filename           String   @db.VarChar(255)
+  originalName       String?  @map("original_name") @db.VarChar(255)
+  mimeType           String   @map("mime_type") @db.VarChar(128)
+  sizeBytes          Int      @map("size_bytes") @db.UnsignedInt
+  width              Int?     @db.UnsignedInt
+  height             Int?     @db.UnsignedInt
+  sha256             String   @db.Char(64)
+  storagePath        String   @map("storage_path") @db.VarChar(1024)
+  publicPath         String   @map("public_path") @db.VarChar(1024)
+  usageContext       String   @default("general") @map("usage_context") @db.VarChar(64)
+  visibility         String   @default("public") @db.VarChar(32)
+  linkedResourceType String?  @map("linked_resource_type") @db.VarChar(64)
+  linkedResourceId   String?  @map("linked_resource_id") @db.VarChar(128)
+  status             String   @default("active") @db.VarChar(32)
+  createdAt          DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.DateTime(3)
 
   @@index([ownerAccountId])
   @@index([usageContext])

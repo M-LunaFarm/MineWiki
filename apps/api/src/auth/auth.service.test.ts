@@ -79,9 +79,22 @@ if (!hasDatabase) {
       email,
       password: 'SupersafePW1!',
       displayName: 'Player',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
 
     assert.equal(registration.status, 'verification-required');
+    const consents = await prisma.accountConsent.findMany({
+      where: { accountId: registration.accountId },
+      orderBy: { consentType: 'asc' },
+    });
+    assert.deepEqual(
+      consents.map((consent) => [consent.consentType, consent.policyVersion]),
+      [
+        ['privacy', '2026-02-17-v1.0'],
+        ['terms', '2026-02-17-v1.0'],
+      ],
+    );
     const token = await getVerificationToken(registration.accountId);
     const storedVerification = await prisma.emailVerification.findFirst({
       where: { accountId: registration.accountId },
@@ -114,6 +127,8 @@ if (!hasDatabase) {
       email,
       password: 'SupersafePW1!',
       displayName: 'Player',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
 
     const firstToken = await getVerificationToken(registration.accountId);
@@ -149,6 +164,8 @@ if (!hasDatabase) {
       email,
       password: initialPassword,
       displayName: 'Player',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
     const verificationToken = await getVerificationToken(registration.accountId);
     await service.verifyEmail(verificationToken);
@@ -181,6 +198,8 @@ if (!hasDatabase) {
       email,
       password: initialPassword,
       displayName: 'Player',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
     await service.verifyEmail(await getVerificationToken(registration.accountId));
     await service.requestPasswordReset(email);
@@ -241,6 +260,8 @@ if (!hasDatabase) {
       email,
       password: 'anotherPW1!',
       displayName: 'EmailUser',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
     const token = await getVerificationToken(emailRegistration.accountId);
     const emailAccount = await service.verifyEmail(token);
@@ -269,6 +290,8 @@ if (!hasDatabase) {
       email: 'link-' + randomUUID() + '@example.com',
       password: 'LinkPW123!',
       displayName: 'LinkUser',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
     const primaryToken = await getVerificationToken(primaryRegistration.accountId);
     const primary = await serviceDisabled.verifyEmail(primaryToken);
@@ -287,6 +310,8 @@ if (!hasDatabase) {
       email: 'link2-' + randomUUID() + '@example.com',
       password: 'LinkPW456!',
       displayName: 'Linker',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
     const emailToken = await getVerificationToken(emailRegistration.accountId);
     const emailAcc = await serviceEnabled.verifyEmail(emailToken);

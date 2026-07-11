@@ -107,7 +107,16 @@ test('email auth endpoints reject malformed request bodies before calling the se
   );
 
   const invalidCalls = [
-    () => controller.registerEmail({}),
+    () => controller.registerEmail({}, { headers: {} } as never),
+    () =>
+      controller.registerEmail(
+        {
+          email: 'player@example.com',
+          password: 'ValidPassword1!',
+          displayName: 'Player',
+        },
+        { headers: {} } as never,
+      ),
     () => controller.resendVerification({ email: 'not-an-email' }),
     () => controller.setupEmailLogin(
       { userId: '11111111-1111-4111-8111-111111111111' } as SessionPayload,
@@ -145,13 +154,18 @@ test('email auth request parsing trims canonical text fields', async () => {
     email: '  Player@Example.com  ',
     password: 'ValidPassword1!',
     displayName: '  Player  ',
-  });
+    agreeTerms: true,
+    agreePrivacy: true,
+  }, { headers: {} } as never);
   await controller.resendVerification({ email: '  Player@Example.com  ' });
 
   assert.deepEqual(registrationPayload, {
     email: 'Player@Example.com',
     password: 'ValidPassword1!',
     displayName: 'Player',
+    agreeTerms: true,
+    agreePrivacy: true,
+    context: { ipAddress: null, userAgent: null },
   });
   assert.equal(resendEmail, 'Player@Example.com');
 });

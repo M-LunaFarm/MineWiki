@@ -24,6 +24,8 @@ interface AuthContextValue {
     email: string;
     password: string;
     displayName?: string;
+    agreeTerms: true;
+    agreePrivacy: true;
   }) => Promise<EmailRegistrationResult>;
   readonly verifyEmail: (token: string) => Promise<void>;
   readonly resendVerification: (email: string) => Promise<ResendVerificationResult>;
@@ -65,7 +67,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const register = useCallback(
-    async (payload: { email: string; password: string; displayName?: string }) => {
+    async (payload: {
+      email: string;
+      password: string;
+      displayName?: string;
+      agreeTerms: true;
+      agreePrivacy: true;
+    }) => {
       setLoading(true);
       try {
         const result = await registerEmail(payload);

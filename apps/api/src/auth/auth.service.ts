@@ -26,6 +26,9 @@ interface EmailRegistrationDto {
   readonly email: string;
   readonly password: string;
   readonly displayName?: string;
+  readonly agreeTerms: true;
+  readonly agreePrivacy: true;
+  readonly context?: SessionContext;
 }
 
 interface EmailLoginDto {
@@ -127,6 +130,8 @@ const DUMMY_PASSWORD_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$MjQUBk0H7jTj+SgNScFhCA$LHY2v6BYTGSHHMuOrWQyGqAbW3Xjzpa0jGwLN1CbdA0';
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 30; // 30 minutes
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30; // 30 minutes
+const TERMS_POLICY_VERSION = '2026-02-17-v1.0';
+const PRIVACY_POLICY_VERSION = '2026-02-17-v1.0';
 
 @Injectable()
 export class AuthService {
@@ -154,6 +159,9 @@ export class AuthService {
         '비밀번호는 8자 이상이며 대문자와 특수문자를 최소 1자 이상 포함해야 합니다.',
       );
     }
+    if (payload.agreeTerms !== true || payload.agreePrivacy !== true) {
+      throw new BadRequestException('이용약관과 개인정보 처리방침에 동의해 주세요.');
+    }
     const existing = await this.accounts.findByProvider('email', email);
     if (existing) {
       throw new ConflictException('이미 등록된 이메일입니다.');
@@ -167,6 +175,20 @@ export class AuthService {
       displayName: payload.displayName?.trim() || email.split('@')[0],
       passwordHash,
       emailVerified: false,
+      consents: [
+        {
+          consentType: 'terms',
+          policyVersion: TERMS_POLICY_VERSION,
+          ipAddress: payload.context?.ipAddress,
+          userAgent: payload.context?.userAgent,
+        },
+        {
+          consentType: 'privacy',
+          policyVersion: PRIVACY_POLICY_VERSION,
+          ipAddress: payload.context?.ipAddress,
+          userAgent: payload.context?.userAgent,
+        },
+      ],
     });
 
     const verification = await this.createEmailVerification(account.id, email);
