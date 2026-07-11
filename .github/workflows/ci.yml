@@ -91,6 +91,9 @@ jobs:
       - name: Validate PM2 service configuration
         run: pnpm pm2:validate
 
+      - name: Validate permission-aware upload routing
+        run: pnpm gateway:validate
+
       - name: Build API
         run: pnpm build:api
 

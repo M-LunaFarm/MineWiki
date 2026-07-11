@@ -27,6 +27,7 @@
     "deploy:smoke": "pnpm smoke",
     "data:validate": "node scripts/validate-data.mjs",
     "pm2:validate": "node scripts/validate-pm2-config.mjs",
+    "gateway:validate": "node scripts/validate-upload-gateway.mjs",
     "seed": "node scripts/seed.mjs",
     "typecheck": "turbo run build --continue",
     "test:unit": "turbo run test --continue",
