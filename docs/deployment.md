@@ -75,6 +75,12 @@ pnpm build
 
 The Compose migration container performs the same migration and idempotent seed sequence automatically before API and worker startup.
 
+For a Compose deployment, create the first account through the application and then grant it the owner role with:
+
+```bash
+docker compose run --rm -e SEED_ADMIN_EMAIL=you@example.com migrate node scripts/seed.mjs
+```
+
 If `pnpm data:validate` reports only safe warnings for expired replay guards or missing render cache, run:
 
 ```bash

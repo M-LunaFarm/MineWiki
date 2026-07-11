@@ -138,8 +138,11 @@ jobs:
             -e 's/^SMTP_HOST=.*/SMTP_HOST=mail.invalid/' \
             .env
 
-      - name: Build and start fresh Compose stack
-        run: docker compose up -d --build
+      - name: Build all production images
+        run: docker compose --profile bot build
+
+      - name: Start fresh Compose stack
+        run: docker compose up -d
 
       - name: Smoke-test gateway and seeded application
         env:
