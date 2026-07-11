@@ -13,6 +13,7 @@ import { MinecraftModule } from '../minecraft/minecraft.module';
 import { VoteMonitorController } from './vote-monitor.controller';
 import { VoteDispatchController } from './vote-dispatch.controller';
 import { ClaimModule } from '../claim/claim.module';
+import { VoteAdminController } from './vote-admin.controller';
 
 @Module({
   imports: [
@@ -28,7 +29,8 @@ import { ClaimModule } from '../claim/claim.module';
     VoteController,
     VoteDiagnosticsController,
     VoteMonitorController,
-    VoteDispatchController
+    VoteDispatchController,
+    VoteAdminController,
   ],
   exports: [VoteStore]
 })

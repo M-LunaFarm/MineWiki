@@ -28,21 +28,22 @@ export function createRankAggregator(prisma: PrismaHandle) {
       await Promise.all([
       prisma.vote.groupBy({
         by: ['serverId'],
-        where: { votedAt: { gte: last24hStart } },
+        where: { status: 'valid', votedAt: { gte: last24hStart } },
         _count: { _all: true }
       }),
       prisma.vote.groupBy({
         by: ['serverId'],
-        where: { votedAt: { gte: last7dStart } },
+        where: { status: 'valid', votedAt: { gte: last7dStart } },
         _count: { _all: true }
       }),
       prisma.vote.groupBy({
         by: ['serverId'],
-        where: { votedAt: { gte: monthStart } },
+        where: { status: 'valid', votedAt: { gte: monthStart } },
         _count: { _all: true }
       }),
       prisma.vote.groupBy({
         by: ['serverId'],
+        where: { status: 'valid' },
         _count: { _all: true }
       }),
       prisma.server.findMany({
@@ -200,6 +201,7 @@ async function buildSparkline(
     const dailyCounts = await prisma.vote.groupBy({
       by: ['serverId'],
       where: {
+        status: 'valid',
         votedAt: {
           gte: rangeStart,
           lt: rangeEnd

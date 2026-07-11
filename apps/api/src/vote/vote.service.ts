@@ -2,7 +2,8 @@
   BadRequestException,
   ForbiddenException,
   Injectable,
-  Logger
+  Logger,
+  NotFoundException
 } from '@nestjs/common';
 import { z } from 'zod';
 import { ServerService } from '../server/server.service';
@@ -322,6 +323,7 @@ export class VoteService {
     const votes = await this.prisma.vote.findMany({
       where: {
         serverId,
+        status: 'valid',
         usernameNormalized: search ? { contains: search.toLowerCase() } : undefined
       },
       orderBy: { votedAt: 'desc' },
@@ -331,6 +333,43 @@ export class VoteService {
       username: vote.username,
       votedAt: vote.votedAt.toISOString()
     }));
+  }
+
+  async invalidateVote(voteId: string, actorAccountId: string, reason: string) {
+    const normalizedReason = reason.trim();
+    const vote = await this.prisma.vote.findUnique({
+      where: { id: voteId },
+      select: { id: true, serverId: true, status: true },
+    });
+    if (!vote) {
+      throw new NotFoundException('투표를 찾을 수 없습니다.');
+    }
+    if (vote.status !== 'valid') {
+      throw new BadRequestException('이미 무효 처리된 투표입니다.');
+    }
+
+    const result = await this.prisma.vote.updateMany({
+      where: { id: voteId, status: 'valid' },
+      data: {
+        status: 'invalid',
+        invalidatedAt: new Date(),
+        invalidatedBy: actorAccountId,
+        invalidationReason: normalizedReason,
+      },
+    });
+    if (result.count !== 1) {
+      throw new BadRequestException('투표 상태가 변경되어 다시 확인해야 합니다.');
+    }
+
+    await this.events.audit('vote.invalidated', {
+      category: 'vote',
+      severity: 'warning',
+      actorAccountId,
+      subjectType: 'vote',
+      subjectId: voteId,
+      metadata: { serverId: vote.serverId, reason: normalizedReason },
+    });
+    return { id: voteId, serverId: vote.serverId, status: 'invalid' as const };
   }
 
   private async verifyCaptchaToken(token?: string | null, ipAddress?: string): Promise<void> {

@@ -451,7 +451,7 @@ model ServerPingSample {
 }
 
 model Vote {
-  id                 String   @id @default(uuid())
+  id                 String    @id @default(uuid())
   serverId           String
   accountId          String?
   minecraftUuid      String?
@@ -459,7 +459,11 @@ model Vote {
   usernameNormalized String
   ipAddress          String?
   votedAt            DateTime
-  createdAt          DateTime @default(now())
+  createdAt          DateTime  @default(now())
+  status             String    @default("valid") @db.VarChar(16)
+  invalidatedAt      DateTime? @map("invalidated_at") @db.DateTime(3)
+  invalidatedBy      String?   @map("invalidated_by") @db.VarChar(191)
+  invalidationReason String?   @map("invalidation_reason") @db.VarChar(500)
 
   server           Server                @relation(fields: [serverId], references: [id], onDelete: Cascade)
   account          Account?              @relation(fields: [accountId], references: [id], onDelete: SetNull)
@@ -470,6 +474,7 @@ model Vote {
   @@index([serverId, minecraftUuid])
   @@index([serverId, usernameNormalized])
   @@index([serverId, ipAddress])
+  @@index([status, votedAt])
 }
 
 model VoteDispatchAttempt {

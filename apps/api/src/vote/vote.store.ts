@@ -33,6 +33,7 @@ export class VoteStore {
     return this.prisma.vote.count({
       where: {
         serverId,
+        status: 'valid',
         votedAt: { gte: start, lt: end }
       }
     });
@@ -78,7 +79,7 @@ export class VoteStore {
     ipAddress?: string;
   }): Promise<VoteRecord | undefined> {
     const record = await this.prisma.vote.findFirst({
-      where,
+      where: { ...where, status: 'valid' },
       orderBy: { votedAt: 'desc' }
     });
     if (!record) {
