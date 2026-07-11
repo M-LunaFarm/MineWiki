@@ -107,7 +107,6 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
     referralsPromise,
     recommendationsPromise,
   ]);
-  const apiBaseUrl = getApiBaseUrl();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 
   const averageRating =
@@ -136,7 +135,6 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
         reviews={reviews}
         referrals={referrals}
         recommendations={recommendedServers}
-        apiBaseUrl={apiBaseUrl}
         currentReviewSort={currentReviewSort}
         currentReviewRating={currentReviewRating}
         currentReviewTag={currentReviewTag}

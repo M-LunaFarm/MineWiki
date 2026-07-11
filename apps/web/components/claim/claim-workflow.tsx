@@ -945,11 +945,15 @@ export function ClaimWorkflow() {
       <div className="mb-8 rounded-xl border border-[#333333] bg-[#1A1A1A] p-5">
         <div className="grid gap-5 lg:grid-cols-[minmax(0,360px)_1fr] lg:items-center">
           <div>
-            <label className="mb-2 block text-xs font-medium uppercase tracking-wider text-[#A0A0A0]">
+            <label
+              htmlFor="claim-server"
+              className="mb-2 block text-xs font-medium uppercase tracking-wider text-[#A0A0A0]"
+            >
               대상 서버
             </label>
             <div className="relative">
               <select
+                id="claim-server"
                 className="w-full cursor-pointer appearance-none rounded-lg border border-[#333333] bg-[#121212] py-3 pl-4 pr-10 text-sm text-white transition-colors hover:border-[#A0A0A0] focus:border-[#13ec80] focus:outline-none focus:ring-1 focus:ring-[#13ec80]"
                 value={serverId}
                 onChange={(event) => {

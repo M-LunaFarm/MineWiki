@@ -106,13 +106,26 @@ test.describe('End-to-end flows', () => {
         name: 'mw_session',
         value: sessionToken,
         url: baseUrl,
-        path: '/',
       },
     ]);
   });
 
   test('review gating requires login, ownership, and recent vote', async ({ page }) => {
+    const gateResponsePromise = page.waitForResponse(
+      (response) => response.url().includes(`/v1/servers/${serverId}/reviews/gate`),
+    );
     await page.goto('/servers/' + serverId);
+    const gateResponse = await gateResponsePromise;
+    const gate = (await gateResponse.json()) as {
+      isLoggedIn: boolean;
+      isMinecraftOwned: boolean;
+      hasRecentVote: boolean;
+    };
+    expect(gate).toMatchObject({
+      isLoggedIn: true,
+      isMinecraftOwned: true,
+      hasRecentVote: true,
+    });
 
     const composeButton = page.getByRole('button', { name: /리뷰 작성/ });
     await expect(composeButton).toBeEnabled();
@@ -120,7 +133,7 @@ test.describe('End-to-end flows', () => {
 
     await page.getByRole('textbox', { name: /내용/ }).fill('테스트 리뷰 내용입니다.');
     await page.getByRole('button', { name: /리뷰 제출/ }).click();
-    await expect(page.getByText(/리뷰가 등록되었습니다|리뷰 작성 조건/)).toBeVisible();
+    await expect(page.getByText('테스트 리뷰 내용입니다.', { exact: true })).toBeVisible();
   });
 
   test('claim wizard issues verification token for owned server', async ({ page }) => {
@@ -130,9 +143,16 @@ test.describe('End-to-end flows', () => {
     await serverSelect.selectOption(serverId);
 
     await page.getByRole('button', { name: /DNS TXT/ }).click();
+    const startResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/v1/servers/${serverId}/claim/start`) &&
+        response.request().method() === 'POST',
+    );
     await page.getByRole('button', { name: /검증 토큰 발급|소유권 검증 실행/ }).click();
-    await expect(page.getByText(/토큰이 발급되었습니다|검증 토큰/)).toBeVisible();
-    await expect(page.getByText(serverName)).toBeVisible();
+    const startResponse = await startResponsePromise;
+    expect(startResponse.ok(), await startResponse.text()).toBeTruthy();
+    await expect(page.getByText(/DNS TXT 토큰을 발급했습니다/)).toBeVisible();
+    await expect(serverSelect).toHaveValue(serverId);
   });
 
   test('account center shows minecraft ownership status', async ({ page }) => {
@@ -145,7 +165,7 @@ test.describe('End-to-end flows', () => {
   test('landing page shows server discovery entry points', async ({ page }) => {
     await page.goto('/');
     await expect(
-      page.getByRole('heading', { name: /서버를 검색하고, 검증 상태와 리뷰를 확인하세요/ }),
+      page.getByRole('heading', { name: /검증된 서버를 찾고, 투표와 리뷰로 비교하세요/ }),
     ).toBeVisible();
     await expect(page.getByRole('link', { name: /전체 보기/ })).toBeVisible();
   });
