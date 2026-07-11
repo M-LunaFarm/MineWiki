@@ -71,7 +71,7 @@ The seed is idempotent, so this command preserves existing pages and role assign
 
 ## Data Validation
 
-Run `pnpm data:validate` before deploys to check migration integrity across wiki pages, server wiki links, account/profile mappings, uploads, replay guards, and render cache readiness. The command is read-only by default. Use `pnpm data:validate -- --fix` only when you want safe repairs for expired plugin replay guards and missing current render cache entries.
+Run `pnpm data:validate` before deploys to check migration integrity across wiki pages, server wiki links, account/profile mappings, uploads, canonical plugin credentials, replay guards, and render cache readiness. The command is read-only by default. Use `pnpm data:validate -- --fix` only when you want safe repairs for orphan plugin credentials, expired plugin replay guards, and missing current render cache entries.
 
 ## First-Run Seed
 

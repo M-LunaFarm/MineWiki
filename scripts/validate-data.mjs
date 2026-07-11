@@ -150,8 +150,54 @@ async function runValidation() {
     `,
   );
 
+  await validatePluginCredentials();
   await validateExpiredReplayGuards();
   await validateRenderCache();
+}
+
+async function validatePluginCredentials() {
+  const orphaned = await prisma.$queryRawUnsafe(
+    `
+      SELECT ps.id
+      FROM plugin_servers ps
+      LEFT JOIN Server s ON s.id = ps.minewiki_server_id
+      WHERE ps.enabled = TRUE
+        AND ps.minewiki_server_id IS NOT NULL
+        AND s.id IS NULL
+      LIMIT ${args.fixLimit}
+    `,
+  );
+  if (orphaned.length === 0) {
+    pass('active PluginServer points to canonical Server');
+  } else if (!args.fix) {
+    const sample = orphaned.slice(0, args.sampleLimit).map((row) => stringifyId(row.id)).join(', ');
+    error(
+      'active PluginServer points to canonical Server',
+      `${orphaned.length} active orphan credentials; sample: ${sample}; rerun with --fix to disable`,
+    );
+  } else {
+    const ids = orphaned.map((row) => String(row.id));
+    const disabled = await prisma.pluginServer.updateMany({
+      where: { id: { in: ids }, enabled: true },
+      data: { enabled: false },
+    });
+    summary.fixes += disabled.count;
+    pass(
+      'active PluginServer points to canonical Server',
+      `disabled ${disabled.count} orphan credentials`,
+    );
+  }
+
+  await errorIfRows(
+    'canonical PluginServer secret encrypted',
+    `
+      SELECT ps.id
+      FROM plugin_servers ps
+      WHERE ps.minewiki_server_id IS NOT NULL
+        AND ps.server_secret NOT LIKE 'enc:v1:%'
+      LIMIT ${args.sampleLimit}
+    `,
+  );
 }
 
 async function validateExpiredReplayGuards() {
@@ -329,5 +375,6 @@ By default this command never mutates data.
 
 --fix performs safe repairs:
   - delete expired PluginSyncReplayGuard rows
+  - disable active plugin credentials whose canonical server no longer exists
   - rebuild missing render cache for current public wiki revisions`);
 }

@@ -87,6 +87,8 @@ If `pnpm data:validate` reports only safe warnings for expired replay guards or 
 pnpm data:validate -- --fix
 ```
 
+The validator also fails on active plugin credentials whose canonical server is missing and on canonical credentials stored without application encryption. Fix mode safely disables active orphan credentials but never rewrites secrets.
+
 ## Start PM2
 
 ```bash
