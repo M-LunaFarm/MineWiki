@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ServerSummary } from '@minewiki/schemas';
 import {
@@ -683,10 +684,13 @@ function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly
 
         <div className="relative h-20 overflow-hidden rounded-lg border border-white/10 bg-[#1A1A1E] sm:h-20 lg:h-[74px]">
           {server.bannerUrl ? (
-            <img
+            <Image
               alt={`${server.name} 배너`}
-              className="h-full w-full object-cover"
+              fill
+              sizes="(min-width: 1024px) 112px, 100vw"
+              className="object-cover"
               src={server.bannerUrl}
+              unoptimized
             />
           ) : (
             <div className={`flex h-full w-full items-center justify-center ${fallback}`}>

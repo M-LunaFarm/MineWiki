@@ -392,5 +392,5 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 function normalizeAltText(filename: string): string {
-  return filename.trim().replace(/\.[^.]+$/u, '').replace(/[|\[\]]/g, '').slice(0, 80) || 'image';
+  return filename.trim().replace(/\.[^.]+$/u, '').replace(/[|[\]]/g, '').slice(0, 80) || 'image';
 }

@@ -2,6 +2,7 @@
 
 import type { ChangeEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import {
   AlertCircle,
   Bold,
@@ -390,13 +391,15 @@ export function ServerDescriptionEditor({
                       href={imageUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="overflow-hidden rounded border border-[#2a2a2d] bg-[#0e0e10]"
+                      className="relative h-24 overflow-hidden rounded border border-[#2a2a2d] bg-[#0e0e10]"
                     >
-                      <img
+                      <Image
                         src={imageUrl}
                         alt={`상세 설명 이미지 ${index + 1}`}
-                        className="h-24 w-full object-cover"
-                        loading="lazy"
+                        fill
+                        sizes="(min-width: 640px) 33vw, 50vw"
+                        className="object-cover"
+                        unoptimized
                       />
                     </a>
                   ))}
