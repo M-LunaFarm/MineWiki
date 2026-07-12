@@ -5,9 +5,11 @@ x-app-environment: &app-environment
   DATABASE_URL: mysql://minewiki:${MINEWIKI_DB_PASSWORD}@mysql:3306/minewiki
   REDIS_URL: redis://redis:6379
   NEXT_PUBLIC_SITE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}
+  NEXT_PUBLIC_MAIN_SITE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}
+  NEXT_PUBLIC_VERIFY_URL: ${MINEWIKI_VERIFY_PUBLIC_URL:-http://localhost:8080}
   NEXT_PUBLIC_API_BASE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}/api
   INTERNAL_API_BASE_URL: http://api:3000
-  VERIFY_PUBLIC_BASE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}
+  VERIFY_PUBLIC_BASE_URL: ${MINEWIKI_VERIFY_PUBLIC_URL:-http://localhost:8080}
 
 services:
   mysql:
@@ -131,6 +133,8 @@ services:
       NODE_ENV: production
       INTERNAL_API_BASE_URL: http://api:3000
       NEXT_PUBLIC_SITE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}
+      NEXT_PUBLIC_MAIN_SITE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}
+      NEXT_PUBLIC_VERIFY_URL: ${MINEWIKI_VERIFY_PUBLIC_URL:-http://localhost:8080}
       NEXT_PUBLIC_API_BASE_URL: ${MINEWIKI_PUBLIC_URL:-http://localhost:8080}/api
     depends_on:
       api:

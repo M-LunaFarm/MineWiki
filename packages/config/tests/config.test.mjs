@@ -84,7 +84,7 @@ test('API production config rejects Microsoft callback outside the official serv
 
   assert.throws(
     () => new ConfigService(source),
-    /MICROSOFT_REDIRECT_URI must be https:\/\/minewiki\.kr\/minecraft\/callback/
+    /MICROSOFT_REDIRECT_URI must be https:\/\/verify\.minewiki\.kr\/minecraft\/callback/
   );
 });
 
@@ -143,11 +143,13 @@ function validProductionEnv() {
     DATABASE_URL: 'mysql://minewiki:strong@127.0.0.1:3306/minewiki',
     REDIS_URL: 'redis://127.0.0.1:6379',
     NEXT_PUBLIC_SITE_URL: 'https://minewiki.kr',
+    NEXT_PUBLIC_MAIN_SITE_URL: 'https://minewiki.kr',
+    NEXT_PUBLIC_VERIFY_URL: 'https://verify.minewiki.kr',
     NEXT_PUBLIC_API_BASE_URL: 'https://minewiki.kr/api',
     INTERNAL_API_BASE_URL: 'http://127.0.0.1:3000',
     API_HOST: '127.0.0.1',
     API_PORT: '3000',
-    VERIFY_PUBLIC_BASE_URL: 'https://minewiki.kr',
+    VERIFY_PUBLIC_BASE_URL: 'https://verify.minewiki.kr',
     DISCORD_BOT_TOKEN: 'discord-bot-token',
     DISCORD_CLIENT_ID: 'discord-client-id',
     DISCORD_CLIENT_SECRET: 'discord-client-secret',
@@ -156,7 +158,7 @@ function validProductionEnv() {
     PLUGIN_SYNC_TOKEN: 'plugin-sync-token',
     MICROSOFT_CLIENT_ID: 'microsoft-client-id',
     MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
-    MICROSOFT_REDIRECT_URI: 'https://minewiki.kr/minecraft/callback',
+    MICROSOFT_REDIRECT_URI: 'https://verify.minewiki.kr/minecraft/callback',
     NAVER_CLIENT_ID: 'naver-client-id',
     NAVER_CLIENT_SECRET: 'naver-client-secret',
     NAVER_REDIRECT_URI: 'https://minewiki.kr/auth/callback/naver',

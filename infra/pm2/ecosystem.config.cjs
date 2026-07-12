@@ -11,6 +11,7 @@ function configValue(name, fallback) {
 }
 
 const webPort = '4320';
+const verifyWebPort = '4322';
 const apiPort = '4321';
 const internalApiBaseUrl = `http://127.0.0.1:${apiPort}`;
 
@@ -31,6 +32,42 @@ module.exports = {
           'https://minewiki.kr/api',
         ),
         NEXT_PUBLIC_SITE_URL: configValue('NEXT_PUBLIC_SITE_URL', 'https://minewiki.kr'),
+        NEXT_PUBLIC_MAIN_SITE_URL: configValue(
+          'NEXT_PUBLIC_MAIN_SITE_URL',
+          'https://minewiki.kr',
+        ),
+        NEXT_PUBLIC_VERIFY_URL: configValue(
+          'NEXT_PUBLIC_VERIFY_URL',
+          'https://verify.minewiki.kr',
+        ),
+      },
+    },
+    {
+      name: 'minewiki-verify-web',
+      cwd: path.join(repoRoot, 'apps/web'),
+      script: 'node_modules/next/dist/bin/next',
+      args: `start -H 127.0.0.1 -p ${verifyWebPort}`,
+      env: {
+        NODE_ENV: 'production',
+        PORT: verifyWebPort,
+        MINEWIKI_ENV_FILE: envFile,
+        INTERNAL_API_BASE_URL: internalApiBaseUrl,
+        NEXT_PUBLIC_API_BASE_URL: configValue(
+          'NEXT_PUBLIC_API_BASE_URL',
+          'https://minewiki.kr/api',
+        ),
+        NEXT_PUBLIC_SITE_URL: configValue(
+          'NEXT_PUBLIC_VERIFY_URL',
+          'https://verify.minewiki.kr',
+        ),
+        NEXT_PUBLIC_MAIN_SITE_URL: configValue(
+          'NEXT_PUBLIC_MAIN_SITE_URL',
+          'https://minewiki.kr',
+        ),
+        NEXT_PUBLIC_VERIFY_URL: configValue(
+          'NEXT_PUBLIC_VERIFY_URL',
+          'https://verify.minewiki.kr',
+        ),
       },
     },
     {

@@ -45,6 +45,8 @@ const envSchema = z.object({
   API_HOST: z.string().optional(),
   NEXT_PUBLIC_API_BASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SITE_URL: z.string().url().optional(),
+  NEXT_PUBLIC_MAIN_SITE_URL: z.string().url().optional(),
+  NEXT_PUBLIC_VERIFY_URL: z.string().url().optional(),
   INTERNAL_API_BASE_URL: z.string().url().optional(),
   DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().url().optional(),
@@ -246,10 +248,10 @@ function validateProductionEnvironment(env: EnvSchema): void {
 }
 
 function validateMicrosoftRedirectUri(env: EnvSchema, failures: string[]): void {
-  if (isBlank(env.MICROSOFT_REDIRECT_URI) || isBlank(env.NEXT_PUBLIC_SITE_URL)) {
+  if (isBlank(env.MICROSOFT_REDIRECT_URI) || isBlank(env.VERIFY_PUBLIC_BASE_URL)) {
     return;
   }
-  const expected = new URL('/minecraft/callback', env.NEXT_PUBLIC_SITE_URL).toString();
+  const expected = new URL('/minecraft/callback', env.VERIFY_PUBLIC_BASE_URL).toString();
   if (env.MICROSOFT_REDIRECT_URI !== expected) {
     failures.push(`MICROSOFT_REDIRECT_URI must be ${expected}`);
   }

@@ -2,7 +2,6 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import type { MinecraftIdentity } from '@minewiki/schemas';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -20,10 +19,9 @@ import {
   CallbackShell,
   CallbackSideStat,
 } from '../../../components/auth/callback-shell';
-import { csrfHeaders } from '../../../lib/csrf';
-import { getApiBaseUrl } from '../../../lib/runtime-config';
-
-const API_BASE_URL = getApiBaseUrl();
+const MAIN_SITE_ORIGIN = normalizeOrigin(
+  process.env.NEXT_PUBLIC_MAIN_SITE_URL ?? 'https://minewiki.kr',
+);
 
 interface CallbackClientProps {
   readonly code?: string;
@@ -66,9 +64,9 @@ export function MinecraftCallbackClient({
     if (handoffSent) {
       return {
         kind: 'success' as const,
-        title: 'Minecraft 소유권 인증을 완료했습니다.',
+        title: '인증 응답을 전달했습니다.',
         message:
-          'MineWiki 계정에 Minecraft 프로필이 연결되었습니다. 창이 자동으로 닫히지 않으면 직접 닫아도 됩니다.',
+          'MineWiki 계정 창에서 Minecraft 소유권을 최종 확인하고 있습니다. 이 창은 곧 닫힙니다.',
         detail: undefined,
       };
     }
@@ -100,45 +98,29 @@ export function MinecraftCallbackClient({
     let closeTimer: number | undefined;
 
     const completeVerification = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/v1/minecraft/verify`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
-          body: JSON.stringify({ authorizationCode: code, state }),
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(
-            typeof body?.message === 'string'
-              ? body.message
-              : 'Minecraft 소유권을 확인하지 못했습니다.',
-          );
-        }
-        if (cancelled) return;
-
-        const identity = body as MinecraftIdentity;
-        window.opener?.postMessage(
-          { type: 'minecraft-oauth-verified', identity },
-          window.location.origin,
+      if (!window.opener) {
+        setVerificationError(
+          'MineWiki에서 시작한 인증 창이 아닙니다. minewiki.kr 계정 화면에서 다시 시작해 주세요.',
         );
-        setHandoffSent(true);
-        closeTimer = window.setTimeout(() => {
-          try {
-            window.close();
-          } catch {
-            // 사용자가 직접 닫거나 /me로 이동할 수 있다.
-          }
-        }, 3000);
-      } catch (verificationFailure) {
-        if (cancelled) return;
-        const message =
-          verificationFailure instanceof Error
-            ? verificationFailure.message
-            : 'Minecraft 소유권을 확인하지 못했습니다.';
-        setVerificationError(message);
-        notifyMinecraftOAuthError(message);
+        return;
       }
+
+      // verify.minewiki.kr never receives the MineWiki session cookie. It
+      // relays the one-time provider response to the trusted opener, which
+      // performs the authenticated verification request on minewiki.kr.
+      window.opener.postMessage(
+        { type: 'minecraft-oauth-complete', code, state },
+        MAIN_SITE_ORIGIN,
+      );
+      if (cancelled) return;
+      setHandoffSent(true);
+      closeTimer = window.setTimeout(() => {
+        try {
+          window.close();
+        } catch {
+          // 사용자가 직접 닫을 수 있다.
+        }
+      }, 1800);
     };
 
     void completeVerification();
@@ -313,5 +295,13 @@ function notifyMinecraftOAuthError(message: string): void {
   if (typeof window === 'undefined') {
     return;
   }
-  window.opener?.postMessage({ type: 'minecraft-oauth-error', message }, window.location.origin);
+  window.opener?.postMessage({ type: 'minecraft-oauth-error', message }, MAIN_SITE_ORIGIN);
+}
+
+function normalizeOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return 'https://minewiki.kr';
+  }
 }

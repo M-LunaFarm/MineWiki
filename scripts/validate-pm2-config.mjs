@@ -26,8 +26,12 @@ for (const [name, expectedService] of expectedServices) {
 }
 
 const web = config.apps?.find((app) => app.name === 'minewiki-web');
+const verifyWeb = config.apps?.find((app) => app.name === 'minewiki-verify-web');
 if (!web) {
   throw new Error('Missing PM2 process: minewiki-web');
+}
+if (!verifyWeb) {
+  throw new Error('Missing PM2 process: minewiki-verify-web');
 }
 if (web.env?.MINEWIKI_SERVICE) {
   throw new Error('minewiki-web must not impersonate an API, worker, or bot service');
@@ -35,19 +39,31 @@ if (web.env?.MINEWIKI_SERVICE) {
 
 const api = config.apps?.find((app) => app.name === 'minewiki-api');
 const webPort = String(web.env?.PORT ?? '');
+const verifyWebPort = String(verifyWeb.env?.PORT ?? '');
 const apiPort = String(api?.env?.API_PORT ?? '');
-if (!/^\d+$/.test(webPort) || !/^\d+$/.test(apiPort) || webPort === apiPort) {
-  throw new Error('MineWiki web and API must use distinct numeric ports.');
+if (
+  !/^\d+$/.test(webPort) ||
+  !/^\d+$/.test(verifyWebPort) ||
+  !/^\d+$/.test(apiPort) ||
+  new Set([webPort, verifyWebPort, apiPort]).size !== 3
+) {
+  throw new Error('MineWiki web, verify web, and API must use distinct numeric ports.');
 }
 if (!web.args?.includes(`-H 127.0.0.1`) || !web.args?.includes(`-p ${webPort}`)) {
   throw new Error('minewiki-web must bind its configured port to loopback.');
+}
+if (
+  !verifyWeb.args?.includes(`-H 127.0.0.1`) ||
+  !verifyWeb.args?.includes(`-p ${verifyWebPort}`)
+) {
+  throw new Error('minewiki-verify-web must bind its configured port to loopback.');
 }
 if (api?.env?.API_HOST !== '127.0.0.1') {
   throw new Error('minewiki-api must bind to loopback behind Nginx.');
 }
 
 const expectedInternalApiBaseUrl = `http://127.0.0.1:${apiPort}`;
-for (const name of ['minewiki-web', 'minewiki-api', 'minewiki-bot']) {
+for (const name of ['minewiki-web', 'minewiki-verify-web', 'minewiki-api', 'minewiki-bot']) {
   const app = config.apps?.find((candidate) => candidate.name === name);
   if (app?.env?.INTERNAL_API_BASE_URL !== expectedInternalApiBaseUrl) {
     throw new Error(`${name} must use INTERNAL_API_BASE_URL=${expectedInternalApiBaseUrl}`);
@@ -59,9 +75,14 @@ for (const relativePath of ['infra/nginx/minewiki.conf', 'infra/nginx/minewiki.r
   if (!nginxConfig.includes(`server 127.0.0.1:${webPort};`)) {
     throw new Error(`${relativePath} must route MineWiki web to port ${webPort}.`);
   }
+  if (!nginxConfig.includes(`server 127.0.0.1:${verifyWebPort};`)) {
+    throw new Error(`${relativePath} must route MineWiki verify web to port ${verifyWebPort}.`);
+  }
   if (!nginxConfig.includes(`server 127.0.0.1:${apiPort};`)) {
     throw new Error(`${relativePath} must route MineWiki API to port ${apiPort}.`);
   }
 }
 
-console.log(`PM2 service labels and loopback ports are valid (web=${webPort}, api=${apiPort}).`);
+console.log(
+  `PM2 service labels and loopback ports are valid (web=${webPort}, verify=${verifyWebPort}, api=${apiPort}).`,
+);

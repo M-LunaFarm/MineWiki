@@ -4,13 +4,16 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, ShieldCheck, SquareArrowOutUpRight } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MinecraftIdentity } from '@minewiki/schemas';
 import { createAccountMergeRequest } from '../../lib/auth-client';
 import { getApiBaseUrl } from '../../lib/runtime-config';
 import { csrfHeaders } from '../../lib/csrf';
 
 const API_BASE_URL = getApiBaseUrl();
+const VERIFY_ORIGIN = normalizeOrigin(
+  process.env.NEXT_PUBLIC_VERIFY_URL ?? 'https://verify.minewiki.kr',
+);
 
 interface PendingAuthorization {
   readonly authorizationUrl: string;
@@ -32,6 +35,14 @@ function buildAvatarCandidates(uuid: string): string[] {
     `https://mc-heads.net/avatar/${compactUuid}/96`,
     `https://crafatar.com/avatars/${compactUuid}?size=96&overlay`,
   ];
+}
+
+function normalizeOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return 'https://verify.minewiki.kr';
+  }
 }
 
 async function completeDiscordVerifySession(
@@ -63,6 +74,7 @@ async function completeDiscordVerifySession(
 }
 
 export function MinecraftOwnershipPanel() {
+  const oauthPopupRef = useRef<Window | null>(null);
   const searchParams = useSearchParams();
   const verifySessionId = searchParams.get('verifySessionId');
   const verifyToken = searchParams.get('verifyToken');
@@ -235,13 +247,17 @@ export function MinecraftOwnershipPanel() {
     }
 
     const handler = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) {
+      if (event.origin !== window.location.origin && event.origin !== VERIFY_ORIGIN) {
+        return;
+      }
+      if (!oauthPopupRef.current || event.source !== oauthPopupRef.current) {
         return;
       }
       if (typeof event.data !== 'object' || event.data === null) {
         return;
       }
       if (event.data.type === 'minecraft-oauth-error') {
+        oauthPopupRef.current = null;
         setFlowStage('error');
         setPendingAuth(null);
         setError(
@@ -264,6 +280,7 @@ export function MinecraftOwnershipPanel() {
           return;
         }
         const nextIdentity = verifiedIdentity as MinecraftIdentity;
+        oauthPopupRef.current = null;
         setIdentity(nextIdentity);
         setPlayerName(nextIdentity.playerName ?? null);
         setPendingAuth(null);
@@ -304,6 +321,7 @@ export function MinecraftOwnershipPanel() {
 
       setFlowStage('callback');
       setError(null);
+      oauthPopupRef.current = null;
       void performVerification({
         authorizationCode: incomingCode,
         state: pendingAuth.state,
@@ -350,11 +368,13 @@ export function MinecraftOwnershipPanel() {
         setError('팝업을 열 수 없습니다. 브라우저 팝업 차단 설정을 확인해 주세요.');
         return;
       }
+      oauthPopupRef.current = popup;
       const closeTimer = window.setInterval(() => {
         if (!popup.closed) {
           return;
         }
         window.clearInterval(closeTimer);
+        oauthPopupRef.current = null;
         setFlowStage((current) => {
           if (current === 'popup') {
             setPendingAuth(null);
