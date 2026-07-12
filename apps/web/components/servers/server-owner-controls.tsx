@@ -22,6 +22,7 @@ type EditableTarget = {
   host: string;
   port: string;
   token: string;
+  tokenConfigured: boolean;
   publicKey: string;
 };
 
@@ -59,8 +60,8 @@ type ServerWikiLinkResponse = {
 
 function createDefaultTargets(): EditableTarget[] {
   return [
-    { protocol: 'v2', host: '', port: '8192', token: '', publicKey: '' },
-    { protocol: 'v1', host: '', port: '8193', token: '', publicKey: '' },
+    { protocol: 'v2', host: '', port: '8192', token: '', tokenConfigured: false, publicKey: '' },
+    { protocol: 'v1', host: '', port: '8193', token: '', tokenConfigured: false, publicKey: '' },
   ];
 }
 
@@ -76,6 +77,7 @@ function mergeTargets(targets: ReadonlyArray<VotifierTarget>): EditableTarget[] 
       match.host = target.host;
       match.port = String(target.port);
       match.token = target.token ?? '';
+      match.tokenConfigured = target.tokenConfigured ?? false;
       match.publicKey = target.publicKey ?? '';
     }
   }
@@ -339,7 +341,7 @@ export function ServerOwnerControls({
             return { ...target, port: digits };
           }
           if (field === 'token') {
-            return { ...target, token: value };
+            return { ...target, token: value, tokenConfigured: target.tokenConfigured };
           }
           return { ...target, publicKey: value };
         }),
@@ -371,7 +373,7 @@ export function ServerOwnerControls({
         }
         if (target.protocol === 'v2') {
           const token = target.token.trim();
-          if (!token) {
+          if (!token && !target.tokenConfigured) {
             setVotifierFeedback({
               type: 'error',
               message: 'Votifier v2 토큰을 입력해 주세요.',
@@ -382,7 +384,8 @@ export function ServerOwnerControls({
             protocol: 'v2',
             host,
             port: portValue,
-            token,
+            token: token || undefined,
+            tokenConfigured: target.tokenConfigured,
           });
         } else {
           const publicKey = target.publicKey.trim();
@@ -637,8 +640,14 @@ export function ServerOwnerControls({
                         handleVotifierFieldChange(target.protocol, 'token', event.target.value)
                       }
                       placeholder="서버의 Votifier v2 토큰"
+                      autoComplete="new-password"
                       disabled={savingVotifier || loadingVotifier}
                     />
+                    {target.tokenConfigured && !target.token ? (
+                      <span className="text-[11px] font-normal text-emerald-300">
+                        저장된 토큰이 있습니다. 변경할 때만 새 토큰을 입력하세요.
+                      </span>
+                    ) : null}
                   </label>
                 ) : (
                   <label className="flex min-w-0 flex-col gap-2 text-xs font-semibold text-slate-300">

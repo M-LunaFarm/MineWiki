@@ -328,6 +328,18 @@ async function validatePluginCredentials() {
       LIMIT ${args.sampleLimit}
     `,
   );
+
+  await errorIfRows(
+    'Votifier v2 token encrypted',
+    `
+      SELECT vt.id
+      FROM VotifierTarget vt
+      WHERE vt.protocol = 'v2'
+        AND vt.token IS NOT NULL
+        AND vt.token NOT LIKE 'enc:v1:%'
+      LIMIT ${args.sampleLimit}
+    `,
+  );
 }
 
 async function validateExpiredReplayGuards() {

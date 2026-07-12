@@ -495,6 +495,7 @@ export const votifierTargetSchema = z.object({
   host: z.string().min(1),
   port: z.number().int().min(1).max(65535),
   token: z.string().min(1).optional(),
+  tokenConfigured: z.boolean().optional(),
   publicKey: z.string().min(1).optional(),
 });
 

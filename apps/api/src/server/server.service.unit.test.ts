@@ -176,6 +176,68 @@ test('server list marks zero-vote servers as awaiting rank aggregation', async (
   assert.equal(server.rank, null);
 });
 
+test('Votifier settings never return the stored v2 token', async () => {
+  const service = new ServerService(
+    {} as never,
+    {
+      votifierTarget: {
+        findMany: async () => [
+          {
+            protocol: 'v2',
+            host: 'vote.example.com',
+            port: 8192,
+            token: 'enc:v1:sensitive-token',
+            publicKey: null,
+          },
+        ],
+      },
+    } as never,
+    {} as never,
+  );
+
+  const [target] = await service.listVotifierTargets(randomUUID());
+
+  assert.equal(target?.token, undefined);
+  assert.equal(target?.tokenConfigured, true);
+});
+
+test('Votifier update preserves an encrypted token when no replacement is provided', async () => {
+  const serverId = randomUUID();
+  const created: Array<Record<string, unknown>> = [];
+  const service = new ServerService(
+    {} as never,
+    {
+      votifierTarget: {
+        findMany: async () => [
+          {
+            protocol: 'v2',
+            token: 'enc:v1:stored-token',
+            createdAt: new Date(),
+          },
+        ],
+        deleteMany: async () => ({ count: 1 }),
+        createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
+          created.push(...data);
+          return { count: data.length };
+        },
+      },
+      $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
+    } as never,
+    {} as never,
+  );
+
+  await service.updateVotifierTargets(serverId, [
+    {
+      protocol: 'v2',
+      host: 'vote.example.com',
+      port: 8192,
+      tokenConfigured: true,
+    },
+  ]);
+
+  assert.equal(created[0]?.token, 'enc:v1:stored-token');
+});
+
 test('paginated rankings apply server-side filters and return page metadata', async () => {
   const serverId = randomUUID();
   const queries: unknown[] = [];

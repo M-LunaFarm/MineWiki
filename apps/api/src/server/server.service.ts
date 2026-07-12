@@ -27,7 +27,7 @@ import { FileService, type FileImageUploadRequest, type FileImageUploadResponse 
 import { FirestoreTelemetryService } from '../telemetry/firestore-telemetry.service';
 import type { ClaimMethod } from '../claim/claim.types';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
-import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
+import { encryptAppSecret } from '../common/secret-codec';
 import { BusinessEventService } from '../events/business-event.service';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
@@ -906,23 +906,45 @@ export class ServerService {
       protocol: target.protocol === 'v1' ? 'v1' : 'v2',
       host: target.host,
       port: target.port,
-      token: decryptAppSecret(target.token) ?? undefined,
+      tokenConfigured: Boolean(target.token),
       publicKey: target.publicKey ?? undefined,
     }));
   }
 
   async updateVotifierTargets(serverId: string, targets: VotifierTarget[]): Promise<void> {
+    const existingTargets = await this.prisma.votifierTarget.findMany({
+      where: { serverId },
+      orderBy: { createdAt: 'asc' },
+    });
+    const existingByProtocol = new Map(
+      existingTargets.map((target) => [target.protocol, target] as const),
+    );
+    const data = targets.map((target) => {
+      const existing = existingByProtocol.get(target.protocol);
+      let token: string | null = null;
+      if (target.protocol === 'v2') {
+        token = target.token
+          ? encryptAppSecret(target.token)
+          : target.tokenConfigured
+            ? existing?.token ?? null
+            : null;
+        if (!token) {
+          throw new BadRequestException('Votifier v2 토큰을 입력해 주세요.');
+        }
+      }
+      return {
+        serverId,
+        protocol: target.protocol,
+        host: target.host,
+        port: target.port,
+        token,
+        publicKey: target.publicKey ?? null,
+      };
+    });
     await this.prisma.$transaction([
       this.prisma.votifierTarget.deleteMany({ where: { serverId } }),
       this.prisma.votifierTarget.createMany({
-        data: targets.map((target) => ({
-          serverId,
-          protocol: target.protocol,
-          host: target.host,
-          port: target.port,
-          token: encryptAppSecret(target.token),
-          publicKey: target.publicKey ?? null,
-        })),
+        data,
       }),
     ]);
   }
