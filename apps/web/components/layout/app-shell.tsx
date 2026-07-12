@@ -29,6 +29,10 @@ export function AppShell({ children }: AppShellProps) {
     return <div className="min-h-screen text-slate-100">{children}</div>;
   }
 
+  if (isAuthPage) {
+    return <div className="min-h-screen bg-[#070a0c] text-slate-100">{children}</div>;
+  }
+
   if (isSupportPage) {
     return (
       <div className="min-h-screen bg-[#121212] text-slate-100">
@@ -39,7 +43,7 @@ export function AppShell({ children }: AppShellProps) {
     );
   }
 
-  if (isServerPage || pathname === '/me' || pathname === '/servers/register' || isAuthPage) {
+  if (isServerPage || pathname === '/me' || pathname === '/servers/register') {
     return (
       <div className="min-h-screen bg-[#121212] text-slate-100">
         {children}

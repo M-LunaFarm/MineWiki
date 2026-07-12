@@ -40,10 +40,10 @@ export default function ForgotPasswordClient() {
       description="가입한 이메일 주소로 비밀번호 재설정 안내를 발송합니다."
     >
       <form className="space-y-4" onSubmit={handleSubmit}>
-        <label className="flex flex-col gap-2 text-xs font-semibold text-[#555b62]">
+        <label className="flex flex-col gap-2 text-xs font-semibold text-slate-300">
           이메일 주소
           <input
-            className="rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+            className="rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -55,8 +55,8 @@ export default function ForgotPasswordClient() {
           <p
             className={`rounded-lg border px-3 py-2 text-sm ${
               status.type === 'success'
-                ? 'border-[#a8d9bd] bg-[#effaf3] text-[#0f6a3d]'
-                : 'border-[#f0b8ad] bg-[#fff4f2] text-[#b42318]'
+                ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+                : 'border-rose-400/30 bg-rose-500/10 text-rose-300'
             }`}
           >
             {status.message}
@@ -64,7 +64,7 @@ export default function ForgotPasswordClient() {
         ) : null}
         <button
           type="submit"
-          className="w-full rounded-lg bg-[#13ec80] px-4 py-3 text-sm font-semibold text-[#0f1713] transition hover:bg-[#10cf70] disabled:opacity-50"
+          className="w-full rounded-lg bg-[#13ec80] px-4 py-3 text-sm font-semibold text-[#06110d] transition hover:bg-[#10cf70] disabled:opacity-50"
           disabled={loading}
         >
           {loading ? '전송 중...' : '재설정 메일 보내기'}
@@ -73,13 +73,13 @@ export default function ForgotPasswordClient() {
 
       <div className="mt-6 flex flex-wrap gap-2">
         <Link
-          className="rounded-lg border border-[#ded7c8] bg-white px-4 py-2 text-xs font-semibold text-[#3f454c] transition hover:border-[#16824d]/50 hover:text-[#16824d]"
+          className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-[#35e5b7]/50 hover:text-[#35e5b7]"
           href="/login"
         >
           로그인 페이지로 돌아가기
         </Link>
         <Link
-          className="rounded-lg border border-[#ded7c8] bg-white px-4 py-2 text-xs font-semibold text-[#3f454c] transition hover:border-[#16824d]/50 hover:text-[#16824d]"
+          className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-[#35e5b7]/50 hover:text-[#35e5b7]"
           href="/login/reset-password"
         >
           재설정 코드 입력

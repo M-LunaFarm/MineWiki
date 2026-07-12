@@ -1,7 +1,9 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { ArrowLeft, BookOpen, MailCheck, ShieldCheck } from 'lucide-react';
+import type { ReactElement, ReactNode } from 'react';
 
 interface AuthShellLayoutProps {
   readonly title: string;
@@ -11,92 +13,76 @@ interface AuthShellLayoutProps {
 
 export function AuthShellLayout({ title, description, children }: AuthShellLayoutProps) {
   return (
-    <main className="min-h-screen bg-[#f4f0e6] text-[#1f2328]">
-      <div className="grid min-h-screen lg:grid-cols-[minmax(320px,0.92fr)_minmax(420px,1.08fr)]">
-        <aside className="flex flex-col justify-between border-b border-[#ded7c8] bg-[#fcfaf5] px-5 py-5 sm:px-8 lg:border-b-0 lg:border-r lg:px-10 lg:py-8">
-          <div>
-            <Link href="/" className="flex w-fit items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#13ec80] text-base font-bold text-[#0f1713]">
-                L
-              </div>
-              <span className="text-lg font-semibold text-[#1f2328]">
-                MineWiki<span className="text-[#16824d]">.kr</span>
-              </span>
-            </Link>
+    <main className="relative min-h-screen overflow-hidden bg-[#070a0c] text-white">
+      <Image
+        src="/images/minewiki-discovery-world.png"
+        alt=""
+        fill
+        priority
+        sizes="100vw"
+        className="object-cover object-[64%_center] opacity-45"
+      />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(7,10,12,.98)_0%,rgba(7,10,12,.88)_48%,rgba(7,10,12,.72)_100%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(0deg,#070a0c_0%,transparent_45%,rgba(7,10,12,.7)_100%)]" />
 
-            <div className="mt-14 max-w-sm lg:mt-20">
-              <p className="text-xs font-semibold text-[#5f6f64]">계정 보안</p>
-              <h1 className="mt-3 text-3xl font-semibold leading-tight text-[#1f2328] sm:text-4xl">
-                MineWiki 계정 접근
-              </h1>
-              <p className="mt-4 text-sm leading-6 text-[#5f6368]">
-                로그인, 이메일 인증, 비밀번호 재설정은 계정 소유자 확인을 위해 등록된 이메일
-                기준으로 처리됩니다.
-              </p>
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-4 py-5 sm:px-7 lg:px-10 lg:py-7">
+        <header className="flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-3" aria-label="MineWiki 홈">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#35e5b7]/30 bg-[#35e5b7]/10 text-[#35e5b7]">
+              <ShieldCheck className="h-5 w-5" />
+            </span>
+            <span className="text-lg font-black tracking-[-.03em]">MineWiki<span className="text-[#35e5b7]">.kr</span></span>
+          </Link>
+          <Link href="/" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-xs font-semibold text-slate-300 backdrop-blur-md transition hover:border-[#35e5b7]/30 hover:text-white">
+            <ArrowLeft className="h-4 w-4" /> 홈으로
+          </Link>
+        </header>
+
+        <div className="grid flex-1 items-center gap-10 py-6 lg:grid-cols-[minmax(0,1fr)_minmax(420px,520px)] lg:py-14">
+          <section className="hidden max-w-2xl lg:block lg:pb-12">
+            <p className="text-xs font-bold uppercase tracking-[.2em] text-[#35e5b7]">Secure MineWiki Account</p>
+            <h1 className="mt-5 text-4xl font-black leading-[1.08] tracking-[-.045em] sm:text-5xl lg:text-6xl">
+              하나의 계정으로<br /><span className="text-[#35e5b7]">서버와 지식</span>을 연결하세요.
+            </h1>
+            <p className="mt-5 max-w-xl text-sm leading-7 text-slate-300 sm:text-base">
+              서버 리뷰, 투표 신뢰 인증, 위키 기여와 고객지원까지 MineWiki 공식 계정에서 안전하게 이어집니다.
+            </p>
+
+            <div className="mt-9 grid max-w-xl gap-3 sm:grid-cols-3">
+              <GuideRow title="안전한 복구" description="등록 이메일 기반" icon={<MailCheck />} />
+              <GuideRow title="검증된 활동" description="Minecraft 인증 연계" icon={<ShieldCheck />} />
+              <GuideRow title="공식 지원" description="support@minewiki.kr" icon={<BookOpen />} />
             </div>
+          </section>
 
-            <div className="mt-10 space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-[#6d6255]">
-                확인 사항
-              </h3>
-
-              <GuideRow
-                title="등록 이메일 사용"
-                description="가입 시 사용한 이메일 주소로 인증 및 복구 메일이 발송됩니다."
-                icon="alternate_email"
-              />
-              <GuideRow
-                title="메일함 확인"
-                description="수신함에 메일이 없으면 스팸함과 프로모션함을 함께 확인해 주세요."
-                icon="mark_email_read"
-              />
-              <GuideRow
-                title="공용 기기 주의"
-                description="공용 기기에서는 로그인 상태 유지 기능을 사용하지 않는 것이 좋습니다."
-                icon="devices"
-              />
-            </div>
-          </div>
-
-          <div className="mt-12 flex flex-wrap gap-5 border-t border-[#ded7c8] pt-6 text-xs text-[#6d6255]">
-            <Link className="transition-colors hover:text-[#16824d]" href="/policies/terms">
-              이용약관
-            </Link>
-            <Link className="transition-colors hover:text-[#16824d]" href="/policies/privacy">
-              개인정보처리방침
-            </Link>
-            <Link className="transition-colors hover:text-[#16824d]" href="/support">
-              고객센터
-            </Link>
-            <span className="ml-auto">MineWiki Corp.</span>
-          </div>
-        </aside>
-
-        <section className="flex items-center justify-center px-4 py-10 sm:px-8 lg:px-12">
-          <div className="w-full max-w-[440px] rounded-lg border border-[#ded7c8] bg-white p-6 shadow-[0_24px_70px_rgba(35,31,25,0.12)] sm:p-8">
-            <div className="mb-7">
-              <h2 className="text-2xl font-semibold text-[#1f2328]">{title}</h2>
-              <p className="mt-2 text-sm leading-5 text-[#666b72]">{description}</p>
+          <section className="auth-flow w-full rounded-2xl border border-white/10 bg-[#09100f]/90 p-5 shadow-[0_32px_100px_rgba(0,0,0,.55)] backdrop-blur-xl sm:p-8">
+            <div className="mb-7 border-b border-white/[0.08] pb-5">
+              <p className="text-[11px] font-bold uppercase tracking-[.16em] text-[#35e5b7]">MineWiki Account</p>
+              <h2 className="mt-2 text-2xl font-extrabold tracking-[-.025em] text-white">{title}</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-400">{description}</p>
             </div>
             {children}
-          </div>
-        </section>
+          </section>
+        </div>
+
+        <footer className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-white/[0.08] pt-5 text-[11px] text-slate-500">
+          <span>© 2026 MineWiki · minewiki.kr</span>
+          <Link href="/policies/terms" className="hover:text-[#35e5b7]">이용약관</Link>
+          <Link href="/policies/privacy" className="hover:text-[#35e5b7]">개인정보처리방침</Link>
+          <Link href="/support" className="hover:text-[#35e5b7]">고객센터</Link>
+          <a href="mailto:support@minewiki.kr" className="sm:ml-auto hover:text-[#35e5b7]">support@minewiki.kr</a>
+        </footer>
       </div>
     </main>
   );
 }
 
-function GuideRow(props: { title: string; description: string; icon: string }) {
-  const { title, description, icon } = props;
+function GuideRow({ title, description, icon }: { readonly title: string; readonly description: string; readonly icon: ReactElement }) {
   return (
-    <div className="flex gap-3">
-      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[#e9f5ee]">
-        <span className="material-symbols-outlined text-xl text-[#16824d]">{icon}</span>
-      </div>
-      <div>
-        <h4 className="text-sm font-semibold text-[#252a30]">{title}</h4>
-        <p className="mt-1 text-xs leading-5 text-[#666b72]">{description}</p>
-      </div>
+    <div className="rounded-xl border border-white/[0.08] bg-black/25 p-3.5 backdrop-blur-sm">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#35e5b7]/10 text-[#35e5b7] [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
+      <h3 className="mt-3 text-xs font-bold text-white">{title}</h3>
+      <p className="mt-1 text-[11px] text-slate-500">{description}</p>
     </div>
   );
 }

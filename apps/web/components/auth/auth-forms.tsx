@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Check, Eye, EyeOff, Minus } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAuth } from '../providers/auth-context';
 import {
@@ -219,27 +220,27 @@ export function AuthForms() {
 
   if (account) {
     return (
-      <div className="space-y-4 rounded-lg border border-[#ded7c8] bg-[#fcfaf5] p-5">
-        <h3 className="text-sm font-semibold text-[#1f2328]">로그인된 계정</h3>
-        <p className="text-sm text-[#3f454c]">
+      <div className="space-y-4 rounded-lg border border-white/10 bg-[#0d1416] p-5">
+        <h3 className="text-sm font-semibold text-white">로그인된 계정</h3>
+        <p className="text-sm text-slate-200">
           {account.displayName ?? account.email ?? '알 수 없는 사용자'}
         </p>
-        <p className="text-xs text-[#666b72]">연동 방식: {account.provider}</p>
+        <p className="text-xs text-slate-400">연동 방식: {account.provider}</p>
         <div className="flex flex-wrap gap-2 text-xs">
           <Link
-            className="rounded-lg border border-[#ded7c8] bg-white px-3 py-2 text-[#3f454c] hover:border-[#16824d]/50 hover:text-[#16824d]"
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-slate-200 hover:border-[#35e5b7]/50 hover:text-[#35e5b7]"
             href="/servers/register"
           >
             서버 등록
           </Link>
           <Link
-            className="rounded-lg border border-[#ded7c8] bg-white px-3 py-2 text-[#3f454c] hover:border-[#16824d]/50 hover:text-[#16824d]"
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-slate-200 hover:border-[#35e5b7]/50 hover:text-[#35e5b7]"
             href="/dashboard"
           >
             대시보드
           </Link>
           <Link
-            className="rounded-lg border border-[#ded7c8] bg-white px-3 py-2 text-[#3f454c] hover:border-[#16824d]/50 hover:text-[#16824d]"
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-slate-200 hover:border-[#35e5b7]/50 hover:text-[#35e5b7]"
             href="/me"
           >
             계정 관리
@@ -247,7 +248,7 @@ export function AuthForms() {
         </div>
         <button
           type="button"
-          className="w-full rounded-lg border border-[#d8c8bc] bg-white px-4 py-2 text-xs font-semibold text-[#7d2d2d] transition hover:border-[#b85454] hover:text-[#9e2f2f]"
+          className="w-full rounded-lg border border-[#d8c8bc] bg-white/[0.04] px-4 py-2 text-xs font-semibold text-[#7d2d2d] transition hover:border-[#b85454] hover:text-[#9e2f2f]"
           disabled={loading}
           onClick={() => void logout()}
         >
@@ -291,12 +292,12 @@ export function AuthForms() {
       </div>
 
       {!oauthAvailability.discord || !oauthAvailability.naver ? (
-        <p className="rounded-lg border border-[#e7c56f] bg-[#fff8e1] px-3 py-2 text-xs text-[#765900]">
+        <p className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
           일부 간편 로그인 옵션은 현재 비활성화되어 있습니다.
         </p>
       ) : null}
       {oauthError ? (
-        <p className="rounded-lg border border-[#e7c56f] bg-[#fff8e1] px-3 py-2 text-xs text-[#765900]">
+        <p className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
           {oauthError}
         </p>
       ) : null}
@@ -307,25 +308,28 @@ export function AuthForms() {
         onTermsChange={setTermsAccepted}
         onPrivacyChange={setPrivacyAccepted}
       />
+      <p className="-mt-4 text-[11px] leading-5 text-slate-500">
+        간편 로그인 또는 신규 회원가입에 적용됩니다. 기존 이메일 계정 로그인에는 필요하지 않습니다.
+      </p>
 
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-[#ded7c8]" />
+          <div className="w-full border-t border-white/10" />
         </div>
         <div className="relative flex justify-center text-xs">
-          <span className="bg-white px-2 text-[#7a7f86]">이메일로 계속하기</span>
+          <span className="bg-[#09100f] px-2 text-slate-500">이메일로 계속하기</span>
         </div>
       </div>
 
       {mode !== 'verify' ? (
         <>
-          <div className="grid grid-cols-2 rounded-lg border border-[#ded7c8] bg-[#f4f0e6] p-1">
+          <div className="grid grid-cols-2 rounded-lg border border-white/10 bg-white/[0.04] p-1">
             <button
               type="button"
               className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
                 mode === 'login'
-                  ? 'bg-white text-[#1f2328] shadow-sm'
-                  : 'text-[#666b72] hover:text-[#1f2328]'
+                  ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm'
+                  : 'text-slate-400 hover:text-white'
               }`}
               onClick={() => {
                 setMode('login');
@@ -339,8 +343,8 @@ export function AuthForms() {
               type="button"
               className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
                 mode === 'register'
-                  ? 'bg-white text-[#1f2328] shadow-sm'
-                  : 'text-[#666b72] hover:text-[#1f2328]'
+                  ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm'
+                  : 'text-slate-400 hover:text-white'
               }`}
               onClick={() => {
                 setMode('register');
@@ -354,12 +358,12 @@ export function AuthForms() {
 
           <form className="space-y-5" onSubmit={handleSubmit}>
             <div>
-              <label className="mb-1.5 block text-xs font-semibold text-[#555b62]" htmlFor="email">
+              <label className="mb-1.5 block text-xs font-semibold text-slate-300" htmlFor="email">
                 이메일 주소
               </label>
               <input
                 id="email"
-                className="w-full rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+                className="w-full rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
                 type="email"
                 placeholder="name@example.com"
                 value={email}
@@ -370,7 +374,7 @@ export function AuthForms() {
 
             <div>
               <label
-                className="mb-1.5 block text-xs font-semibold text-[#555b62]"
+                className="mb-1.5 block text-xs font-semibold text-slate-300"
                 htmlFor="password"
               >
                 비밀번호
@@ -378,7 +382,7 @@ export function AuthForms() {
               <div className="relative">
                 <input
                   id="password"
-                  className="w-full rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 pr-12 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+                  className="w-full rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 pr-12 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="비밀번호"
                   value={password}
@@ -390,20 +394,18 @@ export function AuthForms() {
                 />
                 <button
                   type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7a7f86] transition-colors hover:text-[#1f2328]"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-white"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => setShowPassword((value) => !value)}
                 >
-                  <span className="material-symbols-outlined text-xl">
-                    {showPassword ? 'visibility_off' : 'visibility'}
-                  </span>
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
             {showPasswordHints && mode === 'register' ? (
-              <div className="rounded-lg border border-[#ded7c8] bg-[#fcfaf5] p-3 text-xs text-[#666b72]">
-                <p className="font-semibold text-[#1f2328]">비밀번호 조건</p>
+              <div className="rounded-lg border border-white/10 bg-[#0d1416] p-3 text-xs text-slate-400">
+                <p className="font-semibold text-white">비밀번호 조건</p>
                 <ul className="mt-2 space-y-1">
                   <PasswordRequirement met={passwordLengthValid}>8자 이상 입력</PasswordRequirement>
                   <PasswordRequirement met={passwordUppercaseValid}>
@@ -420,14 +422,14 @@ export function AuthForms() {
               <>
                 <div>
                   <label
-                    className="mb-1.5 block text-xs font-semibold text-[#555b62]"
+                    className="mb-1.5 block text-xs font-semibold text-slate-300"
                     htmlFor="confirmPassword"
                   >
                     비밀번호 확인
                   </label>
                   <input
                     id="confirmPassword"
-                    className="w-full rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+                    className="w-full rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
                     type={showPassword ? 'text' : 'password'}
                     value={confirmPassword}
                     onChange={(event) => setConfirmPassword(event.target.value)}
@@ -436,21 +438,21 @@ export function AuthForms() {
                   />
                 </div>
                 {passwordsMatch !== null ? (
-                  <p className={`text-xs ${passwordsMatch ? 'text-[#16824d]' : 'text-[#b42318]'}`}>
+                  <p className={`text-xs ${passwordsMatch ? 'text-[#35e5b7]' : 'text-rose-300'}`}>
                     {passwordsMatch ? '비밀번호가 일치합니다.' : '비밀번호가 일치하지 않습니다.'}
                   </p>
                 ) : null}
 
                 <div>
                   <label
-                    className="mb-1.5 block text-xs font-semibold text-[#555b62]"
+                    className="mb-1.5 block text-xs font-semibold text-slate-300"
                     htmlFor="displayName"
                   >
                     닉네임
                   </label>
                   <input
                     id="displayName"
-                    className="w-full rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+                    className="w-full rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
                     value={displayName}
                     onChange={(event) => setDisplayName(event.target.value)}
                     placeholder="커뮤니티에 표시될 이름"
@@ -458,14 +460,14 @@ export function AuthForms() {
                   />
                 </div>
 
-                <p className="text-xs leading-5 text-[#666b72]">
+                <p className="text-xs leading-5 text-slate-400">
                   위 필수 정책 동의는 이메일 회원가입과 간편 로그인에 공통으로 적용됩니다.
                 </p>
               </>
             ) : (
               <div className="flex justify-end">
                 <Link
-                  className="text-xs font-semibold text-[#16824d] transition-colors hover:text-[#0f5f38]"
+                  className="text-xs font-semibold text-[#35e5b7] transition-colors hover:text-[#0f5f38]"
                   href="/login/forgot-password"
                 >
                   비밀번호 찾기
@@ -474,19 +476,19 @@ export function AuthForms() {
             )}
 
             {error ? (
-              <p className="rounded-lg border border-[#f0b8ad] bg-[#fff4f2] px-3 py-2 text-sm text-[#b42318]">
+              <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
                 {error}
               </p>
             ) : null}
             {notice ? (
-              <p className="rounded-lg border border-[#a8d9bd] bg-[#effaf3] px-3 py-2 text-sm text-[#0f6a3d]">
+              <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
                 {notice}
               </p>
             ) : null}
 
             <button
               type="submit"
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-[#13ec80] px-6 py-3.5 text-sm font-bold text-[#0f1713] shadow-sm transition-all hover:bg-[#10cf70] disabled:opacity-50"
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-[#13ec80] px-6 py-3.5 text-sm font-bold text-[#06110d] shadow-sm transition-all hover:bg-[#10cf70] disabled:opacity-50"
               disabled={loading}
             >
               {mode === 'login' ? '로그인하기' : '가입 후 인증 진행'}
@@ -495,18 +497,18 @@ export function AuthForms() {
 
           {mode === 'login' ? (
             <div className="mt-6 space-y-2 text-center">
-              <p className="text-xs text-[#666b72]">
+              <p className="text-xs text-slate-400">
                 계정에 문제가 있나요?{' '}
                 <Link
-                  className="font-semibold text-[#16824d] underline decoration-[#9bbda8] underline-offset-2 transition-colors hover:text-[#0f5f38]"
+                  className="font-semibold text-[#35e5b7] underline decoration-[#9bbda8] underline-offset-2 transition-colors hover:text-[#0f5f38]"
                   href="/login/resend-verification"
                 >
                   인증 메일 재전송
                 </Link>
               </p>
-              <p className="text-xs text-[#666b72]">
+              <p className="text-xs text-slate-400">
                 <Link
-                  className="font-semibold text-[#16824d] transition-colors hover:text-[#0f5f38]"
+                  className="font-semibold text-[#35e5b7] transition-colors hover:text-[#0f5f38]"
                   href="/login/forgot-password"
                 >
                   비밀번호 재설정
@@ -517,9 +519,9 @@ export function AuthForms() {
         </>
       ) : (
         <form className="space-y-4" onSubmit={handleVerifySubmit}>
-          <div className="rounded-lg border border-[#ded7c8] bg-[#fcfaf5] p-4 text-sm text-[#1f2328]">
-            <p className="font-semibold text-[#16824d]">이메일 인증 대기 중</p>
-            <p className="mt-2 text-xs leading-5 text-[#666b72]">
+          <div className="rounded-lg border border-white/10 bg-[#0d1416] p-4 text-sm text-white">
+            <p className="font-semibold text-[#35e5b7]">이메일 인증 대기 중</p>
+            <p className="mt-2 text-xs leading-5 text-slate-400">
               {pendingVerification
                 ? `${pendingVerification.email} 주소로 인증 코드를 발송했습니다. 만료 시간 ${new Date(
                     pendingVerification.expiresAt,
@@ -530,14 +532,14 @@ export function AuthForms() {
 
           <div>
             <label
-              className="mb-1.5 block text-xs font-semibold text-[#555b62]"
+              className="mb-1.5 block text-xs font-semibold text-slate-300"
               htmlFor="verifyToken"
             >
               인증 코드
             </label>
             <input
               id="verifyToken"
-              className="w-full rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+              className="w-full rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
               value={verifyToken}
               onChange={(event) => setVerifyToken(event.target.value)}
               placeholder="이메일로 전송된 코드 입력"
@@ -546,12 +548,12 @@ export function AuthForms() {
           </div>
 
           {error ? (
-            <p className="rounded-lg border border-[#f0b8ad] bg-[#fff4f2] px-3 py-2 text-sm text-[#b42318]">
+            <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
               {error}
             </p>
           ) : null}
           {notice ? (
-            <p className="rounded-lg border border-[#a8d9bd] bg-[#effaf3] px-3 py-2 text-sm text-[#0f6a3d]">
+            <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
               {notice}
             </p>
           ) : null}
@@ -559,7 +561,7 @@ export function AuthForms() {
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              className="rounded-lg border border-[#ded7c8] bg-white px-4 py-2 text-xs font-semibold text-[#3f454c] transition hover:border-[#16824d]/50 hover:text-[#16824d] disabled:opacity-50"
+              className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-[#35e5b7]/50 hover:text-[#35e5b7] disabled:opacity-50"
               onClick={() => void handleResendVerification()}
               disabled={loading || !pendingVerification}
             >
@@ -567,7 +569,7 @@ export function AuthForms() {
             </button>
             <button
               type="submit"
-              className="rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-semibold text-[#0f1713] transition hover:bg-[#10cf70] disabled:opacity-50"
+              className="rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-semibold text-[#06110d] transition hover:bg-[#10cf70] disabled:opacity-50"
               disabled={loading}
             >
               이메일 인증 완료
@@ -576,7 +578,7 @@ export function AuthForms() {
 
           <button
             type="button"
-            className="text-xs font-semibold text-[#16824d] underline transition hover:text-[#0f5f38]"
+            className="text-xs font-semibold text-[#35e5b7] underline transition hover:text-[#0f5f38]"
             onClick={() => {
               setMode('login');
               setPendingVerification(null);
@@ -605,8 +607,8 @@ function PolicyAgreements({
   readonly onPrivacyChange: (value: boolean) => void;
 }) {
   return (
-    <fieldset className="space-y-2 rounded-lg border border-[#ded7c8] bg-[#fcfaf5] px-4 py-3 text-xs leading-5 text-[#666b72]">
-      <legend className="px-1 font-semibold text-[#3f454c]">필수 정책 동의</legend>
+    <fieldset className="space-y-2 rounded-lg border border-white/10 bg-[#0d1416] px-4 py-3 text-xs leading-5 text-slate-400">
+      <legend className="px-1 font-semibold text-slate-200">간편 로그인·신규 가입 필수 동의</legend>
       <PolicyCheckbox checked={termsAccepted} onChange={onTermsChange} href="/policies/terms" label="이용약관" />
       <PolicyCheckbox checked={privacyAccepted} onChange={onPrivacyChange} href="/policies/privacy" label="개인정보 처리방침" />
     </fieldset>
@@ -616,8 +618,8 @@ function PolicyAgreements({
 function PolicyCheckbox({ checked, onChange, href, label }: { readonly checked: boolean; readonly onChange: (value: boolean) => void; readonly href: string; readonly label: string }) {
   return (
     <label className="flex items-start gap-3">
-      <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-[#b9b0a1] bg-white text-[#16824d] focus:ring-[#16824d]" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <span><span className="mr-1 font-semibold text-[#b42318]">[필수]</span><Link className="text-[#16824d] underline" href={href} target="_blank" rel="noopener noreferrer">{label}</Link>에 동의합니다.</span>
+      <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-white/20 bg-white/[0.04] text-[#35e5b7] focus:ring-[#35e5b7]" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span><span className="mr-1 font-semibold text-rose-300">[필수]</span><Link className="text-[#35e5b7] underline" href={href} target="_blank" rel="noopener noreferrer">{label}</Link>에 동의합니다.</span>
     </label>
   );
 }
@@ -631,15 +633,15 @@ function isSafeReturnPath(value: string | null): value is string {
 function PasswordRequirement(props: { met: boolean; children: ReactNode }) {
   const { met, children } = props;
   return (
-    <li className={`flex items-center gap-2 ${met ? 'text-[#16824d]' : 'text-[#7a7f86]'}`}>
+    <li className={`flex items-center gap-2 ${met ? 'text-[#35e5b7]' : 'text-slate-500'}`}>
       <span
         className={`flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${
           met
-            ? 'border-[#16824d]/70 bg-[#e9f5ee] text-[#16824d]'
-            : 'border-[#d8d0c0] text-[#7a7f86]'
+            ? 'border-[#35e5b7]/70 bg-[#35e5b7]/10 text-[#35e5b7]'
+            : 'border-white/15 text-slate-500'
         }`}
       >
-        {met ? '✓' : '•'}
+        {met ? <Check className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
       </span>
       {children}
     </li>

@@ -14,8 +14,8 @@ export default function ResetPasswordPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-[#f4f0e6] px-4">
-          <div className="w-full max-w-md rounded-lg border border-[#ded7c8] bg-white p-8 text-center text-sm text-[#666b72] shadow-[0_24px_70px_rgba(35,31,25,0.12)]">
+        <div className="flex min-h-screen items-center justify-center bg-[#070a0c] px-4">
+          <div className="w-full max-w-md rounded-xl border border-white/10 bg-[#0d1416] p-8 text-center text-sm text-slate-400 shadow-2xl">
             로딩 중...
           </div>
         </div>

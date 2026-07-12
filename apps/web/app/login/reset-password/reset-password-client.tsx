@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Check, Minus } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { resetPassword } from '../../../lib/auth-client';
@@ -66,20 +67,20 @@ export default function ResetPasswordClient() {
       description="메일로 받은 재설정 토큰과 새 비밀번호를 입력해 주세요."
     >
       <form className="space-y-4" onSubmit={handleSubmit}>
-        <label className="flex flex-col gap-2 text-xs font-semibold text-[#555b62]">
+        <label className="flex flex-col gap-2 text-xs font-semibold text-slate-300">
           재설정 토큰
           <input
-            className="rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+            className="rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
             value={token}
             onChange={(event) => setToken(event.target.value)}
             placeholder="이메일로 받은 코드"
             required
           />
         </label>
-        <label className="flex flex-col gap-2 text-xs font-semibold text-[#555b62]">
+        <label className="flex flex-col gap-2 text-xs font-semibold text-slate-300">
           새 비밀번호
           <input
-            className="rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+            className="rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
             type="password"
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
@@ -87,10 +88,10 @@ export default function ResetPasswordClient() {
             required
           />
         </label>
-        <label className="flex flex-col gap-2 text-xs font-semibold text-[#555b62]">
+        <label className="flex flex-col gap-2 text-xs font-semibold text-slate-300">
           새 비밀번호 확인
           <input
-            className="rounded-lg border border-[#d8d0c0] bg-[#fcfaf5] px-4 py-3 text-sm text-[#1f2328] outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#16824d] focus:bg-white focus:ring-2 focus:ring-[#16824d]/15"
+            className="rounded-lg border border-white/15 bg-[#0d1416] px-4 py-3 text-sm text-white outline-none transition-all placeholder:text-[#9aa0a6] focus:border-[#35e5b7] focus:bg-white/[0.04] focus:ring-2 focus:ring-[#35e5b7]/15"
             type="password"
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
@@ -99,7 +100,7 @@ export default function ResetPasswordClient() {
           />
         </label>
 
-        <ul className="space-y-1 rounded-lg border border-[#ded7c8] bg-[#fcfaf5] px-4 py-3 text-xs text-[#666b72]">
+        <ul className="space-y-1 rounded-lg border border-white/10 bg-[#0d1416] px-4 py-3 text-xs text-slate-400">
           <PasswordRule met={passwordLengthValid}>8자 이상</PasswordRule>
           <PasswordRule met={passwordUppercaseValid}>대문자 포함</PasswordRule>
           <PasswordRule met={passwordSpecialValid}>특수문자 포함</PasswordRule>
@@ -109,8 +110,8 @@ export default function ResetPasswordClient() {
           <p
             className={`rounded-lg border px-3 py-2 text-sm ${
               status.type === 'success'
-                ? 'border-[#a8d9bd] bg-[#effaf3] text-[#0f6a3d]'
-                : 'border-[#f0b8ad] bg-[#fff4f2] text-[#b42318]'
+                ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+                : 'border-rose-400/30 bg-rose-500/10 text-rose-300'
             }`}
           >
             {status.message}
@@ -118,7 +119,7 @@ export default function ResetPasswordClient() {
         ) : null}
         <button
           type="submit"
-          className="w-full rounded-lg bg-[#13ec80] px-4 py-3 text-sm font-semibold text-[#0f1713] transition hover:bg-[#10cf70] disabled:opacity-50"
+          className="w-full rounded-lg bg-[#13ec80] px-4 py-3 text-sm font-semibold text-[#06110d] transition hover:bg-[#10cf70] disabled:opacity-50"
           disabled={loading}
         >
           {loading ? '변경 중...' : '비밀번호 변경'}
@@ -127,13 +128,13 @@ export default function ResetPasswordClient() {
 
       <div className="mt-6 flex flex-wrap gap-2">
         <Link
-          className="rounded-lg border border-[#ded7c8] bg-white px-4 py-2 text-xs font-semibold text-[#3f454c] transition hover:border-[#16824d]/50 hover:text-[#16824d]"
+          className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-[#35e5b7]/50 hover:text-[#35e5b7]"
           href="/login"
         >
           로그인 페이지로 돌아가기
         </Link>
         <Link
-          className="rounded-lg border border-[#ded7c8] bg-white px-4 py-2 text-xs font-semibold text-[#3f454c] transition hover:border-[#16824d]/50 hover:text-[#16824d]"
+          className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-[#35e5b7]/50 hover:text-[#35e5b7]"
           href="/login/forgot-password"
         >
           재설정 메일 다시 받기
@@ -146,15 +147,15 @@ export default function ResetPasswordClient() {
 function PasswordRule(props: { met: boolean; children: ReactNode }) {
   const { met, children } = props;
   return (
-    <li className={`flex items-center gap-2 ${met ? 'text-[#16824d]' : 'text-[#7a7f86]'}`}>
+    <li className={`flex items-center gap-2 ${met ? 'text-[#35e5b7]' : 'text-slate-500'}`}>
       <span
         className={`flex h-4 w-4 items-center justify-center rounded-full border text-[10px] ${
           met
-            ? 'border-[#16824d]/70 bg-[#e9f5ee] text-[#16824d]'
-            : 'border-[#d8d0c0] text-[#7a7f86]'
+            ? 'border-[#35e5b7]/70 bg-[#35e5b7]/10 text-[#35e5b7]'
+            : 'border-white/15 text-slate-500'
         }`}
       >
-        {met ? '✓' : '•'}
+        {met ? <Check className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
       </span>
       {children}
     </li>
