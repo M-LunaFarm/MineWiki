@@ -205,7 +205,7 @@ test('plugin sync uses canonical plugin server before legacy fallback', async ()
   assert.equal(updated.length, 0);
 });
 
-test('plugin sync audit events redact sensitive payload values', async () => {
+test('plugin sync audit events store only bounded payload fingerprints', async () => {
   const { service, serverId, secret, auditEvents } = createService();
   const timestamp = String(Math.floor(Date.now() / 1000));
   const nonce = 'redaction';
@@ -221,23 +221,17 @@ test('plugin sync audit events redact sensitive payload values', async () => {
 
   await service.sync({ timestamp, nonce, payload, signature });
 
-  const eventPayload = (auditEvents.at(-1) as {
-    data?: {
-      payload?: {
-        payload?: {
-          access_token?: string;
-          nested?: {
-            serverSecret?: string;
-            verificationUrl?: string;
-          };
-        };
-      };
-    };
-  }).data?.payload?.payload;
+  const eventPayload = (auditEvents.at(-1) as { data?: { payload?: Record<string, unknown> } })
+    .data?.payload;
+  const serialized = JSON.stringify(eventPayload);
 
-  assert.equal(eventPayload?.access_token, '[redacted]');
-  assert.equal(eventPayload?.nested?.serverSecret, '[redacted]');
-  assert.doesNotMatch(eventPayload?.nested?.verificationUrl ?? '', /verify-token/);
+  assert.match(String(eventPayload?.nonceHash), /^[a-f0-9]{64}$/u);
+  assert.match(String(eventPayload?.payloadHash), /^[a-f0-9]{64}$/u);
+  assert.equal(typeof eventPayload?.payloadBytes, 'number');
+  assert.equal(serialized.includes(nonce), false);
+  assert.equal(serialized.includes('access-token'), false);
+  assert.equal(serialized.includes('server-secret'), false);
+  assert.equal(serialized.length < 1024, true);
 });
 
 function auditAction(event: unknown): string | undefined {

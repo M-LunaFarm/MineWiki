@@ -14,23 +14,39 @@ test('plugin sync controller keeps canonical and legacy compatibility routes', a
     }
   } as never);
 
-  assert.equal(Reflect.getMetadata(PATH_METADATA, PluginSyncController.prototype.sync), 'v1/plugin/sync');
-  assert.equal(
-    Reflect.getMetadata(PATH_METADATA, PluginSyncController.prototype.syncLegacyHashed),
-    'api/v1/plugin/sync-9b4f7d2c6a5e4f3aa1d8b9a7c6e5d4f3'
-  );
-  assert.equal(
-    Reflect.getMetadata(PATH_METADATA, PluginSyncController.prototype.syncLegacyPlain),
+  assert.deepEqual(Reflect.getMetadata(PATH_METADATA, PluginSyncController.prototype.sync), [
+    'v1/plugin/sync',
+    'api/v1/plugin/sync-9b4f7d2c6a5e4f3aa1d8b9a7c6e5d4f3',
     'api/v1/plugin/sync'
-  );
+  ]);
 
   const body = {
     timestamp: '1',
     nonce: 'nonce',
-    signature: 'signature',
+    signature: 'a'.repeat(64),
     payload: { server_id: 'server-1' }
   };
-  assert.equal(await controller.syncLegacyHashed(body), response);
-  assert.equal(await controller.syncLegacyPlain(body), response);
-  assert.deepEqual(calls, [body, body]);
+  assert.equal(await controller.sync(body), response);
+  assert.deepEqual(calls, [body]);
+});
+
+test('plugin sync controller rejects oversized unauthenticated payloads before service work', async () => {
+  let calls = 0;
+  const controller = new PluginSyncController({
+    sync: async () => {
+      calls += 1;
+      return {};
+    }
+  } as never);
+
+  assert.throws(
+    () => controller.sync({
+      timestamp: '1',
+      nonce: 'nonce',
+      signature: 'a'.repeat(64),
+      payload: { server_id: 'server-1', padding: 'x'.repeat(17 * 1024) }
+    }),
+    /payload_too_large/
+  );
+  assert.equal(calls, 0);
 });

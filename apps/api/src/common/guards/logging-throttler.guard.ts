@@ -10,16 +10,7 @@ export class LoggingThrottlerGuard extends ThrottlerGuard {
   private readonly logger = new Logger(LoggingThrottlerGuard.name);
 
   protected override async getTracker(request: Record<string, unknown>): Promise<string> {
-    const pluginServerId = pluginSyncServerId(request.body);
-    if (pluginServerId) {
-      return `plugin:${pluginServerId}`;
-    }
-    const fastifyRequest = request as unknown as FastifyRequest;
-    const sessionToken = extractCookie(fastifyRequest.headers.cookie, 'mw_session');
-    if (sessionToken) {
-      return `session:${sha256(sessionToken)}`;
-    }
-    return extractClientIp(fastifyRequest) ?? fastifyRequest.ip ?? 'unknown';
+    return trackerForRequest(request as unknown as FastifyRequest);
   }
 
   protected async throwThrottlingException(
@@ -34,17 +25,12 @@ export class LoggingThrottlerGuard extends ThrottlerGuard {
   }
 }
 
-function pluginSyncServerId(body: unknown): string | null {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return null;
+export function trackerForRequest(request: FastifyRequest): string {
+  const sessionToken = extractCookie(request.headers.cookie, 'mw_session');
+  if (sessionToken) {
+    return `session:${sha256(sessionToken)}`;
   }
-  const payload = (body as { payload?: unknown }).payload;
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return null;
-  }
-  const serverId = (payload as { server_id?: unknown; pluginServerId?: unknown }).server_id ??
-    (payload as { server_id?: unknown; pluginServerId?: unknown }).pluginServerId;
-  return typeof serverId === 'string' && serverId.trim() ? serverId.trim().slice(0, 128) : null;
+  return `ip:${extractClientIp(request) ?? request.ip ?? 'unknown'}`;
 }
 
 function extractCookie(header: string | undefined, name: string): string | null {

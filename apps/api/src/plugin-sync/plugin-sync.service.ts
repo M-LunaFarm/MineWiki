@@ -8,7 +8,7 @@ import {
   NotFoundException,
   Optional
 } from '@nestjs/common';
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import {
@@ -187,28 +187,26 @@ export class PluginSyncService {
     request: PluginSyncRequest,
     extraPayload: Record<string, unknown> = {}
   ): Promise<void> {
+    const serializedPayload = JSON.stringify(request.payload);
+    const summary = {
+      timestamp: request.timestamp.slice(0, 32),
+      nonceHash: createHash('sha256').update(request.nonce).digest('hex'),
+      payloadBytes: Buffer.byteLength(serializedPayload, 'utf8'),
+      payloadHash: createHash('sha256').update(serializedPayload).digest('hex'),
+      ...extraPayload
+    };
     await this.guildEvents.recordPluginSyncAudit({
       pluginServerId: serverId,
       minecraftUuid: AUDIT_MINECRAFT_UUID,
       action,
-      payload: {
-        timestamp: request.timestamp,
-        nonce: request.nonce,
-        payload: request.payload,
-        ...extraPayload
-      }
+      payload: summary
     });
     await this.events?.audit(`plugin.sync.${action}`, {
       category: 'plugin.sync',
       severity: action === 'accepted' ? 'info' : 'warning',
       subjectType: 'plugin_server',
       subjectId: serverId,
-      metadata: {
-        timestamp: request.timestamp,
-        nonce: request.nonce,
-        payload: request.payload,
-        ...extraPayload
-      }
+      metadata: summary
     });
   }
 }
