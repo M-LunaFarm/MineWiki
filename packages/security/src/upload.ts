@@ -5,6 +5,7 @@ import sharp from 'sharp';
 
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024; // 5MB
 const DEFAULT_MAX_DIMENSION = 4096;
+const DEFAULT_MAX_INPUT_PIXELS = 4096 * 4096;
 
 const ALLOWED_MIME = new Map<string, string>([
   ['image/png', '.png'],
@@ -15,6 +16,7 @@ const ALLOWED_MIME = new Map<string, string>([
 export interface ImageValidationOptions {
   readonly maxBytes?: number;
   readonly maxDimension?: number;
+  readonly maxInputPixels?: number;
 }
 
 export interface SanitizedImage {
@@ -40,6 +42,7 @@ export async function validateImageUpload(
 ): Promise<SanitizedImage> {
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxDimension = options.maxDimension ?? DEFAULT_MAX_DIMENSION;
+  const maxInputPixels = options.maxInputPixels ?? DEFAULT_MAX_INPUT_PIXELS;
 
   if (!buffer || buffer.length === 0) {
     throw new ImageValidationError('업로드된 파일이 비어 있습니다.');
@@ -60,11 +63,16 @@ export async function validateImageUpload(
     throw new ImageValidationError('파일 확장자와 실제 이미지 형식이 일치하지 않습니다.');
   }
 
-  const image = sharp(buffer, { failOn: 'none' }).removeAlpha();
-  const metadata = await image.metadata();
+  const image = sharp(buffer, { failOn: 'none', limitInputPixels: maxInputPixels }).removeAlpha();
+  const metadata = await image.metadata().catch(() => {
+    throw new ImageValidationError('이미지 해상도가 허용 범위를 초과했습니다.');
+  });
 
   if (!metadata.width || !metadata.height) {
     throw new ImageValidationError('이미지 메타데이터를 확인할 수 없습니다.');
+  }
+  if (metadata.width * metadata.height > maxInputPixels) {
+    throw new ImageValidationError('이미지 해상도가 허용 범위를 초과했습니다.');
   }
 
   let pipeline = image.rotate().withMetadata({ exif: undefined, icc: undefined });

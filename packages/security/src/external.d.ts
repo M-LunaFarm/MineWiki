@@ -37,6 +37,7 @@ declare module 'sharp' {
 
   interface SharpOptions {
     failOn?: 'none' | 'warning' | 'truncated';
+    limitInputPixels?: number | boolean;
   }
 
   function sharp(input?: Buffer, options?: SharpOptions): SharpInstance;
