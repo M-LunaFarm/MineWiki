@@ -113,12 +113,20 @@ export class AccountConflictService {
   }
 
   private async detectConflicts(accountId: string): Promise<AccountLinkConflict[]> {
+    const accounts = await this.prisma.account.findMany({
+      where: { OR: [{ id: accountId }, { canonicalAccountId: accountId }] },
+      select: { id: true, provider: true, providerUserId: true },
+    });
+    const accountIds = accounts.map((account) => account.id);
+    if (!accountIds.includes(accountId)) {
+      accountIds.unshift(accountId);
+    }
     const [minecraftIdentity, discordUserIds] = await Promise.all([
-      this.prisma.minecraftIdentity.findUnique({
-        where: { accountId },
+      this.prisma.minecraftIdentity.findFirst({
+        where: { accountId: { in: accountIds } },
         select: { uuid: true },
       }),
-      this.resolveDiscordUserIds(accountId),
+      this.resolveDiscordUserIds(accountIds, accounts),
     ]);
 
     const conflicts: AccountLinkConflict[] = [];
@@ -126,7 +134,7 @@ export class AccountConflictService {
       const duplicateIdentity = await this.prisma.minecraftIdentity.findFirst({
         where: {
           uuid: minecraftIdentity.uuid,
-          accountId: { not: accountId },
+          accountId: { notIn: accountIds },
         },
         select: { accountId: true },
       });
@@ -230,20 +238,19 @@ export class AccountConflictService {
     ];
   }
 
-  private async resolveDiscordUserIds(accountId: string): Promise<string[]> {
-    const [account, credentials] = await Promise.all([
-      this.prisma.account.findUnique({
-        where: { id: accountId },
-        select: { provider: true, providerUserId: true },
-      }),
-      this.prisma.oAuthCredential.findMany({
-        where: { accountId, provider: 'discord' },
-        select: { providerUserId: true },
-      }),
-    ]);
+  private async resolveDiscordUserIds(
+    accountIds: string[],
+    accounts: Array<{ provider: string; providerUserId: string }>,
+  ): Promise<string[]> {
+    const credentials = await this.prisma.oAuthCredential.findMany({
+      where: { accountId: { in: accountIds }, provider: 'discord' },
+      select: { providerUserId: true },
+    });
     const ids = new Set<string>();
-    if (account?.provider === 'discord') {
-      ids.add(account.providerUserId);
+    for (const account of accounts) {
+      if (account.provider === 'discord') {
+        ids.add(account.providerUserId);
+      }
     }
     for (const credential of credentials) {
       ids.add(credential.providerUserId);

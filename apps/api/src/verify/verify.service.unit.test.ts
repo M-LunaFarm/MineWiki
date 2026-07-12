@@ -8,10 +8,10 @@ import { VerifyService } from './verify.service';
 function createHarness(options: {
   readonly existingDiscordLink?: { discordUserId: string; minecraftUuid: string };
   readonly existingMinecraftLink?: { discordUserId: string; minecraftUuid: string };
-  readonly conflictingMinecraftAccountId?: string;
   readonly ownsMinecraftIdentity?: boolean;
 } = {}) {
   let session: Record<string, unknown> | null = null;
+  const minecraftUuid = randomUUID();
   const prisma = {
     discordVerificationSession: {
       async create(args: { data: Record<string, unknown> }) {
@@ -62,16 +62,6 @@ function createHarness(options: {
       }
     },
     minecraftIdentity: {
-      async findFirst(args: { where: { accountId?: string | { not: string }; uuid?: string } }) {
-        if (typeof args.where.accountId === 'string') {
-          return options.ownsMinecraftIdentity === false
-            ? null
-            : { accountId: args.where.accountId, playerName: 'VerifiedPlayer' };
-        }
-        return options.conflictingMinecraftAccountId
-          ? { accountId: options.conflictingMinecraftAccountId }
-          : null;
-      },
       async upsert() {
         return {};
       }
@@ -115,14 +105,38 @@ function createHarness(options: {
     }
   } as ConfigService;
   const events = { track: async () => {} } as BusinessEventService;
+  const minecraft = {
+    getStoredIdentity: async () => {
+      if (options.ownsMinecraftIdentity === false) {
+        throw new Error('not_found');
+      }
+      return {
+        uuid: minecraftUuid,
+        playerName: 'VerifiedPlayer',
+        msOwned: true,
+        lastVerifiedAt: new Date().toISOString(),
+      };
+    },
+  };
   return {
+    minecraftUuid,
     get session() {
       return session;
     },
     setSession(next: Record<string, unknown>) {
       session = next;
     },
-    service: new VerifyService(prisma as never, config, events)
+    service: new VerifyService(
+      prisma as never,
+      config,
+      events,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      minecraft as never,
+    )
   };
 }
 
@@ -143,7 +157,7 @@ test('discord verify completes with a valid completion token', async () => {
 
   const completed = await harness.service.completeDiscordSession(response.sessionId, randomUUID(), {
     completionToken,
-    minecraftUuid: randomUUID(),
+    minecraftUuid: harness.minecraftUuid,
     playerName: 'Tester'
   });
 
@@ -220,7 +234,7 @@ test('discord verify cannot be completed twice', async () => {
   const harness = createHarness();
   const { response, completionToken } = await createPendingSession(harness);
   const accountId = randomUUID();
-  const minecraftUuid = randomUUID();
+  const minecraftUuid = harness.minecraftUuid;
   await harness.service.completeDiscordSession(response.sessionId, accountId, {
     completionToken,
     minecraftUuid,
@@ -247,7 +261,7 @@ test('discord verify rejects expired sessions', async () => {
     () =>
       harness.service.completeDiscordSession(response.sessionId, randomUUID(), {
         completionToken,
-        minecraftUuid: randomUUID(),
+        minecraftUuid: harness.minecraftUuid,
         playerName: 'Tester'
       }),
     /expired/
@@ -267,7 +281,7 @@ test('discord verify rejects conflicting Discord account mapping', async () => {
     () =>
       harness.service.completeDiscordSession(response.sessionId, randomUUID(), {
         completionToken,
-        minecraftUuid: randomUUID(),
+        minecraftUuid: harness.minecraftUuid,
         playerName: 'Tester'
       }),
     /Discord account is already linked/

@@ -35,6 +35,7 @@ import type {
   GuildSettingsRequest,
   GuildSummaryResponse
 } from './guild.types';
+import { MinecraftService } from '../minecraft/minecraft.service';
 
 const VERIFY_SESSION_TTL_MS = 1000 * 60 * 15;
 
@@ -46,6 +47,7 @@ export class VerifyService {
   private readonly discordMinecraftLinks: DiscordMinecraftLinkRepository;
   private readonly guildVerifications: GuildVerificationRepository;
   private readonly guildEvents: GuildEventRepository;
+  private readonly minecraft: MinecraftService;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -55,7 +57,8 @@ export class VerifyService {
     @Optional() guildChannelSettings?: GuildChannelSettingsRepository,
     @Optional() discordMinecraftLinks?: DiscordMinecraftLinkRepository,
     @Optional() guildVerifications?: GuildVerificationRepository,
-    @Optional() guildEvents?: GuildEventRepository
+    @Optional() guildEvents?: GuildEventRepository,
+    @Optional() minecraft?: MinecraftService
   ) {
     this.guildSettings = guildSettings ?? new GuildSettingsRepository(prisma);
     this.guildChannelSettings =
@@ -64,6 +67,7 @@ export class VerifyService {
       discordMinecraftLinks ?? new DiscordMinecraftLinkRepository(prisma);
     this.guildVerifications = guildVerifications ?? new GuildVerificationRepository(prisma);
     this.guildEvents = guildEvents ?? new GuildEventRepository(prisma);
+    this.minecraft = minecraft ?? new MinecraftService(events, config, prisma);
 
     const redisUrl = this.config.getOptional('REDIS_URL');
     this.syncQueue = redisUrl
@@ -192,21 +196,14 @@ export class VerifyService {
     this.assertCompletionToken(session.completionTokenHash, payload.completionToken);
 
     const minecraftUuid = normalizeMinecraftUuid(payload.minecraftUuid);
-    const ownedIdentity = await this.prisma.minecraftIdentity.findFirst({
-      where: {
-        accountId,
-        uuid: minecraftUuid,
-        msOwned: true,
-      },
-      select: { playerName: true },
-    });
-    if (!ownedIdentity) {
+    const ownedIdentity = await this.minecraft.getStoredIdentity(accountId).catch(() => null);
+    if (!ownedIdentity || ownedIdentity.uuid !== minecraftUuid || !ownedIdentity.msOwned) {
       throw new ForbiddenException(
         'Microsoft account verification is required for this Minecraft identity.',
       );
     }
     const minecraftName = ownedIdentity.playerName;
-    await this.assertDiscordVerifyLinkConflicts(session, accountId, minecraftUuid);
+    await this.assertDiscordVerifyLinkConflicts(session, minecraftUuid);
     const result = await this.prisma.discordVerificationSession.updateMany({
       where: { id: session.id, status: 'pending' },
       data: {
@@ -412,23 +409,12 @@ export class VerifyService {
 
   private async assertDiscordVerifyLinkConflicts(
     session: { requesterDiscordId: string },
-    accountId: string,
     minecraftUuid: string
   ): Promise<void> {
-    const [identityForUuid, discordLink, minecraftLink] = await Promise.all([
-      this.prisma.minecraftIdentity.findFirst({
-        where: {
-          uuid: minecraftUuid,
-          accountId: { not: accountId }
-        },
-        select: { accountId: true }
-      }),
+    const [discordLink, minecraftLink] = await Promise.all([
       this.discordMinecraftLinks.findByDiscordUserId(session.requesterDiscordId),
       this.discordMinecraftLinks.findByMinecraftUuid(minecraftUuid)
     ]);
-    if (identityForUuid) {
-      throw new ConflictException('Minecraft identity is already linked to another MineWiki account.');
-    }
     if (discordLink && discordLink.minecraftUuid !== minecraftUuid) {
       throw new ConflictException('Discord account is already linked to another Minecraft identity.');
     }

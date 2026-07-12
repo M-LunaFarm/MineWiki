@@ -13,9 +13,10 @@ import {
   GuildSettingsRepository,
   GuildVerificationRepository
 } from './guild.repositories';
+import { MinecraftModule } from '../minecraft/minecraft.module';
 
 @Module({
-  imports: [SessionModule, EventsModule],
+  imports: [SessionModule, EventsModule, MinecraftModule],
   controllers: [VerifyController, DiscordVerifyController, GuildController],
   providers: [
     VerifyService,

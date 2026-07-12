@@ -9,6 +9,7 @@ function createHarness(options: {
   readonly duplicateMinecraftAccountId?: string | null;
   readonly discordUserId?: string | null;
   readonly duplicateDiscordAccountId?: string | null;
+  readonly linkedAccountId?: string | null;
 } = {}) {
   const accountId = options.accountId ?? randomUUID();
   const minecraftUuid = options.minecraftUuid === undefined ? randomUUID() : options.minecraftUuid;
@@ -19,20 +20,31 @@ function createHarness(options: {
 
   const prisma = {
     minecraftIdentity: {
-      async findUnique() {
+      async findFirst(input: { where?: { accountId?: { notIn?: string[] } } }) {
+        if (input.where?.accountId?.notIn) {
+          return options.duplicateMinecraftAccountId
+            ? { accountId: options.duplicateMinecraftAccountId }
+            : null;
+        }
         return minecraftUuid ? { uuid: minecraftUuid } : null;
-      },
-      async findFirst() {
-        return options.duplicateMinecraftAccountId
-          ? { accountId: options.duplicateMinecraftAccountId }
-          : null;
       },
     },
     account: {
-      async findUnique() {
-        return discordUserId
-          ? { provider: 'discord', providerUserId: discordUserId }
-          : { provider: 'email', providerUserId: 'user@example.com' };
+      async findMany() {
+        return [
+          discordUserId
+            ? { id: accountId, provider: 'discord', providerUserId: discordUserId }
+            : { id: accountId, provider: 'email', providerUserId: 'user@example.com' },
+          ...(options.linkedAccountId
+            ? [
+                {
+                  id: options.linkedAccountId,
+                  provider: 'naver',
+                  providerUserId: 'linked-naver',
+                },
+              ]
+            : []),
+        ];
       },
       async findFirst() {
         return options.duplicateDiscordAccountId ? { id: options.duplicateDiscordAccountId } : null;
@@ -112,6 +124,14 @@ test('detects duplicate Discord identity conflict', async () => {
   assert.equal(response.conflicts.length, 1);
   assert.equal(response.conflicts[0]?.kind, 'discord_identity_duplicate');
   assert.equal(response.conflicts[0]?.conflictingAccountId, duplicateAccountId);
+});
+
+test('does not report Minecraft identity stored inside the canonical account group', async () => {
+  const harness = createHarness({ linkedAccountId: randomUUID() });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.deepEqual(response.conflicts, []);
 });
 
 test('creates merge request support ticket without auto-merging', async () => {
