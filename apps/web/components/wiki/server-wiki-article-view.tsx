@@ -36,7 +36,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
 
   return (
     <main className="min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
-      <div className="mx-auto grid w-full max-w-[1600px] lg:grid-cols-[280px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)_292px]">
+      <div className="mx-auto grid w-full max-w-[1600px] lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_292px]">
         <aside className="border-white/10 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:border-r">
           <div className="border-b border-white/10 px-6 py-7">
             <p className="font-display text-lg font-bold text-white">{wiki.name}</p>
@@ -54,18 +54,18 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
             </div>
           </div>
 
-          <nav className="px-4 py-5" aria-label={`${wiki.name} 위키 문서`}>
-            <div className="flex items-center gap-2 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          <nav className="px-4 py-3 lg:py-5" aria-label={`${wiki.name} 위키 문서`}>
+            <div className="hidden items-center gap-2 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 lg:flex">
               <BookOpen className="size-4" />
               서버 핸드북
             </div>
-            <div className="mt-3 space-y-1">
+            <div className="flex gap-2 overflow-x-auto lg:mt-3 lg:block lg:space-y-1">
               {wiki.navigation.map((item) => (
                 <Link
                   key={item.id}
                   href={item.path}
                   aria-current={item.current ? 'page' : undefined}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
+                  className={`flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition lg:w-full ${
                     item.current
                       ? 'bg-emerald-400/10 font-semibold text-emerald-300'
                       : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-100'
@@ -78,7 +78,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
             </div>
           </nav>
 
-          <div className="px-6 pb-6 lg:absolute lg:inset-x-0 lg:bottom-0">
+          <div className="hidden px-6 pb-6 lg:absolute lg:inset-x-0 lg:bottom-0 lg:block">
             <Link
               href={page.serverDirectoryPath ?? '/servers'}
               className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-400 transition hover:border-white/20 hover:text-white"
