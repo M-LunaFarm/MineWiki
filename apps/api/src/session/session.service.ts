@@ -38,6 +38,7 @@ export interface SessionPayload {
   readonly sessionId: string;
   readonly userId: string;
   readonly isElevated: boolean;
+  readonly authenticatedAt: string;
   readonly permissions?: readonly string[];
   readonly groups?: readonly string[];
 }
@@ -226,6 +227,7 @@ export class SessionService {
       sessionId: record.sessionId,
       userId: record.userId,
       isElevated: record.isElevated,
+      authenticatedAt: record.issuedAt.toISOString(),
       permissions: record.permissions,
       groups: record.groups
     };

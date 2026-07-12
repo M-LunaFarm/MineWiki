@@ -26,6 +26,8 @@ import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
 
+const RECENT_AUTHENTICATION_WINDOW_MS = 15 * 60 * 1000;
+
 @UseGuards(SessionGuard)
 @Controller('v1/minecraft')
 export class MinecraftController {
@@ -37,6 +39,7 @@ export class MinecraftController {
     @Body() body: unknown,
     @CurrentSession() session: SessionPayload
   ): Promise<MinecraftAuthorizationStartResponse> {
+    this.assertRecentAuthentication(session);
     const payload: MinecraftAuthorizationStartRequest =
       minecraftAuthorizationStartRequestSchema.parse(body);
     return this.minecraftService.startAuthorization({
@@ -67,6 +70,7 @@ export class MinecraftController {
   @HttpCode(204)
   @Throttle({ default: { limit: 5, ttl: 300 } })
   async revokeOwnIdentity(@CurrentSession() session: SessionPayload): Promise<void> {
+    this.assertRecentAuthentication(session);
     await this.minecraftService.revokeIdentity(session.userId);
   }
 
@@ -79,5 +83,19 @@ export class MinecraftController {
       throw new ForbiddenException('본인 계정만 조회할 수 있습니다.');
     }
     return this.minecraftService.getIdentity(userId);
+  }
+
+  private assertRecentAuthentication(session: SessionPayload): void {
+    const authenticatedAt = new Date(session.authenticatedAt);
+    const age = Date.now() - authenticatedAt.getTime();
+    if (
+      Number.isNaN(authenticatedAt.getTime()) ||
+      age < 0 ||
+      age > RECENT_AUTHENTICATION_WINDOW_MS
+    ) {
+      throw new ForbiddenException(
+        '보안을 위해 다시 로그인한 뒤 15분 안에 Minecraft 인증을 진행해 주세요.'
+      );
+    }
   }
 }
