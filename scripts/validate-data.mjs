@@ -133,6 +133,18 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'public Server descriptions are not test placeholders',
+    `
+      SELECT s.id
+      FROM Server s
+      WHERE LOWER(TRIM(s.shortDescription)) IN ('test', 'testserver', 'example', 'placeholder', 'todo', 'tbd')
+         OR LOWER(TRIM(s.longDescription)) IN ('test', 'testserver', 'example', 'placeholder', 'todo', 'tbd')
+         OR LOWER(TRIM(s.name)) LIKE 'test server%'
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'WikiProfile.accountId points to Account',
     `
       SELECT u.id
