@@ -15,6 +15,7 @@ export function AppShell({ children }: AppShellProps) {
     pathname === '/servers' ||
     (pathname.startsWith('/servers/') && pathname !== '/servers/register');
   const isSupportPage = pathname === '/support' || pathname.startsWith('/support/');
+  const isServerWikiPage = pathname === '/server' || pathname.startsWith('/server/');
   const isAuthPage =
     pathname === '/login' ||
     pathname === '/auth' ||
@@ -39,6 +40,15 @@ export function AppShell({ children }: AppShellProps) {
         <SiteHeader />
         {children}
         <SiteFooter />
+      </div>
+    );
+  }
+
+  if (isServerWikiPage) {
+    return (
+      <div className="min-h-screen bg-[#0b0e12] text-slate-100">
+        <SiteHeader />
+        <div className="pt-16">{children}</div>
       </div>
     );
   }

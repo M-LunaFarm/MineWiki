@@ -40,6 +40,25 @@ export interface WikiPageResponse {
     readonly path: string;
   } | null;
   readonly serverDirectoryPath?: string | null;
+  readonly serverWiki?: {
+    readonly name: string;
+    readonly slug: string;
+    readonly host: string | null;
+    readonly port: number | null;
+    readonly edition: string;
+    readonly supportedVersions: string | null;
+    readonly genres: string | null;
+    readonly isOnline: boolean | null;
+    readonly playersOnline: number | null;
+    readonly playersMax: number | null;
+    readonly layout: 'docs';
+    readonly navigation: ReadonlyArray<{
+      readonly id: string;
+      readonly title: string;
+      readonly path: string;
+      readonly current: boolean;
+    }>;
+  } | null;
 }
 
 export interface WikiRevisionSummary {
@@ -399,7 +418,7 @@ export class WikiReadService {
         })
         .catch(() => undefined);
     }
-    const serverDirectoryPath = await this.findServerDirectoryPath(namespace, page.spaceId);
+    const serverWiki = await this.findServerWikiContext(namespace, page.spaceId, page.id);
     return {
       id: page.id.toString(),
       namespace,
@@ -423,29 +442,76 @@ export class WikiReadService {
       categories: parsed.categories,
       redirectTarget: parsed.redirectTarget,
       redirectedFrom: null,
-      serverDirectoryPath
+      serverDirectoryPath: serverWiki?.directoryPath ?? null,
+      serverWiki: serverWiki?.context ?? null
     };
   }
 
-  private async findServerDirectoryPath(namespace: string, spaceId: bigint): Promise<string | null> {
+  private async findServerWikiContext(namespace: string, spaceId: bigint, currentPageId: bigint) {
     if (namespace !== 'server') {
       return null;
     }
     const serverWiki = await this.prisma.serverWiki.findFirst({
       where: { spaceId },
-      select: { voteServerId: true }
+      select: {
+        voteServerId: true,
+        serverName: true,
+        slug: true,
+        host: true,
+        port: true,
+        edition: true,
+        supportedVersions: true,
+        genres: true
+      }
     });
-    if (!serverWiki?.voteServerId) {
+    if (!serverWiki) {
       return null;
     }
-    const server = await this.prisma.server.findUnique({
-      where: { id: serverWiki.voteServerId },
-      select: { id: true, shortCode: true }
-    });
-    if (!server) {
-      return null;
-    }
-    return `/servers/${server.shortCode?.trim() || server.id}`;
+    const [server, pages] = await Promise.all([
+      serverWiki.voteServerId
+        ? this.prisma.server.findUnique({
+            where: { id: serverWiki.voteServerId },
+            select: {
+              id: true,
+              shortCode: true,
+              isOnline: true,
+              playersOnline: true,
+              playersMax: true
+            }
+          })
+        : null,
+      this.prisma.wikiPage.findMany({
+        where: { spaceId, status: { not: 'deleted' } },
+        select: { id: true, localPath: true, displayTitle: true },
+        orderBy: [{ id: 'asc' }],
+        take: 100
+      })
+    ]);
+    return {
+      directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
+      context: {
+        name: serverWiki.serverName,
+        slug: serverWiki.slug,
+        host: serverWiki.host,
+        port: serverWiki.port,
+        edition: serverWiki.edition,
+        supportedVersions: serverWiki.supportedVersions,
+        genres: serverWiki.genres,
+        isOnline: server?.isOnline ?? null,
+        playersOnline: server?.playersOnline ?? null,
+        playersMax: server?.playersMax ?? null,
+        layout: 'docs' as const,
+        navigation: pages.map((item) => ({
+          id: item.id.toString(),
+          title: item.displayTitle,
+          path:
+            item.localPath === serverWiki.slug
+              ? `/server/${serverWiki.slug}`
+              : `/server/${serverWiki.slug}/${item.localPath}`,
+          current: item.id === currentPageId
+        }))
+      }
+    };
   }
 
   private async findRenderableFiles(ast: AstNode[]) {

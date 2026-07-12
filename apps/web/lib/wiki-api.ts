@@ -33,6 +33,25 @@ export interface WikiPageResponse {
     readonly path: string;
   } | null;
   readonly serverDirectoryPath?: string | null;
+  readonly serverWiki?: {
+    readonly name: string;
+    readonly slug: string;
+    readonly host: string | null;
+    readonly port: number | null;
+    readonly edition: string;
+    readonly supportedVersions: string | null;
+    readonly genres: string | null;
+    readonly isOnline: boolean | null;
+    readonly playersOnline: number | null;
+    readonly playersMax: number | null;
+    readonly layout: 'docs';
+    readonly navigation: ReadonlyArray<{
+      readonly id: string;
+      readonly title: string;
+      readonly path: string;
+      readonly current: boolean;
+    }>;
+  } | null;
 }
 
 export async function fetchWikiPageByPath(path: string): Promise<WikiPageResponse | null> {
