@@ -56,9 +56,6 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60 } })
   startOAuth(@Body() body: unknown) {
     const payload = oauthStartRequestSchema.parse(body);
-    if (payload.agreeTerms !== true || payload.agreePrivacy !== true) {
-      throw new BadRequestException('이용약관과 개인정보 처리방침에 동의해 주세요.');
-    }
     return this.oauthFlow.start(
       payload.provider,
       payload.redirectUri,

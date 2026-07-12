@@ -135,7 +135,7 @@ export async function fetchCurrentAccount(): Promise<AuthAccount | null> {
 
 export async function startOAuthLogin(
   provider: OAuthProvider,
-  payload: { redirectUri: string; returnTo?: string; agreeTerms: true; agreePrivacy: true },
+  payload: { redirectUri: string; returnTo?: string; agreeTerms?: boolean; agreePrivacy?: boolean },
 ): Promise<OAuthStartResponse> {
   return postJson<OAuthStartResponse>('/v1/auth/oauth/start', {
     provider,

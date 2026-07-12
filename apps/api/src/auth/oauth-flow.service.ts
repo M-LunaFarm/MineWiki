@@ -155,7 +155,6 @@ export class OAuthFlowService {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', 'identify email guilds');
     url.searchParams.set('redirect_uri', redirectUri);
-    url.searchParams.set('prompt', 'consent');
     url.searchParams.set('state', state);
     return url.toString();
   }

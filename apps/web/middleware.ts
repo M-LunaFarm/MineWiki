@@ -7,7 +7,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const target = new URL(redirect.destination, request.url);
+  // Reverse proxies expose the internal Next.js origin through request.url.
+  // Build redirects from the configured public origin so Location never leaks localhost.
+  const publicOrigin = process.env.NEXT_PUBLIC_SITE_URL?.trim() || request.nextUrl.origin;
+  const target = new URL(redirect.destination, publicOrigin);
   return NextResponse.redirect(target, redirect.status);
 }
 

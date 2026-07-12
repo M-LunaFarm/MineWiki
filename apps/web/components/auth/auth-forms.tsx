@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, Eye, EyeOff, Minus } from 'lucide-react';
+import { Check, Eye, EyeOff, MessageCircle, Minus } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAuth } from '../providers/auth-context';
 import {
@@ -188,8 +188,8 @@ export function AuthForms() {
   const handleOAuth = async (provider: OAuthProvider) => {
     setOauthError(null);
 
-    if (!termsAccepted || !privacyAccepted) {
-      setOauthError('간편 로그인도 이용약관과 개인정보 처리방침 동의가 필요합니다.');
+    if (mode === 'register' && (!termsAccepted || !privacyAccepted)) {
+      setOauthError('처음 가입할 때는 이용약관과 개인정보 처리방침 동의가 필요합니다.');
       return;
     }
 
@@ -210,7 +210,11 @@ export function AuthForms() {
           returnTo = `${window.location.pathname}${window.location.search}`;
         }
       }
-      await loginOAuth(provider, { returnTo, agreeTerms: true, agreePrivacy: true });
+      await loginOAuth(provider, {
+        returnTo,
+        agreeTerms: mode === 'register',
+        agreePrivacy: mode === 'register',
+      });
     } catch (oauthProblem) {
       const message =
         oauthProblem instanceof Error ? oauthProblem.message : '간편 로그인을 시작하지 못했습니다.';
@@ -260,6 +264,43 @@ export function AuthForms() {
 
   return (
     <div className="space-y-6">
+      {mode !== 'verify' ? (
+        <div className="grid grid-cols-2 rounded-lg border border-white/10 bg-white/[0.04] p-1">
+          <button
+            type="button"
+            className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
+              mode === 'login'
+                ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            onClick={() => {
+              setMode('login');
+              clearTransientMessages();
+              setOauthError(null);
+              setPendingVerification(null);
+            }}
+          >
+            로그인
+          </button>
+          <button
+            type="button"
+            className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
+              mode === 'register'
+                ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            onClick={() => {
+              setMode('register');
+              clearTransientMessages();
+              setOauthError(null);
+              setPendingVerification(null);
+            }}
+          >
+            회원가입
+          </button>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-3">
         <button
           type="button"
@@ -268,13 +309,7 @@ export function AuthForms() {
           disabled={loading || !oauthAvailability.discord}
         >
           <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-white/20">
-            <svg className="h-4 w-4 text-white" viewBox="0 0 261 199" aria-hidden>
-              <path
-                d="M216.856339,16.5966031 C200.285002,8.84328665 182.566144,3.2084988 164.041564,0 C161.766523,4.11318106 159.108624,9.64549908 157.276099,14.0464379 C137.583995,11.0849896 118.072967,11.0849896 98.7430163,14.0464379 C96.9108417,9.64549908 94.1925838,4.11318106 91.8971895,0 C73.3526068,3.2084988 55.6133949,8.86399117 39.0420583,16.6376612 C5.61752293,67.146514 -3.4433191,116.400813 1.08711069,164.955721 C23.2560196,181.510915 44.7403634,191.567697 65.8621325,198.148576 C71.0772151,190.971126 75.7283628,183.341335 79.7352139,175.300261 C72.104019,172.400575 64.7949724,168.822202 57.8887866,164.667963 C59.7209612,163.310589 61.5131304,161.891452 63.2445898,160.431257 C105.36741,180.133187 151.134928,180.133187 192.754523,160.431257 C194.506336,161.891452 196.298154,163.310589 198.110326,164.667963 C191.183787,168.842556 183.854737,172.420929 176.223542,175.320965 C180.230393,183.341335 184.861538,190.991831 190.096624,198.16893 C211.238746,191.588051 232.743023,181.531619 254.911949,164.955721 C260.227747,108.668201 245.831087,59.8662432 216.856339,16.5966031 Z M85.4738752,135.09489 C72.8290281,135.09489 62.4592217,123.290155 62.4592217,108.914901 C62.4592217,94.5396472 72.607595,82.7145587 85.4738752,82.7145587 C98.3405064,82.7145587 108.709962,94.5189427 108.488529,108.914901 C108.508531,123.290155 98.3405064,135.09489 85.4738752,135.09489 Z M170.525237,135.09489 C157.88039,135.09489 147.510584,123.290155 147.510584,108.914901 C147.510584,94.5396472 157.658606,82.7145587 170.525237,82.7145587 C183.391518,82.7145587 193.761324,94.5189427 193.539891,108.914901 C193.539891,123.290155 183.391518,135.09489 170.525237,135.09489 Z"
-                fill="currentColor"
-                fillRule="nonzero"
-              />
-            </svg>
+            <MessageCircle className="h-4 w-4 text-white" aria-hidden />
           </span>
           Discord
         </button>
@@ -302,15 +337,19 @@ export function AuthForms() {
         </p>
       ) : null}
 
-      <PolicyAgreements
-        termsAccepted={termsAccepted}
-        privacyAccepted={privacyAccepted}
-        onTermsChange={setTermsAccepted}
-        onPrivacyChange={setPrivacyAccepted}
-      />
-      <p className="-mt-4 text-[11px] leading-5 text-slate-500">
-        간편 로그인 또는 신규 회원가입에 적용됩니다. 기존 이메일 계정 로그인에는 필요하지 않습니다.
-      </p>
+      {mode === 'register' ? (
+        <>
+          <PolicyAgreements
+            termsAccepted={termsAccepted}
+            privacyAccepted={privacyAccepted}
+            onTermsChange={setTermsAccepted}
+            onPrivacyChange={setPrivacyAccepted}
+          />
+          <p className="-mt-4 text-[11px] leading-5 text-slate-500">
+            최초 회원가입에만 적용됩니다. 기존 계정 로그인에는 다시 동의를 요구하지 않습니다.
+          </p>
+        </>
+      ) : null}
 
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
@@ -323,39 +362,6 @@ export function AuthForms() {
 
       {mode !== 'verify' ? (
         <>
-          <div className="grid grid-cols-2 rounded-lg border border-white/10 bg-white/[0.04] p-1">
-            <button
-              type="button"
-              className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
-                mode === 'login'
-                  ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              onClick={() => {
-                setMode('login');
-                clearTransientMessages();
-                setPendingVerification(null);
-              }}
-            >
-              로그인
-            </button>
-            <button
-              type="button"
-              className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
-                mode === 'register'
-                  ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              onClick={() => {
-                setMode('register');
-                clearTransientMessages();
-                setPendingVerification(null);
-              }}
-            >
-              회원가입
-            </button>
-          </div>
-
           <form className="space-y-5" onSubmit={handleSubmit}>
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-300" htmlFor="email">

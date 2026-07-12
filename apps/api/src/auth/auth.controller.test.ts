@@ -170,6 +170,38 @@ test('email auth request parsing trims canonical text fields', async () => {
   assert.equal(resendEmail, 'Player@Example.com');
 });
 
+test('existing OAuth login can start without repeated policy consent', async () => {
+  const calls: unknown[][] = [];
+  const controller = new AuthController(
+    {} as never,
+    {} as never,
+    {
+      async start(...args: unknown[]) {
+        calls.push(args);
+        return { authorizationUrl: 'https://provider.example', state: 'state-value', expiresAt: new Date().toISOString() };
+      },
+    } as never,
+  );
+
+  await controller.startOAuth({
+    provider: 'discord',
+    redirectUri: 'https://minewiki.kr/auth/callback/discord',
+    returnTo: '/me',
+    agreeTerms: false,
+    agreePrivacy: false,
+  });
+
+  assert.deepEqual(calls[0], [
+    'discord',
+    'https://minewiki.kr/auth/callback/discord',
+    '/me',
+    'login',
+    undefined,
+    false,
+    false,
+  ]);
+});
+
 test('changing a password revokes every other active session', async () => {
   const calls: string[] = [];
   const controller = new AuthController(
