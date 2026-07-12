@@ -268,7 +268,7 @@ export function ServerHeroLive({
             <div className="grid grid-cols-2 gap-2 text-xs">
               <TrustPill
                 label="검증"
-                value={showVerification ? '완료' : '대기'}
+                value={showVerification ? '완료' : '미검증'}
                 active={showVerification}
               />
               <TrustPill label="상태" value={statusLabel} active={statusTone === 'online'} />
