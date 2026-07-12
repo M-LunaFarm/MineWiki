@@ -4,7 +4,7 @@ import {
   ApplicationCommandOptionType,
   ChannelType
 } from 'discord-api-types/v10';
-import { Client, GatewayIntentBits, Interaction } from 'discord.js';
+import { Client, Events, GatewayIntentBits, Interaction } from 'discord.js';
 import { DateTime } from 'luxon';
 import { ConfigService, assertSupportedQueueServer } from '@minewiki/config';
 import { Logger } from '@minewiki/logger';
@@ -48,7 +48,7 @@ if (!token || !clientId) {
     }
   });
 
-  client.once('ready', () => {
+  client.once(Events.ClientReady, () => {
     Logger.info({ tag: client.user?.tag }, 'Discord bot ready');
     void registerCommands(rest, clientId)
       .then(() => Logger.info('Registered global Discord application commands.'))
