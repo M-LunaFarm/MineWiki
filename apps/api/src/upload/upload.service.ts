@@ -14,12 +14,16 @@ import {
 const MAX_BYTES = 2 * 1024 * 1024; // 2MB cap
 const MAX_DIMENSION = 2048; // px
 const UPLOAD_PREFIX = 'uploads';
+const PUBLIC_UPLOAD_PREFIX = `${UPLOAD_PREFIX}/public`;
+const PRIVATE_UPLOAD_PREFIX = `${UPLOAD_PREFIX}/private`;
 
 type StorageMode = 's3' | 'local' | 'disabled';
+export type ImageVisibility = 'public' | 'unlisted' | 'private' | 'restricted';
 
 export interface ImageUploadInput {
   readonly buffer: Buffer;
   readonly filename?: string;
+  readonly visibility: ImageVisibility;
 }
 
 export interface StoredImage {
@@ -103,9 +107,10 @@ export class UploadService {
 
     const filename = `${randomUUID()}${sanitized.extension}`;
     const hash = createHash('sha256').update(sanitized.buffer).digest('hex');
+    const publiclyReadable = input.visibility === 'public' || input.visibility === 'unlisted';
 
     if (this.storageMode === 's3') {
-      const key = `${UPLOAD_PREFIX}/${filename}`;
+      const key = `${publiclyReadable ? PUBLIC_UPLOAD_PREFIX : PRIVATE_UPLOAD_PREFIX}/${filename}`;
       await this.s3!.send(
         new PutObjectCommand({
           Bucket: this.bucket,
@@ -122,7 +127,9 @@ export class UploadService {
         height: sanitized.height,
         hash,
         storagePath: `s3://${this.bucket}/${key}`,
-        publicPath: `${this.publicBaseUrl}/${key}`
+        publicPath: publiclyReadable
+          ? `${this.publicBaseUrl}/${key}`
+          : `/v1/files/public/${filename}/raw`
       };
     }
 
@@ -137,9 +144,11 @@ export class UploadService {
       height: sanitized.height,
       hash,
       storagePath,
-      publicPath: this.publicBaseUrl
-        ? `${this.publicBaseUrl}/${filename}`
-        : `upload://${filename}`
+      publicPath: publiclyReadable
+        ? this.publicBaseUrl
+          ? `${this.publicBaseUrl}/${filename}`
+          : `upload://${filename}`
+        : `/v1/files/public/${filename}/raw`
     };
   }
 
@@ -152,7 +161,9 @@ export class UploadService {
       throw new Error('Stored object does not belong to the configured bucket.');
     }
     const key = storagePath.slice(prefix.length);
-    if (!key || !key.startsWith(`${UPLOAD_PREFIX}/`) || key.includes('..')) {
+    const isPrivateKey = key.startsWith(`${PRIVATE_UPLOAD_PREFIX}/`);
+    const isLegacyKey = /^uploads\/[^/]+$/u.test(key);
+    if (!key || (!isPrivateKey && !isLegacyKey) || key.includes('..')) {
       throw new Error('Stored object key is invalid.');
     }
     const response = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));

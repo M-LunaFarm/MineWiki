@@ -188,7 +188,7 @@ test('file service stores canonical image metadata', async () => {
   assert.equal(uploaded.url, 'upload://stored.webp');
 });
 
-test('file service list hides private files from anonymous users', async () => {
+test('file service list hides private and unlisted files from non-owners', async () => {
   const { service } = createService();
   const publicFile = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
@@ -201,21 +201,33 @@ test('file service list hides private files from anonymous users', async () => {
     usageContext: 'wiki_editor',
     visibility: 'private'
   });
+  await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'shared-by-link.png',
+    usageContext: 'wiki_editor',
+    visibility: 'unlisted'
+  });
 
   const anonymous = await service.listFiles({ usageContext: 'wiki_editor' });
   assert.deepEqual(anonymous.map((file) => file.filename), [publicFile.filename]);
 
+  const otherMember = await service.listFiles({
+    usageContext: 'wiki_editor',
+    session: session('account-2')
+  });
+  assert.deepEqual(otherMember.map((file) => file.filename), [publicFile.filename]);
+
   const owner = await service.listFiles({ usageContext: 'wiki_editor', session: session('account-1') });
-  assert.equal(owner.length, 2);
+  assert.equal(owner.length, 3);
 
   const elevated = await service.listFiles({ usageContext: 'wiki_editor', session: session('admin', true) });
-  assert.equal(elevated.length, 2);
+  assert.equal(elevated.length, 3);
 
   const fileAdmin = await service.listFiles({
     usageContext: 'wiki_editor',
     session: session('file-admin', false, ['file.admin'])
   });
-  assert.equal(fileAdmin.length, 2);
+  assert.equal(fileAdmin.length, 3);
 });
 
 test('file service requires owner before delete', async () => {

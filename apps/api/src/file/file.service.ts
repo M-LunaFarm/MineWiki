@@ -3,7 +3,11 @@ import { promises as fs } from 'node:fs';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
-import { UploadService, type StoredImage } from '../upload/upload.service';
+import {
+  UploadService,
+  type ImageVisibility,
+  type StoredImage
+} from '../upload/upload.service';
 import { decodeBase64 } from '../upload/upload.utils';
 import { FilePermissionService } from './file-permission.service';
 
@@ -74,30 +78,35 @@ export class FileService {
     if (!request.data) {
       throw new BadRequestException('Image data is required.');
     }
+    const policy = await this.prepareUploadPolicy(request, session);
     const stored = await this.uploads.storeImage({
       buffer: decodeBase64(request.data),
-      filename: request.filename?.trim() || undefined
+      filename: request.filename?.trim() || undefined,
+      visibility: policy.visibility
     });
-    return this.createImageRecord(accountId, request, stored, session);
+    return this.createImageRecord(accountId, request, stored, policy);
   }
 
   async createImageFromBuffer(
     accountId: string | null,
     request: FileImageBufferUploadRequest
   ): Promise<FileImageUploadResponse> {
+    const policy = await this.prepareUploadPolicy(request, null);
     const stored = await this.uploads.storeImage({
       buffer: request.buffer,
-      filename: request.filename?.trim() || undefined
+      filename: request.filename?.trim() || undefined,
+      visibility: policy.visibility
     });
-    return this.createImageRecord(accountId, request, stored, null);
+    return this.createImageRecord(accountId, request, stored, policy);
   }
 
-  private async createImageRecord(
-    accountId: string | null,
+  private async prepareUploadPolicy(
     request: FileImageUploadRequest | FileImageBufferUploadRequest,
-    stored: StoredImage,
     session?: SessionPayload | null
-  ): Promise<FileImageUploadResponse> {
+  ): Promise<{
+    visibility: ImageVisibility;
+    linkedResource: { type: 'wiki_page' | 'wiki_space'; id: string } | null;
+  }> {
     const visibility = normalizeVisibility(request.visibility);
     const linkedResource = normalizeLinkedResource(
       request.linkedResourceType,
@@ -106,9 +115,22 @@ export class FileService {
     );
     if (linkedResource && session) {
       await this.permissions.assertCanLink(linkedResource, session);
-    } else if (linkedResource && !session) {
+    } else if (linkedResource) {
       throw new BadRequestException('Linked file uploads require an authenticated session.');
     }
+    return { visibility, linkedResource };
+  }
+
+  private async createImageRecord(
+    accountId: string | null,
+    request: FileImageUploadRequest | FileImageBufferUploadRequest,
+    stored: StoredImage,
+    policy: {
+      visibility: ImageVisibility;
+      linkedResource: { type: 'wiki_page' | 'wiki_space'; id: string } | null;
+    }
+  ): Promise<FileImageUploadResponse> {
+    const { visibility, linkedResource } = policy;
     const created = await this.prisma.uploadedFile.create({
       data: {
         ownerAccountId: accountId,
@@ -166,7 +188,7 @@ export class FileService {
         status: 'active',
         usageContext: usageContext ?? undefined,
         OR: [
-          { visibility: { in: ['public', 'unlisted', 'restricted'] } },
+          { visibility: { in: ['public', 'restricted'] } },
           ...(input.session?.isElevated || input.session?.permissions?.includes('file.admin')
             ? [{}]
             : input.session
@@ -270,9 +292,11 @@ function normalizeUsageContext(value?: string): string {
   return normalized ? normalized.slice(0, 64) : 'general';
 }
 
-function normalizeVisibility(value?: string): string {
+function normalizeVisibility(value?: string): ImageVisibility {
   const normalized = value?.trim().toLowerCase();
-  return normalized && ['public', 'unlisted', 'private', 'restricted'].includes(normalized) ? normalized : 'public';
+  return normalized && ['public', 'unlisted', 'private', 'restricted'].includes(normalized)
+    ? normalized as ImageVisibility
+    : 'public';
 }
 
 function normalizeLinkedResource(
