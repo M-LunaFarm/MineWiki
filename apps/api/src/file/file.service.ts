@@ -12,6 +12,8 @@ export interface FileImageUploadRequest {
   readonly filename?: string;
   readonly usageContext?: string;
   readonly visibility?: string;
+  readonly linkedResourceType?: string;
+  readonly linkedResourceId?: string;
 }
 
 export interface FileImageBufferUploadRequest {
@@ -19,6 +21,8 @@ export interface FileImageBufferUploadRequest {
   readonly filename?: string;
   readonly usageContext?: string;
   readonly visibility?: string;
+  readonly linkedResourceType?: string;
+  readonly linkedResourceId?: string;
 }
 
 export interface FileMetadataResponse {
@@ -62,7 +66,11 @@ export class FileService {
     @Optional() private readonly events?: BusinessEventService
   ) {}
 
-  async createImage(accountId: string, request: FileImageUploadRequest): Promise<FileImageUploadResponse> {
+  async createImage(
+    accountId: string,
+    request: FileImageUploadRequest,
+    session?: SessionPayload | null
+  ): Promise<FileImageUploadResponse> {
     if (!request.data) {
       throw new BadRequestException('Image data is required.');
     }
@@ -70,7 +78,7 @@ export class FileService {
       buffer: decodeBase64(request.data),
       filename: request.filename?.trim() || undefined
     });
-    return this.createImageRecord(accountId, request, stored);
+    return this.createImageRecord(accountId, request, stored, session);
   }
 
   async createImageFromBuffer(
@@ -81,14 +89,26 @@ export class FileService {
       buffer: request.buffer,
       filename: request.filename?.trim() || undefined
     });
-    return this.createImageRecord(accountId, request, stored);
+    return this.createImageRecord(accountId, request, stored, null);
   }
 
   private async createImageRecord(
     accountId: string | null,
     request: FileImageUploadRequest | FileImageBufferUploadRequest,
-    stored: StoredImage
+    stored: StoredImage,
+    session?: SessionPayload | null
   ): Promise<FileImageUploadResponse> {
+    const visibility = normalizeVisibility(request.visibility);
+    const linkedResource = normalizeLinkedResource(
+      request.linkedResourceType,
+      request.linkedResourceId,
+      visibility
+    );
+    if (linkedResource && session) {
+      await this.permissions.assertCanLink(linkedResource, session);
+    } else if (linkedResource && !session) {
+      throw new BadRequestException('Linked file uploads require an authenticated session.');
+    }
     const created = await this.prisma.uploadedFile.create({
       data: {
         ownerAccountId: accountId,
@@ -102,7 +122,9 @@ export class FileService {
         storagePath: stored.storagePath,
         publicPath: stored.publicPath,
         usageContext: normalizeUsageContext(request.usageContext),
-        visibility: normalizeVisibility(request.visibility)
+        visibility,
+        linkedResourceType: linkedResource?.type ?? null,
+        linkedResourceId: linkedResource?.id ?? null
       }
     });
     await this.events?.audit('file.upload', {
@@ -126,7 +148,7 @@ export class FileService {
 
   async getFile(id: string, session?: SessionPayload | null): Promise<FileMetadataResponse> {
     const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
-    this.permissions.assertCanRead(file, session);
+    await this.permissions.assertCanRead(file, session);
     return toFileMetadata(file);
   }
 
@@ -144,7 +166,7 @@ export class FileService {
         status: 'active',
         usageContext: usageContext ?? undefined,
         OR: [
-          { visibility: { in: ['public', 'unlisted'] } },
+          { visibility: { in: ['public', 'unlisted', 'restricted'] } },
           ...(input.session?.isElevated || input.session?.permissions?.includes('file.admin')
             ? [{}]
             : input.session
@@ -165,7 +187,16 @@ export class FileService {
       orderBy: [{ createdAt: 'desc' }],
       take: limit
     });
-    return files.map(toFileMetadata);
+    const visible: FileMetadataResponse[] = [];
+    for (const file of files) {
+      try {
+        await this.permissions.assertCanRead(file, input.session);
+        visible.push(toFileMetadata(file));
+      } catch {
+        // Omit files the caller cannot read without revealing their existence.
+      }
+    }
+    return visible;
   }
 
   async getRawFile(
@@ -189,7 +220,7 @@ export class FileService {
     file: Awaited<ReturnType<PrismaService['uploadedFile']['findUnique']>>,
     session?: SessionPayload | null
   ): Promise<RawFileResponse> {
-    this.permissions.assertCanRead(file, session);
+    await this.permissions.assertCanRead(file, session);
     const cacheControl = file.visibility === 'public' || file.visibility === 'unlisted'
       ? 'public, max-age=31536000, immutable'
       : 'private, no-store';
@@ -242,6 +273,25 @@ function normalizeUsageContext(value?: string): string {
 function normalizeVisibility(value?: string): string {
   const normalized = value?.trim().toLowerCase();
   return normalized && ['public', 'unlisted', 'private', 'restricted'].includes(normalized) ? normalized : 'public';
+}
+
+function normalizeLinkedResource(
+  typeValue: string | undefined,
+  idValue: string | undefined,
+  visibility: string
+): { type: 'wiki_page' | 'wiki_space'; id: string } | null {
+  const type = typeValue?.trim().toLowerCase();
+  const id = idValue?.trim();
+  if (!type && !id) {
+    if (visibility === 'restricted') {
+      throw new BadRequestException('Restricted files require a linked wiki page or space.');
+    }
+    return null;
+  }
+  if ((type !== 'wiki_page' && type !== 'wiki_space') || !id || !/^\d+$/.test(id)) {
+    throw new BadRequestException('Linked resource must be wiki_page or wiki_space with an unsigned id.');
+  }
+  return { type, id };
 }
 
 function toFileMetadata(file: {

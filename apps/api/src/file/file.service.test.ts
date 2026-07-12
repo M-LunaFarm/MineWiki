@@ -56,6 +56,9 @@ function session(userId: string, isElevated = false, permissions: string[] = [])
 
 function createService() {
   const files = new Map<string, TestFile>();
+  const wikiPages = new Map<bigint, { id: bigint; status: string }>([
+    [7n, { id: 7n, status: 'normal' }]
+  ]);
   const uploads = {
     async storeImage() {
       return {
@@ -129,9 +132,43 @@ function createService() {
         files.set(args.where.id, next);
         return next;
       }
+    },
+    wikiPage: {
+      async findUnique(args: { where: { id: bigint } }) {
+        return wikiPages.get(args.where.id) ?? null;
+      }
+    },
+    wikiSpace: {
+      async findUnique() {
+        return null;
+      }
+    },
+    wikiNamespace: {
+      async findUnique() {
+        return null;
+      }
     }
   };
-  return { service: new FileService(prisma as never, uploads as never, new FilePermissionService()), files };
+  const wikiPermissions = {
+    async resolveActor(accountId: string) {
+      return { accountId, profileId: 1n, status: 'active' };
+    },
+    async assertCanEditPage({ page }: { page: { status: string } | null }) {
+      if (!page || page.status !== 'normal') throw new Error('Wiki page not found.');
+    },
+    async assertCanReadPage({ page }: { page: { status: string } | null }) {
+      if (!page || page.status !== 'normal') throw new Error('Wiki page not found.');
+    },
+    async assertCanReadSpace() {
+      throw new Error('Wiki space not found.');
+    }
+  };
+  const filePermissions = new FilePermissionService(prisma as never, wikiPermissions as never);
+  return {
+    service: new FileService(prisma as never, uploads as never, filePermissions),
+    files,
+    wikiPages
+  };
 }
 
 test('file service stores canonical image metadata', async () => {
@@ -242,4 +279,37 @@ test('public upload path resolves through the same visibility policy', async () 
   assert.equal(ownerRaw.redirectUrl, undefined);
   assert.equal(ownerRaw.buffer?.toString(), 'private s3 image');
   assert.equal(ownerRaw.cacheControl, 'private, no-store');
+});
+
+test('restricted wiki file follows linked page read permission', async () => {
+  const { service, wikiPages } = createService();
+  const uploaded = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'restricted.png',
+    usageContext: 'wiki_editor',
+    visibility: 'restricted',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7'
+  }, session('account-1'));
+
+  assert.equal(uploaded.visibility, 'restricted');
+  assert.equal(uploaded.linkedResourceType, 'wiki_page');
+  assert.equal(uploaded.linkedResourceId, '7');
+  await assert.doesNotReject(() => service.getFile(uploaded.id, null));
+
+  wikiPages.set(7n, { id: 7n, status: 'hidden' });
+  await assert.rejects(() => service.getFile(uploaded.id, null), /Wiki page not found/);
+  await assert.doesNotReject(() => service.getFile(uploaded.id, session('account-1')));
+});
+
+test('restricted upload fails closed without a linked wiki resource', async () => {
+  const { service } = createService();
+  await assert.rejects(
+    () => service.createImage('account-1', {
+      data: 'data:image/png;base64,aW1hZ2U=',
+      filename: 'orphan.png',
+      visibility: 'restricted'
+    }, session('account-1')),
+    /require a linked wiki page or space/
+  );
 });

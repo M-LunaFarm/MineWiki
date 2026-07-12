@@ -400,6 +400,7 @@ export async function saveWikiPage(input: {
 export async function uploadWikiImage(input: {
   data: string;
   filename: string;
+  pageId?: string;
 }): Promise<{ url: string; publicPath: string; id: string; filename: string }> {
   const response = await fetch(`${apiBaseUrl()}/v1/files/images`, {
     method: 'POST',
@@ -408,7 +409,10 @@ export async function uploadWikiImage(input: {
     body: JSON.stringify({
       data: input.data,
       filename: input.filename,
-      usageContext: 'wiki_editor'
+      usageContext: 'wiki_editor',
+      visibility: input.pageId ? 'restricted' : 'public',
+      linkedResourceType: input.pageId ? 'wiki_page' : undefined,
+      linkedResourceId: input.pageId
     })
   });
   const body = await response.json().catch(() => ({}));

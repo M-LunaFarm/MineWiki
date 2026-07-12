@@ -32,9 +32,16 @@ export class FileController {
   @UseGuards(SessionGuard)
   uploadImage(
     @CurrentSession() session: SessionPayload,
-    @Body() body: { data?: string; filename?: string; usageContext?: string; visibility?: string }
+    @Body() body: {
+      data?: string;
+      filename?: string;
+      usageContext?: string;
+      visibility?: string;
+      linkedResourceType?: string;
+      linkedResourceId?: string;
+    }
   ): Promise<FileImageUploadResponse> {
-    return this.files.createImage(session.userId, body);
+    return this.files.createImage(session.userId, body, session);
   }
 
   @Get()

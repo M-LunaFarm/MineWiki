@@ -117,6 +117,28 @@ export class WikiPermissionService {
     }
   }
 
+  async assertCanReadSpace(input: {
+    readonly accountId?: string | null;
+    readonly spaceId: bigint;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const store = input.store ?? this.prisma;
+    const space = await store.wikiSpace.findUnique({ where: { id: input.spaceId } });
+    if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) {
+      throw new NotFoundException('Wiki space not found.');
+    }
+    const actor = await this.resolveActor(input.accountId, store);
+    const acl = await this.evaluateAcl('read', actor, {
+      spaceId: space.id,
+      namespaceCode: space.rootNamespaceCode,
+      title: space.title,
+      createdBy: space.createdBy
+    }, store);
+    if (acl.matched && !acl.allowed) {
+      throw new NotFoundException('Wiki space not found.');
+    }
+  }
+
   async canReadPage(input: {
     readonly accountId?: string | null;
     readonly page: WikiPermissionPage | null;

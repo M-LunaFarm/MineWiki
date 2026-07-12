@@ -158,7 +158,11 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     setFeedback(null);
     try {
       const data = await readFileAsDataUrl(file);
-      const uploaded = await uploadWikiImage({ data, filename: file.name });
+      const uploaded = await uploadWikiImage({
+        data,
+        filename: file.name,
+        pageId: page?.id,
+      });
       const alt = normalizeAltText(file.name);
       setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${uploaded.filename}|섬네일|${alt}]]\n`);
       setBlockingErrors([]);
