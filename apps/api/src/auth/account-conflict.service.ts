@@ -8,13 +8,16 @@ import { DiscordMinecraftLinkRepository } from '../verify/guild.repositories';
 const mergeRequestSchema = z.object({
   message: z.string().trim().max(1000).optional(),
   conflictMessage: z.string().trim().max(500).optional(),
-  source: z.enum(['account_center', 'minecraft_verify', 'discord_verify']).optional(),
+  source: z
+    .enum(['account_center', 'minecraft_verify', 'discord_verify', 'wiki_profile'])
+    .optional(),
 });
 
 type LinkConflictKind =
   | 'minecraft_identity_duplicate'
   | 'discord_identity_duplicate'
-  | 'discord_minecraft_mismatch';
+  | 'discord_minecraft_mismatch'
+  | 'legacy_wiki_profile';
 
 export interface AccountLinkConflict {
   readonly id: string;
@@ -23,6 +26,7 @@ export interface AccountLinkConflict {
   readonly minecraftUuid: string | null;
   readonly discordUserId: string | null;
   readonly conflictingAccountId: string | null;
+  readonly legacyWikiProfileId: string | null;
 }
 
 export interface LinkConflictResponse {
@@ -101,6 +105,7 @@ export class AccountConflictService {
           minecraftUuid: conflict.minecraftUuid,
           discordUserId: conflict.discordUserId,
           conflictingAccountId: conflict.conflictingAccountId,
+          legacyWikiProfileId: conflict.legacyWikiProfileId,
         })),
       },
     });
@@ -115,7 +120,13 @@ export class AccountConflictService {
   private async detectConflicts(accountId: string): Promise<AccountLinkConflict[]> {
     const accounts = await this.prisma.account.findMany({
       where: { OR: [{ id: accountId }, { canonicalAccountId: accountId }] },
-      select: { id: true, provider: true, providerUserId: true },
+      select: {
+        id: true,
+        provider: true,
+        providerUserId: true,
+        email: true,
+        emailVerified: true,
+      },
     });
     const accountIds = accounts.map((account) => account.id);
     if (!accountIds.includes(accountId)) {
@@ -130,6 +141,37 @@ export class AccountConflictService {
     ]);
 
     const conflicts: AccountLinkConflict[] = [];
+    const verifiedEmails = accounts
+      .filter((account) => account.emailVerified && account.email)
+      .map((account) => account.email!.trim().toLowerCase());
+    if (verifiedEmails.length > 0) {
+      const [linkedWikiProfile, legacyWikiProfile] = await Promise.all([
+        this.prisma.wikiProfile.findFirst({
+          where: { accountId: { in: accountIds } },
+          select: { id: true },
+        }),
+        this.prisma.wikiProfile.findFirst({
+          where: {
+            accountId: null,
+            email: { in: verifiedEmails },
+            status: 'active',
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (!linkedWikiProfile && legacyWikiProfile) {
+        conflicts.push({
+          id: `legacy-wiki:${legacyWikiProfile.id.toString()}`,
+          kind: 'legacy_wiki_profile',
+          message:
+            '인증된 이메일과 일치하는 기존 MineWiki 위키 프로필이 있습니다. 기록 이전은 지원팀 확인 후 진행됩니다.',
+          minecraftUuid: null,
+          discordUserId: null,
+          conflictingAccountId: null,
+          legacyWikiProfileId: legacyWikiProfile.id.toString(),
+        });
+      }
+    }
     if (minecraftIdentity) {
       const duplicateIdentity = await this.prisma.minecraftIdentity.findFirst({
         where: {
@@ -146,6 +188,7 @@ export class AccountConflictService {
           minecraftUuid: minecraftIdentity.uuid,
           discordUserId: null,
           conflictingAccountId: duplicateIdentity.accountId,
+          legacyWikiProfileId: null,
         });
       }
 
@@ -160,6 +203,7 @@ export class AccountConflictService {
           minecraftUuid: minecraftIdentity.uuid,
           discordUserId: linkedDiscord.discordUserId,
           conflictingAccountId: null,
+          legacyWikiProfileId: null,
         });
       }
     }
@@ -193,6 +237,7 @@ export class AccountConflictService {
           minecraftUuid: null,
           discordUserId,
           conflictingAccountId,
+          legacyWikiProfileId: null,
         });
       }
       if (
@@ -207,6 +252,7 @@ export class AccountConflictService {
           minecraftUuid: linkedMinecraft.minecraftUuid,
           discordUserId,
           conflictingAccountId: null,
+          legacyWikiProfileId: null,
         });
       }
     }
@@ -234,6 +280,7 @@ export class AccountConflictService {
         minecraftUuid: null,
         discordUserId: null,
         conflictingAccountId: null,
+        legacyWikiProfileId: null,
       },
     ];
   }
@@ -270,7 +317,7 @@ export class AccountConflictService {
       '감지된 충돌:',
       ...conflicts.map(
         (conflict) =>
-          `- ${conflict.kind}: ${conflict.message} minecraft=${conflict.minecraftUuid ?? 'n/a'} discord=${conflict.discordUserId ?? 'n/a'} account=${conflict.conflictingAccountId ?? 'n/a'}`,
+          `- ${conflict.kind}: ${conflict.message} minecraft=${conflict.minecraftUuid ?? 'n/a'} discord=${conflict.discordUserId ?? 'n/a'} account=${conflict.conflictingAccountId ?? 'n/a'} wiki_profile=${conflict.legacyWikiProfileId ?? 'n/a'}`,
       ),
     ];
     if (userMessage) {

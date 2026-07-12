@@ -1077,11 +1077,11 @@ function AccountConflictPanel({
         <div className="max-w-3xl">
           <h3 className="flex items-center gap-2 text-lg font-bold text-white">
             <AlertTriangle className="h-5 w-5 text-amber-300" />
-            계정 연동 충돌
+            계정 및 기존 위키 연결
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[#a0a0a0]">
-            Discord 또는 Minecraft 계정이 다른 MineWiki 계정과 충돌하면 자동 병합하지 않고
-            지원팀 확인을 거칩니다.
+            Discord·Minecraft 연동 충돌이나 기존 위키 기록이 발견되면 자동 병합하지 않고
+            지원팀의 소유권 확인을 거칩니다.
           </p>
         </div>
         {ticketId ? (
@@ -1122,7 +1122,7 @@ function AccountConflictPanel({
           <textarea
             value={message}
             onChange={(event) => onMessageChange(event.target.value)}
-            placeholder="지원팀에 전달할 내용을 입력하세요. 예: 두 계정 모두 본인 소유입니다."
+            placeholder="지원팀에 전달할 내용을 입력하세요. 예: 기존 위키 계정과 현재 계정 모두 본인 소유입니다."
             rows={3}
             maxLength={1000}
             className="w-full rounded-md border border-[#30363d] bg-[#111315] px-3 py-2 text-sm text-white outline-none transition placeholder:text-[#6f7882] focus:border-[#13ec80]"

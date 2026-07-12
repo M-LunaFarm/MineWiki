@@ -35,11 +35,13 @@ export interface AccountLinkConflict {
   readonly kind:
     | 'minecraft_identity_duplicate'
     | 'discord_identity_duplicate'
-    | 'discord_minecraft_mismatch';
+    | 'discord_minecraft_mismatch'
+    | 'legacy_wiki_profile';
   readonly message: string;
   readonly minecraftUuid: string | null;
   readonly discordUserId: string | null;
   readonly conflictingAccountId: string | null;
+  readonly legacyWikiProfileId: string | null;
 }
 
 export interface AccountLinkConflictResponse {
@@ -270,7 +272,7 @@ export async function fetchAccountLinkConflicts(): Promise<AccountLinkConflictRe
 export async function createAccountMergeRequest(payload: {
   message?: string;
   conflictMessage?: string;
-  source?: 'account_center' | 'minecraft_verify' | 'discord_verify';
+  source?: 'account_center' | 'minecraft_verify' | 'discord_verify' | 'wiki_profile';
 }): Promise<AccountMergeRequestResponse> {
   return postJson<AccountMergeRequestResponse>('/v1/account/merge-requests', payload);
 }

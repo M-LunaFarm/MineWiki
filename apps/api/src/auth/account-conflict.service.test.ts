@@ -10,6 +10,10 @@ function createHarness(options: {
   readonly discordUserId?: string | null;
   readonly duplicateDiscordAccountId?: string | null;
   readonly linkedAccountId?: string | null;
+  readonly accountEmail?: string | null;
+  readonly emailVerified?: boolean;
+  readonly legacyWikiProfileId?: bigint | null;
+  readonly linkedWikiProfile?: boolean;
 } = {}) {
   const accountId = options.accountId ?? randomUUID();
   const minecraftUuid = options.minecraftUuid === undefined ? randomUUID() : options.minecraftUuid;
@@ -33,14 +37,28 @@ function createHarness(options: {
       async findMany() {
         return [
           discordUserId
-            ? { id: accountId, provider: 'discord', providerUserId: discordUserId }
-            : { id: accountId, provider: 'email', providerUserId: 'user@example.com' },
+            ? {
+                id: accountId,
+                provider: 'discord',
+                providerUserId: discordUserId,
+                email: options.accountEmail ?? null,
+                emailVerified: options.emailVerified ?? false,
+              }
+            : {
+                id: accountId,
+                provider: 'email',
+                providerUserId: 'user@example.com',
+                email: options.accountEmail ?? 'user@example.com',
+                emailVerified: options.emailVerified ?? true,
+              },
           ...(options.linkedAccountId
             ? [
                 {
                   id: options.linkedAccountId,
                   provider: 'naver',
                   providerUserId: 'linked-naver',
+                  email: null,
+                  emailVerified: false,
                 },
               ]
             : []),
@@ -56,6 +74,14 @@ function createHarness(options: {
       },
       async findFirst() {
         return null;
+      },
+    },
+    wikiProfile: {
+      async findFirst(input: { where?: { accountId?: unknown } }) {
+        if (input.where?.accountId) {
+          return options.linkedWikiProfile ? { id: 999n } : null;
+        }
+        return options.legacyWikiProfileId ? { id: options.legacyWikiProfileId } : null;
       },
     },
     supportTicket: {
@@ -128,6 +154,52 @@ test('detects duplicate Discord identity conflict', async () => {
 
 test('does not report Minecraft identity stored inside the canonical account group', async () => {
   const harness = createHarness({ linkedAccountId: randomUUID() });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.deepEqual(response.conflicts, []);
+});
+
+test('offers manual recovery for an unlinked legacy wiki profile with verified email', async () => {
+  const harness = createHarness({
+    minecraftUuid: null,
+    discordUserId: null,
+    accountEmail: 'legacy@example.com',
+    emailVerified: true,
+    legacyWikiProfileId: 197n,
+  });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.equal(response.conflicts.length, 1);
+  assert.equal(response.conflicts[0]?.kind, 'legacy_wiki_profile');
+  assert.equal(response.conflicts[0]?.legacyWikiProfileId, '197');
+  assert.equal(response.conflicts[0]?.conflictingAccountId, null);
+});
+
+test('never offers legacy wiki recovery from an unverified email', async () => {
+  const harness = createHarness({
+    minecraftUuid: null,
+    discordUserId: null,
+    accountEmail: 'legacy@example.com',
+    emailVerified: false,
+    legacyWikiProfileId: 197n,
+  });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.deepEqual(response.conflicts, []);
+});
+
+test('does not offer a second legacy profile when the canonical account already has one', async () => {
+  const harness = createHarness({
+    minecraftUuid: null,
+    discordUserId: null,
+    accountEmail: 'legacy@example.com',
+    emailVerified: true,
+    legacyWikiProfileId: 197n,
+    linkedWikiProfile: true,
+  });
 
   const response = await harness.service.listLinkConflicts(harness.accountId);
 
