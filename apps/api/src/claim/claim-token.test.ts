@@ -98,6 +98,7 @@ test('successful ownership verification promotes registrant to owner atomically'
   const updates: Array<Record<string, unknown>> = [];
   const verifiedMethod = {
     id: 'claim-method-1',
+    serverId: 'server-1',
     accountId: 'account-registrant',
     method: 'dns',
     token: hashClaimToken('claim-proof'),
@@ -106,10 +107,11 @@ test('successful ownership verification promotes registrant to owner atomically'
     verifiedAt: new Date(),
     lastCheckedAt: new Date(),
     note: 'dns_token_confirmed',
+    version: 1,
   };
   const prisma = {
     serverClaimMethod: {
-      update: async () => verifiedMethod,
+      updateMany: async () => ({ count: 1 }),
       findMany: async () => [verifiedMethod],
     },
     server: {
@@ -119,6 +121,7 @@ test('successful ownership verification promotes registrant to owner atomically'
       },
       update: async () => ({}),
     },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
   };
   const service = new ClaimService(
     {
@@ -131,7 +134,7 @@ test('successful ownership verification promotes registrant to owner atomically'
     prisma as never,
   );
 
-  await service.applyVerificationResult('server-1', 'dns', {
+  await service.applyVerificationResult(verifiedMethod, {
     status: 'verified',
     checkedAt: new Date().toISOString(),
   });
@@ -139,6 +142,45 @@ test('successful ownership verification promotes registrant to owner atomically'
   assert.deepEqual(updates, [
     { ownerAccountId: 'account-registrant', registrantAccountId: null },
   ]);
+});
+
+test('stale claim verification result cannot promote an owner after proof rotation', async () => {
+  let ownershipUpdates = 0;
+  const snapshot = {
+    id: 'claim-method-1',
+    serverId: 'server-1',
+    accountId: 'account-registrant',
+    method: 'dns',
+    token: hashClaimToken('proof-a'),
+    issuedAt: new Date('2026-07-12T00:00:00.000Z'),
+    version: 1,
+  };
+  const prisma = {
+    serverClaimMethod: {
+      updateMany: async () => ({ count: 0 }),
+      findMany: async () => [],
+    },
+    server: {
+      updateMany: async () => {
+        ownershipUpdates += 1;
+        return { count: 1 };
+      },
+      update: async () => ({}),
+    },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+  };
+  const service = new ClaimService(
+    { ensureExists: async () => ({ ownerAccountId: null }) } as never,
+    prisma as never,
+  );
+
+  const applied = await service.applyVerificationResult(snapshot, {
+    status: 'verified',
+    checkedAt: new Date().toISOString(),
+  });
+
+  assert.equal(applied, false);
+  assert.equal(ownershipUpdates, 0);
 });
 
 test('pending claim tokens expire 24 hours after issuance and cannot be verified', async () => {
@@ -153,15 +195,16 @@ test('pending claim tokens expire 24 hours after issuance and cannot be verified
     verifiedAt: null,
     lastCheckedAt: null,
     note: 'token_issued',
+    version: 1,
   };
   const updates: Array<Record<string, unknown>> = [];
   const prisma = {
     serverClaimMethod: {
       findMany: async () => [staleMethod],
       findUnique: async () => ({ ...staleMethod, status: updates.length > 0 ? 'expired' : 'pending' }),
-      update: async ({ data }: { data: Record<string, unknown> }) => {
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
         updates.push(data);
-        return { ...staleMethod, ...data };
+        return { count: 1 };
       },
     },
     server: {

@@ -1,5 +1,6 @@
 ﻿import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   forwardRef,
   Inject,
@@ -29,6 +30,15 @@ export interface ClaimVerificationResult {
 const ALL_METHODS: ClaimMethod[] = ['dns', 'motd'];
 const METHOD_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24h
 type StoredVerificationGrade = 'A' | 'B' | 'C' | 'Unverified';
+
+interface ClaimMethodSnapshot {
+  readonly id: string;
+  readonly serverId: string;
+  readonly accountId: string | null;
+  readonly token: string;
+  readonly issuedAt: Date;
+  readonly version: number;
+}
 
 @Injectable()
 export class ClaimService {
@@ -93,6 +103,7 @@ export class ClaimService {
             verifiedAt: null,
             lastCheckedAt: now,
             note: 'token_issued',
+            version: { increment: 1 },
           },
         }),
       ),
@@ -137,48 +148,67 @@ export class ClaimService {
     }
 
     const result = await this.runVerificationCheck(method, normalizedProof, serverId);
-    await this.applyVerificationResult(serverId, method, result);
+    const applied = await this.applyVerificationResult(methodState, result);
+    if (!applied) {
+      throw new ConflictException(
+        '검증 토큰이 변경되었습니다. 새 토큰으로 다시 시도해 주세요.',
+      );
+    }
     return this.getStatus(serverId);
   }
 
   async applyVerificationResult(
-    serverId: string,
-    method: ClaimMethod,
+    snapshot: ClaimMethodSnapshot,
     result: ClaimVerificationResult,
-  ): Promise<ClaimStatusResponse> {
-    await this.serverService.ensureExists(serverId);
+  ): Promise<boolean> {
+    await this.serverService.ensureExists(snapshot.serverId);
     const checkedAt = new Date(result.checkedAt);
-
-    const updatedMethod = await this.prisma.serverClaimMethod.update({
-      where: {
-        serverId_method: {
-          serverId,
-          method,
-        },
-      },
-      data: {
-        status: result.status,
-        lastCheckedAt: checkedAt,
-        note: result.note ?? null,
-        verifiedAt: result.status === 'verified' ? checkedAt : null,
-      },
-    });
-
-    if (result.status === 'verified' && updatedMethod.accountId) {
-      await this.prisma.server.updateMany({
+    return this.prisma.$transaction(async (transaction) => {
+      const updated = await transaction.serverClaimMethod.updateMany({
         where: {
-          id: serverId,
-          ownerAccountId: null,
+          id: snapshot.id,
+          version: snapshot.version,
+          token: snapshot.token,
+          issuedAt: snapshot.issuedAt,
         },
         data: {
-          ownerAccountId: updatedMethod.accountId,
-          registrantAccountId: null,
+          version: { increment: 1 },
+          status: result.status,
+          lastCheckedAt: checkedAt,
+          note: result.note ?? null,
+          verifiedAt: result.status === 'verified' ? checkedAt : null,
         },
       });
-    }
+      if (updated.count !== 1) {
+        return false;
+      }
 
-    await this.syncGrade(serverId);
-    return this.getStatus(serverId);
+      if (result.status === 'verified' && snapshot.accountId) {
+        await transaction.server.updateMany({
+          where: {
+            id: snapshot.serverId,
+            ownerAccountId: null,
+          },
+          data: {
+            ownerAccountId: snapshot.accountId,
+            registrantAccountId: null,
+          },
+        });
+      }
+
+      const methods = await transaction.serverClaimMethod.findMany({
+        where: { serverId: snapshot.serverId },
+      });
+      const grade = this.computeStoredGrade(methods);
+      await transaction.server.update({
+        where: { id: snapshot.serverId },
+        data: {
+          verificationGrade: grade,
+          verifiedAt: grade === 'Unverified' ? null : checkedAt,
+        },
+      });
+      return true;
+    });
   }
 
   async getStatus(serverId: string): Promise<ClaimStatusResponse> {
@@ -257,11 +287,17 @@ export class ClaimService {
       return;
     }
 
-    await this.prisma.$transaction(
+    const results = await this.prisma.$transaction(
       expired.map((method) =>
-        this.prisma.serverClaimMethod.update({
-          where: { id: method.id },
+        this.prisma.serverClaimMethod.updateMany({
+          where: {
+            id: method.id,
+            version: method.version,
+            token: method.token,
+            issuedAt: method.issuedAt,
+          },
           data: {
+            version: { increment: 1 },
             status: 'expired',
             verifiedAt: null,
             lastCheckedAt: new Date(),
@@ -271,7 +307,9 @@ export class ClaimService {
       ),
     );
 
-    await this.syncGrade(serverId);
+    if (results.some((result) => result.count === 1)) {
+      await this.syncGrade(serverId);
+    }
   }
 
   private async syncGrade(serverId: string): Promise<void> {

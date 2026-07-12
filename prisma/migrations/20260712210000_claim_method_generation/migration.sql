@@ -1,0 +1,2 @@
+ALTER TABLE `ServerClaimMethod`
+  ADD COLUMN `version` INTEGER NOT NULL DEFAULT 1;

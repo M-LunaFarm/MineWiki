@@ -13,6 +13,16 @@ type ClaimMethod = 'plugin' | 'dns' | 'motd';
 type ClaimMethodState = 'pending' | 'verified' | 'expired' | 'failed';
 type VerificationGrade = 'A' | 'B' | 'C' | 'Unverified';
 
+interface ClaimSnapshot {
+  readonly id: string;
+  readonly serverId: string;
+  readonly method: ClaimMethod;
+  readonly version: number;
+  readonly token: string;
+  readonly issuedAt: Date;
+  readonly accountId?: string | null;
+}
+
 type PrismaHandle = Pick<PrismaClient, 'server' | 'serverClaimMethod'>;
 
 export interface ClaimVerificationResult {
@@ -21,11 +31,19 @@ export interface ClaimVerificationResult {
   readonly note?: string;
 }
 
-export function createClaimVerifier(prisma: PrismaHandle) {
+export function createClaimVerifier(
+  prisma: PrismaHandle,
+  dependencies: {
+    readonly now?: () => Date;
+    readonly runVerificationCheck?: typeof runVerificationCheck;
+  } = {},
+) {
   const logger = Logger.child({ component: 'ClaimVerifier' });
+  const now = dependencies.now ?? (() => new Date());
+  const check = dependencies.runVerificationCheck ?? runVerificationCheck;
 
   async function verify(job: ClaimVerificationJob): Promise<ClaimVerificationResult> {
-    const checkedAt = new Date().toISOString();
+    const checkedAt = now().toISOString();
     if (!isSupportedClaimMethod(job.method)) {
       logger.warn(
         { serverId: job.serverId, method: job.method },
@@ -52,18 +70,20 @@ export function createClaimVerifier(prisma: PrismaHandle) {
       return { status: 'failed', checkedAt, note: 'method_not_issued' };
     }
 
+    const expiryBasis = methodRecord.verifiedAt ?? methodRecord.issuedAt;
     if (
-      methodRecord.status === 'verified' &&
-      methodRecord.verifiedAt &&
-      Date.now() - methodRecord.verifiedAt.getTime() > METHOD_EXPIRY_MS
+      (methodRecord.status === 'pending' || methodRecord.status === 'verified') &&
+      now().getTime() - expiryBasis.getTime() > METHOD_EXPIRY_MS
     ) {
       const result = {
         status: 'expired' as const,
         checkedAt,
         note: 'token_expired',
       };
-      await applyVerificationResult(prisma, job.serverId, job.method, result);
-      return result;
+      const applied = await applyVerificationResult(prisma, methodRecord, result);
+      return applied
+        ? result
+        : { status: 'pending', checkedAt, note: 'claim_generation_changed' };
     }
 
     const proof = resolveVerificationProof(methodRecord.token, methodRecord.tokenCiphertext);
@@ -73,14 +93,15 @@ export function createClaimVerifier(prisma: PrismaHandle) {
         checkedAt,
         note: 'verification_proof_unavailable',
       };
-      await prisma.serverClaimMethod.update({
+      await prisma.serverClaimMethod.updateMany({
         where: {
-          serverId_method: {
-            serverId: job.serverId,
-            method: job.method,
-          },
+          id: methodRecord.id,
+          version: methodRecord.version,
+          token: methodRecord.token,
+          issuedAt: methodRecord.issuedAt,
         },
         data: {
+          version: { increment: 1 },
           lastCheckedAt: new Date(checkedAt),
           note: result.note,
         },
@@ -88,9 +109,11 @@ export function createClaimVerifier(prisma: PrismaHandle) {
       return result;
     }
 
-    const result = await runVerificationCheck(job.method, proof ?? '', job.serverId, prisma);
-    await applyVerificationResult(prisma, job.serverId, job.method, result);
-    return result;
+    const result = await check(job.method, proof ?? '', job.serverId, prisma);
+    const applied = await applyVerificationResult(prisma, methodRecord, result);
+    return applied
+      ? result
+      : { status: 'pending', checkedAt, note: 'claim_generation_changed' };
   }
 
   return { verify };
@@ -111,38 +134,42 @@ export function resolveVerificationProof(
 
 async function applyVerificationResult(
   prisma: PrismaHandle,
-  serverId: string,
-  method: ClaimMethod,
+  snapshot: ClaimSnapshot,
   result: ClaimVerificationResult,
-): Promise<void> {
+): Promise<boolean> {
   const checkedAt = new Date(result.checkedAt);
-  await prisma.serverClaimMethod.update({
+  const updated = await prisma.serverClaimMethod.updateMany({
     where: {
-      serverId_method: {
-        serverId,
-        method,
-      },
+      id: snapshot.id,
+      version: snapshot.version,
+      token: snapshot.token,
+      issuedAt: snapshot.issuedAt,
     },
     data: {
+      version: { increment: 1 },
       status: result.status,
       lastCheckedAt: checkedAt,
       note: result.note ?? null,
       verifiedAt: result.status === 'verified' ? checkedAt : null,
     },
   });
+  if (updated.count !== 1) {
+    return false;
+  }
 
   const methods = await prisma.serverClaimMethod.findMany({
-    where: { serverId },
+    where: { serverId: snapshot.serverId },
     select: { method: true, status: true },
   });
   const grade = computeGrade(methods);
   await prisma.server.update({
-    where: { id: serverId },
+    where: { id: snapshot.serverId },
     data: {
       verificationGrade: grade,
       verifiedAt: grade === 'Unverified' ? null : checkedAt,
     },
   });
+  return true;
 }
 
 async function runVerificationCheck(

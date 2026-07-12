@@ -604,6 +604,7 @@ model ServerClaimMethod {
   verifiedAt      DateTime?
   lastCheckedAt   DateTime?
   note            String?
+  version         Int              @default(1)
 
   server  Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
   account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
