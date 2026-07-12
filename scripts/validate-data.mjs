@@ -168,6 +168,106 @@ async function runValidation() {
     `,
   );
 
+  await errorIfRows(
+    'review trust evidence is complete',
+    `
+      SELECT r.id
+      FROM ServerReview r
+      WHERE (
+        r.evidenceMinecraftUuid IS NOT NULL
+        OR r.evidenceVoteId IS NOT NULL
+        OR r.evidenceVerifiedAt IS NOT NULL
+        OR r.evidencePolicyVersion IS NOT NULL
+      )
+      AND (
+        r.evidenceMinecraftUuid IS NULL
+        OR r.evidenceVoteId IS NULL
+        OR r.evidenceVerifiedAt IS NULL
+        OR r.evidencePolicyVersion IS NULL
+      )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'review trust evidence matches its vote',
+    `
+      SELECT r.id
+      FROM ServerReview r
+      LEFT JOIN Vote v ON v.id = r.evidenceVoteId
+      WHERE r.evidenceVoteId IS NOT NULL
+        AND (
+          v.id IS NULL
+          OR v.status <> 'valid'
+          OR v.serverId <> r.serverId
+          OR v.minecraftUuid IS NULL
+          OR v.minecraftUuid <> r.evidenceMinecraftUuid
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'vote dispatch attempt matches vote and target server',
+    `
+      SELECT a.id
+      FROM vote_dispatch_attempts a
+      LEFT JOIN Vote v ON v.id = a.vote_id
+      LEFT JOIN VotifierTarget t ON t.id = a.target_id
+      WHERE v.id IS NULL
+        OR v.serverId <> a.server_id
+        OR (a.target_id IS NOT NULL AND (t.id IS NULL OR t.serverId <> a.server_id))
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'canonical Account points to an existing connected account',
+    `
+      SELECT a.id
+      FROM Account a
+      LEFT JOIN Account canonical ON canonical.id = a.canonicalAccountId
+      WHERE a.canonicalAccountId IS NOT NULL
+        AND canonical.id IS NULL
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'linked Accounts agree on canonical identity',
+    `
+      SELECT l.id
+      FROM AccountLink l
+      JOIN Account source ON source.id = l.primaryAccountId
+      JOIN Account target ON target.id = l.linkedAccountId
+      WHERE (source.canonicalAccountId IS NOT NULL OR target.canonicalAccountId IS NOT NULL)
+        AND COALESCE(source.canonicalAccountId, source.id)
+          <> COALESCE(target.canonicalAccountId, target.id)
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'completed Discord verification has canonical identity evidence',
+    `
+      SELECT s.id
+      FROM DiscordVerificationSession s
+      LEFT JOIN Account a ON a.id = s.accountId
+      LEFT JOIN MinecraftIdentity m
+        ON m.accountId = s.accountId
+       AND m.uuid = s.minecraftUuid
+      WHERE s.status IN ('linked', 'synced')
+        AND (
+          s.accountId IS NULL
+          OR s.minecraftUuid IS NULL
+          OR s.minecraftName IS NULL
+          OR a.id IS NULL
+          OR m.accountId IS NULL
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
   await validatePluginCredentials();
   await validateExpiredReplayGuards();
   await validateRenderCache();
@@ -388,7 +488,8 @@ function parsePositiveInt(value, fallback) {
 function printHelp() {
   console.log(`Usage: pnpm data:validate [--fix] [--sample-limit=20] [--fix-limit=5000]
 
-Checks migration integrity across wiki, server, file, and plugin-sync tables.
+Checks migration integrity across wiki, server, reviews, votes, account identity,
+Discord verification, file, and plugin-sync tables.
 By default this command never mutates data.
 
 --fix performs safe repairs:
