@@ -736,7 +736,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   }, [pathname, selectedTicketId]);
 
   return (
-    <div className="min-h-screen bg-[#111214] pt-16 text-[#F4F4F5]">
+    <div className="support-surface min-h-screen bg-[#111214] pt-16 text-[#F4F4F5]">
       <main>
         <section className="border-b border-[#2C2D30] bg-[#18191C]">
           <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">

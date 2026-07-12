@@ -232,6 +232,48 @@ html[data-theme='light'] .wiki-rendered .doc-status {
   color: #5f5025;
 }
 
+html[data-theme='light'] .support-surface {
+  background: #f4f5f2;
+  color: #202820;
+}
+
+html[data-theme='light'] .support-surface [class*='bg-[#111214]'] {
+  background-color: #f4f5f2;
+}
+
+html[data-theme='light'] .support-surface [class*='bg-[#18191C]'],
+html[data-theme='light'] .support-surface [class*='bg-[#151619]'] {
+  background-color: #ffffff;
+}
+
+html[data-theme='light'] .support-surface [class*='bg-[#202124]'] {
+  background-color: #e7ebe6;
+}
+
+html[data-theme='light'] .support-surface [class*='border-[#2C2D30]'],
+html[data-theme='light'] .support-surface [class*='border-[#34363A]'],
+html[data-theme='light'] .support-surface [class*='border-[#55585F]'] {
+  border-color: rgba(37, 49, 41, 0.16);
+}
+
+html[data-theme='light'] .support-surface [class*='text-[#F4F4F5]'],
+html[data-theme='light'] .support-surface [class*='text-[#D8D9DC]'] {
+  color: #202820;
+}
+
+html[data-theme='light'] .support-surface [class*='text-[#B6B7BA]'],
+html[data-theme='light'] .support-surface [class*='text-[#A7A9AF]'],
+html[data-theme='light'] .support-surface [class*='text-[#85878D]'],
+html[data-theme='light'] .support-surface [class*='text-[#73757C]'] {
+  color: #657067;
+}
+
+html[data-theme='light'] .support-surface input,
+html[data-theme='light'] .support-surface textarea,
+html[data-theme='light'] .support-surface select {
+  color: #202820;
+}
+
 html[data-theme='dark'] .paper-directory,
 html[data-theme='dark'] .paper-mobile-filter {
   background-color: #111713;

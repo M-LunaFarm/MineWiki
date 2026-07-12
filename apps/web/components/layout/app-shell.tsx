@@ -22,7 +22,7 @@ export function AppShell({ children }: AppShellProps) {
     pathname.startsWith('/login/') ||
     pathname.startsWith('/auth/');
 
-  if (pathname === '/') {
+  if (pathname === '/' || pathname === '/servers') {
     return <div className="min-h-screen text-slate-100">{children}</div>;
   }
 
