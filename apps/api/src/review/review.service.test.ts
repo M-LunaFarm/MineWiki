@@ -1,4 +1,4 @@
-import { after, before, test } from 'node:test';
+import { after, afterEach, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ForbiddenException } from '@nestjs/common';
@@ -37,6 +37,8 @@ if (!hasDatabase) {
     accounts,
     prisma
   );
+  const createdAccountIds = new Set<string>();
+  const createdServerIds = new Set<string>();
 
   before(async () => {
     await prisma.$connect();
@@ -46,22 +48,41 @@ if (!hasDatabase) {
     await prisma.$disconnect();
   });
 
+  afterEach(async () => {
+    const serverIds = [...createdServerIds];
+    const accountIds = [...createdAccountIds];
+    if (serverIds.length > 0) {
+      await prisma.reviewSubmissionGate.deleteMany({
+        where: { serverId: { in: serverIds } }
+      });
+      await prisma.server.deleteMany({ where: { id: { in: serverIds } } });
+    }
+    if (accountIds.length > 0) {
+      await prisma.account.deleteMany({ where: { id: { in: accountIds } } });
+    }
+    createdServerIds.clear();
+    createdAccountIds.clear();
+  });
+
   const createAccount = async (displayName = 'Tester') => {
     const email = 'tester-' + randomUUID() + '@example.com';
-    return accounts.registerAccount({
+    const account = await accounts.registerAccount({
       provider: 'email',
       providerUserId: email,
       email,
       displayName,
       emailVerified: true
     });
+    createdAccountIds.add(account.id);
+    return account;
   };
 
   const createServer = async (ownerAccountId?: string) => {
-    const name = 'Test Server ' + randomUUID().slice(0, 8);
-    return serverService.register({
+    const unique = randomUUID().replace(/-/g, '').slice(0, 12);
+    const name = 'Test Server ' + unique.slice(0, 8);
+    const server = await serverService.register({
       name,
-      joinHost: 'play.example.com',
+      joinHost: `review-${unique}.example.com`,
       joinPort: 25565,
       edition: 'java',
       supportedVersions: ['1.20.1'],
@@ -72,6 +93,8 @@ if (!hasDatabase) {
       discordUrl: null,
       ownerAccountId
     });
+    createdServerIds.add(server.id);
+    return server;
   };
 
   const createSession = (accountId: string): SessionPayload => ({

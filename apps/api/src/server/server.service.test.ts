@@ -49,6 +49,8 @@ if (!hasDatabase) {
 
   test('updateBanner stores sanitized image and updates server detail', async () => {
     const { service, cleanup } = createService();
+    let serverId: string | null = null;
+    let uploadedFileId: string | null = null;
     try {
       const name = 'Test Server ' + randomUUID().slice(0, 8);
       const server = await service.register({
@@ -63,6 +65,7 @@ if (!hasDatabase) {
         websiteUrl: null,
         discordUrl: null
       });
+      serverId = server.id;
 
       const buffer = await sharp({
         create: {
@@ -79,18 +82,26 @@ if (!hasDatabase) {
         data: `data:image/jpeg;base64,${buffer.toString('base64')}`,
         filename: 'banner.jpg'
       });
+      uploadedFileId = stored.id;
 
       const detail = await service.detail(server.id);
       assert.equal(detail.bannerUrl, stored.publicPath);
       assert.ok(stored.filename.endsWith('.webp'));
       assert.ok(stored.width <= 800);
     } finally {
+      if (uploadedFileId) {
+        await prisma.uploadedFile.delete({ where: { id: uploadedFileId } }).catch(() => {});
+      }
+      if (serverId) {
+        await prisma.server.delete({ where: { id: serverId } }).catch(() => {});
+      }
       cleanup();
     }
   });
 
   test('uploadContentImage stores sanitized image for markdown content', async () => {
     const { service, cleanup } = createService();
+    let uploadedFileId: string | null = null;
     try {
       const buffer = await sharp({
         create: {
@@ -107,10 +118,14 @@ if (!hasDatabase) {
         data: `data:image/png;base64,${buffer.toString('base64')}`,
         filename: 'content.png'
       });
+      uploadedFileId = stored.id;
       assert.ok(stored.publicPath.length > 0);
       assert.ok(stored.filename.endsWith('.webp'));
       assert.ok(stored.width <= 1200);
     } finally {
+      if (uploadedFileId) {
+        await prisma.uploadedFile.delete({ where: { id: uploadedFileId } }).catch(() => {});
+      }
       cleanup();
     }
   });
