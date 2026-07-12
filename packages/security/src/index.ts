@@ -1,5 +1,6 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import ipaddr from 'ipaddr.js';
 
 export type AddressFamily = 4 | 6;
 
@@ -18,7 +19,13 @@ export interface OutboundValidationOptions {
   readonly label?: string;
   readonly allowIpv6?: boolean;
   readonly allowedPorts?: readonly number[];
+  readonly lookup?: LookupFunction;
 }
+
+type LookupFunction = (
+  hostname: string,
+  options: { readonly all: true; readonly verbatim: true }
+) => Promise<Array<{ readonly address: string; readonly family: number }>>;
 
 type UnsafeReason =
   | 'invalid_host'
@@ -123,10 +130,34 @@ function ensurePublicIpv4(address: string, label: string): void {
   }
 }
 
+function ensurePublicIpv6(address: string, label: string): void {
+  let parsed: ipaddr.IPv6;
+  try {
+    const candidate = ipaddr.parse(address);
+    if (candidate.kind() !== 'ipv6') {
+      throw new Error('not IPv6');
+    }
+    parsed = candidate as ipaddr.IPv6;
+  } catch {
+    throw new UnsafeEndpointError('private_address', `${label}: invalid IPv6 address`);
+  }
+  if (parsed.isIPv4MappedAddress()) {
+    ensurePublicIpv4(parsed.toIPv4Address().toString(), label);
+    return;
+  }
+  if (parsed.range() !== 'unicast') {
+    throw new UnsafeEndpointError(
+      'private_address',
+      `${label}: IPv6 address ${address} is not reachable from public internet`
+    );
+  }
+}
+
 async function resolveHost(
   host: string,
   allowIpv6: boolean,
-  label: string
+  label: string,
+  lookupHost: LookupFunction
 ): Promise<ResolvedAddress[]> {
   const ipType = isIP(host);
   if (ipType === 4) {
@@ -137,11 +168,12 @@ async function resolveHost(
     if (!allowIpv6) {
       throw new UnsafeEndpointError('ipv6_not_allowed', `${label}: IPv6 is not allowed`);
     }
+    ensurePublicIpv6(host, label);
     return [{ address: host, family: 6 }];
   }
 
   try {
-    const records = await lookup(host, { all: true, verbatim: true });
+    const records = await lookupHost(host, { all: true, verbatim: true });
     if (!records || records.length === 0) {
       throw new UnsafeEndpointError(
         'resolve_failed',
@@ -156,6 +188,7 @@ async function resolveHost(
         if (!allowIpv6) {
           continue;
         }
+        ensurePublicIpv6(record.address, label);
         sanitized.push({ address: record.address, family: 6 });
         continue;
       }
@@ -185,7 +218,12 @@ export async function validateOutboundTarget(
   const label = options.label ?? 'Outbound target validation';
   const normalizedHost = ensureValidHost(host, label);
   const normalizedPort = ensureValidPort(port, label, options.allowedPorts);
-  const addresses = await resolveHost(normalizedHost, Boolean(options.allowIpv6), label);
+  const addresses = await resolveHost(
+    normalizedHost,
+    Boolean(options.allowIpv6),
+    label,
+    options.lookup ?? lookup
+  );
 
   return {
     host: normalizedHost,

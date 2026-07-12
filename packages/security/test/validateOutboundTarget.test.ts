@@ -90,3 +90,56 @@ test('rejects DNS host when only IPv6 records are available', async () => {
       error.message.includes('IPv6 is not allowed')
   );
 });
+
+for (const address of [
+  '::',
+  '::1',
+  'fc00::1',
+  'fd00::1',
+  'fe80::1',
+  'ff02::1',
+  '2001:db8::1',
+  '::ffff:127.0.0.1',
+  '::ffff:10.0.0.1',
+  '::ffff:169.254.169.254',
+  '::ffff:192.168.1.1'
+]) {
+  test(`rejects non-public IPv6 target ${address}`, async () => {
+    await assert.rejects(
+      () => validateOutboundTarget(address, 25565, { allowIpv6: true }),
+      (error: unknown) =>
+        error instanceof UnsafeEndpointError && error.reason === 'private_address'
+    );
+  });
+}
+
+for (const address of ['2606:4700:4700::1111', '2001:4860:4860::8888']) {
+  test(`allows public IPv6 target ${address}`, async () => {
+    const result = await validateOutboundTarget(address, 25565, { allowIpv6: true });
+    assert.deepEqual(result.addresses, [{ address, family: 6 }]);
+  });
+}
+
+test('fails closed when enabled DNS results mix public IPv4 and private IPv6', async () => {
+  await assert.rejects(
+    () => validateOutboundTarget('mixed.example', 25565, {
+      allowIpv6: true,
+      lookup: async () => [
+        { address: '8.8.8.8', family: 4 },
+        { address: 'fd00::1', family: 6 }
+      ]
+    }),
+    (error: unknown) =>
+      error instanceof UnsafeEndpointError && error.reason === 'private_address'
+  );
+});
+
+test('ignores private IPv6 DNS records while IPv6 support is disabled', async () => {
+  const result = await validateOutboundTarget('mixed.example', 25565, {
+    lookup: async () => [
+      { address: '8.8.8.8', family: 4 },
+      { address: 'fd00::1', family: 6 }
+    ]
+  });
+  assert.deepEqual(result.addresses, [{ address: '8.8.8.8', family: 4 }]);
+});
