@@ -134,6 +134,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   const [searchKeyword, setSearchKeyword] = useState('');
 
   const [messageBody, setMessageBody] = useState('');
+  const [messageInternal, setMessageInternal] = useState(false);
   const [submittingMessage, setSubmittingMessage] = useState(false);
 
   const [serverOptions, setServerOptions] = useState<SupportServerOption[]>([]);
@@ -490,13 +491,13 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
 
   const selectedMessages = detail?.messages ?? [];
   const selectedTicketLabel = selectedTicket ? `#${selectedTicket.id.slice(0, 8)}` : null;
+  const canManageTicket = Boolean(mode === 'agent' && isAgent && detail?.viewer.canManage);
   const canSendMessage = Boolean(
     account &&
       selectedTicket &&
-      selectedTicket.status !== 'closed' &&
-      selectedTicket.status !== 'resolved',
+      (canManageTicket ||
+        (selectedTicket.status !== 'closed' && selectedTicket.status !== 'resolved')),
   );
-  const canManageTicket = Boolean(mode === 'agent' && isAgent && detail?.viewer.canManage);
 
   const handleSelectTopic = useCallback(
     (category: string) => {
@@ -527,9 +528,10 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
       try {
         const next = await createSupportMessage(selectedTicketId, {
           body,
-          isInternal: false,
+          isInternal: canManageTicket ? messageInternal : false,
         });
         setMessageBody('');
+        setMessageInternal(false);
         setDetail(next);
         await loadTickets(next.ticket.id, true);
       } catch (sendError) {
@@ -540,7 +542,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         setSubmittingMessage(false);
       }
     },
-    [canSendMessage, loadTickets, messageBody, selectedTicketId],
+    [canManageTicket, canSendMessage, loadTickets, messageBody, messageInternal, selectedTicketId],
   );
 
   const handleUpdateTicket = useCallback(
@@ -1045,6 +1047,23 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                                     ),
                                   )}
                                 </select>
+                                <select
+                                  aria-label="문의 우선순위 변경"
+                                  className="h-9 rounded-md border border-[#34363A] bg-[#111214] px-2 text-xs text-white outline-none focus:border-[#13ec80]/60"
+                                  disabled={updatingTicket}
+                                  value={selectedTicket.priority}
+                                  onChange={(event) =>
+                                    void handleUpdateTicket({
+                                      priority: event.target.value as TicketPriority,
+                                    })
+                                  }
+                                >
+                                  {PRIORITY_OPTIONS.map((item) => (
+                                    <option key={item.value} value={item.value}>
+                                      우선순위: {item.label}
+                                    </option>
+                                  ))}
+                                </select>
                                 <button
                                   className="rounded-md border border-[#34363A] px-3 py-2 text-xs text-[#D8D9DC] transition hover:border-[#13ec80]/50 disabled:opacity-50"
                                   type="button"
@@ -1152,6 +1171,11 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                                     <span className="text-xs font-semibold text-white">
                                       {message.authorDisplayName}
                                     </span>
+                                    {message.isInternal ? (
+                                      <span className="rounded border border-amber-300/30 bg-amber-300/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
+                                        내부 메모
+                                      </span>
+                                    ) : null}
                                     <span className="text-[11px] text-[#85878D]">
                                       {formatTime(message.createdAt)}
                                     </span>
@@ -1207,9 +1231,22 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                         }}
                       />
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-xs text-[#85878D]">
-                          Ctrl 또는 Command + Enter로 전송할 수 있습니다.
-                        </p>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <p className="text-xs text-[#85878D]">
+                            Ctrl 또는 Command + Enter로 전송할 수 있습니다.
+                          </p>
+                          {canManageTicket ? (
+                            <label className="inline-flex items-center gap-2 text-xs text-amber-100">
+                              <input
+                                className="h-4 w-4 rounded border-[#55585F] bg-[#111214]"
+                                type="checkbox"
+                                checked={messageInternal}
+                                onChange={(event) => setMessageInternal(event.target.checked)}
+                              />
+                              고객에게 보이지 않는 내부 메모
+                            </label>
+                          ) : null}
+                        </div>
                         <button
                           className="inline-flex items-center gap-2 rounded-md bg-[#13ec80] px-4 py-2 text-sm font-semibold text-[#101211] transition hover:bg-[#10ce70] disabled:cursor-not-allowed disabled:opacity-60"
                           type="submit"
