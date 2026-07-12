@@ -5,7 +5,6 @@ import { resolve } from 'node:path';
 
 const mutationFiles = [
   'app/servers/register/page.tsx',
-  'app/minecraft/callback/callback-client.tsx',
   'components/claim/claim-workflow.tsx',
   'components/minecraft/ownership-panel.tsx',
   'components/reviews/review-composer.tsx',
