@@ -257,6 +257,21 @@ export class MinecraftService {
     };
   }
 
+  async getStoredIdentity(userId: string): Promise<MinecraftIdentity> {
+    const identity = await this.prisma.minecraftIdentity.findUnique({
+      where: { accountId: userId }
+    });
+    if (!identity) {
+      throw new NotFoundException('Minecraft ownership verification not found for user');
+    }
+    return {
+      uuid: identity.uuid,
+      playerName: identity.playerName ?? undefined,
+      msOwned: identity.msOwned,
+      lastVerifiedAt: identity.lastVerifiedAt.toISOString()
+    };
+  }
+
   async revokeIdentity(userId: string): Promise<void> {
     const [removedIdentity] = await this.prisma.$transaction([
       this.prisma.minecraftIdentity.deleteMany({

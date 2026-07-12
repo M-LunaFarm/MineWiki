@@ -534,6 +534,16 @@ model ServerReview {
   @@index([evidenceMinecraftUuid])
 }
 
+model ReviewSubmissionGate {
+  serverId        String
+  authorAccountId String
+  lastSubmittedAt DateTime
+
+  @@id([serverId, authorAccountId])
+  @@index([lastSubmittedAt])
+  @@map("review_submission_gates")
+}
+
 model ReviewHelpfulVote {
   id           String   @id @default(uuid())
   reviewId     String

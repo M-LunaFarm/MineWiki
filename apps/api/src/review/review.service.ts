@@ -19,6 +19,7 @@ import type { SessionPayload } from '../session/session.service';
 
 const REVIEW_COOLDOWN_MS = 1000 * 60 * 60 * 24; // 24시간
 const RECENT_VOTE_WINDOW_MS = 1000 * 60 * 60 * 24; // 24시간 내 투표 필요
+const OWNERSHIP_VERIFICATION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 180; // 180일
 const WILSON_Z = 1.96;
 const HELPFUL_COOLDOWN_MS = 1000 * 60 * 5; // 5분
 const ADMIN_REPLY_AUTHOR_FALLBACK = '운영진';
@@ -141,22 +142,20 @@ export class ReviewService {
 
     let identity;
     try {
-      identity = await this.minecraft.getIdentity(session.userId);
+      identity = await this.minecraft.getStoredIdentity(session.userId);
     } catch {
       throw new ForbiddenException('Minecraft 소유권 인증이 필요합니다.');
     }
 
     const evidenceVote = await this.enforceVoteGate(serverId, identity.uuid, now);
 
-    const lastReview = await this.prisma.serverReview.findFirst({
-      where: {
-        serverId,
-        authorAccountId: session.userId
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-    if (lastReview && now.getTime() - lastReview.createdAt.getTime() < REVIEW_COOLDOWN_MS) {
-      throw new ForbiddenException('이미 최근에 리뷰를 작성했습니다. 잠시 후 다시 시도해주세요.');
+    const verifiedAt = new Date(identity.lastVerifiedAt);
+    if (
+      Number.isNaN(verifiedAt.getTime()) ||
+      verifiedAt.getTime() > now.getTime() ||
+      now.getTime() - verifiedAt.getTime() > OWNERSHIP_VERIFICATION_MAX_AGE_MS
+    ) {
+      throw new ForbiddenException('Minecraft 소유권을 다시 인증해 주세요.');
     }
 
     const actualDisplayName = deriveDisplayName(account.displayName, account.providerUserId);
@@ -164,24 +163,32 @@ export class ReviewService {
     const visibility = normalizeVisibility(parsed.visibility);
     const authorDisplayName = isAnonymous ? '익명' : actualDisplayName;
 
-    const review = await this.prisma.serverReview.create({
-      data: {
-        id: randomUUID(),
+    const review = await this.prisma.$transaction(async (transaction) => {
+      await this.acquireReviewSubmissionGate(
+        transaction,
         serverId,
-        authorAccountId: session.userId,
-        authorDisplayName,
-        rating: parsed.rating,
-        body: parsed.body,
-        tags: parsed.tags,
-        visibility,
-        isAnonymous,
-        helpfulCount: 0,
-        reports: 0
-        ,evidenceMinecraftUuid: identity.uuid
-        ,evidenceVoteId: evidenceVote.id ?? null
-        ,evidenceVerifiedAt: new Date(identity.lastVerifiedAt)
-        ,evidencePolicyVersion: '2026-07-12-v1'
-      }
+        session.userId,
+        now
+      );
+      return transaction.serverReview.create({
+        data: {
+          id: randomUUID(),
+          serverId,
+          authorAccountId: session.userId,
+          authorDisplayName,
+          rating: parsed.rating,
+          body: parsed.body,
+          tags: parsed.tags,
+          visibility,
+          isAnonymous,
+          helpfulCount: 0,
+          reports: 0,
+          evidenceMinecraftUuid: identity.uuid,
+          evidenceVoteId: evidenceVote.id ?? null,
+          evidenceVerifiedAt: verifiedAt,
+          evidencePolicyVersion: '2026-07-12-v1'
+        }
+      });
     });
 
     await this.serverService.incrementReviewCount(serverId);
@@ -435,7 +442,15 @@ export class ReviewService {
 
     let identityUuid: string | null = null;
     try {
-      const identity = await this.minecraft.getIdentity(session.userId);
+      const identity = await this.minecraft.getStoredIdentity(session.userId);
+      const verifiedAt = new Date(identity.lastVerifiedAt);
+      if (
+        Number.isNaN(verifiedAt.getTime()) ||
+        verifiedAt.getTime() > Date.now() ||
+        Date.now() - verifiedAt.getTime() > OWNERSHIP_VERIFICATION_MAX_AGE_MS
+      ) {
+        throw new Error('stale minecraft ownership verification');
+      }
       identityUuid = identity.uuid;
     } catch {
       return {
@@ -494,6 +509,32 @@ export class ReviewService {
     }
 
     return lastVote;
+  }
+
+  private async acquireReviewSubmissionGate(
+    transaction: Prisma.TransactionClient,
+    serverId: string,
+    authorAccountId: string,
+    now: Date
+  ): Promise<void> {
+    const cutoff = new Date(now.getTime() - REVIEW_COOLDOWN_MS);
+    const refreshed = await transaction.reviewSubmissionGate.updateMany({
+      where: { serverId, authorAccountId, lastSubmittedAt: { lte: cutoff } },
+      data: { lastSubmittedAt: now }
+    });
+    if (refreshed.count === 1) {
+      return;
+    }
+    try {
+      await transaction.reviewSubmissionGate.create({
+        data: { serverId, authorAccountId, lastSubmittedAt: now }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ForbiddenException('이미 최근에 리뷰를 작성했습니다. 잠시 후 다시 시도해주세요.');
+      }
+      throw error;
+    }
   }
 }
 
