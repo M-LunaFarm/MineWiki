@@ -124,6 +124,7 @@ test('server list exposes the aggregated global rank metadata', async () => {
             rankCurrent: 2,
             rankDelta24h: 3,
             rankBest: 1,
+            votesTotal: 342,
             lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
           },
         },
@@ -173,6 +174,7 @@ test('server list marks zero-vote servers as awaiting rank aggregation', async (
             rankCurrent: 9,
             rankDelta24h: 0,
             rankBest: 9,
+            votesTotal: 0,
             lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
           },
         },
@@ -184,6 +186,51 @@ test('server list marks zero-vote servers as awaiting rank aggregation', async (
   const [server] = await service.list();
 
   assert.equal(server.rank, null);
+});
+
+test('server list preserves rank when only historical valid votes remain', async () => {
+  const serverId = randomUUID();
+  const prisma = {
+    server: {
+      findMany: async () => [
+        {
+          id: serverId,
+          name: 'Historically Ranked Server',
+          joinHost: 'history.example.com',
+          joinPort: 25565,
+          edition: 'java',
+          supportedVersions: ['1.21'],
+          tags: [],
+          shortDescription: 'Historical rank',
+          verificationGrade: 'Unverified',
+          verifiedAt: null,
+          votes24h: 0,
+          votesMonthly: 0,
+          reviewsCount: 1,
+          voteRequiresOwnership: false,
+          bannerUrl: null,
+          websiteUrl: null,
+          playersOnline: 0,
+          playersMax: 0,
+          playersLastUpdatedAt: null,
+          isOnline: false,
+          latencyMs: null,
+          stats: {
+            rankCurrent: 1,
+            rankDelta24h: 0,
+            rankBest: 1,
+            votesTotal: 1,
+            lastUpdatedAt: new Date('2026-07-12T01:00:00.000Z'),
+          },
+        },
+      ],
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const [server] = await service.list();
+
+  assert.equal(server.rank?.current, 1);
 });
 
 test('Votifier settings never return the stored v2 token', async () => {

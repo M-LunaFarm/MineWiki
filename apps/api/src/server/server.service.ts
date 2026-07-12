@@ -183,7 +183,10 @@ export class ServerService {
     const startedAt = Date.now();
     const lookup = normalizeServerLookup(idOrShortCode);
     try {
-      const server = await this.prisma.server.findUnique({ where: lookup });
+      const server = await this.prisma.server.findUnique({
+        where: lookup,
+        include: { stats: true },
+      });
       if (!server) {
         throw new NotFoundException(`Server ${idOrShortCode} not found`);
       }
@@ -1440,6 +1443,7 @@ function toSummary(server: {
     rankCurrent: number;
     rankDelta24h: number;
     rankBest: number;
+    votesTotal: number;
     lastUpdatedAt: Date;
   } | null;
 }): ServerSummary {
@@ -1473,7 +1477,9 @@ function toSummary(server: {
       : null,
     isOnline: server.isOnline ?? null,
     latencyMs: server.latencyMs ?? null,
-    rank: server.stats && server.votes24h > 0
+    rank:
+      server.stats &&
+      (server.stats.votesTotal > 0 || server.votes24h > 0 || (server.votesMonthly ?? 0) > 0)
       ? {
           current: server.stats.rankCurrent,
           delta24h: server.stats.rankDelta24h,
@@ -1521,6 +1527,13 @@ function toDetail(
     playersLastUpdatedAt: Date | null;
     isOnline: boolean | null;
     latencyMs: number | null;
+    stats?: {
+      rankCurrent: number;
+      rankDelta24h: number;
+      rankBest: number;
+      votesTotal: number;
+      lastUpdatedAt: Date;
+    } | null;
   },
   verificationMethods: ClaimMethod[],
 ): ServerDetail {
