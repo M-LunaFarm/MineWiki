@@ -23,6 +23,7 @@ function createService(options: {
   readonly subwikiRole?: { id: bigint } | null;
   readonly serverWiki?: { voteServerId: string | null; createdBy: bigint | null } | null;
   readonly server?: { ownerAccountId: string | null } | null;
+  readonly namespaceId?: number | null;
 } = {}) {
   const now = new Date();
   const store = {
@@ -43,6 +44,11 @@ function createService(options: {
           createdAt: now,
           updatedAt: now
         }));
+      }
+    },
+    wikiNamespace: {
+      async findUnique() {
+        return options.namespaceId ? { id: options.namespaceId } : null;
       }
     },
     aclGroup: {
@@ -200,4 +206,89 @@ test('space allow server owner role works', async () => {
 
   assert.equal(decision.matched, true);
   assert.equal(decision.allowed, true);
+});
+
+test('a page rule overrides an inherited site rule', async () => {
+  const { service, store } = createService({
+    rules: [
+      {
+        targetType: 'site',
+        action: 'edit',
+        effect: 'deny',
+        subjectType: 'perm',
+        subjectValue: 'member',
+        reason: 'site_member_deny'
+      },
+      {
+        targetType: 'page',
+        targetId: 1n,
+        action: 'edit',
+        effect: 'allow',
+        subjectType: 'perm',
+        subjectValue: 'member',
+        reason: 'page_member_allow'
+      }
+    ]
+  });
+
+  const decision = await service.evaluate({
+    actor: { accountId: 'account-1', profileId: 100n, status: 'active' },
+    action: 'edit',
+    resource: { pageId: 1n, spaceId: 10n },
+    store: store as unknown as PrismaService
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.reason, 'page_member_allow');
+});
+
+test('namespace rules apply between space and site inheritance', async () => {
+  const { service, store } = createService({
+    namespaceId: 7,
+    rules: [{
+      targetType: 'namespace',
+      targetId: 7n,
+      action: 'create',
+      effect: 'allow',
+      subjectType: 'perm',
+      subjectValue: 'member',
+      reason: 'server_namespace_member'
+    }]
+  });
+
+  const decision = await service.evaluate({
+    actor: { accountId: 'account-1', profileId: 100n, status: 'active' },
+    action: 'create',
+    resource: { namespaceCode: 'server', title: '새 문서' },
+    store: store as unknown as PrismaService
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.reason, 'server_namespace_member');
+});
+
+test('general wiki groups are distinct ACL subjects', async () => {
+  const { service, store } = createService({
+    rules: [{
+      targetType: 'space',
+      targetId: 10n,
+      action: 'edit',
+      effect: 'allow',
+      subjectType: 'group',
+      subjectValue: 'trusted',
+      reason: 'trusted_group'
+    }],
+    userGroups: [{ groupId: 2 }],
+    groups: [{ id: 2, code: 'trusted' }]
+  });
+
+  const decision = await service.evaluate({
+    actor: { accountId: 'account-1', profileId: 100n, status: 'active' },
+    action: 'edit',
+    resource: { pageId: 1n, spaceId: 10n },
+    store: store as unknown as PrismaService
+  });
+
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.reason, 'trusted_group');
 });

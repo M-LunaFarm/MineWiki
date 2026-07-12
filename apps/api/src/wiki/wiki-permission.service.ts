@@ -17,6 +17,7 @@ type WikiPermissionStore = Pick<
   | 'wikiGroup'
   | 'wikiUserGroup'
   | 'wikiGroupPermission'
+  | 'wikiNamespace'
   | 'wikiPage'
   | 'wikiPageRevision'
 >;
@@ -37,6 +38,7 @@ type WikiPermissionSession = SessionPayload & {
 
 export interface WikiPermissionPage {
   readonly id: bigint;
+  readonly namespaceId?: number;
   readonly spaceId: bigint;
   readonly title: string;
   readonly protectionLevel: string;
@@ -140,7 +142,7 @@ export class WikiPermissionService {
         return deny('protection_not_readable');
       }
     }
-    const acl = await this.evaluateAcl('read', actor, { pageId: page.id, spaceId: page.spaceId, title: page.title, createdBy: page.createdBy }, store);
+    const acl = await this.evaluateAcl('read', actor, { pageId: page.id, spaceId: page.spaceId, namespaceId: page.namespaceId, title: page.title, createdBy: page.createdBy }, store);
     if (acl.matched && !acl.allowed) {
       return deny(acl.reason);
     }
@@ -189,7 +191,7 @@ export class WikiPermissionService {
     if (this.isAdminActor(actor)) {
       return allow('admin_edit');
     }
-    const acl = await this.evaluateAcl('edit', actor, { pageId: page.id, spaceId: page.spaceId, title: page.title, createdBy: page.createdBy }, store);
+    const acl = await this.evaluateAcl('edit', actor, { pageId: page.id, spaceId: page.spaceId, namespaceId: page.namespaceId, title: page.title, createdBy: page.createdBy }, store);
     if (acl.matched) {
       return acl.allowed ? allow(acl.reason) : deny(acl.reason);
     }
@@ -372,6 +374,7 @@ export class WikiPermissionService {
     const acl = await this.evaluateAcl(input.action, actor, {
       pageId: input.page.id,
       spaceId: input.page.spaceId,
+      namespaceId: input.page.namespaceId,
       title: input.page.title,
       createdBy: input.page.createdBy
     }, store);
@@ -458,6 +461,7 @@ export class WikiPermissionService {
     resource: {
       readonly pageId?: bigint | null;
       readonly spaceId?: bigint | null;
+      readonly namespaceId?: number | null;
       readonly namespaceCode?: string | null;
       readonly title?: string | null;
       readonly createdBy?: bigint | null;

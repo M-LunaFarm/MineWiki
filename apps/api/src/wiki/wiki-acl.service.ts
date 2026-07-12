@@ -10,6 +10,7 @@ type WikiAclStore = Pick<
   | 'wikiGroup'
   | 'wikiUserGroup'
   | 'wikiGroupPermission'
+  | 'wikiNamespace'
   | 'wikiSpace'
   | 'subwikiRole'
   | 'serverWiki'
@@ -34,6 +35,7 @@ export type WikiAclAction =
 export interface WikiAclResource {
   readonly pageId?: bigint | null;
   readonly spaceId?: bigint | null;
+  readonly namespaceId?: number | null;
   readonly namespaceCode?: string | null;
   readonly title?: string | null;
   readonly createdBy?: bigint | null;
@@ -64,7 +66,20 @@ export class WikiAclService {
   }): Promise<WikiAclDecision> {
     const store = input.store ?? this.prisma;
     const now = new Date();
-    const targetFilters: Array<{ targetType: string; targetId?: bigint | null }> = [{ targetType: 'site', targetId: null }];
+    let namespaceId = input.resource.namespaceId ?? null;
+    if (!namespaceId && input.resource.namespaceCode) {
+      const namespace = await store.wikiNamespace.findUnique({
+        where: { code: input.resource.namespaceCode },
+        select: { id: true }
+      });
+      namespaceId = namespace?.id ?? null;
+    }
+    const targetFilters: Array<{ targetType: string; targetId?: bigint | null }> = [
+      { targetType: 'site', targetId: null }
+    ];
+    if (namespaceId) {
+      targetFilters.push({ targetType: 'namespace', targetId: BigInt(namespaceId) });
+    }
     if (input.resource.spaceId) {
       targetFilters.push({ targetType: 'space', targetId: input.resource.spaceId });
     }
@@ -86,36 +101,39 @@ export class WikiAclService {
         ]
       }
     });
-    const sorted = rules
+    const activeRules = rules
       .filter((rule) =>
         rule.action === input.action &&
         targetFilters.some((target) => rule.targetType === target.targetType && (rule.targetId ?? null) === (target.targetId ?? null)) &&
         (!rule.expiresAt || rule.expiresAt.getTime() > now.getTime())
-      )
-      .sort((left, right) => {
-      const targetDelta = targetSpecificity(left.targetType) - targetSpecificity(right.targetType);
-      return targetDelta === 0 ? left.sortOrder - right.sortOrder : targetDelta;
-    });
+      );
 
-    let allowReason: string | null = null;
-    for (const rule of sorted) {
-      const matches = await this.subjectMatches(store, rule, input.actor, input.resource);
-      if (!matches) {
-        continue;
-      }
-      if (rule.effect === 'deny') {
-        return { matched: true, allowed: false, reason: rule.reason ?? 'acl_deny' };
-      }
-      if (rule.effect === 'allow') {
-        allowReason = rule.reason ?? 'acl_allow';
-      } else {
+    const scopes = [...targetFilters].sort(
+      (left, right) => targetSpecificity(right.targetType) - targetSpecificity(left.targetType)
+    );
+    for (const scope of scopes) {
+      const scopedRules = activeRules
+        .filter(
+          (rule) =>
+            rule.targetType === scope.targetType &&
+            (rule.targetId ?? null) === (scope.targetId ?? null)
+        )
+        .sort((left, right) => left.sortOrder - right.sortOrder);
+      for (const rule of scopedRules) {
+        if (!(await this.subjectMatches(store, rule, input.actor, input.resource))) {
+          continue;
+        }
+        if (rule.effect === 'allow') {
+          return { matched: true, allowed: true, reason: rule.reason ?? 'acl_allow' };
+        }
+        if (rule.effect === 'deny') {
+          return { matched: true, allowed: false, reason: rule.reason ?? 'acl_deny' };
+        }
         return { matched: true, allowed: false, reason: 'acl_unsupported_effect' };
       }
     }
 
-    return allowReason
-      ? { matched: true, allowed: true, reason: allowReason }
-      : { matched: false, allowed: false, reason: 'acl_no_match' };
+    return { matched: false, allowed: false, reason: 'acl_no_match' };
   }
 
   private async subjectMatches(
@@ -133,13 +151,16 @@ export class WikiAclService {
       return this.permissionMatches(store, subjectValue, actor);
     }
     if (subjectType === 'user') {
-      return Boolean(actor && actor.profileId === BigInt(subjectValue));
+      return Boolean(actor && safeBigInt(subjectValue) === actor.profileId);
     }
     if (subjectType === 'aclgroup') {
       return this.aclGroupMatches(store, subjectValue, actor);
     }
     if (subjectType === 'role') {
       return this.roleMatches(store, subjectValue, actor, resource);
+    }
+    if (subjectType === 'group') {
+      return Boolean(actor && (await this.groupCodes(store, actor)).includes(subjectValue));
     }
     return false;
   }
@@ -369,4 +390,12 @@ function targetSpecificity(targetType: string): number {
 
 function stripAclPrefix(value: string, subjectType: string): string {
   return value.replace(new RegExp(`^${subjectType}:`), '');
+}
+
+function safeBigInt(value: string): bigint | null {
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
 }
