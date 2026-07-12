@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { ArrowLeft, Bot, ExternalLink, Hash, Settings, ShieldCheck, Users } from 'lucide-react';
 import {
   buildDiscordBotInviteUrl,
   fetchGuildDetail,
+  isGuildAuthenticationError,
   type GuildActionProfile,
   type GuildChannelSetting,
   type GuildDetail,
@@ -34,6 +35,9 @@ export default async function GuildDetailPage({ params }: PageProps) {
   try {
     guild = await fetchGuildDetail(guildId);
   } catch (fetchError) {
+    if (isGuildAuthenticationError(fetchError)) {
+      redirect(`/login?returnTo=${encodeURIComponent(`/guilds/${guildId}`)}`);
+    }
     error = fetchError instanceof Error ? fetchError.message : '길드 정보를 불러오지 못했습니다.';
   }
 

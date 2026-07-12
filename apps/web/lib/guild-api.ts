@@ -46,6 +46,20 @@ export type GuildDetail = GuildSummary & {
   readonly actionProfiles: GuildActionProfile[];
 };
 
+export class GuildApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'GuildApiError';
+  }
+}
+
+export function isGuildAuthenticationError(error: unknown): boolean {
+  return error instanceof GuildApiError && error.status === 401;
+}
+
 export function buildDiscordBotInviteUrl(guildId?: string | null): string | null {
   const clientId = process.env.NEXT_PUBLIC_DISCORD_CLIENT_ID ?? process.env.DISCORD_CLIENT_ID;
   if (!clientId) {
@@ -112,7 +126,10 @@ async function fetchGuildApi<T>(path: string, init: RequestInit = {}): Promise<T
 async function readGuildResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body?.message ?? `Guild API request failed. (${response.status})`);
+    throw new GuildApiError(
+      response.status,
+      body?.message ?? `Guild API request failed. (${response.status})`,
+    );
   }
   return (await response.json()) as T;
 }
@@ -120,7 +137,7 @@ async function readGuildResponse<T>(response: Response): Promise<T> {
 async function sessionHeaders(): Promise<{ cookie: string }> {
   const cookieHeader = (await cookies()).toString();
   if (!cookieHeader) {
-    throw new Error('로그인이 필요합니다.');
+    throw new GuildApiError(401, '로그인이 필요합니다.');
   }
   return { cookie: cookieHeader };
 }

@@ -1,6 +1,12 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { Bot, ExternalLink, Hash, Settings, ShieldCheck, Users } from 'lucide-react';
-import { buildDiscordBotInviteUrl, fetchGuilds, type GuildSummary } from '../../lib/guild-api';
+import {
+  buildDiscordBotInviteUrl,
+  fetchGuilds,
+  isGuildAuthenticationError,
+  type GuildSummary,
+} from '../../lib/guild-api';
 import { createPageMetadata } from '../../lib/metadata';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +26,9 @@ export default async function GuildListPage() {
   try {
     guilds = await fetchGuilds();
   } catch (fetchError) {
+    if (isGuildAuthenticationError(fetchError)) {
+      redirect('/login?returnTo=%2Fguilds');
+    }
     error = fetchError instanceof Error ? fetchError.message : '길드 목록을 불러오지 못했습니다.';
   }
 

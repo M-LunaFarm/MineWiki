@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { ArrowLeft, Hash, Save, ShieldCheck } from 'lucide-react';
 import {
   fetchGuildDetail,
+  isGuildAuthenticationError,
   updateGuildSettings,
   type GuildDetail,
   type GuildSettingsPayload,
@@ -35,6 +36,9 @@ export default async function GuildSettingsPage({ params, searchParams }: PagePr
   try {
     guild = await fetchGuildDetail(guildId);
   } catch (fetchError) {
+    if (isGuildAuthenticationError(fetchError)) {
+      redirect(`/login?returnTo=${encodeURIComponent(`/guilds/${guildId}/settings`)}`);
+    }
     loadError = fetchError instanceof Error ? fetchError.message : '길드 설정을 불러오지 못했습니다.';
   }
 
@@ -67,6 +71,9 @@ export default async function GuildSettingsPage({ params, searchParams }: PagePr
     try {
       await updateGuildSettings(guildId, payload);
     } catch (error) {
+      if (isGuildAuthenticationError(error)) {
+        redirect(`/login?returnTo=${encodeURIComponent(redirectPath)}`);
+      }
       console.error('Failed to update guild settings', error);
       redirect(`${redirectPath}?error=save`);
     }
