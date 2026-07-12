@@ -8,6 +8,10 @@
 import { ConfigService } from '@minewiki/config';
 import type { OAuthProvider } from '@minewiki/schemas';
 import { randomBytes } from 'node:crypto';
+import {
+  hashOAuthBrowserBinding,
+  matchesOAuthBrowserBinding
+} from './oauth-browser-binding';
 import { PrismaService } from '../common/prisma.service';
 import { encryptAppSecret } from '../common/secret-codec';
 
@@ -21,6 +25,7 @@ interface PendingOAuthState {
   readonly agreePrivacy: boolean;
   readonly createdAt: Date;
   readonly expiresAt: Date;
+  readonly browserBindingHash: string;
 }
 
 interface OAuthStartResult {
@@ -70,7 +75,8 @@ export class OAuthFlowService {
     mode: 'login' | 'link' = 'login',
     linkAccountId?: string,
     agreeTerms = false,
-    agreePrivacy = false
+    agreePrivacy = false,
+    browserBindingHash?: string
   ): Promise<OAuthStartResult> {
     await this.evictExpiredStates();
     const state = this.generateState();
@@ -87,6 +93,9 @@ export class OAuthFlowService {
     if (mode === 'link' && !linkAccountId) {
       throw new BadRequestException('OAuth link requires an account context.');
     }
+    if (!browserBindingHash) {
+      throw new BadRequestException('OAuth 브라우저 확인 정보가 없습니다. 다시 시도해 주세요.');
+    }
 
     await this.prisma.oAuthState.create({
       data: {
@@ -99,7 +108,8 @@ export class OAuthFlowService {
         mode,
         linkAccountId: linkAccountId ?? null
         ,agreeTerms
-        ,agreePrivacy
+        ,agreePrivacy,
+        browserBindingHash
       }
     });
 
@@ -114,10 +124,14 @@ export class OAuthFlowService {
     provider: OAuthProvider,
     code: string,
     state: string,
-    redirectUri?: string
+    redirectUri?: string,
+    browserBinding?: string
   ): Promise<OAuthCompleteResult> {
     await this.evictExpiredStates();
-    const pending = await this.consumeState(state, provider);
+    if (!browserBinding) {
+      throw new BadRequestException('OAuth 브라우저 확인 정보가 없습니다. 다시 시도해 주세요.');
+    }
+    const pending = await this.consumeState(state, provider, browserBinding);
     if (redirectUri && redirectUri !== pending.redirectUri) {
       throw new BadRequestException('OAuth 리디렉션 URI가 일치하지 않습니다.');
     }
@@ -373,28 +387,46 @@ export class OAuthFlowService {
     };
   }
 
-  private async consumeState(state: string, provider: OAuthProvider): Promise<PendingOAuthState> {
-    const pending = await this.prisma.oAuthState.findUnique({
-      where: { state }
+  private async consumeState(
+    state: string,
+    provider: OAuthProvider,
+    browserBinding: string
+  ): Promise<PendingOAuthState> {
+    return this.prisma.$transaction(async (transaction) => {
+      const pending = await transaction.oAuthState.findUnique({ where: { state } });
+      if (
+        !pending ||
+        pending.provider !== provider ||
+        pending.expiresAt.getTime() <= Date.now() ||
+        !pending.browserBindingHash ||
+        !matchesOAuthBrowserBinding(browserBinding, pending.browserBindingHash)
+      ) {
+        throw new BadRequestException('만료되었거나 유효하지 않은 OAuth 상태입니다.');
+      }
+      const consumed = await transaction.oAuthState.deleteMany({
+        where: {
+          state,
+          provider,
+          browserBindingHash: hashOAuthBrowserBinding(browserBinding),
+          expiresAt: { gt: new Date() }
+        }
+      });
+      if (consumed.count !== 1) {
+        throw new BadRequestException('만료되었거나 이미 사용된 OAuth 상태입니다.');
+      }
+      return {
+        provider: pending.provider,
+        redirectUri: pending.redirectUri,
+        returnTo: pending.returnTo ?? undefined,
+        mode: pending.mode,
+        linkAccountId: pending.linkAccountId ?? undefined,
+        agreeTerms: pending.agreeTerms,
+        agreePrivacy: pending.agreePrivacy,
+        createdAt: pending.createdAt,
+        expiresAt: pending.expiresAt,
+        browserBindingHash: pending.browserBindingHash
+      };
     });
-    if (!pending) {
-      throw new BadRequestException('만료되었거나 유효하지 않은 OAuth 상태입니다.');
-    }
-    if (pending.provider !== provider) {
-      throw new BadRequestException('OAuth 공급자 정보가 일치하지 않습니다.');
-    }
-    await this.prisma.oAuthState.delete({ where: { state } });
-    return {
-      provider: pending.provider,
-      redirectUri: pending.redirectUri,
-      returnTo: pending.returnTo ?? undefined,
-      mode: pending.mode,
-      linkAccountId: pending.linkAccountId ?? undefined,
-      agreeTerms: pending.agreeTerms,
-      agreePrivacy: pending.agreePrivacy,
-      createdAt: pending.createdAt,
-      expiresAt: pending.expiresAt
-    };
   }
 
   private async evictExpiredStates(): Promise<void> {

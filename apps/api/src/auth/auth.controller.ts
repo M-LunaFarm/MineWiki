@@ -43,6 +43,11 @@ import {
 } from '@minewiki/schemas';
 import { OAuthFlowService } from './oauth-flow.service';
 import { extractClientIp } from '../common/http/client-ip';
+import {
+  hashOAuthBrowserBinding,
+  issueOAuthBrowserBinding,
+  readOAuthBrowserBinding
+} from './oauth-browser-binding';
 
 @Controller('v1/auth')
 export class AuthController {
@@ -54,8 +59,14 @@ export class AuthController {
 
   @Post('oauth/start')
   @Throttle({ default: { limit: 10, ttl: 60 } })
-  startOAuth(@Body() body: unknown) {
+  startOAuth(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
     const payload = oauthStartRequestSchema.parse(body);
+    const binding = issueOAuthBrowserBinding(request.headers.cookie);
+    reply.header('Set-Cookie', binding.cookie);
     return this.oauthFlow.start(
       payload.provider,
       payload.redirectUri,
@@ -64,20 +75,31 @@ export class AuthController {
       undefined,
       payload.agreeTerms,
       payload.agreePrivacy,
+      hashOAuthBrowserBinding(binding.value),
     );
   }
 
   @UseGuards(SessionGuard)
   @Post('oauth/link')
   @Throttle({ default: { limit: 5, ttl: 60 } })
-  startOAuthLink(@Body() body: unknown, @CurrentSession() session: SessionPayload) {
+  startOAuthLink(
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
     const payload = oauthStartRequestSchema.parse(body);
+    const binding = issueOAuthBrowserBinding(request.headers.cookie);
+    reply.header('Set-Cookie', binding.cookie);
     return this.oauthFlow.start(
       payload.provider,
       payload.redirectUri,
       payload.returnTo,
       'link',
       session.userId,
+      false,
+      false,
+      hashOAuthBrowserBinding(binding.value),
     );
   }
 
@@ -89,11 +111,16 @@ export class AuthController {
     @Req() request: FastifyRequest,
   ) {
     const payload = oauthCompleteRequestSchema.parse(body);
+    const browserBinding = readOAuthBrowserBinding(request.headers.cookie);
+    if (!browserBinding) {
+      throw new BadRequestException('OAuth 브라우저 확인 정보가 없습니다. 다시 시도해 주세요.');
+    }
     const profile = await this.oauthFlow.complete(
       payload.provider,
       payload.code,
       payload.state,
       payload.redirectUri,
+      browserBinding,
     );
     if (profile.mode === 'link') {
       const sessionRecord = await this.getOptionalSession(request);

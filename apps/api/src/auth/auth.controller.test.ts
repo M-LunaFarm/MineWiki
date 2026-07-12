@@ -172,6 +172,7 @@ test('email auth request parsing trims canonical text fields', async () => {
 
 test('existing OAuth login can start without repeated policy consent', async () => {
   const calls: unknown[][] = [];
+  const responseHeaders = new Map<string, string>();
   const controller = new AuthController(
     {} as never,
     {} as never,
@@ -183,15 +184,23 @@ test('existing OAuth login can start without repeated policy consent', async () 
     } as never,
   );
 
-  await controller.startOAuth({
-    provider: 'discord',
-    redirectUri: 'https://minewiki.kr/auth/callback/discord',
-    returnTo: '/me',
-    agreeTerms: false,
-    agreePrivacy: false,
-  });
+  await controller.startOAuth(
+    {
+      provider: 'discord',
+      redirectUri: 'https://minewiki.kr/auth/callback/discord',
+      returnTo: '/me',
+      agreeTerms: false,
+      agreePrivacy: false,
+    },
+    { headers: {} } as never,
+    {
+      header(name: string, value: string) {
+        responseHeaders.set(name, value);
+      },
+    } as never,
+  );
 
-  assert.deepEqual(calls[0], [
+  assert.deepEqual(calls[0]?.slice(0, 7), [
     'discord',
     'https://minewiki.kr/auth/callback/discord',
     '/me',
@@ -200,6 +209,34 @@ test('existing OAuth login can start without repeated policy consent', async () 
     false,
     false,
   ]);
+  assert.match(String(calls[0]?.[7]), /^[a-f0-9]{64}$/u);
+  assert.match(responseHeaders.get('Set-Cookie') ?? '', /^__Host-mw_oauth_browser=/u);
+  assert.match(responseHeaders.get('Set-Cookie') ?? '', /HttpOnly/u);
+  assert.match(responseHeaders.get('Set-Cookie') ?? '', /Secure/u);
+  assert.match(responseHeaders.get('Set-Cookie') ?? '', /SameSite=Lax/u);
+});
+
+test('OAuth completion rejects a browser without its binding cookie before provider exchange', async () => {
+  let completeCalls = 0;
+  const controller = new AuthController(
+    {} as never,
+    {} as never,
+    {
+      async complete() {
+        completeCalls += 1;
+      },
+    } as never,
+  );
+
+  await assert.rejects(
+    controller.completeOAuth(
+      { provider: 'discord', code: 'code', state: 'state-value' },
+      {} as never,
+      { headers: {} } as never,
+    ),
+    /OAuth 브라우저 확인 정보가 없습니다/
+  );
+  assert.equal(completeCalls, 0);
 });
 
 test('changing a password revokes every other active session', async () => {

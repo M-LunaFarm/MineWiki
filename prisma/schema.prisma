@@ -304,16 +304,17 @@ model Session {
 }
 
 model OAuthState {
-  state         String        @id
-  provider      OAuthProvider
-  redirectUri   String
-  returnTo      String?
-  createdAt     DateTime      @default(now())
-  expiresAt     DateTime
-  mode          OAuthMode     @default(login)
-  linkAccountId String?
-  agreeTerms    Boolean       @default(false)
-  agreePrivacy  Boolean       @default(false)
+  state              String        @id
+  provider           OAuthProvider
+  redirectUri        String
+  returnTo           String?
+  createdAt          DateTime      @default(now())
+  expiresAt          DateTime
+  mode               OAuthMode     @default(login)
+  linkAccountId      String?
+  agreeTerms         Boolean       @default(false)
+  agreePrivacy       Boolean       @default(false)
+  browserBindingHash String?       @map("browser_binding_hash") @db.Char(64)
 
   linkAccount Account? @relation(fields: [linkAccountId], references: [id], onDelete: Cascade)
 }
