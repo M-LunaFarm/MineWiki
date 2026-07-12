@@ -161,6 +161,7 @@ test('paginated rankings apply server-side filters and return page metadata', as
   const result = await service.rankings({
     edition: 'java',
     grade: 'Verified',
+    online: true,
     tag: 'survival',
     search: 'ranked',
     sort: 'latest',
@@ -182,6 +183,7 @@ test('paginated rankings apply server-side filters and return page metadata', as
     (queries[0] as { where: { tags: unknown } }).where.tags,
     { array_contains: ['survival'] },
   );
+  assert.equal((queries[0] as { where: { isOnline: unknown } }).where.isOnline, true);
 });
 
 test('server banner upload uses canonical file service metadata path', async () => {

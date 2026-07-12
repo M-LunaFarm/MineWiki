@@ -108,6 +108,7 @@ export class ServerService {
   async rankings(input: {
     readonly edition?: 'java' | 'bedrock';
     readonly grade?: 'Verified' | 'Unverified';
+    readonly online?: boolean;
     readonly tag?: string;
     readonly search?: string;
     readonly sort: ServerSort;
@@ -117,6 +118,7 @@ export class ServerService {
     const search = input.search?.trim();
     const where: Prisma.ServerWhereInput = {
       edition: input.edition,
+      isOnline: input.online,
       verificationGrade:
         input.grade === 'Verified'
           ? { in: ['A', 'B', 'C'] }

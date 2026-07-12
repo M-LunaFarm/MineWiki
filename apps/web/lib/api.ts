@@ -37,6 +37,7 @@ interface ServerSummaryOptions {
 export interface ServerRankingOptions {
   readonly edition?: 'java' | 'bedrock';
   readonly grade?: 'Verified' | 'Unverified';
+  readonly online?: boolean;
   readonly tag?: string;
   readonly search?: string;
   readonly sort?: 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'latest' | 'name_asc';

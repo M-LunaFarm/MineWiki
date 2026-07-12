@@ -58,6 +58,7 @@ const pluginCredentialStatusSchema = z.object({ enabled: z.boolean() });
 const rankingQuerySchema = z.object({
   edition: z.enum(['java', 'bedrock']).optional(),
   grade: z.enum(['Verified', 'Unverified']).optional(),
+  online: z.enum(['true', 'false']).optional(),
   tag: z.string().trim().min(1).max(64).optional(),
   search: z.string().trim().min(1).max(100).optional(),
   sort: z
@@ -108,6 +109,7 @@ export class ServerController {
     @Query('sort') sort?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('online') online?: string,
   ): Promise<ServerRankingResponse> {
     const query = rankingQuerySchema.parse({
       edition: edition?.trim() || undefined,
@@ -117,10 +119,12 @@ export class ServerController {
       sort: sort?.trim() || undefined,
       page: page?.trim() || undefined,
       pageSize: pageSize?.trim() || undefined,
+      online: online?.trim() || undefined,
     });
     return this.serverService.rankings({
       edition: query.edition,
       grade: query.grade,
+      online: query.online === undefined ? undefined : query.online === 'true',
       tag: query.tag,
       search: query.search,
       sort: query.sort ?? 'votes24h_desc',

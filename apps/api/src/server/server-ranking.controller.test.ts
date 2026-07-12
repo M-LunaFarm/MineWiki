@@ -34,6 +34,7 @@ test('ranking controller normalizes filters and pagination', async () => {
     'latest',
     '2',
     '12',
+    'true',
   );
 
   assert.equal(result.page, 2);
@@ -41,6 +42,7 @@ test('ranking controller normalizes filters and pagination', async () => {
     {
       edition: 'java',
       grade: 'Verified',
+      online: true,
       tag: 'survival',
       search: 'ranked',
       sort: 'latest',
@@ -60,7 +62,7 @@ test('ranking controller rejects oversized page sizes and unknown sorts', () => 
   );
 
   assert.throws(
-    () => controller.rankings(undefined, undefined, undefined, undefined, 'paid', '1', '500'),
+    () => controller.rankings(undefined, undefined, undefined, undefined, 'paid', '1', '500', undefined),
     (error: unknown) => error instanceof ZodError,
   );
 });

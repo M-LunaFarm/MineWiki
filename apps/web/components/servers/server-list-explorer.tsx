@@ -65,12 +65,19 @@ const GENRE_OPTIONS = [
 type GenreKey = (typeof GENRE_OPTIONS)[number]['key'];
 type EditionFilter = 'all' | 'java' | 'bedrock';
 type GradeFilter = 'all' | 'Verified' | 'Unverified';
-type SortFilter = 'votes24h_desc' | 'reviews_desc' | 'latest';
+type OnlineFilter = 'all' | 'online';
+type SortFilter =
+  | 'votes24h_desc'
+  | 'votesMonthly_desc'
+  | 'reviews_desc'
+  | 'latest'
+  | 'name_asc';
 
 export interface ServerListInitialFilters {
   readonly search: string;
   readonly edition: EditionFilter;
   readonly grade: GradeFilter;
+  readonly online: OnlineFilter;
   readonly sort: SortFilter;
   readonly tags: string[];
   readonly page: number;
@@ -79,21 +86,28 @@ export interface ServerListInitialFilters {
 interface ServerListExplorerProps {
   readonly initialRanking: ServerRankingResponse;
   readonly initialFilters: ServerListInitialFilters;
+  readonly initialLoadError?: string | null;
 }
 
-export function ServerListExplorer({ initialRanking, initialFilters }: ServerListExplorerProps) {
+export function ServerListExplorer({
+  initialRanking,
+  initialFilters,
+  initialLoadError = null,
+}: ServerListExplorerProps) {
   const [ranking, setRanking] = useState(initialRanking);
   const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(initialLoadError);
   const [searchQuery, setSearchQuery] = useState(initialFilters.search);
   const [edition, setEdition] = useState<EditionFilter>(initialFilters.edition);
   const [grade, setGrade] = useState<GradeFilter>(initialFilters.grade);
+  const [online, setOnline] = useState<OnlineFilter>(initialFilters.online);
   const [sort, setSort] = useState<SortFilter>(initialFilters.sort);
   const [selectedGenres, setSelectedGenres] = useState<GenreKey[]>(() =>
     initialFilters.tags.filter(isGenreKey),
   );
   const [currentPage, setCurrentPage] = useState(initialFilters.page);
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
   const didMountRef = useRef(false);
   const didFetchRef = useRef(false);
 
@@ -113,6 +127,7 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
     searchQuery.trim().length > 0 ||
     edition !== 'all' ||
     grade !== 'all' ||
+    online !== 'all' ||
     sort !== 'votes24h_desc' ||
     selectedGenres.length > 0;
 
@@ -122,7 +137,7 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
       return;
     }
     setCurrentPage(1);
-  }, [searchQuery, edition, grade, sort, selectedGenres]);
+  }, [searchQuery, edition, grade, online, sort, selectedGenres]);
 
   const totalPages = Math.max(1, ranking.totalPages);
   const onlineCount = ranking.summary.online;
@@ -144,6 +159,7 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
     setSearchQuery('');
     setEdition('all');
     setGrade('all');
+    setOnline('all');
     setSort('votes24h_desc');
     setSelectedGenres([]);
     setCurrentPage(1);
@@ -154,19 +170,31 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
   };
 
   useEffect(() => {
-    if (!didFetchRef.current) {
+    if (!didFetchRef.current && !initialLoadError) {
       didFetchRef.current = true;
       return;
     }
+    didFetchRef.current = true;
 
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setLoading(true);
       setLoadError(null);
+      const params = new URLSearchParams();
+      if (searchQuery.trim()) params.set('search', searchQuery.trim());
+      if (edition !== 'all') params.set('edition', edition);
+      if (grade !== 'all') params.set('grade', grade);
+      if (online === 'online') params.set('online', 'true');
+      if (selectedGenres[0]) params.set('tag', selectedGenres[0]);
+      if (sort !== 'votes24h_desc') params.set('sort', sort);
+      if (currentPage > 1) params.set('page', String(currentPage));
+      const query = params.toString();
+      window.history.replaceState(null, '', query ? `/servers?${query}` : '/servers');
       try {
         const nextRanking = await fetchServerRankings({
           edition: edition === 'all' ? undefined : edition,
           grade: grade === 'all' ? undefined : grade,
+          online: online === 'online' ? true : undefined,
           tag: selectedGenres[0],
           search: searchQuery.trim() || undefined,
           sort,
@@ -176,18 +204,10 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
         if (controller.signal.aborted) return;
         setRanking(nextRanking);
 
-        const params = new URLSearchParams();
-        if (searchQuery.trim()) params.set('search', searchQuery.trim());
-        if (edition !== 'all') params.set('edition', edition);
-        if (grade !== 'all') params.set('grade', grade);
-        if (selectedGenres[0]) params.set('tag', selectedGenres[0]);
-        if (sort !== 'votes24h_desc') params.set('sort', sort);
-        if (currentPage > 1) params.set('page', String(currentPage));
-        const query = params.toString();
-        window.history.replaceState(null, '', query ? `/servers?${query}` : '/servers');
       } catch (error) {
         if (controller.signal.aborted) return;
-        setLoadError(error instanceof Error ? error.message : '서버 순위를 불러오지 못했습니다.');
+        console.error('Failed to refresh server rankings', error);
+        setLoadError('서버 순위 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -197,7 +217,7 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [currentPage, edition, grade, searchQuery, selectedGenres, sort]);
+  }, [currentPage, edition, grade, initialLoadError, online, retryToken, searchQuery, selectedGenres, sort]);
 
   return (
     <div className="min-h-screen bg-[#090d12] text-gray-100 antialiased">
@@ -323,8 +343,10 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
                   className="h-10 w-full cursor-pointer appearance-none rounded-lg border border-gray-700 bg-[#111821] px-3 pr-8 text-sm font-medium text-gray-300 focus:border-[#13ec80] focus:outline-none"
                 >
                   <option value="votes24h_desc">투표순</option>
+                  <option value="votesMonthly_desc">월간 투표순</option>
                   <option value="reviews_desc">리뷰 많은순</option>
                   <option value="latest">최신순</option>
+                  <option value="name_asc">이름순</option>
                 </select>
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
                   ▼
@@ -379,6 +401,20 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
                   />
                 </div>
               </FilterGroup>
+              <FilterGroup title="접속 상태">
+                <div className="grid grid-cols-2 gap-2">
+                  <FilterToggleButton
+                    active={online === 'all'}
+                    onClick={() => setOnline('all')}
+                    label="전체"
+                  />
+                  <FilterToggleButton
+                    active={online === 'online'}
+                    onClick={() => setOnline('online')}
+                    label="온라인"
+                  />
+                </div>
+              </FilterGroup>
               <FilterGroup title="장르">
                 <div className="flex flex-wrap gap-2">
                   {GENRE_OPTIONS.map((genre) => {
@@ -410,7 +446,23 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
           </aside>
 
           <div className="min-w-0">
-            {servers.length === 0 ? (
+            {servers.length === 0 && loadError ? (
+              <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-red-400/20 bg-red-500/[0.06] px-6 py-16 text-center">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-red-500/10">
+                  <WifiOff className="h-7 w-7 text-red-200" />
+                </div>
+                <h2 className="mb-2 text-lg font-bold text-white">서버 순위를 불러오지 못했습니다</h2>
+                <p className="mb-6 max-w-md text-sm leading-6 text-red-100/70">{loadError}</p>
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setRetryToken((value) => value + 1)}
+                  className="rounded-lg bg-[#13ec80] px-4 py-2 text-sm font-bold text-[#07100b] transition hover:bg-[#38f09b] disabled:cursor-wait disabled:opacity-60"
+                >
+                  {loading ? '다시 연결 중' : '다시 시도'}
+                </button>
+              </section>
+            ) : servers.length === 0 ? (
               <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-800 bg-[#111821] px-6 py-16 text-center">
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-[#1A1A1E]">
                   <SearchX className="h-7 w-7 text-gray-500" />
@@ -552,6 +604,24 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
 
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
+                  접속 상태
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <FilterToggleButton
+                    active={online === 'all'}
+                    onClick={() => setOnline('all')}
+                    label="전체"
+                  />
+                  <FilterToggleButton
+                    active={online === 'online'}
+                    onClick={() => setOnline('online')}
+                    label="온라인"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">
                   정렬
                 </p>
                 <select
@@ -560,8 +630,10 @@ export function ServerListExplorer({ initialRanking, initialFilters }: ServerLis
                   className="h-10 w-full rounded-lg border border-gray-700 bg-[#1A1A1E] px-3 text-sm text-gray-200 focus:border-[#13ec80] focus:outline-none"
                 >
                   <option value="votes24h_desc">투표순</option>
+                  <option value="votesMonthly_desc">월간 투표순</option>
                   <option value="reviews_desc">리뷰 많은순</option>
                   <option value="latest">최신순</option>
+                  <option value="name_asc">이름순</option>
                 </select>
               </div>
 
