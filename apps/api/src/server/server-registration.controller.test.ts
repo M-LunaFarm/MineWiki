@@ -1,6 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ServerController } from './server.controller';
+import { normalizeMinecraftServerHost } from '@minewiki/minecraft';
+
+test('Minecraft server hosts are canonicalized without accepting URLs or embedded ports', () => {
+  assert.equal(normalizeMinecraftServerHost(' PLAY.Example.COM. '), 'play.example.com');
+  assert.equal(
+    normalizeMinecraftServerHost('마인크래프트.한국'),
+    'xn--hj2bm5bm1v7vib0c1ue.xn--3e0b707e',
+  );
+  assert.throws(() => normalizeMinecraftServerHost('https://play.example.com'));
+  assert.throws(() => normalizeMinecraftServerHost('play.example.com:25565'));
+  assert.throws(() => normalizeMinecraftServerHost('user@play.example.com'));
+  assert.throws(() => normalizeMinecraftServerHost('localhost'));
+  assert.throws(() => normalizeMinecraftServerHost('minecraft.local'));
+});
 
 test('public registration records a pending registrant without granting ownership', async () => {
   let registration: Record<string, unknown> | null = null;

@@ -3,6 +3,82 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { ServerService } from './server.service';
 
+test('registration canonicalizes endpoints and rejects disguised duplicates', async () => {
+  let storedEndpointKey: string | null = null;
+  let storedHost: string | null = null;
+  const now = new Date('2026-07-12T00:00:00.000Z');
+  const prisma = {
+    server: {
+      findFirst: async ({ where }: { where: { registrationEndpointKey: string } }) =>
+        storedEndpointKey === where.registrationEndpointKey ? { id: 'server-existing' } : null,
+      findUnique: async () => null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        storedEndpointKey = String(data.registrationEndpointKey);
+        storedHost = String(data.joinHost);
+        return {
+          id: randomUUID(),
+          shortCode: String(data.shortCode),
+          wikiSpaceId: null,
+          wikiPageId: null,
+          wikiSlug: null,
+          name: String(data.name),
+          joinHost: storedHost,
+          joinPort: Number(data.joinPort),
+          edition: data.edition,
+          supportedVersions: data.supportedVersions,
+          tags: data.tags,
+          shortDescription: data.shortDescription,
+          longDescription: data.longDescription,
+          bannerUrl: null,
+          websiteUrl: null,
+          discordUrl: null,
+          voteCooldownHours: 24,
+          verificationGrade: 'Unverified',
+          verifiedAt: null,
+          votes24h: 0,
+          votesMonthly: 0,
+          reviewsCount: 0,
+          voteRequiresOwnership: false,
+          playersOnline: null,
+          playersMax: null,
+          playersLastUpdatedAt: null,
+          isOnline: null,
+          latencyMs: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+      },
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+  const base = {
+    name: 'Canonical Server',
+    joinPort: 25565,
+    edition: 'java' as const,
+    supportedVersions: ['1.21.1'],
+    tags: ['survival'],
+    shortDescription: 'Canonical endpoint registration',
+    longDescription: 'Canonical endpoint registration test.',
+    websiteUrl: null,
+    discordUrl: null,
+    registrantAccountId: randomUUID(),
+  };
+
+  await service.register({ ...base, joinHost: ' PLAY.Example.COM. ' });
+  assert.equal(storedHost, 'play.example.com');
+  assert.match(storedEndpointKey ?? '', /^[a-f0-9]{64}$/u);
+
+  await assert.rejects(
+    () => service.register({ ...base, joinHost: 'play.example.com' }),
+    /이미 등록되어 있습니다/,
+  );
+
+  await assert.rejects(
+    () => service.register({ ...base, joinHost: '192.168.1.10', joinPort: 25566 }),
+    /사설망, 루프백 또는 예약된 IP 주소/,
+  );
+});
+
 test('server list exposes the aggregated global rank metadata', async () => {
   const serverId = randomUUID();
   const prisma = {

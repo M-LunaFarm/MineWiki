@@ -18,8 +18,9 @@ import type {
 import { Prisma } from '@prisma/client';
 import { status, statusBedrock } from 'minecraft-server-util';
 import { resolveSrv } from 'node:dns/promises';
-import { randomInt } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { isIP } from 'node:net';
+import { normalizeMinecraftServerHost } from '@minewiki/minecraft';
 import { PrismaService } from '../common/prisma.service';
 import { type StoredVerificationGrade, type ServerFilters, type ServerSort } from './server.store';
 import { FileService, type FileImageUploadRequest, type FileImageUploadResponse } from '../file/file.service';
@@ -1008,6 +1009,39 @@ export class ServerService {
     ownerAccountId?: string;
     registrantAccountId?: string;
   }): Promise<ServerDetail> {
+    let normalizedHost: string;
+    try {
+      normalizedHost = normalizeMinecraftServerHost(serverInput.joinHost);
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : '서버 접속 주소 형식이 올바르지 않습니다.',
+      );
+    }
+    const registrationEndpointKey = createRegistrationEndpointKey(
+      serverInput.edition,
+      normalizedHost,
+      serverInput.joinPort,
+    );
+    const duplicate = await this.prisma.server.findFirst({
+      where: { registrationEndpointKey },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new ConflictException('같은 에디션과 접속 주소를 사용하는 서버가 이미 등록되어 있습니다.');
+    }
+    if (isIP(normalizedHost) !== 0) {
+      try {
+        await validateOutboundTarget(normalizedHost, serverInput.joinPort, {
+          label: 'Server registration',
+          allowIpv6: LIVE_PING_ALLOW_IPV6,
+        });
+      } catch {
+        throw new BadRequestException(
+          '사설망, 루프백 또는 예약된 IP 주소는 서버 주소로 등록할 수 없습니다.',
+        );
+      }
+    }
+
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const shortCode = await this.generateUniqueShortCode();
       try {
@@ -1015,8 +1049,9 @@ export class ServerService {
           data: {
             shortCode,
             name: serverInput.name,
-            joinHost: serverInput.joinHost,
+            joinHost: normalizedHost,
             joinPort: serverInput.joinPort,
+            registrationEndpointKey,
             edition: serverInput.edition,
             supportedVersions: serverInput.supportedVersions,
             tags: serverInput.tags,
@@ -1057,6 +1092,11 @@ export class ServerService {
         });
         return toDetail(server, ALL_METHODS);
       } catch (error) {
+        if (isEndpointUniqueConstraintError(error)) {
+          throw new ConflictException(
+            '같은 에디션과 접속 주소를 사용하는 서버가 이미 등록되어 있습니다.',
+          );
+        }
         if (!isUniqueConstraintError(error)) {
           throw error;
         }
@@ -1214,6 +1254,24 @@ function generateShortCode(): string {
 
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+function isEndpointUniqueConstraintError(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+    return false;
+  }
+  const target = error.meta?.target;
+  return Array.isArray(target)
+    ? target.includes('registrationEndpointKey')
+    : String(target ?? '').includes('registrationEndpointKey');
+}
+
+function createRegistrationEndpointKey(
+  edition: ServerDetail['edition'],
+  host: string,
+  port: number,
+): string {
+  return createHash('sha256').update(`${edition}:${host}:${port}`).digest('hex');
 }
 
 function normalizeServerWikiSelector(

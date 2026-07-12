@@ -310,8 +310,8 @@ model OAuthState {
   expiresAt     DateTime
   mode          OAuthMode     @default(login)
   linkAccountId String?
-  agreeTerms   Boolean       @default(false)
-  agreePrivacy Boolean       @default(false)
+  agreeTerms    Boolean       @default(false)
+  agreePrivacy  Boolean       @default(false)
 
   linkAccount Account? @relation(fields: [linkAccountId], references: [id], onDelete: Cascade)
 }
@@ -358,42 +358,42 @@ model MinecraftIdentity {
   lastVerifiedAt DateTime
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
-
 }
 
 model Server {
-  id                    String            @id @default(uuid())
-  shortCode             String?           @unique @db.VarChar(12)
-  ownerAccountId        String?
-  registrantAccountId   String?
-  wikiSpaceId           BigInt?           @db.UnsignedBigInt
-  wikiPageId            BigInt?           @db.UnsignedBigInt
-  wikiSlug              String?
-  name                  String
-  joinHost              String
-  joinPort              Int
-  edition               ServerEdition
-  supportedVersions     Json
-  tags                  Json
-  shortDescription      String
-  longDescription       String
-  bannerUrl             String?
-  websiteUrl            String?
-  discordUrl            String?
-  voteCooldownHours     Int               @default(24)
-  verificationGrade     VerificationGrade @default(Unverified)
-  verifiedAt            DateTime?
-  votes24h              Int               @default(0)
-  votesMonthly          Int?
-  reviewsCount          Int               @default(0)
-  voteRequiresOwnership Boolean           @default(false)
-  playersOnline         Int?
-  playersMax            Int?
-  playersLastUpdatedAt  DateTime?
-  isOnline              Boolean?
-  latencyMs             Int?
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  id                      String            @id @default(uuid())
+  shortCode               String?           @unique @db.VarChar(12)
+  ownerAccountId          String?
+  registrantAccountId     String?
+  registrationEndpointKey String?           @unique @db.Char(64)
+  wikiSpaceId             BigInt?           @db.UnsignedBigInt
+  wikiPageId              BigInt?           @db.UnsignedBigInt
+  wikiSlug                String?
+  name                    String
+  joinHost                String
+  joinPort                Int
+  edition                 ServerEdition
+  supportedVersions       Json
+  tags                    Json
+  shortDescription        String
+  longDescription         String
+  bannerUrl               String?
+  websiteUrl              String?
+  discordUrl              String?
+  voteCooldownHours       Int               @default(24)
+  verificationGrade       VerificationGrade @default(Unverified)
+  verifiedAt              DateTime?
+  votes24h                Int               @default(0)
+  votesMonthly            Int?
+  reviewsCount            Int               @default(0)
+  voteRequiresOwnership   Boolean           @default(false)
+  playersOnline           Int?
+  playersMax              Int?
+  playersLastUpdatedAt    DateTime?
+  isOnline                Boolean?
+  latencyMs               Int?
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
 
   ownerAccount         Account?              @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
   registrantAccount    Account?              @relation("ServerRegistrant", fields: [registrantAccountId], references: [id], onDelete: SetNull)
@@ -507,22 +507,22 @@ model VoteDispatchAttempt {
 }
 
 model ServerReview {
-  id                  String           @id @default(uuid())
-  serverId            String
-  authorAccountId     String
-  authorDisplayName   String
-  rating              Int
-  body                String
-  tags                Json
-  visibility          ReviewVisibility @default(public)
-  isAnonymous         Boolean          @default(false)
-  helpfulCount        Int              @default(0)
-  reports             Int              @default(0)
-  adminReplyBody      String?
-  adminReplyAuthor    String?
-  adminReplyCreatedAt DateTime?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  id                    String           @id @default(uuid())
+  serverId              String
+  authorAccountId       String
+  authorDisplayName     String
+  rating                Int
+  body                  String
+  tags                  Json
+  visibility            ReviewVisibility @default(public)
+  isAnonymous           Boolean          @default(false)
+  helpfulCount          Int              @default(0)
+  reports               Int              @default(0)
+  adminReplyBody        String?
+  adminReplyAuthor      String?
+  adminReplyCreatedAt   DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
   evidenceMinecraftUuid String?
   evidenceVoteId        String?
   evidenceVerifiedAt    DateTime?
