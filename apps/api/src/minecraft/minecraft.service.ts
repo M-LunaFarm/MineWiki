@@ -187,10 +187,12 @@ export class MinecraftService {
       lastVerifiedAt: new Date().toISOString()
     };
 
+    const clusterAccountIds = await this.resolveCanonicalAccountIds(payload.userId);
+
     const existingIdentity = await this.prisma.minecraftIdentity.findFirst({
       where: {
         uuid: identity.uuid,
-        accountId: { not: payload.userId }
+        accountId: { notIn: clusterAccountIds }
       },
       select: { accountId: true }
     });
@@ -201,22 +203,29 @@ export class MinecraftService {
     }
 
     try {
-      await this.prisma.minecraftIdentity.upsert({
-        where: { accountId: payload.userId },
-        update: {
-          uuid: identity.uuid,
-          playerName: identity.playerName ?? null,
-          msOwned: identity.msOwned,
-          lastVerifiedAt: new Date(identity.lastVerifiedAt)
-        },
-        create: {
-          accountId: payload.userId,
-          uuid: identity.uuid,
-          playerName: identity.playerName ?? null,
-          msOwned: identity.msOwned,
-          lastVerifiedAt: new Date(identity.lastVerifiedAt)
-        }
-      });
+      await this.prisma.$transaction([
+        this.prisma.minecraftIdentity.deleteMany({
+          where: {
+            accountId: { in: clusterAccountIds, not: payload.userId }
+          }
+        }),
+        this.prisma.minecraftIdentity.upsert({
+          where: { accountId: payload.userId },
+          update: {
+            uuid: identity.uuid,
+            playerName: identity.playerName ?? null,
+            msOwned: identity.msOwned,
+            lastVerifiedAt: new Date(identity.lastVerifiedAt)
+          },
+          create: {
+            accountId: payload.userId,
+            uuid: identity.uuid,
+            playerName: identity.playerName ?? null,
+            msOwned: identity.msOwned,
+            lastVerifiedAt: new Date(identity.lastVerifiedAt)
+          }
+        })
+      ]);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException(
@@ -232,19 +241,14 @@ export class MinecraftService {
   }
 
   async getIdentity(userId: string): Promise<MinecraftIdentity> {
-    const identity = await this.prisma.minecraftIdentity.findUnique({
-      where: { accountId: userId }
-    });
-    if (!identity) {
-      throw new NotFoundException('Minecraft ownership verification not found for user');
-    }
+    const identity = await this.findCanonicalIdentity(userId);
     let playerName = identity.playerName ?? undefined;
     if (!playerName) {
       playerName = await this.resolvePlayerName(identity.uuid);
       if (playerName) {
         await this.prisma.minecraftIdentity
           .update({
-            where: { accountId: userId },
+            where: { accountId: identity.accountId },
             data: { playerName }
           })
           .catch(() => undefined);
@@ -259,12 +263,7 @@ export class MinecraftService {
   }
 
   async getStoredIdentity(userId: string): Promise<MinecraftIdentity> {
-    const identity = await this.prisma.minecraftIdentity.findUnique({
-      where: { accountId: userId }
-    });
-    if (!identity) {
-      throw new NotFoundException('Minecraft ownership verification not found for user');
-    }
+    const identity = await this.findCanonicalIdentity(userId);
     return {
       uuid: identity.uuid,
       playerName: identity.playerName ?? undefined,
@@ -274,12 +273,13 @@ export class MinecraftService {
   }
 
   async revokeIdentity(userId: string): Promise<void> {
+    const clusterAccountIds = await this.resolveCanonicalAccountIds(userId);
     const [removedIdentity] = await this.prisma.$transaction([
       this.prisma.minecraftIdentity.deleteMany({
-        where: { accountId: userId }
+        where: { accountId: { in: clusterAccountIds } }
       }),
       this.prisma.minecraftAuthorization.deleteMany({
-        where: { accountId: userId }
+        where: { accountId: { in: clusterAccountIds } }
       })
     ]);
 
@@ -287,6 +287,35 @@ export class MinecraftService {
       userId,
       removed: removedIdentity.count > 0
     });
+  }
+
+  private async findCanonicalIdentity(userId: string) {
+    const clusterAccountIds = await this.resolveCanonicalAccountIds(userId);
+    const identities = await this.prisma.minecraftIdentity.findMany({
+      where: { accountId: { in: clusterAccountIds } },
+      orderBy: [{ accountId: 'asc' }],
+      take: 2
+    });
+    if (identities.length === 0) {
+      throw new NotFoundException('Minecraft ownership verification not found for user');
+    }
+    if (identities.length > 1) {
+      throw new ConflictException(
+        'Linked MineWiki accounts contain multiple Minecraft identities. Contact support.'
+      );
+    }
+    return identities[0]!;
+  }
+
+  private async resolveCanonicalAccountIds(userId: string): Promise<string[]> {
+    const accounts = await this.prisma.account.findMany({
+      where: {
+        OR: [{ id: userId }, { canonicalAccountId: userId }]
+      },
+      select: { id: true }
+    });
+    const ids = accounts.map((account) => account.id);
+    return ids.includes(userId) ? ids : [userId, ...ids];
   }
 
   private async exchangeAuthorizationCode(

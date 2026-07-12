@@ -248,6 +248,18 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'canonical Account group has at most one Minecraft identity',
+    `
+      SELECT COALESCE(a.canonicalAccountId, a.id) AS id
+      FROM Account a
+      JOIN MinecraftIdentity m ON m.accountId = a.id
+      GROUP BY COALESCE(a.canonicalAccountId, a.id)
+      HAVING COUNT(*) > 1
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'completed Discord verification has canonical identity evidence',
     `
       SELECT s.id
