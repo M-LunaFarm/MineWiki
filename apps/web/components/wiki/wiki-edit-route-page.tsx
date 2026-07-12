@@ -1,4 +1,5 @@
 import { fetchWikiPageByPath } from '../../lib/wiki-api';
+import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiEditorClient } from './wiki-editor-client';
 
 interface WikiEditRoutePageProps {
@@ -18,9 +19,8 @@ const namespaceByPrefix = {
 } as const;
 
 export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoutePageProps) {
-  const title = segments.length > 0 ? segments.map(decodeURIComponent).join('/') : '대문';
-  const suffix = segments.map((segment) => encodeURIComponent(segment)).join('/');
-  const routePath = `/${prefix}${suffix ? `/${suffix}` : '/대문'}`;
+  const title = segments.length > 0 ? segments.map(decodeWikiRouteSegment).join('/') : '대문';
+  const routePath = buildWikiRoutePath(prefix, segments);
   const page = await fetchWikiPageByPath(routePath).catch(() => null);
 
   return (

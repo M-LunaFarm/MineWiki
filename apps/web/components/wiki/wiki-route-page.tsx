@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { fetchWikiPageByPath } from '../../lib/wiki-api';
+import { buildWikiRoutePath } from '../../lib/wiki-routes.mjs';
 import { WikiArticleView } from './wiki-article-view';
 
 interface WikiRoutePageProps {
@@ -8,8 +9,7 @@ interface WikiRoutePageProps {
 }
 
 export async function WikiRoutePage({ prefix, segments = [] }: WikiRoutePageProps) {
-  const suffix = segments.map((segment) => encodeURIComponent(segment)).join('/');
-  const routePath = `/${prefix}${suffix ? `/${suffix}` : '/대문'}`;
+  const routePath = buildWikiRoutePath(prefix, segments);
   const page = await fetchWikiPageByPath(routePath);
   if (!page) {
     notFound();

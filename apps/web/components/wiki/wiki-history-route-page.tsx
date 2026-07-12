@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { fetchWikiPageByPath, fetchWikiRevisions } from '../../lib/wiki-api';
+import { buildWikiRoutePath } from '../../lib/wiki-routes.mjs';
 
 interface WikiHistoryRoutePageProps {
   readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'help' | 'project' | 'file';
@@ -8,8 +9,7 @@ interface WikiHistoryRoutePageProps {
 }
 
 export async function WikiHistoryRoutePage({ prefix, segments = [] }: WikiHistoryRoutePageProps) {
-  const suffix = segments.map((segment) => encodeURIComponent(segment)).join('/');
-  const routePath = `/${prefix}${suffix ? `/${suffix}` : '/대문'}`;
+  const routePath = buildWikiRoutePath(prefix, segments);
   const page = await fetchWikiPageByPath(routePath);
   if (!page) {
     notFound();
