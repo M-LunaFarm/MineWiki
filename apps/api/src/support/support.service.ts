@@ -593,7 +593,7 @@ export class SupportService {
     if (isAgent) {
       return;
     }
-    if (ticket.requesterAccountId === userId || ticket.assigneeAccountId === userId) {
+    if (ticket.requesterAccountId === userId) {
       return;
     }
     throw new ForbiddenException('해당 티켓에 접근할 권한이 없습니다.');

@@ -370,9 +370,9 @@ export class WikiEditService {
         store: input.store
       });
       if (allowed) continue;
-      const before = sectionContentByAnchor(input.currentContent, lock.anchor);
-      const after = sectionContentByAnchor(input.nextContent, lock.anchor);
-      if (before !== after) {
+      const before = sectionContentsByAnchor(input.currentContent, lock.anchor);
+      const after = sectionContentsByAnchor(input.nextContent, lock.anchor);
+      if (before.length !== 1 || after.length !== 1 || before[0] !== after[0]) {
         throw new ForbiddenException(`Wiki section is locked: ${lock.heading}`);
       }
     }
@@ -573,10 +573,10 @@ export class WikiEditService {
   }
 }
 
-function sectionContentByAnchor(content: string, anchor: string): string | null {
+function sectionContentsByAnchor(content: string, anchor: string): string[] {
   const parsed = parseMarkup(content);
-  const heading = parsed.headings.find((item) => item.anchor === anchor);
-  if (!heading) return null;
   const lines = content.replace(/\r\n/g, '\n').split('\n');
-  return lines.slice(heading.startLine - 1, heading.endLine).join('\n');
+  return parsed.headings
+    .filter((heading) => heading.anchor === anchor)
+    .map((heading) => lines.slice(heading.startLine - 1, heading.endLine).join('\n'));
 }

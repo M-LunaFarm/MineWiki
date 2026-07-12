@@ -276,7 +276,9 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
   headings.forEach((heading, index) => {
     const next = headings[index + 1];
     heading.endLine = (next?.startLine ?? lines.length + 1) - 1;
-    if (seenHeadings.has(heading.id)) errors.push(`중복 제목이 있습니다: ${heading.text}`);
+    if (seenHeadings.has(heading.id)) {
+      blockingErrors.push(`중복 제목 앵커가 있습니다: ${heading.text}`);
+    }
     seenHeadings.add(heading.id);
   });
 

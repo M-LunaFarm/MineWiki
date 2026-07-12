@@ -59,3 +59,13 @@ test('limits recursive folding blocks', () => {
 
   assert.equal(parsed.blockingErrors.includes('접기 블록 중첩 제한을 초과했습니다.'), true);
 });
+
+test('duplicate heading anchors are blocking markup errors', () => {
+  const parsed = parseMarkup('== Intro ==\n첫 번째\n\n== Intro ==\n두 번째');
+
+  assert.equal(parsed.headings.filter((heading) => heading.anchor === 'Intro').length, 2);
+  assert.equal(
+    parsed.blockingErrors.some((error) => error.includes('중복 제목 앵커')),
+    true,
+  );
+});

@@ -216,6 +216,14 @@ if (!hasDatabase) {
 
       await assert.rejects(
         edits.updatePage(session(fixture.account.id), created.pageId, {
+          contentRaw: '== Intro ==\n보호된 내용\n\n== Intro ==\n우회 내용\n\n== Notes ==\n수정된 메모',
+          baseRevisionId: unrelated.revisionId
+        }),
+        /Wiki section is locked: Intro|blocking errors/
+      );
+
+      await assert.rejects(
+        edits.updatePage(session(fixture.account.id), created.pageId, {
           contentRaw: '== Intro ==\n변조된 내용\n\n== Notes ==\n수정된 메모',
           baseRevisionId: unrelated.revisionId
         }),
