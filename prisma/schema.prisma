@@ -484,6 +484,19 @@ model Vote {
   @@index([status, votedAt])
 }
 
+model VoteCooldownClaim {
+  identityType String   @db.VarChar(16)
+  identityKey  String   @db.VarChar(255)
+  kstDay       DateTime @db.Date
+  voteId       String   @db.VarChar(191)
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+
+  @@id([identityType, identityKey, kstDay])
+  @@index([voteId])
+  @@index([kstDay])
+  @@map("vote_cooldown_claims")
+}
+
 model VoteDispatchAttempt {
   id            String           @id @default(uuid()) @db.Char(36)
   voteId        String           @map("vote_id")

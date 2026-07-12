@@ -6,6 +6,7 @@
   NotFoundException
 } from '@nestjs/common';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { ServerService } from '../server/server.service';
 import { VoteQueueService } from './vote.queue';
 import {
@@ -109,18 +110,40 @@ export class VoteService {
 
     const targets = await this.resolveVotifierTargets(serverId);
     const dispatchTargets: VoteDispatchTarget[] = [];
-    const vote = await this.prisma.$transaction(async (tx) => {
-      const createdVote = await tx.vote.create({
-        data: {
-          serverId,
-          username: normalizedUsername,
-          usernameNormalized: normalizedUsername.toLowerCase(),
-          ipAddress: context.ipAddress ?? null,
-          accountId: context.accountId ?? null,
-          minecraftUuid: context.minecraftUuid ?? null,
-          votedAt: now
+    let vote;
+    try {
+      vote = await this.prisma.$transaction(async (tx) => {
+        const createdVote = await tx.vote.create({
+          data: {
+            serverId,
+            username: normalizedUsername,
+            usernameNormalized: normalizedUsername.toLowerCase(),
+            ipAddress: context.ipAddress ?? null,
+            accountId: context.accountId ?? null,
+            minecraftUuid: context.minecraftUuid ?? null,
+            votedAt: now
+          }
+        });
+
+        const kstDay = getKstCalendarDay(now);
+        await tx.voteCooldownClaim.create({
+          data: {
+            identityType: derivePlayerIdentityType(context),
+            identityKey: playerKey,
+            kstDay,
+            voteId: createdVote.id
+          }
+        });
+        if (context.ipAddress) {
+          await tx.voteCooldownClaim.create({
+            data: {
+              identityType: 'ip',
+              identityKey: context.ipAddress,
+              kstDay,
+              voteId: createdVote.id
+            }
+          });
         }
-      });
 
       for (const target of targets) {
         const attempt = await tx.voteDispatchAttempt.create({
@@ -171,8 +194,16 @@ export class VoteService {
         }
       });
 
-      return createdVote;
-    });
+        return createdVote;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ForbiddenException(
+          `이미 오늘 투표가 등록되었습니다. 다음 투표 가능 시간: ${nextKstResetAt.toISOString()}`
+        );
+      }
+      throw error;
+    }
 
     this.logger.log({ serverId, voteId: vote.id }, 'Vote accepted');
 
@@ -579,6 +610,17 @@ function derivePlayerKey(username: string, context: VoteRequestContext): string 
     return `acct:${context.accountId}`;
   }
   return `user:${username.toLowerCase()}`;
+}
+
+function derivePlayerIdentityType(context: VoteRequestContext): string {
+  if (context.minecraftUuid) return 'minecraft';
+  if (context.accountId) return 'account';
+  return 'username';
+}
+
+function getKstCalendarDay(date: Date): Date {
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()));
 }
 
 function getKstDayStartUtc(date: Date): Date {

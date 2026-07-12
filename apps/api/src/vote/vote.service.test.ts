@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Prisma } from '@prisma/client';
 import { VoteService } from './vote.service';
 
 const serverId = '8d5d43eb-5e53-4ce9-90a0-dfd8fbfa9b6b';
@@ -73,6 +74,42 @@ test('vote accepted creates dispatch attempts and queues vote id', async () => {
   for (const sensitive of ['DemoPlayer', '192.0.2.10', 'vote.example.com', 'secret-token']) {
     assert.equal(serializedJob.includes(sensitive), false);
   }
+});
+
+test('atomic cooldown claim rejects a concurrent duplicate before dispatch and counters', async () => {
+  const queuedJobs: unknown[] = [];
+  const createdAttempts: unknown[] = [];
+  const prisma = createPrismaMock(createdAttempts, true);
+  const service = new VoteService(
+    {
+      ensureExists: async () => ({
+        id: serverId,
+        voteRequiresOwnership: false,
+        votesMonthly: 10
+      })
+    } as never,
+    { enqueue: async (job: unknown) => queuedJobs.push(job) } as never,
+    { isCaptchaRequired: () => false } as never,
+    { track: async () => undefined } as never,
+    {
+      getLastVoteForUsernameGlobal: async () => null,
+      getLastVoteForAccountGlobal: async () => null,
+      getLastVoteForMinecraftGlobal: async () => null,
+      getLastVoteForIpGlobal: async () => null
+    } as never,
+    prisma as never
+  );
+
+  await assert.rejects(
+    service.submitVote(
+      serverId,
+      { username: 'DemoPlayer', agreeTerms: true, agreePrivacy: true },
+      { ipAddress: '192.0.2.10' }
+    ),
+    /이미 오늘 투표가 등록되었습니다/
+  );
+  assert.equal(createdAttempts.length, 0);
+  assert.equal(queuedJobs.length, 0);
 });
 
 test('invalidating a vote refreshes valid counters and writes an audit event', async () => {
@@ -213,7 +250,8 @@ test('moderation feed exposes bounded private evidence only to the admin service
   assert.equal(findInputs.length, 1);
 });
 
-function createPrismaMock(createdAttempts: unknown[]) {
+function createPrismaMock(createdAttempts: unknown[], rejectCooldownClaim = false) {
+  const createdClaims: unknown[] = [];
   const tx = {
     vote: {
       create: async () => ({ id: voteId })
@@ -222,6 +260,18 @@ function createPrismaMock(createdAttempts: unknown[]) {
       create: async (args: { data: unknown }) => {
         createdAttempts.push(args.data);
         return { id: dispatchAttemptId };
+      }
+    },
+    voteCooldownClaim: {
+      create: async (args: { data: unknown }) => {
+        if (rejectCooldownClaim) {
+          throw new Prisma.PrismaClientKnownRequestError('duplicate cooldown claim', {
+            code: 'P2002',
+            clientVersion: 'test'
+          });
+        }
+        createdClaims.push(args.data);
+        return args.data;
       }
     },
     server: {
