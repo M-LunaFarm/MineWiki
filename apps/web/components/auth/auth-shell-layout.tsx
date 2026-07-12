@@ -2,8 +2,9 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowLeft, BookOpen, MailCheck, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, BookOpen, BookOpenText, MailCheck, ShieldCheck } from 'lucide-react';
 import type { ReactElement, ReactNode } from 'react';
+import { ThemeToggle } from '../layout/theme-toggle';
 
 interface AuthShellLayoutProps {
   readonly title: string;
@@ -13,7 +14,7 @@ interface AuthShellLayoutProps {
 
 export function AuthShellLayout({ title, description, children }: AuthShellLayoutProps) {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#070a0c] text-white">
+    <main className="auth-shell relative min-h-screen overflow-hidden bg-[#070a0c] text-white">
       <Image
         src="/images/minewiki-discovery-world.png"
         alt=""
@@ -22,20 +23,23 @@ export function AuthShellLayout({ title, description, children }: AuthShellLayou
         sizes="100vw"
         className="object-cover object-[64%_center] opacity-45"
       />
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(7,10,12,.98)_0%,rgba(7,10,12,.88)_48%,rgba(7,10,12,.72)_100%)]" />
-      <div className="absolute inset-0 bg-[linear-gradient(0deg,#070a0c_0%,transparent_45%,rgba(7,10,12,.7)_100%)]" />
+      <div className="auth-shell-overlay-x absolute inset-0 bg-[linear-gradient(90deg,rgba(7,10,12,.98)_0%,rgba(7,10,12,.88)_48%,rgba(7,10,12,.72)_100%)]" />
+      <div className="auth-shell-overlay-y absolute inset-0 bg-[linear-gradient(0deg,#070a0c_0%,transparent_45%,rgba(7,10,12,.7)_100%)]" />
 
       <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-4 py-5 sm:px-7 lg:px-10 lg:py-7">
         <header className="flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3" aria-label="MineWiki 홈">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#35e5b7]/30 bg-[#35e5b7]/10 text-[#35e5b7]">
-              <ShieldCheck className="h-5 w-5" />
+              <BookOpenText className="h-5 w-5" />
             </span>
             <span className="text-lg font-black tracking-[-.03em]">MineWiki<span className="text-[#35e5b7]">.kr</span></span>
           </Link>
-          <Link href="/" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-xs font-semibold text-slate-300 backdrop-blur-md transition hover:border-[#35e5b7]/30 hover:text-white">
-            <ArrowLeft className="h-4 w-4" /> 홈으로
-          </Link>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Link href="/" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-xs font-semibold text-slate-300 backdrop-blur-md transition hover:border-[#35e5b7]/30 hover:text-white">
+              <ArrowLeft className="h-4 w-4" /> 홈으로
+            </Link>
+          </div>
         </header>
 
         <div className="grid flex-1 items-center gap-10 py-6 lg:grid-cols-[minmax(0,1fr)_minmax(420px,520px)] lg:py-14">
@@ -55,7 +59,7 @@ export function AuthShellLayout({ title, description, children }: AuthShellLayou
             </div>
           </section>
 
-          <section className="auth-flow w-full rounded-2xl border border-white/10 bg-[#09100f]/90 p-5 shadow-[0_32px_100px_rgba(0,0,0,.55)] backdrop-blur-xl sm:p-8">
+          <section className="auth-flow auth-card w-full rounded-2xl border border-white/10 bg-[#09100f]/90 p-5 shadow-[0_32px_100px_rgba(0,0,0,.55)] backdrop-blur-xl sm:p-8">
             <div className="mb-7 border-b border-white/[0.08] pb-5">
               <p className="text-[11px] font-bold uppercase tracking-[.16em] text-[#35e5b7]">MineWiki Account</p>
               <h2 className="mt-2 text-2xl font-extrabold tracking-[-.025em] text-white">{title}</h2>
@@ -79,7 +83,7 @@ export function AuthShellLayout({ title, description, children }: AuthShellLayou
 
 function GuideRow({ title, description, icon }: { readonly title: string; readonly description: string; readonly icon: ReactElement }) {
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-black/25 p-3.5 backdrop-blur-sm">
+    <div className="auth-guide rounded-xl border border-white/[0.08] bg-black/25 p-3.5 backdrop-blur-sm">
       <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#35e5b7]/10 text-[#35e5b7] [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
       <h3 className="mt-3 text-xs font-bold text-white">{title}</h3>
       <p className="mt-1 text-[11px] text-slate-500">{description}</p>

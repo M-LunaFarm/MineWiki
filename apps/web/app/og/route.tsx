@@ -20,8 +20,8 @@ export function GET(request: Request) {
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          background: '#0b0d10',
-          color: '#f8fafc',
+          background: '#f1efe8',
+          color: '#20251f',
           padding: '68px',
           fontFamily: 'Arial, sans-serif',
         }}
@@ -37,21 +37,22 @@ export function GET(request: Request) {
         >
           <div
             style={{
-              width: '56px',
-              height: '56px',
+              width: '58px',
+              height: '58px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              borderRadius: '14px',
-              border: '1px solid rgba(19, 236, 128, 0.45)',
-              background: 'rgba(19, 236, 128, 0.12)',
-              color: '#13ec80',
+              borderRadius: '12px',
+              background: '#123d31',
+              color: '#9af2d5',
+              fontSize: '18px',
+              letterSpacing: '-2px',
             }}
           >
-            L
+            MW
           </div>
           <div style={{ display: 'flex' }}>
-            MineWiki<span style={{ color: '#13ec80' }}>.kr</span>
+            MineWiki<span style={{ color: '#197052' }}>.kr</span>
           </div>
         </div>
 
@@ -70,7 +71,7 @@ export function GET(request: Request) {
           <div
             style={{
               maxWidth: '860px',
-              color: '#b8c0c8',
+              color: '#596159',
               fontSize: '28px',
               lineHeight: 1.35,
             }}
@@ -84,13 +85,13 @@ export function GET(request: Request) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            borderTop: '1px solid #272c33',
+            borderTop: '1px solid #aaa79e',
             paddingTop: '28px',
-            color: '#8f98a3',
+            color: '#6e756d',
             fontSize: '24px',
           }}
         >
-          <span>한국 마인크래프트 서버 목록</span>
+          <span>서버 랭킹 · 위키 · 리뷰</span>
           <span>minewiki.kr</span>
         </div>
       </div>

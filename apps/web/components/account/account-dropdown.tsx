@@ -110,7 +110,7 @@ export function AccountDropdown() {
       <button
         type="button"
         onClick={toggle}
-        className="flex min-h-10 items-center gap-2 rounded-md border border-[#30363d] bg-[#181a1d] px-3 py-2 text-sm font-medium text-[#e6e6e6] transition hover:border-[#13ec80]/40 hover:text-white"
+        className="account-trigger flex min-h-10 items-center gap-2 rounded-md border border-[#30363d] bg-[#181a1d] px-3 py-2 text-sm font-medium text-[#e6e6e6] transition hover:border-[#13ec80]/40 hover:text-white"
         disabled={loading}
       >
         {account ? (
@@ -135,7 +135,7 @@ export function AccountDropdown() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 z-40 mt-2.5 w-[21rem] overflow-hidden rounded-lg border border-[#30363d] bg-[#181a1d] p-3 text-sm text-[#e6e6e6] shadow-xl">
+        <div className="account-menu absolute right-0 z-40 mt-2.5 w-[21rem] overflow-hidden rounded-lg border border-[#30363d] bg-[#181a1d] p-3 text-sm text-[#e6e6e6] shadow-xl">
           {account ? (
             <div className="space-y-3">
               <div className="rounded-md border border-[#30363d] bg-[#111315] p-3 text-xs text-[#9ca3af]">

@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { Menu, Search, X } from 'lucide-react';
+import { BookOpenText, Menu, Search, X } from 'lucide-react';
 import { AccountDropdown } from '../account/account-dropdown';
 import { useAuth } from '../providers/auth-context';
+import { ThemeToggle } from './theme-toggle';
 
 type NavigationLink = {
   readonly href: string;
@@ -102,11 +103,9 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
             <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="MineWiki 홈">
               <span
                 aria-hidden="true"
-                className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-[#14c794]/30 bg-gradient-to-br from-[#0f1a16] to-[#0b0f15] shadow-[0_0_18px_-6px_rgba(20,199,148,0.5)]"
+                className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#123d31] text-[#8cf0cf]"
               >
-                <span className="absolute left-[10px] top-[10px] h-3.5 w-3.5 rounded-full bg-[#14c794]" />
-                <span className="absolute left-[15px] top-[15px] h-3.5 w-3.5 rounded-full bg-[#0b0f15]" />
-                <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-white/85" />
+                <BookOpenText className="h-[19px] w-[19px]" strokeWidth={2.2} />
               </span>
               <span className={`text-[19px] font-extrabold tracking-tight ${variant === 'paper' ? 'text-[#20241f]' : 'text-white'}`}>
                 MineWiki<span className="text-[#14c794]">.kr</span>
@@ -158,6 +157,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
             </form>
 
             <AccountDropdown />
+            <ThemeToggle paper={variant === 'paper'} />
             <button
               type="button"
               className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-300 transition hover:border-white/20 hover:text-white lg:hidden"
