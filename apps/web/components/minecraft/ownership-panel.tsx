@@ -251,6 +251,39 @@ export function MinecraftOwnershipPanel() {
         );
         return;
       }
+      if (event.data.type === 'minecraft-oauth-verified') {
+        const verifiedIdentity = event.data.identity as Partial<MinecraftIdentity> | undefined;
+        if (
+          !verifiedIdentity ||
+          typeof verifiedIdentity.uuid !== 'string' ||
+          verifiedIdentity.msOwned !== true ||
+          typeof verifiedIdentity.lastVerifiedAt !== 'string'
+        ) {
+          setFlowStage('error');
+          setError('Minecraft 인증 결과를 확인할 수 없습니다. 계정 페이지를 새로고침해 주세요.');
+          return;
+        }
+        const nextIdentity = verifiedIdentity as MinecraftIdentity;
+        setIdentity(nextIdentity);
+        setPlayerName(nextIdentity.playerName ?? null);
+        setPendingAuth(null);
+        setError(null);
+        setFlowStage('completed');
+        if (verifySessionId && verifyToken) {
+          void completeDiscordVerifySession(verifySessionId, verifyToken, nextIdentity)
+            .then(() => {
+              setDiscordVerifyStatus('Discord 검증 세션이 MineWiki 계정과 연결되었습니다.');
+            })
+            .catch((completionError) => {
+              setError(
+                completionError instanceof Error
+                  ? completionError.message
+                  : 'Discord 검증 세션을 완료하지 못했습니다.',
+              );
+            });
+        }
+        return;
+      }
       if (event.data.type !== 'minecraft-oauth-complete') {
         return;
       }
@@ -279,7 +312,7 @@ export function MinecraftOwnershipPanel() {
 
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [pendingAuth, performVerification]);
+  }, [pendingAuth, performVerification, verifySessionId, verifyToken]);
 
   useEffect(() => {
     setAvatarIndex(0);

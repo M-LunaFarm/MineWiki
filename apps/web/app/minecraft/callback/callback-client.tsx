@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import type { MinecraftIdentity } from '@minewiki/schemas';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -19,6 +20,10 @@ import {
   CallbackShell,
   CallbackSideStat,
 } from '../../../components/auth/callback-shell';
+import { csrfHeaders } from '../../../lib/csrf';
+import { getApiBaseUrl } from '../../../lib/runtime-config';
+
+const API_BASE_URL = getApiBaseUrl();
 
 interface CallbackClientProps {
   readonly code?: string;
@@ -35,15 +40,17 @@ export function MinecraftCallbackClient({
 }: CallbackClientProps) {
   const router = useRouter();
   const [handoffSent, setHandoffSent] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
   const status = useMemo(() => {
-    if (error) {
+    if (error || verificationError) {
       return {
         kind: 'error' as const,
         title: 'Microsoft 인증을 완료하지 못했습니다.',
         message:
           error === 'access_denied'
             ? '사용자가 Microsoft 인증 창에서 권한 승인을 취소했습니다.'
-            : 'Microsoft 인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도하거나 다른 계정으로 인증해 주세요.',
+            : verificationError ??
+              'Microsoft 인증 처리 중 오류가 발생했습니다. 잠시 후 다시 시도하거나 다른 계정으로 인증해 주세요.',
         detail: errorDescription,
       };
     }
@@ -59,19 +66,19 @@ export function MinecraftCallbackClient({
     if (handoffSent) {
       return {
         kind: 'success' as const,
-        title: 'Minecraft 인증 응답을 전달했습니다.',
+        title: 'Minecraft 소유권 인증을 완료했습니다.',
         message:
-          '인증 결과가 원래 창으로 전달되었습니다. 창이 자동으로 닫히지 않으면 직접 닫아도 됩니다.',
+          'MineWiki 계정에 Minecraft 프로필이 연결되었습니다. 창이 자동으로 닫히지 않으면 직접 닫아도 됩니다.',
         detail: undefined,
       };
     }
     return {
       kind: 'pending' as const,
-      title: 'Minecraft 인증 응답을 확인하고 있습니다.',
-      message: 'Microsoft에서 전달한 인증 값을 검증하고 원래 창으로 전달하는 중입니다.',
+      title: 'Minecraft 소유권을 확인하고 있습니다.',
+      message: 'Microsoft 응답을 서버에서 검증하고 Minecraft 보유 여부와 프로필을 확인하는 중입니다.',
       detail: undefined,
     };
-  }, [code, state, error, errorDescription, handoffSent]);
+  }, [code, state, error, errorDescription, handoffSent, verificationError]);
 
   useEffect(() => {
     if (error) {
@@ -89,24 +96,56 @@ export function MinecraftCallbackClient({
     if (typeof window === 'undefined') {
       return;
     }
-    try {
-      window.opener?.postMessage(
-        { type: 'minecraft-oauth-complete', code, state },
-        window.location.origin,
-      );
-      window.postMessage({ type: 'minecraft-oauth-complete', code, state }, window.location.origin);
-      setHandoffSent(true);
-    } catch {
-      setHandoffSent(true);
-    }
-    const timer = window.setTimeout(() => {
+    let cancelled = false;
+    let closeTimer: number | undefined;
+
+    const completeVerification = async () => {
       try {
-        window.close();
-      } catch {
-        // ignore close failures
+        const response = await fetch(`${API_BASE_URL}/v1/minecraft/verify`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+          body: JSON.stringify({ authorizationCode: code, state }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(
+            typeof body?.message === 'string'
+              ? body.message
+              : 'Minecraft 소유권을 확인하지 못했습니다.',
+          );
+        }
+        if (cancelled) return;
+
+        const identity = body as MinecraftIdentity;
+        window.opener?.postMessage(
+          { type: 'minecraft-oauth-verified', identity },
+          window.location.origin,
+        );
+        setHandoffSent(true);
+        closeTimer = window.setTimeout(() => {
+          try {
+            window.close();
+          } catch {
+            // 사용자가 직접 닫거나 /me로 이동할 수 있다.
+          }
+        }, 3000);
+      } catch (verificationFailure) {
+        if (cancelled) return;
+        const message =
+          verificationFailure instanceof Error
+            ? verificationFailure.message
+            : 'Minecraft 소유권을 확인하지 못했습니다.';
+        setVerificationError(message);
+        notifyMinecraftOAuthError(message);
       }
-    }, 3000);
-    return () => window.clearTimeout(timer);
+    };
+
+    void completeVerification();
+    return () => {
+      cancelled = true;
+      if (closeTimer) window.clearTimeout(closeTimer);
+    };
   }, [code, state, error]);
 
   const progressWidth = status.kind === 'pending' ? '68%' : '100%';
@@ -121,8 +160,8 @@ export function MinecraftCallbackClient({
       complete: Boolean(state && !error),
     },
     {
-      label: 'Parent window notified',
-      complete: handoffSent && !error,
+      label: 'MineWiki account linked',
+      complete: handoffSent && !error && !verificationError,
     },
   ];
 
@@ -174,16 +213,16 @@ export function MinecraftCallbackClient({
             </p>
             <h2 className="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl">
               {status.kind === 'pending'
-                ? '응답 전달 중'
+                ? '소유권 확인 중'
                 : status.kind === 'success'
-                  ? '응답 전달 완료'
+                  ? '소유권 인증 완료'
                   : '인증 응답 확인 필요'}
             </h2>
             <p className="mt-3 text-sm leading-6 text-[#a9b0ba]">
               {status.kind === 'pending'
-                ? 'Microsoft 콜백 값을 원래 MineWiki 창으로 전달하고 있습니다.'
+                ? 'Microsoft 응답과 Minecraft 프로필을 서버에서 확인하고 있습니다.'
                 : status.kind === 'success'
-                  ? '원래 창에서 Minecraft 소유권 검증이 이어집니다.'
+                  ? '인증된 Minecraft 프로필이 MineWiki 계정에 연결되었습니다.'
                   : 'MineWiki에서 Minecraft 인증을 다시 시작해 주세요.'}
             </p>
           </div>
@@ -203,18 +242,18 @@ export function MinecraftCallbackClient({
             <div>
               <p className="text-sm font-medium text-[#e5e7eb]">
                 {status.kind === 'pending'
-                  ? '콜백 응답을 전달하고 있습니다.'
+                  ? 'Minecraft 소유권을 확인하고 있습니다.'
                   : status.kind === 'success'
-                    ? '부모 창 알림이 완료되었습니다.'
+                    ? 'MineWiki 계정 연결이 완료되었습니다.'
                     : status.kind === 'warning'
                       ? '인증 응답 값이 유효하지 않습니다.'
                       : 'OAuth 처리 중 오류가 발생했습니다.'}
               </p>
               <p className="mt-1 text-xs leading-5 text-[#a9b0ba]">
                 {status.kind === 'pending'
-                  ? '팝업 완료 신호를 안전한 동일 출처 메시지로 전달합니다.'
+                  ? '인증 코드는 MineWiki API에서 일회성으로 검증됩니다.'
                   : status.kind === 'success'
-                    ? '원래 창에서 Minecraft 소유권 검증이 계속 진행됩니다.'
+                    ? '원래 창을 새로고침해도 연결된 프로필을 다시 확인할 수 있습니다.'
                     : 'MineWiki에서 Minecraft 인증을 다시 시작해 주세요.'}
               </p>
               {status.detail ? (
