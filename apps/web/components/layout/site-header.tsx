@@ -97,18 +97,18 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
 
   return (
     <header className={`fixed inset-x-0 top-0 z-50 border-b backdrop-blur-xl ${variant === 'paper' ? 'border-[#b8b4aa]/70 bg-[#f4f2ec]/90 text-[#252925]' : 'border-white/[0.06] bg-[#07090c]/80'}`}>
-      <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[1440px] px-3 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-7">
-            <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="MineWiki 홈">
+            <Link href="/" className="flex shrink-0 items-center gap-2 sm:gap-2.5" aria-label="MineWiki 홈">
               <span
                 aria-hidden="true"
                 className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#123d31] text-[#8cf0cf]"
               >
                 <BookOpenText className="h-[19px] w-[19px]" strokeWidth={2.2} />
               </span>
-              <span className={`text-[19px] font-extrabold tracking-tight ${variant === 'paper' ? 'text-[#20241f]' : 'text-white'}`}>
-                MineWiki<span className="text-[#14c794]">.kr</span>
+              <span className={`text-[16px] font-extrabold tracking-tight sm:text-[19px] ${variant === 'paper' ? 'text-[#20241f]' : 'text-white'}`}>
+                MineWiki<span className="hidden text-[#14c794] min-[360px]:inline">.kr</span>
               </span>
             </Link>
             <nav className="hidden items-center gap-0.5 text-sm font-medium lg:flex">
@@ -134,7 +134,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
             </nav>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3">
             <div className="hidden border-l border-white/[0.08] pl-4 text-xs text-slate-500 2xl:block">
               {loading
                 ? '세션 확인 중'

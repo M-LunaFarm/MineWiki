@@ -139,7 +139,7 @@ export function ServerHeroLive({
 
   return (
     <section className="space-y-6">
-      <div className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0d1219] shadow-2xl shadow-black/40">
+      <div className="dark-fixed-surface relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0d1219] shadow-2xl shadow-black/40">
         <div className="group absolute inset-0 h-full w-full">
           {detail.bannerUrl ? (
             <img

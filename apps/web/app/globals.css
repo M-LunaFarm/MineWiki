@@ -143,8 +143,63 @@ html[data-theme='light'] [class*='text-gray-400'] {
   color: #566158;
 }
 
+html[data-theme='light'] [class*='text-slate-200'] {
+  color: #344139;
+}
+
+html[data-theme='light'] [class*='text-emerald-200'],
+html[data-theme='light'] [class*='text-emerald-300'] {
+  color: #08775a;
+}
+
+html[data-theme='light'] [class*='text-cyan-200'],
+html[data-theme='light'] [class*='text-cyan-300'] {
+  color: #0e7490;
+}
+
 html[data-theme='light'] [class*='border-white'] {
   border-color: rgba(37, 49, 41, 0.14);
+}
+
+/* Marketing/server artwork intentionally remains dark in either theme. */
+html[data-theme='light'] .dark-fixed-surface {
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.1);
+  background-color: #0d1219;
+}
+
+html[data-theme='light'] .dark-fixed-surface [class*='text-white'] {
+  color: #f8fafc;
+}
+
+html[data-theme='light'] .dark-fixed-surface [class*='text-slate-300'] {
+  color: #cbd5e1;
+}
+
+html[data-theme='light'] .dark-fixed-surface [class*='text-slate-200'] {
+  color: #e2e8f0;
+}
+
+html[data-theme='light'] .dark-fixed-surface [class*='text-emerald-200'],
+html[data-theme='light'] .dark-fixed-surface [class*='text-emerald-300'] {
+  color: #6ee7b7;
+}
+
+html[data-theme='light'] .dark-fixed-surface [class*='text-cyan-200'],
+html[data-theme='light'] .dark-fixed-surface [class*='text-cyan-300'] {
+  color: #a5f3fc;
+}
+
+html[data-theme='light'] .dark-fixed-surface [class*='text-slate-400'] {
+  color: #94a3b8;
+}
+
+html[data-theme='light'] .dark-fixed-surface [class*='text-slate-500'] {
+  color: #64748b;
+}
+
+html[data-theme='light'] .dark-fixed-surface [class*='border-white'] {
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 html[data-theme='light'] .surface-flat,

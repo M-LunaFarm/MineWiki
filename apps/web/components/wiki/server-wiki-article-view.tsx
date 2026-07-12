@@ -42,7 +42,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
       : 'lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_292px]';
 
   return (
-    <main className="min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
+    <main className="server-wiki-layout min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
       <div className={`mx-auto grid w-full max-w-[1600px] ${gridClass}`}>
         <aside className="border-white/10 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:border-r">
           <div className="border-b border-white/10 px-6 py-7">
@@ -111,7 +111,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
 
           <header className="mt-7 border-b border-white/10 pb-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <h1 className="font-display text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+              <h1 className="font-display text-3xl font-extrabold tracking-tight text-white sm:text-5xl">
                 {page.displayTitle}
               </h1>
               <Link

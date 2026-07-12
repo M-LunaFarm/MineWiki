@@ -110,7 +110,7 @@ export function AccountDropdown() {
       <button
         type="button"
         onClick={toggle}
-        className="account-trigger flex min-h-10 items-center gap-2 rounded-md border border-[#30363d] bg-[#181a1d] px-3 py-2 text-sm font-medium text-[#e6e6e6] transition hover:border-[#13ec80]/40 hover:text-white"
+        className="account-trigger flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-[#30363d] bg-[#181a1d] px-2 py-2 text-sm font-medium text-[#e6e6e6] transition hover:border-[#13ec80]/40 hover:text-white sm:gap-2 sm:px-3"
         disabled={loading}
       >
         {account ? (
@@ -131,7 +131,7 @@ export function AccountDropdown() {
           </span>
         ) : null}
         <span>{account ? (account.displayName ?? account.email ?? '내 계정') : '로그인'}</span>
-        <ChevronDown aria-hidden="true" className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown aria-hidden="true" className={`hidden h-4 w-4 transition-transform min-[360px]:block ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open ? (
