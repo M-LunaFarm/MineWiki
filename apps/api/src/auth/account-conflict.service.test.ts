@@ -28,11 +28,6 @@ function createHarness(options: {
           : null;
       },
     },
-    lunaDiscordAccountLink: {
-      async findUnique() {
-        return null;
-      },
-    },
     account: {
       async findUnique() {
         return discordUserId
@@ -72,13 +67,25 @@ function createHarness(options: {
       audits.push(args);
     },
   };
+  const discordMinecraftLinks = {
+    async findByDiscordUserId() {
+      return null;
+    },
+    async findByMinecraftUuid() {
+      return null;
+    },
+  };
 
   return {
     accountId,
     tickets,
     messages,
     audits,
-    service: new AccountConflictService(prisma as never, events as never),
+    service: new AccountConflictService(
+      prisma as never,
+      events as never,
+      discordMinecraftLinks as never,
+    ),
   };
 }
 

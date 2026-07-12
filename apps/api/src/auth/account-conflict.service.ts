@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
+import { DiscordMinecraftLinkRepository } from '../verify/guild.repositories';
 
 const mergeRequestSchema = z.object({
   message: z.string().trim().max(1000).optional(),
@@ -36,10 +37,16 @@ export interface MergeRequestResponse {
 
 @Injectable()
 export class AccountConflictService {
+  private readonly discordMinecraftLinks: DiscordMinecraftLinkRepository;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: BusinessEventService,
-  ) {}
+    @Optional() discordMinecraftLinks?: DiscordMinecraftLinkRepository,
+  ) {
+    this.discordMinecraftLinks =
+      discordMinecraftLinks ?? new DiscordMinecraftLinkRepository(prisma);
+  }
 
   async listLinkConflicts(accountId: string): Promise<LinkConflictResponse> {
     return { conflicts: await this.detectConflicts(accountId) };
@@ -134,10 +141,9 @@ export class AccountConflictService {
         });
       }
 
-      const linkedDiscord = await this.prisma.lunaDiscordAccountLink.findUnique({
-        where: { minecraftUuid: minecraftIdentity.uuid },
-        select: { discordUserId: true },
-      });
+      const linkedDiscord = await this.discordMinecraftLinks.findByMinecraftUuid(
+        minecraftIdentity.uuid,
+      );
       if (linkedDiscord && !discordUserIds.includes(linkedDiscord.discordUserId)) {
         conflicts.push({
           id: `minecraft-discord:${minecraftIdentity.uuid}:${linkedDiscord.discordUserId}`,
@@ -168,10 +174,7 @@ export class AccountConflictService {
           },
           select: { accountId: true },
         }),
-        this.prisma.lunaDiscordAccountLink.findUnique({
-          where: { discordUserId },
-          select: { minecraftUuid: true },
-        }),
+        this.discordMinecraftLinks.findByDiscordUserId(discordUserId),
       ]);
       const conflictingAccountId = duplicateAccount?.id ?? duplicateCredential?.accountId ?? null;
       if (conflictingAccountId) {

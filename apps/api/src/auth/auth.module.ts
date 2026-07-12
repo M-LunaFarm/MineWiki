@@ -8,6 +8,7 @@ import { SessionModule } from '../session/session.module';
 import { OAuthFlowService } from './oauth-flow.service';
 import { EmailService } from './email.service';
 import { FileModule } from '../file/file.module';
+import { DiscordMinecraftLinkRepository } from '../verify/guild.repositories';
 
 @Module({
   imports: [SessionModule, FileModule],
@@ -16,7 +17,8 @@ import { FileModule } from '../file/file.module';
     AccountConflictService,
     AccountSeparationService,
     OAuthFlowService,
-    EmailService
+    EmailService,
+    DiscordMinecraftLinkRepository
   ],
   controllers: [AuthController, AccountConflictController],
   exports: [AuthService, AccountSeparationService, OAuthFlowService, EmailService]
