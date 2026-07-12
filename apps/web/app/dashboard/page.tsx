@@ -360,7 +360,12 @@ export default function DashboardPage() {
                     <div className="mt-2 border-t border-dashed border-[#30363d] pt-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2 text-xs text-[#b8c0c8]">
-                          {server.voteRequiresOwnership ? (
+                          {server.isPendingClaim ? (
+                            <>
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                              <span>소유권 검증 전까지 운영 설정이 잠겨 있습니다.</span>
+                            </>
+                          ) : server.voteRequiresOwnership ? (
                             <>
                               <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
                               <span>검증된 사용자 투표만 허용됩니다.</span>
@@ -388,9 +393,13 @@ export default function DashboardPage() {
                           </button>
                           <Link
                             href={`/claim?serverId=${server.id}`}
-                            className="rounded-md bg-[#30363d] px-3 py-1.5 text-xs font-medium text-[#d8dee5] transition-colors hover:bg-[#3f4850] hover:text-white"
+                            className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                              server.isPendingClaim
+                                ? 'bg-[#13ec80] text-[#07120f] hover:bg-[#35f29a]'
+                                : 'bg-[#30363d] text-[#d8dee5] hover:bg-[#3f4850] hover:text-white'
+                            }`}
                           >
-                            검증 관리
+                            {server.isPendingClaim ? '소유권 검증 시작' : '검증 관리'}
                           </Link>
                           <Link
                             href={buildServerPath(server)}

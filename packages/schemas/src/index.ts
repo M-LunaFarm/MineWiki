@@ -371,6 +371,7 @@ export const dashboardServerSummarySchema = z.object({
   reviewsCount: z.number().int().nonnegative(),
   verificationGrade: serverVerificationGradeSchema,
   voteRequiresOwnership: z.boolean(),
+  isPendingClaim: z.boolean().optional(),
   lastSyncedAt: z.string().datetime().nullable().optional(),
 });
 

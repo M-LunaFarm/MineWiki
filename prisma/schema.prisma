@@ -107,6 +107,7 @@ model Account {
   outgoingLinks           AccountLink[]            @relation("AccountLinkPrimary")
   incomingLinks           AccountLink[]            @relation("AccountLinkTarget")
   serversOwned            Server[]                 @relation("ServerOwner")
+  serversRegistered       Server[]                 @relation("ServerRegistrant")
   reviews                 ServerReview[]
   votes                   Vote[]
   reviewHelpfulVotes      ReviewHelpfulVote[]
@@ -364,6 +365,7 @@ model Server {
   id                    String            @id @default(uuid())
   shortCode             String?           @unique @db.VarChar(12)
   ownerAccountId        String?
+  registrantAccountId   String?
   wikiSpaceId           BigInt?           @db.UnsignedBigInt
   wikiPageId            BigInt?           @db.UnsignedBigInt
   wikiSlug              String?
@@ -394,6 +396,7 @@ model Server {
   updatedAt             DateTime          @updatedAt
 
   ownerAccount         Account?              @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
+  registrantAccount    Account?              @relation("ServerRegistrant", fields: [registrantAccountId], references: [id], onDelete: SetNull)
   stats                ServerStats?
   pingSamples          ServerPingSample[]
   votes                Vote[]
@@ -405,6 +408,7 @@ model Server {
   supportTickets       SupportTicket[]
 
   @@index([ownerAccountId])
+  @@index([registrantAccountId])
   @@index([wikiSpaceId])
   @@index([wikiSlug])
   @@index([verificationGrade])

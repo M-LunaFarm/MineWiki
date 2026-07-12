@@ -77,6 +77,70 @@ test('plugin claim tokens cannot be issued without an authenticated plugin proof
   );
 });
 
+test('only the registering account can start the first ownership claim', async () => {
+  const service = new ClaimService(
+    {
+      ensureExists: async () => ({
+        ownerAccountId: null,
+        registrantAccountId: 'account-registrant',
+      }),
+    } as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    () => service.issueTokens('server-1', 'account-attacker', ['dns']),
+    /서버를 등록한 계정만 최초 소유권 검증을 시작할 수 있습니다/,
+  );
+});
+
+test('successful ownership verification promotes registrant to owner atomically', async () => {
+  const updates: Array<Record<string, unknown>> = [];
+  const verifiedMethod = {
+    id: 'claim-method-1',
+    accountId: 'account-registrant',
+    method: 'dns',
+    token: hashClaimToken('claim-proof'),
+    issuedAt: new Date(),
+    status: 'verified',
+    verifiedAt: new Date(),
+    lastCheckedAt: new Date(),
+    note: 'dns_token_confirmed',
+  };
+  const prisma = {
+    serverClaimMethod: {
+      update: async () => verifiedMethod,
+      findMany: async () => [verifiedMethod],
+    },
+    server: {
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+        updates.push(data);
+        return { count: 1 };
+      },
+      update: async () => ({}),
+    },
+  };
+  const service = new ClaimService(
+    {
+      ensureExists: async () => ({
+        ownerAccountId: null,
+        registrantAccountId: 'account-registrant',
+        verificationGrade: 'Unverified',
+      }),
+    } as never,
+    prisma as never,
+  );
+
+  await service.applyVerificationResult('server-1', 'dns', {
+    status: 'verified',
+    checkedAt: new Date().toISOString(),
+  });
+
+  assert.deepEqual(updates, [
+    { ownerAccountId: 'account-registrant', registrantAccountId: null },
+  ]);
+});
+
 test('pending claim tokens expire 24 hours after issuance and cannot be verified', async () => {
   const staleMethod = {
     id: 'claim-method-stale',

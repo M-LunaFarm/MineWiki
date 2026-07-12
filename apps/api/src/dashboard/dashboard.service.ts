@@ -9,7 +9,9 @@ export class DashboardService {
 
   async getOverview(accountId: string): Promise<DashboardOverview> {
     const servers = await this.prisma.server.findMany({
-      where: { ownerAccountId: accountId },
+      where: {
+        OR: [{ ownerAccountId: accountId }, { registrantAccountId: accountId }],
+      },
       include: { stats: true }
     });
 
@@ -23,6 +25,7 @@ export class DashboardService {
       verificationGrade:
         (server.verificationGrade === 'Unverified' ? 'Unverified' : 'Verified') as DashboardOverview['servers'][number]['verificationGrade'],
       voteRequiresOwnership: server.voteRequiresOwnership,
+      isPendingClaim: !server.ownerAccountId && server.registrantAccountId === accountId,
       lastSyncedAt: server.stats?.lastUpdatedAt
         ? server.stats.lastUpdatedAt.toISOString()
         : server.updatedAt.toISOString()
@@ -48,7 +51,9 @@ export class DashboardService {
 
     const methods = await this.prisma.serverClaimMethod.findMany({
       where: {
-        server: { ownerAccountId: accountId }
+        server: {
+          OR: [{ ownerAccountId: accountId }, { registrantAccountId: accountId }],
+        },
       },
       include: { server: { select: { name: true } } }
     });

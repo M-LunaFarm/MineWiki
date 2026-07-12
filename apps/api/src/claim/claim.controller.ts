@@ -68,7 +68,7 @@ export class ClaimController {
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @CurrentSession() session: SessionPayload
   ): Promise<ClaimStatusResponse> {
-    if (!(await this.claimService.isOwner(serverId, session.userId))) {
+    if (!(await this.claimService.canAccessClaim(serverId, session.userId))) {
       throw new ForbiddenException('해당 서버의 검증 상태를 조회할 권한이 없습니다.');
     }
     return this.claimService.getStatus(serverId);

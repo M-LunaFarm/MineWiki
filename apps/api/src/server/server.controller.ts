@@ -167,7 +167,7 @@ export class ServerController {
     const payload = serverRegistrationSchema.parse(body) as RequiredServerRegistrationPayload;
     return this.serverService.register({
       ...payload,
-      ownerAccountId: session.userId
+      registrantAccountId: session.userId
     });
   }
 
@@ -276,7 +276,10 @@ export class ServerController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentSession() session: SessionPayload
   ) {
-    if (!(await this.claimService.isOwner(id, session.userId))) {
+    if (
+      !(await this.claimService.isOwner(id, session.userId)) &&
+      !(await this.claimService.isPendingRegistrant(id, session.userId))
+    ) {
       throw new BadRequestException('해당 서버를 제거할 권한이 없습니다.');
     }
     await this.serverService.remove(id, session.userId);
@@ -327,7 +330,10 @@ export class ServerController {
     @Body('data') data: string,
     @CurrentSession() session: SessionPayload
   ) {
-    if (!(await this.claimService.isOwner(id, session.userId))) {
+    if (
+      !(await this.claimService.isOwner(id, session.userId)) &&
+      !(await this.claimService.isPendingRegistrant(id, session.userId))
+    ) {
       throw new BadRequestException('해당 서버의 배너를 수정할 권한이 없습니다.');
     }
     if (!data) {

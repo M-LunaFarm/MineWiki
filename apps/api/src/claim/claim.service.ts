@@ -48,6 +48,13 @@ export class ClaimService {
     if (server.ownerAccountId && server.ownerAccountId !== accountId) {
       throw new ForbiddenException('해당 서버를 검증할 권한이 없습니다.');
     }
+    if (
+      !server.ownerAccountId &&
+      server.registrantAccountId &&
+      server.registrantAccountId !== accountId
+    ) {
+      throw new ForbiddenException('서버를 등록한 계정만 최초 소유권 검증을 시작할 수 있습니다.');
+    }
     const targets = methods && methods.length > 0 ? methods : ALL_METHODS;
     if (targets.includes('plugin')) {
       throw new BadRequestException(
@@ -165,6 +172,7 @@ export class ClaimService {
         },
         data: {
           ownerAccountId: updatedMethod.accountId,
+          registrantAccountId: null,
         },
       });
     }
@@ -200,6 +208,22 @@ export class ClaimService {
   async isOwner(serverId: string, accountId: string): Promise<boolean> {
     const server = await this.serverService.ensureExists(serverId);
     return Boolean(server.ownerAccountId && server.ownerAccountId === accountId);
+  }
+
+  async isPendingRegistrant(serverId: string, accountId: string): Promise<boolean> {
+    const server = await this.serverService.ensureExists(serverId);
+    return Boolean(
+      !server.ownerAccountId &&
+        server.registrantAccountId &&
+        server.registrantAccountId === accountId,
+    );
+  }
+
+  async canAccessClaim(serverId: string, accountId: string): Promise<boolean> {
+    return (
+      (await this.isOwner(serverId, accountId)) ||
+      (await this.isPendingRegistrant(serverId, accountId))
+    );
   }
 
   private assertCanUseClaimMethod(

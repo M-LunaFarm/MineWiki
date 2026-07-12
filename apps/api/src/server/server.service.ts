@@ -1006,6 +1006,7 @@ export class ServerService {
     websiteUrl?: string | null;
     discordUrl?: string | null;
     ownerAccountId?: string;
+    registrantAccountId?: string;
   }): Promise<ServerDetail> {
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const shortCode = await this.generateUniqueShortCode();
@@ -1024,6 +1025,7 @@ export class ServerService {
             websiteUrl: serverInput.websiteUrl ?? null,
             discordUrl: serverInput.discordUrl ?? null,
             ownerAccountId: serverInput.ownerAccountId ?? null,
+            registrantAccountId: serverInput.registrantAccountId ?? null,
             voteCooldownHours: 24,
             verificationGrade: 'Unverified',
             votes24h: 0,
