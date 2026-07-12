@@ -7,6 +7,7 @@ import {
   DragEvent,
   KeyboardEvent,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -140,6 +141,12 @@ export default function ServerRegisterPage() {
   const { account, loading } = useAuth();
   const router = useRouter();
   const apiBaseUrl = useMemo(() => normalizeApiBaseUrl(), []);
+
+  useEffect(() => {
+    if (!loading && !account) {
+      router.replace('/login?returnTo=/servers/register');
+    }
+  }, [account, loading, router]);
 
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   const [errors, setErrors] = useState<string[]>([]);
@@ -374,17 +381,9 @@ export default function ServerRegisterPage() {
   if (!account) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#121212] px-4">
-        <div className="w-full max-w-xl rounded-xl border border-[#333333] bg-[#1A1A1A] p-6 text-center">
-          <h2 className="text-xl font-bold text-white">로그인이 필요합니다</h2>
-          <p className="mt-3 text-sm text-[#A0A0A0]">
-            서버를 등록하려면 Discord 또는 NAVER 계정으로 로그인해야 합니다.
-          </p>
-          <Link
-            className="mt-5 inline-flex rounded-lg bg-[#13ec80] px-5 py-2.5 text-sm font-bold text-black transition hover:bg-[#35f29a]"
-            href="/login?returnTo=/servers/register"
-          >
-            로그인하기
-          </Link>
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#0d1416] px-4 py-3 text-sm text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin text-[#35e5b7]" />
+          서버 등록을 위해 로그인 화면으로 이동 중입니다.
         </div>
       </div>
     );

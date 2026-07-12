@@ -19,7 +19,7 @@ test('Minecraft authorization accepts a recently authenticated session', async (
   const service = {
     startAuthorization: async () => {
       called = true;
-      return { authorizationUrl: 'https://example.com', state: 'state-value', codeVerifier: 'x'.repeat(43) };
+      return { authorizationUrl: 'https://example.com', state: 'state-value' };
     },
   } as unknown as MinecraftService;
   const controller = new MinecraftController(service);

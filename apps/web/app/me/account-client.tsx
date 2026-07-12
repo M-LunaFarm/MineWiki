@@ -16,6 +16,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { MinecraftIdentity, OAuthProvider } from '@minewiki/schemas';
 import { SessionList } from '../../components/account/session-list';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
@@ -98,6 +99,13 @@ function FeedbackText({ feedback }: { feedback: FeedbackState | null }) {
 
 export function AccountClientPage() {
   const { account, loading, refresh } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !account) {
+      router.replace('/login?returnTo=/me');
+    }
+  }, [account, loading, router]);
 
   const [displayName, setDisplayName] = useState('');
   const [displayNameFeedback, setDisplayNameFeedback] = useState<FeedbackState | null>(null);
@@ -620,18 +628,9 @@ export function AccountClientPage() {
   if (!account) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#121212] px-4">
-        <div className="w-full max-w-xl rounded-lg border border-[#30363d] bg-[#181a1d] p-6 text-center">
-          <h2 className="text-xl font-bold text-white">로그인이 필요합니다.</h2>
-          <p className="mt-3 text-sm text-[#a0a0a0]">
-            계정 및 보안 페이지는 로그인한 사용자만 접근하실 수 있습니다. 로그인 후 다시 시도해
-            주세요.
-          </p>
-          <Link
-            href="/login"
-            className="mt-5 inline-flex items-center justify-center rounded-md bg-[#13ec80] px-5 py-2.5 text-sm font-bold text-black transition hover:bg-[#35f29a]"
-          >
-            로그인하기
-          </Link>
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#0d1416] px-4 py-3 text-sm text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin text-[#35e5b7]" />
+          안전한 로그인 화면으로 이동 중입니다.
         </div>
       </div>
     );

@@ -15,7 +15,6 @@ const API_BASE_URL = getApiBaseUrl();
 interface PendingAuthorization {
   readonly authorizationUrl: string;
   readonly state: string;
-  readonly codeVerifier: string;
 }
 
 type FlowStage = 'idle' | 'popup' | 'callback' | 'verifying' | 'completed' | 'error';
@@ -104,7 +103,7 @@ export function MinecraftOwnershipPanel() {
   }, [identity?.uuid, playerName]);
 
   const performVerification = useCallback(
-    async (details: { authorizationCode: string; state?: string; codeVerifier?: string }) => {
+    async (details: { authorizationCode: string; state?: string }) => {
       const trimmedCode = details.authorizationCode.trim();
       if (!trimmedCode) {
         setFlowStage('error');
@@ -126,7 +125,6 @@ export function MinecraftOwnershipPanel() {
           body: JSON.stringify({
             authorizationCode: trimmedCode,
             state: details.state,
-            codeVerifier: details.codeVerifier,
           }),
         });
 
@@ -276,7 +274,6 @@ export function MinecraftOwnershipPanel() {
       void performVerification({
         authorizationCode: incomingCode,
         state: pendingAuth.state,
-        codeVerifier: pendingAuth.codeVerifier,
       });
     };
 

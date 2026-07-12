@@ -143,7 +143,6 @@ export const minecraftVerificationRequestSchema = z.object({
   userId: z.string().uuid().optional(),
   authorizationCode: z.string().min(1),
   redirectUri: z.string().url().optional(),
-  codeVerifier: z.string().min(43).max(128).optional(),
   state: z.string().min(8).optional(),
 });
 
@@ -155,7 +154,6 @@ export const minecraftAuthorizationStartRequestSchema = z.object({
 export const minecraftAuthorizationStartResponseSchema = z.object({
   authorizationUrl: z.string().url(),
   state: z.string().min(8),
-  codeVerifier: z.string().min(43).max(128),
 });
 
 export const userAccountSchema = z.object({

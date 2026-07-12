@@ -81,10 +81,13 @@ export class MinecraftService {
       throw new InternalServerErrorException('MICROSOFT_CLIENT_ID is not configured.');
     }
 
-    const redirectUri = request.redirectUri ?? fallbackRedirect;
-    if (!redirectUri) {
+    if (!fallbackRedirect) {
       throw new InternalServerErrorException('MICROSOFT_REDIRECT_URI is not configured.');
     }
+    if (request.redirectUri && request.redirectUri !== fallbackRedirect) {
+      throw new ForbiddenException('허용되지 않은 Microsoft 인증 콜백 주소입니다.');
+    }
+    const redirectUri = fallbackRedirect;
 
     const state = this.generateState();
     const codeVerifier = this.generateCodeVerifier();
@@ -113,8 +116,7 @@ export class MinecraftService {
 
     return {
       authorizationUrl: url.toString(),
-      state,
-      codeVerifier
+      state
     };
   }
 
@@ -140,18 +142,17 @@ export class MinecraftService {
     payload: MinecraftVerificationRequest
   ): Promise<MinecraftIdentity> {
     let effectiveRedirect = payload.redirectUri;
-    let effectiveCodeVerifier = payload.codeVerifier;
+    let effectiveCodeVerifier: string | undefined;
 
     if (payload.state) {
       const pending = await this.consumeAuthorization(payload.state, payload.userId);
       if (effectiveRedirect && effectiveRedirect !== pending.redirectUri) {
         throw new ForbiddenException('Redirect URI mismatch for provided state.');
       }
-      if (effectiveCodeVerifier && effectiveCodeVerifier !== pending.codeVerifier) {
-        throw new ForbiddenException('Code verifier mismatch for provided state.');
-      }
       effectiveRedirect = pending.redirectUri;
       effectiveCodeVerifier = pending.codeVerifier;
+    } else {
+      throw new ForbiddenException('Microsoft 인증 상태가 누락되었거나 만료되었습니다.');
     }
 
     let microsoftToken = await this.exchangeAuthorizationCode(
@@ -308,7 +309,7 @@ export class MinecraftService {
 
     const form = new URLSearchParams({
       client_id: clientId,
-      scope: 'XboxLive.signin offline_access',
+      scope: 'XboxLive.signin',
       code,
       redirect_uri: effectiveRedirect,
       grant_type: 'authorization_code'
