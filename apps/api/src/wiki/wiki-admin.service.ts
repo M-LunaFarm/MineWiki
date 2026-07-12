@@ -15,6 +15,10 @@ const ALLOWED_PROTECTION_LEVELS = new Set([
   'locked'
 ]);
 const ALLOWED_REVISION_VISIBILITIES = new Set(['public', 'hidden', 'deleted', 'private']);
+const ACL_TARGET_TYPES = new Set(['site', 'namespace', 'space', 'page']);
+const ACL_ACTIONS = new Set(['read', 'edit', 'create', 'move', 'delete', 'revert', 'history', 'raw', 'upload_file', 'acl']);
+const ACL_EFFECTS = new Set(['allow', 'deny']);
+const ACL_SUBJECT_TYPES = new Set(['perm', 'user', 'group', 'aclgroup', 'role']);
 
 export interface WikiAdminRecentChange {
   readonly id: string;
@@ -72,6 +76,143 @@ export class WikiAdminService {
       take: 100
     });
     return pages.map(toPageSummary);
+  }
+
+  async getAclRules() {
+    const rules = await this.prisma.aclRule.findMany({
+      orderBy: [{ targetType: 'asc' }, { targetId: 'asc' }, { action: 'asc' }, { sortOrder: 'asc' }],
+      take: 500
+    });
+    return rules.map(toAclRuleSummary);
+  }
+
+  async getAclCatalog() {
+    const [namespaces, spaces, pages, groups, aclGroups] = await Promise.all([
+      this.prisma.wikiNamespace.findMany({ orderBy: [{ id: 'asc' }] }),
+      this.prisma.wikiSpace.findMany({
+        where: { status: 'active' },
+        orderBy: [{ name: 'asc' }],
+        take: 500,
+        select: { id: true, name: true, spaceType: true, rootPath: true }
+      }),
+      this.prisma.wikiPage.findMany({
+        where: { status: { not: 'deleted' } },
+        orderBy: [{ updatedAt: 'desc' }],
+        take: 500,
+        select: { id: true, displayTitle: true, spaceId: true }
+      }),
+      this.prisma.wikiGroup.findMany({ orderBy: [{ displayName: 'asc' }] }),
+      this.prisma.aclGroup.findMany({
+        where: { status: 'active' },
+        orderBy: [{ title: 'asc' }],
+        select: { id: true, groupKey: true, title: true }
+      })
+    ]);
+    return {
+      namespaces: namespaces.map((item) => ({ id: String(item.id), code: item.code, name: item.displayName })),
+      spaces: spaces.map((item) => ({ id: item.id.toString(), name: item.name, type: item.spaceType, path: item.rootPath })),
+      pages: pages.map((item) => ({ id: item.id.toString(), name: item.displayTitle, spaceId: item.spaceId.toString() })),
+      groups: groups.map((item) => ({ code: item.code, name: item.displayName })),
+      aclGroups: aclGroups.map((item) => ({ id: item.id.toString(), key: item.groupKey, name: item.title }))
+    };
+  }
+
+  async createAclRule(input: {
+    readonly targetType?: string;
+    readonly targetId?: string | null;
+    readonly action?: string;
+    readonly effect?: string;
+    readonly subjectType?: string;
+    readonly subjectValue?: string;
+    readonly reason?: string | null;
+    readonly expiresAt?: string | null;
+    readonly actorProfileId: bigint;
+  }) {
+    const targetType = input.targetType?.trim() ?? '';
+    const action = input.action?.trim() ?? '';
+    const effect = input.effect?.trim() ?? '';
+    const subjectType = input.subjectType?.trim() ?? '';
+    const subjectValue = input.subjectValue?.trim() ?? '';
+    if (!ACL_TARGET_TYPES.has(targetType) || !ACL_ACTIONS.has(action) || !ACL_EFFECTS.has(effect) || !ACL_SUBJECT_TYPES.has(subjectType)) {
+      throw new BadRequestException('Invalid ACL rule type.');
+    }
+    if (!subjectValue || subjectValue.length > 255) {
+      throw new BadRequestException('ACL subject is required.');
+    }
+    const targetId = targetType === 'site' ? null : this.parseBigIntId(input.targetId ?? '', 'targetId');
+    const expiresAt = parseOptionalDate(input.expiresAt, 'expiresAt');
+    const reason = input.reason?.trim().slice(0, 1000) || null;
+    const created = await this.prisma.$transaction(async (tx) => {
+      const aggregate = await tx.aclRule.aggregate({
+        where: { targetType, targetId, action },
+        _max: { sortOrder: true }
+      });
+      const rule = await tx.aclRule.create({
+        data: {
+          targetType,
+          targetId,
+          action,
+          effect,
+          subjectType,
+          subjectValue,
+          sortOrder: (aggregate._max.sortOrder ?? 0) + 10,
+          reason,
+          expiresAt,
+          createdBy: input.actorProfileId,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+      });
+      await tx.aclChangeLog.create({
+        data: {
+          targetType,
+          targetId,
+          actionType: 'create',
+          oldRuleJson: null,
+          newRuleJson: toAclRuleSummary(rule),
+          reason,
+          changedBy: input.actorProfileId,
+          createdAt: new Date()
+        }
+      });
+      return rule;
+    });
+    await this.auditAdmin('wiki.acl_create', {
+      actorProfileId: input.actorProfileId,
+      metadata: { ruleId: created.id.toString(), targetType, targetId: targetId?.toString() ?? null, action, effect, subjectType, subjectValue, reason }
+    });
+    return toAclRuleSummary(created);
+  }
+
+  async deleteAclRule(input: {
+    readonly ruleId: string;
+    readonly actorProfileId: bigint;
+    readonly reason?: string | null;
+  }) {
+    const id = this.parseBigIntId(input.ruleId, 'ruleId');
+    const rule = await this.prisma.aclRule.findUnique({ where: { id } });
+    if (!rule) throw new NotFoundException('ACL rule not found.');
+    const reason = input.reason?.trim().slice(0, 1000) || null;
+    await this.prisma.$transaction([
+      this.prisma.aclRule.delete({ where: { id } }),
+      this.prisma.aclChangeLog.create({
+        data: {
+          targetType: rule.targetType,
+          targetId: rule.targetId,
+          actionType: 'delete',
+          oldRuleJson: toAclRuleSummary(rule),
+          newRuleJson: null,
+          reason,
+          changedBy: input.actorProfileId,
+          createdAt: new Date()
+        }
+      })
+    ]);
+    await this.auditAdmin('wiki.acl_delete', {
+      actorProfileId: input.actorProfileId,
+      metadata: { ruleId: id.toString(), reason }
+    });
+    return { deleted: true, ruleId: id.toString() };
   }
 
   async updateProtection(input: {
@@ -339,7 +480,7 @@ export class WikiAdminService {
     action: string,
     input: {
       readonly actorProfileId: bigint | null;
-      readonly pageId: bigint;
+      readonly pageId?: bigint | null;
       readonly revisionId?: bigint | null;
       readonly metadata?: Record<string, unknown>;
     }
@@ -347,10 +488,10 @@ export class WikiAdminService {
     await this.events?.audit(action, {
       category: 'wiki',
       actorProfileId: input.actorProfileId,
-      subjectType: 'wiki_page',
-      subjectId: input.pageId,
+      subjectType: input.pageId ? 'wiki_page' : 'wiki_acl',
+      subjectId: input.pageId ?? null,
       metadata: {
-        pageId: input.pageId,
+        pageId: input.pageId ?? null,
         revisionId: input.revisionId ?? null,
         ...input.metadata
       }
@@ -392,4 +533,45 @@ function toPageSummary(page: {
     currentRevisionId: page.currentRevisionId?.toString() ?? null,
     updatedAt: page.updatedAt.toISOString()
   };
+}
+
+function toAclRuleSummary(rule: {
+  id: bigint;
+  targetType: string;
+  targetId: bigint | null;
+  action: string;
+  effect: string;
+  subjectType: string;
+  subjectValue: string;
+  sortOrder: number;
+  reason: string | null;
+  expiresAt: Date | null;
+  createdBy: bigint | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: rule.id.toString(),
+    targetType: rule.targetType,
+    targetId: rule.targetId?.toString() ?? null,
+    action: rule.action,
+    effect: rule.effect,
+    subjectType: rule.subjectType,
+    subjectValue: rule.subjectValue,
+    sortOrder: rule.sortOrder,
+    reason: rule.reason,
+    expiresAt: rule.expiresAt?.toISOString() ?? null,
+    createdBy: rule.createdBy?.toString() ?? null,
+    createdAt: rule.createdAt.toISOString(),
+    updatedAt: rule.updatedAt.toISOString()
+  };
+}
+
+function parseOptionalDate(value: string | null | undefined, label: string): Date | null {
+  if (!value?.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new BadRequestException(`${label} must be a valid date.`);
+  }
+  return date;
 }

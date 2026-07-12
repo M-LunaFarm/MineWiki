@@ -132,6 +132,9 @@ export function WikiAdminConsole({ view }: { readonly view: 'overview' | 'pages'
             <Link href="/admin/wiki/pages" className={`chip ${view === 'pages' ? 'chip-accent' : 'chip-muted'}`}>
               문서
             </Link>
+            <Link href="/admin/wiki/acl" className="chip chip-muted">
+              ACL
+            </Link>
           </nav>
         </div>
       </section>

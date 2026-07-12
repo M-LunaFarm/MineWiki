@@ -155,6 +155,28 @@ export interface WikiAdminPageSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiAclRuleSummary {
+  readonly id: string;
+  readonly targetType: 'site' | 'namespace' | 'space' | 'page';
+  readonly targetId: string | null;
+  readonly action: string;
+  readonly effect: 'allow' | 'deny';
+  readonly subjectType: 'perm' | 'user' | 'group' | 'aclgroup' | 'role';
+  readonly subjectValue: string;
+  readonly sortOrder: number;
+  readonly reason: string | null;
+  readonly expiresAt: string | null;
+  readonly createdAt: string;
+}
+
+export interface WikiAclCatalog {
+  readonly namespaces: ReadonlyArray<{ id: string; code: string; name: string }>;
+  readonly spaces: ReadonlyArray<{ id: string; name: string; type: string; path: string }>;
+  readonly pages: ReadonlyArray<{ id: string; name: string; spaceId: string }>;
+  readonly groups: ReadonlyArray<{ code: string; name: string }>;
+  readonly aclGroups: ReadonlyArray<{ id: string; key: string; name: string }>;
+}
+
 export interface WikiMutationResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -260,6 +282,34 @@ export async function fetchWikiAdminRecent(): Promise<WikiAdminRecentChange[]> {
 
 export async function fetchWikiAdminPages(status?: string): Promise<WikiAdminPageSummary[]> {
   return fetchWikiAdminJson(`/pages${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+}
+
+export async function fetchWikiAclRules(): Promise<WikiAclRuleSummary[]> {
+  return fetchWikiAdminJson('/acl');
+}
+
+export async function fetchWikiAclCatalog(): Promise<WikiAclCatalog> {
+  return fetchWikiAdminJson('/acl/catalog');
+}
+
+export async function createWikiAclRule(input: {
+  targetType: WikiAclRuleSummary['targetType'];
+  targetId: string | null;
+  action: string;
+  effect: WikiAclRuleSummary['effect'];
+  subjectType: WikiAclRuleSummary['subjectType'];
+  subjectValue: string;
+  reason?: string;
+  expiresAt?: string | null;
+}): Promise<WikiAclRuleSummary> {
+  return fetchWikiAdminJson('/acl', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function deleteWikiAclRule(ruleId: string, reason?: string): Promise<void> {
+  await fetchWikiAdminJson(`/acl/${encodeURIComponent(ruleId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ reason })
+  });
 }
 
 export async function updateWikiPageProtection(input: {

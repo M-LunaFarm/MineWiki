@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
@@ -27,6 +27,52 @@ export class WikiAdminController {
   ): Promise<WikiAdminPageSummary[]> {
     await this.assertAdmin(session);
     return this.wikiAdmin.getPages(status);
+  }
+
+  @Get('acl')
+  async getAclRules(@CurrentSession() session: SessionPayload) {
+    await this.assertAdmin(session);
+    return this.wikiAdmin.getAclRules();
+  }
+
+  @Get('acl/catalog')
+  async getAclCatalog(@CurrentSession() session: SessionPayload) {
+    await this.assertAdmin(session);
+    return this.wikiAdmin.getAclCatalog();
+  }
+
+  @Post('acl')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
+  async createAclRule(
+    @Body() body: {
+      targetType?: string;
+      targetId?: string | null;
+      action?: string;
+      effect?: string;
+      subjectType?: string;
+      subjectValue?: string;
+      reason?: string | null;
+      expiresAt?: string | null;
+    },
+    @CurrentSession() session: SessionPayload
+  ) {
+    const actor = await this.assertAdmin(session);
+    return this.wikiAdmin.createAclRule({ ...body, actorProfileId: actor.id });
+  }
+
+  @Delete('acl/:id')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
+  async deleteAclRule(
+    @Param('id') ruleId: string,
+    @Body() body: { reason?: string | null },
+    @CurrentSession() session: SessionPayload
+  ) {
+    const actor = await this.assertAdmin(session);
+    return this.wikiAdmin.deleteAclRule({
+      ruleId,
+      actorProfileId: actor.id,
+      reason: body.reason
+    });
   }
 
   @Patch('pages/:id/protection')
