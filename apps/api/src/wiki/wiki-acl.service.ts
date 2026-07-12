@@ -381,11 +381,19 @@ export class WikiAclService {
   }
 }
 
+const TARGET_SPECIFICITY = {
+  site: 0,
+  namespace: 1,
+  space: 2,
+  page: 3
+} as const;
+
 function targetSpecificity(targetType: string): number {
-  if (targetType === 'site') return 0;
-  if (targetType === 'space') return 1;
-  if (targetType === 'page') return 2;
-  return 3;
+  const specificity = TARGET_SPECIFICITY[targetType as keyof typeof TARGET_SPECIFICITY];
+  if (specificity === undefined) {
+    throw new Error(`Unsupported ACL target type: ${targetType}`);
+  }
+  return specificity;
 }
 
 function stripAclPrefix(value: string, subjectType: string): string {

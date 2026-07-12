@@ -267,6 +267,57 @@ test('namespace rules apply between space and site inheritance', async () => {
   assert.equal(decision.reason, 'server_namespace_member');
 });
 
+for (const scenario of [
+  { action: 'read', specificType: 'page', specificId: 1n, broaderEffect: 'allow', specificEffect: 'deny' },
+  { action: 'read', specificType: 'page', specificId: 1n, broaderEffect: 'deny', specificEffect: 'allow' },
+  { action: 'edit', specificType: 'page', specificId: 1n, broaderEffect: 'allow', specificEffect: 'deny' },
+  { action: 'edit', specificType: 'page', specificId: 1n, broaderEffect: 'deny', specificEffect: 'allow' },
+  { action: 'create', specificType: 'space', specificId: 10n, broaderEffect: 'allow', specificEffect: 'deny' },
+  { action: 'create', specificType: 'space', specificId: 10n, broaderEffect: 'deny', specificEffect: 'allow' }
+] as const) {
+  test(`${scenario.specificType} ${scenario.specificEffect} overrides namespace ${scenario.broaderEffect} for ${scenario.action}`, async () => {
+    const { service, store } = createService({
+      namespaceId: 7,
+      rules: [
+        {
+          targetType: 'namespace',
+          targetId: 7n,
+          action: scenario.action,
+          effect: scenario.broaderEffect,
+          subjectType: 'perm',
+          subjectValue: 'any',
+          sortOrder: 0,
+          reason: 'namespace_rule'
+        },
+        {
+          targetType: scenario.specificType,
+          targetId: scenario.specificId,
+          action: scenario.action,
+          effect: scenario.specificEffect,
+          subjectType: 'perm',
+          subjectValue: 'any',
+          sortOrder: 999,
+          reason: 'specific_rule'
+        }
+      ]
+    });
+
+    const decision = await service.evaluate({
+      actor: null,
+      action: scenario.action,
+      resource: {
+        pageId: scenario.action === 'create' ? null : 1n,
+        spaceId: 10n,
+        namespaceCode: 'server'
+      },
+      store: store as unknown as PrismaService
+    });
+
+    assert.equal(decision.allowed, scenario.specificEffect === 'allow');
+    assert.equal(decision.reason, 'specific_rule');
+  });
+}
+
 test('general wiki groups are distinct ACL subjects', async () => {
   const { service, store } = createService({
     rules: [{
