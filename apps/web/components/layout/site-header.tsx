@@ -26,7 +26,7 @@ const NAV_LINKS: readonly NavigationLink[] = [
   { href: '/admin', label: '관리자', key: 'admin', requiresAdmin: true },
 ];
 
-export function SiteHeader() {
+export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | 'paper' }) {
   const pathname = usePathname();
   const { account, loading } = useAuth();
   const [currentSearch, setCurrentSearch] = useState('');
@@ -95,7 +95,7 @@ export function SiteHeader() {
   });
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.06] bg-[#07090c]/80 backdrop-blur-xl">
+    <header className={`fixed inset-x-0 top-0 z-50 border-b backdrop-blur-xl ${variant === 'paper' ? 'border-[#b8b4aa]/70 bg-[#f4f2ec]/90 text-[#252925]' : 'border-white/[0.06] bg-[#07090c]/80'}`}>
       <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-7">
@@ -108,7 +108,7 @@ export function SiteHeader() {
                 <span className="absolute left-[15px] top-[15px] h-3.5 w-3.5 rounded-full bg-[#0b0f15]" />
                 <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-white/85" />
               </span>
-              <span className="text-[19px] font-extrabold tracking-tight text-white">
+              <span className={`text-[19px] font-extrabold tracking-tight ${variant === 'paper' ? 'text-[#20241f]' : 'text-white'}`}>
                 MineWiki<span className="text-[#14c794]">.kr</span>
               </span>
             </Link>
@@ -121,8 +121,8 @@ export function SiteHeader() {
                     href={link.href}
                     className={`relative rounded-lg px-3 py-2 transition-colors ${
                       active
-                        ? 'text-white'
-                        : 'text-slate-400 hover:bg-white/[0.04] hover:text-white'
+                        ? variant === 'paper' ? 'text-[#1f5f46]' : 'text-white'
+                        : variant === 'paper' ? 'text-[#4d544d] hover:bg-[#dfe6dc]/70 hover:text-[#1c211d]' : 'text-slate-400 hover:bg-white/[0.04] hover:text-white'
                     }`}
                   >
                     {link.label}
@@ -153,7 +153,7 @@ export function SiteHeader() {
                 value={currentSearch}
                 onChange={(event) => setCurrentSearch(event.target.value)}
                 placeholder="서버와 위키 통합 검색"
-                className="h-10 w-64 rounded-xl border border-white/[0.08] bg-white/[0.03] pl-10 pr-3 text-sm text-white placeholder:text-slate-500 transition-colors focus:border-[#14c794]/60 focus:bg-white/[0.05] focus:outline-none focus:ring-2 focus:ring-[#14c794]/15"
+                className={`h-10 w-64 rounded-xl pl-10 pr-3 text-sm transition-colors focus:border-[#14c794]/60 focus:outline-none focus:ring-2 focus:ring-[#14c794]/15 ${variant === 'paper' ? 'border border-[#aaa79e] bg-white/35 text-[#222720] placeholder:text-[#777b73]' : 'border border-white/[0.08] bg-white/[0.03] text-white placeholder:text-slate-500 focus:bg-white/[0.05]'}`}
               />
             </form>
 
@@ -226,7 +226,7 @@ function isActive(pathname: string | null, key: NavigationLink['key']): boolean 
     );
   }
   if (key === 'servers') {
-    return pathname === '/servers' || pathname.startsWith('/servers/');
+    return pathname === '/' || pathname === '/servers' || pathname.startsWith('/servers/');
   }
   if (key === 'recent') {
     return pathname === '/recent';

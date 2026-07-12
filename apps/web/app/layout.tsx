@@ -1,7 +1,7 @@
 import './globals.css';
 
 import type { ReactNode } from 'react';
-import { Inter, Noto_Sans_KR, JetBrains_Mono } from 'next/font/google';
+import { Inter, Noto_Sans_KR, Noto_Serif_KR, JetBrains_Mono } from 'next/font/google';
 import { AuthProvider } from '../components/providers/auth-context';
 import { QueryClientProvider } from '../components/providers/query-client-provider';
 import { AppShell } from '../components/layout/app-shell';
@@ -32,6 +32,12 @@ const bodyFont = Noto_Sans_KR({
   variable: '--font-body',
 });
 
+const editorialFont = Noto_Serif_KR({
+  subsets: ['latin'],
+  weight: ['600', '700', '900'],
+  variable: '--font-editorial',
+});
+
 const monoFont = JetBrains_Mono({
   subsets: ['latin'],
   weight: ['400', '600'],
@@ -42,7 +48,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko">
       <body
-        className={`${displayFont.variable} ${bodyFont.variable} ${monoFont.variable} min-h-screen bg-surface-100 font-sans text-slate-100 antialiased`}
+        className={`${displayFont.variable} ${bodyFont.variable} ${editorialFont.variable} ${monoFont.variable} min-h-screen bg-surface-100 font-sans text-slate-100 antialiased`}
       >
         <QueryClientProvider>
           <AuthProvider>

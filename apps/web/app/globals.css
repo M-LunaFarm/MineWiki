@@ -172,6 +172,77 @@
     @apply h-10 w-full rounded-md border border-white/10 bg-[#151a21] px-3 text-sm font-normal text-white outline-none transition focus:border-emerald-300/50 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
+  .paper-directory {
+    background-color: #f4f2ec;
+    background-image: url('/images/paper-newsprint-texture.png');
+    background-repeat: repeat;
+    background-size: 1024px 1024px;
+  }
+
+  .paper-control {
+    @apply rounded-md border bg-white/25 text-sm outline-none transition;
+    border-color: #aaa79e;
+    color: #2a3029;
+  }
+  .paper-control::placeholder {
+    color: #7a7e76;
+  }
+  .paper-control:focus {
+    border-color: #247253;
+    box-shadow: 0 0 0 2px rgba(36, 114, 83, 0.13);
+  }
+
+  .paper-filter {
+    background: rgba(246, 244, 238, 0.55);
+  }
+
+  .paper-server-row {
+    color: #262b25;
+  }
+
+  .paper-directory .paper-server-row a:not([class*='bg-[#13ec80]']) {
+    color: #20251f;
+  }
+
+  .paper-directory .paper-server-row [class*='bg-[#090d12]'],
+  .paper-directory .paper-server-row [class*='bg-[#111821]'] {
+    background: rgba(255, 255, 255, 0.22);
+  }
+
+  .paper-directory .paper-server-row [class*='border-white'],
+  .paper-directory .paper-server-row [class*='border-gray'] {
+    border-color: rgba(115, 112, 103, 0.45);
+  }
+
+  .paper-directory .paper-server-row [class*='text-white'] {
+    color: #20251f;
+  }
+
+  .paper-directory .paper-server-row [class*='text-gray-4'],
+  .paper-directory .paper-server-row [class*='text-gray-5'] {
+    color: #676c64;
+  }
+
+  .paper-directory .paper-server-row [class*='text-gray-3'] {
+    color: #454b44;
+  }
+
+  .paper-directory .paper-server-row [class*='text-red-2'] {
+    color: #a33f3b;
+  }
+
+  .paper-directory .paper-server-row [class*='text-amber-2'],
+  .paper-directory .paper-server-row [class*='text-amber-1'] {
+    color: #806018;
+  }
+
+  .paper-mobile-filter {
+    background-color: #f4f2ec;
+    background-image: url('/images/paper-newsprint-texture.png');
+    background-size: 1024px 1024px;
+    color: #252925;
+  }
+
   .wiki-rendered .doc-status {
     @apply my-0 grid gap-1 rounded-xl border border-amber-300/20 border-l-4 border-l-amber-300 bg-amber-300/[0.06] px-4 py-3;
   }

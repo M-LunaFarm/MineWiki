@@ -4,9 +4,10 @@ import { ExternalLink } from 'lucide-react';
 const DISCORD_INVITE_URL = 'https://discord.gg/HPh2xYjSVH';
 const TWITTER_URL = 'https://x.com';
 
-export function SiteFooter() {
+export function SiteFooter({ variant = 'dark' }: { readonly variant?: 'dark' | 'paper' }) {
+  const paper = variant === 'paper';
   return (
-    <footer className="border-t border-[#272c33] bg-[#0b0d10] pb-8 pt-12 text-[#a9b0ba]">
+    <footer className={`border-t pb-8 pt-12 ${paper ? 'border-[#aaa79e] bg-[#e8e5dc]/85 text-[#5d635c]' : 'border-[#272c33] bg-[#0b0d10] text-[#a9b0ba]'}`}>
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mb-8 grid grid-cols-1 gap-8 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
@@ -14,7 +15,7 @@ export function SiteFooter() {
               <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-400/30 bg-emerald-400 text-xs font-bold text-[#0b0d10]">
                 M
               </div>
-              <span className="text-lg font-bold text-white">
+              <span className={`text-lg font-bold ${paper ? 'text-[#252925]' : 'text-white'}`}>
                 MineWiki<span className="text-[#13ec80]">.kr</span>
               </span>
             </Link>
@@ -23,10 +24,10 @@ export function SiteFooter() {
             </p>
           </div>
 
-          <FooterCol title="탐색" links={['서버 목록', 'Java 서버', 'Bedrock 서버', '신규 서버']} />
-          <FooterCol title="지원" links={['고객센터', '운영 문의', '서버 신고', '계정 도움말']} />
+          <FooterCol title="탐색" links={['서버 목록', 'Java 서버', 'Bedrock 서버', '신규 서버']} paper={paper} />
+          <FooterCol title="지원" links={['고객센터', '운영 문의', '서버 신고', '계정 도움말']} paper={paper} />
           <div>
-            <h4 className="mb-4 text-sm font-bold text-white">정책</h4>
+            <h4 className={`mb-4 text-sm font-bold ${paper ? 'text-[#252925]' : 'text-white'}`}>정책</h4>
             <ul className="space-y-2 text-sm">
               <li>
                 <Link className="transition-colors hover:text-[#13ec80]" href="/policies/terms">
@@ -52,7 +53,7 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <div className="flex flex-col items-start justify-between gap-4 border-t border-[#272c33] pt-8 md:flex-row md:items-center">
+        <div className={`flex flex-col items-start justify-between gap-4 border-t pt-8 md:flex-row md:items-center ${paper ? 'border-[#aaa79e]' : 'border-[#272c33]'}`}>
           <p className="text-xs">© 2026 MineWiki · minewiki.kr · support@minewiki.kr · Mojang Studios와 공식 제휴 관계가 없습니다.</p>
           <div className="flex gap-4 text-sm">
             <a
@@ -80,7 +81,7 @@ export function SiteFooter() {
   );
 }
 
-function FooterCol({ title, links }: { readonly title: string; readonly links: string[] }) {
+function FooterCol({ title, links, paper = false }: { readonly title: string; readonly links: string[]; readonly paper?: boolean }) {
   const resolveLink = (label: string): { href: string; external: boolean } => {
     if (title === '탐색') {
       if (label === '서버 목록') {
@@ -109,7 +110,7 @@ function FooterCol({ title, links }: { readonly title: string; readonly links: s
 
   return (
     <div>
-      <h4 className="mb-4 text-sm font-bold text-white">{title}</h4>
+      <h4 className={`mb-4 text-sm font-bold ${paper ? 'text-[#252925]' : 'text-white'}`}>{title}</h4>
       <ul className="space-y-2 text-sm">
         {links.map((label) => {
           const link = resolveLink(label);

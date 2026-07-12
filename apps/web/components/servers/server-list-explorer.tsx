@@ -2,15 +2,12 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ServerRankingResponse, ServerSummary } from '@minewiki/schemas';
 import {
   Activity,
   BadgeCheck,
-  ChevronLeft,
-  ChevronRight,
   Copy,
-  ExternalLink,
   ListFilter,
   Search,
   SearchX,
@@ -24,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { SiteHeader } from '../layout/site-header';
+import { SiteFooter } from '../layout/site-footer';
 import {
   getServerPreviewFallbackClass,
   getServerPreviewInitial,
@@ -111,6 +109,7 @@ export function ServerListExplorer({
   const [retryToken, setRetryToken] = useState(0);
   const didMountRef = useRef(false);
   const didFetchRef = useRef(false);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -143,18 +142,12 @@ export function ServerListExplorer({
   const totalPages = Math.max(1, ranking.totalPages);
   const onlineCount = ranking.summary.online;
   const verifiedCount = ranking.summary.verified;
-  const totalVotes24h = ranking.summary.votes24h;
 
   useEffect(() => {
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
     }
   }, [currentPage, totalPages]);
-
-  const pageTokens = useMemo(
-    () => buildPageTokens(totalPages, currentPage),
-    [totalPages, currentPage],
-  );
 
   const resetFilters = () => {
     setSearchQuery('');
@@ -188,7 +181,6 @@ export function ServerListExplorer({
       if (online === 'online') params.set('online', 'true');
       if (selectedGenres[0]) params.set('tag', selectedGenres[0]);
       if (sort !== 'votes24h_desc') params.set('sort', sort);
-      if (currentPage > 1) params.set('page', String(currentPage));
       const query = params.toString();
       const pathname = window.location.pathname === '/' ? '/' : '/servers';
       window.history.replaceState(null, '', query ? `${pathname}?${query}` : pathname);
@@ -204,7 +196,14 @@ export function ServerListExplorer({
           pageSize: PAGE_SIZE,
         });
         if (controller.signal.aborted) return;
-        setRanking(nextRanking);
+        setRanking((current) => {
+          if (currentPage === 1) return nextRanking;
+          const knownIds = new Set(current.items.map((item) => item.id));
+          return {
+            ...nextRanking,
+            items: [...current.items, ...nextRanking.items.filter((item) => !knownIds.has(item.id))],
+          };
+        });
 
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -221,45 +220,27 @@ export function ServerListExplorer({
     };
   }, [currentPage, edition, grade, initialLoadError, online, retryToken, searchQuery, selectedGenres, sort]);
 
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || loading || loadError || currentPage >= totalPages) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setCurrentPage((page) => Math.min(totalPages, page + 1));
+        }
+      },
+      { rootMargin: '320px 0px' },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [currentPage, loadError, loading, totalPages]);
+
   return (
-    <div className="min-h-screen bg-[#090d12] text-gray-100 antialiased">
-      <SiteHeader />
+    <div className="paper-directory min-h-screen text-[#252925] antialiased">
+      <SiteHeader variant="paper" />
 
       <main className="mx-auto flex w-full max-w-[1440px] flex-col px-4 pb-10 pt-24 sm:px-6 lg:px-8">
-        <header className="mb-5 border-b border-white/10 pb-5">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#13ec80]">
-                Minecraft Server Directory
-              </p>
-              <h1 className="mt-2 text-2xl font-bold text-white sm:text-3xl">
-                한국 마인크래프트 서버 목록
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-400">
-                접속 상태, 투표, 리뷰, 에디션을 한 화면에서 비교하세요.
-              </p>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-[repeat(3,minmax(116px,1fr))_auto] lg:min-w-[560px]">
-              <HeaderStat label="등록" value={ranking.total.toLocaleString('ko-KR')} />
-              <HeaderStat label="온라인" value={onlineCount.toLocaleString('ko-KR')} tone="cyan" />
-              <HeaderStat
-                label="24h 투표"
-                value={totalVotes24h.toLocaleString('ko-KR')}
-                tone="emerald"
-              />
-              <Link
-                href="/servers/register"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-[#13ec80] px-4 text-sm font-bold text-[#07100b] transition-colors hover:bg-[#38f09b]"
-              >
-                <ExternalLink className="h-4 w-4" />
-                서버 등록하기
-              </Link>
-            </div>
-          </div>
-        </header>
-
-        <section className="sticky top-16 z-40 -mx-4 mb-5 border-b border-white/10 bg-[#090d12]/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <section className="sticky top-16 z-40 -mx-4 mb-0 border-y border-[#aaa79e]/60 bg-[#f4f2ec]/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
           <div className="mx-auto flex max-w-[1440px] flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
               <label className="relative w-full lg:w-[420px]">
@@ -269,11 +250,11 @@ export function ServerListExplorer({
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="서버명, 주소, 태그 검색"
-                  className="h-10 w-full rounded-lg border border-white/10 bg-[#111821] pl-10 pr-3 text-sm text-white placeholder:text-gray-500 focus:border-[#13ec80] focus:outline-none focus:ring-2 focus:ring-[#13ec80]/15"
+                  className="paper-control h-10 w-full pl-10 pr-3"
                 />
               </label>
 
-              <div className="hidden w-full items-center rounded-lg border border-gray-700 bg-[#1A1A1E] p-1 md:flex md:w-auto">
+              <div className="hidden w-full items-center rounded-md border border-[#aaa79e] bg-white/25 p-1 md:flex md:w-auto">
                 <FilterToggleButton
                   active={edition === 'all'}
                   onClick={() => setEdition('all')}
@@ -294,7 +275,7 @@ export function ServerListExplorer({
               <select
                 value={grade}
                 onChange={(event) => setGrade(event.target.value as GradeFilter)}
-                className="hidden h-10 min-w-[140px] cursor-pointer rounded-lg border border-gray-700 bg-[#1A1A1E] px-3 text-sm text-gray-200 focus:border-[#13ec80] focus:outline-none md:block"
+                className="paper-control hidden h-10 min-w-[140px] cursor-pointer px-3 md:block"
               >
                 <option value="all">모든 상태</option>
                 <option value="Verified">Verified</option>
@@ -304,7 +285,7 @@ export function ServerListExplorer({
               <button
                 type="button"
                 onClick={() => setMobileFilterOpen(true)}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-gray-700 bg-[#111821] px-3 text-sm font-medium text-gray-200 md:hidden"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-[#8f938a] bg-white/25 px-3 text-sm font-medium text-[#343a34] md:hidden"
               >
                 <SlidersHorizontal className="h-4 w-4" />
                 필터
@@ -312,10 +293,10 @@ export function ServerListExplorer({
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between xl:w-auto">
-              <div className="flex items-center gap-3 text-sm text-gray-400">
+              <div className="flex items-center gap-3 text-sm text-[#676c64]">
                 <span>
                   결과{' '}
-                  <strong className="text-white">
+                  <strong className="text-[#20231f]">
                     {ranking.total.toLocaleString('ko-KR')}
                   </strong>
                   개
@@ -342,7 +323,7 @@ export function ServerListExplorer({
                 <select
                   value={sort}
                   onChange={(event) => setSort(event.target.value as SortFilter)}
-                  className="h-10 w-full cursor-pointer appearance-none rounded-lg border border-gray-700 bg-[#111821] px-3 pr-8 text-sm font-medium text-gray-300 focus:border-[#13ec80] focus:outline-none"
+                  className="paper-control h-10 w-full cursor-pointer appearance-none px-3 pr-8 font-medium"
                 >
                   <option value="votes24h_desc">투표순</option>
                   <option value="votesMonthly_desc">월간 투표순</option>
@@ -359,9 +340,9 @@ export function ServerListExplorer({
           </div>
         </section>
 
-        <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="hidden self-start rounded-xl border border-white/10 bg-[#111821] p-4 lg:sticky lg:top-36 lg:block">
-            <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
+        <div className="grid lg:grid-cols-[300px_minmax(0,1fr)]">
+          <aside className="paper-filter hidden self-start border-r border-[#aaa79e]/60 p-5 lg:sticky lg:top-[121px] lg:block">
+            <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-[#262b25]">
               <ListFilter className="h-4 w-4 text-[#13ec80]" />
               탐색 필터
             </div>
@@ -430,7 +411,7 @@ export function ServerListExplorer({
                         className={`rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
                           active
                             ? 'border-[#13ec80]/40 bg-[#13ec80]/15 text-[#13ec80]'
-                            : 'border-white/10 bg-[#090d12] text-gray-300 hover:border-white/25'
+                            : 'border-[#aaa79e] bg-white/20 text-[#4e544d] hover:border-[#6f746c]'
                         }`}
                       >
                         {genre.label}
@@ -483,12 +464,12 @@ export function ServerListExplorer({
                 </button>
               </section>
             ) : (
-              <section className="mb-12 grid gap-3">
+              <section className="mb-12 divide-y divide-[#aaa79e]/55 border-b border-[#aaa79e]/55">
                 {servers.map((server, index) => (
                   <ServerCard
                     key={server.id}
                     server={server}
-                    rank={server.rank?.current ?? (currentPage - 1) * PAGE_SIZE + index + 1}
+                    rank={index + 1}
                   />
                 ))}
               </section>
@@ -496,54 +477,23 @@ export function ServerListExplorer({
           </div>
         </div>
 
-        {totalPages > 1 ? (
-          <nav className="mt-auto flex items-center justify-center gap-2 pb-12">
-            <button
-              type="button"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage((value) => Math.max(1, value - 1))}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-800 text-gray-500 transition-colors hover:bg-[#1A1A1E] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label="이전 페이지"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-
-            {pageTokens.map((token, index) =>
-              token === 'ellipsis' ? (
-                <span
-                  key={`ellipsis-${index}`}
-                  className="inline-flex h-10 w-10 items-center justify-center text-gray-600"
-                >
-                  ...
-                </span>
-              ) : (
-                <button
-                  key={token}
-                  type="button"
-                  onClick={() => setCurrentPage(token)}
-                  className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border text-sm font-bold transition-colors ${
-                    token === currentPage
-                      ? 'border-[#13ec80]/40 bg-[#13ec80] text-[#101012]'
-                      : 'border-gray-800 text-gray-400 hover:bg-[#1A1A1E] hover:text-white'
-                  }`}
-                >
-                  {token}
-                </button>
-              ),
-            )}
-
-            <button
-              type="button"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage((value) => Math.min(totalPages, value + 1))}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-800 text-gray-400 transition-colors hover:bg-[#1A1A1E] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label="다음 페이지"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </nav>
-        ) : null}
+        <div ref={loadMoreRef} className="flex min-h-20 items-center justify-center pb-8" aria-live="polite">
+          {loading && currentPage > 1 ? (
+            <div className="flex items-center gap-3 text-sm text-[#5e655d]">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-[#247253]" />
+              다음 서버를 펼치는 중
+            </div>
+          ) : currentPage < totalPages ? (
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[#777b73]">
+              아래로 스크롤하면 더 불러옵니다
+            </span>
+          ) : servers.length > 0 ? (
+            <span className="text-xs text-[#777b73]">모든 서버를 확인했습니다.</span>
+          ) : null}
+        </div>
       </main>
+
+      <SiteFooter variant="paper" />
 
       {mobileFilterOpen ? (
         <div className="fixed inset-0 z-[60] md:hidden">
@@ -553,13 +503,13 @@ export function ServerListExplorer({
             onClick={() => setMobileFilterOpen(false)}
             aria-label="필터 닫기"
           />
-          <aside className="absolute right-0 top-0 h-full w-[88%] max-w-sm overflow-y-auto border-l border-gray-700 bg-[#121212] p-5">
+          <aside className="paper-mobile-filter absolute right-0 top-0 h-full w-[88%] max-w-sm overflow-y-auto border-l border-[#aaa79e] p-5">
             <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-base font-semibold text-white">필터</h2>
+              <h2 className="text-base font-semibold text-[#20251f]">필터</h2>
               <button
                 type="button"
                 onClick={() => setMobileFilterOpen(false)}
-                className="rounded-lg border border-gray-700 p-2 text-gray-300"
+                className="rounded-md border border-[#8f938a] p-2 text-[#424841]"
                 aria-label="닫기"
               >
                 <X className="h-4 w-4" />
@@ -597,7 +547,7 @@ export function ServerListExplorer({
                 <select
                   value={grade}
                   onChange={(event) => setGrade(event.target.value as GradeFilter)}
-                  className="h-10 w-full rounded-lg border border-gray-700 bg-[#1A1A1E] px-3 text-sm text-gray-200 focus:border-[#13ec80] focus:outline-none"
+                  className="paper-control h-10 w-full px-3"
                 >
                   <option value="all">모든 상태</option>
                   <option value="Verified">Verified</option>
@@ -630,7 +580,7 @@ export function ServerListExplorer({
                 <select
                   value={sort}
                   onChange={(event) => setSort(event.target.value as SortFilter)}
-                  className="h-10 w-full rounded-lg border border-gray-700 bg-[#1A1A1E] px-3 text-sm text-gray-200 focus:border-[#13ec80] focus:outline-none"
+                  className="paper-control h-10 w-full px-3"
                 >
                   <option value="votes24h_desc">투표순</option>
                   <option value="votesMonthly_desc">월간 투표순</option>
@@ -656,7 +606,7 @@ export function ServerListExplorer({
                         className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
                           active
                             ? 'border-[#13ec80]/40 bg-[#13ec80]/15 text-[#13ec80]'
-                            : 'border-gray-700 bg-[#1A1A1E] text-gray-300'
+                            : 'border-[#aaa79e] bg-white/20 text-[#4e544d]'
                         }`}
                       >
                         {genre.label}
@@ -667,12 +617,12 @@ export function ServerListExplorer({
               </div>
             </div>
 
-            <div className="fixed bottom-0 right-0 w-[88%] max-w-sm border-t border-gray-700 bg-[#121212] p-4">
+            <div className="fixed bottom-0 right-0 w-[88%] max-w-sm border-t border-[#aaa79e] bg-[#efede6] p-4">
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={resetFilters}
-                  className="flex-1 rounded-lg border border-gray-700 bg-[#1A1A1E] py-2.5 text-sm font-semibold text-gray-200"
+                  className="flex-1 rounded-lg border border-[#8f938a] bg-white/25 py-2.5 text-sm font-semibold text-[#343a34]"
                 >
                   초기화
                 </button>
@@ -692,26 +642,6 @@ export function ServerListExplorer({
   );
 }
 
-function HeaderStat({
-  label,
-  value,
-  tone = 'slate',
-}: {
-  readonly label: string;
-  readonly value: string;
-  readonly tone?: 'slate' | 'cyan' | 'emerald';
-}) {
-  const valueClass =
-    tone === 'cyan' ? 'text-cyan-300' : tone === 'emerald' ? 'text-[#13ec80]' : 'text-white';
-
-  return (
-    <div className="rounded-lg border border-white/10 bg-[#111821] px-3 py-2">
-      <p className="text-[11px] font-medium text-gray-500">{label}</p>
-      <p className={`mt-0.5 text-lg font-bold ${valueClass}`}>{value}</p>
-    </div>
-  );
-}
-
 function FilterGroup({
   title,
   children,
@@ -721,7 +651,7 @@ function FilterGroup({
 }) {
   return (
     <section>
-      <h2 className="mb-2 text-xs font-semibold uppercase text-gray-500">{title}</h2>
+      <h2 className="mb-2 text-xs font-semibold uppercase text-[#666b63]">{title}</h2>
       {children}
     </section>
   );
@@ -729,9 +659,9 @@ function FilterGroup({
 
 function SideStat({ label, value }: { readonly label: string; readonly value: string }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-[#090d12] px-3 py-2">
-      <p className="text-[11px] text-gray-500">{label}</p>
-      <p className="mt-1 text-sm font-bold text-white">{value}</p>
+    <div className="rounded-md border border-[#b7b3a9] bg-white/20 px-3 py-2">
+      <p className="text-[11px] text-[#72766e]">{label}</p>
+      <p className="mt-1 text-sm font-bold text-[#242824]">{value}</p>
     </div>
   );
 }
@@ -757,11 +687,11 @@ function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly
   };
 
   return (
-    <article className="group rounded-xl border border-white/10 bg-[#111821] p-3 transition-colors hover:border-[#13ec80]/35 hover:bg-[#131d28]">
+    <article className="paper-server-row group px-4 py-4 transition-colors hover:bg-[#e3eadf]/55">
       <div className="grid gap-3 lg:grid-cols-[42px_112px_minmax(0,1fr)_340px] lg:items-center">
         <div className="hidden text-center text-sm font-bold text-gray-500 lg:block">{rank}</div>
 
-        <div className="relative h-20 overflow-hidden rounded-lg border border-white/10 bg-[#1A1A1E] sm:h-20 lg:h-[74px]">
+        <div className="relative h-20 overflow-hidden border border-[#b7b3a9] bg-[#e8e5de] sm:h-20 lg:h-[74px]">
           {server.bannerUrl ? (
             <Image
               alt={`${server.name} 배너`}
@@ -921,12 +851,12 @@ function MetricCell({
   readonly value: string;
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-white/10 bg-[#090d12] px-2 py-2">
-      <span className="flex items-center gap-1 text-[11px] text-gray-500">
+    <div className="min-w-0 border-l border-[#b7b3a9]/70 px-3 py-1 first:border-l-0">
+      <span className="flex items-center gap-1 text-[11px] text-[#74786f]">
         {icon}
         {label}
       </span>
-      <span className="mt-0.5 block truncate text-sm font-semibold text-white">{value}</span>
+      <span className="mt-1 block truncate text-sm font-semibold text-[#242824]">{value}</span>
     </div>
   );
 }
@@ -946,29 +876,13 @@ function FilterToggleButton({
       onClick={onClick}
       className={`inline-flex h-8 items-center justify-center rounded-md border px-3 text-xs font-medium transition-colors ${
         active
-          ? 'border-[#13ec80]/40 bg-[#13ec80]/15 text-[#13ec80]'
-          : 'border-transparent bg-transparent text-gray-400 hover:border-gray-600 hover:text-white'
+          ? 'border-[#2b7959]/60 bg-[#dce9dd]/80 text-[#1f694c]'
+          : 'border-transparent bg-transparent text-[#555b54] hover:border-[#aaa79e] hover:text-[#20251f]'
       }`}
     >
       {label}
     </button>
   );
-}
-
-function buildPageTokens(totalPages: number, currentPage: number): Array<number | 'ellipsis'> {
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, index) => index + 1);
-  }
-
-  if (currentPage <= 3) {
-    return [1, 2, 3, 4, 'ellipsis', totalPages];
-  }
-
-  if (currentPage >= totalPages - 2) {
-    return [1, 'ellipsis', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
-  }
-
-  return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages];
 }
 
 function isGenreKey(value: string): value is GenreKey {
