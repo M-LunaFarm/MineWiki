@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { PolicyViewer, type PolicyVersion } from '../../../components/policies/policy-viewer';
 import { createPageMetadata } from '../../../lib/metadata';
+import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
 
 export const metadata: Metadata = createPageMetadata({
   title: '개인정보 처리방침',
@@ -11,9 +12,9 @@ export const metadata: Metadata = createPageMetadata({
 
 const versions: PolicyVersion[] = [
   {
-    id: '2026-07-11',
-    label: '[2026.07.11 시행] 개인정보 처리방침 (v1.1)',
-    effectiveDate: '2026-07-11',
+    id: CURRENT_POLICY_VERSIONS.privacy.effectiveDate,
+    label: `[2026.07.11 시행] 개인정보 처리방침 (${CURRENT_POLICY_VERSIONS.privacy.version})`,
+    effectiveDate: CURRENT_POLICY_VERSIONS.privacy.effectiveDate,
     summary:
       '버전 v1.1 | 최종 개정일 2026.07.11. 공식 서비스 정보, 회원가입 동의 기록, 보관기간 및 권리행사 채널을 명시한 개인정보 처리방침입니다.',
     changeNotes: [

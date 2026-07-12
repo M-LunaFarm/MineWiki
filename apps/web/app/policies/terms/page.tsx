@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { PolicyViewer, type PolicyVersion } from '../../../components/policies/policy-viewer';
 import { createPageMetadata } from '../../../lib/metadata';
+import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
 
 export const metadata: Metadata = createPageMetadata({
   title: '통합 이용약관',
@@ -11,9 +12,9 @@ export const metadata: Metadata = createPageMetadata({
 
 const versions: PolicyVersion[] = [
   {
-    id: '2026-07-11',
-    label: '[2026.07.11 시행] 통합 이용약관 (v1.1)',
-    effectiveDate: '2026-07-11',
+    id: CURRENT_POLICY_VERSIONS.terms.effectiveDate,
+    label: `[2026.07.11 시행] 통합 이용약관 (${CURRENT_POLICY_VERSIONS.terms.version})`,
+    effectiveDate: CURRENT_POLICY_VERSIONS.terms.effectiveDate,
     summary:
       '버전 v1.1 | 최종 개정일 2026.07.11. MineWiki 공식 서비스 정보, 서버 랭킹 기준, 가입 동의 기록 및 문의 채널을 명확히 한 통합 약관입니다.',
     changeNotes: [

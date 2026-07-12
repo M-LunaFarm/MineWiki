@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, FileText, LifeBuoy, Search } from 'lucide-react';
+import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
 
 type PolicyCategory = 'all' | 'terms' | 'privacy' | 'operations' | 'voting';
 type PolicyStatus = 'active' | 'upcoming';
@@ -35,9 +36,10 @@ const DOCS: PolicyDoc[] = [
     title: '통합 이용약관',
     summary: '서비스 이용 조건, 권리·의무, 제재 및 분쟁 해결 절차를 규정합니다.',
     category: 'terms',
-    version: 'v1.0',
+    version: CURRENT_POLICY_VERSIONS.terms.version,
     status: 'active',
-    updatedAt: '2026-02-17',
+    updatedAt: CURRENT_POLICY_VERSIONS.terms.effectiveDate,
+    effectiveAt: CURRENT_POLICY_VERSIONS.terms.effectiveDate,
     href: '/policies/terms',
     importance: 100,
   },
@@ -46,9 +48,10 @@ const DOCS: PolicyDoc[] = [
     title: '개인정보 처리방침',
     summary: '최소 수집, 보관·파기, 위탁 및 정보주체 권리 행사 절차를 안내합니다.',
     category: 'privacy',
-    version: 'v1.0',
+    version: CURRENT_POLICY_VERSIONS.privacy.version,
     status: 'active',
-    updatedAt: '2026-02-17',
+    updatedAt: CURRENT_POLICY_VERSIONS.privacy.effectiveDate,
+    effectiveAt: CURRENT_POLICY_VERSIONS.privacy.effectiveDate,
     href: '/policies/privacy',
     importance: 95,
   },

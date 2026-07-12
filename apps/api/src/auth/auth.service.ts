@@ -8,6 +8,7 @@
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
+import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
 import { hash, verify, Algorithm } from '@node-rs/argon2';
 import { createHash, randomBytes } from 'node:crypto';
 import type { AuthProvider } from './account-separation.service';
@@ -132,8 +133,8 @@ const DUMMY_PASSWORD_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$MjQUBk0H7jTj+SgNScFhCA$LHY2v6BYTGSHHMuOrWQyGqAbW3Xjzpa0jGwLN1CbdA0';
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 30; // 30 minutes
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30; // 30 minutes
-const TERMS_POLICY_VERSION = '2026-07-11-v1.1';
-const PRIVACY_POLICY_VERSION = '2026-07-11-v1.1';
+const TERMS_POLICY_VERSION = CURRENT_POLICY_VERSIONS.terms.consentVersion;
+const PRIVACY_POLICY_VERSION = CURRENT_POLICY_VERSIONS.privacy.consentVersion;
 
 @Injectable()
 export class AuthService {

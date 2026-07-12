@@ -1,5 +1,18 @@
 import { z } from 'zod';
 
+export const CURRENT_POLICY_VERSIONS = {
+  terms: {
+    version: 'v1.1',
+    consentVersion: '2026-07-11-v1.1',
+    effectiveDate: '2026-07-11',
+  },
+  privacy: {
+    version: 'v1.1',
+    consentVersion: '2026-07-11-v1.1',
+    effectiveDate: '2026-07-11',
+  },
+} as const;
+
 export const authProviderSchema = z.enum(['email', 'discord', 'naver']);
 export const oauthProviderSchema = z.enum(['discord', 'naver']);
 
