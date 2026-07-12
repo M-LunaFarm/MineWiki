@@ -51,6 +51,15 @@ if (!hasDatabase) {
         }
       });
       accountId = account.id;
+      await prisma.minecraftIdentity.create({
+        data: {
+          accountId: account.id,
+          uuid: minecraftUuid,
+          playerName: 'Tester',
+          msOwned: true,
+          lastVerifiedAt: new Date()
+        }
+      });
 
       const session = await service.createDiscordSession({
         guildId,

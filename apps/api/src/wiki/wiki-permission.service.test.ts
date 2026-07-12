@@ -241,6 +241,70 @@ test('blocked wiki profile cannot edit open page', async () => {
   assert.equal(decision.allowed, false);
 });
 
+test('normal editor cannot change an admin-only section lock', async () => {
+  const service = createService();
+  const allowed = await service.canEditSectionLock({
+    actor: actor({ profileId: 200n }),
+    page: page({ createdBy: 100n }),
+    lock: { lockType: 'admin_only' }
+  });
+
+  assert.equal(allowed, false);
+});
+
+test('elevated editor can change a locked section', async () => {
+  const service = createService();
+  const allowed = await service.canEditSectionLock({
+    actor: actor({ profileId: 200n, isElevated: true }),
+    page: page({ createdBy: 100n }),
+    lock: { lockType: 'locked' }
+  });
+
+  assert.equal(allowed, true);
+});
+
+test('trusted section lock accepts trusted group and rejects ordinary member', async () => {
+  const service = createService();
+  const trusted = await service.canEditSectionLock({
+    actor: actor({ profileId: 200n, groups: ['trusted'] }),
+    page: page(),
+    lock: { lockType: 'trusted_only' }
+  });
+  const member = await service.canEditSectionLock({
+    actor: actor({ profileId: 200n, groups: ['member'] }),
+    page: page(),
+    lock: { lockType: 'trusted_only' }
+  });
+
+  assert.equal(trusted, true);
+  assert.equal(member, false);
+});
+
+test('section owner group can edit its locked section', async () => {
+  const service = createService();
+  const allowed = await service.canEditSectionLock({
+    actor: actor({ profileId: 200n, groups: ['documentation'] }),
+    page: page(),
+    lock: { lockType: 'admin_only', ownerGroup: 'documentation' }
+  });
+
+  assert.equal(allowed, true);
+});
+
+test('owner-only section accepts linked server owner', async () => {
+  const service = createService({
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n },
+    server: { ownerAccountId: 'account-1' }
+  });
+  const allowed = await service.canEditSectionLock({
+    actor: actor({ profileId: 200n }),
+    page: page({ createdBy: 300n }),
+    lock: { lockType: 'owner_only' }
+  });
+
+  assert.equal(allowed, true);
+});
+
 test('active user can create in a basic wiki space', async () => {
   const service = createService();
   const decision = await service.canCreatePage({

@@ -55,6 +55,11 @@ export interface WikiPermissionDecision {
   readonly reason: string;
 }
 
+export interface WikiSectionLockPolicy {
+  readonly lockType: string;
+  readonly ownerGroup?: string | null;
+}
+
 const EDITOR_ROLES = new Set(['owner', 'manager', 'editor', 'maintainer', 'reviewer', 'trusted']);
 const OWNER_ROLES = new Set(['owner', 'manager', 'maintainer']);
 const MOD_REVIEW_ROLES = new Set(['owner', 'manager', 'maintainer', 'reviewer']);
@@ -382,6 +387,33 @@ export class WikiPermissionService {
       return acl.allowed ? allow(acl.reason) : deny(acl.reason);
     }
     return allow('readable_action');
+  }
+
+  async canEditSectionLock(input: {
+    readonly actor: WikiPermissionActor;
+    readonly page: WikiPermissionPage;
+    readonly lock: WikiSectionLockPolicy;
+    readonly store?: WikiPermissionStore;
+  }): Promise<boolean> {
+    const store = input.store ?? this.prisma;
+    const { actor, page, lock } = input;
+    if (this.isAdminActor(actor) ||
+        actor.permissions?.includes('page.protect') === true ||
+        actor.permissions?.includes('report.handle') === true) {
+      return true;
+    }
+    if (lock.ownerGroup && actor.groups?.includes(lock.ownerGroup)) {
+      return true;
+    }
+    if (lock.lockType === 'trusted_only') {
+      return actor.groups?.some((group) =>
+        ['trusted', 'moderator', 'admin', 'developer'].includes(group)) === true;
+    }
+    if (lock.lockType === 'owner_only') {
+      return this.canManagePageArea(store, actor, page);
+    }
+    // admin_only, locked, and unknown legacy values fail closed.
+    return false;
   }
 
   private async canManagePageArea(

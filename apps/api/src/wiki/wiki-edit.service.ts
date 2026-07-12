@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional
 } from '@nestjs/common';
 import { hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
@@ -217,6 +219,13 @@ export class WikiEditService {
         throw new ConflictException('Base revision does not match current revision.');
       }
       const latest = await this.findLatestRevision(tx, page.id);
+      await this.assertLockedSectionsUnchanged({
+        actor: this.wikiPermissions.actorFromSession(session, actor),
+        page,
+        currentContent: latest?.contentRaw ?? '',
+        nextContent: contentRaw,
+        store: tx
+      });
       const revision = await this.createRevision(tx, {
         pageId: page.id,
         revisionNo: latest ? latest.revisionNo + 1 : 1,
@@ -332,6 +341,41 @@ export class WikiEditService {
       errors: parsed.errors,
       blockingErrors: parsed.blockingErrors
     };
+  }
+
+  private async assertLockedSectionsUnchanged(input: {
+    readonly actor: ReturnType<WikiPermissionService['actorFromSession']>;
+    readonly page: {
+      readonly id: bigint;
+      readonly namespaceId: number;
+      readonly spaceId: bigint;
+      readonly title: string;
+      readonly protectionLevel: string;
+      readonly status: string;
+      readonly createdBy: bigint | null;
+    };
+    readonly currentContent: string;
+    readonly nextContent: string;
+    readonly store: Prisma.TransactionClient;
+  }): Promise<void> {
+    const locks = await input.store.pageSectionLock.findMany({
+      where: { pageId: input.page.id },
+      orderBy: [{ id: 'asc' }]
+    });
+    for (const lock of locks) {
+      const allowed = await this.wikiPermissions.canEditSectionLock({
+        actor: input.actor,
+        page: input.page,
+        lock,
+        store: input.store
+      });
+      if (allowed) continue;
+      const before = sectionContentByAnchor(input.currentContent, lock.anchor);
+      const after = sectionContentByAnchor(input.nextContent, lock.anchor);
+      if (before !== after) {
+        throw new ForbiddenException(`Wiki section is locked: ${lock.heading}`);
+      }
+    }
   }
 
   private async findDefaultSpaceId(namespaceCode: string): Promise<bigint> {
@@ -527,4 +571,12 @@ export class WikiEditService {
     }
     return BigInt(value);
   }
+}
+
+function sectionContentByAnchor(content: string, anchor: string): string | null {
+  const parsed = parseMarkup(content);
+  const heading = parsed.headings.find((item) => item.anchor === anchor);
+  if (!heading) return null;
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  return lines.slice(heading.startLine - 1, heading.endLine).join('\n');
 }

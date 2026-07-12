@@ -93,6 +93,7 @@ if (!hasDatabase) {
     );
     const pages = await prisma.wikiPage.findMany({ where: pageFilter, select: { id: true } });
     for (const page of pages) {
+      await prisma.pageSectionLock.deleteMany({ where: { pageId: page.id } });
       await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: page.id } });
       await prisma.wikiPageRevision.deleteMany({ where: { pageId: page.id } });
       await prisma.wikiPage.delete({ where: { id: page.id } }).catch(() => {});
@@ -173,6 +174,59 @@ if (!hasDatabase) {
       );
       const diff = await edits.getRevisionDiff(created.revisionId, edited.revisionId);
       assert.ok(diff.hunks.some((hunk) => hunk.type === 'added' && hunk.line === '두 번째 줄'));
+    } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id,
+        pageId
+      });
+    }
+  });
+
+  test('section locks preserve protected content while allowing unrelated edits', async () => {
+    const fixture = await createFixture();
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        title: `잠금 ${fixture.unique}`,
+        spaceId: fixture.space.id.toString(),
+        contentRaw: '== Intro ==\n보호된 내용\n\n== Notes ==\n메모',
+        editSummary: '생성'
+      });
+      pageId = created.pageId;
+      await prisma.pageSectionLock.create({
+        data: {
+          pageId: BigInt(created.pageId),
+          anchor: 'Intro',
+          heading: 'Intro',
+          lockType: 'admin_only',
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+      });
+
+      const unrelated = await edits.updatePage(session(fixture.account.id), created.pageId, {
+        contentRaw: '== Intro ==\n보호된 내용\n\n== Notes ==\n수정된 메모',
+        baseRevisionId: created.revisionId
+      });
+      assert.equal(unrelated.revisionNo, 2);
+
+      await assert.rejects(
+        edits.updatePage(session(fixture.account.id), created.pageId, {
+          contentRaw: '== Intro ==\n변조된 내용\n\n== Notes ==\n수정된 메모',
+          baseRevisionId: unrelated.revisionId
+        }),
+        /Wiki section is locked: Intro/
+      );
+
+      const elevated = await edits.updatePage(session(fixture.account.id, true), created.pageId, {
+        contentRaw: '== Intro ==\n관리자 수정\n\n== Notes ==\n수정된 메모',
+        baseRevisionId: unrelated.revisionId
+      });
+      assert.equal(elevated.revisionNo, 3);
     } finally {
       await cleanupFixture({
         accountId: fixture.account.id,
