@@ -105,7 +105,10 @@ const apiProductionKeys: Array<keyof EnvSchema> = [
   'STORAGE_PUBLIC_BASE_URL',
   'SMTP_HOST',
   'SMTP_FROM',
-  'APP_ENCRYPTION_KEY'
+  'APP_ENCRYPTION_KEY',
+  'MICROSOFT_CLIENT_ID',
+  'MICROSOFT_CLIENT_SECRET',
+  'MICROSOFT_REDIRECT_URI'
 ];
 
 const botProductionKeys: Array<keyof EnvSchema> = [
@@ -221,12 +224,7 @@ function validateProductionEnvironment(env: EnvSchema): void {
       'NAVER OAuth',
       failures
     );
-    validateOptionalGroup(
-      env,
-      ['MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET', 'MICROSOFT_REDIRECT_URI'],
-      'Microsoft OAuth',
-      failures
-    );
+    validateMicrosoftRedirectUri(env, failures);
     validateOptionalGroup(env, ['SMTP_USER', 'SMTP_PASS'], 'SMTP authentication', failures);
   }
 
@@ -244,6 +242,16 @@ function validateProductionEnvironment(env: EnvSchema): void {
 
   if (failures.length > 0) {
     throw new Error(`Production configuration is incomplete: ${failures.join('; ')}`);
+  }
+}
+
+function validateMicrosoftRedirectUri(env: EnvSchema, failures: string[]): void {
+  if (isBlank(env.MICROSOFT_REDIRECT_URI) || isBlank(env.NEXT_PUBLIC_SITE_URL)) {
+    return;
+  }
+  const expected = new URL('/minecraft/callback', env.NEXT_PUBLIC_SITE_URL).toString();
+  if (env.MICROSOFT_REDIRECT_URI !== expected) {
+    failures.push(`MICROSOFT_REDIRECT_URI must be ${expected}`);
   }
 }
 

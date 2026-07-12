@@ -37,16 +37,13 @@ test('production config accepts complete environment', () => {
   assert.equal(config.get('APP_ENCRYPTION_KEY'), 'base64-production-key');
 });
 
-test('API production config allows optional OAuth integrations to be absent', () => {
+test('API production config allows optional login OAuth integrations to be absent', () => {
   const source = validProductionEnv();
   source.MINEWIKI_SERVICE = 'api';
   delete source.DISCORD_BOT_TOKEN;
   delete source.DISCORD_CLIENT_ID;
   delete source.DISCORD_CLIENT_SECRET;
   delete source.DISCORD_REDIRECT_URI;
-  delete source.MICROSOFT_CLIENT_ID;
-  delete source.MICROSOFT_CLIENT_SECRET;
-  delete source.MICROSOFT_REDIRECT_URI;
   delete source.NAVER_CLIENT_ID;
   delete source.NAVER_CLIENT_SECRET;
   delete source.NAVER_REDIRECT_URI;
@@ -55,21 +52,40 @@ test('API production config allows optional OAuth integrations to be absent', ()
   assert.equal(config.get('MINEWIKI_SERVICE'), 'api');
 });
 
-test('API production config accepts blank optional OAuth groups from the example file', () => {
+test('API production config accepts blank optional login OAuth groups', () => {
   const source = validProductionEnv();
   source.MINEWIKI_SERVICE = 'api';
   source.DISCORD_CLIENT_ID = '';
   source.DISCORD_CLIENT_SECRET = '';
   source.DISCORD_REDIRECT_URI = '';
-  source.MICROSOFT_CLIENT_ID = '';
-  source.MICROSOFT_CLIENT_SECRET = '';
-  source.MICROSOFT_REDIRECT_URI = '';
   source.NAVER_CLIENT_ID = '';
   source.NAVER_CLIENT_SECRET = '';
   source.NAVER_REDIRECT_URI = '';
 
   const config = new ConfigService(source);
   assert.equal(config.get('MINEWIKI_SERVICE'), 'api');
+});
+
+test('API production config requires Microsoft ownership verification', () => {
+  const source = validProductionEnv();
+  source.MINEWIKI_SERVICE = 'api';
+  delete source.MICROSOFT_CLIENT_SECRET;
+
+  assert.throws(
+    () => new ConfigService(source),
+    /MICROSOFT_CLIENT_SECRET is required/
+  );
+});
+
+test('API production config rejects Microsoft callback outside the official service', () => {
+  const source = validProductionEnv();
+  source.MINEWIKI_SERVICE = 'api';
+  source.MICROSOFT_REDIRECT_URI = 'https://lunaf.kr/minecraft/callback';
+
+  assert.throws(
+    () => new ConfigService(source),
+    /MICROSOFT_REDIRECT_URI must be https:\/\/minewiki\.kr\/minecraft\/callback/
+  );
 });
 
 test('API production config rejects a partial OAuth integration', () => {
