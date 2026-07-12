@@ -17,8 +17,11 @@ import {
 } from '@minewiki/schemas';
 import { normalizeApiBaseUrl } from './runtime-config';
 
-const baseUrl = normalizeApiBaseUrl();
 const REVIEW_TAG_SET = new Set(reviewTagSchema.options);
+
+function apiBaseUrl(): string {
+  return normalizeApiBaseUrl();
+}
 
 function isReviewTag(value?: string | null): value is ServerReview['tags'][number] {
   if (!value) {
@@ -55,7 +58,7 @@ interface ServerReviewOptions {
 export async function fetchServerSummaries(
   options: ServerSummaryOptions = {}
 ): Promise<ServerSummary[]> {
-  const api = createApiClient(baseUrl);
+  const api = createApiClient(apiBaseUrl());
   return api.listServers(options);
 }
 
@@ -69,7 +72,7 @@ export async function fetchServerRankings(
     }
   }
   const response = await fetch(
-    `${baseUrl}/v1/servers/rankings?${searchParams.toString()}`,
+    `${apiBaseUrl()}/v1/servers/rankings?${searchParams.toString()}`,
     { cache: 'no-store' }
   );
   if (!response.ok) {
@@ -80,7 +83,7 @@ export async function fetchServerRankings(
 }
 
 export async function fetchServerDetail(id: string): Promise<ServerDetail | null> {
-  const response = await fetch(`${baseUrl}/v1/servers/${id}`);
+  const response = await fetch(`${apiBaseUrl()}/v1/servers/${id}`);
   if (response.status === 404) {
     return null;
   }
@@ -93,7 +96,7 @@ export async function fetchServerDetail(id: string): Promise<ServerDetail | null
 }
 
 export async function fetchServerStats(id: string): Promise<ServerStats | null> {
-  const response = await fetch(`${baseUrl}/v1/servers/${id}/stats`);
+  const response = await fetch(`${apiBaseUrl()}/v1/servers/${id}/stats`);
   if (response.status === 404) {
     return null;
   }
@@ -123,7 +126,7 @@ export async function fetchServerReviews(
     searchParams.set('tag', options.tag);
   }
   const response = await fetch(
-    `${baseUrl}/v1/servers/${id}/reviews?${searchParams.toString()}`
+    `${apiBaseUrl()}/v1/servers/${id}/reviews?${searchParams.toString()}`
   );
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -145,7 +148,7 @@ export async function fetchServerReferrals(
     searchParams.set('search', options.search);
   }
   const response = await fetch(
-    `${baseUrl}/v1/servers/${id}/votes/recent?${searchParams.toString()}`,
+    `${apiBaseUrl()}/v1/servers/${id}/votes/recent?${searchParams.toString()}`,
     { credentials: 'include' }
   );
   if (!response.ok) {
@@ -165,7 +168,7 @@ export async function fetchServerUpdates(
     searchParams.set('limit', String(options.limit));
   }
   const response = await fetch(
-    `${baseUrl}/v1/servers/${id}/updates?${searchParams.toString()}`
+    `${apiBaseUrl()}/v1/servers/${id}/updates?${searchParams.toString()}`
   );
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

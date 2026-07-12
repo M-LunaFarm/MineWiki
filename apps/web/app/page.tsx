@@ -62,7 +62,7 @@ export default async function HomePage() {
               <p className="mt-5 max-w-lg text-[15px] leading-7 text-slate-300">
                 서버 랭킹과 위키 지식을 따로 찾지 마세요. 검증된 운영 정보부터 플레이에 필요한 가이드까지 하나의 탐색 흐름으로 연결합니다.
               </p>
-              <form action="/servers" className="mt-8 flex max-w-lg overflow-hidden rounded-xl border border-white/15 bg-black/45 p-1.5 shadow-2xl backdrop-blur-md focus-within:border-[#35e5b7]/60">
+              <form action="/search" className="mt-8 flex max-w-lg overflow-hidden rounded-xl border border-white/15 bg-black/45 p-1.5 shadow-2xl backdrop-blur-md focus-within:border-[#35e5b7]/60">
                 <Search className="ml-3 h-5 w-5 shrink-0 self-center text-slate-400" />
                 <input name="search" type="search" aria-label="서버와 위키 검색" placeholder="서버명, 주소, 플레이 스타일 검색" className="min-w-0 flex-1 bg-transparent px-3 text-sm text-white outline-none placeholder:text-slate-500" />
                 <button className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#31d9aa] text-[#06110d] transition hover:bg-[#4cebbb]" aria-label="검색"><ArrowRight className="h-5 w-5" /></button>

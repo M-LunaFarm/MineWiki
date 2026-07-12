@@ -1,7 +1,9 @@
 import { normalizeApiBaseUrl } from './runtime-config';
 import { csrfHeaders } from './csrf';
 
-const baseUrl = normalizeApiBaseUrl();
+function apiBaseUrl(): string {
+  return normalizeApiBaseUrl();
+}
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -35,7 +37,7 @@ export interface WikiPageResponse {
 
 export async function fetchWikiPageByPath(path: string): Promise<WikiPageResponse | null> {
   const searchParams = new URLSearchParams({ path });
-  const response = await fetch(`${baseUrl}/v1/wiki/page/by-path?${searchParams.toString()}`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/page/by-path?${searchParams.toString()}`, {
     next: { revalidate: 60 }
   });
   if (response.status === 404) {
@@ -162,7 +164,7 @@ export interface UploadedFileMetadata {
 }
 
 export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisionResponse> {
-  const response = await fetch(`${baseUrl}/v1/wiki/revisions/${revisionId}`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/revisions/${revisionId}`, {
     credentials: 'include'
   });
   if (!response.ok) {
@@ -173,7 +175,7 @@ export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisio
 }
 
 export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionSummary[]> {
-  const response = await fetch(`${baseUrl}/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions`, {
     credentials: 'include',
     next: { revalidate: 30 }
   });
@@ -186,7 +188,7 @@ export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionSu
 
 export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {
   const response = await fetch(
-    `${baseUrl}/v1/wiki/revisions/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`,
+    `${apiBaseUrl()}/v1/wiki/revisions/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`,
     {
       credentials: 'include'
     }
@@ -199,7 +201,7 @@ export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Pr
 }
 
 export async function fetchWikiRecent(): Promise<WikiRecentChangeSummary[]> {
-  const response = await fetch(`${baseUrl}/v1/wiki/recent`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/recent`, {
     credentials: 'include',
     next: { revalidate: 30 }
   });
@@ -222,7 +224,7 @@ export async function searchWiki(input: {
   if (input.namespace) {
     params.set('namespace', input.namespace);
   }
-  const response = await fetch(`${baseUrl}/v1/wiki/search?${params.toString()}`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/search?${params.toString()}`, {
     credentials: 'include',
     next: { revalidate: 30 }
   });
@@ -267,7 +269,7 @@ export async function setWikiAdminPageDeleted(input: {
 }
 
 async function fetchWikiAdminJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${baseUrl}/v1/admin/wiki${path}`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/admin/wiki${path}`, {
     ...init,
     credentials: 'include',
     headers: {
@@ -284,7 +286,7 @@ async function fetchWikiAdminJson<T>(path: string, init?: RequestInit): Promise<
 }
 
 export async function previewWikiMarkup(contentRaw: string): Promise<{ html: string; errors: string[]; blockingErrors: string[] }> {
-  const response = await fetch(`${baseUrl}/v1/wiki/preview`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/preview`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
@@ -306,7 +308,7 @@ export async function saveWikiPage(input: {
   isMinor: boolean;
   baseRevisionId?: string;
 }): Promise<WikiMutationResponse> {
-  const response = await fetch(`${baseUrl}/v1/wiki/pages${input.pageId ? `/${input.pageId}` : ''}`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages${input.pageId ? `/${input.pageId}` : ''}`, {
     method: input.pageId ? 'PATCH' : 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
@@ -330,7 +332,7 @@ export async function uploadWikiImage(input: {
   data: string;
   filename: string;
 }): Promise<{ url: string; publicPath: string; id: string; filename: string }> {
-  const response = await fetch(`${baseUrl}/v1/files/images`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/files/images`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
@@ -363,7 +365,7 @@ export async function listWikiFiles(input: {
   if (input.search?.trim()) {
     params.set('search', input.search.trim());
   }
-  const response = await fetch(`${baseUrl}/v1/files?${params.toString()}`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/files?${params.toString()}`, {
     credentials: 'include'
   });
   if (!response.ok) {

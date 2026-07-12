@@ -149,10 +149,10 @@ export function SiteHeader() {
               <input
                 name="q"
                 type="search"
-                aria-label="위키 검색"
+                aria-label="MineWiki 통합 검색"
                 value={currentSearch}
                 onChange={(event) => setCurrentSearch(event.target.value)}
-                placeholder="위키 문서 검색"
+                placeholder="서버와 위키 통합 검색"
                 className="h-10 w-64 rounded-xl border border-white/[0.08] bg-white/[0.03] pl-10 pr-3 text-sm text-white placeholder:text-slate-500 transition-colors focus:border-[#14c794]/60 focus:bg-white/[0.05] focus:outline-none focus:ring-2 focus:ring-[#14c794]/15"
               />
             </form>
@@ -176,10 +176,10 @@ export function SiteHeader() {
               <input
                 name="q"
                 type="search"
-                aria-label="위키 검색"
+                aria-label="MineWiki 통합 검색"
                 value={currentSearch}
                 onChange={(event) => setCurrentSearch(event.target.value)}
-                placeholder="위키 문서 검색"
+                placeholder="서버와 위키 통합 검색"
                 className="h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 pl-10 text-sm text-white placeholder:text-slate-500 focus:border-[#14c794]/60 focus:outline-none"
               />
             </form>
