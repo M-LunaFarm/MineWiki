@@ -551,6 +551,8 @@ export class AuthService {
       ]);
     }
 
+    await this.accounts.stabilizeCanonicalAccount(primaryAccountId, linked.id);
+
     return this.toAccountView(primary);
   }
 
@@ -613,6 +615,7 @@ export class AuthService {
       select: {
         id: true,
         createdAt: true,
+        canonicalAccountId: true,
       },
     });
 
@@ -620,12 +623,32 @@ export class AuthService {
       throw new NotFoundAccountError();
     }
 
-    let canonical = candidates[0];
-    for (const candidate of candidates.slice(1)) {
-      if (this.isPreferredCanonicalAccount(candidate, canonical)) {
-        canonical = candidate;
+    const connectedIds = new Set(candidates.map((candidate) => candidate.id));
+    const seed = candidates.find((candidate) => candidate.id === accountId);
+    const pinnedId =
+      seed?.canonicalAccountId && connectedIds.has(seed.canonicalAccountId)
+        ? seed.canonicalAccountId
+        : candidates
+            .map((candidate) => candidate.canonicalAccountId)
+            .find((candidateId): candidateId is string =>
+              Boolean(candidateId && connectedIds.has(candidateId)),
+            );
+
+    let canonical = pinnedId
+      ? candidates.find((candidate) => candidate.id === pinnedId)!
+      : candidates[0];
+    if (!pinnedId) {
+      for (const candidate of candidates.slice(1)) {
+        if (this.isPreferredCanonicalAccount(candidate, canonical)) {
+          canonical = candidate;
+        }
       }
     }
+
+    await this.prisma.account.updateMany({
+      where: { id: { in: Array.from(connectedAccountIds) } },
+      data: { canonicalAccountId: canonical.id },
+    });
 
     const resolved = await this.accounts.getAccount(canonical.id);
     if (!resolved) {

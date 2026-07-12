@@ -84,16 +84,17 @@ enum SupportMessageAuthorRole {
 }
 
 model Account {
-  id             String       @id @default(uuid())
-  provider       AuthProvider
-  providerUserId String
-  email          String?
-  displayName    String?
-  avatarUrl      String?
-  emailVerified  Boolean      @default(false)
-  passwordHash   String?
-  createdAt      DateTime     @default(now())
-  lastLoginAt    DateTime?
+  id                 String       @id @default(uuid())
+  canonicalAccountId String?
+  provider           AuthProvider
+  providerUserId     String
+  email              String?
+  displayName        String?
+  avatarUrl          String?
+  emailVerified      Boolean      @default(false)
+  passwordHash       String?
+  createdAt          DateTime     @default(now())
+  lastLoginAt        DateTime?
 
   sessions                Session[]
   emailVerifications      EmailVerification[]
@@ -122,6 +123,7 @@ model Account {
 
   @@unique([provider, providerUserId])
   @@index([email])
+  @@index([canonicalAccountId])
 }
 
 model AccountConsent {

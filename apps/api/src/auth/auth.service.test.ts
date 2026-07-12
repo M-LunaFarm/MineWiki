@@ -228,6 +228,8 @@ if (!hasDatabase) {
     const oauth = await service.handleNaverCallback({
       userId: 'naver-' + randomUUID(),
       displayName: 'OAuthUser',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
 
     const email = 'oauth-setup-' + randomUUID() + '@example.com';
@@ -270,6 +272,8 @@ if (!hasDatabase) {
       userId: 'discord-' + randomUUID(),
       email,
       displayName: 'DiscordUser',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
 
     const discordSession = await prisma.session.findUnique({
@@ -298,6 +302,8 @@ if (!hasDatabase) {
     const discord = await serviceDisabled.handleDiscordCallback({
       userId: 'discord-' + randomUUID(),
       email: 'link-' + randomUUID() + '@example.com',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
 
     await assert.rejects(
@@ -318,6 +324,8 @@ if (!hasDatabase) {
     const discordAcc = await serviceEnabled.handleDiscordCallback({
       userId: 'discord-' + randomUUID(),
       email: 'link2-' + randomUUID() + '@example.com',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
 
     const request = await serviceEnabled.createLinkRequest(
@@ -337,11 +345,26 @@ if (!hasDatabase) {
     const discordLogin = await service.handleDiscordCallback({
       userId: discordUserId,
       displayName: 'DiscordPrimary',
+      agreeTerms: true,
+      agreePrivacy: true,
     });
 
     await service.linkOAuthAccount(discordLogin.account.id, 'naver', {
       userId: naverUserId,
       displayName: 'NaverLinked',
+    });
+
+    const linkedNaver = await prisma.account.findUnique({
+      where: { provider_providerUserId: { provider: 'naver', providerUserId: naverUserId } },
+    });
+    assert.ok(linkedNaver);
+    await prisma.account.update({
+      where: { id: linkedNaver.id },
+      data: {
+        createdAt: new Date(
+          new Date(discordLogin.account.createdAt).getTime() - 86_400_000,
+        ),
+      },
     });
 
     const naverLogin = await service.handleNaverCallback({
@@ -351,6 +374,7 @@ if (!hasDatabase) {
 
     assert.equal(naverLogin.account.id, discordLogin.account.id);
     assert.equal(naverLogin.account.provider, 'discord');
+    assert.equal(linkedNaver.canonicalAccountId, discordLogin.account.id);
     assert.ok(naverLogin.account.linkedAccounts.some((account) => account.provider === 'naver'));
   });
 }

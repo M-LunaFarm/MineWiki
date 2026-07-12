@@ -57,8 +57,11 @@ export class AccountSeparationService {
     }
 
     const emailNormalized = input.email ? input.email.toLowerCase() : null;
+    const accountId = randomUUID();
     const record = await this.prisma.account.create({
       data: {
+        id: accountId,
+        canonicalAccountId: accountId,
         provider: input.provider,
         providerUserId: input.providerUserId,
         email: emailNormalized,
@@ -219,6 +222,11 @@ export class AccountSeparationService {
       })
     ]);
 
+    await this.stabilizeCanonicalAccount(
+      request.primaryAccountId,
+      request.targetAccountId
+    );
+
     const linkedAccountIds = await this.getLinkedAccountIds(request.primaryAccountId);
     return {
       requestId,
@@ -253,6 +261,53 @@ export class AccountSeparationService {
       data: { lastLoginAt: date }
     });
     return this.toAccountRecord(updated);
+  }
+
+  async stabilizeCanonicalAccount(
+    primaryAccountId: string,
+    linkedAccountId: string
+  ): Promise<string> {
+    const primary = await this.prisma.account.findUnique({
+      where: { id: primaryAccountId },
+      select: { canonicalAccountId: true }
+    });
+    if (!primary) {
+      throw new NotFoundException('계정 정보를 찾을 수 없습니다.');
+    }
+
+    const canonicalAccountId = primary.canonicalAccountId ?? primaryAccountId;
+    const connectedIds = new Set<string>([primaryAccountId, linkedAccountId]);
+    let frontier = [primaryAccountId, linkedAccountId];
+    while (frontier.length > 0) {
+      const links = await this.prisma.accountLink.findMany({
+        where: {
+          OR: [
+            { primaryAccountId: { in: frontier } },
+            { linkedAccountId: { in: frontier } }
+          ]
+        },
+        select: { primaryAccountId: true, linkedAccountId: true }
+      });
+      const next: string[] = [];
+      for (const link of links) {
+        for (const accountId of [link.primaryAccountId, link.linkedAccountId]) {
+          if (!connectedIds.has(accountId)) {
+            connectedIds.add(accountId);
+            next.push(accountId);
+          }
+        }
+      }
+      frontier = next;
+    }
+
+    if (!connectedIds.has(canonicalAccountId)) {
+      throw new ConflictException('연결 계정의 대표 계정 정보가 올바르지 않습니다.');
+    }
+    await this.prisma.account.updateMany({
+      where: { id: { in: Array.from(connectedIds) } },
+      data: { canonicalAccountId }
+    });
+    return canonicalAccountId;
   }
 
   private async ensureAccount(accountId: string) {
