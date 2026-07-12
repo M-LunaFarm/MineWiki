@@ -1,7 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { decryptAppSecret } from '../common/secret-codec';
+import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
 import { PrismaService } from '../common/prisma.service';
 import { PluginServerRepository } from '../verify/guild.repositories';
 import { PluginCredentialService } from './plugin-credential.service';
@@ -137,6 +137,38 @@ test('plugin credential rotation replaces the stored secret', async () => {
     const issued = await service.rotate('server-1', 'credential-1', 'owner-account');
     assert.notEqual(replacement, 'old-secret');
     assert.equal(decryptAppSecret(replacement), issued.secret);
+  } finally {
+    restoreEnvironment('APP_ENCRYPTION_KEY', previousKey);
+  }
+});
+
+test('legacy plugin credentials remain usable after encryption migration', async () => {
+  const previousKey = process.env.APP_ENCRYPTION_KEY;
+  process.env.APP_ENCRYPTION_KEY = 'legacy-plugin-credential-test-key';
+  const plaintextSecret = 'legacy-plugin-secret';
+  const encryptedSecret = encryptAppSecret(plaintextSecret);
+  const repository = new PluginServerRepository({
+    pluginServer: {
+      async findUnique() {
+        return null;
+      },
+    },
+    lunaGuildServer: {
+      async findUnique() {
+        return {
+          serverId: 'legacy-server-1',
+          guildId: '1234567890',
+          serverSecret: encryptedSecret,
+          enabled: true,
+        };
+      },
+    },
+  } as never);
+
+  try {
+    const resolved = await repository.find('legacy-server-1');
+    assert.equal(resolved?.source, 'legacy');
+    assert.equal(resolved?.serverSecret, plaintextSecret);
   } finally {
     restoreEnvironment('APP_ENCRYPTION_KEY', previousKey);
   }

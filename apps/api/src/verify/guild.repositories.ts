@@ -161,7 +161,7 @@ export class PluginServerRepository {
       source: 'legacy',
       pluginServerId: legacy.serverId,
       guildId: legacy.guildId,
-      serverSecret: legacy.serverSecret,
+      serverSecret: decryptAppSecret(legacy.serverSecret) ?? legacy.serverSecret,
       enabled: legacy.enabled
     };
   }

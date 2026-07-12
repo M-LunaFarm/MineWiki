@@ -281,6 +281,7 @@ async function runValidation() {
   );
 
   await validatePluginCredentials();
+  await validateEncryptedCredentials();
   await validateExpiredReplayGuards();
   await validateRenderCache();
 }
@@ -318,28 +319,94 @@ async function validatePluginCredentials() {
     );
   }
 
-  await errorIfRows(
-    'canonical PluginServer secret encrypted',
-    `
-      SELECT ps.id
-      FROM plugin_servers ps
-      WHERE ps.minewiki_server_id IS NOT NULL
-        AND ps.server_secret NOT LIKE 'enc:v1:%'
-      LIMIT ${args.sampleLimit}
-    `,
-  );
+}
 
-  await errorIfRows(
-    'Votifier v2 token encrypted',
-    `
-      SELECT vt.id
-      FROM VotifierTarget vt
-      WHERE vt.protocol = 'v2'
-        AND vt.token IS NOT NULL
-        AND vt.token NOT LIKE 'enc:v1:%'
-      LIMIT ${args.sampleLimit}
-    `,
-  );
+async function validateEncryptedCredentials() {
+  const [oauthCredentials, votifierTargets, pluginServers, legacyPluginServers] =
+    await Promise.all([
+      prisma.oAuthCredential.findMany({
+        select: { id: true, accessToken: true, refreshToken: true },
+        take: args.fixLimit,
+      }),
+      prisma.votifierTarget.findMany({
+        where: { protocol: 'v2', token: { not: null } },
+        select: { id: true, token: true },
+        take: args.fixLimit,
+      }),
+      prisma.pluginServer.findMany({
+        select: { id: true, serverSecret: true },
+        take: args.fixLimit,
+      }),
+      prisma.lunaGuildServer.findMany({
+        select: { id: true, serverSecret: true },
+        take: args.fixLimit,
+      }),
+    ]);
+
+  const plaintext = [
+    ...oauthCredentials.flatMap((credential) => [
+      ...(!isEncrypted(credential.accessToken)
+        ? [{ kind: 'oauth_access', id: credential.id, value: credential.accessToken }]
+        : []),
+      ...(credential.refreshToken && !isEncrypted(credential.refreshToken)
+        ? [{ kind: 'oauth_refresh', id: credential.id, value: credential.refreshToken }]
+        : []),
+    ]),
+    ...votifierTargets.flatMap((target) =>
+      target.token && !isEncrypted(target.token)
+        ? [{ kind: 'votifier', id: target.id, value: target.token }]
+        : [],
+    ),
+    ...pluginServers.flatMap((server) =>
+      !isEncrypted(server.serverSecret)
+        ? [{ kind: 'plugin', id: server.id, value: server.serverSecret }]
+        : [],
+    ),
+    ...legacyPluginServers.flatMap((server) =>
+      !isEncrypted(server.serverSecret)
+        ? [{ kind: 'legacy_plugin', id: server.id, value: server.serverSecret }]
+        : [],
+    ),
+  ];
+
+  if (plaintext.length === 0) {
+    pass('stored credentials encrypted');
+    return;
+  }
+  if (!args.fix) {
+    error(
+      'stored credentials encrypted',
+      `${plaintext.length} plaintext credential fields; rerun with --fix to encrypt`,
+    );
+    return;
+  }
+
+  const security = await loadSecurity();
+  const encryptionKey = process.env.APP_ENCRYPTION_KEY?.trim();
+  if (!security || !encryptionKey) {
+    error(
+      'stored credentials encrypted',
+      'APP_ENCRYPTION_KEY and the built @minewiki/security package are required for --fix',
+    );
+    return;
+  }
+
+  for (const item of plaintext) {
+    const encrypted = security.encryptSecret(item.value, encryptionKey);
+    if (item.kind === 'oauth_access') {
+      await prisma.oAuthCredential.update({ where: { id: item.id }, data: { accessToken: encrypted } });
+    } else if (item.kind === 'oauth_refresh') {
+      await prisma.oAuthCredential.update({ where: { id: item.id }, data: { refreshToken: encrypted } });
+    } else if (item.kind === 'votifier') {
+      await prisma.votifierTarget.update({ where: { id: item.id }, data: { token: encrypted } });
+    } else if (item.kind === 'plugin') {
+      await prisma.pluginServer.update({ where: { id: item.id }, data: { serverSecret: encrypted } });
+    } else {
+      await prisma.lunaGuildServer.update({ where: { id: item.id }, data: { serverSecret: encrypted } });
+    }
+    summary.fixes += 1;
+  }
+  pass('stored credentials encrypted', `encrypted ${plaintext.length} credential fields`);
 }
 
 async function validateExpiredReplayGuards() {
@@ -465,6 +532,22 @@ async function loadWikiCore() {
   }
 }
 
+async function loadSecurity() {
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const modulePath = path.join(scriptDir, '..', 'packages', 'security', 'dist', 'index.js');
+  try {
+    const imported = await import(pathToFileUrl(modulePath));
+    const security = imported.default ?? imported;
+    return typeof security.encryptSecret === 'function' ? security : null;
+  } catch {
+    return null;
+  }
+}
+
+function isEncrypted(value) {
+  return typeof value === 'string' && value.startsWith('enc:v1:');
+}
+
 function pathToFileUrl(filePath) {
   return `file://${filePath.split(path.sep).map(encodeURIComponent).join('/')}`;
 }
@@ -517,6 +600,7 @@ Discord verification, file, and plugin-sync tables.
 By default this command never mutates data.
 
 --fix performs safe repairs:
+  - encrypt legacy OAuth, Votifier, and plugin credentials
   - delete expired PluginSyncReplayGuard rows
   - disable active plugin credentials whose canonical server no longer exists
   - rebuild missing render cache for current public wiki revisions`);
