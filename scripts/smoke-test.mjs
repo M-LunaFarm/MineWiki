@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import './load-environment.mjs';
+import { matchesJsonSubset } from './smoke-assertions.mjs';
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
@@ -12,6 +13,12 @@ const checks = [
     name: 'web home',
     url: `${webBaseUrl}/`,
     expectedStatuses: [200],
+  },
+  {
+    name: 'web identity',
+    url: `${webBaseUrl}/health`,
+    expectedStatuses: [200],
+    expectedJson: { status: 'ok', service: 'minewiki-web' },
   },
   {
     name: 'wiki page',
@@ -27,10 +34,17 @@ const checks = [
     name: 'api health',
     url: `${apiBaseUrl}/health`,
     expectedStatuses: [200],
+    expectedJson: { status: 'ok', service: 'minewiki-api' },
   },
   {
     name: 'api readiness',
     url: `${apiBaseUrl}/ready`,
+    expectedStatuses: [200],
+    expectedJson: { status: 'ok', service: 'minewiki-api' },
+  },
+  {
+    name: 'minecraft ownership callback',
+    url: `${webBaseUrl}/minecraft/callback`,
     expectedStatuses: [200],
   },
   {
@@ -52,12 +66,18 @@ const checks = [
     name: 'proxied api readiness',
     url: `${webBaseUrl}/api/ready`,
     expectedStatuses: [200],
+    expectedJson: { status: 'ok', service: 'minewiki-api' },
   },
 ];
 
 if (dryRun) {
   for (const check of checks) {
-    console.log(`${check.name}: ${check.url} [${check.expectedStatuses.join(', ')}]`);
+    const jsonExpectation = check.expectedJson
+      ? ` json=${JSON.stringify(check.expectedJson)}`
+      : '';
+    console.log(
+      `${check.name}: ${check.url} [${check.expectedStatuses.join(', ')}]${jsonExpectation}`,
+    );
   }
   process.exit(0);
 }
@@ -67,14 +87,24 @@ let failures = 0;
 for (const check of checks) {
   try {
     const response = await fetch(check.url, { redirect: 'manual' });
-    if (check.expectedStatuses.includes(response.status)) {
-      console.log(`ok ${check.name} ${response.status}`);
+    if (!check.expectedStatuses.includes(response.status)) {
+      failures += 1;
+      console.error(
+        `fail ${check.name}: expected ${check.expectedStatuses.join(', ')}, got ${response.status}`,
+      );
       continue;
     }
-    failures += 1;
-    console.error(
-      `fail ${check.name}: expected ${check.expectedStatuses.join(', ')}, got ${response.status}`,
-    );
+    if (check.expectedJson) {
+      const body = await response.json().catch(() => null);
+      if (!matchesJsonSubset(body, check.expectedJson)) {
+        failures += 1;
+        console.error(
+          `fail ${check.name}: response does not identify ${check.expectedJson.service ?? 'the expected service'}`,
+        );
+        continue;
+      }
+    }
+    console.log(`ok ${check.name} ${response.status}`);
   } catch (error) {
     failures += 1;
     console.error(`fail ${check.name}: ${error instanceof Error ? error.message : String(error)}`);
