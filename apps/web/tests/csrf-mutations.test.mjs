@@ -15,6 +15,7 @@ const mutationFiles = [
   'components/voting/vote-modal.tsx',
   'components/voting/vote-modal-modern.tsx',
   'lib/dashboard-api.ts',
+  'lib/support-api.ts',
 ];
 
 test('authenticated browser mutations attach CSRF headers', () => {

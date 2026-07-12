@@ -11,6 +11,7 @@ import {
   fetchSupportServerOptions,
   fetchSupportTicketDetail,
   fetchSupportTickets,
+  updateSupportTicket,
   type SupportServerOption,
   type SupportTicket,
   type SupportTicketDetail,
@@ -21,6 +22,8 @@ import { useAuth } from '../providers/auth-context';
 type TicketStatusFilter = 'all' | SupportTicketStatus;
 type TicketPriority = SupportTicket['priority'];
 type InquiryTab = 'member' | 'guest';
+type SupportMode = 'customer' | 'agent';
+type TicketView = 'mine' | 'assigned' | 'inbox';
 
 const AUTO_REFRESH_INTERVAL_MS = 20_000;
 
@@ -40,6 +43,12 @@ const STATUS_FILTERS: ReadonlyArray<{ value: TicketStatusFilter; label: string }
   { value: 'pending', label: '대기' },
   { value: 'resolved', label: '해결' },
   { value: 'closed', label: '종료' },
+];
+
+const AGENT_VIEWS: ReadonlyArray<{ value: TicketView; label: string }> = [
+  { value: 'inbox', label: '전체 인박스' },
+  { value: 'assigned', label: '내 배정' },
+  { value: 'mine', label: '내 문의' },
 ];
 
 const PRIORITY_OPTIONS: ReadonlyArray<{ value: TicketPriority; label: string }> = [
@@ -102,7 +111,7 @@ function normalizeSiteKey(value: string | undefined): string | undefined {
   return trimmed;
 }
 
-export function SupportRedesignPage() {
+export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: SupportMode }) {
   const { account, loading: authLoading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
@@ -117,6 +126,9 @@ export function SupportRedesignPage() {
   const [listLoading, setListLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ticketView, setTicketView] = useState<TicketView>(mode === 'agent' ? 'inbox' : 'mine');
+  const [isAgent, setIsAgent] = useState(false);
+  const [updatingTicket, setUpdatingTicket] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<TicketStatusFilter>('all');
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -206,10 +218,11 @@ export function SupportRedesignPage() {
 
       try {
         const response = await fetchSupportTickets({
-          view: 'mine',
+          view: mode === 'agent' ? ticketView : 'mine',
           status: statusFilter === 'all' ? undefined : statusFilter,
         });
         const nextTickets = response.items;
+        setIsAgent(response.viewer.isAgent);
         setTickets(nextTickets);
 
         setSelectedTicketId((current) => {
@@ -234,7 +247,7 @@ export function SupportRedesignPage() {
         }
       }
     },
-    [account, statusFilter],
+    [account, mode, statusFilter, ticketView],
   );
 
   useEffect(() => {
@@ -483,6 +496,7 @@ export function SupportRedesignPage() {
       selectedTicket.status !== 'closed' &&
       selectedTicket.status !== 'resolved',
   );
+  const canManageTicket = Boolean(mode === 'agent' && isAgent && detail?.viewer.canManage);
 
   const handleSelectTopic = useCallback(
     (category: string) => {
@@ -527,6 +541,32 @@ export function SupportRedesignPage() {
       }
     },
     [canSendMessage, loadTickets, messageBody, selectedTicketId],
+  );
+
+  const handleUpdateTicket = useCallback(
+    async (patch: {
+      status?: SupportTicketStatus;
+      priority?: TicketPriority;
+      assigneeAccountId?: string | null;
+    }) => {
+      if (!selectedTicketId || !canManageTicket) {
+        return;
+      }
+      setUpdatingTicket(true);
+      setError(null);
+      try {
+        const updated = await updateSupportTicket(selectedTicketId, patch);
+        setDetail(updated);
+        await loadTickets(updated.ticket.id, true);
+      } catch (updateError) {
+        setError(
+          updateError instanceof Error ? updateError.message : '문의 상태를 변경하지 못했습니다.',
+        );
+      } finally {
+        setUpdatingTicket(false);
+      }
+    },
+    [canManageTicket, loadTickets, selectedTicketId],
   );
 
   const handleCreateMemberTicket = useCallback(
@@ -699,13 +739,18 @@ export function SupportRedesignPage() {
         <section className="border-b border-[#2C2D30] bg-[#18191C]">
           <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-[#13ec80]">고객센터</p>
+              <p className="text-sm font-semibold text-[#13ec80]">
+                {mode === 'agent' ? 'Support Operations' : '고객센터'}
+              </p>
               <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-normal text-white sm:text-4xl">
-                서비스 이용 중 발생한 문제를 정확하게 접수하고 처리 현황을 확인하세요.
+                {mode === 'agent'
+                  ? '문의 인박스를 분류하고 배정하여 처리 상태를 관리하세요.'
+                  : '서비스 이용 중 발생한 문제를 정확하게 접수하고 처리 현황을 확인하세요.'}
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-[#B6B7BA]">
-                계정, 서버 등록, 결제, 신고 및 정책 이의 신청을 한 곳에서 접수할 수 있습니다. 회원은
-                문의 진행 상황과 답변 내역을 이 화면에서 계속 확인할 수 있습니다.
+                {mode === 'agent'
+                  ? 'MineWiki 계정, Minecraft 인증, 서버 소유권, 위키 및 플러그인 문의를 한 화면에서 처리합니다.'
+                  : '계정, 서버 등록, 결제, 신고 및 정책 이의 신청을 한 곳에서 접수할 수 있습니다. 회원은 문의 진행 상황과 답변 내역을 이 화면에서 계속 확인할 수 있습니다.'}
               </p>
 
               <div className="mt-6 max-w-2xl rounded-lg border border-[#34363A] bg-[#111214] p-2">
@@ -764,8 +809,9 @@ export function SupportRedesignPage() {
             </div>
           ) : null}
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <div className={mode === 'agent' ? 'grid gap-6' : 'grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]'}>
             <div className="space-y-6">
+              {mode === 'customer' ? (
               <section className="rounded-lg border border-[#34363A] bg-[#18191C]">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#2C2D30] px-5 py-4">
                   <div>
@@ -822,13 +868,18 @@ export function SupportRedesignPage() {
                   )}
                 </div>
               </section>
+              ) : null}
 
               <section className="rounded-lg border border-[#34363A] bg-[#18191C]">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#2C2D30] px-5 py-4">
                   <div>
-                    <h2 className="text-base font-semibold text-white">내 문의 현황</h2>
+                    <h2 className="text-base font-semibold text-white">
+                      {mode === 'agent' ? '문의 운영 인박스' : '내 문의 현황'}
+                    </h2>
                     <p className="mt-1 text-xs text-[#A7A9AF]">
-                      회원 계정으로 접수한 문의와 답변 내역입니다.
+                      {mode === 'agent'
+                        ? '전체 문의, 내 배정 문의와 고객 답변을 실시간으로 관리합니다.'
+                        : '회원 계정으로 접수한 문의와 답변 내역입니다.'}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -855,6 +906,24 @@ export function SupportRedesignPage() {
                 <div className="grid min-h-[520px] lg:grid-cols-[320px_minmax(0,1fr)]">
                   <aside className="border-b border-[#2C2D30] lg:border-b-0 lg:border-r">
                     <div className="space-y-3 border-b border-[#2C2D30] p-4">
+                      {mode === 'agent' ? (
+                        <div className="flex gap-2 overflow-x-auto pb-1">
+                          {AGENT_VIEWS.map((view) => (
+                            <button
+                              key={view.value}
+                              className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition ${
+                                ticketView === view.value
+                                  ? 'border-[#13ec80]/50 bg-[#13ec80]/10 text-[#13ec80]'
+                                  : 'border-[#34363A] bg-[#151619] text-[#A7A9AF] hover:text-white'
+                              }`}
+                              type="button"
+                              onClick={() => setTicketView(view.value)}
+                            >
+                              {view.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="flex gap-2 overflow-x-auto pb-1">
                         {STATUS_FILTERS.map((filter) => (
                           <button
@@ -954,7 +1023,53 @@ export function SupportRedesignPage() {
                             </p>
                             <SupportContextBadges ticket={selectedTicket} />
                           </div>
-                          <button
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            {canManageTicket && account ? (
+                              <>
+                                <select
+                                  aria-label="문의 상태 변경"
+                                  className="h-9 rounded-md border border-[#34363A] bg-[#111214] px-2 text-xs text-white outline-none focus:border-[#13ec80]/60"
+                                  disabled={updatingTicket}
+                                  value={selectedTicket.status}
+                                  onChange={(event) =>
+                                    void handleUpdateTicket({
+                                      status: event.target.value as SupportTicketStatus,
+                                    })
+                                  }
+                                >
+                                  {STATUS_FILTERS.filter((item) => item.value !== 'all').map(
+                                    (item) => (
+                                      <option key={item.value} value={item.value}>
+                                        {item.label}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
+                                <button
+                                  className="rounded-md border border-[#34363A] px-3 py-2 text-xs text-[#D8D9DC] transition hover:border-[#13ec80]/50 disabled:opacity-50"
+                                  type="button"
+                                  disabled={updatingTicket}
+                                  onClick={() =>
+                                    void handleUpdateTicket({ assigneeAccountId: account.id })
+                                  }
+                                >
+                                  내게 배정
+                                </button>
+                                {selectedTicket.assignee ? (
+                                  <button
+                                    className="rounded-md border border-[#34363A] px-3 py-2 text-xs text-[#D8D9DC] transition hover:border-amber-300/50 disabled:opacity-50"
+                                    type="button"
+                                    disabled={updatingTicket}
+                                    onClick={() =>
+                                      void handleUpdateTicket({ assigneeAccountId: null })
+                                    }
+                                  >
+                                    배정 해제
+                                  </button>
+                                ) : null}
+                              </>
+                            ) : null}
+                            <button
                             className="inline-flex items-center gap-2 rounded-md border border-[#34363A] px-3 py-2 text-xs text-[#D8D9DC] transition hover:border-[#13ec80]/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                             type="button"
                             disabled={!selectedTicketId}
@@ -969,6 +1084,7 @@ export function SupportRedesignPage() {
                                 ? '복사 실패'
                                 : '링크 복사'}
                           </button>
+                          </div>
                         </div>
                       ) : (
                         <div>
@@ -1109,6 +1225,7 @@ export function SupportRedesignPage() {
               </section>
             </div>
 
+            {mode === 'customer' ? (
             <aside className="space-y-6">
               <section
                 id="support-request-form"
@@ -1349,6 +1466,7 @@ export function SupportRedesignPage() {
                 </ul>
               </section>
             </aside>
+            ) : null}
           </div>
         </section>
       </main>
