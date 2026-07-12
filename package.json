@@ -26,7 +26,7 @@
     "build:bot": "pnpm --dir apps/bot build",
     "check": "turbo run check build --continue",
     "db:deploy": "node scripts/deploy-database.mjs",
-    "deploy:build": "pnpm db:deploy && pnpm build",
+    "deploy:build": "pnpm db:deploy && pnpm seed && pnpm build",
     "deploy:smoke": "pnpm smoke",
     "data:validate": "node scripts/validate-data.mjs",
     "pm2:validate": "node scripts/validate-pm2-config.mjs",
