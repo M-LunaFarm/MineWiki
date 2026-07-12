@@ -114,10 +114,7 @@ export class VerifyService {
     const completionTokenHash = hashCompletionToken(completionToken);
 
     await this.ensureGuildChannel(payload.guildId, payload.channelId, now);
-    const options = await this.resolveGuildVerificationOptions(payload.guildId, payload.channelId, {
-      roleId: payload.roleId,
-      nicknameTemplate: payload.nicknameTemplate
-    });
+    const options = await this.resolveGuildVerificationOptions(payload.guildId, payload.channelId);
     const created = await this.prisma.discordVerificationSession.create({
       data: {
         guildId: payload.guildId,
@@ -438,16 +435,15 @@ export class VerifyService {
 
   private async resolveGuildVerificationOptions(
     guildId: string,
-    channelId: string,
-    overrides: { roleId?: string; nicknameTemplate?: string } = {}
+    channelId: string
   ): Promise<DiscordVerificationOptions> {
     const [guild, channel] = await Promise.all([
       this.guildSettings.find(guildId),
       this.guildChannelSettings.find(guildId, channelId)
     ]);
-    const roleId = overrides.roleId ?? channel?.verifiedRoleId ?? guild?.verifiedRoleId ?? undefined;
+    const roleId = channel?.verifiedRoleId ?? guild?.verifiedRoleId ?? undefined;
     const nicknameTemplate =
-      overrides.nicknameTemplate ?? channel?.nicknameFormat ?? guild?.nicknameFormat ?? undefined;
+      channel?.nicknameFormat ?? guild?.nicknameFormat ?? undefined;
     const dmTemplate =
       channel?.botMessageTemplate ??
       guild?.botMessageTemplate ??

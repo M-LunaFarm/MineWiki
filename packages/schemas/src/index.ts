@@ -546,9 +546,7 @@ export const discordVerifySessionCreateRequestSchema = z.object({
   guildId: z.string().min(1),
   channelId: z.string().min(1),
   requesterDiscordId: z.string().min(1),
-  roleId: z.string().min(1).optional(),
-  nicknameTemplate: z.string().min(1).max(80).optional(),
-});
+}).strict();
 
 export const discordVerifySessionResponseSchema = z.object({
   sessionId: z.string().uuid(),

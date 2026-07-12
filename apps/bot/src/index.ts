@@ -4,7 +4,7 @@ import {
   ApplicationCommandOptionType,
   ChannelType
 } from 'discord-api-types/v10';
-import { Client, Events, GatewayIntentBits, Interaction } from 'discord.js';
+import { Client, Events, GatewayIntentBits, Interaction, PermissionFlagsBits } from 'discord.js';
 import { DateTime } from 'luxon';
 import { ConfigService, assertSupportedQueueServer } from '@minewiki/config';
 import { Logger } from '@minewiki/logger';
@@ -77,6 +77,13 @@ if (!token || !clientId) {
           });
           return;
         }
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+          await interaction.reply({
+            content: 'Manage Server permission is required to configure digests.',
+            ephemeral: true
+          });
+          return;
+        }
 
         const channel =
           interaction.options.getChannel('channel') ??
@@ -85,7 +92,8 @@ if (!token || !clientId) {
           !channel ||
           !('isTextBased' in channel) ||
           typeof channel.isTextBased !== 'function' ||
-          !channel.isTextBased()
+          !channel.isTextBased() ||
+          ('guildId' in channel && channel.guildId !== guildId)
         ) {
           await interaction.reply({
             content: 'Pick a text channel to receive the daily digest.',
@@ -192,14 +200,10 @@ if (!token || !clientId) {
           return;
         }
         try {
-          const role = interaction.options.getRole('role');
-          const nicknameTemplate = interaction.options.getString('nickname-template') ?? undefined;
           const result = await createVerifySession({
             guildId,
             channelId: interaction.channelId,
-            requesterDiscordId: interaction.user.id,
-            roleId: role?.id,
-            nicknameTemplate
+            requesterDiscordId: interaction.user.id
           });
           await interaction.reply({
             content: [
@@ -333,21 +337,7 @@ async function registerCommands(rest: REST, clientId: string): Promise<void> {
           {
             type: ApplicationCommandOptionType.Subcommand,
             name: 'verify',
-            description: 'Start Discord and Minecraft account verification.',
-            options: [
-              {
-                type: ApplicationCommandOptionType.Role,
-                name: 'role',
-                description: 'Role to grant after verification.',
-                required: false
-              },
-              {
-                type: ApplicationCommandOptionType.String,
-                name: 'nickname-template',
-                description: 'Nickname template, e.g. {player}.',
-                required: false
-              }
-            ]
+            description: 'Start Discord and Minecraft account verification.'
           }
         ]
       }
@@ -359,8 +349,6 @@ async function createVerifySession(payload: {
   guildId: string;
   channelId: string;
   requesterDiscordId: string;
-  roleId?: string;
-  nicknameTemplate?: string;
 }): Promise<{ verificationUrl: string; expiresAt: string }> {
   const token = config.getOptional('INTERNAL_BOT_API_TOKEN');
   if (!token) {

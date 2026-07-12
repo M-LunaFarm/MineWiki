@@ -42,9 +42,9 @@ export async function loadDiscordVerifyExecutionJob(
     repository.findGuildSettings(session.guildId),
     repository.findChannelSettings(session.guildId, session.channelId),
   ]);
-  const roleId = session.roleId ?? channel?.verifiedRoleId ?? guild?.verifiedRoleId ?? undefined;
+  const roleId = channel?.verifiedRoleId ?? guild?.verifiedRoleId ?? undefined;
   const nicknameTemplate =
-    session.nicknameTemplate ?? channel?.nicknameFormat ?? guild?.nicknameFormat ?? undefined;
+    channel?.nicknameFormat ?? guild?.nicknameFormat ?? undefined;
   const dmTemplate =
     channel?.botMessageTemplate ??
     guild?.botMessageTemplate ??

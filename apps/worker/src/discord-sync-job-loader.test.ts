@@ -17,8 +17,8 @@ test('Discord sync queue stores only a session reference and hydrates private st
       accountId: '22222222-2222-4222-8222-222222222222',
       minecraftUuid: '33333333-3333-4333-8333-333333333333',
       minecraftName: 'PrivatePlayer',
-      roleId: null,
-      nicknameTemplate: null,
+      roleId: 'attacker-selected-role',
+      nicknameTemplate: '[Owner] {player}',
     }),
     findGuildSettings: async () => ({
       verifiedRoleId: 'verified-role',
@@ -26,7 +26,12 @@ test('Discord sync queue stores only a session reference and hydrates private st
       botMessageTemplate: 'Welcome {player}',
       logChannelId: 'log-channel',
     }),
-    findChannelSettings: async () => null,
+    findChannelSettings: async () => ({
+      verifiedRoleId: 'channel-approved-role',
+      nicknameFormat: '[Channel] {player}',
+      botMessageTemplate: null,
+      logChannelId: null,
+    }),
   };
 
   const queued = JSON.stringify(job);
@@ -44,7 +49,8 @@ test('Discord sync queue stores only a session reference and hydrates private st
   const execution = await loadDiscordVerifyExecutionJob(repository, job);
   assert.equal(execution.discordUserId, 'discord-user-private');
   assert.equal(execution.minecraftUuid, '33333333-3333-4333-8333-333333333333');
-  assert.equal(execution.roleId, 'verified-role');
+  assert.equal(execution.roleId, 'channel-approved-role');
+  assert.equal(execution.nicknameTemplate, '[Channel] {player}');
   assert.equal(execution.dmTemplate, 'Welcome {player}');
   assert.equal(execution.logChannelId, 'log-channel');
 });

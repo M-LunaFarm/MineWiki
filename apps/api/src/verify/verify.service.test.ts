@@ -64,9 +64,7 @@ if (!hasDatabase) {
       const session = await service.createDiscordSession({
         guildId,
         channelId,
-        requesterDiscordId: discordUserId,
-        roleId: `role-${unique}`,
-        nicknameTemplate: '{player}'
+        requesterDiscordId: discordUserId
       });
       sessionId = session.sessionId;
       const completionToken = new URL(session.verificationUrl).searchParams.get('verifyToken');
