@@ -1,33 +1,46 @@
-import type { PrismaClient } from '@prisma/client';
 import type { DiscordVerifySyncJob } from '@minewiki/schemas';
 import type { DiscordVerifyExecutionJob } from './processors/discord-verify-sync';
 
-type PrismaHandle = Pick<
-  PrismaClient,
-  'discordVerificationSession' | 'lunaGuild' | 'lunaGuildChannelSetting'
->;
+export interface DiscordVerificationReader {
+  findSession(sessionId: string): Promise<DiscordVerificationSessionRecord | null>;
+  findGuildSettings(guildId: string): Promise<DiscordGuildSettingsRecord | null>;
+  findChannelSettings(
+    guildId: string,
+    channelId: string,
+  ): Promise<DiscordGuildSettingsRecord | null>;
+}
+
+interface DiscordVerificationSessionRecord {
+  readonly id: string;
+  readonly guildId: string;
+  readonly channelId: string;
+  readonly requesterDiscordId: string;
+  readonly accountId: string | null;
+  readonly minecraftUuid: string | null;
+  readonly minecraftName: string | null;
+  readonly roleId: string | null;
+  readonly nicknameTemplate: string | null;
+}
+
+interface DiscordGuildSettingsRecord {
+  readonly verifiedRoleId: string | null;
+  readonly nicknameFormat: string | null;
+  readonly botMessageTemplate: string | null;
+  readonly logChannelId: string | null;
+}
 
 export async function loadDiscordVerifyExecutionJob(
-  prisma: PrismaHandle,
+  repository: DiscordVerificationReader,
   job: DiscordVerifySyncJob,
 ): Promise<DiscordVerifyExecutionJob> {
-  const session = await prisma.discordVerificationSession.findUnique({
-    where: { id: job.sessionId },
-  });
+  const session = await repository.findSession(job.sessionId);
   if (!session?.accountId || !session.minecraftUuid) {
     throw new Error('discord_verify_session_not_ready');
   }
 
   const [guild, channel] = await Promise.all([
-    prisma.lunaGuild.findUnique({ where: { guildId: session.guildId } }),
-    prisma.lunaGuildChannelSetting.findUnique({
-      where: {
-        guildId_channelId: {
-          guildId: session.guildId,
-          channelId: session.channelId,
-        },
-      },
-    }),
+    repository.findGuildSettings(session.guildId),
+    repository.findChannelSettings(session.guildId, session.channelId),
   ]);
   const roleId = session.roleId ?? channel?.verifiedRoleId ?? guild?.verifiedRoleId ?? undefined;
   const nicknameTemplate =

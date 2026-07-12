@@ -8,31 +8,25 @@ test('Discord sync queue stores only a session reference and hydrates private st
     action: 'link',
     sessionId: '11111111-1111-4111-8111-111111111111',
   };
-  const prisma = {
-    discordVerificationSession: {
-      findUnique: async () => ({
-        id: job.sessionId,
-        guildId: 'guild-private',
-        channelId: 'channel-private',
-        requesterDiscordId: 'discord-user-private',
-        accountId: '22222222-2222-4222-8222-222222222222',
-        minecraftUuid: '33333333-3333-4333-8333-333333333333',
-        minecraftName: 'PrivatePlayer',
-        roleId: null,
-        nicknameTemplate: null,
-      }),
-    },
-    lunaGuild: {
-      findUnique: async () => ({
-        verifiedRoleId: 'verified-role',
-        nicknameFormat: '[Member] {player}',
-        botMessageTemplate: 'Welcome {player}',
-        logChannelId: 'log-channel',
-      }),
-    },
-    lunaGuildChannelSetting: {
-      findUnique: async () => null,
-    },
+  const repository = {
+    findSession: async () => ({
+      id: job.sessionId,
+      guildId: 'guild-private',
+      channelId: 'channel-private',
+      requesterDiscordId: 'discord-user-private',
+      accountId: '22222222-2222-4222-8222-222222222222',
+      minecraftUuid: '33333333-3333-4333-8333-333333333333',
+      minecraftName: 'PrivatePlayer',
+      roleId: null,
+      nicknameTemplate: null,
+    }),
+    findGuildSettings: async () => ({
+      verifiedRoleId: 'verified-role',
+      nicknameFormat: '[Member] {player}',
+      botMessageTemplate: 'Welcome {player}',
+      logChannelId: 'log-channel',
+    }),
+    findChannelSettings: async () => null,
   };
 
   const queued = JSON.stringify(job);
@@ -47,7 +41,7 @@ test('Discord sync queue stores only a session reference and hydrates private st
     assert.equal(queued.includes(privateValue), false);
   }
 
-  const execution = await loadDiscordVerifyExecutionJob(prisma as never, job);
+  const execution = await loadDiscordVerifyExecutionJob(repository, job);
   assert.equal(execution.discordUserId, 'discord-user-private');
   assert.equal(execution.minecraftUuid, '33333333-3333-4333-8333-333333333333');
   assert.equal(execution.roleId, 'verified-role');

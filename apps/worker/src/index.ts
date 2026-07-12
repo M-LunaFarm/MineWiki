@@ -27,6 +27,7 @@ import {
 } from './job-log-context';
 import { loadVoteDispatchExecutionJob } from './vote-job-loader';
 import { loadDiscordVerifyExecutionJob } from './discord-sync-job-loader';
+import { DiscordVerificationRepository } from './discord-verification.repository';
 import { loadDiscordDigestExecutionJob } from './discord-digest-job-loader';
 import type {
   ClaimVerificationJob,
@@ -51,6 +52,7 @@ const connection = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
 });
 const prisma = new PrismaClient();
+const discordVerificationRepository = new DiscordVerificationRepository(prisma);
 
 const observabilityExporter = new ObservabilityExporter({
   endpoint: config.getOptional('OBSERVABILITY_ENDPOINT'),
@@ -318,7 +320,7 @@ createWorker<DiscordVerifySyncJob>('discord-verify-sync', async (job) => {
   );
   let executionJob;
   try {
-    executionJob = await loadDiscordVerifyExecutionJob(prisma, job.data);
+    executionJob = await loadDiscordVerifyExecutionJob(discordVerificationRepository, job.data);
   } catch (error) {
     await prisma.discordVerificationSession.updateMany({
       where: { id: job.data.sessionId, status: { not: 'synced' } },
