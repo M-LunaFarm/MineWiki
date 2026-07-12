@@ -23,7 +23,7 @@ const NAV_LINKS: readonly NavigationLink[] = [
   { href: '/guilds', label: '길드', key: 'guilds' },
   { href: '/support', label: '지원', key: 'support' },
   { href: '/me', label: '계정', key: 'account', requiresAccount: true },
-  { href: '/admin/support', label: '관리자', key: 'admin', requiresAdmin: true },
+  { href: '/admin', label: '관리자', key: 'admin', requiresAdmin: true },
 ];
 
 export function SiteHeader() {
@@ -81,7 +81,7 @@ export function SiteHeader() {
   const hasAdminAccess = Boolean(
     account?.access?.isElevated ||
       account?.access?.roles.some((role) => role === 'admin' || role === 'owner') ||
-      account?.access?.permissions.some((permission) => permission.startsWith('admin.')),
+      account?.access?.permissions.some((permission) => permission.endsWith('.admin')),
   );
 
   const visibleLinks = NAV_LINKS.filter((link) => {
