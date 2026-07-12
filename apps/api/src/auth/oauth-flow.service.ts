@@ -17,6 +17,8 @@ interface PendingOAuthState {
   readonly returnTo?: string;
   readonly mode: 'login' | 'link';
   readonly linkAccountId?: string;
+  readonly agreeTerms: boolean;
+  readonly agreePrivacy: boolean;
   readonly createdAt: Date;
   readonly expiresAt: Date;
 }
@@ -34,6 +36,8 @@ interface OAuthCompleteResult {
   readonly returnTo?: string;
   readonly mode: 'login' | 'link';
   readonly linkAccountId?: string;
+  readonly agreeTerms: boolean;
+  readonly agreePrivacy: boolean;
   readonly credential?: OAuthCredentialSnapshot;
 }
 
@@ -64,7 +68,9 @@ export class OAuthFlowService {
     redirectUri?: string,
     returnTo?: string,
     mode: 'login' | 'link' = 'login',
-    linkAccountId?: string
+    linkAccountId?: string,
+    agreeTerms = false,
+    agreePrivacy = false
   ): Promise<OAuthStartResult> {
     await this.evictExpiredStates();
     const state = this.generateState();
@@ -92,6 +98,8 @@ export class OAuthFlowService {
         expiresAt,
         mode,
         linkAccountId: linkAccountId ?? null
+        ,agreeTerms
+        ,agreePrivacy
       }
     });
 
@@ -122,6 +130,8 @@ export class OAuthFlowService {
         returnTo: pending.returnTo,
         mode: pending.mode,
         linkAccountId: pending.linkAccountId
+        ,agreeTerms: pending.agreeTerms
+        ,agreePrivacy: pending.agreePrivacy
       };
     }
     const profile = await this.exchangeNaverCode(code, state, effectiveRedirect);
@@ -130,6 +140,8 @@ export class OAuthFlowService {
       returnTo: pending.returnTo,
       mode: pending.mode,
       linkAccountId: pending.linkAccountId
+      ,agreeTerms: pending.agreeTerms
+      ,agreePrivacy: pending.agreePrivacy
     };
   }
 
@@ -379,6 +391,8 @@ export class OAuthFlowService {
       returnTo: pending.returnTo ?? undefined,
       mode: pending.mode,
       linkAccountId: pending.linkAccountId ?? undefined,
+      agreeTerms: pending.agreeTerms,
+      agreePrivacy: pending.agreePrivacy,
       createdAt: pending.createdAt,
       expiresAt: pending.expiresAt
     };

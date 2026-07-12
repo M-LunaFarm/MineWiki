@@ -309,6 +309,8 @@ model OAuthState {
   expiresAt     DateTime
   mode          OAuthMode     @default(login)
   linkAccountId String?
+  agreeTerms   Boolean       @default(false)
+  agreePrivacy Boolean       @default(false)
 
   linkAccount Account? @relation(fields: [linkAccountId], references: [id], onDelete: Cascade)
 }

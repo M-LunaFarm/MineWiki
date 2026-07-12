@@ -45,6 +45,8 @@ interface OAuthPayload {
   readonly userId: string;
   readonly email?: string;
   readonly displayName?: string;
+  readonly agreeTerms?: boolean;
+  readonly agreePrivacy?: boolean;
 }
 
 interface SessionContext {
@@ -562,6 +564,9 @@ export class AuthService {
     }
     const providerUserId = payload.userId;
     const existing = await this.accounts.findByProvider(provider, providerUserId);
+    if (!existing && (payload.agreeTerms !== true || payload.agreePrivacy !== true)) {
+      throw new BadRequestException('이용약관과 개인정보 처리방침에 동의해 주세요.');
+    }
     const account = existing
       ? existing
       : await this.accounts.registerAccount({
@@ -570,6 +575,10 @@ export class AuthService {
           email: payload.email?.toLowerCase(),
           displayName: payload.displayName?.trim() || `${providerUserId}`,
           emailVerified: true,
+          consents: [
+            { consentType: 'terms', policyVersion: TERMS_POLICY_VERSION, ipAddress: context.ipAddress, userAgent: context.userAgent },
+            { consentType: 'privacy', policyVersion: PRIVACY_POLICY_VERSION, ipAddress: context.ipAddress, userAgent: context.userAgent },
+          ],
         });
 
     const sessionAccount = await this.resolveSessionAccount(account.id);

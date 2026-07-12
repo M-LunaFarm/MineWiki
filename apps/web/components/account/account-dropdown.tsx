@@ -19,7 +19,7 @@ function buildMinecraftAvatarCandidates(uuid: string): string[] {
 }
 
 export function AccountDropdown() {
-  const { account, loading, loginOAuth, logout } = useAuth();
+  const { account, loading, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [minecraftAvatarCandidates, setMinecraftAvatarCandidates] = useState<string[]>([]);
@@ -82,19 +82,6 @@ export function AccountDropdown() {
   const toggle = () => {
     setError(null);
     setOpen((value) => !value);
-  };
-
-  const handleOAuth = async (provider: 'discord' | 'naver') => {
-    setError(null);
-    try {
-      const search = typeof window !== 'undefined' ? window.location.search : '';
-      const returnTo = `${pathname ?? ''}${search}`;
-      await loginOAuth(provider, { returnTo });
-    } catch (oauthIssue) {
-      const message =
-        oauthIssue instanceof Error ? oauthIssue.message : '로그인을 시작하지 못했습니다.';
-      setError(message);
-    }
   };
 
   const handleLogout = async () => {
@@ -259,22 +246,20 @@ export function AccountDropdown() {
                   Discord, NAVER 또는 이메일 계정으로 로그인하실 수 있습니다.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => void handleOAuth('discord')}
+              <Link
+                href={`/login?returnTo=${encodeURIComponent(pathname || '/')}`}
                 className="w-full rounded-md border border-white/10 bg-[#5865F2]/85 px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#4752c4] disabled:opacity-50"
-                disabled={loading}
+                onClick={() => setOpen(false)}
               >
                 Discord 로그인
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleOAuth('naver')}
+              </Link>
+              <Link
+                href={`/login?returnTo=${encodeURIComponent(pathname || '/')}`}
                 className="w-full rounded-md border border-white/10 bg-[#03C75A]/85 px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#029b48] disabled:opacity-50"
-                disabled={loading}
+                onClick={() => setOpen(false)}
               >
                 NAVER 로그인
-              </button>
+              </Link>
               <Link
                 href="/login"
                 className="block rounded-md border border-white/10 px-3 py-2 text-center text-xs font-semibold text-slate-300 transition hover:bg-white/5"

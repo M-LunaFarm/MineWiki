@@ -1,0 +1,3 @@
+ALTER TABLE `OAuthState`
+  ADD COLUMN `agreeTerms` BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN `agreePrivacy` BOOLEAN NOT NULL DEFAULT false;

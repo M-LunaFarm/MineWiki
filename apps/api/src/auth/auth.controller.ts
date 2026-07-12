@@ -56,7 +56,18 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60 } })
   startOAuth(@Body() body: unknown) {
     const payload = oauthStartRequestSchema.parse(body);
-    return this.oauthFlow.start(payload.provider, payload.redirectUri, payload.returnTo);
+    if (payload.agreeTerms !== true || payload.agreePrivacy !== true) {
+      throw new BadRequestException('이용약관과 개인정보 처리방침에 동의해 주세요.');
+    }
+    return this.oauthFlow.start(
+      payload.provider,
+      payload.redirectUri,
+      payload.returnTo,
+      'login',
+      undefined,
+      payload.agreeTerms,
+      payload.agreePrivacy,
+    );
   }
 
   @UseGuards(SessionGuard)
@@ -219,7 +230,7 @@ export class AuthController {
 
   private async finalizeOAuth(
     provider: OAuthProvider,
-    profile: { providerUserId: string; email?: string; displayName?: string },
+    profile: { providerUserId: string; email?: string; displayName?: string; agreeTerms: boolean; agreePrivacy: boolean },
     reply: FastifyReply,
     request: FastifyRequest,
   ): Promise<AuthSessionResult> {
@@ -232,6 +243,8 @@ export class AuthController {
         userId: profile.providerUserId,
         email: profile.email,
         displayName: profile.displayName,
+        agreeTerms: profile.agreeTerms,
+        agreePrivacy: profile.agreePrivacy,
       },
       this.extractSessionContext(request),
     );

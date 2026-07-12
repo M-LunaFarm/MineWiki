@@ -36,6 +36,8 @@ export const oauthStartRequestSchema = z.object({
   provider: oauthProviderSchema,
   redirectUri: z.string().url().optional(),
   returnTo: z.string().min(1).optional(),
+  agreeTerms: z.boolean().optional(),
+  agreePrivacy: z.boolean().optional(),
 });
 
 export const oauthStartResponseSchema = z.object({

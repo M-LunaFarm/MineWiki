@@ -29,7 +29,7 @@ interface AuthContextValue {
   }) => Promise<EmailRegistrationResult>;
   readonly verifyEmail: (token: string) => Promise<void>;
   readonly resendVerification: (email: string) => Promise<ResendVerificationResult>;
-  readonly loginOAuth: (provider: OAuthProvider, options?: { returnTo?: string }) => Promise<void>;
+  readonly loginOAuth: (provider: OAuthProvider, options: { returnTo?: string; agreeTerms: true; agreePrivacy: true }) => Promise<void>;
   readonly logout: () => Promise<void>;
 }
 
@@ -110,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loginOAuth = useCallback(
-    async (provider: OAuthProvider, options?: { returnTo?: string }) => {
+    async (provider: OAuthProvider, options: { returnTo?: string; agreeTerms: true; agreePrivacy: true }) => {
       if (typeof window === 'undefined') {
         throw new Error('OAuth 로그인이 클라이언트 환경에서만 지원됩니다.');
       }
@@ -120,6 +120,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const result = await startOAuthLogin(provider, {
           redirectUri,
           returnTo: options?.returnTo,
+          agreeTerms: options.agreeTerms,
+          agreePrivacy: options.agreePrivacy,
         });
         setLoading(false);
         window.location.assign(result.authorizationUrl);

@@ -26,7 +26,8 @@ export function AuthForms() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [agreementsAccepted, setAgreementsAccepted] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [passwordFocused, setPasswordFocused] = useState(false);
@@ -97,7 +98,7 @@ export function AuthForms() {
           setError('비밀번호 확인이 일치하지 않습니다.');
           return;
         }
-        if (!agreementsAccepted) {
+        if (!termsAccepted || !privacyAccepted) {
           setError('이용약관과 개인정보 처리방침에 모두 동의해야 합니다.');
           return;
         }
@@ -122,7 +123,8 @@ export function AuthForms() {
       setPassword('');
       setConfirmPassword('');
       setDisplayName('');
-      setAgreementsAccepted(false);
+      setTermsAccepted(false);
+      setPrivacyAccepted(false);
       setPasswordFocused(false);
       setShowPassword(false);
     } catch (submitError) {
@@ -185,6 +187,11 @@ export function AuthForms() {
   const handleOAuth = async (provider: OAuthProvider) => {
     setOauthError(null);
 
+    if (!termsAccepted || !privacyAccepted) {
+      setOauthError('간편 로그인도 이용약관과 개인정보 처리방침 동의가 필요합니다.');
+      return;
+    }
+
     if (!oauthAvailability[provider]) {
       setOauthError(`${PROVIDER_LABEL[provider]} 로그인이 현재 비활성화되어 있습니다.`);
       return;
@@ -202,7 +209,7 @@ export function AuthForms() {
           returnTo = `${window.location.pathname}${window.location.search}`;
         }
       }
-      await loginOAuth(provider, { returnTo });
+      await loginOAuth(provider, { returnTo, agreeTerms: true, agreePrivacy: true });
     } catch (oauthProblem) {
       const message =
         oauthProblem instanceof Error ? oauthProblem.message : '간편 로그인을 시작하지 못했습니다.';
@@ -293,6 +300,13 @@ export function AuthForms() {
           {oauthError}
         </p>
       ) : null}
+
+      <PolicyAgreements
+        termsAccepted={termsAccepted}
+        privacyAccepted={privacyAccepted}
+        onTermsChange={setTermsAccepted}
+        onPrivacyChange={setPrivacyAccepted}
+      />
 
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
@@ -444,33 +458,9 @@ export function AuthForms() {
                   />
                 </div>
 
-                <label className="flex items-start gap-3 rounded-lg border border-[#ded7c8] bg-[#fcfaf5] px-4 py-3 text-xs leading-5 text-[#666b72]">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border-[#b9b0a1] bg-white text-[#16824d] focus:ring-[#16824d]"
-                    checked={agreementsAccepted}
-                    onChange={(event) => setAgreementsAccepted(event.target.checked)}
-                    required
-                  />
-                  <span>
-                    <Link
-                      className="text-[#16824d] underline"
-                      href="/policies/terms"
-                      target="_blank"
-                    >
-                      이용약관
-                    </Link>{' '}
-                    및{' '}
-                    <Link
-                      className="text-[#16824d] underline"
-                      href="/policies/privacy"
-                      target="_blank"
-                    >
-                      개인정보 처리방침
-                    </Link>
-                    에 동의합니다.
-                  </span>
-                </label>
+                <p className="text-xs leading-5 text-[#666b72]">
+                  위 필수 정책 동의는 이메일 회원가입과 간편 로그인에 공통으로 적용됩니다.
+                </p>
               </>
             ) : (
               <div className="flex justify-end">
@@ -600,6 +590,35 @@ export function AuthForms() {
         </form>
       )}
     </div>
+  );
+}
+
+function PolicyAgreements({
+  termsAccepted,
+  privacyAccepted,
+  onTermsChange,
+  onPrivacyChange,
+}: {
+  readonly termsAccepted: boolean;
+  readonly privacyAccepted: boolean;
+  readonly onTermsChange: (value: boolean) => void;
+  readonly onPrivacyChange: (value: boolean) => void;
+}) {
+  return (
+    <fieldset className="space-y-2 rounded-lg border border-[#ded7c8] bg-[#fcfaf5] px-4 py-3 text-xs leading-5 text-[#666b72]">
+      <legend className="px-1 font-semibold text-[#3f454c]">필수 정책 동의</legend>
+      <PolicyCheckbox checked={termsAccepted} onChange={onTermsChange} href="/policies/terms" label="이용약관" />
+      <PolicyCheckbox checked={privacyAccepted} onChange={onPrivacyChange} href="/policies/privacy" label="개인정보 처리방침" />
+    </fieldset>
+  );
+}
+
+function PolicyCheckbox({ checked, onChange, href, label }: { readonly checked: boolean; readonly onChange: (value: boolean) => void; readonly href: string; readonly label: string }) {
+  return (
+    <label className="flex items-start gap-3">
+      <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-[#b9b0a1] bg-white text-[#16824d] focus:ring-[#16824d]" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span><span className="mr-1 font-semibold text-[#b42318]">[필수]</span><Link className="text-[#16824d] underline" href={href} target="_blank" rel="noopener noreferrer">{label}</Link>에 동의합니다.</span>
+    </label>
   );
 }
 
