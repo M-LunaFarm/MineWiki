@@ -146,7 +146,7 @@ export class ReviewService {
       throw new ForbiddenException('Minecraft 소유권 인증이 필요합니다.');
     }
 
-    await this.enforceVoteGate(serverId, identity.uuid, now);
+    const evidenceVote = await this.enforceVoteGate(serverId, identity.uuid, now);
 
     const lastReview = await this.prisma.serverReview.findFirst({
       where: {
@@ -177,6 +177,10 @@ export class ReviewService {
         isAnonymous,
         helpfulCount: 0,
         reports: 0
+        ,evidenceMinecraftUuid: identity.uuid
+        ,evidenceVoteId: evidenceVote.id ?? null
+        ,evidenceVerifiedAt: new Date(identity.lastVerifiedAt)
+        ,evidencePolicyVersion: '2026-07-12-v1'
       }
     });
 
@@ -544,6 +548,10 @@ function toReviewResponse(review: {
   adminReplyAuthor: string | null;
   adminReplyCreatedAt: Date | null;
   createdAt: Date;
+  evidenceMinecraftUuid?: string | null;
+  evidenceVoteId?: string | null;
+  evidenceVerifiedAt?: Date | null;
+  evidencePolicyVersion?: string | null;
 }, viewerAccountId?: string): ServerReview {
   const tags = normalizeReviewTags(review.tags);
   const adminReplyAuthor = normalizeAdminReplyAuthor(review.adminReplyAuthor);
@@ -554,7 +562,10 @@ function toReviewResponse(review: {
     rating: review.rating,
     body: review.body,
     tags,
-    trustLabels: ['ms_owned', 'vote_ack'],
+    trustLabels:
+      review.evidenceMinecraftUuid && review.evidenceVoteId && review.evidenceVerifiedAt
+        ? ['ms_owned', 'vote_ack']
+        : [],
     helpfulCount: review.helpfulCount,
     reports: review.reports,
     visibility: review.visibility,

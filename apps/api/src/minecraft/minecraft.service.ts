@@ -17,6 +17,7 @@ import type {
 } from '@minewiki/schemas';
 import { BusinessEventService } from '../events/business-event.service';
 import { PrismaService } from '../common/prisma.service';
+import { Prisma } from '@prisma/client';
 
 const MICROSOFT_TOKEN_URL =
   'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
@@ -93,7 +94,7 @@ export class MinecraftService {
     url.searchParams.set('client_id', clientId);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('redirect_uri', redirectUri);
-    url.searchParams.set('scope', 'XboxLive.signin offline_access');
+    url.searchParams.set('scope', 'XboxLive.signin');
     url.searchParams.set('state', state);
     url.searchParams.set('code_challenge', codeChallenge);
     url.searchParams.set('code_challenge_method', 'S256');
@@ -198,22 +199,31 @@ export class MinecraftService {
       );
     }
 
-    await this.prisma.minecraftIdentity.upsert({
-      where: { accountId: payload.userId },
-      update: {
-        uuid: identity.uuid,
-        playerName: identity.playerName ?? null,
-        msOwned: identity.msOwned,
-        lastVerifiedAt: new Date(identity.lastVerifiedAt)
-      },
-      create: {
-        accountId: payload.userId,
-        uuid: identity.uuid,
-        playerName: identity.playerName ?? null,
-        msOwned: identity.msOwned,
-        lastVerifiedAt: new Date(identity.lastVerifiedAt)
+    try {
+      await this.prisma.minecraftIdentity.upsert({
+        where: { accountId: payload.userId },
+        update: {
+          uuid: identity.uuid,
+          playerName: identity.playerName ?? null,
+          msOwned: identity.msOwned,
+          lastVerifiedAt: new Date(identity.lastVerifiedAt)
+        },
+        create: {
+          accountId: payload.userId,
+          uuid: identity.uuid,
+          playerName: identity.playerName ?? null,
+          msOwned: identity.msOwned,
+          lastVerifiedAt: new Date(identity.lastVerifiedAt)
+        }
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException(
+          'Minecraft identity is already linked to another MineWiki account.'
+        );
       }
-    });
+      throw error;
+    }
 
     this.logger.log(`Minecraft ownership verified for user ${payload.userId}`);
 

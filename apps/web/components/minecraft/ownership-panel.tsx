@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, ShieldCheck, SquareArrowOutUpRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -66,6 +67,10 @@ export function MinecraftOwnershipPanel() {
   const searchParams = useSearchParams();
   const verifySessionId = searchParams.get('verifySessionId');
   const verifyToken = searchParams.get('verifyToken');
+  const requestedReturnTo = searchParams.get('returnTo');
+  const returnTo = requestedReturnTo?.startsWith('/') && !requestedReturnTo.startsWith('//')
+    ? requestedReturnTo
+    : null;
   const [identity, setIdentity] = useState<MinecraftIdentity | null>(null);
   const [playerName, setPlayerName] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'verifying' | 'loadingIdentity'>('idle');
@@ -402,7 +407,7 @@ export function MinecraftOwnershipPanel() {
   }, [flowStage, identity]);
 
   return (
-    <section className="relative overflow-hidden rounded-xl border border-white/10 bg-[#1A1A1A] p-8 shadow-sm">
+    <section id="minecraft-ownership" className="relative overflow-hidden rounded-xl border border-white/10 bg-[#1A1A1A] p-8 shadow-sm">
       <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-[#13ec80]/5 blur-3xl" />
       <div className="relative z-10">
         <div className="mb-8 flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
@@ -550,7 +555,7 @@ export function MinecraftOwnershipPanel() {
         ) : null}
 
         {identity ? (
-          <div className="mt-6 flex items-center gap-4 border-t border-white/10 pt-6">
+          <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-white/10 pt-6">
             <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded border border-white/15 bg-[#121212]">
               {activeAvatarSrc ? (
                 <Image
@@ -583,6 +588,11 @@ export function MinecraftOwnershipPanel() {
                 최근 검증: {new Date(identity.lastVerifiedAt).toLocaleString('ko-KR')}
               </p>
             </div>
+            {returnTo ? (
+              <Link href={returnTo} className="ml-auto inline-flex rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-bold text-[#07130d] transition hover:bg-[#35f29a]">
+                리뷰 화면으로 돌아가기
+              </Link>
+            ) : null}
           </div>
         ) : (
           <p className="mt-6 border-t border-white/10 pt-5 text-xs text-[#8b97a6]">

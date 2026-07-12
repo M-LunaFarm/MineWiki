@@ -287,7 +287,11 @@ export function ServerReviewSection({
         composeDisabled={composerDisabled}
         onCompose={handleOpenComposer}
       />
-      <ReviewGateHint status={gateStatus} onRefresh={refreshGateStatus} />
+      <ReviewGateHint
+        status={gateStatus}
+        onRefresh={refreshGateStatus}
+        returnTo={serverPath ?? `/servers/${serverId}`}
+      />
       <ServerReviewFilters
         serverId={serverId}
         serverPath={serverPath}

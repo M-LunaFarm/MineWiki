@@ -1,10 +1,12 @@
 'use client';
 
+import Link from 'next/link';
 import type { ReviewGateStatus } from '@minewiki/schemas';
 
 interface ReviewGateHintProps {
   readonly status: ReviewGateStatus;
   readonly onRefresh?: () => void;
+  readonly returnTo: string;
 }
 
 const REQUIREMENTS: Array<{
@@ -37,7 +39,7 @@ function formatKstDateTime(value: string): string {
   return parsed.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
 }
 
-export function ReviewGateHint({ status, onRefresh }: ReviewGateHintProps) {
+export function ReviewGateHint({ status, onRefresh, returnTo }: ReviewGateHintProps) {
   const completed = REQUIREMENTS.reduce(
     (count, requirement) => count + Number(status[requirement.key]),
     0
@@ -106,6 +108,18 @@ export function ReviewGateHint({ status, onRefresh }: ReviewGateHintProps) {
             : '투표 정보를 불러오는 중이거나 투표 이력이 없습니다.'}
         </p>
       </div>
+
+      {!status.isLoggedIn ? (
+        <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="mt-4 inline-flex rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-bold text-[#07130d] transition hover:bg-[#35f29a]">
+          로그인하고 리뷰 준비하기
+        </Link>
+      ) : !status.isMinecraftOwned ? (
+        <Link href={`/me?returnTo=${encodeURIComponent(returnTo)}#minecraft-ownership`} className="mt-4 inline-flex rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-bold text-[#07130d] transition hover:bg-[#35f29a]">
+          Microsoft로 Minecraft 소유권 인증
+        </Link>
+      ) : !status.hasRecentVote ? (
+        <p className="mt-4 text-xs text-amber-200">이 서버에 투표하면 리뷰 작성 조건이 완료됩니다.</p>
+      ) : null}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 import { PrismaService } from '../common/prisma.service';
 
 export interface VoteRecord {
+  readonly id?: string;
   readonly serverId: string;
   readonly username: string;
   readonly votedAt: Date;
@@ -86,6 +87,7 @@ export class VoteStore {
       return undefined;
     }
     return {
+      id: record.id,
       serverId: record.serverId,
       username: record.username,
       votedAt: record.votedAt,
