@@ -1,7 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { ServerService } from './server.service';
+import { downsamplePingSamples, ServerService } from './server.service';
+
+test('server stats downsampling preserves the seven-day range endpoints', () => {
+  const samples = Array.from({ length: 901 }, (_, index) => index);
+  const downsampled = downsamplePingSamples(samples, 96);
+
+  assert.equal(downsampled.length, 96);
+  assert.equal(downsampled[0], 0);
+  assert.equal(downsampled[downsampled.length - 1], 900);
+  assert.equal(new Set(downsampled).size, downsampled.length);
+});
 
 test('registration canonicalizes endpoints and rejects disguised duplicates', async () => {
   let storedEndpointKey: string | null = null;

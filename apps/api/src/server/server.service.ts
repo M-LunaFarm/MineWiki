@@ -264,6 +264,8 @@ export class ServerService {
         }
       }
 
+      samples = downsamplePingSamples(samples, 96);
+
       const payload: ServerStats = {
         serverId: id,
         rank: {
@@ -1195,6 +1197,23 @@ export class ServerService {
     }
     throw new Error('Failed to generate unique server short code.');
   }
+}
+
+export function downsamplePingSamples<T>(samples: readonly T[], maxSamples = 96): T[] {
+  if (maxSamples < 2 || samples.length <= maxSamples) {
+    return [...samples];
+  }
+  const lastIndex = samples.length - 1;
+  const selected: T[] = [];
+  let previousIndex = -1;
+  for (let slot = 0; slot < maxSamples; slot += 1) {
+    const index = Math.round((slot / (maxSamples - 1)) * lastIndex);
+    if (index !== previousIndex) {
+      selected.push(samples[index]);
+      previousIndex = index;
+    }
+  }
+  return selected;
 }
 
 export interface ServerWikiLinkRequest {

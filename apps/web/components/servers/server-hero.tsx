@@ -73,7 +73,7 @@ export function ServerHero({ detail, serverId, apiBaseUrl, stats }: ServerHeroPr
       value: `${detail.reviewsCount.toLocaleString('ko-KR')}건`,
       caption: detail.verifiedAt
         ? `마지막 검증 ${new Date(detail.verifiedAt).toLocaleDateString('ko-KR')}`
-        : '검증 이력 준비 중'
+        : '서버 소유권 미검증'
     }
   ];
   const metricsHistory = stats ? buildMetricsHistory(stats) : null;
@@ -177,9 +177,28 @@ export function ServerHero({ detail, serverId, apiBaseUrl, stats }: ServerHeroPr
 }
 
 function buildMetricsHistory(stats: ServerStats) {
+  if (stats.pingSamples?.length) {
+    const samples = downsampleMetricSamples(stats.pingSamples, 96);
+    return samples.map((sample) => {
+      const timestamp = new Date(sample.timestamp);
+      const label = Number.isNaN(timestamp.getTime())
+        ? sample.timestamp
+        : timestamp.toLocaleString('ko-KR', {
+            month: 'numeric',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+      return {
+        label,
+        players: Math.max(0, sample.players ?? 0),
+        latency: Math.max(0, sample.latency ?? 0),
+        online: sample.online,
+      };
+    });
+  }
+
   const points = stats.sparkline.length ? stats.sparkline : Array(7).fill(stats.players.online);
-  const maxSpark = Math.max(...points, 1);
-  const baselinePlayers = stats.players.online;
   const historyLength = points.length;
   const now = new Date();
 
@@ -188,18 +207,20 @@ function buildMetricsHistory(stats: ServerStats) {
     const labelDate = new Date(now);
     labelDate.setDate(now.getDate() - daysAgo);
     const label = `${labelDate.getMonth() + 1}/${labelDate.getDate()}`;
-    const players = Math.max(
-      0,
-      Math.round(baselinePlayers * 0.6 + (value / maxSpark) * baselinePlayers * 0.8)
-    );
-    const latency = Math.max(
-      45,
-      Math.round(160 - (value / maxSpark) * 70 + Math.sin(index) * 8)
-    );
     return {
       label,
-      players,
-      latency
+      players: Math.max(0, value),
+      latency: Math.max(0, stats.latencyMs ?? 0),
     };
   });
+}
+
+function downsampleMetricSamples<T>(samples: readonly T[], maxSamples: number): T[] {
+  if (samples.length <= maxSamples) {
+    return [...samples];
+  }
+  const lastIndex = samples.length - 1;
+  return Array.from({ length: maxSamples }, (_, slot) =>
+    samples[Math.round((slot / (maxSamples - 1)) * lastIndex)],
+  );
 }
