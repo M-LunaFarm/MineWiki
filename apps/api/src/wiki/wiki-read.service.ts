@@ -51,7 +51,7 @@ export interface WikiPageResponse {
     readonly isOnline: boolean | null;
     readonly playersOnline: number | null;
     readonly playersMax: number | null;
-    readonly layout: 'docs';
+    readonly layout: 'docs' | 'handbook' | 'brand';
     readonly navigation: ReadonlyArray<{
       readonly id: string;
       readonly title: string;
@@ -461,7 +461,8 @@ export class WikiReadService {
         port: true,
         edition: true,
         supportedVersions: true,
-        genres: true
+        genres: true,
+        layoutKey: true
       }
     });
     if (!serverWiki) {
@@ -500,7 +501,7 @@ export class WikiReadService {
         isOnline: server?.isOnline ?? null,
         playersOnline: server?.playersOnline ?? null,
         playersMax: server?.playersMax ?? null,
-        layout: 'docs' as const,
+        layout: normalizeServerWikiLayoutKey(serverWiki.layoutKey),
         navigation: pages.map((item) => ({
           id: item.id.toString(),
           title: item.displayTitle,
@@ -543,6 +544,10 @@ export class WikiReadService {
     }
     return BigInt(value);
   }
+}
+
+function normalizeServerWikiLayoutKey(value: string): 'docs' | 'handbook' | 'brand' {
+  return value === 'handbook' || value === 'brand' ? value : 'docs';
 }
 
 function collectFileNames(ast: AstNode[], output = new Set<string>()): Set<string> {

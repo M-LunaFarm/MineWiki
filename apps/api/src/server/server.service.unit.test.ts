@@ -233,6 +233,45 @@ test('server list preserves rank when only historical valid votes remain', async
   assert.equal(server.rank?.current, 1);
 });
 
+test('server wiki Docs layout is always included without a paid entitlement', async () => {
+  const prisma = {
+    serverWiki: {
+      async findUnique() {
+        return { id: 5n, layoutKey: 'docs', layoutUpdatedAt: null };
+      }
+    },
+    serverWikiLayoutEntitlement: {
+      async findMany() { return []; }
+    }
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const settings = await service.getWikiLayoutSettings(randomUUID());
+
+  assert.equal(settings.selected, 'docs');
+  assert.equal(settings.layouts.find((layout) => layout.key === 'docs')?.entitled, true);
+  assert.equal(settings.layouts.find((layout) => layout.key === 'handbook')?.entitled, false);
+});
+
+test('server wiki rejects selecting a premium layout without an active entitlement', async () => {
+  const prisma = {
+    serverWiki: {
+      async findUnique() {
+        return { id: 5n, layoutKey: 'docs', layoutUpdatedAt: null };
+      }
+    },
+    serverWikiLayoutEntitlement: {
+      async findMany() { return []; }
+    }
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  await assert.rejects(
+    () => service.updateWikiLayout(randomUUID(), 'brand'),
+    /premium layout is not included/
+  );
+});
+
 test('Votifier settings never return the stored v2 token', async () => {
   const service = new ServerService(
     {} as never,

@@ -44,7 +44,7 @@ export interface WikiPageResponse {
     readonly isOnline: boolean | null;
     readonly playersOnline: number | null;
     readonly playersMax: number | null;
-    readonly layout: 'docs';
+    readonly layout: 'docs' | 'handbook' | 'brand';
     readonly navigation: ReadonlyArray<{
       readonly id: string;
       readonly title: string;

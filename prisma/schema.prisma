@@ -1105,6 +1105,9 @@ model ServerWiki {
   genres            String?  @db.VarChar(255)
   verifiedStatus    String   @default("none") @map("verified_status") @db.VarChar(32)
   status            String   @default("active") @db.VarChar(32)
+  layoutKey         String   @default("docs") @map("layout_key") @db.VarChar(32)
+  layoutUpdatedAt   DateTime? @map("layout_updated_at")
+  layoutUpdatedBy   BigInt?  @map("layout_updated_by") @db.UnsignedBigInt
   createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
   createdAt         DateTime @map("created_at")
   updatedAt         DateTime @map("updated_at")
@@ -1113,6 +1116,24 @@ model ServerWiki {
   @@index([status])
   @@index([verifiedStatus])
   @@map("server_wikis")
+}
+
+model ServerWikiLayoutEntitlement {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  serverWikiId      BigInt    @map("server_wiki_id") @db.UnsignedBigInt
+  layoutKey         String    @map("layout_key") @db.VarChar(32)
+  status            String    @default("active") @db.VarChar(32)
+  source            String    @default("manual") @db.VarChar(32)
+  externalReference String?   @unique @map("external_reference") @db.VarChar(191)
+  startsAt          DateTime  @default(now()) @map("starts_at")
+  expiresAt         DateTime? @map("expires_at")
+  createdBy         BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([serverWikiId, layoutKey, status], map: "idx_server_wiki_layout_entitlement")
+  @@index([expiresAt], map: "idx_server_wiki_layout_expiry")
+  @@map("server_wiki_layout_entitlements")
 }
 
 model ModWiki {

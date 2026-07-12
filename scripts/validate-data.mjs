@@ -133,6 +133,40 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'ServerWiki layout keys and premium entitlements are valid',
+    `
+      SELECT sw.id
+      FROM server_wikis sw
+      WHERE sw.layout_key NOT IN ('docs', 'handbook', 'brand')
+         OR (
+           sw.layout_key IN ('handbook', 'brand')
+           AND NOT EXISTS (
+             SELECT 1
+             FROM server_wiki_layout_entitlements e
+             WHERE e.server_wiki_id = sw.id
+               AND e.layout_key = sw.layout_key
+               AND e.status = 'active'
+               AND e.starts_at <= NOW(3)
+               AND (e.expires_at IS NULL OR e.expires_at > NOW(3))
+           )
+         )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'ServerWiki layout entitlements point to supported layouts',
+    `
+      SELECT e.id
+      FROM server_wiki_layout_entitlements e
+      LEFT JOIN server_wikis sw ON sw.id = e.server_wiki_id
+      WHERE sw.id IS NULL
+         OR e.layout_key NOT IN ('handbook', 'brand')
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'public Server descriptions are not test placeholders',
     `
       SELECT s.id

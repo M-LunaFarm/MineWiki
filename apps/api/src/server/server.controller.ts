@@ -54,6 +54,9 @@ const pluginCredentialPayloadSchema = z.object({
 });
 
 const pluginCredentialStatusSchema = z.object({ enabled: z.boolean() });
+const serverWikiLayoutPayloadSchema = z.object({
+  layoutKey: z.enum(['docs', 'handbook', 'brand'])
+});
 
 const rankingQuerySchema = z.object({
   edition: z.enum(['java', 'bedrock']).optional(),
@@ -148,6 +151,24 @@ export class ServerController {
   @Get(':id/wiki')
   async serverWiki(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.serverService.getServerWikiLink(id);
+  }
+
+  @Get(':id/wiki-layouts')
+  async wikiLayouts(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.serverService.getWikiLayoutSettings(id);
+  }
+
+  @UseGuards(SessionGuard)
+  @Patch(':id/wiki-layout')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  async updateWikiLayout(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    const payload = serverWikiLayoutPayloadSchema.parse(body);
+    return this.serverService.updateWikiLayout(id, payload.layoutKey);
   }
 
   @Get(':id/stats')

@@ -1,6 +1,7 @@
 ﻿import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
@@ -40,6 +41,32 @@ const SHORT_CODE_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
 const SHORT_CODE_LENGTH = 7;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHORT_CODE_PATTERN = /^[a-z0-9]{5,12}$/;
+
+export const SERVER_WIKI_LAYOUTS = [
+  {
+    key: 'docs',
+    conceptNumber: 3,
+    name: 'Docs',
+    description: '문서 탐색과 가독성에 집중한 기본 GitBook형 레이아웃',
+    tier: 'free',
+  },
+  {
+    key: 'handbook',
+    conceptNumber: 1,
+    name: 'Handbook',
+    description: '서버 핸드북의 정보 구조를 강조하는 프리미엄 레이아웃',
+    tier: 'premium',
+  },
+  {
+    key: 'brand',
+    conceptNumber: 2,
+    name: 'Brand',
+    description: '서버 브랜딩과 핵심 정보를 강조하는 프리미엄 레이아웃',
+    tier: 'premium',
+  },
+] as const;
+
+type ServerWikiLayoutKey = (typeof SERVER_WIKI_LAYOUTS)[number]['key'];
 
 @Injectable()
 export class ServerService {
@@ -1132,6 +1159,66 @@ export class ServerService {
     throw new Error('Failed to generate unique server short code.');
   }
 
+  async getWikiLayoutSettings(serverId: string) {
+    const serverWiki = await this.prisma.serverWiki.findUnique({
+      where: { voteServerId: serverId },
+      select: { id: true, layoutKey: true, layoutUpdatedAt: true }
+    });
+    if (!serverWiki) {
+      throw new NotFoundException('Server wiki not found.');
+    }
+    const now = new Date();
+    const entitlements = await this.prisma.serverWikiLayoutEntitlement.findMany({
+      where: {
+        serverWikiId: serverWiki.id,
+        status: 'active',
+        startsAt: { lte: now },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+      },
+      select: { layoutKey: true, expiresAt: true, source: true }
+    });
+    const allowed = new Set<ServerWikiLayoutKey>(['docs']);
+    for (const entitlement of entitlements) {
+      if (isServerWikiLayoutKey(entitlement.layoutKey)) allowed.add(entitlement.layoutKey);
+    }
+    return {
+      selected: isServerWikiLayoutKey(serverWiki.layoutKey) ? serverWiki.layoutKey : 'docs',
+      updatedAt: serverWiki.layoutUpdatedAt?.toISOString() ?? null,
+      layouts: SERVER_WIKI_LAYOUTS.map((layout) => {
+        const entitlement = entitlements.find((item) => item.layoutKey === layout.key);
+        return {
+          ...layout,
+          entitled: allowed.has(layout.key),
+          entitlementExpiresAt: entitlement?.expiresAt?.toISOString() ?? null
+        };
+      })
+    };
+  }
+
+  async updateWikiLayout(serverId: string, layoutKey: string, actorProfileId?: bigint | null) {
+    if (!isServerWikiLayoutKey(layoutKey)) {
+      throw new BadRequestException('Unknown server wiki layout.');
+    }
+    const settings = await this.getWikiLayoutSettings(serverId);
+    const layout = settings.layouts.find((item) => item.key === layoutKey);
+    if (!layout?.entitled) {
+      throw new ForbiddenException('This premium layout is not included in the server plan.');
+    }
+    const updated = await this.prisma.serverWiki.update({
+      where: { voteServerId: serverId },
+      data: {
+        layoutKey,
+        layoutUpdatedAt: new Date(),
+        layoutUpdatedBy: actorProfileId ?? null
+      },
+      select: { layoutKey: true, layoutUpdatedAt: true }
+    });
+    return {
+      selected: updated.layoutKey,
+      updatedAt: updated.layoutUpdatedAt?.toISOString() ?? null
+    };
+  }
+
   private async findServerWikiForServer(serverId: string, wikiSpaceId?: bigint | null) {
     const linkedByServer = await this.prisma.serverWiki.findUnique({
       where: { voteServerId: serverId },
@@ -1322,6 +1409,10 @@ function createRegistrationEndpointKey(
   port: number,
 ): string {
   return createHash('sha256').update(`${edition}:${host}:${port}`).digest('hex');
+}
+
+function isServerWikiLayoutKey(value: string): value is ServerWikiLayoutKey {
+  return SERVER_WIKI_LAYOUTS.some((layout) => layout.key === value);
 }
 
 function normalizeServerWikiSelector(

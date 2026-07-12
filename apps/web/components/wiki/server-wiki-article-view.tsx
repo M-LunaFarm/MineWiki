@@ -33,13 +33,23 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
   const previous = currentIndex > 0 ? wiki.navigation[currentIndex - 1] : null;
   const next = currentIndex >= 0 ? wiki.navigation[currentIndex + 1] ?? null : null;
   const address = wiki.host ? `${wiki.host}${wiki.port && wiki.port !== 25565 ? `:${wiki.port}` : ''}` : null;
+  const isHandbook = wiki.layout === 'handbook';
+  const isBrand = wiki.layout === 'brand';
+  const gridClass = isBrand
+    ? 'lg:grid-cols-[252px_minmax(0,1fr)] 2xl:grid-cols-[252px_minmax(0,1fr)_278px]'
+    : isHandbook
+      ? 'lg:grid-cols-[292px_minmax(0,1fr)] 2xl:grid-cols-[292px_minmax(0,1fr)_292px]'
+      : 'lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_292px]';
 
   return (
     <main className="min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
-      <div className="mx-auto grid w-full max-w-[1600px] lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_292px]">
+      <div className={`mx-auto grid w-full max-w-[1600px] ${gridClass}`}>
         <aside className="border-white/10 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:border-r">
           <div className="border-b border-white/10 px-6 py-7">
-            <p className="font-display text-lg font-bold text-white">{wiki.name}</p>
+            <div className="flex items-center gap-3">
+              {isHandbook ? <span className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-2 text-emerald-300"><BookOpen className="size-5" /></span> : null}
+              <p className="font-display text-lg font-bold text-white">{wiki.name}{isHandbook ? ` ${page.displayTitle.endsWith('대문') ? '대문' : ''}` : ''}</p>
+            </div>
             <p className="mt-1 text-sm text-slate-500">서버 핸드북</p>
             <div className="mt-4 flex items-center justify-between gap-3 text-xs">
               <span className={wiki.isOnline ? 'text-emerald-300' : 'text-slate-500'}>
@@ -76,6 +86,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
                 </Link>
               ))}
             </div>
+            {isBrand ? <div className="mt-5 hidden space-y-4 border-l border-white/10 pl-5 text-sm text-slate-500 lg:block"><div><p className="font-semibold text-slate-300">서버 정보</p><ul className="mt-2 space-y-2 text-xs"><li>주소 · {address ?? '정보 없음'}</li><li>에디션 · {wiki.edition}</li><li>지원 버전 · {wiki.supportedVersions ?? '정보 없음'}</li></ul></div><div><p className="font-semibold text-slate-300">참여 안내</p></div></div> : null}
           </nav>
 
           <div className="hidden px-6 pb-6 lg:absolute lg:inset-x-0 lg:bottom-0 lg:block">
@@ -112,14 +123,21 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
               </Link>
             </div>
             <p className="mt-5 text-sm text-slate-500">{routePath} · 최근 수정 {updatedAt}</p>
+            {isHandbook ? <Link href={page.serverDirectoryPath ?? '/servers'} className="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-emerald-300 hover:text-emerald-200"><ArrowLeft className="size-4" />서버 목록으로 돌아가기</Link> : null}
           </header>
 
-          {address ? (
+          {address && !isHandbook ? (
+            isBrand ? (
+              <section className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-white/10 border-l-4 border-l-emerald-400 bg-white/[0.025] px-6 py-5 text-sm">
+                <span className="font-mono font-semibold text-emerald-300">{address}</span><span className="text-slate-600">•</span><span>에디션: {wiki.edition}</span><span className="text-slate-600">•</span><span>지원 버전: {wiki.supportedVersions ?? '정보 없음'}</span>
+              </section>
+            ) : (
             <section className="mt-8 grid gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-5 sm:grid-cols-3">
               <Info label="접속 주소" value={address} />
               <Info label="에디션" value={wiki.edition} />
               <Info label="지원 버전" value={wiki.supportedVersions ?? '정보 없음'} />
             </section>
+            )
           ) : null}
 
           <div className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: page.html }} />
@@ -142,7 +160,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
               <div className="mt-4 border-l-2 border-emerald-400 pl-4 text-sm text-emerald-300">{page.displayTitle}</div>
             </section>
             <div className="border-t border-white/10" />
-            <section className="rounded-xl border border-white/10 p-5">
+            {!isHandbook ? <section className="rounded-xl border border-white/10 p-5">
               <div className="flex items-start gap-3">
                 <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 p-2.5 text-emerald-300"><Trophy className="size-5" /></span>
                 <div>
@@ -151,9 +169,9 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
                 </div>
               </div>
               <Link href={page.serverDirectoryPath ?? '/servers'} className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-emerald-400/60 px-4 py-2.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-400/10">
-                <ShieldCheck className="size-4" />서버 순위 / 투표하기
+                <ShieldCheck className="size-4" />{isBrand ? '서버 디렉터리에서 보기' : '서버 순위 / 투표하기'}
               </Link>
-            </section>
+            </section> : null}
             <p className="text-xs text-slate-600">업데이트: {updatedAt}</p>
           </div>
         </aside>

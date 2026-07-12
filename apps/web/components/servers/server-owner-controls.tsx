@@ -523,13 +523,22 @@ export function ServerOwnerControls({
             </p>
           </div>
           {wikiUrl ? (
-            <Link
-              href={wikiUrl}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-[#13ec80]/30 bg-[#13ec80]/10 px-4 py-2 text-xs font-semibold text-[#13ec80] transition hover:bg-[#13ec80]/20"
-            >
-              위키 보기
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={`/servers/${encodeURIComponent(serverId)}/wiki-layouts`}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-violet-300/30 bg-violet-400/10 px-4 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-400/20"
+              >
+                레이아웃
+                <Rocket className="h-3.5 w-3.5" />
+              </Link>
+              <Link
+                href={wikiUrl}
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-[#13ec80]/30 bg-[#13ec80]/10 px-4 py-2 text-xs font-semibold text-[#13ec80] transition hover:bg-[#13ec80]/20"
+              >
+                위키 보기
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Link>
+            </div>
           ) : (
             <button
               type="button"
