@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ExternalLink } from 'lucide-react';
+import { BookOpenText, ExternalLink } from 'lucide-react';
 
 const DISCORD_INVITE_URL = 'https://discord.gg/HPh2xYjSVH';
 const TWITTER_URL = 'https://x.com';
@@ -7,14 +7,14 @@ const TWITTER_URL = 'https://x.com';
 export function SiteFooter({ variant = 'dark' }: { readonly variant?: 'dark' | 'paper' }) {
   const paper = variant === 'paper';
   return (
-    <footer className={`border-t pb-8 pt-12 ${paper ? 'border-[#aaa79e] bg-[#e8e5dc]/85 text-[#5d635c]' : 'border-[#272c33] bg-[#0b0d10] text-[#a9b0ba]'}`}>
+    <footer className={`site-footer border-t pb-8 pt-12 ${paper ? 'border-[#aaa79e] bg-[#e8e5dc]/85 text-[#5d635c]' : 'border-[#272c33] bg-[#0b0d10] text-[#a9b0ba]'}`}>
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mb-8 grid grid-cols-1 gap-8 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <Link className="mb-4 flex items-center gap-2" href="/">
-              <div className="flex h-7 w-7 items-center justify-center rounded-md border border-emerald-400/30 bg-emerald-400 text-xs font-bold text-[#0b0d10]">
-                M
-              </div>
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#123d31] text-[#9af2d5]">
+                <BookOpenText className="h-4 w-4" strokeWidth={2.2} />
+              </span>
               <span className={`text-lg font-bold ${paper ? 'text-[#252925]' : 'text-white'}`}>
                 MineWiki<span className="text-[#13ec80]">.kr</span>
               </span>

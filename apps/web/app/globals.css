@@ -274,6 +274,46 @@ html[data-theme='light'] .support-surface select {
   color: #202820;
 }
 
+html[data-theme='light'] .site-footer {
+  border-color: rgba(37, 49, 41, 0.14);
+  background: #e9ede8;
+  color: #59645b;
+}
+
+html[data-theme='light'] .site-footer [class*='border-[#272c33]'] {
+  border-color: rgba(37, 49, 41, 0.14);
+}
+
+html[data-theme='light'] .dashboard-surface [class*='bg-[#181a1d]'],
+html[data-theme='light'] .dashboard-surface [class*='bg-[#111315]'] {
+  background-color: #ffffff;
+}
+
+html[data-theme='light'] .dashboard-surface [class*='bg-[#23272b]'],
+html[data-theme='light'] .dashboard-surface [class*='bg-[#2d2d2d]'] {
+  background-color: #e8ece7;
+}
+
+html[data-theme='light'] .dashboard-surface [class*='bg-[#2f3438]'] {
+  background-color: rgba(37, 49, 41, 0.14);
+}
+
+html[data-theme='light'] .dashboard-surface [class*='border-[#2f3438]'],
+html[data-theme='light'] .dashboard-surface [class*='border-[#30363d]'],
+html[data-theme='light'] .dashboard-surface [class*='border-[#3b4248]'] {
+  border-color: rgba(37, 49, 41, 0.16);
+}
+
+html[data-theme='light'] .dashboard-surface [class*='text-[#d8dee5]'] {
+  color: #29332b;
+}
+
+html[data-theme='light'] .dashboard-surface [class*='text-[#b8c0c8]'],
+html[data-theme='light'] .dashboard-surface [class*='text-[#8f98a3]'],
+html[data-theme='light'] .dashboard-surface [class*='text-[#A0A0A0]'] {
+  color: #68736a;
+}
+
 html[data-theme='dark'] .paper-directory,
 html[data-theme='dark'] .paper-mobile-filter {
   background-color: #111713;

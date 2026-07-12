@@ -164,7 +164,7 @@ export default function DashboardPage() {
 
   if (authLoading || loading) {
     return (
-      <div className="rounded-lg border border-[#2f3438] bg-[#181a1d] p-6 text-sm text-[#b8c0c8]">
+      <div className="surface-flat p-6 text-sm text-slate-400">
         운영자 대시보드를 불러오는 중입니다.
       </div>
     );
@@ -172,7 +172,7 @@ export default function DashboardPage() {
 
   if (!account) {
     return (
-      <div className="space-y-4 rounded-lg border border-[#2f3438] bg-[#181a1d] p-6 text-sm text-[#b8c0c8]">
+      <div className="surface-flat space-y-4 p-6 text-sm text-slate-400">
         <div>
           <h1 className="text-lg font-semibold text-white">로그인이 필요합니다.</h1>
           <p className="mt-1">운영자 대시보드는 로그인 후 이용하실 수 있습니다.</p>
@@ -197,7 +197,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="dashboard-surface space-y-6">
       {actionNotice ? (
         <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
           {actionNotice}
