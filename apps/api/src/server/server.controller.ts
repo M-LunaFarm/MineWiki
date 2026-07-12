@@ -62,7 +62,14 @@ const rankingQuerySchema = z.object({
   tag: z.string().trim().min(1).max(64).optional(),
   search: z.string().trim().min(1).max(100).optional(),
   sort: z
-    .enum(['votes24h_desc', 'votesMonthly_desc', 'reviews_desc', 'latest', 'name_asc'])
+    .enum([
+      'votes24h_desc',
+      'votesMonthly_desc',
+      'playersOnline_desc',
+      'reviews_desc',
+      'latest',
+      'name_asc',
+    ])
     .default('votes24h_desc'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(24),

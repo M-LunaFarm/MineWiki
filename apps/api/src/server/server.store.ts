@@ -7,6 +7,7 @@ export interface ServerFilters {
 export type ServerSort =
   | 'votes24h_desc'
   | 'votesMonthly_desc'
+  | 'playersOnline_desc'
   | 'reviews_desc'
   | 'latest'
   | 'name_asc';
@@ -19,6 +20,7 @@ export function isServerSort(value: unknown): value is ServerSort {
   return (
     value === 'votes24h_desc' ||
     value === 'votesMonthly_desc' ||
+    value === 'playersOnline_desc' ||
     value === 'reviews_desc' ||
     value === 'latest' ||
     value === 'name_asc'

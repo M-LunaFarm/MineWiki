@@ -50,6 +50,7 @@ export default async function ServerListPage({ searchParams }: PageProps) {
 
   const initialSort: ServerListInitialFilters['sort'] =
     sortParam === 'votesMonthly_desc' ||
+    sortParam === 'playersOnline_desc' ||
     sortParam === 'reviews_desc' ||
     sortParam === 'latest' ||
     sortParam === 'name_asc'

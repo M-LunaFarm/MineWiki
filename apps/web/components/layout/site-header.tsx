@@ -20,7 +20,7 @@ const NAV_LINKS: readonly NavigationLink[] = [
   { href: '/servers', label: '서버 목록', key: 'servers' },
   { href: '/recent', label: '최근 변경', key: 'recent' },
   { href: '/search', label: '검색', key: 'search' },
-  { href: '/guilds', label: '길드', key: 'guilds' },
+  { href: '/guilds', label: 'Discord 연동', key: 'guilds' },
   { href: '/support', label: '지원', key: 'support' },
   { href: '/me', label: '계정', key: 'account', requiresAccount: true },
   { href: '/admin', label: '관리자', key: 'admin', requiresAdmin: true },

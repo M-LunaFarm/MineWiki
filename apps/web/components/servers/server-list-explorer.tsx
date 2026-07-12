@@ -69,6 +69,7 @@ type OnlineFilter = 'all' | 'online';
 type SortFilter =
   | 'votes24h_desc'
   | 'votesMonthly_desc'
+  | 'playersOnline_desc'
   | 'reviews_desc'
   | 'latest'
   | 'name_asc';
@@ -189,7 +190,8 @@ export function ServerListExplorer({
       if (sort !== 'votes24h_desc') params.set('sort', sort);
       if (currentPage > 1) params.set('page', String(currentPage));
       const query = params.toString();
-      window.history.replaceState(null, '', query ? `/servers?${query}` : '/servers');
+      const pathname = window.location.pathname === '/' ? '/' : '/servers';
+      window.history.replaceState(null, '', query ? `${pathname}?${query}` : pathname);
       try {
         const nextRanking = await fetchServerRankings({
           edition: edition === 'all' ? undefined : edition,
@@ -344,6 +346,7 @@ export function ServerListExplorer({
                 >
                   <option value="votes24h_desc">투표순</option>
                   <option value="votesMonthly_desc">월간 투표순</option>
+                  <option value="playersOnline_desc">동접순</option>
                   <option value="reviews_desc">리뷰 많은순</option>
                   <option value="latest">최신순</option>
                   <option value="name_asc">이름순</option>
@@ -631,6 +634,7 @@ export function ServerListExplorer({
                 >
                   <option value="votes24h_desc">투표순</option>
                   <option value="votesMonthly_desc">월간 투표순</option>
+                  <option value="playersOnline_desc">동접순</option>
                   <option value="reviews_desc">리뷰 많은순</option>
                   <option value="latest">최신순</option>
                   <option value="name_asc">이름순</option>

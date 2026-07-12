@@ -359,7 +359,7 @@ test('paginated rankings apply server-side filters and return page metadata', as
     online: true,
     tag: 'survival',
     search: 'ranked',
-    sort: 'latest',
+    sort: 'playersOnline_desc',
     page: 2,
     pageSize: 12,
   });
@@ -374,6 +374,11 @@ test('paginated rankings apply server-side filters and return page metadata', as
   assert.equal(queries.length, 6);
   assert.deepEqual((queries[0] as { skip: number; take: number }).skip, 12);
   assert.deepEqual((queries[0] as { skip: number; take: number }).take, 12);
+  assert.deepEqual((queries[0] as { orderBy: unknown }).orderBy, [
+    { isOnline: { sort: 'desc', nulls: 'last' } },
+    { playersOnline: { sort: 'desc', nulls: 'last' } },
+    { name: 'asc' },
+  ]);
   assert.deepEqual(
     (queries[0] as { where: { tags: unknown } }).where.tags,
     { array_contains: ['survival'] },

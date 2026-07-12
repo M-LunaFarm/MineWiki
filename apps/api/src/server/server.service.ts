@@ -1267,6 +1267,12 @@ function buildOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationInput[] {
       return [{ votesMonthly: 'desc' }, { name: 'asc' }];
     case 'reviews_desc':
       return [{ reviewsCount: 'desc' }, { name: 'asc' }];
+    case 'playersOnline_desc':
+      return [
+        { isOnline: { sort: 'desc', nulls: 'last' } },
+        { playersOnline: { sort: 'desc', nulls: 'last' } },
+        { name: 'asc' },
+      ];
     case 'name_asc':
       return [{ name: 'asc' }];
     case 'latest':

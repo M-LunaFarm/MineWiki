@@ -12,8 +12,8 @@ import { createPageMetadata } from '../../lib/metadata';
 export const dynamic = 'force-dynamic';
 
 export const metadata = createPageMetadata({
-  title: 'Discord 길드 관리',
-  description: 'MineWiki Discord 인증 봇의 길드 설정과 인증 현황을 관리합니다.',
+  title: 'Discord 서버 연동',
+  description: 'MineWiki Discord 인증 봇이 연결된 서버의 설정과 인증 현황을 관리합니다.',
   path: '/guilds',
   noIndex: true,
 });
@@ -29,7 +29,7 @@ export default async function GuildListPage() {
     if (isGuildAuthenticationError(fetchError)) {
       redirect('/login?returnTo=%2Fguilds');
     }
-    error = fetchError instanceof Error ? fetchError.message : '길드 목록을 불러오지 못했습니다.';
+    error = fetchError instanceof Error ? fetchError.message : 'Discord 서버 목록을 불러오지 못했습니다.';
   }
 
   const configuredRoles = guilds.filter((guild) => guild.verifiedRoleId).length;
@@ -42,7 +42,7 @@ export default async function GuildListPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#14c794]">
             Discord Operations
           </p>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight text-white">길드 관리</h1>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight text-white">Discord 서버 연동</h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
             인증 역할, 로그 채널, 닉네임 포맷, 봇 응답 메시지를 MineWiki에서 직접 관리합니다.
           </p>
@@ -54,7 +54,7 @@ export default async function GuildListPage() {
             </span>
             <div>
               <h2 className="text-sm font-semibold text-white">봇 연결</h2>
-              <p className="mt-1 text-xs text-slate-400">새 길드에는 봇 초대가 먼저 필요합니다.</p>
+              <p className="mt-1 text-xs text-slate-400">새 Discord 서버에는 봇 초대가 먼저 필요합니다.</p>
             </div>
           </div>
           {inviteUrl ? (
@@ -76,7 +76,7 @@ export default async function GuildListPage() {
       </section>
 
       <section className="grid gap-3 sm:grid-cols-3">
-        <MetricCard icon={<Users className="h-4 w-4" />} label="등록 길드" value={guilds.length} />
+        <MetricCard icon={<Users className="h-4 w-4" />} label="연동 서버" value={guilds.length} />
         <MetricCard
           icon={<ShieldCheck className="h-4 w-4" />}
           label="인증 역할 설정"
@@ -87,14 +87,14 @@ export default async function GuildListPage() {
 
       {error ? (
         <section className="surface-card border-red-400/20 bg-red-500/10 p-5">
-          <h2 className="text-sm font-semibold text-red-100">길드 목록을 불러오지 못했습니다</h2>
+          <h2 className="text-sm font-semibold text-red-100">Discord 서버 목록을 불러오지 못했습니다</h2>
           <p className="mt-2 text-sm text-red-100/80">{error}</p>
         </section>
       ) : null}
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold text-white">연동된 길드</h2>
+          <h2 className="text-xl font-semibold text-white">연동된 Discord 서버</h2>
           <span className="text-xs text-slate-500">최근 업데이트 순</span>
         </div>
         {guilds.length > 0 ? (
@@ -109,7 +109,7 @@ export default async function GuildListPage() {
                   <div className="min-w-0">
                     <p className="font-mono text-xs text-slate-500">{guild.guildId}</p>
                     <h3 className="mt-1 text-lg font-semibold text-white">
-                      Discord 길드 {guild.guildId}
+                      Discord 서버 {guild.guildId}
                     </h3>
                   </div>
                   <Settings className="h-5 w-5 shrink-0 text-slate-400" />
@@ -126,9 +126,9 @@ export default async function GuildListPage() {
           </div>
         ) : !error ? (
           <div className="surface-card p-8 text-center">
-            <p className="text-sm font-semibold text-white">등록된 길드가 없습니다</p>
+            <p className="text-sm font-semibold text-white">연동된 Discord 서버가 없습니다</p>
             <p className="mt-2 text-sm text-slate-400">
-              봇이 길드 설정을 동기화하면 이 화면에 표시됩니다.
+              봇이 Discord 서버 설정을 동기화하면 이 화면에 표시됩니다.
             </p>
           </div>
         ) : null}

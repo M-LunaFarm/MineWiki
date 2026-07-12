@@ -34,7 +34,12 @@ interface ServerSummaryOptions {
   readonly edition?: 'java' | 'bedrock';
   readonly tag?: string;
   readonly search?: string;
-  readonly sort?: 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'name_asc';
+  readonly sort?:
+    | 'votes24h_desc'
+    | 'votesMonthly_desc'
+    | 'playersOnline_desc'
+    | 'reviews_desc'
+    | 'name_asc';
 }
 
 export interface ServerRankingOptions {
@@ -43,7 +48,13 @@ export interface ServerRankingOptions {
   readonly online?: boolean;
   readonly tag?: string;
   readonly search?: string;
-  readonly sort?: 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'latest' | 'name_asc';
+  readonly sort?:
+    | 'votes24h_desc'
+    | 'votesMonthly_desc'
+    | 'playersOnline_desc'
+    | 'reviews_desc'
+    | 'latest'
+    | 'name_asc';
   readonly page?: number;
   readonly pageSize?: number;
 }

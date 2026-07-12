@@ -56,7 +56,12 @@ export class ApiClient {
     edition?: 'java' | 'bedrock';
     tag?: string;
     search?: string;
-    sort?: 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'name_asc';
+    sort?:
+      | 'votes24h_desc'
+      | 'votesMonthly_desc'
+      | 'playersOnline_desc'
+      | 'reviews_desc'
+      | 'name_asc';
   }): Promise<ServerSummary[]> {
     const searchParams = new URLSearchParams();
     if (options?.edition) {
@@ -84,7 +89,13 @@ export class ApiClient {
     grade?: 'Verified' | 'Unverified';
     tag?: string;
     search?: string;
-    sort?: 'votes24h_desc' | 'votesMonthly_desc' | 'reviews_desc' | 'latest' | 'name_asc';
+    sort?:
+      | 'votes24h_desc'
+      | 'votesMonthly_desc'
+      | 'playersOnline_desc'
+      | 'reviews_desc'
+      | 'latest'
+      | 'name_asc';
     page?: number;
     pageSize?: number;
   }): Promise<ServerRankingResponse> {
