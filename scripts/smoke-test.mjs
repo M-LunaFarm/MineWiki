@@ -5,8 +5,8 @@ import { matchesJsonSubset } from './smoke-assertions.mjs';
 
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
-const webBaseUrl = normalizeBaseUrl(process.env.SMOKE_WEB_BASE_URL ?? 'http://127.0.0.1:4311');
-const apiBaseUrl = normalizeBaseUrl(process.env.SMOKE_API_BASE_URL ?? 'http://127.0.0.1:3000');
+const webBaseUrl = normalizeBaseUrl(process.env.SMOKE_WEB_BASE_URL ?? 'http://127.0.0.1:4320');
+const apiBaseUrl = normalizeBaseUrl(process.env.SMOKE_API_BASE_URL ?? 'http://127.0.0.1:4321');
 
 const checks = [
   {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -32,4 +33,35 @@ if (web.env?.MINEWIKI_SERVICE) {
   throw new Error('minewiki-web must not impersonate an API, worker, or bot service');
 }
 
-console.log('PM2 service labels are valid.');
+const api = config.apps?.find((app) => app.name === 'minewiki-api');
+const webPort = String(web.env?.PORT ?? '');
+const apiPort = String(api?.env?.API_PORT ?? '');
+if (!/^\d+$/.test(webPort) || !/^\d+$/.test(apiPort) || webPort === apiPort) {
+  throw new Error('MineWiki web and API must use distinct numeric ports.');
+}
+if (!web.args?.includes(`-H 127.0.0.1`) || !web.args?.includes(`-p ${webPort}`)) {
+  throw new Error('minewiki-web must bind its configured port to loopback.');
+}
+if (api?.env?.API_HOST !== '127.0.0.1') {
+  throw new Error('minewiki-api must bind to loopback behind Nginx.');
+}
+
+const expectedInternalApiBaseUrl = `http://127.0.0.1:${apiPort}`;
+for (const name of ['minewiki-web', 'minewiki-api', 'minewiki-bot']) {
+  const app = config.apps?.find((candidate) => candidate.name === name);
+  if (app?.env?.INTERNAL_API_BASE_URL !== expectedInternalApiBaseUrl) {
+    throw new Error(`${name} must use INTERNAL_API_BASE_URL=${expectedInternalApiBaseUrl}`);
+  }
+}
+
+for (const relativePath of ['infra/nginx/minewiki.conf', 'infra/nginx/minewiki.routes.conf']) {
+  const nginxConfig = readFileSync(resolve(relativePath), 'utf8');
+  if (!nginxConfig.includes(`server 127.0.0.1:${webPort};`)) {
+    throw new Error(`${relativePath} must route MineWiki web to port ${webPort}.`);
+  }
+  if (!nginxConfig.includes(`server 127.0.0.1:${apiPort};`)) {
+    throw new Error(`${relativePath} must route MineWiki API to port ${apiPort}.`);
+  }
+}
+
+console.log(`PM2 service labels and loopback ports are valid (web=${webPort}, api=${apiPort}).`);
