@@ -82,19 +82,20 @@ connection.on('error', (error) => {
 
 const dispatcher = createVoteDispatcher({
   recorder: {
-    async markStarted(dispatchAttemptId: string): Promise<void> {
-      await prisma.voteDispatchAttempt.updateMany({
-        where: { id: dispatchAttemptId, status: { not: 'success' } },
+    async markStarted(dispatchAttemptId: string): Promise<boolean> {
+      const claimed = await prisma.voteDispatchAttempt.updateMany({
+        where: { id: dispatchAttemptId, status: 'queued' },
         data: {
           status: 'processing',
           attempts: { increment: 1 },
           lastAttemptAt: new Date(),
         },
       });
+      return claimed.count === 1;
     },
     async markSucceeded(dispatchAttemptId: string): Promise<void> {
-      await prisma.voteDispatchAttempt.update({
-        where: { id: dispatchAttemptId },
+      await prisma.voteDispatchAttempt.updateMany({
+        where: { id: dispatchAttemptId, status: 'processing' },
         data: {
           status: 'success',
           error: null,
@@ -103,8 +104,8 @@ const dispatcher = createVoteDispatcher({
       });
     },
     async markFailed(dispatchAttemptId: string, error: unknown): Promise<void> {
-      await prisma.voteDispatchAttempt.update({
-        where: { id: dispatchAttemptId },
+      await prisma.voteDispatchAttempt.updateMany({
+        where: { id: dispatchAttemptId, status: 'processing' },
         data: {
           status: 'failed',
           error: truncateDispatchError(error),

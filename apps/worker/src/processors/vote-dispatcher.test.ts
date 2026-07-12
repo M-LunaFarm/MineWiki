@@ -127,6 +127,7 @@ test('retryable failure is recorded', async () => {
     recorder: {
       async markStarted(dispatchAttemptId) {
         events.push({ type: 'started', id: dispatchAttemptId });
+        return true;
       },
       async markSucceeded(dispatchAttemptId) {
         events.push({ type: 'succeeded', id: dispatchAttemptId });
@@ -171,6 +172,7 @@ test('non-retryable failure is recorded', async () => {
     recorder: {
       async markStarted(dispatchAttemptId) {
         events.push({ type: 'started', id: dispatchAttemptId });
+        return true;
       },
       async markSucceeded(dispatchAttemptId) {
         events.push({ type: 'succeeded', id: dispatchAttemptId });
@@ -205,6 +207,42 @@ test('non-retryable failure is recorded', async () => {
       ['failed', '84acf734-427c-47aa-bf3a-6464dc9478a5']
     ]
   );
+});
+
+test('dispatch does not open a connection when another worker already claimed the attempt', async () => {
+  let resolvedTargets = 0;
+  const dispatcher = createVoteDispatcher({
+    recorder: {
+      async markStarted() {
+        return false;
+      },
+      async markSucceeded() {},
+      async markFailed() {},
+    },
+    async resolveTarget() {
+      resolvedTargets += 1;
+      return { host: '203.0.113.10', port: 8192 };
+    },
+  });
+
+  await assert.rejects(
+    dispatcher.dispatch({
+      voteId: '941832a6-5b1d-417d-9f5f-857818c073a0',
+      serverId: 'f391b759-e6fb-4b59-b69e-7521ceda5834',
+      username: 'Player',
+      votedAt: new Date().toISOString(),
+      targets: [{
+        targetId: 'target-1',
+        dispatchAttemptId: 'attempt-1',
+        protocol: 'v2',
+        host: 'vote.example.test',
+        port: 8192,
+        token: 'token',
+      }],
+    }),
+    /No queued Votifier dispatch attempt was acquired/
+  );
+  assert.equal(resolvedTargets, 0);
 });
 
 test('production resolver rejects private Votifier destinations before dialing', async () => {

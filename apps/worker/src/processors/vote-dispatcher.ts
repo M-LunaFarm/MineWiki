@@ -34,7 +34,7 @@ export interface VoteDispatchExecutionJob {
 }
 
 export interface VoteDispatchRecorder {
-  markStarted(dispatchAttemptId: string): Promise<void>;
+  markStarted(dispatchAttemptId: string): Promise<boolean>;
   markSucceeded(dispatchAttemptId: string): Promise<void>;
   markFailed(dispatchAttemptId: string, error: unknown): Promise<void>;
 }
@@ -52,8 +52,11 @@ export function createVoteDispatcher(options: {
   async function dispatch(job: VoteDispatchExecutionJob): Promise<DispatchResult> {
     let lastError: unknown;
     for (const target of job.targets) {
+      const claimed = (await options.recorder?.markStarted(target.dispatchAttemptId)) ?? true;
+      if (!claimed) {
+        continue;
+      }
       try {
-        await options.recorder?.markStarted(target.dispatchAttemptId);
         if (target.protocol === 'v2') {
           await sendV2(job, target, await resolveTarget(target));
           await options.recorder?.markSucceeded(target.dispatchAttemptId);
@@ -79,16 +82,12 @@ export function createVoteDispatcher(options: {
         );
       }
     }
-    throw lastError ?? new Error('No Votifier targets were provided.');
+    throw lastError ?? new Error('No queued Votifier dispatch attempt was acquired.');
   }
 
   function jobOptions(): JobsOptions {
     return {
-      attempts: 5,
-      backoff: {
-        type: 'exponential',
-        delay: 1000
-      }
+      attempts: 1
     };
   }
 

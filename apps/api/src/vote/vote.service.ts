@@ -322,13 +322,16 @@ export class VoteService {
       throw new BadRequestException('재시도 가능한 Votifier 인증 정보가 없습니다.');
     }
 
-    await this.prisma.voteDispatchAttempt.update({
-      where: { id: attempt.id },
+    const acquired = await this.prisma.voteDispatchAttempt.updateMany({
+      where: { id: attempt.id, status: 'failed' },
       data: {
         status: 'queued',
         error: null
       }
     });
+    if (acquired.count !== 1) {
+      throw new BadRequestException('이미 재시도 중인 투표 전달입니다.');
+    }
 
     try {
       await this.voteQueue.enqueue(

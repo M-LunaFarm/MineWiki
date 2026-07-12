@@ -112,6 +112,50 @@ test('atomic cooldown claim rejects a concurrent duplicate before dispatch and c
   assert.equal(queuedJobs.length, 0);
 });
 
+test('manual dispatch replay acquires failed state exactly once before queueing', async () => {
+  let acquired = true;
+  const queued: unknown[] = [];
+  const attempt = {
+    id: dispatchAttemptId,
+    voteId,
+    serverId,
+    status: 'failed',
+    vote: { id: voteId },
+    target: {
+      id: targetId,
+      protocol: 'v2',
+      host: 'vote.example.com',
+      port: 8192,
+      token: 'secret-token',
+      publicKey: null
+    }
+  };
+  const service = new VoteService(
+    { ensureExists: async () => ({ id: serverId }) } as never,
+    { enqueue: async (job: unknown) => queued.push(job) } as never,
+    { isCaptchaRequired: () => false } as never,
+    {} as never,
+    {} as never,
+    {
+      voteDispatchAttempt: {
+        findFirst: async () => attempt,
+        count: async () => 0,
+        updateMany: async () => ({ count: acquired ? 1 : 0 })
+      }
+    } as never
+  );
+
+  await service.replayDispatchAttempt(serverId, dispatchAttemptId);
+  assert.equal(queued.length, 1);
+
+  acquired = false;
+  await assert.rejects(
+    service.replayDispatchAttempt(serverId, dispatchAttemptId),
+    /이미 재시도 중인 투표 전달/
+  );
+  assert.equal(queued.length, 1);
+});
+
 test('invalidating a vote refreshes valid counters and writes an audit event', async () => {
   let countCall = 0;
   const serverUpdates: unknown[] = [];
