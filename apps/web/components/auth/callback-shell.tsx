@@ -60,7 +60,7 @@ export function CallbackShell({
   const tone = statusStyles[status];
 
   return (
-    <div className="min-h-screen bg-[#0b0d10] text-white">
+    <div className="dark-fixed-surface min-h-screen bg-[#0b0d10] text-white">
       <nav className="mx-auto flex w-full max-w-7xl items-center justify-between px-4 py-5 sm:px-6 lg:px-8">
         <Link className="group flex items-center gap-2" href="/">
           <CallbackBrandMark />
