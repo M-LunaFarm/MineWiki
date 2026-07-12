@@ -79,6 +79,7 @@ test('invalidating a vote refreshes valid counters and writes an audit event', a
   let countCall = 0;
   const serverUpdates: unknown[] = [];
   const statsUpdates: unknown[] = [];
+  const reviewUpdates: unknown[] = [];
   const auditEvents: unknown[] = [];
   const service = new VoteService(
     {} as never,
@@ -108,7 +109,28 @@ test('invalidating a vote refreshes valid counters and writes an audit event', a
           return { operation: 'serverStats.updateMany' };
         },
       },
-      $transaction: async (operations: unknown[]) => operations,
+      serverReview: {
+        updateMany: async (args: unknown) => {
+          reviewUpdates.push(args);
+          return { count: 2 };
+        },
+      },
+      $transaction: async (
+        operation: unknown[] | ((transaction: unknown) => Promise<unknown>),
+      ) =>
+        typeof operation === 'function'
+          ? operation({
+              vote: {
+                updateMany: async () => ({ count: 1 }),
+              },
+              serverReview: {
+                updateMany: async (args: unknown) => {
+                  reviewUpdates.push(args);
+                  return { count: 2 };
+                },
+              },
+            })
+          : operation,
     } as never,
   );
 
@@ -132,7 +154,18 @@ test('invalidating a vote refreshes valid counters and writes an audit event', a
       data: { votesLast24h: 4, votesLast7d: 10, votesMonthToDate: 20, votesTotal: 100 },
     },
   ]);
+  assert.deepEqual(reviewUpdates, [
+    {
+      where: { evidenceVoteId: voteId, visibility: 'public' },
+      data: { visibility: 'staff' },
+    },
+  ]);
   assert.equal(auditEvents.length, 1);
+  assert.equal(
+    (auditEvents[0] as [string, { metadata: { restrictedReviews: number } }])[1].metadata
+      .restrictedReviews,
+    2,
+  );
 });
 
 test('moderation feed exposes bounded private evidence only to the admin service path', async () => {

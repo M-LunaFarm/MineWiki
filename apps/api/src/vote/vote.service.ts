@@ -355,18 +355,26 @@ export class VoteService {
       throw new BadRequestException('이미 무효 처리된 투표입니다.');
     }
 
-    const result = await this.prisma.vote.updateMany({
-      where: { id: voteId, status: 'valid' },
-      data: {
-        status: 'invalid',
-        invalidatedAt: new Date(),
-        invalidatedBy: actorAccountId,
-        invalidationReason: normalizedReason,
-      },
+    const invalidatedAt = new Date();
+    const restrictedReviews = await this.prisma.$transaction(async (transaction) => {
+      const result = await transaction.vote.updateMany({
+        where: { id: voteId, status: 'valid' },
+        data: {
+          status: 'invalid',
+          invalidatedAt,
+          invalidatedBy: actorAccountId,
+          invalidationReason: normalizedReason,
+        },
+      });
+      if (result.count !== 1) {
+        throw new BadRequestException('투표 상태가 변경되어 다시 확인해야 합니다.');
+      }
+      const reviews = await transaction.serverReview.updateMany({
+        where: { evidenceVoteId: voteId, visibility: 'public' },
+        data: { visibility: 'staff' },
+      });
+      return reviews.count;
     });
-    if (result.count !== 1) {
-      throw new BadRequestException('투표 상태가 변경되어 다시 확인해야 합니다.');
-    }
 
     await this.refreshVoteCounters(vote.serverId);
 
@@ -376,7 +384,11 @@ export class VoteService {
       actorAccountId,
       subjectType: 'vote',
       subjectId: voteId,
-      metadata: { serverId: vote.serverId, reason: normalizedReason },
+      metadata: {
+        serverId: vote.serverId,
+        reason: normalizedReason,
+        restrictedReviews,
+      },
     });
     return {
       id: voteId,
