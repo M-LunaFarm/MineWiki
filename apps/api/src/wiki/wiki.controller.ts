@@ -7,12 +7,17 @@ import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import {
   WikiEditService,
+  type WikiMoveRequest,
+  type WikiMoveResponse,
   type WikiMutationResponse,
   type WikiPageMutationRequest,
   type WikiPreviewResponse,
+  type WikiRevertRequest,
   type WikiRevisionDiffResponse,
   type WikiRevisionResponse,
-  type WikiSectionMutationRequest
+  type WikiSectionMutationRequest,
+  type WikiStatusMutationRequest,
+  type WikiStatusMutationResponse
 } from './wiki-edit.service';
 import {
   WikiReadService,
@@ -68,6 +73,16 @@ export class WikiController {
   @UseGuards(OptionalSessionGuard)
   getPageRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiRevisionSummary[]> {
     return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null);
+  }
+
+  @Get('pages/:id/raw')
+  @UseGuards(OptionalSessionGuard)
+  getPageRaw(
+    @Param('id') pageId: string,
+    @Req() request: FastifyRequest,
+    @Query('revisionId') revisionId?: string
+  ): Promise<WikiRevisionResponse> {
+    return this.wikiEdit.getRawPage(pageId, request.sessionPayload?.userId ?? null, revisionId);
   }
 
   @Get('recent')
@@ -137,6 +152,50 @@ export class WikiController {
     @CurrentSession() session: SessionPayload
   ): Promise<WikiMutationResponse> {
     return this.wikiEdit.updatePage(session, pageId, body);
+  }
+
+  @Post('pages/:id/move')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  @UseGuards(SessionGuard)
+  movePage(
+    @Param('id') pageId: string,
+    @Body() body: WikiMoveRequest,
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiMoveResponse> {
+    return this.wikiEdit.movePage(session, pageId, body);
+  }
+
+  @Post('pages/:id/delete')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  @UseGuards(SessionGuard)
+  deletePage(
+    @Param('id') pageId: string,
+    @Body() body: WikiStatusMutationRequest,
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiStatusMutationResponse> {
+    return this.wikiEdit.deletePage(session, pageId, body);
+  }
+
+  @Post('pages/:id/restore')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  @UseGuards(SessionGuard)
+  restorePage(
+    @Param('id') pageId: string,
+    @Body() body: WikiStatusMutationRequest,
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiStatusMutationResponse> {
+    return this.wikiEdit.restorePage(session, pageId, body);
+  }
+
+  @Post('pages/:id/revert')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  @UseGuards(SessionGuard)
+  revertPage(
+    @Param('id') pageId: string,
+    @Body() body: WikiRevertRequest,
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiMutationResponse> {
+    return this.wikiEdit.revertPage(session, pageId, body);
   }
 
   @Post('pages/:id/sections')

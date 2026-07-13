@@ -14,7 +14,7 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 
-type ChangeType = 'create' | 'edit';
+type ChangeType = 'create' | 'edit' | 'move' | 'delete' | 'restore' | 'revert';
 
 export interface WikiPageMutationRequest {
   readonly namespace?: string;
@@ -36,6 +36,23 @@ export interface WikiSectionMutationRequest {
   readonly baseRevisionId?: string;
 }
 
+export interface WikiMoveRequest {
+  readonly title?: string;
+  readonly displayTitle?: string;
+  readonly reason?: string;
+  readonly leaveRedirect?: boolean;
+}
+
+export interface WikiRevertRequest {
+  readonly revisionId?: string;
+  readonly baseRevisionId?: string;
+  readonly reason?: string;
+}
+
+export interface WikiStatusMutationRequest {
+  readonly reason?: string;
+}
+
 export interface WikiMutationResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -43,6 +60,16 @@ export interface WikiMutationResponse {
   readonly namespace: string;
   readonly title: string;
   readonly slug: string;
+}
+
+export interface WikiMoveResponse extends WikiMutationResponse {
+  readonly previousTitle: string;
+  readonly redirectPageId: string | null;
+}
+
+export interface WikiStatusMutationResponse {
+  readonly pageId: string;
+  readonly status: 'normal' | 'deleted';
 }
 
 export interface WikiRevisionResponse {
@@ -311,6 +338,352 @@ export class WikiEditService {
     return result;
   }
 
+  async movePage(session: SessionPayload, pageId: string, request: WikiMoveRequest): Promise<WikiMoveResponse> {
+    const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const nextTitle = this.requiredString(request.title, 'title');
+    const nextSlug = slugifyTitle(nextTitle);
+    const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const now = new Date();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
+      if (!page || page.status === 'deleted') {
+        throw new NotFoundException('Wiki page not found.');
+      }
+      const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
+      if (!namespace) {
+        throw new NotFoundException('Wiki namespace not found.');
+      }
+      await this.wikiPermissions.assertCanMutatePageAction({
+        actor: this.wikiPermissions.actorFromSession(session, actor),
+        action: 'move',
+        page,
+        store: tx
+      });
+      await this.assertPageIsNotSpaceRoot(tx, page, 'move');
+      await this.wikiPermissions.assertCanCreatePage({
+        actor: this.wikiPermissions.actorFromSession(session, actor),
+        namespaceCode: namespace.code,
+        spaceId: page.spaceId,
+        title: nextTitle,
+        pageType: page.pageType,
+        store: tx
+      });
+      if (nextSlug === page.slug) {
+        throw new BadRequestException('The destination title is the same as the current title.');
+      }
+      await this.assertMoveStaysInSpace(tx, page, nextSlug);
+      const conflict = await tx.wikiPage.findUnique({
+        where: {
+          namespaceId_slug: {
+            namespaceId: page.namespaceId,
+            slug: nextSlug
+          }
+        },
+        select: { id: true }
+      });
+      if (conflict) {
+        throw new ConflictException('A wiki page already exists at the destination title.');
+      }
+
+      const moved = await tx.wikiPage.update({
+        where: { id: page.id },
+        data: {
+          localPath: nextSlug,
+          slug: nextSlug,
+          title: nextTitle,
+          displayTitle: this.cleanOptional(request.displayTitle) ?? nextTitle.split('/').at(-1) ?? nextTitle,
+          updatedAt: now
+        }
+      });
+      let redirectPageId: bigint | null = null;
+      if (request.leaveRedirect !== false) {
+        const redirect = await tx.wikiPage.create({
+          data: {
+            namespaceId: page.namespaceId,
+            spaceId: page.spaceId,
+            localPath: page.localPath,
+            slug: page.slug,
+            title: page.title,
+            displayTitle: page.displayTitle,
+            pageType: 'redirect',
+            protectionLevel: page.protectionLevel,
+            status: 'normal',
+            createdBy: actor.id,
+            createdAt: now,
+            updatedAt: now
+          }
+        });
+        const redirectRevision = await this.createRevision(tx, {
+          pageId: redirect.id,
+          revisionNo: 1,
+          parentRevisionId: null,
+          contentRaw: this.redirectMarkup(namespace.code, nextTitle),
+          editSummary: this.cleanOptional(request.reason) ?? `${page.title} 문서 이동`,
+          isMinor: false,
+          actorId: actor.id,
+          createdAt: now
+        });
+        await tx.wikiPage.update({
+          where: { id: redirect.id },
+          data: { currentRevisionId: redirectRevision.id }
+        });
+        redirectPageId = redirect.id;
+      }
+      await this.insertRecentChange(tx, {
+        pageId: moved.id,
+        revisionId: moved.currentRevisionId,
+        actorId: actor.id,
+        changeType: 'move',
+        title: moved.title,
+        namespaceCode: namespace.code,
+        summary: this.cleanOptional(request.reason) ?? `${page.title} -> ${moved.title}`,
+        isMinor: false,
+        createdAt: now
+      });
+      const latest = await this.findLatestRevision(tx, moved.id);
+      if (!latest) {
+        throw new NotFoundException('Public wiki revision not found.');
+      }
+      return {
+        pageId: moved.id.toString(),
+        revisionId: latest.id.toString(),
+        revisionNo: latest.revisionNo,
+        namespace: namespace.code,
+        title: moved.title,
+        slug: moved.slug,
+        previousTitle: page.title,
+        redirectPageId: redirectPageId?.toString() ?? null
+      };
+    });
+    await this.events?.audit('wiki.move', {
+      category: 'wiki',
+      actorAccountId: session.userId,
+      actorProfileId: actor.id,
+      subjectType: 'wiki_page',
+      subjectId: result.pageId,
+      metadata: {
+        previousTitle: result.previousTitle,
+        title: result.title,
+        redirectPageId: result.redirectPageId,
+        reason: this.cleanOptional(request.reason)
+      }
+    });
+    return result;
+  }
+
+  async deletePage(
+    session: SessionPayload,
+    pageId: string,
+    request: WikiStatusMutationRequest
+  ): Promise<WikiStatusMutationResponse> {
+    return this.setPageStatus(session, pageId, 'deleted', request);
+  }
+
+  async restorePage(
+    session: SessionPayload,
+    pageId: string,
+    request: WikiStatusMutationRequest
+  ): Promise<WikiStatusMutationResponse> {
+    return this.setPageStatus(session, pageId, 'normal', request);
+  }
+
+  async revertPage(session: SessionPayload, pageId: string, request: WikiRevertRequest): Promise<WikiMutationResponse> {
+    const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const sourceRevisionId = this.parseBigIntId(this.requiredString(request.revisionId, 'revisionId'), 'revisionId');
+    const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const now = new Date();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
+      if (!page || page.status === 'deleted') {
+        throw new NotFoundException('Wiki page not found.');
+      }
+      const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
+      if (!namespace) {
+        throw new NotFoundException('Wiki namespace not found.');
+      }
+      await this.wikiPermissions.assertCanMutatePageAction({
+        actor: this.wikiPermissions.actorFromSession(session, actor),
+        action: 'revert',
+        page,
+        store: tx
+      });
+      if (request.baseRevisionId && page.currentRevisionId?.toString() !== request.baseRevisionId) {
+        throw new ConflictException('Base revision does not match current revision.');
+      }
+      const [source, latest] = await Promise.all([
+        tx.wikiPageRevision.findUnique({ where: { id: sourceRevisionId } }),
+        this.findLatestRevision(tx, page.id)
+      ]);
+      if (!source || source.pageId !== page.id || source.visibility !== 'public') {
+        throw new NotFoundException('Revert source revision not found.');
+      }
+      if (latest?.id === source.id) {
+        throw new BadRequestException('The selected revision is already current.');
+      }
+      await this.assertLockedSectionsUnchanged({
+        actor: this.wikiPermissions.actorFromSession(session, actor),
+        page,
+        currentContent: latest?.contentRaw ?? '',
+        nextContent: source.contentRaw,
+        store: tx
+      });
+      const revision = await this.createRevision(tx, {
+        pageId: page.id,
+        revisionNo: latest ? latest.revisionNo + 1 : 1,
+        parentRevisionId: latest?.id ?? null,
+        contentRaw: source.contentRaw,
+        editSummary: this.cleanOptional(request.reason) ?? `r${source.revisionNo} 판으로 되돌리기`,
+        isMinor: false,
+        actorId: actor.id,
+        createdAt: now
+      });
+      await tx.wikiPage.update({
+        where: { id: page.id },
+        data: { currentRevisionId: revision.id, updatedAt: now }
+      });
+      await this.insertRecentChange(tx, {
+        pageId: page.id,
+        revisionId: revision.id,
+        actorId: actor.id,
+        changeType: 'revert',
+        title: page.title,
+        namespaceCode: namespace.code,
+        summary: revision.editSummary,
+        isMinor: false,
+        createdAt: now
+      });
+      return {
+        pageId: page.id.toString(),
+        revisionId: revision.id.toString(),
+        revisionNo: revision.revisionNo,
+        namespace: namespace.code,
+        title: page.title,
+        slug: page.slug
+      };
+    });
+    await this.events?.audit('wiki.revert', {
+      category: 'wiki',
+      actorAccountId: session.userId,
+      actorProfileId: actor.id,
+      subjectType: 'wiki_page',
+      subjectId: result.pageId,
+      metadata: {
+        sourceRevisionId: sourceRevisionId.toString(),
+        revisionId: result.revisionId,
+        revisionNo: result.revisionNo,
+        reason: this.cleanOptional(request.reason)
+      }
+    });
+    return result;
+  }
+
+  private async setPageStatus(
+    session: SessionPayload,
+    pageId: string,
+    status: 'normal' | 'deleted',
+    request: WikiStatusMutationRequest
+  ): Promise<WikiStatusMutationResponse> {
+    const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
+      if (!page) {
+        throw new NotFoundException('Wiki page not found.');
+      }
+      if (page.status === status) {
+        throw new BadRequestException(`Wiki page is already ${status}.`);
+      }
+      const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
+      if (status === 'deleted') {
+        if (page.status === 'deleted') {
+          throw new NotFoundException('Wiki page not found.');
+        }
+        await this.wikiPermissions.assertCanMutatePageAction({
+          actor: permissionActor,
+          action: 'delete',
+          page,
+          store: tx
+        });
+        await this.assertPageIsNotSpaceRoot(tx, page, 'delete');
+      } else {
+        await this.wikiPermissions.assertCanRestorePage({ actor: permissionActor, page, store: tx });
+      }
+      const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
+      if (!namespace) {
+        throw new NotFoundException('Wiki namespace not found.');
+      }
+      const updated = await tx.wikiPage.update({
+        where: { id: page.id },
+        data: { status, updatedAt: now }
+      });
+      await this.insertRecentChange(tx, {
+        pageId: updated.id,
+        revisionId: updated.currentRevisionId,
+        actorId: actor.id,
+        changeType: status === 'deleted' ? 'delete' : 'restore',
+        title: updated.title,
+        namespaceCode: namespace.code,
+        summary: this.cleanOptional(request.reason) ?? (status === 'deleted' ? '문서 삭제' : '문서 복구'),
+        isMinor: false,
+        createdAt: now
+      });
+      return { pageId: updated.id.toString(), status };
+    });
+    await this.events?.audit(status === 'deleted' ? 'wiki.delete' : 'wiki.restore', {
+      category: 'wiki',
+      actorAccountId: session.userId,
+      actorProfileId: actor.id,
+      subjectType: 'wiki_page',
+      subjectId: result.pageId,
+      metadata: {
+        status,
+        reason: this.cleanOptional(request.reason)
+      }
+    });
+    return result;
+  }
+
+  private async assertPageIsNotSpaceRoot(
+    tx: Prisma.TransactionClient,
+    page: { readonly id: bigint; readonly spaceId: bigint; readonly slug: string },
+    action: 'move' | 'delete'
+  ): Promise<void> {
+    const [space, serverWiki] = await Promise.all([
+      tx.wikiSpace.findUnique({ where: { id: page.spaceId }, select: { rootPageId: true } }),
+      tx.serverWiki.findFirst({ where: { spaceId: page.spaceId }, select: { slug: true } })
+    ]);
+    if (space?.rootPageId === page.id || (serverWiki && slugifyTitle(serverWiki.slug) === page.slug)) {
+      throw new ForbiddenException(`A wiki space root page cannot be ${action === 'move' ? 'moved' : 'deleted'}.`);
+    }
+  }
+
+  private async assertMoveStaysInSpace(
+    tx: Prisma.TransactionClient,
+    page: { readonly spaceId: bigint },
+    nextSlug: string
+  ): Promise<void> {
+    const serverWiki = await tx.serverWiki.findFirst({
+      where: { spaceId: page.spaceId },
+      select: { slug: true }
+    });
+    if (!serverWiki) {
+      return;
+    }
+    const serverSlug = slugifyTitle(serverWiki.slug);
+    if (!nextSlug.startsWith(`${serverSlug}/`)) {
+      throw new BadRequestException('Server wiki pages must stay under their server path.');
+    }
+  }
+
+  private redirectMarkup(namespaceCode: string, title: string): string {
+    return namespaceCode === 'main'
+      ? `#넘겨주기 [[${title}]]`
+      : `#넘겨주기 [[${namespaceCode}:${title}]]`;
+  }
+
   async appendSection(session: SessionPayload, pageId: string, request: WikiSectionMutationRequest): Promise<WikiMutationResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const heading = this.requiredString(request.heading, 'heading');
@@ -338,6 +711,43 @@ export class WikiEditService {
   }
 
   async getRevision(revisionId: string, accountId?: string | null): Promise<WikiRevisionResponse> {
+    return this.getRevisionForAction(revisionId, accountId ?? null, 'raw');
+  }
+
+  async getRawPage(
+    pageId: string,
+    accountId?: string | null,
+    revisionId?: string | null
+  ): Promise<WikiRevisionResponse> {
+    const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
+    if (!page) {
+      throw new NotFoundException('Wiki page not found.');
+    }
+    await this.wikiPermissions.assertCanReadPage({ accountId: accountId ?? null, page });
+    await this.wikiPermissions.assertCanUsePageAction({
+      accountId: accountId ?? null,
+      action: 'raw',
+      page
+    });
+    const revision = revisionId
+      ? await this.prisma.wikiPageRevision.findUnique({
+          where: { id: this.parseBigIntId(revisionId, 'revisionId') }
+        })
+      : page.currentRevisionId
+        ? await this.prisma.wikiPageRevision.findUnique({ where: { id: page.currentRevisionId } })
+        : await this.findLatestRevision(this.prisma, page.id);
+    if (!revision || revision.pageId !== page.id || revision.visibility !== 'public') {
+      throw new NotFoundException('Wiki revision not found.');
+    }
+    return this.toRevisionResponse(revision);
+  }
+
+  private async getRevisionForAction(
+    revisionId: string,
+    accountId: string | null,
+    action: 'raw' | 'history'
+  ): Promise<WikiRevisionResponse> {
     const id = this.parseBigIntId(revisionId, 'revisionId');
     const revision = await this.prisma.wikiPageRevision.findUnique({ where: { id } });
     if (!revision || revision.visibility !== 'public') {
@@ -345,17 +755,18 @@ export class WikiEditService {
     }
     const page = await this.prisma.wikiPage.findUnique({ where: { id: revision.pageId } });
     await this.wikiPermissions.assertCanReadPage({
-      accountId: accountId ?? null,
+      accountId,
       page,
       revision
     });
+    await this.wikiPermissions.assertCanUsePageAction({ accountId, action, page });
     return this.toRevisionResponse(revision);
   }
 
   async getRevisionDiff(leftId: string, rightId: string, accountId?: string | null): Promise<WikiRevisionDiffResponse> {
     const [left, right] = await Promise.all([
-      this.getRevision(leftId, accountId ?? null),
-      this.getRevision(rightId, accountId ?? null)
+      this.getRevisionForAction(leftId, accountId ?? null, 'history'),
+      this.getRevisionForAction(rightId, accountId ?? null, 'history')
     ]);
     return {
       left,
@@ -497,7 +908,7 @@ export class WikiEditService {
     tx: Pick<PrismaService, 'wikiRecentChange'>,
     input: {
       pageId: bigint;
-      revisionId: bigint;
+      revisionId: bigint | null;
       actorId: bigint;
       changeType: ChangeType;
       title: string;

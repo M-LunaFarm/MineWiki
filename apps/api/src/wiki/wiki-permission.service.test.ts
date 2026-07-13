@@ -241,6 +241,60 @@ test('blocked wiki profile cannot edit open page', async () => {
   assert.equal(decision.allowed, false);
 });
 
+test('ordinary editors can revert but cannot move or delete without explicit ACL', async () => {
+  const service = createService();
+  const ordinaryEditor = actor({ profileId: 200n });
+  const target = page({ createdBy: 100n });
+
+  await service.assertCanMutatePageAction({ actor: ordinaryEditor, action: 'revert', page: target });
+  await assert.rejects(
+    service.assertCanMutatePageAction({ actor: ordinaryEditor, action: 'move', page: target }),
+    /manager/i
+  );
+  await assert.rejects(
+    service.assertCanMutatePageAction({ actor: ordinaryEditor, action: 'delete', page: target }),
+    /manager/i
+  );
+});
+
+test('page creator can move and delete an editable page', async () => {
+  const service = createService();
+  const creator = actor({ profileId: 100n });
+  const target = page({ createdBy: 100n });
+
+  await service.assertCanMutatePageAction({ actor: creator, action: 'move', page: target });
+  await service.assertCanMutatePageAction({ actor: creator, action: 'delete', page: target });
+});
+
+test('explicit move ACL can grant a non-manager editor access', async () => {
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        return input.action === 'move'
+          ? { matched: true, allowed: true, reason: 'acl_move' }
+          : { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+
+  await service.assertCanMutatePageAction({
+    actor: actor({ profileId: 200n }),
+    action: 'move',
+    page: page({ createdBy: 100n })
+  });
+});
+
+test('deleted page restore is limited to its manager even without an ACL rule', async () => {
+  const service = createService();
+  const deletedPage = page({ status: 'deleted', createdBy: 100n });
+
+  await service.assertCanRestorePage({ actor: actor({ profileId: 100n }), page: deletedPage });
+  await assert.rejects(
+    service.assertCanRestorePage({ actor: actor({ profileId: 200n }), page: deletedPage }),
+    /not allowed/i
+  );
+});
+
 test('normal editor cannot change an admin-only section lock', async () => {
   const service = createService();
   const allowed = await service.canEditSectionLock({

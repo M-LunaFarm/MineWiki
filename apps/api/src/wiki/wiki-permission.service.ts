@@ -379,6 +379,64 @@ export class WikiPermissionService {
     }
   }
 
+  async assertCanMutatePageAction(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly action: Extract<WikiAclAction, 'move' | 'delete' | 'revert'>;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const store = input.store ?? this.prisma;
+    await this.assertCanEditPage({
+      actor: input.actor,
+      page: input.page,
+      store
+    });
+    if (!input.actor || !input.page) {
+      throw new ForbiddenException('Wiki page action is not allowed.');
+    }
+    const acl = await this.evaluateAcl(input.action, input.actor, {
+      pageId: input.page.id,
+      spaceId: input.page.spaceId,
+      namespaceId: input.page.namespaceId,
+      title: input.page.title,
+      createdBy: input.page.createdBy
+    }, store);
+    if (acl.matched) {
+      if (!acl.allowed) {
+        throw new ForbiddenException(`Wiki page action is not allowed: ${acl.reason}`);
+      }
+      return;
+    }
+    if (input.action !== 'revert' && !(await this.canManagePageArea(store, input.actor, input.page))) {
+      throw new ForbiddenException('Wiki page action requires a page or space manager.');
+    }
+  }
+
+  async assertCanRestorePage(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const store = input.store ?? this.prisma;
+    const { actor, page } = input;
+    if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status) || !page || page.status !== 'deleted') {
+      throw new ForbiddenException('Wiki page restore is not allowed.');
+    }
+    if (!(await this.canManagePageArea(store, actor, page))) {
+      throw new ForbiddenException('Wiki page restore is not allowed.');
+    }
+    const acl = await this.evaluateAcl('delete', actor, {
+      pageId: page.id,
+      spaceId: page.spaceId,
+      namespaceId: page.namespaceId,
+      title: page.title,
+      createdBy: page.createdBy
+    }, store);
+    if (acl.matched && !acl.allowed) {
+      throw new ForbiddenException(`Wiki page restore is not allowed: ${acl.reason}`);
+    }
+  }
+
   async canUsePageAction(input: {
     readonly accountId?: string | null;
     readonly action: WikiAclAction;
