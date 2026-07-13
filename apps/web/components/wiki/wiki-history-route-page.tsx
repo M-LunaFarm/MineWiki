@@ -40,7 +40,10 @@ export async function WikiHistoryRoutePage({ prefix, segments = [] }: WikiHistor
                 <time className="text-xs text-slate-500">{formatDate(revision.createdAt)}</time>
               </div>
               <p className="mt-3 break-words text-sm text-slate-300">{revision.editSummary ?? '요약 없음'}</p>
-              <p className="mt-2 text-xs text-slate-500">편집자 {revision.createdBy ?? 'unknown'}{revision.isMinor ? ' · minor' : ''}</p>
+              <p className="mt-2 text-xs text-slate-500">
+                편집자 {revision.createdBy ? <Link href={`/wiki/contributions/${revision.createdBy}`} className="hover:text-emerald-200">{revision.createdByName ?? revision.createdBy}</Link> : 'unknown'}
+                {revision.isMinor ? ' · minor' : ''}
+              </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Link href={`/wiki/revision/${revision.id}`} className="chip chip-accent">보기</Link>
                 {previous ? <Link href={`/wiki/diff/${previous.id}/${revision.id}`} className="chip chip-muted">diff</Link> : null}
@@ -79,7 +82,9 @@ export async function WikiHistoryRoutePage({ prefix, segments = [] }: WikiHistor
                     {revision.isMinor ? <span className="chip chip-muted mr-2">minor</span> : null}
                     {revision.editSummary ?? '요약 없음'}
                   </td>
-                  <td className="px-4 py-3">{revision.createdBy ?? 'unknown'}</td>
+                  <td className="px-4 py-3">
+                    {revision.createdBy ? <Link href={`/wiki/contributions/${revision.createdBy}`} className="hover:text-emerald-200">{revision.createdByName ?? revision.createdBy}</Link> : 'unknown'}
+                  </td>
                   <td className="px-4 py-3">{formatDate(revision.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">

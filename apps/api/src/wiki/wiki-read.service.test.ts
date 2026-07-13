@@ -49,6 +49,34 @@ test('backlinks expose only links from the current readable source revision', as
   assert.equal(response.items[0]?.routePath, '/wiki/%ED%98%84%EC%9E%AC');
 });
 
+test('contributions resolve public changes to stable document routes', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const page = {
+    id: 20n, namespaceId: 1, spaceId: 1n, slug: '기여_문서', title: '기여 문서', displayTitle: '기여 문서',
+    currentRevisionId: 200n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 5n, createdAt: now, updatedAt: now, localPath: '기여_문서'
+  };
+  const prisma = {
+    wikiProfile: {
+      async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; }
+    },
+    wikiRecentChange: {
+      async findMany() {
+        return [{ id: 9n, pageId: 20n, revisionId: 200n, changeType: 'edit', namespaceCode: 'main', summary: '보강', isMinor: false, createdAt: now }];
+      }
+    },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5' });
+
+  assert.equal(result.profile.displayName, '편집자');
+  assert.equal(result.items[0]?.routePath, '/wiki/%EA%B8%B0%EC%97%AC_%EB%AC%B8%EC%84%9C');
+  assert.equal(result.items[0]?.summary, '보강');
+});
+
 function createReadService(options: {
   readonly cacheHtml?: string | null;
   readonly onCacheLookup?: (where: unknown) => void;

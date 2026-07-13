@@ -22,6 +22,8 @@ import {
 import {
   WikiReadService,
   type WikiBacklinkResponse,
+  type WikiContributionResponse,
+  type WikiDeletedPageSummary,
   type WikiPageResponse,
   type WikiRecentChangeSummary,
   type WikiRevisionSummary,
@@ -106,6 +108,22 @@ export class WikiController {
   @UseGuards(OptionalSessionGuard)
   getRecent(@Req() request: FastifyRequest): Promise<WikiRecentChangeSummary[]> {
     return this.wikiRead.getRecent(request.sessionPayload?.userId ?? null);
+  }
+
+  @Get('contributions/:profileId')
+  @UseGuards(OptionalSessionGuard)
+  getContributions(
+    @Param('profileId') profileId: string,
+    @Req() request: FastifyRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiContributionResponse> {
+    return this.wikiRead.getContributions({
+      profileId,
+      accountId: request.sessionPayload?.userId ?? null,
+      cursor,
+      limit
+    });
   }
 
   @Get('search')
@@ -230,6 +248,17 @@ export class WikiController {
   @UseGuards(SessionGuard)
   getMe(@CurrentSession() session: SessionPayload): Promise<WikiMeResponse> {
     return this.wikiProfiles.getMe(session.userId);
+  }
+
+  @Get('me/deleted-pages')
+  @UseGuards(SessionGuard)
+  async getMyDeletedPages(@CurrentSession() session: SessionPayload): Promise<WikiDeletedPageSummary[]> {
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    return this.wikiRead.getDeletedPages({
+      accountId: session.userId,
+      profileId: profile.id,
+      includeAll: session.isElevated === true || session.permissions?.includes('wiki.admin') === true || session.groups?.includes('admin') === true
+    });
   }
 }
 

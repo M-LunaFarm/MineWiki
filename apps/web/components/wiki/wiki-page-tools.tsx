@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
-import { Code2, FolderPen, Link2, Loader2, Trash2 } from 'lucide-react';
+import { ArchiveRestore, Code2, FolderPen, Link2, Loader2, Trash2 } from 'lucide-react';
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 
@@ -85,6 +85,9 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
         <p className="mt-2 text-xs leading-5 text-slate-500">
           이동과 삭제는 문서 작성자, 공간 관리자 또는 명시적으로 허용된 ACL 사용자만 실행할 수 있습니다.
         </p>
+        <Link href="/wiki/deleted" className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-300 hover:text-emerald-200">
+          <ArchiveRestore className="size-3.5" /> 삭제 문서함
+        </Link>
         <form onSubmit={move} className="mt-4 space-y-3">
           <label className="block text-xs font-semibold text-slate-400">
             새 문서 제목

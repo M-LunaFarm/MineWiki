@@ -97,6 +97,7 @@ export interface WikiRevisionSummary {
   readonly editSummary: string | null;
   readonly isMinor: boolean;
   readonly createdBy: string | null;
+  readonly createdByName: string | null;
   readonly createdAt: string;
   readonly contentHash: string;
   readonly contentSize: number;
@@ -151,6 +152,32 @@ export interface WikiBacklinkItem {
 export interface WikiBacklinkResponse {
   readonly items: WikiBacklinkItem[];
   readonly nextCursor: string | null;
+}
+
+export interface WikiContributionResponse {
+  readonly profile: { readonly id: string; readonly username: string; readonly displayName: string };
+  readonly items: ReadonlyArray<{
+    readonly id: string;
+    readonly pageId: string;
+    readonly revisionId: string | null;
+    readonly changeType: string;
+    readonly title: string;
+    readonly namespace: string;
+    readonly routePath: string;
+    readonly summary: string | null;
+    readonly isMinor: boolean;
+    readonly createdAt: string;
+  }>;
+  readonly nextCursor: string | null;
+}
+
+export interface WikiDeletedPageSummary {
+  readonly id: string;
+  readonly namespace: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly spaceId: string;
+  readonly updatedAt: string;
 }
 
 export interface WikiAdminRecentChange {
@@ -266,6 +293,15 @@ export async function fetchWikiBacklinks(pageId: string, cursor?: string): Promi
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to load wiki backlinks.');
+  }
+  return response.json();
+}
+
+export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]> {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/me/deleted-pages`, { credentials: 'include' });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load deleted wiki pages.');
   }
   return response.json();
 }

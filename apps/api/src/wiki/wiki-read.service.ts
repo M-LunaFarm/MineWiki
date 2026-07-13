@@ -73,6 +73,7 @@ export interface WikiRevisionSummary {
   readonly editSummary: string | null;
   readonly isMinor: boolean;
   readonly createdBy: string | null;
+  readonly createdByName: string | null;
   readonly createdAt: string;
   readonly contentHash: string;
   readonly contentSize: number;
@@ -116,6 +117,38 @@ export interface WikiBacklinkItem {
 export interface WikiBacklinkResponse {
   readonly items: WikiBacklinkItem[];
   readonly nextCursor: string | null;
+}
+
+export interface WikiContributionItem {
+  readonly id: string;
+  readonly pageId: string;
+  readonly revisionId: string | null;
+  readonly changeType: string;
+  readonly title: string;
+  readonly namespace: string;
+  readonly routePath: string;
+  readonly summary: string | null;
+  readonly isMinor: boolean;
+  readonly createdAt: string;
+}
+
+export interface WikiContributionResponse {
+  readonly profile: {
+    readonly id: string;
+    readonly username: string;
+    readonly displayName: string;
+  };
+  readonly items: WikiContributionItem[];
+  readonly nextCursor: string | null;
+}
+
+export interface WikiDeletedPageSummary {
+  readonly id: string;
+  readonly namespace: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly spaceId: string;
+  readonly updatedAt: string;
 }
 
 @Injectable()
@@ -209,12 +242,21 @@ export class WikiReadService {
       orderBy: [{ revisionNo: 'desc' }],
       take: 100
     });
+    const profileIds = [...new Set(revisions.flatMap((revision) => revision.createdBy ? [revision.createdBy] : []))];
+    const profiles = profileIds.length > 0
+      ? await this.prisma.wikiProfile.findMany({
+          where: { id: { in: profileIds } },
+          select: { id: true, displayName: true }
+        })
+      : [];
+    const profileById = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
     return revisions.map((revision) => ({
       id: revision.id.toString(),
       revisionNo: revision.revisionNo,
       editSummary: revision.editSummary,
       isMinor: revision.isMinor,
       createdBy: revision.createdBy?.toString() ?? null,
+      createdByName: revision.createdBy ? profileById.get(revision.createdBy) ?? null : null,
       createdAt: revision.createdAt.toISOString(),
       contentHash: revision.contentHash,
       contentSize: revision.contentSize
@@ -321,6 +363,143 @@ export class WikiReadService {
       items,
       nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
     };
+  }
+
+  async getContributions(input: {
+    readonly profileId: string;
+    readonly accountId?: string | null;
+    readonly cursor?: string;
+    readonly limit?: string | number;
+  }): Promise<WikiContributionResponse> {
+    const profileId = this.parseBigIntId(input.profileId, 'profileId');
+    const profile = await this.prisma.wikiProfile.findUnique({
+      where: { id: profileId },
+      select: { id: true, username: true, displayName: true, status: true }
+    });
+    if (!profile || profile.status !== 'active') throw new NotFoundException('Wiki profile not found.');
+    const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
+    const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
+    const changes = await this.prisma.wikiRecentChange.findMany({
+      where: {
+        actorId: profile.id,
+        pageId: { not: null },
+        ...(cursor ? { id: { lt: cursor } } : {})
+      },
+      orderBy: [{ id: 'desc' }],
+      take: Math.min(limit * 4 + 1, 401)
+    });
+    const pageIds = [...new Set(changes.flatMap((change) => change.pageId ? [change.pageId] : []))];
+    const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
+    const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
+    const namespaces = namespaceIds.length > 0
+      ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } } })
+      : [];
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const items: WikiContributionItem[] = [];
+    let lastScannedId: bigint | null = null;
+    for (const change of changes) {
+      lastScannedId = change.id;
+      if (!change.pageId) continue;
+      const page = pageById.get(change.pageId);
+      if (!page) continue;
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+      } catch {
+        continue;
+      }
+      const namespace = namespaceById.get(page.namespaceId) ?? change.namespaceCode;
+      items.push({
+        id: change.id.toString(),
+        pageId: page.id.toString(),
+        revisionId: change.revisionId?.toString() ?? null,
+        changeType: change.changeType,
+        title: page.displayTitle,
+        namespace,
+        routePath: wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title),
+        summary: change.summary,
+        isMinor: change.isMinor,
+        createdAt: change.createdAt.toISOString()
+      });
+      if (items.length >= limit) break;
+    }
+    const mayHaveMore = changes.length > 0 && (items.length >= limit || changes.length >= Math.min(limit * 4 + 1, 401));
+    return {
+      profile: {
+        id: profile.id.toString(),
+        username: profile.username,
+        displayName: profile.displayName
+      },
+      items,
+      nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
+    };
+  }
+
+  async getDeletedPages(input: {
+    readonly accountId: string;
+    readonly profileId: bigint;
+    readonly includeAll?: boolean;
+  }): Promise<WikiDeletedPageSummary[]> {
+    let managedSpaceIds: bigint[] = [];
+    if (!input.includeAll) {
+      const [spaces, roles, servers, verifiedMods] = await Promise.all([
+        this.prisma.wikiSpace.findMany({
+          where: { OR: [{ ownerUserId: input.profileId }, { createdBy: input.profileId }] },
+          select: { id: true }
+        }),
+        this.prisma.subwikiRole.findMany({
+          where: {
+            userId: input.profileId,
+            status: 'active',
+            role: { in: ['owner', 'manager', 'maintainer'] }
+          },
+          select: { spaceId: true }
+        }),
+        this.prisma.server.findMany({ where: { ownerAccountId: input.accountId }, select: { id: true } }),
+        this.prisma.modWiki.findMany({ where: { verifiedBy: input.profileId }, select: { spaceId: true } })
+      ]);
+      const ownedServerIds = servers.map((server) => server.id);
+      const serverWikis = ownedServerIds.length > 0
+        ? await this.prisma.serverWiki.findMany({
+            where: { voteServerId: { in: ownedServerIds } },
+            select: { spaceId: true }
+          })
+        : [];
+      managedSpaceIds = [...new Set([
+        ...spaces.map((space) => space.id),
+        ...roles.map((role) => role.spaceId),
+        ...serverWikis.map((wiki) => wiki.spaceId),
+        ...verifiedMods.map((wiki) => wiki.spaceId)
+      ])];
+    }
+    const pages = await this.prisma.wikiPage.findMany({
+      where: {
+        status: 'deleted',
+        ...(!input.includeAll
+          ? {
+              OR: [
+                { createdBy: input.profileId },
+                ...(managedSpaceIds.length > 0 ? [{ spaceId: { in: managedSpaceIds } }] : [])
+              ]
+            }
+          : {})
+      },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 100
+    });
+    const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
+    const namespaces = namespaceIds.length > 0
+      ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } } })
+      : [];
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    return pages.map((page) => ({
+      id: page.id.toString(),
+      namespace: namespaceById.get(page.namespaceId) ?? 'main',
+      title: page.title,
+      displayTitle: page.displayTitle,
+      spaceId: page.spaceId.toString(),
+      updatedAt: page.updatedAt.toISOString()
+    }));
   }
 
   async search(input: {
