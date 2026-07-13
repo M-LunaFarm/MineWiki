@@ -15,6 +15,7 @@ import {
 const ACTIONS = [
   ['read', '읽기'], ['edit', '편집'], ['create', '문서 생성'], ['move', '이동'],
   ['delete', '삭제'], ['revert', '되돌리기'], ['history', '역사'], ['raw', '원문'],
+  ['discuss', '토론'],
   ['upload_file', '파일 업로드'], ['acl', 'ACL 관리'],
 ] as const;
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
-import { ArchiveRestore, Code2, FolderPen, Link2, Loader2, Trash2 } from 'lucide-react';
+import { ArchiveRestore, Code2, FolderPen, Link2, Loader2, MessageSquareText, Trash2 } from 'lucide-react';
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 
@@ -73,6 +73,12 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
           className="chip chip-muted inline-flex items-center gap-1.5"
         >
           <Link2 className="size-3.5" /> 역링크
+        </Link>
+        <Link
+          href={`/wiki/discuss/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`}
+          className="chip chip-muted inline-flex items-center gap-1.5"
+        >
+          <MessageSquareText className="size-3.5" /> 토론
         </Link>
       </div>
       {!authLoading && !account ? (

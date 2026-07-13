@@ -180,6 +180,29 @@ export interface WikiDeletedPageSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiThreadSummary {
+  readonly id: string;
+  readonly pageId: string;
+  readonly title: string;
+  readonly status: string;
+  readonly createdBy: string;
+  readonly createdByName: string;
+  readonly commentCount: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface WikiThreadDetail extends WikiThreadSummary {
+  readonly comments: ReadonlyArray<{
+    readonly id: string;
+    readonly content: string | null;
+    readonly status: string;
+    readonly createdBy: string;
+    readonly createdByName: string;
+    readonly createdAt: string;
+  }>;
+}
+
 export interface WikiAdminRecentChange {
   readonly id: string;
   readonly pageId: string | null;
@@ -304,6 +327,50 @@ export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]>
     throw new Error(body?.message ?? 'Failed to load deleted wiki pages.');
   }
   return response.json();
+}
+
+export async function fetchWikiThreads(pageId: string): Promise<WikiThreadSummary[]> {
+  return readWikiBrowser<WikiThreadSummary[]>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussions`);
+}
+
+export async function fetchWikiThread(threadId: string): Promise<WikiThreadDetail> {
+  return readWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(threadId)}`);
+}
+
+export async function createWikiThread(input: { pageId: string; title: string; content: string }): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/discussions`, 'POST', {
+    title: input.title, content: input.content
+  });
+}
+
+export async function addWikiThreadComment(input: { threadId: string; content: string }): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/comments`, 'POST', {
+    content: input.content
+  });
+}
+
+export async function setWikiThreadStatus(input: { threadId: string; status: 'open' | 'closed' }): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/status`, 'PATCH', {
+    status: input.status
+  });
+}
+
+async function readWikiBrowser<T>(path: string): Promise<T> {
+  const response = await fetch(`${apiBaseUrl()}${path}`, { credentials: 'include' });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.message ?? 'Wiki request failed.');
+  return body as T;
+}
+
+async function mutateWikiBrowser<T>(path: string, method: string, payload: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
+    method, credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+    body: JSON.stringify(payload)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.message ?? 'Wiki mutation failed.');
+  return body as T;
 }
 
 export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionSummary[]> {

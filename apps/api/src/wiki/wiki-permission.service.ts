@@ -437,6 +437,38 @@ export class WikiPermissionService {
     }
   }
 
+  async assertCanDiscussPage(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const store = input.store ?? this.prisma;
+    const { actor, page } = input;
+    if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status) || !page) {
+      throw new ForbiddenException('Wiki discussion is not allowed.');
+    }
+    await this.assertCanReadPage({ accountId: actor.accountId, page, store });
+    const acl = await this.evaluateAcl('discuss', actor, {
+      pageId: page.id,
+      spaceId: page.spaceId,
+      namespaceId: page.namespaceId,
+      title: page.title,
+      createdBy: page.createdBy
+    }, store);
+    if (acl.matched && !acl.allowed) {
+      throw new ForbiddenException(`Wiki discussion is not allowed: ${acl.reason}`);
+    }
+  }
+
+  async canManagePage(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<boolean> {
+    if (!input.actor || !input.page || !ACTIVE_PROFILE_STATUSES.has(input.actor.status)) return false;
+    return this.canManagePageArea(input.store ?? this.prisma, input.actor, input.page);
+  }
+
   async canUsePageAction(input: {
     readonly accountId?: string | null;
     readonly action: WikiAclAction;

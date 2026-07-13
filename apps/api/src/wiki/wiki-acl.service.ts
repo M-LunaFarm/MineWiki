@@ -29,6 +29,7 @@ export type WikiAclAction =
   | 'revert'
   | 'history'
   | 'raw'
+  | 'discuss'
   | 'upload_file'
   | 'acl';
 
