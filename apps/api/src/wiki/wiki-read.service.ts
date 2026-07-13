@@ -153,6 +153,24 @@ export interface WikiDeletedPageSummary {
   readonly updatedAt: string;
 }
 
+export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'long' | 'short';
+
+export interface WikiSpecialDocumentItem {
+  readonly id: string;
+  readonly pageId: string | null;
+  readonly namespace: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly routePath: string;
+  readonly value: number | null;
+  readonly updatedAt: string | null;
+}
+
+export interface WikiSpecialDocumentResponse {
+  readonly type: WikiSpecialDocumentType;
+  readonly items: WikiSpecialDocumentItem[];
+}
+
 @Injectable()
 export class WikiReadService {
   constructor(
@@ -502,6 +520,138 @@ export class WikiReadService {
       spaceId: page.spaceId.toString(),
       updatedAt: page.updatedAt.toISOString()
     }));
+  }
+
+  async getSpecialDocuments(input: {
+    readonly type?: string;
+    readonly namespace?: string;
+    readonly limit?: string | number;
+    readonly accountId?: string | null;
+  }): Promise<WikiSpecialDocumentResponse> {
+    const allowedTypes: WikiSpecialDocumentType[] = ['random', 'orphaned', 'wanted', 'uncategorized', 'long', 'short'];
+    const type = allowedTypes.includes(input.type as WikiSpecialDocumentType)
+      ? input.type as WikiSpecialDocumentType
+      : 'orphaned';
+    const limit = Math.min(Math.max(Number(input.limit ?? 50) || 50, 1), 100);
+    const namespace = input.namespace?.trim()
+      ? await this.prisma.wikiNamespace.findUnique({ where: { code: input.namespace.trim() } })
+      : null;
+    if (input.namespace?.trim() && !namespace) return { type, items: [] };
+
+    const pages = await this.prisma.wikiPage.findMany({
+      where: {
+        namespaceId: namespace?.id,
+        status: { in: ['normal', 'active', 'published'] },
+        pageType: { not: 'redirect' },
+        currentRevisionId: { not: null }
+      },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 2000
+    });
+    const visiblePages: typeof pages = [];
+    for (const page of pages) {
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+        visiblePages.push(page);
+      } catch {
+        continue;
+      }
+    }
+    const namespaceIds = [...new Set(visiblePages.map((page) => page.namespaceId))];
+    const namespaces = namespaceIds.length > 0
+      ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } }, select: { id: true, code: true } })
+      : [];
+    const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
+    if (type === 'random') {
+      const page = visiblePages[Math.floor(Math.random() * visiblePages.length)];
+      return { type, items: page ? [this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)] : [] };
+    }
+
+    const revisionIds = visiblePages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+    const revisions = revisionIds.length > 0
+      ? await this.prisma.wikiPageRevision.findMany({
+          where: { id: { in: revisionIds }, visibility: 'public' },
+          select: { id: true, contentRaw: true, contentSize: true }
+        })
+      : [];
+    const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
+
+    if (type === 'long' || type === 'short') {
+      const sorted = visiblePages
+        .map((page) => ({ page, size: page.currentRevisionId ? revisionById.get(page.currentRevisionId)?.contentSize ?? 0 : 0 }))
+        .sort((left, right) => type === 'long' ? right.size - left.size : left.size - right.size)
+        .slice(0, limit);
+      return {
+        type,
+        items: sorted.map(({ page, size }) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', size))
+      };
+    }
+
+    if (type === 'uncategorized') {
+      const items = visiblePages.filter((page) => {
+        const revision = page.currentRevisionId ? revisionById.get(page.currentRevisionId) : null;
+        return revision ? parseMarkup(revision.contentRaw).categories.length === 0 : false;
+      }).slice(0, limit);
+      return { type, items: items.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)) };
+    }
+
+    const visiblePageIds = new Set(visiblePages.map((page) => page.id));
+    const links = visiblePageIds.size > 0
+      ? await this.prisma.wikiPageLink.findMany({
+          where: { sourcePageId: { in: [...visiblePageIds] } },
+          select: { sourcePageId: true, targetNamespaceCode: true, targetSlug: true },
+          take: 20_000
+        })
+      : [];
+    if (type === 'wanted') {
+      const existing = new Set(visiblePages.map((page) => `${namespaceById.get(page.namespaceId) ?? 'main'}:${page.slug}`));
+      const counts = new Map<string, { namespace: string; slug: string; count: number }>();
+      for (const link of links) {
+        const key = `${link.targetNamespaceCode}:${link.targetSlug}`;
+        if (existing.has(key)) continue;
+        const current = counts.get(key);
+        counts.set(key, { namespace: link.targetNamespaceCode, slug: link.targetSlug, count: (current?.count ?? 0) + 1 });
+      }
+      const items = [...counts.entries()].sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0], 'ko')).slice(0, limit);
+      return {
+        type,
+        items: items.map(([key, target]) => ({
+          id: `wanted:${key}`,
+          pageId: null,
+          namespace: target.namespace,
+          title: target.slug,
+          displayTitle: target.slug.split('/').at(-1) ?? target.slug,
+          routePath: wikiUrl(target.namespace as Parameters<typeof wikiUrl>[0], target.slug),
+          value: target.count,
+          updatedAt: null
+        }))
+      };
+    }
+
+    const incoming = new Set(links.map((link) => `${link.targetNamespaceCode}:${link.targetSlug}`));
+    const spaces = visiblePages.length > 0
+      ? await this.prisma.wikiSpace.findMany({
+          where: { id: { in: [...new Set(visiblePages.map((page) => page.spaceId))] } },
+          select: { rootPageId: true }
+        })
+      : [];
+    const rootPageIds = new Set(spaces.flatMap((space) => space.rootPageId ? [space.rootPageId] : []));
+    const orphaned = visiblePages.filter((page) => {
+      const key = `${namespaceById.get(page.namespaceId) ?? 'main'}:${page.slug}`;
+      return !rootPageIds.has(page.id) && !incoming.has(key);
+    }).slice(0, limit);
+    return { type, items: orphaned.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)) };
+  }
+
+  private specialPageItem(
+    page: { id: bigint; title: string; displayTitle: string; updatedAt: Date },
+    namespace: string,
+    value: number | null
+  ): WikiSpecialDocumentItem {
+    return {
+      id: page.id.toString(), pageId: page.id.toString(), namespace, title: page.title, displayTitle: page.displayTitle,
+      routePath: wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title), value, updatedAt: page.updatedAt.toISOString()
+    };
   }
 
   async search(input: {

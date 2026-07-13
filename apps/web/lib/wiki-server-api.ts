@@ -7,7 +7,9 @@ import type {
   WikiRevisionDiffResponse,
   WikiRevisionResponse,
   WikiRevisionSummary,
-  WikiSearchResult
+  WikiSearchResult,
+  WikiSpecialDocumentResponse,
+  WikiSpecialDocumentType
 } from './wiki-api';
 
 const API_BASE = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL);
@@ -59,6 +61,17 @@ export async function searchWiki(input: {
   if (input.namespace) params.set('namespace', input.namespace);
   const response = await wikiFetch(`/v1/wiki/search?${params.toString()}`);
   return readWikiResponse<WikiSearchResult[]>(response, 'Failed to search wiki.');
+}
+
+export async function fetchWikiSpecial(input: {
+  readonly type: WikiSpecialDocumentType;
+  readonly namespace?: string;
+  readonly limit?: number;
+}): Promise<WikiSpecialDocumentResponse> {
+  const params = new URLSearchParams({ type: input.type, limit: String(input.limit ?? 50) });
+  if (input.namespace) params.set('namespace', input.namespace);
+  const response = await wikiFetch(`/v1/wiki/special?${params.toString()}`);
+  return readWikiResponse<WikiSpecialDocumentResponse>(response, 'Failed to load special wiki documents.');
 }
 
 async function wikiFetch(path: string): Promise<Response> {

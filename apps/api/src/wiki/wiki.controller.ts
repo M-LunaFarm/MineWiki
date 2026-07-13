@@ -27,7 +27,8 @@ import {
   type WikiPageResponse,
   type WikiRecentChangeSummary,
   type WikiRevisionSummary,
-  type WikiSearchResult
+  type WikiSearchResult,
+  type WikiSpecialDocumentResponse
 } from './wiki-read.service';
 import { WikiProfileService, type WikiMeResponse } from './wiki-profile.service';
 
@@ -140,6 +141,17 @@ export class WikiController {
       limit,
       accountId: request.sessionPayload?.userId ?? null
     });
+  }
+
+  @Get('special')
+  @UseGuards(OptionalSessionGuard)
+  special(
+    @Req() request: FastifyRequest,
+    @Query('type') type?: string,
+    @Query('namespace') namespace?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiSpecialDocumentResponse> {
+    return this.wikiRead.getSpecialDocuments({ type, namespace, limit, accountId: request.sessionPayload?.userId ?? null });
   }
 
   @Get('revisions/:revisionId')

@@ -139,6 +139,22 @@ export interface WikiSearchResult {
   readonly updatedAt: string;
 }
 
+export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'long' | 'short';
+
+export interface WikiSpecialDocumentResponse {
+  readonly type: WikiSpecialDocumentType;
+  readonly items: ReadonlyArray<{
+    readonly id: string;
+    readonly pageId: string | null;
+    readonly namespace: string;
+    readonly title: string;
+    readonly displayTitle: string;
+    readonly routePath: string;
+    readonly value: number | null;
+    readonly updatedAt: string | null;
+  }>;
+}
+
 export interface WikiBacklinkItem {
   readonly id: string;
   readonly sourcePageId: string;

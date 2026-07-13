@@ -18,6 +18,42 @@ test('server wiki navigation derives a stable document tree depth', () => {
   assert.equal(serverWikiNavigationDepth('luna-main', '운영/권한/ACL'), 2);
 });
 
+test('special long documents are sorted by current public source size', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const pages = [
+    { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'short', slug: 'short', title: '짧음', displayTitle: '짧음', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now },
+    { id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'long', slug: 'long', title: '김', displayTitle: '김', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now }
+  ];
+  const prisma = {
+    wikiPage: { async findMany() { return pages; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 11n, contentRaw: 'short', contentSize: 5 }, { id: 12n, contentRaw: 'long content', contentSize: 500 }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const result = await new WikiReadService(prisma, permissions).getSpecialDocuments({ type: 'long' });
+
+  assert.deepEqual(result.items.map((item) => [item.pageId, item.value]), [['2', 500], ['1', 5]]);
+});
+
+test('special wanted documents aggregate unresolved current links', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'source', slug: 'source', title: '출처', displayTitle: '출처', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
+  const prisma = {
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 11n, contentRaw: '[[없는 문서]]', contentSize: 8 }]; } },
+    wikiPageLink: { async findMany() { return [
+      { sourcePageId: 1n, targetNamespaceCode: 'main', targetSlug: '없는 문서' },
+      { sourcePageId: 1n, targetNamespaceCode: 'main', targetSlug: '없는 문서' }
+    ]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const result = await new WikiReadService(prisma, permissions).getSpecialDocuments({ type: 'wanted' });
+
+  assert.equal(result.items[0]?.title, '없는 문서');
+  assert.equal(result.items[0]?.value, 2);
+});
+
 test('backlinks expose only links from the current readable source revision', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const target = {
