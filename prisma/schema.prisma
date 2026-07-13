@@ -1145,6 +1145,27 @@ model WikiPageWatch {
   @@map("wiki_page_watches")
 }
 
+model WikiNotification {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  profileId      BigInt    @map("profile_id") @db.UnsignedBigInt
+  type           String    @db.VarChar(32)
+  pageId         BigInt?   @map("page_id") @db.UnsignedBigInt
+  actorProfileId BigInt?   @map("actor_profile_id") @db.UnsignedBigInt
+  sourceType     String    @map("source_type") @db.VarChar(32)
+  sourceId       String    @map("source_id") @db.VarChar(64)
+  title          String    @db.VarChar(255)
+  message        String?   @db.VarChar(500)
+  href           String    @db.VarChar(1000)
+  dedupeKey      String    @unique(map: "uk_wiki_notifications_dedupe") @map("dedupe_key") @db.VarChar(191)
+  readAt         DateTime? @map("read_at")
+  createdAt      DateTime  @map("created_at")
+
+  @@index([profileId, readAt, id], map: "idx_wiki_notifications_inbox")
+  @@index([profileId, id], map: "idx_wiki_notifications_profile")
+  @@index([pageId, id], map: "idx_wiki_notifications_page")
+  @@map("wiki_notifications")
+}
+
 model WikiEditRequest {
   id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   pageId             BigInt    @map("page_id") @db.UnsignedBigInt
