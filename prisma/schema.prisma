@@ -974,6 +974,21 @@ model WikiProfile {
   @@map("users")
 }
 
+model WikiUserBlockEvent {
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  targetProfileId BigInt   @map("target_profile_id") @db.UnsignedBigInt
+  actorProfileId  BigInt   @map("actor_profile_id") @db.UnsignedBigInt
+  action          String   @db.VarChar(16)
+  previousStatus  String   @map("previous_status") @db.VarChar(32)
+  newStatus       String   @map("new_status") @db.VarChar(32)
+  reason          String   @db.VarChar(1000)
+  createdAt       DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([targetProfileId, id], map: "idx_wiki_user_block_events_target")
+  @@index([actorProfileId, createdAt], map: "idx_wiki_user_block_events_actor")
+  @@map("wiki_user_block_events")
+}
+
 model WikiSpace {
   id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   code              String   @unique @db.VarChar(64)

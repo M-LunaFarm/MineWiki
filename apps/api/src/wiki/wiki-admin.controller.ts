@@ -29,6 +29,43 @@ export class WikiAdminController {
     return this.wikiAdmin.getPages(status);
   }
 
+  @Get('users')
+  async getUsers(@Query('q') query: string | undefined, @CurrentSession() session: SessionPayload) {
+    await this.assertBlockAdmin(session);
+    return this.wikiAdmin.getUsers(query);
+  }
+
+  @Get('user-block-events')
+  async getUserBlockEvents(
+    @Query('targetProfileId') targetProfileId: string | undefined,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertBlockAdmin(session);
+    return this.wikiAdmin.getUserBlockEvents(targetProfileId);
+  }
+
+  @Post('users/:id/block')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  async blockUser(
+    @Param('id') targetProfileId: string,
+    @Body() body: { reason?: string },
+    @CurrentSession() session: SessionPayload
+  ) {
+    const actor = await this.assertBlockAdmin(session);
+    return this.wikiAdmin.setUserBlocked({ targetProfileId, actorProfileId: actor.id, blocked: true, reason: body.reason });
+  }
+
+  @Post('users/:id/unblock')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  async unblockUser(
+    @Param('id') targetProfileId: string,
+    @Body() body: { reason?: string },
+    @CurrentSession() session: SessionPayload
+  ) {
+    const actor = await this.assertBlockAdmin(session);
+    return this.wikiAdmin.setUserBlocked({ targetProfileId, actorProfileId: actor.id, blocked: false, reason: body.reason });
+  }
+
   @Get('acl')
   async getAclRules(@CurrentSession() session: SessionPayload) {
     await this.assertAdmin(session);
@@ -162,6 +199,17 @@ export class WikiAdminController {
       session.groups?.includes('admin') !== true
     ) {
       throw new ForbiddenException('Wiki admin permission is required.');
+    }
+    return this.wikiProfiles.ensureWikiProfile(session.userId);
+  }
+
+  private async assertBlockAdmin(session: SessionPayload): Promise<{ id: bigint }> {
+    if (
+      !session.isElevated &&
+      session.permissions?.includes('wiki.user.block') !== true &&
+      session.groups?.some((group) => group === 'owner' || group === 'admin') !== true
+    ) {
+      throw new ForbiddenException('Wiki user block permission is required.');
     }
     return this.wikiProfiles.ensureWikiProfile(session.userId);
   }

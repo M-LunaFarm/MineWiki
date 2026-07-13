@@ -336,6 +336,29 @@ export interface WikiAdminPageSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiAdminUserSummary {
+  readonly id: string;
+  readonly accountId: string | null;
+  readonly username: string;
+  readonly displayName: string;
+  readonly status: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface WikiUserBlockEventSummary {
+  readonly id: string;
+  readonly targetProfileId: string;
+  readonly targetName: string;
+  readonly actorProfileId: string;
+  readonly actorName: string;
+  readonly action: string;
+  readonly previousStatus: string;
+  readonly newStatus: string;
+  readonly reason: string;
+  readonly createdAt: string;
+}
+
 export interface WikiAclRuleSummary {
   readonly id: string;
   readonly targetType: 'site' | 'namespace' | 'space' | 'page';
@@ -622,6 +645,20 @@ export async function fetchWikiAdminRecent(): Promise<WikiAdminRecentChange[]> {
 
 export async function fetchWikiAdminPages(status?: string): Promise<WikiAdminPageSummary[]> {
   return fetchWikiAdminJson(`/pages${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+}
+
+export async function fetchWikiAdminUsers(query?: string): Promise<WikiAdminUserSummary[]> {
+  return fetchWikiAdminJson(`/users${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+}
+
+export async function fetchWikiUserBlockEvents(targetProfileId?: string): Promise<WikiUserBlockEventSummary[]> {
+  return fetchWikiAdminJson(`/user-block-events${targetProfileId ? `?targetProfileId=${encodeURIComponent(targetProfileId)}` : ''}`);
+}
+
+export async function setWikiAdminUserBlocked(input: { profileId: string; blocked: boolean; reason: string }): Promise<WikiAdminUserSummary> {
+  return fetchWikiAdminJson(`/users/${encodeURIComponent(input.profileId)}/${input.blocked ? 'block' : 'unblock'}`, {
+    method: 'POST', body: JSON.stringify({ reason: input.reason })
+  });
 }
 
 export async function fetchWikiAclRules(): Promise<WikiAclRuleSummary[]> {

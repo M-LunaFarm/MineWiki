@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PrismaService } from '../common/prisma.service';
 import { WikiAdminService } from './wiki-admin.service';
+import { BadRequestException } from '@nestjs/common';
 
 interface TestRevision {
   id: bigint;
@@ -152,6 +153,36 @@ function createService() {
     renderCaches
   };
 }
+
+test('wiki user block updates status and appends immutable history in one transaction', async () => {
+  const now = new Date('2026-07-06T00:00:00.000Z');
+  const profile = { id: 9n, accountId: 'account-9', username: 'user9', displayName: '사용자 9', status: 'active', createdAt: now, updatedAt: now };
+  let eventData: Record<string, unknown> | null = null;
+  const tx = {
+    wikiProfile: { async update(args: { data: { status: string; updatedAt: Date } }) { Object.assign(profile, args.data); return profile; } },
+    wikiUserBlockEvent: { async create(args: { data: Record<string, unknown> }) { eventData = args.data; return { id: 1n, ...args.data }; } }
+  };
+  const prisma = {
+    wikiProfile: { async findUnique() { return profile; } },
+    accountRole: { async findMany() { return []; } },
+    async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); }
+  };
+  const service = new WikiAdminService(prisma as unknown as PrismaService);
+
+  const result = await service.setUserBlocked({ targetProfileId: '9', actorProfileId: 2n, blocked: true, reason: '반복적인 문서 훼손' });
+  assert.equal(result.status, 'blocked');
+  assert.deepEqual(eventData && { action: eventData.action, previousStatus: eventData.previousStatus, newStatus: eventData.newStatus }, {
+    action: 'block', previousStatus: 'active', newStatus: 'blocked'
+  });
+});
+
+test('wiki user block rejects self-targeting before data access', async () => {
+  const service = new WikiAdminService({} as PrismaService);
+  await assert.rejects(
+    service.setUserBlocked({ targetProfileId: '2', actorProfileId: 2n, blocked: true, reason: '충분히 긴 사유' }),
+    BadRequestException
+  );
+});
 
 test('wiki admin service updates page protection and records recent change', async () => {
   const { service, page, changes } = createService();

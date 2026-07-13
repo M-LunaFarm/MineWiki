@@ -45,6 +45,29 @@ export interface WikiAdminPageSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiAdminUserSummary {
+  readonly id: string;
+  readonly accountId: string | null;
+  readonly username: string;
+  readonly displayName: string;
+  readonly status: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface WikiUserBlockEventSummary {
+  readonly id: string;
+  readonly targetProfileId: string;
+  readonly targetName: string;
+  readonly actorProfileId: string;
+  readonly actorName: string;
+  readonly action: string;
+  readonly previousStatus: string;
+  readonly newStatus: string;
+  readonly reason: string;
+  readonly createdAt: string;
+}
+
 @Injectable()
 export class WikiAdminService {
   constructor(
@@ -78,6 +101,106 @@ export class WikiAdminService {
       take: 100
     });
     return pages.map(toPageSummary);
+  }
+
+  async getUsers(query?: string): Promise<WikiAdminUserSummary[]> {
+    const q = query?.trim().slice(0, 64) ?? '';
+    const users = await this.prisma.wikiProfile.findMany({
+      where: q ? { OR: [{ username: { contains: q } }, { displayName: { contains: q } }] } : undefined,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: 100
+    });
+    return users.map((user) => ({
+      id: user.id.toString(),
+      accountId: user.accountId,
+      username: user.username,
+      displayName: user.displayName,
+      status: user.status,
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString()
+    }));
+  }
+
+  async getUserBlockEvents(targetProfileId?: string): Promise<WikiUserBlockEventSummary[]> {
+    const targetId = targetProfileId ? this.parseBigIntId(targetProfileId, 'targetProfileId') : null;
+    const events = await this.prisma.wikiUserBlockEvent.findMany({
+      where: targetId ? { targetProfileId: targetId } : undefined,
+      orderBy: [{ id: 'desc' }],
+      take: 100
+    });
+    const profileIds = [...new Set(events.flatMap((event) => [event.targetProfileId, event.actorProfileId]))];
+    const profiles = profileIds.length > 0
+      ? await this.prisma.wikiProfile.findMany({ where: { id: { in: profileIds } }, select: { id: true, displayName: true } })
+      : [];
+    const names = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
+    return events.map((event) => ({
+      id: event.id.toString(),
+      targetProfileId: event.targetProfileId.toString(),
+      targetName: names.get(event.targetProfileId) ?? '알 수 없는 사용자',
+      actorProfileId: event.actorProfileId.toString(),
+      actorName: names.get(event.actorProfileId) ?? '알 수 없는 관리자',
+      action: event.action,
+      previousStatus: event.previousStatus,
+      newStatus: event.newStatus,
+      reason: event.reason,
+      createdAt: event.createdAt.toISOString()
+    }));
+  }
+
+  async setUserBlocked(input: {
+    readonly targetProfileId: string;
+    readonly actorProfileId: bigint;
+    readonly blocked: boolean;
+    readonly reason?: string;
+  }): Promise<WikiAdminUserSummary> {
+    const targetId = this.parseBigIntId(input.targetProfileId, 'targetProfileId');
+    if (targetId === input.actorProfileId) throw new BadRequestException('자기 자신의 위키 기여 권한은 변경할 수 없습니다.');
+    const reason = input.reason?.trim() ?? '';
+    if (reason.length < 5 || reason.length > 1000) throw new BadRequestException('사유는 5자 이상 1000자 이하로 입력하세요.');
+    const target = await this.prisma.wikiProfile.findUnique({ where: { id: targetId } });
+    if (!target) throw new NotFoundException('Wiki profile not found.');
+    if (target.accountId) {
+      const protectedRoles = await this.prisma.accountRole.findMany({
+        where: { accountId: target.accountId },
+        include: { role: true }
+      });
+      if (protectedRoles.some((entry) => entry.role.code === 'owner' || entry.role.code === 'admin')) {
+        throw new BadRequestException('보호된 운영자 계정의 위키 기여 권한은 이 화면에서 변경할 수 없습니다.');
+      }
+    }
+    const newStatus = input.blocked ? 'blocked' : 'active';
+    if (target.status === newStatus) throw new BadRequestException(input.blocked ? '이미 차단된 사용자입니다.' : '이미 활성 상태인 사용자입니다.');
+    if (input.blocked && target.status !== 'active') throw new BadRequestException('활성 사용자만 차단할 수 있습니다.');
+    if (!input.blocked && target.status !== 'blocked') throw new BadRequestException('차단된 사용자만 해제할 수 있습니다.');
+    const previousStatus = target.status;
+    const now = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.wikiProfile.update({ where: { id: target.id }, data: { status: newStatus, updatedAt: now } });
+      await tx.wikiUserBlockEvent.create({
+        data: {
+          targetProfileId: target.id,
+          actorProfileId: input.actorProfileId,
+          action: input.blocked ? 'block' : 'unblock',
+          previousStatus,
+          newStatus,
+          reason,
+          createdAt: now
+        }
+      });
+      return user;
+    });
+    await this.events?.audit(input.blocked ? 'wiki.user_block' : 'wiki.user_unblock', {
+      category: 'wiki',
+      actorProfileId: input.actorProfileId,
+      subjectType: 'wiki_profile',
+      subjectId: target.id,
+      metadata: { previousStatus, status: newStatus, reason }
+    });
+    return {
+      id: updated.id.toString(), accountId: updated.accountId, username: updated.username,
+      displayName: updated.displayName, status: updated.status,
+      createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString()
+    };
   }
 
   async getAclRules() {
