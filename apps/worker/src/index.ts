@@ -28,6 +28,7 @@ import {
 import { loadVoteDispatchExecutionJob } from './vote-job-loader';
 import { loadDiscordVerifyExecutionJob } from './discord-sync-job-loader';
 import { DiscordVerificationRepository } from './discord-verification.repository';
+import { processWikiNotificationOutbox } from './wiki-notification-outbox';
 import { loadDiscordDigestExecutionJob } from './discord-digest-job-loader';
 import type {
   ClaimVerificationJob,
@@ -41,6 +42,7 @@ import type {
 const PING_INTERVAL_MS = 5 * 60 * 1000;
 const RANK_INTERVAL_MS = 60 * 60 * 1000;
 const CLAIM_SCAN_INTERVAL_MS = 60 * 60 * 1000;
+const WIKI_NOTIFICATION_INTERVAL_MS = 5 * 1000;
 const CLAIM_PENDING_THRESHOLD_HOURS = 1;
 const CLAIM_VERIFIED_THRESHOLD_HOURS = 24;
 const MAX_PING_BATCH = 200;
@@ -571,6 +573,10 @@ async function bootstrapWorker(): Promise<void> {
   scheduleInterval('server-ping', PING_INTERVAL_MS, enqueueServerPings);
   scheduleInterval('claim-check', CLAIM_SCAN_INTERVAL_MS, enqueueClaimChecks);
   scheduleInterval('rank-aggregation', RANK_INTERVAL_MS, enqueueRankAggregation);
+  scheduleInterval('wiki-notification-outbox', WIKI_NOTIFICATION_INTERVAL_MS, async () => {
+    const count = await processWikiNotificationOutbox(prisma);
+    if (count > 0) Logger.info({ count }, 'Delivered wiki notification outbox events');
+  });
   Logger.info({ redisUrl, workerCount: workers.length }, 'Worker bootstrapped and waiting for jobs');
 }
 

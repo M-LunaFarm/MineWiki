@@ -1183,6 +1183,38 @@ model WikiNotification {
   @@map("wiki_notifications")
 }
 
+model WikiNotificationEvent {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  eventKey    String    @unique @map("event_key") @db.VarChar(191)
+  eventType   String    @map("event_type") @db.VarChar(64)
+  payloadJson Json      @map("payload_json")
+  status      String    @default("pending") @db.VarChar(16)
+  attempts    Int       @default(0)
+  availableAt DateTime  @map("available_at") @db.DateTime(3)
+  lockedAt    DateTime? @map("locked_at") @db.DateTime(3)
+  lockedBy    String?   @map("locked_by") @db.VarChar(128)
+  processedAt DateTime? @map("processed_at") @db.DateTime(3)
+  lastError   String?   @map("last_error") @db.VarChar(1000)
+  createdAt   DateTime  @map("created_at") @db.DateTime(3)
+
+  @@index([status, availableAt, id], map: "idx_wiki_notification_events_pending")
+  @@index([lockedAt], map: "idx_wiki_notification_events_locked")
+  @@map("wiki_notification_events")
+}
+
+model WikiDiscussionSubscription {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  threadId  BigInt   @map("thread_id") @db.UnsignedBigInt
+  profileId BigInt   @map("profile_id") @db.UnsignedBigInt
+  muted     Boolean  @default(false)
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+
+  @@unique([threadId, profileId], map: "uk_wiki_discussion_subscriptions_thread_profile")
+  @@index([profileId, updatedAt], map: "idx_wiki_discussion_subscriptions_profile")
+  @@map("wiki_discussion_subscriptions")
+}
+
 model WikiEditRequest {
   id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   pageId             BigInt    @map("page_id") @db.UnsignedBigInt

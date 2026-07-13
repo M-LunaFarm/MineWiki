@@ -24,6 +24,21 @@ export interface WikiNotificationListResponse {
   readonly nextCursor: string | null;
 }
 
+interface PendingNotificationDelivery {
+  readonly profileId: bigint;
+  readonly type: string;
+  readonly pageId: bigint | null;
+  readonly actorProfileId: bigint | null;
+  readonly sourceType: string;
+  readonly sourceId: string;
+  readonly title: string;
+  readonly message: string | null;
+  readonly href: string;
+  readonly dedupeKey: string;
+  readonly readAt: null;
+  readonly createdAt: Date;
+}
+
 @Injectable()
 export class WikiNotificationService {
   constructor(
@@ -122,8 +137,7 @@ export class WikiNotificationService {
     });
     if (watches.length === 0) return;
     const now = new Date();
-    await tx.wikiNotification.createMany({
-      data: watches.map((watch) => ({
+    await this.persistDeliveries(tx, `revision:${input.revisionId.toString()}`, 'page_revision', watches.map((watch) => ({
         profileId: watch.profileId,
         type: 'page_revision',
         pageId: input.pageId,
@@ -136,25 +150,25 @@ export class WikiNotificationService {
         dedupeKey: `revision:${input.revisionId.toString()}:profile:${watch.profileId.toString()}`,
         readAt: null,
         createdAt: now
-      })),
-      skipDuplicates: true
-    });
+      })));
   }
 
   async notifyDiscussionReply(
     tx: Prisma.TransactionClient,
     input: { readonly pageId: bigint; readonly threadId: bigint; readonly commentId: bigint; readonly actorProfileId: bigint; readonly title: string }
   ): Promise<void> {
-    const [thread, comments] = await Promise.all([
+    const [thread, comments, subscriptions] = await Promise.all([
       tx.wikiDiscussionThread.findUnique({ where: { id: input.threadId }, select: { createdBy: true } }),
-      tx.wikiDiscussionComment.findMany({ where: { threadId: input.threadId }, select: { createdBy: true } })
+      tx.wikiDiscussionComment.findMany({ where: { threadId: input.threadId }, select: { createdBy: true } }),
+      tx.wikiDiscussionSubscription.findMany({ where: { threadId: input.threadId }, select: { profileId: true, muted: true } })
     ]);
-    const recipients = [...new Set([thread?.createdBy, ...comments.map((comment) => comment.createdBy)])]
+    const muted = new Set(subscriptions.filter((subscription) => subscription.muted).map((subscription) => subscription.profileId));
+    const recipients = [...new Set([thread?.createdBy, ...comments.map((comment) => comment.createdBy), ...subscriptions.filter((subscription) => !subscription.muted).map((subscription) => subscription.profileId)])]
       .filter((profileId): profileId is bigint => typeof profileId === 'bigint' && profileId !== input.actorProfileId);
-    if (recipients.length === 0) return;
+    const activeRecipients = recipients.filter((profileId) => !muted.has(profileId));
+    if (activeRecipients.length === 0) return;
     const now = new Date();
-    await tx.wikiNotification.createMany({
-      data: recipients.map((profileId) => ({
+    await this.persistDeliveries(tx, `discussion-comment:${input.commentId.toString()}`, 'discussion_reply', activeRecipients.map((profileId) => ({
         profileId,
         type: 'discussion_reply',
         pageId: input.pageId,
@@ -167,9 +181,7 @@ export class WikiNotificationService {
         dedupeKey: `discussion-comment:${input.commentId.toString()}:profile:${profileId.toString()}`,
         readAt: null,
         createdAt: now
-      })),
-      skipDuplicates: true
-    });
+      })));
   }
 
   async notifyEditRequestReviewed(tx: Prisma.TransactionClient, input: {
@@ -181,8 +193,7 @@ export class WikiNotificationService {
     readonly title: string;
   }): Promise<void> {
     if (input.profileId === input.reviewerProfileId) return;
-    await tx.wikiNotification.createMany({
-      data: [{
+    await this.persistDeliveries(tx, `edit-request:${input.requestId.toString()}:${input.status}`, `edit_request_${input.status}`, [{
         profileId: input.profileId,
         type: `edit_request_${input.status}`,
         pageId: input.pageId,
@@ -195,6 +206,35 @@ export class WikiNotificationService {
         dedupeKey: `edit-request:${input.requestId.toString()}:${input.status}:profile:${input.profileId.toString()}`,
         readAt: null,
         createdAt: new Date()
+      }]);
+  }
+
+  private async persistDeliveries(
+    tx: Prisma.TransactionClient,
+    eventKey: string,
+    eventType: string,
+    deliveries: PendingNotificationDelivery[]
+  ): Promise<void> {
+    if (deliveries.length === 0) return;
+    if (process.env.WIKI_NOTIFICATION_DELIVERY_MODE === 'direct') {
+      await tx.wikiNotification.createMany({ data: deliveries, skipDuplicates: true });
+      return;
+    }
+    await tx.wikiNotificationEvent.createMany({
+      data: [{
+        eventKey,
+        eventType,
+        payloadJson: {
+          deliveries: deliveries.map((delivery) => ({
+            ...delivery,
+            profileId: delivery.profileId.toString(),
+            pageId: delivery.pageId?.toString() ?? null,
+            actorProfileId: delivery.actorProfileId?.toString() ?? null,
+            createdAt: delivery.createdAt.toISOString()
+          }))
+        },
+        status: 'pending', attempts: 0, availableAt: new Date(), lockedAt: null,
+        lockedBy: null, processedAt: null, lastError: null, createdAt: new Date()
       }],
       skipDuplicates: true
     });

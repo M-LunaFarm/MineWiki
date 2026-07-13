@@ -263,6 +263,7 @@ export interface WikiRecentThreadListResponse {
 export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canModerate: boolean;
   readonly canReply: boolean;
+  readonly subscribed: boolean;
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
@@ -520,6 +521,10 @@ export async function deleteWikiThreadComment(input: { threadId: string; comment
     'DELETE',
     {}
   );
+}
+
+export async function setWikiThreadSubscription(threadId: string, subscribed: boolean): Promise<{ readonly subscribed: boolean }> {
+  return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/subscription`, 'POST', { subscribed });
 }
 
 export async function fetchWikiWatchStatus(pageId: string): Promise<WikiWatchStatus> {

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Loader2, MessageSquarePlus, MessagesSquare, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bell, BellOff, Loader2, MessageSquarePlus, MessagesSquare, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import {
   addWikiThreadComment,
@@ -11,6 +11,7 @@ import {
   fetchWikiThread,
   fetchWikiThreads,
   setWikiThreadStatus,
+  setWikiThreadSubscription,
   type WikiThreadDetail,
   type WikiThreadSummary
 } from '../../lib/wiki-api';
@@ -106,6 +107,15 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     } catch (caught) { setError(message(caught)); } finally { setWorking(false); }
   }
 
+  async function toggleSubscription() {
+    if (!selected) return;
+    setWorking(true); setError(null);
+    try {
+      const result = await setWikiThreadSubscription(selected.id, !selected.subscribed);
+      setSelected((current) => current ? { ...current, subscribed: result.subscribed } : current);
+    } catch (caught) { setError(message(caught)); } finally { setWorking(false); }
+  }
+
   async function removeComment(commentId: string) {
     if (!selected || !window.confirm('이 댓글을 삭제하시겠습니까?')) return;
     setWorking(true); setError(null);
@@ -146,7 +156,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
         </aside>
         <section className={`min-w-0 ${selected ? '' : 'hidden lg:block'}`}>
           {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}
-          {selected ? <div className="space-y-4"><button type="button" onClick={closeThread} className="inline-flex min-h-11 items-center gap-2 text-sm text-slate-300 lg:hidden"><ArrowLeft className="size-4" /> 토론 목록</button><div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4"><div className="min-w-0"><h2 className="break-words text-2xl font-bold text-white">{selected.title}</h2><p className="mt-2 text-xs text-slate-500">{selected.createdByName} · {selected.status} · 댓글 {selected.commentCount.toLocaleString('ko-KR')}개</p></div>{selected.canModerate ? <button type="button" disabled={working} onClick={() => void toggleStatus()} className="chip chip-muted">{selected.status === 'open' ? '토론 닫기' : '다시 열기'}</button> : null}</div>{selected.nextCommentCursor ? <button type="button" disabled={loadingOlder} onClick={() => void loadOlderComments()} className="chip chip-muted mx-auto flex min-h-11 items-center gap-2">{loadingOlder ? <Loader2 className="size-4 animate-spin" /> : null} 이전 댓글 더 보기</button> : null}{selected.comments.map((item) => <article id={`comment-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedCommentId || undefined} key={item.id} className="border border-white/10 bg-[#111821] p-4 outline-none data-[highlighted=true]:border-emerald-300/60 data-[highlighted=true]:bg-emerald-300/10"><div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500"><Link href={`/wiki/contributions/${item.createdBy}`} className="hover:text-emerald-200">{item.createdByName}</Link><span className="flex items-center gap-3"><time>{formatDate(item.createdAt)}</time>{item.canDelete ? <button type="button" disabled={working} onClick={() => void removeComment(item.id)} className="inline-flex min-h-11 items-center gap-1 text-slate-500 hover:text-red-200"><Trash2 className="size-3.5" /> 삭제</button> : null}</span></div><p className="mt-3 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-200">{item.content ?? '삭제된 댓글입니다.'}</p></article>)}{selected.canReply ? <form onSubmit={reply} className="space-y-3"><textarea value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" /><button disabled={working} className="btn-primary w-full sm:w-auto">댓글 등록</button></form> : null}</div> : !loading ? <p className="border border-white/10 p-6 text-sm text-slate-400">왼쪽에서 토론을 선택하세요.</p> : null}
+          {selected ? <div className="space-y-4"><button type="button" onClick={closeThread} className="inline-flex min-h-11 items-center gap-2 text-sm text-slate-300 lg:hidden"><ArrowLeft className="size-4" /> 토론 목록</button><div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4"><div className="min-w-0"><h2 className="break-words text-2xl font-bold text-white">{selected.title}</h2><p className="mt-2 text-xs text-slate-500">{selected.createdByName} · {selected.status} · 댓글 {selected.commentCount.toLocaleString('ko-KR')}개</p></div><div className="flex flex-wrap gap-2">{account ? <button type="button" disabled={working} onClick={() => void toggleSubscription()} className="chip chip-muted inline-flex min-h-11 items-center gap-2">{selected.subscribed ? <BellOff className="size-4" /> : <Bell className="size-4" />}{selected.subscribed ? '알림 끄기' : '알림 받기'}</button> : null}{selected.canModerate ? <button type="button" disabled={working} onClick={() => void toggleStatus()} className="chip chip-muted min-h-11">{selected.status === 'open' ? '토론 닫기' : '다시 열기'}</button> : null}</div></div>{selected.nextCommentCursor ? <button type="button" disabled={loadingOlder} onClick={() => void loadOlderComments()} className="chip chip-muted mx-auto flex min-h-11 items-center gap-2">{loadingOlder ? <Loader2 className="size-4 animate-spin" /> : null} 이전 댓글 더 보기</button> : null}{selected.comments.map((item) => <article id={`comment-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedCommentId || undefined} key={item.id} className="border border-white/10 bg-[#111821] p-4 outline-none data-[highlighted=true]:border-emerald-300/60 data-[highlighted=true]:bg-emerald-300/10"><div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500"><Link href={`/wiki/contributions/${item.createdBy}`} className="hover:text-emerald-200">{item.createdByName}</Link><span className="flex items-center gap-3"><time>{formatDate(item.createdAt)}</time>{item.canDelete ? <button type="button" disabled={working} onClick={() => void removeComment(item.id)} className="inline-flex min-h-11 items-center gap-1 text-slate-500 hover:text-red-200"><Trash2 className="size-3.5" /> 삭제</button> : null}</span></div><p className="mt-3 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-200">{item.content ?? '삭제된 댓글입니다.'}</p></article>)}{selected.canReply ? <form onSubmit={reply} className="space-y-3"><textarea value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" /><button disabled={working} className="btn-primary w-full sm:w-auto">댓글 등록</button></form> : null}</div> : !loading ? <p className="border border-white/10 p-6 text-sm text-slate-400">왼쪽에서 토론을 선택하세요.</p> : null}
         </section>
       </div>
     </div>

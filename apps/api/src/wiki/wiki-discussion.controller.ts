@@ -67,4 +67,12 @@ export class WikiDiscussionController {
   removeComment(@Param('threadId') threadId: string, @Param('commentId') commentId: string, @CurrentSession() session: SessionPayload) {
     return this.discussions.deleteComment(session, threadId, commentId);
   }
+
+  @Post('discussions/:threadId/subscription')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  subscribe(@Param('threadId') threadId: string, @Body() body: { subscribed?: boolean }, @CurrentSession() session: SessionPayload) {
+    if (typeof body.subscribed !== 'boolean') throw new BadRequestException('subscribed must be boolean.');
+    return this.discussions.setSubscription(session, threadId, body.subscribed);
+  }
 }

@@ -28,16 +28,16 @@ test('notification inbox belongs to the authenticated wiki profile', async () =>
 });
 
 test('watched revision notifications exclude the editor and deduplicate per recipient', async () => {
-  let created: Array<{ profileId: bigint; dedupeKey: string }> = [];
+  let deliveries: Array<{ profileId: string; dedupeKey: string }> = [];
   const tx = {
     wikiPageWatch: { async findMany() { return [{ profileId: 8n }, { profileId: 9n }]; } },
-    wikiNotification: { async createMany(args: { data: Array<{ profileId: bigint; dedupeKey: string }> }) { created = args.data; return { count: args.data.length }; } }
+    wikiNotificationEvent: { async createMany(args: { data: Array<{ payloadJson: { deliveries: typeof deliveries } }> }) { deliveries = args.data[0]?.payloadJson.deliveries ?? []; return { count: 1 }; } }
   };
   const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
   await service.notifyWatchedRevision(tx as never, { pageId: 2n, revisionId: 3n, actorProfileId: 7n, title: 'Guide' });
 
-  assert.deepEqual(created.map((item) => item.profileId), [8n, 9n]);
-  assert.deepEqual(created.map((item) => item.dedupeKey), ['revision:3:profile:8', 'revision:3:profile:9']);
+  assert.deepEqual(deliveries.map((item) => item.profileId), ['8', '9']);
+  assert.deepEqual(deliveries.map((item) => item.dedupeKey), ['revision:3:profile:8', 'revision:3:profile:9']);
 });
 
 test('discussion reply notifications deep-link to the exact comment', async () => {
@@ -45,12 +45,28 @@ test('discussion reply notifications deep-link to the exact comment', async () =
   const tx = {
     wikiDiscussionThread: { async findUnique() { return { createdBy: 8n }; } },
     wikiDiscussionComment: { async findMany() { return []; } },
-    wikiNotification: {
-      async createMany(args: { data: Array<{ href: string }> }) { href = args.data[0]?.href ?? ''; return { count: args.data.length }; }
+    wikiDiscussionSubscription: { async findMany() { return []; } },
+    wikiNotificationEvent: {
+      async createMany(args: { data: Array<{ payloadJson: { deliveries: Array<{ href: string }> } }> }) { href = args.data[0]?.payloadJson.deliveries[0]?.href ?? ''; return { count: 1 }; }
     }
   };
   const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
   await service.notifyDiscussionReply(tx as never, { pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide' });
 
   assert.equal(href, '/wiki/discuss/2?thread=3&comment=4');
+});
+
+test('muted discussion subscribers are excluded from reply delivery', async () => {
+  let deliveries: Array<{ profileId: string }> = [];
+  const tx = {
+    wikiDiscussionThread: { async findUnique() { return { createdBy: 8n }; } },
+    wikiDiscussionComment: { async findMany() { return [{ createdBy: 9n }]; } },
+    wikiDiscussionSubscription: { async findMany() { return [{ profileId: 8n, muted: true }, { profileId: 9n, muted: false }]; } },
+    wikiNotificationEvent: {
+      async createMany(args: { data: Array<{ payloadJson: { deliveries: typeof deliveries } }> }) { deliveries = args.data[0]?.payloadJson.deliveries ?? []; return { count: 1 }; }
+    }
+  };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+  await service.notifyDiscussionReply(tx as never, { pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide' });
+  assert.deepEqual(deliveries.map((delivery) => delivery.profileId), ['9']);
 });

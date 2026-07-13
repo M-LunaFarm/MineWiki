@@ -36,6 +36,7 @@ export interface WikiRecentThreadListResponse {
 export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canModerate: boolean;
   readonly canReply: boolean;
+  readonly subscribed: boolean;
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
@@ -198,6 +199,9 @@ export class WikiDiscussionService {
     const commentCount = await this.prisma.wikiDiscussionComment.count({ where: { threadId: thread.id } });
     const profileById = await this.profileNames([thread.createdBy, ...pageComments.map((comment) => comment.createdBy)]);
     const viewer = session ? await this.wikiProfiles.ensureWikiProfile(session.userId) : null;
+    const subscription = viewer ? await this.prisma.wikiDiscussionSubscription.findUnique({
+      where: { threadId_profileId: { threadId: thread.id, profileId: viewer.id } }, select: { muted: true }
+    }) : null;
     const canManage = viewer && session
       ? await this.wikiPermissions.canManagePage({ actor: this.wikiPermissions.actorFromSession(session, viewer), page })
       : false;
@@ -218,6 +222,7 @@ export class WikiDiscussionService {
       ...this.toThreadSummary(thread, profileById, commentCount),
       canModerate,
       canReply,
+      subscribed: Boolean(subscription && !subscription.muted),
       nextCommentCursor: hasOlderComments ? pageComments.at(-1)?.id.toString() ?? null : null,
       comments: pageComments.reverse().map((comment) => ({
         id: comment.id.toString(),
@@ -254,6 +259,9 @@ export class WikiDiscussionService {
       await tx.wikiDiscussionComment.create({
         data: { threadId: created.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
       });
+      await tx.wikiDiscussionSubscription.create({
+        data: { threadId: created.id, profileId: profile.id, muted: false, createdAt: now, updatedAt: now }
+      });
       return created;
     });
     await this.audit('wiki.discussion.create', session, profile.id, page.id, thread.id);
@@ -279,6 +287,11 @@ export class WikiDiscussionService {
       const comment = await tx.wikiDiscussionComment.create({
         data: { threadId: thread.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
       });
+      await tx.wikiDiscussionSubscription.upsert({
+        where: { threadId_profileId: { threadId: thread.id, profileId: profile.id } },
+        create: { threadId: thread.id, profileId: profile.id, muted: false, createdAt: now, updatedAt: now },
+        update: {}
+      });
       await tx.wikiDiscussionThread.update({ where: { id: thread.id }, data: { updatedAt: now } });
       await this.notifications?.notifyDiscussionReply(tx, {
         pageId: page.id,
@@ -290,6 +303,21 @@ export class WikiDiscussionService {
     });
     await this.audit('wiki.discussion.comment', session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
+  }
+
+  async setSubscription(session: SessionPayload, threadId: string, subscribed: boolean): Promise<{ readonly subscribed: boolean }> {
+    const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: this.parseId(threadId, 'threadId') } });
+    if (!thread) throw new NotFoundException('Wiki discussion thread not found.');
+    const page = await this.readablePage(thread.pageId.toString(), session.userId);
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    await this.wikiPermissions.assertCanDiscussPage({ actor: this.wikiPermissions.actorFromSession(session, profile), page });
+    const now = new Date();
+    await this.prisma.wikiDiscussionSubscription.upsert({
+      where: { threadId_profileId: { threadId: thread.id, profileId: profile.id } },
+      create: { threadId: thread.id, profileId: profile.id, muted: !subscribed, createdAt: now, updatedAt: now },
+      update: { muted: !subscribed, updatedAt: now }
+    });
+    return { subscribed };
   }
 
   async setThreadStatus(
