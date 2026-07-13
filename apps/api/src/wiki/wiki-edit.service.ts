@@ -6,7 +6,7 @@ import {
   NotFoundException,
   Optional
 } from '@nestjs/common';
-import { hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
+import { hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION, type AstNode } from '@minewiki/wiki-core';
 import type { Prisma, WikiEditRequest } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
@@ -966,15 +966,17 @@ export class WikiEditService {
         visibility: 'public'
       }
     });
-    await tx.wikiPageRenderCache.create({
-      data: {
-        pageId: input.pageId,
-        revisionId: revision.id,
-        rendererVersion: WIKI_RENDERER_VERSION,
-        html: renderDocument(parsed.ast),
-        createdAt: input.createdAt
-      }
-    });
+    if (!astContainsFile(parsed.ast)) {
+      await tx.wikiPageRenderCache.create({
+        data: {
+          pageId: input.pageId,
+          revisionId: revision.id,
+          rendererVersion: WIKI_RENDERER_VERSION,
+          html: renderDocument(parsed.ast),
+          createdAt: input.createdAt
+        }
+      });
+    }
     await this.wikiLinks?.replaceForRevision(tx as Prisma.TransactionClient, input.pageId, revision.id, parsed.links);
     await this.notifications?.notifyWatchedRevision(tx as Prisma.TransactionClient, {
       pageId: input.pageId,
@@ -1095,6 +1097,10 @@ export class WikiEditService {
     }
     return BigInt(value);
   }
+}
+
+export function astContainsFile(ast: readonly AstNode[]): boolean {
+  return ast.some((node) => node.type === 'file' || (node.type === 'folding' && astContainsFile(node.children)));
 }
 
 function sectionContentsByAnchor(content: string, anchor: string): string[] {

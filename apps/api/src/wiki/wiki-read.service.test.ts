@@ -313,8 +313,10 @@ test('contribution tabs expose discussion, edit-request, and reviewer ledgers', 
 
 function createReadService(options: {
   readonly cacheHtml?: string | null;
+  readonly contentRaw?: string;
   readonly onCacheLookup?: (where: unknown) => void;
   readonly onCacheCreate?: (data: unknown) => void;
+  readonly files?: ReadonlyArray<{ filename: string; publicPath: string; mimeType: string; originalName: string | null }>;
 }) {
   const now = new Date('2026-07-05T00:00:00.000Z');
   const prisma = {
@@ -346,7 +348,7 @@ function createReadService(options: {
           pageId: 10n,
           revisionNo: 1,
           contentHash: 'a'.repeat(64),
-          contentRaw: "'''현재''' 문서",
+          contentRaw: options.contentRaw ?? "'''현재''' 문서",
           createdAt: now,
           createdBy: 40n,
           visibility: 'public'
@@ -362,6 +364,9 @@ function createReadService(options: {
         options.onCacheCreate?.(args.data);
         return { id: 1n };
       }
+    },
+    uploadedFile: {
+      async findMany() { return options.files ?? []; }
     },
     serverWiki: {
       async findFirst() {
@@ -435,6 +440,23 @@ test('wiki read ignores stale renderer cache and writes current version', async 
   assert.equal(data.rendererVersion, WIKI_RENDERER_VERSION);
   assert.equal(data.html, page.html);
   assert.equal(data.createdAt instanceof Date, true);
+});
+
+test('wiki read ignores persistent render caches for file-dependent revisions', async () => {
+  let lookedUpCache = false;
+  let createdCache = false;
+  const service = createReadService({
+    cacheHtml: '<p>파일 없음: logo.png</p>',
+    contentRaw: '[[파일:logo.png|섬네일|서버 로고]]',
+    files: [{ filename: 'logo.png', publicPath: '/files/logo.png', mimeType: 'image/png', originalName: 'logo.png' }],
+    onCacheLookup() { lookedUpCache = true; },
+    onCacheCreate() { createdCache = true; }
+  });
+  const page = await service.getPage('main', '대문');
+  assert.equal(lookedUpCache, false);
+  assert.equal(createdCache, false);
+  assert.match(page.html, /<img src="\/files\/logo\.png"/);
+  assert.equal(page.html.includes('파일 없음'), false);
 });
 
 function createRedirectReadService(pages: Record<string, { id: bigint; title: string; contentRaw: string }>) {

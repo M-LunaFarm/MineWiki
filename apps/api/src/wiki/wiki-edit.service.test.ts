@@ -2,13 +2,19 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
-import { WikiEditService } from './wiki-edit.service';
+import { parseMarkup } from '@minewiki/wiki-core';
+import { astContainsFile, WikiEditService } from './wiki-edit.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
 import type { WikiNotificationService } from './wiki-notification.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+test('file dependencies are detected inside nested folding blocks', () => {
+  assert.equal(astContainsFile(parseMarkup('일반 문서').ast), false);
+  assert.equal(astContainsFile(parseMarkup('{{{#!folding 자세히\n[[파일:logo.png]]\n}}}').ast), true);
+});
 
 function session(userId: string, isElevated = false) {
   return {

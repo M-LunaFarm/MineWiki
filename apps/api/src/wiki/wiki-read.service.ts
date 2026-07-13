@@ -1095,20 +1095,23 @@ export class WikiReadService {
     }
 
     const serverWiki = await this.findServerWikiContext(namespace, page.spaceId, page.id);
-    const cache = await this.prisma.wikiPageRenderCache.findUnique({
-      where: {
-        revisionId_rendererVersion: {
-          revisionId: revision.id,
-          rendererVersion: WIKI_RENDERER_VERSION
-        }
-      }
-    });
+    const hasFileDependencies = collectFileNames(parsed.ast).size > 0;
+    const cache = hasFileDependencies
+      ? null
+      : await this.prisma.wikiPageRenderCache.findUnique({
+          where: {
+            revisionId_rendererVersion: {
+              revisionId: revision.id,
+              rendererVersion: WIKI_RENDERER_VERSION
+            }
+          }
+        });
     const files = cache ? {} : await this.findRenderableFiles(parsed.ast);
     const html = cache?.html ?? renderDocument(parsed.ast, {
       files,
       internalLinkBasePath: serverWiki ? `/server/${encodeURIComponent(serverWiki.context.slug)}` : undefined,
     });
-    if (!cache) {
+    if (!cache && !hasFileDependencies) {
       await this.prisma.wikiPageRenderCache
         .create({
           data: {
