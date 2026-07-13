@@ -142,6 +142,74 @@ if (!hasDatabase) {
     }
   });
 
+  test('creates a server wiki child page in the owning server space', async () => {
+    const unique = randomUUID().replace(/-/g, '').slice(0, 16);
+    const serverSlug = `server-${unique}`;
+    const account = await prisma.account.create({
+      data: {
+        provider: 'email',
+        providerUserId: `server-wiki-child-${unique}`,
+        email: `server-wiki-child-${unique}@example.com`,
+        displayName: `ServerWiki_${unique}`,
+        emailVerified: true,
+      },
+    });
+    const profile = await profiles.ensureWikiProfile(account.id);
+    const space = await prisma.wikiSpace.create({
+      data: {
+        code: `server-child-${unique}`,
+        spaceKey: `server-child-${unique}`,
+        name: `Server child ${unique}`,
+        slug: serverSlug,
+        spaceType: 'server_wiki',
+        rootNamespaceCode: 'server',
+        rootPath: `/server/${serverSlug}`,
+        status: 'active',
+        createdBy: profile.id,
+        ownerUserId: profile.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+    await prisma.serverWiki.create({
+      data: {
+        spaceId: space.id,
+        serverName: `Server ${unique}`,
+        slug: serverSlug,
+        edition: 'java',
+        status: 'active',
+        createdBy: profile.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(account.id), {
+        namespace: 'server',
+        title: `${serverSlug}/운영_규칙`,
+        contentRaw: '== 운영 규칙 ==\n실제 규칙',
+        editSummary: '하위 문서 생성',
+      });
+      pageId = created.pageId;
+      const page = await prisma.wikiPage.findUnique({ where: { id: BigInt(created.pageId) } });
+      assert.equal(page?.spaceId, space.id);
+      assert.equal(page?.localPath, `${serverSlug}/운영_규칙`);
+      assert.equal(page?.displayTitle, '운영_규칙');
+      assert.equal(page?.pageType, 'server');
+    } finally {
+      if (pageId) {
+        await prisma.wikiRecentChange.deleteMany({ where: { pageId: BigInt(pageId) } });
+        await prisma.wikiPageRevision.deleteMany({ where: { pageId: BigInt(pageId) } });
+        await prisma.wikiPage.delete({ where: { id: BigInt(pageId) } }).catch(() => {});
+      }
+      await prisma.serverWiki.deleteMany({ where: { spaceId: space.id } });
+      await prisma.wikiSpace.delete({ where: { id: space.id } }).catch(() => {});
+      await prisma.wikiProfile.deleteMany({ where: { accountId: account.id } });
+      await prisma.account.delete({ where: { id: account.id } }).catch(() => {});
+    }
+  });
+
   test('editing creates an ordered child revision and updates current page content', async () => {
     const fixture = await createFixture();
     let pageId: string | undefined;

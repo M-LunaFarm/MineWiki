@@ -1,9 +1,9 @@
 import sanitizeHtml from 'sanitize-html';
 import type { AstNode, InlineNode, ParsedDocument } from './types.js';
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
-import { normalizeTitle } from './normalize.js';
+import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.1';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 
@@ -378,6 +378,8 @@ function parseInline(input: string, links: Set<string>, errors: string[], footno
 
 export interface RenderOptions {
   missingLinks?: Set<string>;
+  /** Route prefix used for unqualified links inside an isolated subwiki. */
+  internalLinkBasePath?: string;
   files?: Record<string, { url: string; mimeType: string; originalName: string; license?: string | null; sourceText?: string | null }>;
   officialAreas?: Record<string, { status: string; lastModifiedAt?: string | null; renewalRequiredAt?: string | null }>;
   dataTables?: Record<string, { caption: string; headers: string[]; rows: string[][] }>;
@@ -475,7 +477,14 @@ function renderInternalLink(target: string, label: string, options: RenderOption
   const missing = options.missingLinks?.has(wikiLinkKey(target));
   const className = missing ? 'wiki-link missing' : 'wiki-link';
   const titleAttr = missing ? ' title="문서 없음"' : '';
-  return `<a class="${className}" href="${wikiUrl(parsed.namespace, parsed.title)}"${titleAttr}>${escapeHtml(label)}</a>`;
+  const unqualified = parsed.namespace === 'main' && !target.includes(':');
+  const href = unqualified && options.internalLinkBasePath
+    ? `${options.internalLinkBasePath.replace(/\/$/, '')}/${slugifyTitle(parsed.title)
+        .split('/')
+        .map((part) => encodeURIComponent(part))
+        .join('/')}`
+    : wikiUrl(parsed.namespace, parsed.title);
+  return `<a class="${className}" href="${href}"${titleAttr}>${escapeHtml(label)}</a>`;
 }
 
 function renderComponent(name: string, props: Record<string, string>, options: RenderOptions = {}) {

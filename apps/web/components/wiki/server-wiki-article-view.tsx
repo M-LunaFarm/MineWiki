@@ -7,13 +7,13 @@ import {
   FileText,
   List,
   PencilLine,
+  History,
   ShieldCheck,
-  ThumbsDown,
-  ThumbsUp,
   Trophy,
 } from 'lucide-react';
 
 import type { WikiPageResponse } from '../../lib/wiki-api';
+import { ServerWikiCreateLink } from './server-wiki-create-link';
 
 interface ServerWikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -43,8 +43,8 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
 
   return (
     <main className="server-wiki-layout min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
-      <div className={`mx-auto grid w-full max-w-[1600px] ${gridClass}`}>
-        <aside className="border-white/10 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:border-r">
+      <div className={`mx-auto grid w-full max-w-[1600px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
+        <aside className="min-w-0 border-white/10 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:border-r">
           <div className="border-b border-white/10 px-6 py-7">
             <div className="flex items-center gap-3">
               {isHandbook ? <span className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-2 text-emerald-300"><BookOpen className="size-5" /></span> : null}
@@ -86,6 +86,9 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
                 </Link>
               ))}
             </div>
+            <div className="mt-3">
+              <ServerWikiCreateLink serverSlug={wiki.slug} />
+            </div>
             {isBrand ? <div className="mt-5 hidden space-y-4 border-l border-white/10 pl-5 text-sm text-slate-500 lg:block"><div><p className="font-semibold text-slate-300">서버 정보</p><ul className="mt-2 space-y-2 text-xs"><li>주소 · {address ?? '정보 없음'}</li><li>에디션 · {wiki.edition}</li><li>지원 버전 · {wiki.supportedVersions ?? '정보 없음'}</li></ul></div><div><p className="font-semibold text-slate-300">참여 안내</p></div></div> : null}
           </nav>
 
@@ -114,13 +117,22 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
               <h1 className="font-display text-3xl font-extrabold tracking-tight text-white sm:text-5xl">
                 {page.displayTitle}
               </h1>
-              <Link
-                href={`${routePath}/edit`}
-                className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-emerald-300/40 hover:text-emerald-200"
-              >
-                <PencilLine className="size-4" />
-                편집
-              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href={`${routePath}/history`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-emerald-300/40 hover:text-emerald-200"
+                >
+                  <History className="size-4" />
+                  역사
+                </Link>
+                <Link
+                  href={`${routePath}/edit`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-emerald-300/40 hover:text-emerald-200"
+                >
+                  <PencilLine className="size-4" />
+                  편집
+                </Link>
+              </div>
             </div>
             <p className="mt-5 text-sm text-slate-500">{routePath} · 최근 수정 {updatedAt}</p>
             {isHandbook ? <Link href={page.serverDirectoryPath ?? '/servers'} className="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-emerald-300 hover:text-emerald-200"><ArrowLeft className="size-4" />서버 목록으로 돌아가기</Link> : null}
@@ -146,18 +158,23 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
             <WikiPager item={previous} direction="previous" />
             <WikiPager item={next} direction="next" />
           </div>
-          <div className="mt-6 flex flex-wrap items-center gap-4 text-sm text-slate-500">
-            <span>이 문서가 도움이 되었나요?</span>
-            <button type="button" className="rounded-md p-2 transition hover:bg-white/5 hover:text-emerald-300" aria-label="도움이 됐어요"><ThumbsUp className="size-5" /></button>
-            <button type="button" className="rounded-md p-2 transition hover:bg-white/5 hover:text-rose-300" aria-label="도움이 안 됐어요"><ThumbsDown className="size-5" /></button>
-          </div>
         </article>
 
         <aside className="hidden border-l border-white/10 px-8 py-12 2xl:block">
           <div className="sticky top-28 space-y-8">
             <section>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-300"><List className="size-4" />이 페이지</h2>
-              <div className="mt-4 border-l-2 border-emerald-400 pl-4 text-sm text-emerald-300">{page.displayTitle}</div>
+              <nav className="mt-4 space-y-2 border-l border-white/10 pl-4 text-sm" aria-label="문서 목차">
+                {(page.headings?.length ?? 0) > 0 ? page.headings.map((heading) => (
+                  <a
+                    key={`${heading.anchor}-${heading.level}`}
+                    href={`#${encodeURIComponent(heading.anchor)}`}
+                    className={`block text-slate-400 transition hover:text-emerald-300 ${heading.level > 2 ? 'pl-3 text-xs' : ''}`}
+                  >
+                    {heading.title}
+                  </a>
+                )) : <span className="text-slate-600">목차가 없습니다.</span>}
+              </nav>
             </section>
             <div className="border-t border-white/10" />
             {!isHandbook ? <section className="rounded-xl border border-white/10 p-5">

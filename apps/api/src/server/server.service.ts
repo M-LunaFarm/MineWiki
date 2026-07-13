@@ -776,6 +776,61 @@ export class ServerService {
           createdAt: now,
         },
       });
+      for (const starter of buildServerStarterPages(server)) {
+        const starterParsed = parseMarkup(starter.contentRaw);
+        const starterPage = await tx.wikiPage.create({
+          data: {
+            namespaceId: namespace.id,
+            spaceId: space.id,
+            localPath: `${slug}/${starter.path}`,
+            slug: `${slug}/${starter.path}`,
+            title: `${slug}/${starter.path}`,
+            displayTitle: starter.title,
+            pageType: 'server',
+            protectionLevel: 'open',
+            status: 'normal',
+            createdBy: actor.id,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        const starterRevision = await tx.wikiPageRevision.create({
+          data: {
+            pageId: starterPage.id,
+            revisionNo: 1,
+            parentRevisionId: null,
+            contentRaw: starter.contentRaw,
+            contentAst: starterParsed.ast as Prisma.InputJsonValue,
+            contentHash: hashContent(starter.contentRaw),
+            contentSize: Buffer.byteLength(starter.contentRaw, 'utf8'),
+            syntaxVersion: 'bwm-0.3',
+            editSummary: `서버 위키 ${starter.title} 생성`,
+            isMinor: false,
+            createdBy: actor.id,
+            actorType: 'user',
+            actorUserId: actor.id,
+            createdAt: now,
+            visibility: 'public',
+          },
+        });
+        await tx.wikiPage.update({
+          where: { id: starterPage.id },
+          data: { currentRevisionId: starterRevision.id, updatedAt: now },
+        });
+        await tx.wikiRecentChange.create({
+          data: {
+            pageId: starterPage.id,
+            revisionId: starterRevision.id,
+            actorId: actor.id,
+            changeType: 'create',
+            title: starterPage.title,
+            namespaceCode: namespace.code,
+            summary: starterRevision.editSummary,
+            isMinor: false,
+            createdAt: now,
+          },
+        });
+      }
       const updatedServer = await tx.server.update({
         where: { id: server.id },
         data: {
@@ -1503,11 +1558,34 @@ function buildServerMainPageContent(server: {
     tags.length > 0 ? `* 태그: ${tags.join(', ')}` : null,
     '',
     '== 참여 안내 ==',
-    '서버 소개, 규칙, 시작 방법을 이 문서에 정리해 주세요.',
+    '처음 방문했다면 [[시작하기]]를 읽고, 접속 전 [[규칙]]을 확인해 주세요. 자주 묻는 내용은 [[FAQ]]에 정리되어 있습니다.',
     '',
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
+}
+
+function buildServerStarterPages(
+  server: { name: string; joinHost: string; joinPort: number },
+): ReadonlyArray<{ path: string; title: string; contentRaw: string }> {
+  const address = `${server.joinHost}:${server.joinPort}`;
+  return [
+    {
+      path: '시작하기',
+      title: '시작하기',
+      contentRaw: `== ${server.name} 시작하기 ==\n\n* 접속 주소: ${address}\n* Minecraft 멀티플레이에서 서버 추가를 선택하세요.\n* 접속 전 [[규칙]]을 확인해 주세요.\n\n문제가 있다면 [[FAQ]]를 확인해 주세요.\n`,
+    },
+    {
+      path: '규칙',
+      title: '서버 규칙',
+      contentRaw: `== 기본 규칙 ==\n\n이 문서는 ${server.name} 운영자가 실제 서버 규칙으로 편집할 수 있습니다.\n\n* 다른 이용자를 존중해 주세요.\n* 서버 운영 정책과 공지를 확인해 주세요.\n* 제재 문의는 MineWiki 고객센터를 이용해 주세요.\n`,
+    },
+    {
+      path: 'FAQ',
+      title: '자주 묻는 질문',
+      contentRaw: `== 자주 묻는 질문 ==\n\n=== 서버 주소 ===\n${address}\n\n=== 처음 접속하는 방법 ===\n[[시작하기]] 문서를 확인해 주세요.\n`,
+    },
+  ];
 }
 
 function toSummary(server: {

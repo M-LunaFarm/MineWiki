@@ -26,6 +26,11 @@ export interface WikiPageResponse {
   readonly html: string;
   readonly links: string[];
   readonly categories: string[];
+  readonly headings: ReadonlyArray<{
+    readonly level: number;
+    readonly title: string;
+    readonly anchor: string;
+  }>;
   readonly redirectTarget: string | null;
   readonly redirectedFrom?: {
     readonly namespace: string;

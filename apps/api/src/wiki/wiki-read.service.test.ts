@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
 import type { WikiPermissionService } from './wiki-permission.service';
-import { WikiReadService } from './wiki-read.service';
+import { buildServerWikiPagePath, WikiReadService } from './wiki-read.service';
+
+test('server wiki navigation removes the duplicated space slug', () => {
+  assert.equal(buildServerWikiPagePath('luna-main', 'luna-main'), '/server/luna-main');
+  assert.equal(buildServerWikiPagePath('luna-main', 'luna-main/규칙'), '/server/luna-main/%EA%B7%9C%EC%B9%99');
+  assert.equal(buildServerWikiPagePath('luna-main', 'FAQ'), '/server/luna-main/FAQ');
+});
 
 function createReadService(options: {
   readonly cacheHtml?: string | null;

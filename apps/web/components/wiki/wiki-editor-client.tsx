@@ -351,7 +351,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">충돌 처리</dt>
-                <dd>placeholder</dd>
+                <dd>최신 판과 다르면 저장 차단</dd>
               </div>
             </dl>
           </section>

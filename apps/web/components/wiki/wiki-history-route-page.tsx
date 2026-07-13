@@ -62,9 +62,6 @@ export async function WikiHistoryRoutePage({ prefix, segments = [] }: WikiHistor
                           diff
                         </Link>
                       ) : null}
-                      <button className="chip chip-muted opacity-60" type="button" disabled>
-                        rollback
-                      </button>
                     </div>
                   </td>
                 </tr>

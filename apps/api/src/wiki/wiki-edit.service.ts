@@ -100,9 +100,8 @@ export class WikiEditService {
     if (!namespace) {
       throw new NotFoundException('Wiki namespace not found.');
     }
-    const spaceId = request.spaceId
-      ? this.parseBigIntId(request.spaceId, 'spaceId')
-      : await this.findDefaultSpaceId(namespaceCode);
+    const createTarget = await this.resolveCreateTarget(namespaceCode, title, request.spaceId);
+    const spaceId = createTarget.spaceId;
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const slug = slugifyTitle(title);
     const now = new Date();
@@ -111,7 +110,7 @@ export class WikiEditService {
       namespaceCode,
       spaceId,
       title,
-      pageType: this.cleanOptional(request.pageType) ?? 'article'
+      pageType: this.cleanOptional(request.pageType) ?? createTarget.pageType
     });
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -133,8 +132,8 @@ export class WikiEditService {
           localPath: slug,
           slug,
           title,
-          displayTitle: this.cleanOptional(request.displayTitle) ?? title,
-          pageType: this.cleanOptional(request.pageType) ?? 'article',
+          displayTitle: this.cleanOptional(request.displayTitle) ?? createTarget.displayTitle,
+          pageType: this.cleanOptional(request.pageType) ?? createTarget.pageType,
           protectionLevel: 'open',
           status: 'normal',
           createdBy: actor.id,
@@ -193,6 +192,39 @@ export class WikiEditService {
       }
     });
     return result;
+  }
+
+  private async resolveCreateTarget(namespaceCode: string, title: string, requestedSpaceId?: string) {
+    if (requestedSpaceId) {
+      return {
+        spaceId: this.parseBigIntId(requestedSpaceId, 'spaceId'),
+        displayTitle: title.split('/').at(-1) ?? title,
+        pageType: namespaceCode === 'server' ? 'server' : 'article',
+      };
+    }
+    if (namespaceCode === 'server') {
+      const [serverSlug, ...relativeParts] = slugifyTitle(title).split('/');
+      if (!serverSlug || relativeParts.length === 0) {
+        throw new BadRequestException('Server wiki child pages require a server slug and document path.');
+      }
+      const serverWiki = await this.prisma.serverWiki.findUnique({
+        where: { slug: serverSlug },
+        select: { spaceId: true },
+      });
+      if (!serverWiki) {
+        throw new NotFoundException('Server wiki not found.');
+      }
+      return {
+        spaceId: serverWiki.spaceId,
+        displayTitle: relativeParts.at(-1) ?? title,
+        pageType: 'server',
+      };
+    }
+    return {
+      spaceId: await this.findDefaultSpaceId(namespaceCode),
+      displayTitle: title,
+      pageType: 'article',
+    };
   }
 
   async updatePage(session: SessionPayload, pageId: string, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {

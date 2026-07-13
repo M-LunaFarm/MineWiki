@@ -33,6 +33,11 @@ export interface WikiPageResponse {
   readonly html: string;
   readonly links: string[];
   readonly categories: string[];
+  readonly headings: ReadonlyArray<{
+    readonly level: number;
+    readonly title: string;
+    readonly anchor: string;
+  }>;
   readonly redirectTarget: string | null;
   readonly redirectedFrom?: {
     readonly namespace: string;
@@ -342,6 +347,7 @@ export class WikiReadService {
     namespaceId?: number;
     id: bigint;
     spaceId: bigint;
+    localPath: string;
     slug: string;
     title: string;
     displayTitle: string;
@@ -380,7 +386,7 @@ export class WikiReadService {
     });
     const parsed = parseMarkup(revision.contentRaw);
     if (parsed.redirectTarget && options.followRedirects) {
-      const target = parseLinkTarget(parsed.redirectTarget);
+      const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
       const redirected = await this.getPageInternal(target.namespace, target.title, accountId, {
         followRedirects: true,
         redirectTrail: [...options.redirectTrail, `${namespace}:${page.slug}`]
@@ -395,6 +401,7 @@ export class WikiReadService {
       };
     }
 
+    const serverWiki = await this.findServerWikiContext(namespace, page.spaceId, page.id);
     const cache = await this.prisma.wikiPageRenderCache.findUnique({
       where: {
         revisionId_rendererVersion: {
@@ -404,7 +411,10 @@ export class WikiReadService {
       }
     });
     const files = cache ? {} : await this.findRenderableFiles(parsed.ast);
-    const html = cache?.html ?? renderDocument(parsed.ast, { files });
+    const html = cache?.html ?? renderDocument(parsed.ast, {
+      files,
+      internalLinkBasePath: serverWiki ? `/server/${encodeURIComponent(serverWiki.context.slug)}` : undefined,
+    });
     if (!cache) {
       await this.prisma.wikiPageRenderCache
         .create({
@@ -418,7 +428,6 @@ export class WikiReadService {
         })
         .catch(() => undefined);
     }
-    const serverWiki = await this.findServerWikiContext(namespace, page.spaceId, page.id);
     return {
       id: page.id.toString(),
       namespace,
@@ -440,6 +449,7 @@ export class WikiReadService {
       html,
       links: parsed.links,
       categories: parsed.categories,
+      headings: parsed.headings.map(({ level, title, anchor }) => ({ level, title, anchor })),
       redirectTarget: parsed.redirectTarget,
       redirectedFrom: null,
       serverDirectoryPath: serverWiki?.directoryPath ?? null,
@@ -505,10 +515,7 @@ export class WikiReadService {
         navigation: pages.map((item) => ({
           id: item.id.toString(),
           title: item.displayTitle,
-          path:
-            item.localPath === serverWiki.slug
-              ? `/server/${serverWiki.slug}`
-              : `/server/${serverWiki.slug}/${item.localPath}`,
+          path: buildServerWikiPagePath(serverWiki.slug, item.localPath),
           current: item.id === currentPageId
         }))
       }
@@ -544,6 +551,32 @@ export class WikiReadService {
     }
     return BigInt(value);
   }
+}
+
+export function buildServerWikiPagePath(serverSlug: string, localPath: string): string {
+  const normalizedSlug = slugifyTitle(serverSlug);
+  const normalizedPath = slugifyTitle(localPath);
+  const relativePath = normalizedPath === normalizedSlug
+    ? ''
+    : normalizedPath.startsWith(`${normalizedSlug}/`)
+      ? normalizedPath.slice(normalizedSlug.length + 1)
+      : normalizedPath;
+  const encodedSlug = normalizedSlug.split('/').map(encodeURIComponent).join('/');
+  if (!relativePath) return `/server/${encodedSlug}`;
+  const encodedRelative = relativePath.split('/').map(encodeURIComponent).join('/');
+  return `/server/${encodedSlug}/${encodedRelative}`;
+}
+
+function resolveContextualLinkTarget(namespace: string, localPath: string, target: string) {
+  const parsed = parseLinkTarget(target);
+  if (namespace !== 'server' || parsed.namespace !== 'main' || target.includes(':')) {
+    return parsed;
+  }
+  const [serverSlug] = slugifyTitle(localPath).split('/');
+  return {
+    namespace: 'server' as const,
+    title: `${serverSlug}/${parsed.title}`,
+  };
 }
 
 function normalizeServerWikiLayoutKey(value: string): 'docs' | 'handbook' | 'brand' {

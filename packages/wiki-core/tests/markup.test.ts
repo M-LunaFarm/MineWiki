@@ -46,6 +46,16 @@ test('parses links, categories, components, and safe HTML', () => {
   assert.equal(html.includes('class="wiki-link missing"'), true);
 });
 
+test('resolves unqualified links inside a server subwiki', () => {
+  const parsed = parseMarkup('[[규칙]] · [[도움말:문법]]');
+  const html = renderDocument(parsed.ast, {
+    internalLinkBasePath: '/server/luna-main',
+  });
+
+  assert.match(html, /href="\/server\/luna-main\/%EA%B7%9C%EC%B9%99"/);
+  assert.match(html, /href="\/help\/%EB%AC%B8%EB%B2%95"/);
+});
+
 test('rejects oversized documents before parsing their contents', () => {
   const parsed = parseMarkup('가'.repeat(400_000));
 
