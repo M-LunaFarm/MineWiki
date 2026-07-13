@@ -37,6 +37,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canModerate: boolean;
   readonly canReply: boolean;
   readonly subscribed: boolean;
+  readonly pinnedCommentId: string | null;
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
@@ -46,6 +47,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly createdByName: string;
     readonly createdAt: string;
     readonly canDelete: boolean;
+    readonly pinned: boolean;
   }>;
 }
 
@@ -196,8 +198,12 @@ export class WikiDiscussionService {
     });
     const hasOlderComments = comments.length > commentLimit;
     const pageComments = comments.slice(0, commentLimit);
+    const pinnedComment = thread.pinnedCommentId && !pageComments.some((comment) => comment.id === thread.pinnedCommentId)
+      ? await this.prisma.wikiDiscussionComment.findUnique({ where: { id: thread.pinnedCommentId } })
+      : null;
+    const displayComments = pinnedComment && pinnedComment.threadId === thread.id ? [...pageComments, pinnedComment] : pageComments;
     const commentCount = await this.prisma.wikiDiscussionComment.count({ where: { threadId: thread.id } });
-    const profileById = await this.profileNames([thread.createdBy, ...pageComments.map((comment) => comment.createdBy)]);
+    const profileById = await this.profileNames([thread.createdBy, ...displayComments.map((comment) => comment.createdBy)]);
     const viewer = session ? await this.wikiProfiles.ensureWikiProfile(session.userId) : null;
     const subscription = viewer ? await this.prisma.wikiDiscussionSubscription.findUnique({
       where: { threadId_profileId: { threadId: thread.id, profileId: viewer.id } }, select: { muted: true }
@@ -223,15 +229,21 @@ export class WikiDiscussionService {
       canModerate,
       canReply,
       subscribed: Boolean(subscription && !subscription.muted),
+      pinnedCommentId: thread.pinnedCommentId?.toString() ?? null,
       nextCommentCursor: hasOlderComments ? pageComments.at(-1)?.id.toString() ?? null : null,
-      comments: pageComments.reverse().map((comment) => ({
+      comments: displayComments.sort((left, right) => {
+        if (left.id === thread.pinnedCommentId) return -1;
+        if (right.id === thread.pinnedCommentId) return 1;
+        return left.id < right.id ? -1 : 1;
+      }).map((comment) => ({
         id: comment.id.toString(),
         content: comment.status === 'deleted' ? null : comment.content,
         status: comment.status,
         createdBy: comment.createdBy.toString(),
         createdByName: profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
         createdAt: comment.createdAt.toISOString(),
-        canDelete: Boolean(comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage))
+        canDelete: Boolean(comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
+        pinned: comment.id === thread.pinnedCommentId
       }))
     };
   }
@@ -340,6 +352,26 @@ export class WikiDiscussionService {
     return this.getThread(thread.id.toString(), session);
   }
 
+  async updateThreadTopic(session: SessionPayload, threadId: string, titleInput?: string): Promise<WikiThreadDetail> {
+    const thread = await this.moderatableThread(session, threadId);
+    const title = this.requiredText(titleInput, 'title', 255);
+    await this.prisma.wikiDiscussionThread.update({ where: { id: thread.id }, data: { title, updatedAt: new Date() } });
+    await this.audit('wiki.discussion.topic', session, thread.profileId, thread.pageId, thread.id);
+    return this.getThread(thread.id.toString(), session);
+  }
+
+  async setPinnedComment(session: SessionPayload, threadId: string, commentId: string | null): Promise<WikiThreadDetail> {
+    const thread = await this.moderatableThread(session, threadId);
+    const parsedCommentId = commentId ? this.parseId(commentId, 'commentId') : null;
+    if (parsedCommentId) {
+      const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: parsedCommentId } });
+      if (!comment || comment.threadId !== thread.id || comment.status === 'deleted') throw new NotFoundException('Wiki discussion comment not found.');
+    }
+    await this.prisma.wikiDiscussionThread.update({ where: { id: thread.id }, data: { pinnedCommentId: parsedCommentId, updatedAt: new Date() } });
+    await this.audit(parsedCommentId ? 'wiki.discussion.pin' : 'wiki.discussion.unpin', session, thread.profileId, thread.pageId, thread.id);
+    return this.getThread(thread.id.toString(), session);
+  }
+
   async deleteComment(session: SessionPayload, threadId: string, commentId: string): Promise<WikiThreadDetail> {
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: this.parseId(threadId, 'threadId') } });
     if (!thread) throw new NotFoundException('Wiki discussion thread not found.');
@@ -365,6 +397,19 @@ export class WikiDiscussionService {
     if (!page) throw new NotFoundException('Wiki page not found.');
     await this.wikiPermissions.assertCanReadPage({ accountId, page });
     return page;
+  }
+
+  private async moderatableThread(session: SessionPayload, threadId: string) {
+    const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: this.parseId(threadId, 'threadId') } });
+    if (!thread) throw new NotFoundException('Wiki discussion thread not found.');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
+    if (!page) throw new NotFoundException('Wiki page not found.');
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const actor = this.wikiPermissions.actorFromSession(session, profile);
+    if (thread.createdBy !== profile.id && !(await this.wikiPermissions.canManagePage({ actor, page }))) {
+      throw new ForbiddenException('Wiki discussion moderation is not allowed.');
+    }
+    return { ...thread, profileId: profile.id };
   }
 
   private async profileNames(ids: readonly bigint[]) {

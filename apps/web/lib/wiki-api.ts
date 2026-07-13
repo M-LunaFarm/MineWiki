@@ -264,6 +264,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canModerate: boolean;
   readonly canReply: boolean;
   readonly subscribed: boolean;
+  readonly pinnedCommentId: string | null;
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
@@ -273,6 +274,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly createdByName: string;
     readonly createdAt: string;
     readonly canDelete: boolean;
+    readonly pinned: boolean;
   }>;
 }
 
@@ -525,6 +527,14 @@ export async function deleteWikiThreadComment(input: { threadId: string; comment
 
 export async function setWikiThreadSubscription(threadId: string, subscribed: boolean): Promise<{ readonly subscribed: boolean }> {
   return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/subscription`, 'POST', { subscribed });
+}
+
+export async function updateWikiThreadTopic(threadId: string, title: string): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/topic`, 'PATCH', { title });
+}
+
+export async function setWikiThreadPinnedComment(threadId: string, commentId: string | null): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/pin`, 'PATCH', { commentId });
 }
 
 export async function fetchWikiWatchStatus(pageId: string): Promise<WikiWatchStatus> {

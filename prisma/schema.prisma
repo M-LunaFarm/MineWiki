@@ -1126,6 +1126,7 @@ model WikiDiscussionThread {
   createdBy BigInt   @map("created_by") @db.UnsignedBigInt
   createdAt DateTime @map("created_at")
   updatedAt DateTime @map("updated_at")
+  pinnedCommentId BigInt? @map("pinned_comment_id") @db.UnsignedBigInt
 
   @@index([pageId, status, updatedAt], map: "idx_wiki_threads_page_status")
   @@index([updatedAt, id], map: "idx_wiki_threads_recent")

@@ -61,6 +61,21 @@ export class WikiDiscussionController {
     return this.discussions.setThreadStatus(session, threadId, body.status);
   }
 
+  @Patch('discussions/:threadId/topic')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  topic(@Param('threadId') threadId: string, @Body() body: { title?: string }, @CurrentSession() session: SessionPayload) {
+    return this.discussions.updateThreadTopic(session, threadId, body.title);
+  }
+
+  @Patch('discussions/:threadId/pin')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  pin(@Param('threadId') threadId: string, @Body() body: { commentId?: string | null }, @CurrentSession() session: SessionPayload) {
+    if (body.commentId !== null && typeof body.commentId !== 'string') throw new BadRequestException('commentId must be a string or null.');
+    return this.discussions.setPinnedComment(session, threadId, body.commentId ?? null);
+  }
+
   @Delete('discussions/:threadId/comments/:commentId')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })

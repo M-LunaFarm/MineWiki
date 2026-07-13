@@ -171,3 +171,22 @@ test('focused comment windows include the requested comment', async () => {
   assert.deepEqual(commentWhere, { threadId: thread.id, id: { lte: 40n } });
   assert.equal(result.comments[0]?.id, '40');
 });
+
+test('pinned discussion comment is included ahead of the current comment window', async () => {
+  const pinnedThread = { ...thread, pinnedCommentId: 41n };
+  const makeComment = (id: bigint, content: string) => ({ id, threadId: thread.id, content, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: null });
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findUnique() { return pinnedThread; } },
+    wikiDiscussionComment: {
+      async findUnique() { return makeComment(41n, 'pinned'); },
+      async count() { return 2; },
+      async findMany() { return [makeComment(50n, 'latest')]; }
+    },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const discussions = new WikiDiscussionService(store as unknown as PrismaService, {} as WikiProfileService, { async assertCanReadPage() {} } as unknown as WikiPermissionService);
+  const result = await discussions.getThread(thread.id.toString());
+  assert.deepEqual(result.comments.map((comment) => comment.id), ['41', '50']);
+  assert.equal(result.comments[0]?.pinned, true);
+});
