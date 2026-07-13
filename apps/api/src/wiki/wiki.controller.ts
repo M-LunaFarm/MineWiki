@@ -26,7 +26,7 @@ import {
   type WikiContributionResponse,
   type WikiDeletedPageSummary,
   type WikiPageResponse,
-  type WikiRecentChangeSummary,
+  type WikiRecentChangeListResponse,
   type WikiRevisionListResponse,
   type WikiSearchResult,
   type WikiSpecialDocumentResponse
@@ -114,8 +114,15 @@ export class WikiController {
 
   @Get('recent')
   @UseGuards(OptionalSessionGuard)
-  getRecent(@Req() request: FastifyRequest): Promise<WikiRecentChangeSummary[]> {
-    return this.wikiRead.getRecent(request.sessionPayload?.userId ?? null);
+  getRecent(
+    @Req() request: FastifyRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('changeType') changeType?: string,
+    @Query('namespace') namespace?: string,
+    @Query('minor') minor?: string
+  ): Promise<WikiRecentChangeListResponse> {
+    return this.wikiRead.getRecent({ accountId: request.sessionPayload?.userId ?? null, cursor, limit, changeType, namespace, minor });
   }
 
   @Get('contributions/:profileId')

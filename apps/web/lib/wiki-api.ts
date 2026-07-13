@@ -129,9 +129,15 @@ export interface WikiRecentChangeSummary {
   readonly changeType: string;
   readonly title: string;
   readonly namespaceCode: string;
+  readonly routePath: string;
   readonly summary: string | null;
   readonly isMinor: boolean;
   readonly createdAt: string;
+}
+
+export interface WikiRecentChangeListResponse {
+  readonly items: WikiRecentChangeSummary[];
+  readonly nextCursor: string | null;
 }
 
 export interface WikiSearchResult {
@@ -618,16 +624,13 @@ export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Pr
   return response.json();
 }
 
-export async function fetchWikiRecent(): Promise<WikiRecentChangeSummary[]> {
-  const response = await fetch(`${apiBaseUrl()}/v1/wiki/recent`, {
-    credentials: 'include',
-    next: { revalidate: 30 }
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body?.message ?? 'Failed to load recent wiki changes.');
-  }
-  return response.json();
+export async function fetchWikiRecent(input: { cursor?: string; changeType?: string; namespace?: string; minor?: string } = {}): Promise<WikiRecentChangeListResponse> {
+  const params = new URLSearchParams({ limit: '30' });
+  if (input.cursor) params.set('cursor', input.cursor);
+  if (input.changeType) params.set('changeType', input.changeType);
+  if (input.namespace) params.set('namespace', input.namespace);
+  if (input.minor) params.set('minor', input.minor);
+  return readWikiBrowser(`/v1/wiki/recent?${params.toString()}`);
 }
 
 export async function searchWiki(input: {

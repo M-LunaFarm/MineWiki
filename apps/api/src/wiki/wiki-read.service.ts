@@ -89,9 +89,15 @@ export interface WikiRecentChangeSummary {
   readonly changeType: string;
   readonly title: string;
   readonly namespaceCode: string;
+  readonly routePath: string;
   readonly summary: string | null;
   readonly isMinor: boolean;
   readonly createdAt: string;
+}
+
+export interface WikiRecentChangeListResponse {
+  readonly items: WikiRecentChangeSummary[];
+  readonly nextCursor: string | null;
 }
 
 export interface WikiSearchResult {
@@ -314,23 +320,51 @@ export class WikiReadService {
     return { items, nextCursor: hasMore ? pageRows.at(-1)?.revisionNo.toString() ?? null : null };
   }
 
-  async getRecent(accountId?: string | null): Promise<WikiRecentChangeSummary[]> {
+  async getRecent(input: {
+    readonly accountId?: string | null;
+    readonly cursor?: string;
+    readonly limit?: string | number;
+    readonly changeType?: string;
+    readonly namespace?: string;
+    readonly minor?: string;
+  } = {}): Promise<WikiRecentChangeListResponse> {
+    const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
+    const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
+    const changeType = this.parseRecentFilter(input.changeType, 'changeType');
+    const namespace = this.parseRecentFilter(input.namespace, 'namespace');
+    const isMinor = input.minor === 'true' ? true : input.minor === 'false' ? false : undefined;
+    if (input.minor && isMinor === undefined) throw new BadRequestException('minor must be true or false.');
+    const scanLimit = Math.min(limit * 4 + 1, 401);
     const changes = await this.prisma.wikiRecentChange.findMany({
-      orderBy: [{ createdAt: 'desc' }],
-      take: 100
+      where: {
+        ...(cursor ? { id: { lt: cursor } } : {}),
+        ...(changeType ? { changeType } : {}),
+        ...(namespace ? { namespaceCode: namespace } : {}),
+        ...(isMinor === undefined ? {} : { isMinor })
+      },
+      orderBy: [{ id: 'desc' }],
+      take: scanLimit
     });
+    const pageIds = [...new Set(changes.flatMap((change) => change.pageId ? [change.pageId] : []))];
+    const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const readableByPageId = new Map<bigint, boolean>();
     const visible: WikiRecentChangeSummary[] = [];
+    let lastScannedId: bigint | null = null;
     for (const change of changes) {
+      lastScannedId = change.id;
       if (change.pageId) {
-        const page = await this.prisma.wikiPage.findUnique({ where: { id: change.pageId } });
-        try {
-          await this.wikiPermissions.assertCanReadPage({
-            accountId: accountId ?? null,
-            page
-          });
-        } catch {
-          continue;
+        let readable = readableByPageId.get(change.pageId);
+        if (readable === undefined) {
+          try {
+            await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: pageById.get(change.pageId) ?? null });
+            readable = true;
+          } catch {
+            readable = false;
+          }
+          readableByPageId.set(change.pageId, readable);
         }
+        if (!readable) continue;
       }
       visible.push({
         id: change.id.toString(),
@@ -340,15 +374,15 @@ export class WikiReadService {
         changeType: change.changeType,
         title: change.title,
         namespaceCode: change.namespaceCode,
+        routePath: wikiUrl(change.namespaceCode as Parameters<typeof wikiUrl>[0], change.title),
         summary: change.summary,
         isMinor: change.isMinor,
         createdAt: change.createdAt.toISOString()
       });
-      if (visible.length >= 50) {
-        break;
-      }
+      if (visible.length >= limit) break;
     }
-    return visible;
+    const mayHaveMore = changes.length > 0 && (visible.length >= limit || changes.length >= scanLimit);
+    return { items: visible, nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null };
   }
 
   async getBacklinks(input: {
@@ -1080,6 +1114,13 @@ export class WikiReadService {
     const parsed = Number(value);
     if (!Number.isSafeInteger(parsed) || parsed < 1) throw new BadRequestException(`${label} must be a positive integer.`);
     return parsed;
+  }
+
+  private parseRecentFilter(value: string | undefined, label: string): string | undefined {
+    const normalized = value?.trim();
+    if (!normalized) return undefined;
+    if (!/^[a-z0-9_-]{1,32}$/i.test(normalized)) throw new BadRequestException(`${label} is invalid.`);
+    return normalized;
   }
 }
 

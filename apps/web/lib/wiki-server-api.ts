@@ -3,7 +3,7 @@ import { normalizeApiBaseUrl } from './runtime-config';
 import type {
   WikiPageResponse,
   WikiContributionResponse,
-  WikiRecentChangeSummary,
+  WikiRecentChangeListResponse,
   WikiRevisionDiffResponse,
   WikiRevisionResponse,
   WikiRevisionListResponse,
@@ -38,9 +38,13 @@ export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Pr
   return readWikiResponse<WikiRevisionDiffResponse>(response, 'Failed to load wiki diff.');
 }
 
-export async function fetchWikiRecent(): Promise<WikiRecentChangeSummary[]> {
-  const response = await wikiFetch('/v1/wiki/recent');
-  return readWikiResponse<WikiRecentChangeSummary[]>(response, 'Failed to load recent wiki changes.');
+export async function fetchWikiRecent(input: { readonly changeType?: string; readonly namespace?: string; readonly minor?: string } = {}): Promise<WikiRecentChangeListResponse> {
+  const params = new URLSearchParams({ limit: '30' });
+  if (input.changeType) params.set('changeType', input.changeType);
+  if (input.namespace) params.set('namespace', input.namespace);
+  if (input.minor) params.set('minor', input.minor);
+  const response = await wikiFetch(`/v1/wiki/recent?${params.toString()}`);
+  return readWikiResponse<WikiRecentChangeListResponse>(response, 'Failed to load recent wiki changes.');
 }
 
 export async function fetchWikiContributions(profileId: string, cursor?: string): Promise<WikiContributionResponse> {

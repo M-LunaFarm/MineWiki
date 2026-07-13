@@ -35,6 +35,50 @@ test('revision history uses a stable revision number cursor beyond the first pag
   assert.equal(result.nextCursor, '3');
 });
 
+test('recent changes use filters, a stable cursor, and one page visibility check per document', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const readablePage = { id: 1n, namespaceId: 1, spaceId: 1n, title: '공개 문서', createdBy: 1n, protectionLevel: 'open', status: 'normal' };
+  const hiddenPage = { ...readablePage, id: 2n, title: '비공개 문서' };
+  let recentQuery: unknown;
+  let pageQueryCount = 0;
+  const change = (id: bigint, pageId: bigint, title: string) => ({ id, pageId, revisionId: id + 100n, actorId: 3n, changeType: 'edit', title, namespaceCode: 'server', summary: null, isMinor: false, createdAt: now });
+  const prisma = {
+    wikiRecentChange: {
+      async findMany(args: unknown) {
+        recentQuery = args;
+        return [change(10n, 1n, '공개 문서'), change(9n, 2n, '비공개 문서'), change(8n, 1n, '공개 문서')];
+      }
+    },
+    wikiPage: {
+      async findMany() {
+        pageQueryCount += 1;
+        return [readablePage, hiddenPage];
+      }
+    }
+  } as unknown as PrismaService;
+  const checked = new Map<bigint, number>();
+  const permissions = {
+    async assertCanReadPage({ page }: { page: { id: bigint } | null }) {
+      if (!page) throw new Error('missing');
+      checked.set(page.id, (checked.get(page.id) ?? 0) + 1);
+      if (page.id === 2n) throw new Error('hidden');
+    }
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getRecent({ cursor: '11', limit: 2, changeType: 'edit', namespace: 'server', minor: 'false' });
+
+  assert.deepEqual(recentQuery, {
+    where: { id: { lt: 11n }, changeType: 'edit', namespaceCode: 'server', isMinor: false },
+    orderBy: [{ id: 'desc' }],
+    take: 9
+  });
+  assert.equal(pageQueryCount, 1);
+  assert.deepEqual([...checked.entries()], [[1n, 1], [2n, 1]]);
+  assert.deepEqual(result.items.map((item) => item.id), ['10', '8']);
+  assert.equal(result.items[0]?.routePath, '/server/%EA%B3%B5%EA%B0%9C_%EB%AC%B8%EC%84%9C');
+  assert.equal(result.nextCursor, '8');
+});
+
 test('blocked profiles keep their public contribution ledger', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const prisma = {
