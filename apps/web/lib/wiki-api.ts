@@ -174,6 +174,25 @@ export interface WikiBlameResponse {
   }>;
 }
 
+export interface WikiNotificationItem {
+  readonly id: string;
+  readonly type: string;
+  readonly pageId: string | null;
+  readonly actorProfileId: string | null;
+  readonly actorName: string | null;
+  readonly title: string;
+  readonly message: string | null;
+  readonly href: string;
+  readonly read: boolean;
+  readonly createdAt: string;
+}
+
+export interface WikiNotificationListResponse {
+  readonly items: WikiNotificationItem[];
+  readonly unreadCount: number;
+  readonly nextCursor: string | null;
+}
+
 export interface WikiBacklinkItem {
   readonly id: string;
   readonly sourcePageId: string;
@@ -396,6 +415,20 @@ export async function fetchWikiBacklinks(pageId: string, cursor?: string): Promi
 
 export async function fetchWikiBlame(pageId: string): Promise<WikiBlameResponse> {
   return readWikiBrowser<WikiBlameResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/blame`);
+}
+
+export async function fetchWikiNotifications(cursor?: string): Promise<WikiNotificationListResponse> {
+  const params = new URLSearchParams({ limit: '30' });
+  if (cursor) params.set('cursor', cursor);
+  return readWikiBrowser<WikiNotificationListResponse>(`/v1/wiki/notifications?${params.toString()}`);
+}
+
+export async function markWikiNotificationRead(notificationId: string): Promise<{ readonly read: true }> {
+  return mutateWikiBrowser<{ readonly read: true }>(`/v1/wiki/notifications/${encodeURIComponent(notificationId)}/read`, 'POST', {});
+}
+
+export async function markAllWikiNotificationsRead(throughId: string): Promise<{ readonly count: number }> {
+  return mutateWikiBrowser<{ readonly count: number }>('/v1/wiki/notifications/read-all', 'POST', { throughId });
 }
 
 export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]> {

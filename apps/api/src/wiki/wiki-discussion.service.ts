@@ -4,6 +4,7 @@ import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
+import { WikiNotificationService } from './wiki-notification.service';
 
 export interface WikiThreadSummary {
   readonly id: string;
@@ -34,7 +35,8 @@ export class WikiDiscussionService {
     private readonly prisma: PrismaService,
     private readonly wikiProfiles: WikiProfileService,
     private readonly wikiPermissions: WikiPermissionService,
-    @Optional() private readonly events?: BusinessEventService
+    @Optional() private readonly events?: BusinessEventService,
+    @Optional() private readonly notifications?: WikiNotificationService
   ) {}
 
   async listThreads(pageId: string, accountId?: string | null): Promise<WikiThreadSummary[]> {
@@ -124,12 +126,19 @@ export class WikiDiscussionService {
     await this.wikiPermissions.assertCanDiscussPage({ actor: this.wikiPermissions.actorFromSession(session, profile), page });
     const content = this.requiredText(input.content, 'content', 10_000);
     const now = new Date();
-    await this.prisma.$transaction([
-      this.prisma.wikiDiscussionComment.create({
+    await this.prisma.$transaction(async (tx) => {
+      const comment = await tx.wikiDiscussionComment.create({
         data: { threadId: thread.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
-      }),
-      this.prisma.wikiDiscussionThread.update({ where: { id: thread.id }, data: { updatedAt: now } })
-    ]);
+      });
+      await tx.wikiDiscussionThread.update({ where: { id: thread.id }, data: { updatedAt: now } });
+      await this.notifications?.notifyDiscussionReply(tx, {
+        pageId: page.id,
+        threadId: thread.id,
+        commentId: comment.id,
+        actorProfileId: profile.id,
+        title: thread.title
+      });
+    });
     await this.audit('wiki.discussion.comment', session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session.userId);
   }

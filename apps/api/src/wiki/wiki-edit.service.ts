@@ -14,6 +14,7 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
+import { WikiNotificationService } from './wiki-notification.service';
 
 type ChangeType = 'create' | 'edit' | 'move' | 'delete' | 'restore' | 'revert';
 
@@ -116,7 +117,8 @@ export class WikiEditService {
     private readonly wikiProfiles: WikiProfileService,
     private readonly wikiPermissions: WikiPermissionService,
     @Optional() private readonly events?: BusinessEventService,
-    @Optional() private readonly wikiLinks?: WikiLinkIndexService
+    @Optional() private readonly wikiLinks?: WikiLinkIndexService,
+    @Optional() private readonly notifications?: WikiNotificationService
   ) {}
 
   async createPage(session: SessionPayload, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
@@ -178,6 +180,7 @@ export class WikiEditService {
         editSummary: this.cleanOptional(request.editSummary),
         isMinor: Boolean(request.isMinor),
         actorId: actor.id,
+        title: page.displayTitle,
         createdAt: now
       });
       await tx.wikiPage.update({
@@ -295,6 +298,7 @@ export class WikiEditService {
         editSummary: this.cleanOptional(request.editSummary),
         isMinor: Boolean(request.isMinor),
         actorId: actor.id,
+        title: page.displayTitle,
         createdAt: now
       });
       await tx.wikiPage.update({
@@ -424,6 +428,7 @@ export class WikiEditService {
           editSummary: this.cleanOptional(request.reason) ?? `${page.title} 문서 이동`,
           isMinor: false,
           actorId: actor.id,
+          title: redirect.displayTitle,
           createdAt: now
         });
         await tx.wikiPage.update({
@@ -539,6 +544,7 @@ export class WikiEditService {
         editSummary: this.cleanOptional(request.reason) ?? `r${source.revisionNo} 판으로 되돌리기`,
         isMinor: false,
         actorId: actor.id,
+        title: page.displayTitle,
         createdAt: now
       });
       await tx.wikiPage.update({
@@ -861,6 +867,7 @@ export class WikiEditService {
       editSummary?: string | null;
       isMinor: boolean;
       actorId: bigint;
+      title: string;
       createdAt: Date;
     }
   ) {
@@ -901,6 +908,12 @@ export class WikiEditService {
       }
     });
     await this.wikiLinks?.replaceForRevision(tx as Prisma.TransactionClient, input.pageId, revision.id, parsed.links);
+    await this.notifications?.notifyWatchedRevision(tx as Prisma.TransactionClient, {
+      pageId: input.pageId,
+      revisionId: revision.id,
+      actorProfileId: input.actorId,
+      title: input.title
+    });
     return revision;
   }
 

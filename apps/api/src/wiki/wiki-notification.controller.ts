@@ -1,4 +1,4 @@
-import { Controller, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
@@ -21,8 +21,8 @@ export class WikiNotificationController {
 
   @Post('read-all')
   @Throttle({ default: { limit: 20, ttl: 60 } })
-  markAllRead(@CurrentSession() session: SessionPayload) {
-    return this.notifications.markAllRead(session);
+  markAllRead(@CurrentSession() session: SessionPayload, @Body() body: { throughId?: string }) {
+    return this.notifications.markAllRead(session, body.throughId ?? '');
   }
 
   @Post(':notificationId/read')

@@ -103,10 +103,10 @@ export class WikiNotificationService {
     return { read: true };
   }
 
-  async markAllRead(session: SessionPayload): Promise<{ readonly count: number }> {
+  async markAllRead(session: SessionPayload, throughId: string): Promise<{ readonly count: number }> {
     const profile = await this.profiles.ensureWikiProfile(session.userId);
     const result = await this.prisma.wikiNotification.updateMany({
-      where: { profileId: profile.id, readAt: null },
+      where: { profileId: profile.id, readAt: null, id: { lte: this.id(throughId, 'throughId') } },
       data: { readAt: new Date() }
     });
     return { count: result.count };
@@ -172,7 +172,7 @@ export class WikiNotificationService {
     });
   }
 
-  async notifyEditRequestReviewed(input: {
+  async notifyEditRequestReviewed(tx: Prisma.TransactionClient, input: {
     readonly profileId: bigint;
     readonly pageId: bigint;
     readonly requestId: bigint;
@@ -181,7 +181,7 @@ export class WikiNotificationService {
     readonly title: string;
   }): Promise<void> {
     if (input.profileId === input.reviewerProfileId) return;
-    await this.prisma.wikiNotification.createMany({
+    await tx.wikiNotification.createMany({
       data: [{
         profileId: input.profileId,
         type: `edit_request_${input.status}`,

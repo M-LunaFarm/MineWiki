@@ -7,6 +7,7 @@ import { BookOpenText, Menu, Search, X } from 'lucide-react';
 import { AccountDropdown } from '../account/account-dropdown';
 import { useAuth } from '../providers/auth-context';
 import { ThemeToggle } from './theme-toggle';
+import { WikiNotificationBell } from './wiki-notification-bell';
 
 type NavigationLink = {
   readonly href: string;
@@ -156,6 +157,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
               />
             </form>
 
+            <WikiNotificationBell paper={variant === 'paper'} />
             <AccountDropdown />
             <ThemeToggle paper={variant === 'paper'} />
             <button
