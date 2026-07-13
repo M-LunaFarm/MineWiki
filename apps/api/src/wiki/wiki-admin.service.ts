@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException, Optional } from '@n
 import { hashContent, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
+import { WikiLinkIndexService } from './wiki-link-index.service';
 
 const ALLOWED_PROTECTION_LEVELS = new Set([
   'open',
@@ -48,7 +49,8 @@ export interface WikiAdminPageSummary {
 export class WikiAdminService {
   constructor(
     private readonly prisma: PrismaService,
-    @Optional() private readonly events?: BusinessEventService
+    @Optional() private readonly events?: BusinessEventService,
+    @Optional() private readonly wikiLinks?: WikiLinkIndexService
   ) {}
 
   async getRecent(): Promise<WikiAdminRecentChange[]> {
@@ -383,6 +385,7 @@ export class WikiAdminService {
         createdAt: now
       }
     });
+    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links);
     await this.prisma.wikiPage.update({
       where: { id: page.id },
       data: {

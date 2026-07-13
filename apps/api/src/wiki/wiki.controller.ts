@@ -21,6 +21,7 @@ import {
 } from './wiki-edit.service';
 import {
   WikiReadService,
+  type WikiBacklinkResponse,
   type WikiPageResponse,
   type WikiRecentChangeSummary,
   type WikiRevisionSummary,
@@ -83,6 +84,22 @@ export class WikiController {
     @Query('revisionId') revisionId?: string
   ): Promise<WikiRevisionResponse> {
     return this.wikiEdit.getRawPage(pageId, request.sessionPayload?.userId ?? null, revisionId);
+  }
+
+  @Get('pages/:id/backlinks')
+  @UseGuards(OptionalSessionGuard)
+  getBacklinks(
+    @Param('id') pageId: string,
+    @Req() request: FastifyRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiBacklinkResponse> {
+    return this.wikiRead.getBacklinks({
+      pageId,
+      accountId: request.sessionPayload?.userId ?? null,
+      cursor,
+      limit
+    });
   }
 
   @Get('recent')

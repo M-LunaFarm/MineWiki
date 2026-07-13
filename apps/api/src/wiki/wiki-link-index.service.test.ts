@@ -1,0 +1,46 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import type { PrismaService } from '../common/prisma.service';
+import { WikiLinkIndexService } from './wiki-link-index.service';
+
+function createStore(namespaceCode: string, localPath: string) {
+  const calls: Array<Record<string, unknown>> = [];
+  const store = {
+    wikiPage: {
+      async findUnique() { return { namespaceId: 1, localPath }; }
+    },
+    wikiNamespace: {
+      async findUnique() { return { code: namespaceCode }; }
+    },
+    wikiPageLink: {
+      async deleteMany() { return { count: 0 }; },
+      async createMany(input: { data: Array<Record<string, unknown>> }) {
+        calls.push(...input.data);
+        return { count: input.data.length };
+      }
+    }
+  } as unknown as Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPageLink'>;
+  return { store, calls };
+}
+
+test('link index normalizes and deduplicates generic wiki targets', async () => {
+  const { store, calls } = createStore('main', '대문');
+  await new WikiLinkIndexService().replaceForRevision(store, 10n, 20n, ['문서 A', '문서 A', 'server:서버/규칙']);
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(
+    calls.map((item) => [item.targetNamespaceCode, item.targetSlug]),
+    [['main', '문서_A'], ['server', '서버/규칙']]
+  );
+  assert.ok(calls.every((item) => item.sourceRevisionId === 20n));
+});
+
+test('server wiki links without a namespace stay in the current server space', async () => {
+  const { store, calls } = createStore('server', 'mine-server/시작하기');
+  await new WikiLinkIndexService().replaceForRevision(store, 10n, 20n, ['규칙', 'mod:공용 모드']);
+
+  assert.deepEqual(
+    calls.map((item) => [item.targetNamespaceCode, item.targetSlug]),
+    [['server', 'mine-server/규칙'], ['mod', '공용_모드']]
+  );
+});

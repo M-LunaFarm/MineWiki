@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
-import { Code2, FolderPen, Loader2, Trash2 } from 'lucide-react';
+import { Code2, FolderPen, Link2, Loader2, Trash2 } from 'lucide-react';
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 
@@ -67,6 +67,12 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
           className="chip chip-muted inline-flex items-center gap-1.5"
         >
           <Code2 className="size-3.5" /> 원문
+        </Link>
+        <Link
+          href={`/wiki/backlinks/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`}
+          className="chip chip-muted inline-flex items-center gap-1.5"
+        >
+          <Link2 className="size-3.5" /> 역링크
         </Link>
       </div>
       {!authLoading && !account ? (

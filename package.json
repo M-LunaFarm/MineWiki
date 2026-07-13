@@ -31,6 +31,7 @@
     "deploy:smoke": "pnpm smoke",
     "data:validate": "node scripts/validate-data.mjs",
     "data:migrate-wiki": "node scripts/migrate-legacy-wiki.mjs",
+    "data:backfill-wiki-links": "pnpm --filter @minewiki/wiki-core build && node scripts/backfill-wiki-links.mjs",
     "pm2:validate": "node scripts/validate-pm2-config.mjs",
     "gateway:validate": "node scripts/validate-upload-gateway.mjs",
     "seed": "node scripts/seed.mjs",

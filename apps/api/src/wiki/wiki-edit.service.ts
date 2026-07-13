@@ -13,6 +13,7 @@ import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
+import { WikiLinkIndexService } from './wiki-link-index.service';
 
 type ChangeType = 'create' | 'edit' | 'move' | 'delete' | 'restore' | 'revert';
 
@@ -114,7 +115,8 @@ export class WikiEditService {
     private readonly prisma: PrismaService,
     private readonly wikiProfiles: WikiProfileService,
     private readonly wikiPermissions: WikiPermissionService,
-    @Optional() private readonly events?: BusinessEventService
+    @Optional() private readonly events?: BusinessEventService,
+    @Optional() private readonly wikiLinks?: WikiLinkIndexService
   ) {}
 
   async createPage(session: SessionPayload, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
@@ -898,6 +900,7 @@ export class WikiEditService {
         createdAt: input.createdAt
       }
     });
+    await this.wikiLinks?.replaceForRevision(tx as Prisma.TransactionClient, input.pageId, revision.id, parsed.links);
     return revision;
   }
 

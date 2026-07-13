@@ -1088,6 +1088,21 @@ model WikiPageRenderCache {
   @@map("page_render_cache")
 }
 
+model WikiPageLink {
+  id                  BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  sourcePageId        BigInt   @map("source_page_id") @db.UnsignedBigInt
+  sourceRevisionId    BigInt   @map("source_revision_id") @db.UnsignedBigInt
+  targetNamespaceCode String   @map("target_namespace_code") @db.VarChar(32)
+  targetSlug          String   @map("target_slug") @db.VarChar(255)
+  linkType            String   @default("link") @map("link_type") @db.VarChar(32)
+  createdAt           DateTime @map("created_at")
+
+  @@unique([sourcePageId, targetNamespaceCode, targetSlug, linkType], map: "uk_page_links_source_target")
+  @@index([targetNamespaceCode, targetSlug, id], map: "idx_page_links_target")
+  @@index([sourceRevisionId], map: "idx_page_links_revision")
+  @@map("page_links")
+}
+
 model WikiRecentChange {
   id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   pageId        BigInt?  @map("page_id") @db.UnsignedBigInt
@@ -1104,6 +1119,7 @@ model WikiRecentChange {
   @@index([changeType])
   @@index([changeType, createdAt])
   @@index([pageId, createdAt])
+  @@index([actorId, createdAt])
   @@map("recent_changes")
 }
 

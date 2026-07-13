@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import {
   type AstNode,
   parseLinkTarget,
@@ -11,6 +11,7 @@ import {
 } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { WikiPermissionService } from './wiki-permission.service';
+import { WikiLinkIndexService } from './wiki-link-index.service';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -100,11 +101,29 @@ export interface WikiSearchResult {
   readonly updatedAt: string;
 }
 
+export interface WikiBacklinkItem {
+  readonly id: string;
+  readonly sourcePageId: string;
+  readonly sourceRevisionId: string;
+  readonly namespace: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly routePath: string;
+  readonly linkType: string;
+  readonly updatedAt: string;
+}
+
+export interface WikiBacklinkResponse {
+  readonly items: WikiBacklinkItem[];
+  readonly nextCursor: string | null;
+}
+
 @Injectable()
 export class WikiReadService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly wikiPermissions: WikiPermissionService
+    private readonly wikiPermissions: WikiPermissionService,
+    @Optional() private readonly wikiLinks?: WikiLinkIndexService
   ) {}
 
   async getPage(
@@ -237,6 +256,71 @@ export class WikiReadService {
       }
     }
     return visible;
+  }
+
+  async getBacklinks(input: {
+    readonly pageId: string;
+    readonly accountId?: string | null;
+    readonly cursor?: string;
+    readonly limit?: string | number;
+  }): Promise<WikiBacklinkResponse> {
+    const pageId = this.parseBigIntId(input.pageId, 'pageId');
+    const target = await this.prisma.wikiPage.findUnique({ where: { id: pageId } });
+    if (!target) throw new NotFoundException('Wiki page not found.');
+    await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: target });
+    const namespace = await this.prisma.wikiNamespace.findUnique({ where: { id: target.namespaceId } });
+    if (!namespace) throw new NotFoundException('Wiki namespace not found.');
+    const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
+    const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
+    const links = await this.prisma.wikiPageLink.findMany({
+      where: {
+        targetNamespaceCode: namespace.code,
+        targetSlug: target.slug,
+        ...(cursor ? { id: { lt: cursor } } : {})
+      },
+      orderBy: [{ id: 'desc' }],
+      take: Math.min(limit * 4 + 1, 401)
+    });
+    const pageIds = [...new Set(links.map((link) => link.sourcePageId))];
+    const pages = pageIds.length > 0
+      ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } })
+      : [];
+    const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
+    const namespaces = namespaceIds.length > 0
+      ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } } })
+      : [];
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
+    const items: WikiBacklinkItem[] = [];
+    let lastScannedId: bigint | null = null;
+    for (const link of links) {
+      lastScannedId = link.id;
+      const source = pageById.get(link.sourcePageId);
+      if (!source || source.currentRevisionId !== link.sourceRevisionId) continue;
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: source });
+      } catch {
+        continue;
+      }
+      const sourceNamespace = namespaceById.get(source.namespaceId) ?? 'main';
+      items.push({
+        id: link.id.toString(),
+        sourcePageId: source.id.toString(),
+        sourceRevisionId: link.sourceRevisionId.toString(),
+        namespace: sourceNamespace,
+        title: source.title,
+        displayTitle: source.displayTitle,
+        routePath: wikiUrl(sourceNamespace as Parameters<typeof wikiUrl>[0], source.title),
+        linkType: link.linkType,
+        updatedAt: source.updatedAt.toISOString()
+      });
+      if (items.length >= limit) break;
+    }
+    const mayHaveMore = links.length > 0 && (items.length >= limit || links.length >= Math.min(limit * 4 + 1, 401));
+    return {
+      items,
+      nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
+    };
   }
 
   async search(input: {
@@ -385,6 +469,7 @@ export class WikiReadService {
       revision
     });
     const parsed = parseMarkup(revision.contentRaw);
+    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links).catch(() => undefined);
     if (parsed.redirectTarget && options.followRedirects) {
       const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
       const redirected = await this.getPageInternal(target.namespace, target.title, accountId, {

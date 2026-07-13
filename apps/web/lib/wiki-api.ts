@@ -136,6 +136,23 @@ export interface WikiSearchResult {
   readonly updatedAt: string;
 }
 
+export interface WikiBacklinkItem {
+  readonly id: string;
+  readonly sourcePageId: string;
+  readonly sourceRevisionId: string;
+  readonly namespace: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly routePath: string;
+  readonly linkType: string;
+  readonly updatedAt: string;
+}
+
+export interface WikiBacklinkResponse {
+  readonly items: WikiBacklinkItem[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiAdminRecentChange {
   readonly id: string;
   readonly pageId: string | null;
@@ -235,6 +252,20 @@ export async function fetchWikiRaw(pageId: string, revisionId?: string): Promise
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to load wiki source.');
+  }
+  return response.json();
+}
+
+export async function fetchWikiBacklinks(pageId: string, cursor?: string): Promise<WikiBacklinkResponse> {
+  const params = new URLSearchParams({ limit: '30' });
+  if (cursor) params.set('cursor', cursor);
+  const response = await fetch(
+    `${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/backlinks?${params.toString()}`,
+    { credentials: 'include' }
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load wiki backlinks.');
   }
   return response.json();
 }

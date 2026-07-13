@@ -11,6 +11,44 @@ test('server wiki navigation removes the duplicated space slug', () => {
   assert.equal(buildServerWikiPagePath('luna-main', 'FAQ'), '/server/luna-main/FAQ');
 });
 
+test('backlinks expose only links from the current readable source revision', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const target = {
+    id: 10n, namespaceId: 1, spaceId: 1n, slug: '대문', title: '대문', displayTitle: '대문',
+    currentRevisionId: 100n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 1n, createdAt: now, updatedAt: now, localPath: '대문'
+  };
+  const currentSource = { ...target, id: 20n, slug: '현재', title: '현재', displayTitle: '현재', currentRevisionId: 200n };
+  const staleSource = { ...target, id: 30n, slug: '과거', title: '과거', displayTitle: '과거', currentRevisionId: 301n };
+  const prisma = {
+    wikiPage: {
+      async findUnique() { return target; },
+      async findMany() { return [currentSource, staleSource]; }
+    },
+    wikiNamespace: {
+      async findUnique() { return { id: 1, code: 'main' }; },
+      async findMany() { return [{ id: 1, code: 'main' }]; }
+    },
+    wikiPageLink: {
+      async findMany() {
+        return [
+          { id: 2n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'link' },
+          { id: 1n, sourcePageId: 30n, sourceRevisionId: 300n, linkType: 'link' }
+        ];
+      }
+    }
+  } as unknown as PrismaService;
+  const permissions = {
+    async assertCanReadPage() {}
+  } as unknown as WikiPermissionService;
+
+  const response = await new WikiReadService(prisma, permissions).getBacklinks({ pageId: '10' });
+
+  assert.equal(response.items.length, 1);
+  assert.equal(response.items[0]?.sourcePageId, '20');
+  assert.equal(response.items[0]?.routePath, '/wiki/%ED%98%84%EC%9E%AC');
+});
+
 function createReadService(options: {
   readonly cacheHtml?: string | null;
   readonly onCacheLookup?: (where: unknown) => void;
