@@ -49,6 +49,7 @@ function service(options: {
     wikiDiscussionComment: {
       async findUnique() { return options.comment ?? null; },
       async findMany() { return []; },
+      async count() { return 0; },
       async update() { return options.comment; }
     },
     wikiProfile: {
@@ -118,6 +119,7 @@ test('deleted discussion comments do not expose their former content', async () 
     wikiPage: { async findUnique() { return page; } },
     wikiDiscussionThread: { async findUnique() { return thread; } },
     wikiDiscussionComment: {
+      async count() { return 1; },
       async findMany() {
         return [{
           id: 40n, threadId: thread.id, content: 'removed secret', status: 'deleted', createdBy: 20n,
@@ -137,4 +139,35 @@ test('deleted discussion comments do not expose their former content', async () 
   const result = await discussions.getThread(thread.id.toString());
   assert.equal(result.comments[0]?.content, null);
   assert.equal(result.comments[0]?.status, 'deleted');
+});
+
+test('recent discussion cursors fail closed when tampered', async () => {
+  const discussions = service();
+  await assert.rejects(discussions.listRecent(null, 'not-a-valid-cursor'), BadRequestException);
+});
+
+test('focused comment windows include the requested comment', async () => {
+  let commentWhere: unknown;
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiDiscussionComment: {
+      async findUnique() { return { threadId: thread.id }; },
+      async count() { return 1; },
+      async findMany(args: { where: unknown }) {
+        commentWhere = args.where;
+        return [{ id: 40n, threadId: thread.id, content: 'target', status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: null }];
+      }
+    },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async assertCanReadPage() {} } as unknown as WikiPermissionService
+  );
+
+  const result = await discussions.getThread(thread.id.toString(), null, undefined, 100, '40');
+  assert.deepEqual(commentWhere, { threadId: thread.id, id: { lte: 40n } });
+  assert.equal(result.comments[0]?.id, '40');
 });

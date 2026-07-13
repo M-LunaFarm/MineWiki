@@ -1,15 +1,25 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
-import { WikiDiscussionService, type WikiThreadDetail, type WikiThreadSummary } from './wiki-discussion.service';
+import { WikiDiscussionService, type WikiRecentThreadListResponse, type WikiThreadDetail, type WikiThreadSummary } from './wiki-discussion.service';
 
 @Controller('v1/wiki')
 export class WikiDiscussionController {
   constructor(private readonly discussions: WikiDiscussionService) {}
+
+  @Get('discussions/recent')
+  @UseGuards(OptionalSessionGuard)
+  recent(
+    @Req() request: FastifyRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number
+  ): Promise<WikiRecentThreadListResponse> {
+    return this.discussions.listRecent(request.sessionPayload?.userId ?? null, cursor, limit ?? 30);
+  }
 
   @Get('pages/:pageId/discussions')
   @UseGuards(OptionalSessionGuard)
@@ -19,8 +29,14 @@ export class WikiDiscussionController {
 
   @Get('discussions/:threadId')
   @UseGuards(OptionalSessionGuard)
-  get(@Param('threadId') threadId: string, @Req() request: FastifyRequest): Promise<WikiThreadDetail> {
-    return this.discussions.getThread(threadId, request.sessionPayload ?? null);
+  get(
+    @Param('threadId') threadId: string,
+    @Req() request: FastifyRequest,
+    @Query('commentCursor') commentCursor?: string,
+    @Query('focusCommentId') focusCommentId?: string,
+    @Query('commentLimit', new ParseIntPipe({ optional: true })) commentLimit?: number
+  ): Promise<WikiThreadDetail> {
+    return this.discussions.getThread(threadId, request.sessionPayload ?? null, commentCursor, commentLimit ?? 100, focusCommentId);
   }
 
   @Post('pages/:pageId/discussions')

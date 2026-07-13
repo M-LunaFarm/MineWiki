@@ -12,7 +12,7 @@ import { WikiNotificationBell } from './wiki-notification-bell';
 type NavigationLink = {
   readonly href: string;
   readonly label: string;
-  readonly key: 'wiki' | 'servers' | 'recent' | 'search' | 'guilds' | 'support' | 'account' | 'admin';
+  readonly key: 'wiki' | 'servers' | 'recent' | 'discussions' | 'search' | 'guilds' | 'support' | 'account' | 'admin';
   readonly requiresAccount?: boolean;
   readonly requiresAdmin?: boolean;
 };
@@ -21,6 +21,7 @@ const NAV_LINKS: readonly NavigationLink[] = [
   { href: '/wiki', label: '위키', key: 'wiki' },
   { href: '/servers', label: '서버 목록', key: 'servers' },
   { href: '/recent', label: '최근 변경', key: 'recent' },
+  { href: '/wiki/discussions', label: '토론', key: 'discussions' },
   { href: '/search', label: '검색', key: 'search' },
   { href: '/guilds', label: 'Discord 연동', key: 'guilds' },
   { href: '/support', label: '지원', key: 'support' },
@@ -215,6 +216,9 @@ function isActive(pathname: string | null, key: NavigationLink['key']): boolean 
     return false;
   }
   if (key === 'wiki') {
+    if (pathname === '/wiki/discussions') {
+      return false;
+    }
     return (
       pathname === '/wiki' ||
       pathname.startsWith('/wiki/') ||
@@ -232,6 +236,9 @@ function isActive(pathname: string | null, key: NavigationLink['key']): boolean 
   }
   if (key === 'recent') {
     return pathname === '/recent';
+  }
+  if (key === 'discussions') {
+    return pathname === '/wiki/discussions';
   }
   if (key === 'search') {
     return pathname === '/search';

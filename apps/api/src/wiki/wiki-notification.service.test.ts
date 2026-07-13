@@ -39,3 +39,18 @@ test('watched revision notifications exclude the editor and deduplicate per reci
   assert.deepEqual(created.map((item) => item.profileId), [8n, 9n]);
   assert.deepEqual(created.map((item) => item.dedupeKey), ['revision:3:profile:8', 'revision:3:profile:9']);
 });
+
+test('discussion reply notifications deep-link to the exact comment', async () => {
+  let href = '';
+  const tx = {
+    wikiDiscussionThread: { async findUnique() { return { createdBy: 8n }; } },
+    wikiDiscussionComment: { async findMany() { return []; } },
+    wikiNotification: {
+      async createMany(args: { data: Array<{ href: string }> }) { href = args.data[0]?.href ?? ''; return { count: args.data.length }; }
+    }
+  };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+  await service.notifyDiscussionReply(tx as never, { pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide' });
+
+  assert.equal(href, '/wiki/discuss/2?thread=3&comment=4');
+});

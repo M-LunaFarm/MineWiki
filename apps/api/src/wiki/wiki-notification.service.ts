@@ -163,7 +163,7 @@ export class WikiNotificationService {
         sourceId: input.commentId.toString(),
         title: input.title,
         message: '참여한 토론에 새 댓글이 등록되었습니다.',
-        href: `/wiki/discuss/${input.pageId.toString()}?thread=${input.threadId.toString()}`,
+        href: `/wiki/discuss/${input.pageId.toString()}?thread=${input.threadId.toString()}&comment=${input.commentId.toString()}`,
         dedupeKey: `discussion-comment:${input.commentId.toString()}:profile:${profileId.toString()}`,
         readAt: null,
         createdAt: now

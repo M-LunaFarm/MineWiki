@@ -1113,6 +1113,8 @@ model WikiDiscussionThread {
   updatedAt DateTime @map("updated_at")
 
   @@index([pageId, status, updatedAt], map: "idx_wiki_threads_page_status")
+  @@index([updatedAt, id], map: "idx_wiki_threads_recent")
+  @@index([status, updatedAt, id], map: "idx_wiki_threads_status_recent")
   @@index([createdBy, createdAt], map: "idx_wiki_threads_creator")
   @@map("wiki_discussion_threads")
 }

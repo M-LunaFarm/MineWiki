@@ -1,10 +1,13 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { wikiUrl } from '@minewiki/wiki-core';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
+import { buildServerWikiPagePath } from './wiki-read.service';
 
 export interface WikiThreadSummary {
   readonly id: string;
@@ -18,8 +21,22 @@ export interface WikiThreadSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiRecentThreadSummary extends WikiThreadSummary {
+  readonly pageTitle: string;
+  readonly namespace: string;
+  readonly routePath: string;
+  readonly discussionHref: string;
+}
+
+export interface WikiRecentThreadListResponse {
+  readonly items: WikiRecentThreadSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canModerate: boolean;
+  readonly canReply: boolean;
+  readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
     readonly content: string | null;
@@ -60,26 +77,149 @@ export class WikiDiscussionService {
     return threads.map((thread) => this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0));
   }
 
-  async getThread(threadId: string, session?: SessionPayload | null): Promise<WikiThreadDetail> {
+  async listRecent(
+    accountId: string | null,
+    cursor?: string,
+    requestedLimit = 30
+  ): Promise<WikiRecentThreadListResponse> {
+    const limit = Math.min(Math.max(requestedLimit, 1), 50);
+    const decoded = cursor ? this.decodeRecentCursor(cursor) : null;
+    const snapshotAt = decoded?.snapshotAt ?? new Date();
+    const position = decoded ? { updatedAt: decoded.updatedAt, id: decoded.id } : null;
+    const where: Prisma.WikiDiscussionThreadWhereInput = {
+      updatedAt: { lte: snapshotAt },
+      ...(position ? {
+        OR: [
+          { updatedAt: { lt: position.updatedAt } },
+          { updatedAt: position.updatedAt, id: { lt: position.id } }
+        ]
+      } : {})
+    };
+    const take = Math.min(limit * 5 + 1, 251);
+    const threads = await this.prisma.wikiDiscussionThread.findMany({
+      where,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take
+    });
+    if (threads.length === 0) return { items: [], nextCursor: null };
+    const pages = await this.prisma.wikiPage.findMany({ where: { id: { in: [...new Set(threads.map((thread) => thread.pageId))] } } });
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const namespaces = await this.prisma.wikiNamespace.findMany({
+      where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
+      select: { id: true, code: true }
+    });
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const serverSpaces = [...new Set(pages.filter((page) => namespaceById.get(page.namespaceId) === 'server').map((page) => page.spaceId))];
+    const serverWikis = serverSpaces.length > 0
+      ? await this.prisma.serverWiki.findMany({ where: { spaceId: { in: serverSpaces } }, select: { spaceId: true, slug: true } })
+      : [];
+    const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
+    const readableByPageId = new Map<bigint, boolean>();
+    const visibleThreads = [];
+    for (const thread of threads) {
+      const page = pageById.get(thread.pageId);
+      if (!page || page.status === 'deleted') continue;
+      let readable = readableByPageId.get(page.id);
+      if (readable === undefined) {
+        try {
+          await this.wikiPermissions.assertCanReadPage({ accountId, page });
+          readable = true;
+        } catch {
+          readable = false;
+        }
+        readableByPageId.set(page.id, readable);
+      }
+      if (readable) visibleThreads.push({ thread, page });
+      if (visibleThreads.length > limit) break;
+    }
+    const pageRows = visibleThreads.slice(0, limit);
+    const profileById = await this.profileNames(pageRows.map(({ thread }) => thread.createdBy));
+    const countRows = pageRows.length > 0
+      ? await this.prisma.wikiDiscussionComment.groupBy({
+          by: ['threadId'],
+          where: { threadId: { in: pageRows.map(({ thread }) => thread.id) } },
+          _count: { _all: true }
+        })
+      : [];
+    const countByThreadId = new Map(countRows.map((row) => [row.threadId, row._count._all]));
+    const items = pageRows.map(({ thread, page }) => {
+      const namespace = namespaceById.get(page.namespaceId) ?? 'main';
+      const serverSlug = serverSlugBySpace.get(page.spaceId);
+      const routePath = namespace === 'server' && serverSlug
+        ? buildServerWikiPagePath(serverSlug, page.localPath)
+        : wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
+      return {
+        ...this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0),
+        pageTitle: page.displayTitle,
+        namespace,
+        routePath,
+        discussionHref: namespace === 'server'
+          ? `${routePath}/discuss?thread=${thread.id.toString()}`
+          : `/wiki/discuss/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&thread=${thread.id.toString()}`
+      };
+    });
+    const cursorRow = pageRows.at(-1)?.thread ?? threads.at(-1);
+    const hasMore = visibleThreads.length > limit || threads.length === take;
+    return {
+      items,
+      nextCursor: hasMore && cursorRow ? this.encodeRecentCursor(snapshotAt, cursorRow.updatedAt, cursorRow.id) : null
+    };
+  }
+
+  async getThread(
+    threadId: string,
+    session?: SessionPayload | null,
+    commentCursor?: string,
+    requestedLimit = 100,
+    focusCommentId?: string
+  ): Promise<WikiThreadDetail> {
     const id = this.parseId(threadId, 'threadId');
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
     if (!thread) throw new NotFoundException('Wiki discussion thread not found.');
     const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null);
+    const commentLimit = Math.min(Math.max(requestedLimit, 1), 200);
+    const cursorId = commentCursor ? this.parseId(commentCursor, 'commentCursor') : null;
+    const focusId = focusCommentId ? this.parseId(focusCommentId, 'focusCommentId') : null;
+    if (cursorId && focusId) throw new BadRequestException('commentCursor and focusCommentId cannot be combined.');
+    if (focusId) {
+      const focused = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: focusId }, select: { threadId: true } });
+      if (!focused || focused.threadId !== thread.id) throw new NotFoundException('Wiki discussion comment not found.');
+    }
     const comments = await this.prisma.wikiDiscussionComment.findMany({
-      where: { threadId: thread.id },
-      orderBy: [{ id: 'asc' }],
-      take: 500
+      where: {
+        threadId: thread.id,
+        ...(cursorId ? { id: { lt: cursorId } } : focusId ? { id: { lte: focusId } } : {})
+      },
+      orderBy: [{ id: 'desc' }],
+      take: commentLimit + 1
     });
-    const profileById = await this.profileNames([thread.createdBy, ...comments.map((comment) => comment.createdBy)]);
+    const hasOlderComments = comments.length > commentLimit;
+    const pageComments = comments.slice(0, commentLimit);
+    const commentCount = await this.prisma.wikiDiscussionComment.count({ where: { threadId: thread.id } });
+    const profileById = await this.profileNames([thread.createdBy, ...pageComments.map((comment) => comment.createdBy)]);
     const viewer = session ? await this.wikiProfiles.ensureWikiProfile(session.userId) : null;
     const canManage = viewer && session
       ? await this.wikiPermissions.canManagePage({ actor: this.wikiPermissions.actorFromSession(session, viewer), page })
       : false;
+    let canReply = false;
+    if (viewer && session && thread.status === 'open') {
+      try {
+        await this.wikiPermissions.assertCanDiscussPage({
+          actor: this.wikiPermissions.actorFromSession(session, viewer),
+          page
+        });
+        canReply = true;
+      } catch {
+        canReply = false;
+      }
+    }
     const canModerate = Boolean(viewer && (thread.createdBy === viewer.id || canManage));
     return {
-      ...this.toThreadSummary(thread, profileById, comments.length),
+      ...this.toThreadSummary(thread, profileById, commentCount),
       canModerate,
-      comments: comments.map((comment) => ({
+      canReply,
+      nextCommentCursor: hasOlderComments ? pageComments.at(-1)?.id.toString() ?? null : null,
+      comments: pageComments.reverse().map((comment) => ({
         id: comment.id.toString(),
         content: comment.status === 'deleted' ? null : comment.content,
         status: comment.status,
@@ -229,6 +369,22 @@ export class WikiDiscussionService {
   private parseId(value: string, label: string): bigint {
     if (!/^\d+$/.test(value)) throw new BadRequestException(`${label} must be an unsigned integer.`);
     return BigInt(value);
+  }
+
+  private encodeRecentCursor(snapshotAt: Date, updatedAt: Date, id: bigint): string {
+    return Buffer.from(JSON.stringify({ snapshotAt: snapshotAt.toISOString(), updatedAt: updatedAt.toISOString(), id: id.toString() })).toString('base64url');
+  }
+
+  private decodeRecentCursor(value: string): { snapshotAt: Date; updatedAt: Date; id: bigint } {
+    try {
+      const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as { snapshotAt?: string; updatedAt?: string; id?: string };
+      const snapshotAt = new Date(decoded.snapshotAt ?? '');
+      const updatedAt = new Date(decoded.updatedAt ?? '');
+      if (Number.isNaN(snapshotAt.getTime()) || Number.isNaN(updatedAt.getTime()) || !decoded.id || !/^\d+$/.test(decoded.id)) throw new Error('invalid');
+      return { snapshotAt, updatedAt, id: BigInt(decoded.id) };
+    } catch {
+      throw new BadRequestException('Invalid recent discussion cursor.');
+    }
   }
 
   private async audit(action: string, session: SessionPayload, profileId: bigint, pageId: bigint, threadId: bigint) {

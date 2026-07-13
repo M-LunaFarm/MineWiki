@@ -248,8 +248,22 @@ export interface WikiThreadSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiRecentThreadSummary extends WikiThreadSummary {
+  readonly pageTitle: string;
+  readonly namespace: string;
+  readonly routePath: string;
+  readonly discussionHref: string;
+}
+
+export interface WikiRecentThreadListResponse {
+  readonly items: WikiRecentThreadSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canModerate: boolean;
+  readonly canReply: boolean;
+  readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
     readonly content: string | null;
@@ -446,8 +460,17 @@ export async function fetchWikiThreads(pageId: string): Promise<WikiThreadSummar
   return readWikiBrowser<WikiThreadSummary[]>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussions`);
 }
 
-export async function fetchWikiThread(threadId: string): Promise<WikiThreadDetail> {
-  return readWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(threadId)}`);
+export async function fetchWikiThread(threadId: string, commentCursor?: string, focusCommentId?: string): Promise<WikiThreadDetail> {
+  const params = new URLSearchParams({ commentLimit: '100' });
+  if (commentCursor) params.set('commentCursor', commentCursor);
+  if (focusCommentId) params.set('focusCommentId', focusCommentId);
+  return readWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(threadId)}?${params.toString()}`);
+}
+
+export async function fetchRecentWikiThreads(cursor?: string): Promise<WikiRecentThreadListResponse> {
+  const params = new URLSearchParams({ limit: '30' });
+  if (cursor) params.set('cursor', cursor);
+  return readWikiBrowser<WikiRecentThreadListResponse>(`/v1/wiki/discussions/recent?${params.toString()}`);
 }
 
 export async function createWikiThread(input: { pageId: string; title: string; content: string }): Promise<WikiThreadDetail> {

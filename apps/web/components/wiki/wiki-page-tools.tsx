@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
-import { ArchiveRestore, Code2, Compass, FilePenLine, FolderPen, GitCommitHorizontal, Link2, Loader2, MessageSquareText, Trash2 } from 'lucide-react';
+import { ArchiveRestore, Code2, Compass, FilePenLine, FolderPen, GitCommitHorizontal, Link2, Loader2, MessagesSquare, MessageSquareText, Trash2 } from 'lucide-react';
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { WikiWatchButton } from './wiki-watch-button';
@@ -90,6 +90,7 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
           <MessageSquareText className="size-3.5" /> 토론
         </Link>
         <Link href={requestsHref} className="chip chip-muted inline-flex items-center gap-1.5"><FilePenLine className="size-3.5" /> 편집 요청</Link>
+        <Link href="/wiki/discussions" className="chip chip-muted inline-flex items-center gap-1.5"><MessagesSquare className="size-3.5" /> 최근 토론</Link>
         <Link href={blameHref} className="chip chip-muted inline-flex items-center gap-1.5"><GitCommitHorizontal className="size-3.5" /> blame</Link>
         <Link href="/wiki/special" className="chip chip-muted inline-flex items-center gap-1.5"><Compass className="size-3.5" /> 특수 문서</Link>
       </div>
