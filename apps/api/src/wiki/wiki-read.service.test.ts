@@ -214,6 +214,45 @@ test('contributions resolve public changes to stable document routes', async () 
   assert.equal(result.items[0]?.summary, '보강');
 });
 
+test('contribution tabs expose discussion, edit-request, and reviewer ledgers', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const page = {
+    id: 20n, namespaceId: 1, spaceId: 1n, slug: '기여_문서', title: '기여 문서', displayTitle: '기여 문서',
+    currentRevisionId: 200n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 5n, createdAt: now, updatedAt: now, localPath: '기여_문서'
+  };
+  const editRequest = {
+    id: 31n, pageId: 20n, baseRevisionId: 200n, proposedContent: '내용', editSummary: '수정 제안', isMinor: false,
+    status: 'accepted', createdBy: 5n, reviewedBy: 5n, reviewNote: '승인함', acceptedRevisionId: 201n,
+    createdAt: now, updatedAt: now, reviewedAt: now
+  };
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; } },
+    wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '토론 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
+    wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '문서 방향', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
+    wikiEditRequest: { async findMany() { return [editRequest]; } },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const discussions = await service.getContributions({ profileId: '5', activity: 'discussions' });
+  assert.equal(discussions.activity, 'discussions');
+  assert.equal(discussions.items[0]?.href, '/wiki/discuss/20?thread=40&comment=41');
+  assert.equal(discussions.items[0]?.summary, '토론 의견');
+
+  const requests = await service.getContributions({ profileId: '5', activity: 'edit-requests' });
+  assert.equal(requests.items[0]?.kind, 'edit_request');
+  assert.equal(requests.items[0]?.status, 'accepted');
+  assert.equal(requests.items[0]?.summary, '수정 제안');
+
+  const reviews = await service.getContributions({ profileId: '5', activity: 'reviews' });
+  assert.equal(reviews.items[0]?.kind, 'review');
+  assert.equal(reviews.items[0]?.summary, '승인함');
+  assert.equal(reviews.items[0]?.createdAt, now.toISOString());
+});
+
 function createReadService(options: {
   readonly cacheHtml?: string | null;
   readonly onCacheLookup?: (where: unknown) => void;

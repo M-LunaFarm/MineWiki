@@ -131,13 +131,15 @@ export class WikiController {
     @Param('profileId') profileId: string,
     @Req() request: FastifyRequest,
     @Query('cursor') cursor?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('activity') activity?: string
   ): Promise<WikiContributionResponse> {
     return this.wikiRead.getContributions({
       profileId,
       accountId: request.sessionPayload?.userId ?? null,
       cursor,
-      limit
+      limit,
+      activity
     });
   }
 

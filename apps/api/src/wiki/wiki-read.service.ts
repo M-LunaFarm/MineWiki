@@ -129,18 +129,22 @@ export interface WikiBacklinkResponse {
 
 export interface WikiContributionItem {
   readonly id: string;
+  readonly kind: 'document' | 'discussion' | 'edit_request' | 'review';
   readonly pageId: string;
   readonly revisionId: string | null;
   readonly changeType: string;
   readonly title: string;
   readonly namespace: string;
   readonly routePath: string;
+  readonly href: string;
   readonly summary: string | null;
   readonly isMinor: boolean;
+  readonly status: string | null;
   readonly createdAt: string;
 }
 
 export interface WikiContributionResponse {
+  readonly activity: 'edits' | 'discussions' | 'edit-requests' | 'reviews';
   readonly profile: {
     readonly id: string;
     readonly username: string;
@@ -455,6 +459,7 @@ export class WikiReadService {
     readonly accountId?: string | null;
     readonly cursor?: string;
     readonly limit?: string | number;
+    readonly activity?: string;
   }): Promise<WikiContributionResponse> {
     const profileId = this.parseBigIntId(input.profileId, 'profileId');
     const profile = await this.prisma.wikiProfile.findUnique({
@@ -464,6 +469,12 @@ export class WikiReadService {
     if (!profile || !['active', 'blocked'].includes(profile.status)) throw new NotFoundException('Wiki profile not found.');
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
+    const activity = input.activity ?? 'edits';
+    if (!['edits', 'discussions', 'edit-requests', 'reviews'].includes(activity)) throw new BadRequestException('activity is invalid.');
+    const common = { profile, accountId: input.accountId ?? null, cursor, limit };
+    if (activity === 'discussions') return this.getDiscussionContributions(common);
+    if (activity === 'edit-requests') return this.getEditRequestContributions(common, false);
+    if (activity === 'reviews') return this.getEditRequestContributions(common, true);
     const changes = await this.prisma.wikiRecentChange.findMany({
       where: {
         actorId: profile.id,
@@ -496,20 +507,24 @@ export class WikiReadService {
       const namespace = namespaceById.get(page.namespaceId) ?? change.namespaceCode;
       items.push({
         id: change.id.toString(),
+        kind: 'document',
         pageId: page.id.toString(),
         revisionId: change.revisionId?.toString() ?? null,
         changeType: change.changeType,
         title: page.displayTitle,
         namespace,
         routePath: wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title),
+        href: change.revisionId ? `/wiki/revision/${change.revisionId.toString()}` : wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title),
         summary: change.summary,
         isMinor: change.isMinor,
+        status: null,
         createdAt: change.createdAt.toISOString()
       });
       if (items.length >= limit) break;
     }
     const mayHaveMore = changes.length > 0 && (items.length >= limit || changes.length >= Math.min(limit * 4 + 1, 401));
     return {
+      activity: 'edits',
       profile: {
         id: profile.id.toString(),
         username: profile.username,
@@ -518,6 +533,115 @@ export class WikiReadService {
       },
       items,
       nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
+    };
+  }
+
+  private async getDiscussionContributions(input: {
+    readonly profile: { readonly id: bigint; readonly username: string; readonly displayName: string; readonly status: string };
+    readonly accountId: string | null;
+    readonly cursor: bigint | null;
+    readonly limit: number;
+  }): Promise<WikiContributionResponse> {
+    const scanLimit = Math.min(input.limit * 4 + 1, 401);
+    const comments = await this.prisma.wikiDiscussionComment.findMany({
+      where: { createdBy: input.profile.id, ...(input.cursor ? { id: { lt: input.cursor } } : {}) },
+      orderBy: [{ id: 'desc' }],
+      take: scanLimit
+    });
+    const threadIds = [...new Set(comments.map((comment) => comment.threadId))];
+    const threads = threadIds.length > 0 ? await this.prisma.wikiDiscussionThread.findMany({ where: { id: { in: threadIds } } }) : [];
+    const threadById = new Map(threads.map((thread) => [thread.id, thread]));
+    const pageIds = [...new Set(threads.map((thread) => thread.pageId))];
+    const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
+    const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const readable = new Map<bigint, boolean>();
+    const items: WikiContributionItem[] = [];
+    let lastScannedId: bigint | null = null;
+    for (const comment of comments) {
+      lastScannedId = comment.id;
+      const thread = threadById.get(comment.threadId);
+      if (!thread || thread.status === 'deleted') continue;
+      const page = pageById.get(thread.pageId);
+      if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
+      const namespace = namespaceById.get(page.namespaceId) ?? 'main';
+      const routePath = wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
+      items.push({
+        id: comment.id.toString(), kind: 'discussion', pageId: page.id.toString(), revisionId: null,
+        changeType: 'comment', title: thread.title, namespace, routePath,
+        href: `/wiki/discuss/${page.id.toString()}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`,
+        summary: comment.status === 'normal' ? comment.content.slice(0, 255) : '삭제된 댓글', isMinor: false,
+        status: thread.status, createdAt: comment.createdAt.toISOString()
+      });
+      if (items.length >= input.limit) break;
+    }
+    return this.contributionResponse('discussions', input.profile, items, comments, lastScannedId, input.limit, scanLimit);
+  }
+
+  private async getEditRequestContributions(input: {
+    readonly profile: { readonly id: bigint; readonly username: string; readonly displayName: string; readonly status: string };
+    readonly accountId: string | null;
+    readonly cursor: bigint | null;
+    readonly limit: number;
+  }, reviews: boolean): Promise<WikiContributionResponse> {
+    const scanLimit = Math.min(input.limit * 4 + 1, 401);
+    const requests = await this.prisma.wikiEditRequest.findMany({
+      where: reviews
+        ? { reviewedBy: input.profile.id, reviewedAt: { not: null }, ...(input.cursor ? { id: { lt: input.cursor } } : {}) }
+        : { createdBy: input.profile.id, ...(input.cursor ? { id: { lt: input.cursor } } : {}) },
+      orderBy: [{ id: 'desc' }],
+      take: scanLimit
+    });
+    const pageIds = [...new Set(requests.map((request) => request.pageId))];
+    const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
+    const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const readable = new Map<bigint, boolean>();
+    const items: WikiContributionItem[] = [];
+    let lastScannedId: bigint | null = null;
+    for (const request of requests) {
+      lastScannedId = request.id;
+      const page = pageById.get(request.pageId);
+      if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
+      const namespace = namespaceById.get(page.namespaceId) ?? 'main';
+      const routePath = wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
+      items.push({
+        id: request.id.toString(), kind: reviews ? 'review' : 'edit_request', pageId: page.id.toString(), revisionId: request.acceptedRevisionId?.toString() ?? null,
+        changeType: reviews ? 'review' : 'edit_request', title: page.displayTitle, namespace, routePath,
+        href: `/wiki/edit-requests/${page.id.toString()}`, summary: reviews ? request.reviewNote ?? request.editSummary : request.editSummary,
+        isMinor: request.isMinor, status: request.status,
+        createdAt: (reviews ? request.reviewedAt ?? request.updatedAt : request.createdAt).toISOString()
+      });
+      if (items.length >= input.limit) break;
+    }
+    return this.contributionResponse(reviews ? 'reviews' : 'edit-requests', input.profile, items, requests, lastScannedId, input.limit, scanLimit);
+  }
+
+  private async canReadContributionPage(page: Parameters<WikiPermissionService['assertCanReadPage']>[0]['page'] & { id: bigint }, accountId: string | null, cache: Map<bigint, boolean>): Promise<boolean> {
+    const cached = cache.get(page.id);
+    if (cached !== undefined) return cached;
+    try {
+      await this.wikiPermissions.assertCanReadPage({ accountId, page });
+      cache.set(page.id, true);
+      return true;
+    } catch {
+      cache.set(page.id, false);
+      return false;
+    }
+  }
+
+  private contributionResponse(
+    activity: WikiContributionResponse['activity'],
+    profile: { readonly id: bigint; readonly username: string; readonly displayName: string; readonly status: string },
+    items: WikiContributionItem[], scanned: ReadonlyArray<unknown>, lastScannedId: bigint | null, limit: number, scanLimit: number
+  ): WikiContributionResponse {
+    return {
+      activity,
+      profile: { id: profile.id.toString(), username: profile.username, displayName: profile.displayName, status: profile.status },
+      items,
+      nextCursor: scanned.length > 0 && (items.length >= limit || scanned.length >= scanLimit) ? lastScannedId?.toString() ?? null : null
     };
   }
 

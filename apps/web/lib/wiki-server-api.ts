@@ -47,9 +47,10 @@ export async function fetchWikiRecent(input: { readonly changeType?: string; rea
   return readWikiResponse<WikiRecentChangeListResponse>(response, 'Failed to load recent wiki changes.');
 }
 
-export async function fetchWikiContributions(profileId: string, cursor?: string): Promise<WikiContributionResponse> {
+export async function fetchWikiContributions(profileId: string, cursor?: string, activity = 'edits'): Promise<WikiContributionResponse> {
   const params = new URLSearchParams({ limit: '30' });
   if (cursor) params.set('cursor', cursor);
+  params.set('activity', activity);
   const response = await wikiFetch(
     `/v1/wiki/contributions/${encodeURIComponent(profileId)}?${params.toString()}`
   );

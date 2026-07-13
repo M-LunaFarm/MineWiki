@@ -222,17 +222,21 @@ export interface WikiBacklinkResponse {
 }
 
 export interface WikiContributionResponse {
+  readonly activity: 'edits' | 'discussions' | 'edit-requests' | 'reviews';
   readonly profile: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string };
   readonly items: ReadonlyArray<{
     readonly id: string;
+    readonly kind: 'document' | 'discussion' | 'edit_request' | 'review';
     readonly pageId: string;
     readonly revisionId: string | null;
     readonly changeType: string;
     readonly title: string;
     readonly namespace: string;
     readonly routePath: string;
+    readonly href: string;
     readonly summary: string | null;
     readonly isMinor: boolean;
+    readonly status: string | null;
     readonly createdAt: string;
   }>;
   readonly nextCursor: string | null;
