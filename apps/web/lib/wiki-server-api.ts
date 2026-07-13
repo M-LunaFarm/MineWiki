@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { normalizeApiBaseUrl } from './runtime-config';
 import type {
   WikiPageResponse,
+  WikiCategoryResponse,
   WikiContributionResponse,
   WikiRecentChangeListResponse,
   WikiRevisionDiffResponse,
@@ -80,6 +81,19 @@ export async function fetchWikiSpecial(input: {
   if (input.namespace) params.set('namespace', input.namespace);
   const response = await wikiFetch(`/v1/wiki/special?${params.toString()}`);
   return readWikiResponse<WikiSpecialDocumentResponse>(response, 'Failed to load special wiki documents.');
+}
+
+export async function fetchWikiCategory(input: {
+  readonly category: string;
+  readonly namespace?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+}): Promise<WikiCategoryResponse> {
+  const params = new URLSearchParams({ limit: String(input.limit ?? 30) });
+  if (input.namespace) params.set('namespace', input.namespace);
+  if (input.cursor) params.set('cursor', input.cursor);
+  const response = await wikiFetch(`/v1/wiki/categories/${encodeURIComponent(input.category)}?${params.toString()}`);
+  return readWikiResponse<WikiCategoryResponse>(response, 'Failed to load wiki category.');
 }
 
 async function wikiFetch(path: string): Promise<Response> {

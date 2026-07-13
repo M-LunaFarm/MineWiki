@@ -244,6 +244,29 @@ test('backlinks expose only links from the current readable source revision', as
   assert.equal(response.items[0]?.routePath, '/wiki/%ED%98%84%EC%9E%AC');
 });
 
+test('category membership exposes only current readable documents', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const current = { id: 20n, namespaceId: 1, spaceId: 1n, slug: '가이드', title: '가이드', displayTitle: '가이드', currentRevisionId: 200n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now, localPath: '가이드' };
+  const stale = { ...current, id: 30n, slug: '과거', title: '과거', displayTitle: '과거', currentRevisionId: 301n };
+  const hidden = { ...current, id: 40n, slug: '비공개', title: '비공개', displayTitle: '비공개', currentRevisionId: 400n };
+  const prisma = {
+    wikiPageLink: { async findMany() { return [
+      { id: 3n, sourcePageId: 20n, sourceRevisionId: 200n },
+      { id: 2n, sourcePageId: 30n, sourceRevisionId: 300n },
+      { id: 1n, sourcePageId: 40n, sourceRevisionId: 400n }
+    ]; } },
+    wikiPage: { async findMany() { return [current, stale, hidden]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage({ page }: { page: { id: bigint } }) { if (page.id === 40n) throw new Error('hidden'); } } as unknown as WikiPermissionService;
+
+  const response = await new WikiReadService(prisma, permissions).getCategoryMembers({ category: '초보자', limit: 30 });
+
+  assert.equal(response.category, '초보자');
+  assert.deepEqual(response.items.map((item) => item.pageId), ['20']);
+  assert.equal(response.items[0]?.routePath, '/wiki/%EA%B0%80%EC%9D%B4%EB%93%9C');
+});
+
 test('contributions resolve public changes to stable document routes', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const page = {

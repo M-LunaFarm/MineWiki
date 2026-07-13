@@ -117,7 +117,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
   }
 
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] ?? '';
+    let line = lines[i] ?? '';
     if (!line.trim()) continue;
     if (i === 0 && redirectTarget) continue;
 
@@ -204,12 +204,20 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
       continue;
     }
 
-    const category = line.match(/^\[\[분류:(.+?)\]\]$/);
-    if (category) {
-      const title = normalizeTitle(category[1]);
-      ast.push({ type: 'category', title });
-      categories.add(title);
-      continue;
+    const inlineCategories = [...line.matchAll(/\[\[분류:([^|\]]+)(?:\|[^\]]*)?\]\]/g)];
+    if (inlineCategories.length > 0) {
+      for (const category of inlineCategories) {
+        const title = normalizeTitle(category[1] ?? '');
+        if (title) categories.add(title);
+      }
+      line = line.replace(/\[\[분류:([^|\]]+)(?:\|[^\]]*)?\]\]/g, '').trimEnd();
+      if (!line.trim()) {
+        for (const category of inlineCategories) {
+          const title = normalizeTitle(category[1] ?? '');
+          if (title) ast.push({ type: 'category', title });
+        }
+        continue;
+      }
     }
 
     const heading = line.match(/^(={2,4})\s*(.+?)\s*\1$/);

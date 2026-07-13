@@ -10,7 +10,8 @@ export class WikiLinkIndexService {
     store: WikiLinkStore,
     pageId: bigint,
     revisionId: bigint,
-    links: readonly string[]
+    links: readonly string[],
+    categories: readonly string[] = []
   ): Promise<void> {
     const page = await store.wikiPage.findUnique({
       where: { id: pageId },
@@ -23,13 +24,22 @@ export class WikiLinkIndexService {
     });
     if (!namespace) return;
 
-    const normalized = new Map<string, { targetNamespaceCode: string; targetSlug: string }>();
+    const normalized = new Map<string, { targetNamespaceCode: string; targetSlug: string; linkType: string }>();
     for (const target of links) {
       const resolved = resolveTarget(namespace.code, page.localPath, target);
       if (!resolved.targetSlug || resolved.targetSlug.length > 255 || resolved.targetNamespaceCode.length > 32) {
         continue;
       }
-      normalized.set(`${resolved.targetNamespaceCode}:${resolved.targetSlug}`, resolved);
+      normalized.set(`link:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, { ...resolved, linkType: 'link' });
+    }
+    for (const category of categories) {
+      const targetSlug = slugifyTitle(category);
+      if (!targetSlug || targetSlug.length > 255) continue;
+      normalized.set(`category:category:${targetSlug}`, {
+        targetNamespaceCode: 'category',
+        targetSlug,
+        linkType: 'category'
+      });
     }
     await store.wikiPageLink.deleteMany({ where: { sourcePageId: pageId } });
     if (normalized.size === 0) return;
@@ -39,7 +49,7 @@ export class WikiLinkIndexService {
         sourceRevisionId: revisionId,
         targetNamespaceCode: target.targetNamespaceCode,
         targetSlug: target.targetSlug,
-        linkType: 'link',
+        linkType: target.linkType,
         createdAt: new Date()
       })),
       skipDuplicates: true

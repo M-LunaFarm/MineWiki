@@ -23,6 +23,8 @@ import {
   WikiReadService,
   type WikiBlameResponse,
   type WikiBacklinkResponse,
+  type WikiCategoryResponse,
+  type WikiDocumentTemplateSummary,
   type WikiContributionResponse,
   type WikiDeletedPageSummary,
   type WikiPageResponse,
@@ -170,6 +172,27 @@ export class WikiController {
     @Query('limit') limit?: string
   ): Promise<WikiSpecialDocumentResponse> {
     return this.wikiRead.getSpecialDocuments({ type, namespace, limit, accountId: request.sessionPayload?.userId ?? null });
+  }
+
+  @Get('categories/:category')
+  @UseGuards(OptionalSessionGuard)
+  categoryMembers(
+    @Param('category') category: string,
+    @Req() request: FastifyRequest,
+    @Query('namespace') namespace?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiCategoryResponse> {
+    return this.wikiRead.getCategoryMembers({ category, namespace, cursor, limit, accountId: request.sessionPayload?.userId ?? null });
+  }
+
+  @Get('templates')
+  @UseGuards(OptionalSessionGuard)
+  templates(
+    @Req() request: FastifyRequest,
+    @Query('pageId') pageId?: string
+  ): Promise<WikiDocumentTemplateSummary[]> {
+    return this.wikiRead.getDocumentTemplates({ pageId, accountId: request.sessionPayload?.userId ?? null });
   }
 
   @Get('revisions/:revisionId')

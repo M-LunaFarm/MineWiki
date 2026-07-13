@@ -110,9 +110,9 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
               <h2 className="text-sm font-semibold text-white">분류</h2>
               <div className="mt-3 flex flex-wrap gap-2">
                 {page.categories.map((category) => (
-                  <span key={category} className="chip chip-muted">
+                  <Link key={category} href={`/wiki/category/${encodeURIComponent(category)}`} className="chip chip-muted hover:border-emerald-300/40 hover:text-emerald-100">
                     {category}
-                  </span>
+                  </Link>
                 ))}
               </div>
             </section>

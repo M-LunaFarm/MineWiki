@@ -192,6 +192,31 @@ export interface WikiSpecialDocumentResponse {
   readonly items: WikiSpecialDocumentItem[];
 }
 
+export interface WikiCategoryResponse {
+  readonly category: string;
+  readonly items: ReadonlyArray<{
+    readonly id: string;
+    readonly pageId: string;
+    readonly namespace: string;
+    readonly title: string;
+    readonly displayTitle: string;
+    readonly routePath: string;
+    readonly updatedAt: string;
+  }>;
+  readonly nextCursor: string | null;
+}
+
+export interface WikiDocumentTemplateSummary {
+  readonly id: string;
+  readonly key: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly scope: string;
+  readonly targetArea: string;
+  readonly defaultCategory: string | null;
+  readonly contentRaw: string;
+}
+
 export interface WikiBlameResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -457,6 +482,115 @@ export class WikiReadService {
       items,
       nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
     };
+  }
+
+  async getCategoryMembers(input: {
+    readonly category: string;
+    readonly accountId?: string | null;
+    readonly namespace?: string;
+    readonly cursor?: string;
+    readonly limit?: string | number;
+  }): Promise<WikiCategoryResponse> {
+    const category = input.category.trim().replace(/_/g, ' ');
+    const categorySlug = slugifyTitle(category);
+    if (!categorySlug) throw new BadRequestException('category is required.');
+    const namespace = input.namespace?.trim()
+      ? await this.prisma.wikiNamespace.findUnique({ where: { code: input.namespace.trim() }, select: { id: true, code: true } })
+      : null;
+    if (input.namespace?.trim() && !namespace) return { category, items: [], nextCursor: null };
+    const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
+    const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
+    const scanLimit = Math.min(limit * 4 + 1, 401);
+    const links = await this.prisma.wikiPageLink.findMany({
+      where: {
+        targetNamespaceCode: 'category',
+        targetSlug: categorySlug,
+        linkType: 'category',
+        ...(cursor ? { id: { lt: cursor } } : {})
+      },
+      orderBy: [{ id: 'desc' }],
+      take: scanLimit
+    });
+    const pageIds = [...new Set(links.map((link) => link.sourcePageId))];
+    const pages = pageIds.length > 0
+      ? await this.prisma.wikiPage.findMany({
+          where: {
+            id: { in: pageIds },
+            namespaceId: namespace?.id,
+            status: { in: ['normal', 'active', 'published'] },
+            pageType: { not: 'redirect' }
+          }
+        })
+      : [];
+    const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
+    const namespaces = namespaceIds.length > 0
+      ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } }, select: { id: true, code: true } })
+      : [];
+    const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const items: WikiCategoryResponse['items'][number][] = [];
+    let lastScannedId: bigint | null = null;
+    for (const link of links) {
+      lastScannedId = link.id;
+      const page = pageById.get(link.sourcePageId);
+      if (!page || page.currentRevisionId !== link.sourceRevisionId) continue;
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+      } catch {
+        continue;
+      }
+      const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
+      items.push({
+        id: link.id.toString(),
+        pageId: page.id.toString(),
+        namespace: namespaceCode,
+        title: page.title,
+        displayTitle: page.displayTitle,
+        routePath: wikiUrl(namespaceCode as Parameters<typeof wikiUrl>[0], page.title),
+        updatedAt: page.updatedAt.toISOString()
+      });
+      if (items.length >= limit) break;
+    }
+    const mayHaveMore = links.length > 0 && (items.length >= limit || links.length >= scanLimit);
+    return { category, items, nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null };
+  }
+
+  async getDocumentTemplates(input: {
+    readonly accountId?: string | null;
+    readonly pageId?: string;
+  }): Promise<WikiDocumentTemplateSummary[]> {
+    let spaceId: bigint | null = null;
+    if (input.pageId) {
+      const page = await this.prisma.wikiPage.findUnique({ where: { id: this.parseBigIntId(input.pageId, 'pageId') } });
+      if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+      await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+      spaceId = page.spaceId;
+    }
+    const profile = input.accountId
+      ? await this.prisma.wikiProfile.findUnique({ where: { accountId: input.accountId }, select: { id: true } })
+      : null;
+    const templates = await this.prisma.documentTemplate.findMany({
+      where: {
+        status: 'active',
+        OR: [
+          { templateScope: 'global', spaceId: null },
+          ...(spaceId ? [{ templateScope: 'space', spaceId }] : []),
+          ...(profile ? [{ templateScope: 'user', createdBy: profile.id }] : [])
+        ]
+      },
+      orderBy: [{ templateScope: 'asc' }, { title: 'asc' }, { id: 'asc' }],
+      take: 80
+    });
+    return templates.map((template) => ({
+      id: template.id.toString(),
+      key: template.templateKey,
+      title: template.title,
+      description: template.description,
+      scope: template.templateScope,
+      targetArea: template.targetArea,
+      defaultCategory: template.defaultCategory,
+      contentRaw: template.contentRaw
+    }));
   }
 
   async getContributions(input: {
@@ -1077,7 +1211,7 @@ export class WikiReadService {
       revision
     });
     const parsed = parseMarkup(revision.contentRaw);
-    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links).catch(() => undefined);
+    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links, parsed.categories).catch(() => undefined);
     if (parsed.redirectTarget && options.followRedirects) {
       const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
       const redirected = await this.getPageInternal(target.namespace, target.title, accountId, {

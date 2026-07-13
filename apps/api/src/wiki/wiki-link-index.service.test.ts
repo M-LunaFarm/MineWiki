@@ -25,13 +25,14 @@ function createStore(namespaceCode: string, localPath: string) {
 
 test('link index normalizes and deduplicates generic wiki targets', async () => {
   const { store, calls } = createStore('main', '대문');
-  await new WikiLinkIndexService().replaceForRevision(store, 10n, 20n, ['문서 A', '문서 A', 'server:서버/규칙']);
+  await new WikiLinkIndexService().replaceForRevision(store, 10n, 20n, ['문서 A', '문서 A', 'server:서버/규칙'], ['가이드', '가이드']);
 
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.deepEqual(
     calls.map((item) => [item.targetNamespaceCode, item.targetSlug]),
-    [['main', '문서_A'], ['server', '서버/규칙']]
+    [['main', '문서_A'], ['server', '서버/규칙'], ['category', '가이드']]
   );
+  assert.equal(calls.at(-1)?.linkType, 'category');
   assert.ok(calls.every((item) => item.sourceRevisionId === 20n));
 });
 

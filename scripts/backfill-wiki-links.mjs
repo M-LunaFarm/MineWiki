@@ -14,6 +14,7 @@ const batchSize = 100;
 let cursor;
 let indexedPages = 0;
 let indexedLinks = 0;
+let indexedCategories = 0;
 
 try {
   const namespaces = await prisma.wikiNamespace.findMany({ select: { id: true, code: true } });
@@ -41,7 +42,9 @@ try {
       const revision = revisionByPage.get(page.id);
       const namespaceCode = namespaceById.get(page.namespaceId);
       if (!revision || !namespaceCode) continue;
-      const links = normalizeLinks(namespaceCode, page.localPath, parseMarkup(revision.contentRaw).links);
+      const parsed = parseMarkup(revision.contentRaw);
+      const links = normalizeLinks(namespaceCode, page.localPath, parsed.links);
+      const categories = normalizeCategories(parsed.categories);
       await prisma.$transaction(async (tx) => {
         await tx.wikiPageLink.deleteMany({ where: { sourcePageId: page.id } });
         if (links.length > 0) {
@@ -57,15 +60,33 @@ try {
             skipDuplicates: true
           });
         }
+        if (categories.length > 0) {
+          await tx.wikiPageLink.createMany({
+            data: categories.map((category) => ({
+              sourcePageId: page.id,
+              sourceRevisionId: revision.id,
+              targetNamespaceCode: 'category',
+              targetSlug: category,
+              linkType: 'category',
+              createdAt: new Date()
+            })),
+            skipDuplicates: true
+          });
+        }
       });
       indexedPages += 1;
       indexedLinks += links.length;
+      indexedCategories += categories.length;
     }
     cursor = pages.at(-1).id;
   }
-  process.stdout.write(`Indexed ${indexedLinks} links from ${indexedPages} current wiki pages.\n`);
+  process.stdout.write(`Indexed ${indexedLinks} links and ${indexedCategories} categories from ${indexedPages} current wiki pages.\n`);
 } finally {
   await prisma.$disconnect();
+}
+
+function normalizeCategories(categories) {
+  return [...new Set(categories.map((category) => slugifyTitle(category)).filter((category) => category && category.length <= 255))];
 }
 
 function normalizeLinks(namespaceCode, localPath, targets) {

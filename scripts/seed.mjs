@@ -129,6 +129,83 @@ const siteSettings = [
   ['support.enabled', true, 'Whether support ticket features are enabled'],
 ];
 
+const documentTemplates = [
+  {
+    key: 'guide', title: '가이드 문서', description: '개요, 준비물, 절차, 관련 문서 구조로 시작합니다.', targetArea: 'any', category: '가이드',
+    content: `{{문서 상태
+|상태=검증 필요
+}}
+
+'''{{문서명}}''' 가이드입니다.
+
+== 개요 ==
+
+== 준비물 ==
+
+== 절차 ==
+
+== 관련 문서 ==`
+  },
+  {
+    key: 'server_rules', title: '서버 규칙', description: '서버 규칙과 제재 기준을 일관된 구조로 정리합니다.', targetArea: 'official', category: '서버 규칙',
+    content: `{{문서 상태
+|상태=검증 필요
+}}
+
+'''{{문서명}}''' 문서입니다.
+
+== 기본 규칙 ==
+
+== 금지 행위 ==
+
+== 제재 기준 ==
+
+== 이의 제기 ==`
+  },
+  {
+    key: 'server_notice', title: '서버 공지', description: '공지 내용, 적용 일시, 영향을 빠짐없이 기록합니다.', targetArea: 'official', category: '서버 공지',
+    content: `{{문서 상태
+|상태=공식
+}}
+
+== 공지 내용 ==
+
+== 적용 일시 ==
+
+== 영향 및 유의사항 ==`
+  },
+  {
+    key: 'mod_device', title: '모드 장치', description: '모드 장치의 제작법과 사용법, 자동화 예시를 작성합니다.', targetArea: 'any', category: '모드 장치',
+    content: `{{문서 상태
+|상태=검증 필요
+}}
+
+'''{{문서명}}'''은 모드에서 제공하는 장치입니다.
+
+== 개요 ==
+
+== 제작 ==
+
+== 사용법 ==
+
+== 자동화 예시 ==`
+  },
+  {
+    key: 'troubleshooting', title: '문제 해결', description: '증상, 원인, 해결 방법, 검증 절차로 시작합니다.', targetArea: 'any', category: '문제 해결',
+    content: `{{문서 상태
+|상태=검증 필요
+}}
+
+== 증상 ==
+
+== 원인 ==
+
+== 해결 방법 ==
+
+== 검증 ==`
+  }
+];
+
 try {
   console.log(`MineWiki seed (${args.dryRun ? 'dry-run' : 'write mode'})`);
   await seed();
@@ -148,8 +225,46 @@ async function seed() {
   await seedRootSpacesAndPages();
   await seedRolesAndPermissions();
   await seedSiteSettings();
+  await seedDocumentTemplates();
   if (args.adminEmail) {
     await grantFirstAdmin(args.adminEmail);
+  }
+}
+
+async function seedDocumentTemplates() {
+  for (const template of documentTemplates) {
+    const existing = await prisma.documentTemplate.findFirst({
+      where: { spaceId: null, templateKey: template.key }
+    });
+    if (args.dryRun) {
+      changes.push(`${existing ? 'would keep' : 'would create'} document template ${template.key}`);
+      continue;
+    }
+    if (existing) {
+      await prisma.documentTemplate.update({
+        where: { id: existing.id },
+        data: { status: 'active', updatedAt: now() }
+      });
+      changes.push(`kept document template ${template.key}`);
+      continue;
+    }
+    await prisma.documentTemplate.create({
+      data: {
+        spaceId: null,
+        templateKey: template.key,
+        title: template.title,
+        description: template.description,
+        templateScope: 'global',
+        targetArea: template.targetArea,
+        defaultCategory: template.category,
+        contentRaw: template.content,
+        createdBy: null,
+        status: 'active',
+        createdAt: now(),
+        updatedAt: now()
+      }
+    });
+    changes.push(`created document template ${template.key}`);
   }
 }
 
@@ -456,6 +571,7 @@ Idempotently seeds:
   - /wiki/대문, /help/대문, /project/대문
   - default roles and permissions
   - default site settings
+  - default document templates
 
 Existing pages are never overwritten. Use --admin-email after creating the first account to grant the owner role.`);
 }

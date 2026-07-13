@@ -508,7 +508,7 @@ export class WikiAdminService {
         createdAt: now
       }
     });
-    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links);
+    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links, parsed.categories);
     await this.prisma.wikiPage.update({
       where: { id: page.id },
       data: {

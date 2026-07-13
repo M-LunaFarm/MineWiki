@@ -171,6 +171,31 @@ export interface WikiSpecialDocumentResponse {
   }>;
 }
 
+export interface WikiCategoryResponse {
+  readonly category: string;
+  readonly items: ReadonlyArray<{
+    readonly id: string;
+    readonly pageId: string;
+    readonly namespace: string;
+    readonly title: string;
+    readonly displayTitle: string;
+    readonly routePath: string;
+    readonly updatedAt: string;
+  }>;
+  readonly nextCursor: string | null;
+}
+
+export interface WikiDocumentTemplateSummary {
+  readonly id: string;
+  readonly key: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly scope: string;
+  readonly targetArea: string;
+  readonly defaultCategory: string | null;
+  readonly contentRaw: string;
+}
+
 export interface WikiBlameResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -924,4 +949,11 @@ export async function listWikiFiles(input: {
     throw new Error(body?.message ?? 'Failed to list wiki files.');
   }
   return response.json();
+}
+
+export async function listWikiDocumentTemplates(pageId?: string): Promise<WikiDocumentTemplateSummary[]> {
+  const params = new URLSearchParams();
+  if (pageId) params.set('pageId', pageId);
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return readWikiBrowser<WikiDocumentTemplateSummary[]>(`/v1/wiki/templates${suffix}`);
 }

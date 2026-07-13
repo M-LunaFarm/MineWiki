@@ -46,6 +46,15 @@ test('parses links, categories, components, and safe HTML', () => {
   assert.equal(html.includes('class="wiki-link missing"'), true);
 });
 
+test('extracts inline categories without rendering them as document links', () => {
+  const parsed = parseMarkup('본문 끝 [[분류:가이드|정렬 키]] [[분류:초보자]]');
+
+  assert.deepEqual(parsed.categories, ['가이드', '초보자']);
+  assert.deepEqual(parsed.links, []);
+  assert.equal(renderDocument(parsed.ast).includes('분류:'), false);
+  assert.match(renderDocument(parsed.ast), /본문 끝/);
+});
+
 test('resolves unqualified links inside a server subwiki', () => {
   const parsed = parseMarkup('[[규칙]] · [[도움말:문법]]');
   const html = renderDocument(parsed.ast, {

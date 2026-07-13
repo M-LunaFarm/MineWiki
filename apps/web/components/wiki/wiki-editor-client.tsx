@@ -3,17 +3,19 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
-import { AlertTriangle, Eye, FileImage, ImagePlus, Loader2, Save } from 'lucide-react';
+import { AlertTriangle, Eye, FileImage, ImagePlus, LayoutTemplate, Loader2, Save } from 'lucide-react';
 import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
 import {
   fetchWikiRevision,
   createWikiEditRequest,
   listWikiFiles,
+  listWikiDocumentTemplates,
   previewWikiMarkup,
   saveWikiPage,
   uploadWikiImage,
   type UploadedFileMetadata,
+  type WikiDocumentTemplateSummary,
   type WikiPageResponse
 } from '../../lib/wiki-api';
 
@@ -39,6 +41,9 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [fileSearch, setFileSearch] = useState('');
   const [wikiFiles, setWikiFiles] = useState<UploadedFileMetadata[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [templates, setTemplates] = useState<WikiDocumentTemplateSummary[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [loadingRevision, setLoadingRevision] = useState(Boolean(page));
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
@@ -77,6 +82,25 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       cancelled = true;
     };
   }, [page]);
+
+  useEffect(() => {
+    if (!account || page) return;
+    let cancelled = false;
+    setLoadingTemplates(true);
+    listWikiDocumentTemplates()
+      .then((items) => {
+        if (cancelled) return;
+        setTemplates(items);
+        setSelectedTemplateId(items[0]?.id ?? '');
+      })
+      .catch((error) => {
+        if (!cancelled) setFeedback(error instanceof Error ? error.message : '문서 양식을 불러오지 못했습니다.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingTemplates(false);
+      });
+    return () => { cancelled = true; };
+  }, [account, page]);
 
   const canSubmit = useMemo(() => {
     return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0);
@@ -125,6 +149,20 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
         setFeedback(`${message} 충돌이 발생했다면 최신 리비전을 다시 불러온 뒤 재시도하세요.`);
       }
     });
+  }
+
+  function applyTemplate() {
+    const template = templates.find((item) => item.id === selectedTemplateId);
+    if (!template) return;
+    if (contentRaw.trim() && !window.confirm('작성 중인 본문을 선택한 문서 양식으로 바꿀까요?')) return;
+    let next = template.contentRaw.replaceAll('{{문서명}}', title);
+    if (template.defaultCategory && !next.includes(`[[분류:${template.defaultCategory}`)) {
+      next = `${next.trimEnd()}\n\n[[분류:${template.defaultCategory}]]\n`;
+    }
+    setContentRaw(next);
+    setEditSummary((current) => current || `${template.title}으로 초안 작성`);
+    setBlockingErrors([]);
+    setFeedback(`${template.title}을 적용했습니다. 저장 전에 내용을 확인하세요.`);
   }
 
   function submitForReview() {
@@ -363,6 +401,21 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
         </section>
 
         <aside className="space-y-4">
+          {!page ? (
+            <section className="surface-flat p-4">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><LayoutTemplate className="size-4 text-emerald-300" /> 문서 양식</h2>
+              <p className="mt-2 text-xs leading-5 text-slate-500">빈 문서에서 검증된 기본 구조로 시작합니다.</p>
+              {loadingTemplates ? <p className="mt-4 flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중</p> : templates.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  <select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)} className="h-11 w-full rounded-lg border border-white/10 bg-[#0d1219] px-3 text-sm text-white" aria-label="문서 양식 선택">
+                    {templates.map((template) => <option key={template.id} value={template.id}>{template.title}</option>)}
+                  </select>
+                  <p className="min-h-10 text-xs leading-5 text-slate-400">{templates.find((template) => template.id === selectedTemplateId)?.description ?? '기본 문서 양식'}</p>
+                  <button type="button" onClick={applyTemplate} disabled={!selectedTemplateId || saving} className="btn-secondary h-11 w-full">양식 적용</button>
+                </div>
+              ) : <p className="mt-4 text-sm text-slate-500">사용 가능한 문서 양식이 없습니다.</p>}
+            </section>
+          ) : null}
           <section className="surface-flat p-4">
             <h2 className="text-sm font-semibold text-white">저장 기준</h2>
             <dl className="mt-3 space-y-2 text-sm text-slate-300">
