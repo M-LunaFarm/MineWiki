@@ -874,8 +874,7 @@ export class WikiReadService {
         pageType: { not: 'redirect' },
         currentRevisionId: { not: null }
       },
-      orderBy: [{ updatedAt: 'desc' }],
-      take: 2000
+      orderBy: [{ updatedAt: 'desc' }]
     });
     const visiblePages: typeof pages = [];
     for (const page of pages) {
@@ -928,8 +927,7 @@ export class WikiReadService {
     const links = visiblePageIds.size > 0
       ? await this.prisma.wikiPageLink.findMany({
           where: { sourcePageId: { in: [...visiblePageIds] } },
-          select: { sourcePageId: true, targetNamespaceCode: true, targetSlug: true },
-          take: 20_000
+          select: { sourcePageId: true, targetNamespaceCode: true, targetSlug: true }
         })
       : [];
     if (type === 'wanted') {
