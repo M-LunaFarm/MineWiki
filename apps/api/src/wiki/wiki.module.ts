@@ -12,11 +12,13 @@ import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
+import { WikiWatchController } from './wiki-watch.controller';
+import { WikiWatchService } from './wiki-watch.service';
 
 @Module({
   imports: [SessionModule, EventsModule],
-  controllers: [WikiController, WikiAdminController, WikiDiscussionController],
-  providers: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiDiscussionService, WikiReadService, WikiEditService],
+  controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiWatchController],
+  providers: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiDiscussionService, WikiWatchService, WikiReadService, WikiEditService],
   exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}

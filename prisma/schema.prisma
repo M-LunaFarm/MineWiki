@@ -1131,6 +1131,20 @@ model WikiDiscussionComment {
   @@map("wiki_discussion_comments")
 }
 
+model WikiPageWatch {
+  id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  profileId          BigInt    @map("profile_id") @db.UnsignedBigInt
+  pageId             BigInt    @map("page_id") @db.UnsignedBigInt
+  lastSeenRevisionId BigInt?   @map("last_seen_revision_id") @db.UnsignedBigInt
+  createdAt          DateTime  @map("created_at")
+  updatedAt          DateTime  @map("updated_at")
+
+  @@unique([profileId, pageId], map: "uk_wiki_page_watches_profile_page")
+  @@index([profileId, updatedAt], map: "idx_wiki_page_watches_profile")
+  @@index([pageId], map: "idx_wiki_page_watches_page")
+  @@map("wiki_page_watches")
+}
+
 model WikiRecentChange {
   id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   pageId        BigInt?  @map("page_id") @db.UnsignedBigInt

@@ -205,6 +205,19 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   }>;
 }
 
+export interface WikiWatchStatus {
+  readonly watched: boolean;
+  readonly unread: boolean;
+}
+
+export interface WikiWatchlistItem extends WikiWatchStatus {
+  readonly pageId: string;
+  readonly title: string;
+  readonly namespace: string;
+  readonly routePath: string;
+  readonly updatedAt: string;
+}
+
 export interface WikiAdminRecentChange {
   readonly id: string;
   readonly pageId: string | null;
@@ -355,6 +368,26 @@ export async function setWikiThreadStatus(input: { threadId: string; status: 'op
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/status`, 'PATCH', {
     status: input.status
   });
+}
+
+export async function fetchWikiWatchStatus(pageId: string): Promise<WikiWatchStatus> {
+  return readWikiBrowser<WikiWatchStatus>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/watch`);
+}
+
+export async function setWikiPageWatched(pageId: string, watched: boolean): Promise<WikiWatchStatus> {
+  return mutateWikiBrowser<WikiWatchStatus>(
+    `/v1/wiki/pages/${encodeURIComponent(pageId)}/watch`,
+    watched ? 'PUT' : 'DELETE',
+    {}
+  );
+}
+
+export async function markWikiPageWatchRead(pageId: string): Promise<WikiWatchStatus> {
+  return mutateWikiBrowser<WikiWatchStatus>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/watch/read`, 'POST', {});
+}
+
+export async function fetchWikiWatchlist(): Promise<WikiWatchlistItem[]> {
+  return readWikiBrowser<WikiWatchlistItem[]>('/v1/wiki/watchlist');
 }
 
 async function readWikiBrowser<T>(path: string): Promise<T> {

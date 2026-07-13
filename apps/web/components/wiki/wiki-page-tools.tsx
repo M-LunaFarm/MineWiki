@@ -5,6 +5,7 @@ import { useState, type FormEvent } from 'react';
 import { ArchiveRestore, Code2, FolderPen, Link2, Loader2, MessageSquareText, Trash2 } from 'lucide-react';
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
+import { WikiWatchButton } from './wiki-watch-button';
 
 interface WikiPageToolsProps {
   readonly pageId: string;
@@ -66,12 +67,14 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
     <section className="surface-flat p-4">
       <h2 className="text-sm font-semibold text-white">문서 도구</h2>
       <div className="mt-3 flex flex-wrap gap-2">
+        <WikiWatchButton pageId={pageId} routePath={routePath} />
         <Link
           href={rawHref}
           className="chip chip-muted inline-flex items-center gap-1.5"
         >
           <Code2 className="size-3.5" /> 원문
         </Link>
+        {account ? <Link href="/wiki/watchlist" className="chip chip-muted inline-flex items-center gap-1.5"><ArchiveRestore className="size-3.5" /> 관심 목록</Link> : null}
         <Link
           href={backlinksHref}
           className="chip chip-muted inline-flex items-center gap-1.5"
