@@ -5,7 +5,9 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { PrismaClient } = require('@prisma/client');
-const { parseLinkTarget, parseMarkup, slugifyTitle } = require('@minewiki/wiki-core');
+// Root scripts are not workspace package consumers, so resolve the artifact that
+// the package command builds instead of relying on an app-local pnpm symlink.
+const { parseLinkTarget, parseMarkup, slugifyTitle } = require('../packages/wiki-core/dist/index.js');
 
 const prisma = new PrismaClient();
 const batchSize = 100;
