@@ -5,7 +5,7 @@ import { WikiArticleView } from './wiki-article-view';
 import { ServerWikiArticleView } from './server-wiki-article-view';
 
 interface WikiRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'help' | 'project' | 'file';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'file';
   readonly segments?: string[];
 }
 

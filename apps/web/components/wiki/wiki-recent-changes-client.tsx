@@ -64,7 +64,7 @@ function changeTypeLabel(value: string): string {
 }
 
 function namespaceLabel(value: string): string {
-  return ({ main: '일반', server: '서버', mod: '모드', modpack: '모드팩', project: '프로젝트', dev: '개발', help: '도움말', file: '파일', template: '틀' } as Record<string, string>)[value] ?? value;
+  return ({ main: '일반', server: '서버', mod: '모드', modpack: '모드팩', guide: '가이드', data: '데이터', project: '프로젝트', dev: '개발', help: '도움말', file: '파일', template: '틀' } as Record<string, string>)[value] ?? value;
 }
 
 function formatDate(value: string): string {

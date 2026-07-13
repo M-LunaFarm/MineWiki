@@ -22,7 +22,10 @@ test('resolves canonical wiki route mappings', () => {
   assert.deepEqual(resolveWikiPath('/mod/JEI'), { namespace: 'mod', title: 'JEI', slug: 'JEI' });
   assert.deepEqual(resolveWikiPath('/server/luna'), { namespace: 'server', title: 'luna', slug: 'luna' });
   assert.deepEqual(resolveWikiPath('/dev/API'), { namespace: 'dev', title: 'API', slug: 'API' });
+  assert.deepEqual(resolveWikiPath('/wiki/가이드/서버 접속'), { namespace: 'guide', title: '서버 접속', slug: '서버_접속' });
+  assert.deepEqual(resolveWikiPath('/guide/서버 접속'), { namespace: 'guide', title: '서버 접속', slug: '서버_접속' });
   assert.equal(wikiUrl('server', 'luna'), '/server/luna');
+  assert.equal(wikiUrl('guide', '서버 접속'), '/guide/%EC%84%9C%EB%B2%84_%EC%A0%91%EC%86%8D');
 });
 
 test('parses links, categories, components, and safe HTML', () => {

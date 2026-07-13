@@ -49,6 +49,11 @@ export function resolveWikiPath(path: string) {
   const clean = path.replace(/^\/+|\/+$/g, '');
   const [head, ...rest] = clean.split('/');
   if (head === 'wiki') {
+    const nested = prefixToNamespace.find(([prefix]) => prefix === rest[0]);
+    if (nested) {
+      const titlePath = rest.slice(1).join('/');
+      return { namespace: nested[1], title: normalizeTitle(titlePath), slug: slugifyTitle(titlePath) };
+    }
     const titlePath = rest.join('/');
     return { namespace: 'main' as NamespaceCode, title: normalizeTitle(titlePath), slug: slugifyTitle(titlePath) };
   }
@@ -71,6 +76,9 @@ export function wikiUrl(namespace: NamespaceCode, title: string) {
   if (namespace === 'dev') return `/dev/${encodedTitle}`;
   if (namespace === 'help') return `/help/${encodedTitle}`;
   if (namespace === 'project') return `/project/${encodedTitle}`;
+  if (namespace === 'guide') return `/guide/${encodedTitle}`;
+  if (namespace === 'data') return `/data/${encodedTitle}`;
+  if (namespace === 'template') return `/template/${encodedTitle}`;
   const spec = namespaceSpecs.find((item) => item.code === namespace) ?? namespaceSpecs[0];
   return `${encodePathPrefix(spec.pathPrefix)}/${encodedTitle}`;
 }

@@ -4,7 +4,7 @@ import { WikiEditorClient } from './wiki-editor-client';
 import { ServerWikiWorkspace } from './server-wiki-workspace';
 
 interface WikiEditRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'help' | 'project' | 'file';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'file';
   readonly segments?: string[];
 }
 
@@ -14,8 +14,11 @@ const namespaceByPrefix = {
   modpack: 'modpack',
   server: 'server',
   dev: 'dev',
+  guide: 'guide',
+  data: 'data',
   help: 'help',
   project: 'project',
+  template: 'template',
   file: 'file'
 } as const;
 
