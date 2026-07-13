@@ -22,6 +22,10 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
   const [confirmation, setConfirmation] = useState('');
   const [working, setWorking] = useState<'move' | 'delete' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const isServerWiki = routePath === '/server' || routePath.startsWith('/server/');
+  const rawHref = isServerWiki ? `${routePath}/raw` : `/wiki/raw/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const backlinksHref = isServerWiki ? `${routePath}/backlinks` : `/wiki/backlinks/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const discussionHref = isServerWiki ? `${routePath}/discuss` : `/wiki/discuss/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
 
   async function move(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -63,19 +67,19 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
       <h2 className="text-sm font-semibold text-white">문서 도구</h2>
       <div className="mt-3 flex flex-wrap gap-2">
         <Link
-          href={`/wiki/raw/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`}
+          href={rawHref}
           className="chip chip-muted inline-flex items-center gap-1.5"
         >
           <Code2 className="size-3.5" /> 원문
         </Link>
         <Link
-          href={`/wiki/backlinks/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`}
+          href={backlinksHref}
           className="chip chip-muted inline-flex items-center gap-1.5"
         >
           <Link2 className="size-3.5" /> 역링크
         </Link>
         <Link
-          href={`/wiki/discuss/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`}
+          href={discussionHref}
           className="chip chip-muted inline-flex items-center gap-1.5"
         >
           <MessageSquareText className="size-3.5" /> 토론

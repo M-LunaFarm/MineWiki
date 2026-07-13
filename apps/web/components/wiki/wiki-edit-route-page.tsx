@@ -1,6 +1,7 @@
 import { fetchWikiPageByPath } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiEditorClient } from './wiki-editor-client';
+import { ServerWikiWorkspace } from './server-wiki-workspace';
 
 interface WikiEditRoutePageProps {
   readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'help' | 'project' | 'file';
@@ -23,7 +24,7 @@ export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoute
   const routePath = buildWikiRoutePath(prefix, segments);
   const page = await fetchWikiPageByPath(routePath).catch(() => null);
 
-  return (
+  const editor = (
     <WikiEditorClient
       page={page}
       namespace={namespaceByPrefix[prefix]}
@@ -31,4 +32,8 @@ export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoute
       routePath={routePath}
     />
   );
+  if (prefix === 'server' && page?.serverWiki) {
+    return <ServerWikiWorkspace page={page} section="편집">{editor}</ServerWikiWorkspace>;
+  }
+  return editor;
 }

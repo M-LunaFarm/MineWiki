@@ -46,7 +46,7 @@ export function WikiBacklinksClient({ pageId, returnTo }: { readonly pageId: str
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
         <Link href={returnTo} className="hover:text-emerald-200">문서로 돌아가기</Link>
         <span>/</span>
@@ -70,6 +70,6 @@ export function WikiBacklinksClient({ pageId, returnTo }: { readonly pageId: str
       {error ? <p role="alert" className="text-sm text-red-200">{error}</p> : null}
       {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}
       {cursor && !loading ? <button type="button" onClick={() => void loadMore()} className="btn-secondary self-start">더 보기</button> : null}
-    </main>
+    </div>
   );
 }

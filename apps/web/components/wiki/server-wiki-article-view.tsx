@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import {
   ArrowLeft,
-  BookOpen,
   ChevronLeft,
   ChevronRight,
   List,
@@ -12,8 +11,7 @@ import {
 } from 'lucide-react';
 
 import type { WikiPageResponse } from '../../lib/wiki-api';
-import { ServerWikiCreateLink } from './server-wiki-create-link';
-import { ServerWikiNavigation } from './server-wiki-navigation';
+import { ServerWikiSidebar } from './server-wiki-sidebar';
 import { WikiPageTools } from './wiki-page-tools';
 
 interface ServerWikiArticleViewProps {
@@ -45,48 +43,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
   return (
     <main className="server-wiki-layout min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
       <div className={`mx-auto grid w-full max-w-[1600px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
-        <aside className="min-w-0 border-white/10 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:border-r">
-          <div className="border-b border-white/10 px-6 py-7">
-            <div className="flex items-center gap-3">
-              {isHandbook ? <span className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-2 text-emerald-300"><BookOpen className="size-5" /></span> : null}
-              <p className="font-display text-lg font-bold text-white">{wiki.name}{isHandbook ? ` ${page.displayTitle.endsWith('대문') ? '대문' : ''}` : ''}</p>
-            </div>
-            <p className="mt-1 text-sm text-slate-500">서버 핸드북</p>
-            <div className="mt-4 flex items-center justify-between gap-3 text-xs">
-              <span className={wiki.isOnline ? 'text-emerald-300' : 'text-slate-500'}>
-                <span className={`mr-2 inline-block size-2 rounded-full ${wiki.isOnline ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-                {wiki.isOnline ? '온라인' : wiki.isOnline === false ? '오프라인' : '확인 중'}
-              </span>
-              <span className="text-slate-400">
-                {wiki.playersOnline !== null && wiki.playersMax !== null
-                  ? `${wiki.playersOnline} / ${wiki.playersMax}`
-                  : wiki.supportedVersions ?? wiki.edition}
-              </span>
-            </div>
-          </div>
-
-          <nav className="px-4 py-3 lg:py-5" aria-label={`${wiki.name} 위키 문서`}>
-            <div className="hidden items-center gap-2 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 lg:flex">
-              <BookOpen className="size-4" />
-              서버 핸드북
-            </div>
-            <ServerWikiNavigation items={wiki.navigation} />
-            <div className="mt-3">
-              <ServerWikiCreateLink serverSlug={wiki.slug} />
-            </div>
-            {isBrand ? <div className="mt-5 hidden space-y-4 border-l border-white/10 pl-5 text-sm text-slate-500 lg:block"><div><p className="font-semibold text-slate-300">서버 정보</p><ul className="mt-2 space-y-2 text-xs"><li>주소 · {address ?? '정보 없음'}</li><li>에디션 · {wiki.edition}</li><li>지원 버전 · {wiki.supportedVersions ?? '정보 없음'}</li></ul></div><div><p className="font-semibold text-slate-300">참여 안내</p></div></div> : null}
-          </nav>
-
-          <div className="hidden px-6 pb-6 lg:absolute lg:inset-x-0 lg:bottom-0 lg:block">
-            <Link
-              href={page.serverDirectoryPath ?? '/servers'}
-              className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-400 transition hover:border-white/20 hover:text-white"
-            >
-              <ArrowLeft className="size-4" />
-              서버 목록으로 돌아가기
-            </Link>
-          </div>
-        </aside>
+        <ServerWikiSidebar page={page} />
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-500">

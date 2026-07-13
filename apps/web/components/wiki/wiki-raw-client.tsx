@@ -24,7 +24,7 @@ export function WikiRawClient({ pageId, returnTo }: { readonly pageId: string; r
   }, [pageId]);
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
         <Link href={returnTo} className="hover:text-emerald-200">문서로 돌아가기</Link>
         <span>/</span>
@@ -41,6 +41,6 @@ export function WikiRawClient({ pageId, returnTo }: { readonly pageId: string; r
           <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-200">{revision.contentRaw}</pre>
         </section>
       ) : null}
-    </main>
+    </div>
   );
 }

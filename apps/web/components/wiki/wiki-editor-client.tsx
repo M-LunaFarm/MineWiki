@@ -175,15 +175,15 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
 
   if (loading) {
     return (
-      <main className="mx-auto flex min-h-[50vh] max-w-4xl items-center justify-center px-4">
+      <div className="mx-auto flex min-h-[50vh] max-w-4xl items-center justify-center px-4">
         <Loader2 className="h-6 w-6 animate-spin text-emerald-300" />
-      </main>
+      </div>
     );
   }
 
   if (!account) {
     return (
-      <main className="mx-auto flex min-h-[50vh] max-w-3xl flex-col justify-center px-4 py-12">
+      <div className="mx-auto flex min-h-[50vh] max-w-3xl flex-col justify-center px-4 py-12">
         <div className="surface-flat p-6">
           <h1 className="text-2xl font-bold text-white">로그인이 필요합니다</h1>
           <p className="mt-3 text-sm text-slate-300">문서 편집은 MineWiki 계정으로 로그인한 사용자만 사용할 수 있습니다.</p>
@@ -191,12 +191,12 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
             로그인
           </Link>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <header className="border-b border-white/10 pb-5">
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
           <Link href={routePath} className="hover:text-emerald-200">
@@ -376,7 +376,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
           </section>
         </aside>
       </div>
-    </main>
+    </div>
   );
 }
 
