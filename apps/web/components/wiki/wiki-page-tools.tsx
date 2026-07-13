@@ -6,6 +6,7 @@ import { ArchiveRestore, Code2, Compass, FilePenLine, FolderPen, GitCommitHorizo
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { WikiWatchButton } from './wiki-watch-button';
+import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 
 interface WikiPageToolsProps {
   readonly pageId: string;
@@ -24,11 +25,11 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
   const [working, setWorking] = useState<'move' | 'delete' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const isServerWiki = routePath === '/server' || routePath.startsWith('/server/');
-  const rawHref = isServerWiki ? `${routePath}/raw` : `/wiki/raw/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
-  const backlinksHref = isServerWiki ? `${routePath}/backlinks` : `/wiki/backlinks/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
-  const discussionHref = isServerWiki ? `${routePath}/discuss` : `/wiki/discuss/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
-  const requestsHref = isServerWiki ? `${routePath}/requests` : `/wiki/edit-requests/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
-  const blameHref = isServerWiki ? `${routePath}/blame` : `/wiki/blame/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const rawHref = isServerWiki ? buildServerWikiToolPath(routePath, 'raw') : `/wiki/raw/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const backlinksHref = isServerWiki ? buildServerWikiToolPath(routePath, 'backlinks') : `/wiki/backlinks/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const discussionHref = isServerWiki ? buildServerWikiToolPath(routePath, 'discuss') : `/wiki/discuss/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const requestsHref = isServerWiki ? buildServerWikiToolPath(routePath, 'requests') : `/wiki/edit-requests/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const blameHref = isServerWiki ? buildServerWikiToolPath(routePath, 'blame') : `/wiki/blame/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
 
   async function move(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { AlertTriangle, Eye, FileImage, ImagePlus, Loader2, Save } from 'lucide-react';
 import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
@@ -44,7 +45,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
 
   const baseRevisionId = page?.revision.id;
   const heading = page ? `${page.displayTitle} 편집` : `${title} 새 문서 작성`;
-  const loginHref = `/login?returnTo=${encodeURIComponent(`${routePath}/edit`)}`;
+  const editorPath = routePath.startsWith('/server/') ? buildServerWikiToolPath(routePath, 'edit') : `${routePath}/edit`;
+  const loginHref = `/login?returnTo=${encodeURIComponent(editorPath)}`;
 
   useEffect(() => {
     let cancelled = false;

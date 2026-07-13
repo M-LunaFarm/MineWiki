@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { FilePlus2 } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
+import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 
 export function ServerWikiCreateLink({ serverSlug }: { readonly serverSlug: string }) {
   const router = useRouter();
@@ -12,7 +13,8 @@ export function ServerWikiCreateLink({ serverSlug }: { readonly serverSlug: stri
     event.preventDefault();
     const normalized = title.trim().replace(/\s+/g, '_');
     if (!normalized) return;
-    router.push(`/server/${encodeURIComponent(serverSlug)}/${encodeURIComponent(normalized)}/edit`);
+    const routePath = `/server/${encodeURIComponent(serverSlug)}/${encodeURIComponent(normalized)}`;
+    router.push(buildServerWikiToolPath(routePath, 'edit'));
   }
 
   return (

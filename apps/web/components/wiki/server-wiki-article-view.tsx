@@ -13,6 +13,7 @@ import {
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
 import { WikiPageTools } from './wiki-page-tools';
+import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 
 interface ServerWikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -61,14 +62,14 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
               </h1>
               <div className="flex flex-wrap items-center gap-2">
                 <Link
-                  href={`${routePath}/history`}
+                  href={buildServerWikiToolPath(routePath, 'history')}
                   className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-emerald-300/40 hover:text-emerald-200"
                 >
                   <History className="size-4" />
                   역사
                 </Link>
                 <Link
-                  href={`${routePath}/edit`}
+                  href={buildServerWikiToolPath(routePath, 'edit')}
                   className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-emerald-300/40 hover:text-emerald-200"
                 >
                   <PencilLine className="size-4" />

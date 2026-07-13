@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
 import type { WikiPermissionService } from './wiki-permission.service';
-import { buildServerWikiPagePath, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
+import { buildServerWikiNavigation, buildServerWikiPagePath, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
 
 test('server wiki navigation removes the duplicated space slug', () => {
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main'), '/server/luna-main');
@@ -16,6 +16,19 @@ test('server wiki navigation derives a stable document tree depth', () => {
   assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main/시작하기'), 0);
   assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main/가이드/설치'), 1);
   assert.equal(serverWikiNavigationDepth('luna-main', '운영/권한/ACL'), 2);
+});
+
+test('server wiki navigation keeps every document beyond the former 100 item cap', () => {
+  const pages = Array.from({ length: 150 }, (_, index) => ({
+    id: BigInt(index + 1),
+    localPath: index === 0 ? 'luna' : `luna/guide/doc-${String(index).padStart(3, '0')}`,
+    displayTitle: `문서 ${index}`,
+  }));
+  const navigation = buildServerWikiNavigation('luna', pages, 150n);
+  assert.equal(navigation.length, 150);
+  assert.equal(navigation[0]?.path, '/server/luna');
+  assert.equal(navigation[0]?.hasChildren, true);
+  assert.equal(navigation.at(-1)?.current, true);
 });
 
 test('revision history uses a stable revision number cursor beyond the first page', async () => {

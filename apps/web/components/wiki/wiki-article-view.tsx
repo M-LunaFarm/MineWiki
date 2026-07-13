@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { PencilLine, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
+import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
 
 interface WikiArticleViewProps {
@@ -9,6 +10,8 @@ interface WikiArticleViewProps {
 }
 
 export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
+  const editPath = routePath.startsWith('/server/') ? buildServerWikiToolPath(routePath, 'edit') : `${routePath}/edit`;
+  const historyPath = routePath.startsWith('/server/') ? buildServerWikiToolPath(routePath, 'history') : `${routePath}/history`;
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -84,11 +87,11 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
               </div>
             </dl>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Link href={`${routePath}/edit`} className="chip chip-accent inline-flex items-center gap-1.5">
+              <Link href={editPath} className="chip chip-accent inline-flex items-center gap-1.5">
                 <PencilLine className="h-3.5 w-3.5" />
                 편집
               </Link>
-              <Link href={`${routePath}/history`} className="chip chip-accent">
+              <Link href={historyPath} className="chip chip-accent">
                 역사
               </Link>
               <Link href={`/wiki/revision/${page.revision.id}`} className="chip chip-muted">
