@@ -66,6 +66,43 @@ test('revision source requires raw ACL while diff requires history ACL', async (
   assert.deepEqual(actions, ['raw', 'history', 'history']);
 });
 
+test('explicit spaces cannot cross namespace boundaries', async () => {
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 2, code: 'server' }; } },
+    wikiSpace: { async findUnique() { return { id: 9n, status: 'active', spaceType: 'basic', rootNamespaceCode: 'main' }; } }
+  } as unknown as PrismaService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, {} as WikiPermissionService);
+  await assert.rejects(
+    edits.createPage(session('account'), { namespace: 'server', title: 'other/규칙', spaceId: '9', contentRaw: '내용' }),
+    /namespace does not belong/
+  );
+});
+
+test('server wiki paths must stay inside the selected server slug', async () => {
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 2, code: 'server' }; } },
+    wikiSpace: { async findUnique() { return { id: 9n, status: 'active', spaceType: 'server_wiki', rootNamespaceCode: 'server' }; } },
+    serverWiki: { async findFirst() { return { slug: 'minewiki' }; } }
+  } as unknown as PrismaService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, {} as WikiPermissionService);
+  await assert.rejects(
+    edits.createPage(session('account'), { namespace: 'server', title: 'other/규칙', spaceId: '9', contentRaw: '내용' }),
+    /does not belong to this server/
+  );
+});
+
+test('request page types cannot override the space invariant', async () => {
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
+    wikiSpace: { async findUnique() { return { id: 9n, status: 'active', spaceType: 'basic', rootNamespaceCode: 'main' }; } }
+  } as unknown as PrismaService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, {} as WikiPermissionService);
+  await assert.rejects(
+    edits.createPage(session('account'), { namespace: 'main', title: '문서', spaceId: '9', pageType: 'server', contentRaw: '내용' }),
+    /Page type must be article/
+  );
+});
+
 if (!hasDatabase) {
   test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});
 } else {

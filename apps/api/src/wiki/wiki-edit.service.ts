@@ -133,6 +133,10 @@ export class WikiEditService {
     }
     const createTarget = await this.resolveCreateTarget(namespaceCode, title, request.spaceId);
     const spaceId = createTarget.spaceId;
+    const requestedPageType = this.cleanOptional(request.pageType);
+    if (requestedPageType && requestedPageType !== createTarget.pageType) {
+      throw new BadRequestException(`Page type must be ${createTarget.pageType} in this wiki space.`);
+    }
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const slug = slugifyTitle(title);
     const now = new Date();
@@ -141,7 +145,7 @@ export class WikiEditService {
       namespaceCode,
       spaceId,
       title,
-      pageType: this.cleanOptional(request.pageType) ?? createTarget.pageType
+      pageType: createTarget.pageType
     });
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -164,7 +168,7 @@ export class WikiEditService {
           slug,
           title,
           displayTitle: this.cleanOptional(request.displayTitle) ?? createTarget.displayTitle,
-          pageType: this.cleanOptional(request.pageType) ?? createTarget.pageType,
+          pageType: createTarget.pageType,
           protectionLevel: 'open',
           status: 'normal',
           createdBy: actor.id,
@@ -228,8 +232,35 @@ export class WikiEditService {
 
   private async resolveCreateTarget(namespaceCode: string, title: string, requestedSpaceId?: string) {
     if (requestedSpaceId) {
+      const spaceId = this.parseBigIntId(requestedSpaceId, 'spaceId');
+      const space = await this.prisma.wikiSpace.findUnique({
+        where: { id: spaceId },
+        select: { id: true, status: true, spaceType: true, rootNamespaceCode: true }
+      });
+      if (!space || space.status !== 'active') {
+        throw new NotFoundException('Active wiki space not found.');
+      }
+      if (space.rootNamespaceCode !== namespaceCode) {
+        throw new BadRequestException('Wiki namespace does not belong to the requested space.');
+      }
+      if (namespaceCode === 'server') {
+        if (space.spaceType !== 'server_wiki') {
+          throw new BadRequestException('Server pages require a server wiki space.');
+        }
+        const serverWiki = await this.prisma.serverWiki.findFirst({
+          where: { spaceId: space.id, status: { not: 'deleted' } },
+          select: { slug: true }
+        });
+        const normalizedTitle = slugifyTitle(title);
+        const serverSlug = serverWiki ? slugifyTitle(serverWiki.slug) : '';
+        if (!serverWiki || (normalizedTitle !== serverSlug && !normalizedTitle.startsWith(`${serverSlug}/`))) {
+          throw new BadRequestException('Server wiki page path does not belong to this server.');
+        }
+      } else if (space.spaceType === 'server_wiki') {
+        throw new BadRequestException('A server wiki space cannot contain another namespace.');
+      }
       return {
-        spaceId: this.parseBigIntId(requestedSpaceId, 'spaceId'),
+        spaceId,
         displayTitle: title.split('/').at(-1) ?? title,
         pageType: namespaceCode === 'server' ? 'server' : 'article',
       };
@@ -241,9 +272,9 @@ export class WikiEditService {
       }
       const serverWiki = await this.prisma.serverWiki.findUnique({
         where: { slug: serverSlug },
-        select: { spaceId: true },
+        select: { spaceId: true, status: true },
       });
-      if (!serverWiki) {
+      if (!serverWiki || serverWiki.status === 'deleted') {
         throw new NotFoundException('Server wiki not found.');
       }
       return {
@@ -905,14 +936,7 @@ export class WikiEditService {
     if (direct) {
       return direct.id;
     }
-    const fallback = await this.prisma.wikiSpace.findFirst({
-      where: { status: 'active' },
-      orderBy: [{ id: 'asc' }]
-    });
-    if (!fallback) {
-      throw new NotFoundException('Wiki space not found.');
-    }
-    return fallback.id;
+    throw new NotFoundException('Active wiki space for namespace not found.');
   }
 
   private async findLatestRevision(tx: Pick<PrismaService, 'wikiPageRevision'>, pageId: bigint) {
