@@ -7,7 +7,7 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
-import { buildServerWikiPagePath } from './wiki-read.service';
+import { buildServerWikiPagePath, buildServerWikiToolPath } from './wiki-read.service';
 
 export interface WikiThreadSummary {
   readonly id: string;
@@ -156,8 +156,8 @@ export class WikiDiscussionService {
         pageTitle: page.displayTitle,
         namespace,
         routePath,
-        discussionHref: namespace === 'server'
-          ? `${routePath}/discuss?thread=${thread.id.toString()}`
+        discussionHref: namespace === 'server' && serverSlug
+          ? `${buildServerWikiToolPath(serverSlug, page.localPath, 'discuss')}?thread=${thread.id.toString()}`
           : `/wiki/discuss/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&thread=${thread.id.toString()}`
       };
     });

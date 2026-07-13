@@ -146,6 +146,28 @@ test('recent discussion cursors fail closed when tampered', async () => {
   await assert.rejects(discussions.listRecent(null, 'not-a-valid-cursor'), BadRequestException);
 });
 
+test('recent server discussions deep-link through the canonical tool route', async () => {
+  const serverPage = { ...page, namespaceId: 2, spaceId: 9n, localPath: 'luna/API/requests', title: 'luna/API/requests' };
+  const store = {
+    wikiDiscussionThread: { async findMany() { return [{ ...thread, pageId: serverPage.id }]; } },
+    wikiPage: { async findMany() { return [serverPage]; } },
+    wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
+    serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna' }]; } },
+    wikiDiscussionComment: { async groupBy() { return [{ threadId: thread.id, _count: { _all: 1 } }]; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async assertCanReadPage() {} } as unknown as WikiPermissionService
+  );
+  const result = await discussions.listRecent(null, undefined, 30);
+  assert.equal(
+    result.items[0]?.discussionHref,
+    '/server/luna/_tools/discuss/API/requests?thread=30'
+  );
+});
+
 test('focused comment windows include the requested comment', async () => {
   let commentWhere: unknown;
   const store = {

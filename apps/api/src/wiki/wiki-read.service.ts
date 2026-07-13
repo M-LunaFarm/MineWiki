@@ -1269,6 +1269,14 @@ export function buildServerWikiPagePath(serverSlug: string, localPath: string): 
   return `/server/${encodedSlug}/${encodedRelative}`;
 }
 
+export function buildServerWikiToolPath(serverSlug: string, localPath: string, tool: string): string {
+  if (!/^[a-z][a-z0-9-]{1,31}$/.test(tool)) throw new BadRequestException('Invalid server wiki tool.');
+  const rootPath = buildServerWikiPagePath(serverSlug, serverSlug);
+  const pagePath = buildServerWikiPagePath(serverSlug, localPath);
+  const relativePath = pagePath.slice(rootPath.length);
+  return `${rootPath}/_tools/${tool}${relativePath}`;
+}
+
 export function serverWikiNavigationDepth(serverSlug: string, localPath: string): number {
   const relativePath = serverWikiRelativePath(serverSlug, localPath);
   return relativePath ? Math.max(0, relativePath.split('/').filter(Boolean).length - 1) : 0;
