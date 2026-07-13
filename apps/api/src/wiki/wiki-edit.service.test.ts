@@ -331,6 +331,47 @@ if (!hasDatabase) {
     }
   });
 
+  test('moving a document tree preserves children and creates redirects for every old path', async () => {
+    const fixture = await createFixture();
+    try {
+      const rootTitle = `가이드_${fixture.unique}`;
+      const childTitle = `${rootTitle}/설치`;
+      const grandchildTitle = `${childTitle}/리눅스`;
+      const root = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code, title: rootTitle, spaceId: fixture.space.id.toString(), contentRaw: '가이드'
+      });
+      await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code, title: childTitle, spaceId: fixture.space.id.toString(), contentRaw: '설치'
+      });
+      await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code, title: grandchildTitle, spaceId: fixture.space.id.toString(), contentRaw: '리눅스'
+      });
+      const nextRoot = `매뉴얼_${fixture.unique}`;
+      await edits.movePage(session(fixture.account.id), root.pageId, { title: nextRoot, leaveRedirect: true });
+
+      const pages = await prisma.wikiPage.findMany({ where: { namespaceId: fixture.namespace.id } });
+      const bySlug = new Map(pages.map((item) => [item.slug, item]));
+      assert.equal(bySlug.get(nextRoot)?.pageType, 'article');
+      assert.equal(bySlug.get(`${nextRoot}/설치`)?.pageType, 'article');
+      assert.equal(bySlug.get(`${nextRoot}/설치/리눅스`)?.pageType, 'article');
+      assert.equal(bySlug.get(rootTitle)?.pageType, 'redirect');
+      assert.equal(bySlug.get(childTitle)?.pageType, 'redirect');
+      assert.equal(bySlug.get(grandchildTitle)?.pageType, 'redirect');
+
+      await assert.rejects(
+        edits.deletePage(session(fixture.account.id), root.pageId, { reason: '트리 삭제 시도' }),
+        /child documents cannot be deleted/
+      );
+    } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id
+      });
+    }
+  });
+
   test('accepting an edit request attributes the revision to its author and the review to its reviewer', async () => {
     const fixture = await createFixture();
     const reviewer = await prisma.account.create({

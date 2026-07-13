@@ -477,42 +477,72 @@ export class WikiEditService {
       if (nextSlug === page.slug) {
         throw new BadRequestException('The destination title is the same as the current title.');
       }
+      if (nextSlug.startsWith(`${page.slug}/`)) {
+        throw new BadRequestException('A wiki page tree cannot be moved inside itself.');
+      }
       await this.assertMoveStaysInSpace(tx, page, nextSlug);
-      const conflict = await tx.wikiPage.findUnique({
+      const subtree = await tx.wikiPage.findMany({
         where: {
-          namespaceId_slug: {
-            namespaceId: page.namespaceId,
-            slug: nextSlug
-          }
+          namespaceId: page.namespaceId,
+          spaceId: page.spaceId,
+          status: { not: 'deleted' },
+          pageType: { not: 'redirect' },
+          OR: [{ id: page.id }, { localPath: { startsWith: `${page.localPath}/` } }]
+        }
+      });
+      const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
+      const moves = subtree.map((item) => {
+        const suffix = item.localPath === page.localPath ? '' : item.localPath.slice(page.localPath.length);
+        return { source: item, slug: `${nextSlug}${suffix}` };
+      });
+      for (const move of moves) {
+        if (move.source.id === page.id) continue;
+        await this.wikiPermissions.assertCanMutatePageAction({ actor: permissionActor, action: 'move', page: move.source, store: tx });
+        await this.wikiPermissions.assertCanCreatePage({
+          actor: permissionActor, namespaceCode: namespace.code, spaceId: page.spaceId,
+          title: move.slug, pageType: move.source.pageType, store: tx
+        });
+      }
+      const conflicts = await tx.wikiPage.findMany({
+        where: {
+          namespaceId: page.namespaceId,
+          slug: { in: moves.map((move) => move.slug) },
+          id: { notIn: moves.map((move) => move.source.id) }
         },
         select: { id: true }
       });
-      if (conflict) {
+      if (conflicts.length > 0) {
         throw new ConflictException('A wiki page already exists at the destination title.');
       }
 
-      const moved = await tx.wikiPage.update({
-        where: { id: page.id },
-        data: {
-          localPath: nextSlug,
-          slug: nextSlug,
-          title: nextTitle,
-          displayTitle: this.cleanOptional(request.displayTitle) ?? nextTitle.split('/').at(-1) ?? nextTitle,
-          updatedAt: now
-        }
-      });
+      let moved = page;
+      for (const move of [...moves].sort((left, right) => right.source.localPath.length - left.source.localPath.length)) {
+        const updated = await tx.wikiPage.update({
+          where: { id: move.source.id },
+          data: {
+            localPath: move.slug,
+            slug: move.slug,
+            title: move.source.id === page.id ? nextTitle : move.slug,
+            displayTitle: move.source.id === page.id
+              ? this.cleanOptional(request.displayTitle) ?? nextTitle.split('/').at(-1) ?? nextTitle
+              : move.source.displayTitle,
+            updatedAt: now
+          }
+        });
+        if (move.source.id === page.id) moved = updated;
+      }
       let redirectPageId: bigint | null = null;
-      if (request.leaveRedirect !== false) {
+      if (request.leaveRedirect !== false) for (const move of moves) {
         const redirect = await tx.wikiPage.create({
           data: {
-            namespaceId: page.namespaceId,
-            spaceId: page.spaceId,
-            localPath: page.localPath,
-            slug: page.slug,
-            title: page.title,
-            displayTitle: page.displayTitle,
+            namespaceId: move.source.namespaceId,
+            spaceId: move.source.spaceId,
+            localPath: move.source.localPath,
+            slug: move.source.slug,
+            title: move.source.title,
+            displayTitle: move.source.displayTitle,
             pageType: 'redirect',
-            protectionLevel: page.protectionLevel,
+            protectionLevel: move.source.protectionLevel,
             status: 'normal',
             createdBy: actor.id,
             createdAt: now,
@@ -523,8 +553,8 @@ export class WikiEditService {
           pageId: redirect.id,
           revisionNo: 1,
           parentRevisionId: null,
-          contentRaw: this.redirectMarkup(namespace.code, nextTitle),
-          editSummary: this.cleanOptional(request.reason) ?? `${page.title} 문서 이동`,
+          contentRaw: this.redirectMarkup(namespace.code, move.source.id === page.id ? nextTitle : move.slug),
+          editSummary: this.cleanOptional(request.reason) ?? `${move.source.title} 문서 이동`,
           isMinor: false,
           actorId: actor.id,
           title: redirect.displayTitle,
@@ -534,19 +564,17 @@ export class WikiEditService {
           where: { id: redirect.id },
           data: { currentRevisionId: redirectRevision.id }
         });
-        redirectPageId = redirect.id;
+        if (move.source.id === page.id) redirectPageId = redirect.id;
       }
-      await this.insertRecentChange(tx, {
-        pageId: moved.id,
-        revisionId: moved.currentRevisionId,
-        actorId: actor.id,
-        changeType: 'move',
-        title: moved.title,
-        namespaceCode: namespace.code,
-        summary: this.cleanOptional(request.reason) ?? `${page.title} -> ${moved.title}`,
-        isMinor: false,
-        createdAt: now
-      });
+      for (const move of moves) {
+        const targetTitle = move.source.id === page.id ? nextTitle : move.slug;
+        await this.insertRecentChange(tx, {
+          pageId: move.source.id, revisionId: move.source.currentRevisionId, actorId: actor.id,
+          changeType: 'move', title: targetTitle, namespaceCode: namespace.code,
+          summary: this.cleanOptional(request.reason) ?? `${move.source.title} -> ${targetTitle}`,
+          isMinor: false, createdAt: now
+        });
+      }
       const latest = await this.findLatestRevision(tx, moved.id);
       if (!latest) {
         throw new NotFoundException('Public wiki revision not found.');
@@ -712,6 +740,17 @@ export class WikiEditService {
           store: tx
         });
         await this.assertPageIsNotSpaceRoot(tx, page, 'delete');
+        const descendants = await tx.wikiPage.count({
+          where: {
+            namespaceId: page.namespaceId,
+            spaceId: page.spaceId,
+            status: { not: 'deleted' },
+            localPath: { startsWith: `${page.localPath}/` }
+          }
+        });
+        if (descendants > 0) {
+          throw new ConflictException('A wiki page with child documents cannot be deleted. Move or delete its children first.');
+        }
       } else {
         await this.wikiPermissions.assertCanRestorePage({ actor: permissionActor, page, store: tx });
       }
