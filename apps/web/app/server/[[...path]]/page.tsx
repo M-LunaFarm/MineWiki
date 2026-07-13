@@ -13,7 +13,7 @@ export default async function ServerWikiPage({ params }: PageProps) {
   const resolvedParams = await params;
   const path = resolvedParams.path ?? [];
   const action = path[path.length - 1];
-  if (action === 'raw' || action === 'backlinks' || action === 'discuss' || action === 'requests') {
+  if (action === 'raw' || action === 'backlinks' || action === 'discuss' || action === 'requests' || action === 'blame') {
     return <ServerWikiToolRoutePage segments={path.slice(0, -1)} tool={action} />;
   }
   if (action === 'edit') {

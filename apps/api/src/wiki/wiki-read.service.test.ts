@@ -54,6 +54,28 @@ test('special wanted documents aggregate unresolved current links', async () => 
   assert.equal(result.items[0]?.value, 2);
 });
 
+test('blame keeps attribution for lines preserved across later revisions', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'doc', slug: 'doc', title: '문서', displayTitle: '문서', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageRevision: {
+      async count() { return 2; },
+      async findMany() { return [
+        { id: 11n, revisionNo: 1, contentRaw: 'alpha\nbeta', createdBy: 1n, createdAt: now },
+        { id: 12n, revisionNo: 2, contentRaw: 'new\nalpha\nbeta', createdBy: 2n, createdAt: new Date('2026-07-13T01:00:00Z') }
+      ]; }
+    },
+    wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'first' }, { id: 2n, displayName: 'second' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {}, async assertCanUsePageAction() {} } as unknown as WikiPermissionService;
+  const result = await new WikiReadService(prisma, permissions).getBlame('1');
+
+  assert.deepEqual(result.lines.map((line) => [line.content, line.revisionNo, line.createdByName]), [
+    ['new', 2, 'second'], ['alpha', 1, 'first'], ['beta', 1, 'first']
+  ]);
+});
+
 test('backlinks expose only links from the current readable source revision', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const target = {

@@ -21,6 +21,7 @@ import {
 } from './wiki-edit.service';
 import {
   WikiReadService,
+  type WikiBlameResponse,
   type WikiBacklinkResponse,
   type WikiContributionResponse,
   type WikiDeletedPageSummary,
@@ -103,6 +104,12 @@ export class WikiController {
       cursor,
       limit
     });
+  }
+
+  @Get('pages/:id/blame')
+  @UseGuards(OptionalSessionGuard)
+  getBlame(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiBlameResponse> {
+    return this.wikiRead.getBlame(pageId, request.sessionPayload?.userId ?? null);
   }
 
   @Get('recent')

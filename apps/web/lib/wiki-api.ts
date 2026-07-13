@@ -155,6 +155,25 @@ export interface WikiSpecialDocumentResponse {
   }>;
 }
 
+export interface WikiBlameResponse {
+  readonly pageId: string;
+  readonly revisionId: string;
+  readonly revisionNo: number;
+  readonly revisionCount: number;
+  readonly truncatedHistory: boolean;
+  readonly lineCount: number;
+  readonly truncatedLines: boolean;
+  readonly lines: ReadonlyArray<{
+    readonly lineNo: number;
+    readonly content: string;
+    readonly revisionId: string;
+    readonly revisionNo: number;
+    readonly createdBy: string | null;
+    readonly createdByName: string;
+    readonly createdAt: string;
+  }>;
+}
+
 export interface WikiBacklinkItem {
   readonly id: string;
   readonly sourcePageId: string;
@@ -373,6 +392,10 @@ export async function fetchWikiBacklinks(pageId: string, cursor?: string): Promi
     throw new Error(body?.message ?? 'Failed to load wiki backlinks.');
   }
   return response.json();
+}
+
+export async function fetchWikiBlame(pageId: string): Promise<WikiBlameResponse> {
+  return readWikiBrowser<WikiBlameResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/blame`);
 }
 
 export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]> {

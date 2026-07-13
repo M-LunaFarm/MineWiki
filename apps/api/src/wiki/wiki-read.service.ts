@@ -171,6 +171,25 @@ export interface WikiSpecialDocumentResponse {
   readonly items: WikiSpecialDocumentItem[];
 }
 
+export interface WikiBlameResponse {
+  readonly pageId: string;
+  readonly revisionId: string;
+  readonly revisionNo: number;
+  readonly revisionCount: number;
+  readonly truncatedHistory: boolean;
+  readonly lineCount: number;
+  readonly truncatedLines: boolean;
+  readonly lines: ReadonlyArray<{
+    readonly lineNo: number;
+    readonly content: string;
+    readonly revisionId: string;
+    readonly revisionNo: number;
+    readonly createdBy: string | null;
+    readonly createdByName: string;
+    readonly createdAt: string;
+  }>;
+}
+
 @Injectable()
 export class WikiReadService {
   constructor(
@@ -643,6 +662,66 @@ export class WikiReadService {
     return { type, items: orphaned.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)) };
   }
 
+  async getBlame(pageId: string, accountId?: string | null): Promise<WikiBlameResponse> {
+    const id = this.parseBigIntId(pageId, 'pageId');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id } });
+    if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+    await this.wikiPermissions.assertCanReadPage({ accountId: accountId ?? null, page });
+    await this.wikiPermissions.assertCanUsePageAction({ accountId: accountId ?? null, action: 'history', page });
+    const total = await this.prisma.wikiPageRevision.count({ where: { pageId: page.id, visibility: 'public' } });
+    const revisions = await this.prisma.wikiPageRevision.findMany({
+      where: { pageId: page.id, visibility: 'public' },
+      orderBy: [{ revisionNo: 'asc' }],
+      ...(total > 500 ? { skip: total - 500 } : {}),
+      take: 500,
+      select: { id: true, revisionNo: true, contentRaw: true, createdBy: true, createdAt: true }
+    });
+    const current = revisions.at(-1);
+    if (!current) throw new NotFoundException('Public wiki revision not found.');
+
+    type Attribution = { revisionId: bigint; revisionNo: number; createdBy: bigint | null; createdAt: Date };
+    let lines: string[] = [];
+    let attribution: Attribution[] = [];
+    const lineLimit = 5_000;
+    for (const revision of revisions) {
+      const nextLines = revision.contentRaw.replace(/\r\n/g, '\n').split('\n').slice(0, lineLimit);
+      const nextAttribution: Attribution = {
+        revisionId: revision.id,
+        revisionNo: revision.revisionNo,
+        createdBy: revision.createdBy,
+        createdAt: revision.createdAt
+      };
+      attribution = transferLineAttribution(lines, attribution, nextLines, nextAttribution);
+      lines = nextLines;
+    }
+    const profileIds = [...new Set(attribution.flatMap((item) => item.createdBy ? [item.createdBy] : []))];
+    const profiles = profileIds.length > 0
+      ? await this.prisma.wikiProfile.findMany({ where: { id: { in: profileIds } }, select: { id: true, displayName: true } })
+      : [];
+    const nameById = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
+    return {
+      pageId: page.id.toString(),
+      revisionId: current.id.toString(),
+      revisionNo: current.revisionNo,
+      revisionCount: total,
+      truncatedHistory: total > revisions.length,
+      lineCount: current.contentRaw.replace(/\r\n/g, '\n').split('\n').length,
+      truncatedLines: current.contentRaw.replace(/\r\n/g, '\n').split('\n').length > lineLimit,
+      lines: lines.map((content, index) => {
+        const source = attribution[index]!;
+        return {
+          lineNo: index + 1,
+          content,
+          revisionId: source.revisionId.toString(),
+          revisionNo: source.revisionNo,
+          createdBy: source.createdBy?.toString() ?? null,
+          createdByName: source.createdBy ? nameById.get(source.createdBy) ?? '알 수 없는 사용자' : '알 수 없는 사용자',
+          createdAt: source.createdAt.toISOString()
+        };
+      })
+    };
+  }
+
   private specialPageItem(
     page: { id: bigint; title: string; displayTitle: string; updatedAt: Date },
     namespace: string,
@@ -1026,6 +1105,56 @@ function resolveContextualLinkTarget(namespace: string, localPath: string, targe
 
 function normalizeServerWikiLayoutKey(value: string): 'docs' | 'handbook' | 'brand' {
   return value === 'handbook' || value === 'brand' ? value : 'docs';
+}
+
+function transferLineAttribution<T>(oldLines: readonly string[], oldAttribution: readonly T[], newLines: readonly string[], fallback: T): T[] {
+  const next = newLines.map(() => fallback);
+  if (oldLines.length === 0 || newLines.length === 0) return next;
+  const matches = oldLines.length * newLines.length <= 2_000_000
+    ? longestCommonLineMatches(oldLines, newLines)
+    : monotonicLineMatches(oldLines, newLines);
+  for (const [oldIndex, newIndex] of matches) {
+    if (oldAttribution[oldIndex] !== undefined) next[newIndex] = oldAttribution[oldIndex]!;
+  }
+  return next;
+}
+
+function longestCommonLineMatches(oldLines: readonly string[], newLines: readonly string[]): Array<[number, number]> {
+  const rows = Array.from({ length: oldLines.length + 1 }, () => new Uint32Array(newLines.length + 1));
+  for (let oldIndex = 1; oldIndex <= oldLines.length; oldIndex += 1) {
+    for (let newIndex = 1; newIndex <= newLines.length; newIndex += 1) {
+      rows[oldIndex]![newIndex] = oldLines[oldIndex - 1] === newLines[newIndex - 1]
+        ? rows[oldIndex - 1]![newIndex - 1]! + 1
+        : Math.max(rows[oldIndex - 1]![newIndex]!, rows[oldIndex]![newIndex - 1]!);
+    }
+  }
+  const matches: Array<[number, number]> = [];
+  let oldIndex = oldLines.length;
+  let newIndex = newLines.length;
+  while (oldIndex > 0 && newIndex > 0) {
+    if (oldLines[oldIndex - 1] === newLines[newIndex - 1]) {
+      matches.push([oldIndex - 1, newIndex - 1]); oldIndex -= 1; newIndex -= 1;
+    } else if (rows[oldIndex - 1]![newIndex]! >= rows[oldIndex]![newIndex - 1]!) {
+      oldIndex -= 1;
+    } else {
+      newIndex -= 1;
+    }
+  }
+  return matches.reverse();
+}
+
+function monotonicLineMatches(oldLines: readonly string[], newLines: readonly string[]): Array<[number, number]> {
+  const oldPositions = new Map<string, number[]>();
+  oldLines.forEach((line, index) => oldPositions.set(line, [...(oldPositions.get(line) ?? []), index]));
+  const matches: Array<[number, number]> = [];
+  let previousOldIndex = -1;
+  for (let newIndex = 0; newIndex < newLines.length; newIndex += 1) {
+    const candidate = oldPositions.get(newLines[newIndex]!)?.find((index) => index > previousOldIndex);
+    if (candidate === undefined) continue;
+    matches.push([candidate, newIndex]);
+    previousOldIndex = candidate;
+  }
+  return matches;
 }
 
 function collectFileNames(ast: AstNode[], output = new Set<string>()): Set<string> {
