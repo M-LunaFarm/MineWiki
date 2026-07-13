@@ -492,7 +492,7 @@ export class WikiReadService {
           })
         : null,
       this.prisma.wikiPage.findMany({
-        where: { spaceId, status: { not: 'deleted' } },
+        where: { spaceId, status: { not: 'deleted' }, pageType: { not: 'redirect' } },
         select: { id: true, localPath: true, displayTitle: true },
         orderBy: [{ id: 'asc' }],
         take: 100

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { fetchWikiRecent } from '../../lib/wiki-api';
+import { fetchWikiRecent } from '../../lib/wiki-server-api';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 30;

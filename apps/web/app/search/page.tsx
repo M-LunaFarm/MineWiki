@@ -3,7 +3,8 @@ import { BookOpen, Search, Server, ShieldCheck, Users, Vote } from 'lucide-react
 import type { ServerSummary } from '@minewiki/schemas';
 import { fetchServerRankings } from '../../lib/api';
 import { buildServerPath } from '../../lib/server-routes';
-import { searchWiki, type WikiSearchResult } from '../../lib/wiki-api';
+import type { WikiSearchResult } from '../../lib/wiki-api';
+import { searchWiki } from '../../lib/wiki-server-api';
 
 interface SearchPageProps {
   readonly searchParams: Promise<{

@@ -598,9 +598,6 @@ export class WikiEditService {
       }
       const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
       if (status === 'deleted') {
-        if (page.status === 'deleted') {
-          throw new NotFoundException('Wiki page not found.');
-        }
         await this.wikiPermissions.assertCanMutatePageAction({
           actor: permissionActor,
           action: 'delete',

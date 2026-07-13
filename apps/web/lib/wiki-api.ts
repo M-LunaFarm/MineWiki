@@ -191,6 +191,11 @@ export interface WikiMutationResponse {
   readonly slug: string;
 }
 
+export interface WikiMoveResponse extends WikiMutationResponse {
+  readonly previousTitle: string;
+  readonly redirectPageId: string | null;
+}
+
 export interface UploadedFileMetadata {
   readonly id: string;
   readonly ownerAccountId: string | null;
@@ -216,6 +221,20 @@ export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisio
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to load wiki revision.');
+  }
+  return response.json();
+}
+
+export async function fetchWikiRaw(pageId: string, revisionId?: string): Promise<WikiRevisionResponse> {
+  const params = new URLSearchParams();
+  if (revisionId) params.set('revisionId', revisionId);
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/raw${suffix}`, {
+    credentials: 'include'
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load wiki source.');
   }
   return response.json();
 }
@@ -400,6 +419,56 @@ export async function saveWikiPage(input: {
     throw new Error(body?.message ?? 'Failed to save wiki page.');
   }
   return response.json();
+}
+
+export async function moveWikiPage(input: {
+  pageId: string;
+  title: string;
+  displayTitle?: string;
+  reason: string;
+  leaveRedirect: boolean;
+}): Promise<WikiMoveResponse> {
+  return mutateWikiPage(input.pageId, 'move', {
+    title: input.title,
+    displayTitle: input.displayTitle,
+    reason: input.reason,
+    leaveRedirect: input.leaveRedirect
+  });
+}
+
+export async function deleteWikiPage(input: { pageId: string; reason: string }): Promise<{ pageId: string; status: string }> {
+  return mutateWikiPage(input.pageId, 'delete', { reason: input.reason });
+}
+
+export async function restoreWikiPage(input: { pageId: string; reason: string }): Promise<{ pageId: string; status: string }> {
+  return mutateWikiPage(input.pageId, 'restore', { reason: input.reason });
+}
+
+export async function revertWikiPage(input: {
+  pageId: string;
+  revisionId: string;
+  baseRevisionId: string;
+  reason: string;
+}): Promise<WikiMutationResponse> {
+  return mutateWikiPage(input.pageId, 'revert', {
+    revisionId: input.revisionId,
+    baseRevisionId: input.baseRevisionId,
+    reason: input.reason
+  });
+}
+
+async function mutateWikiPage<T>(pageId: string, action: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/${action}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+    body: JSON.stringify(body)
+  });
+  const responseBody = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(responseBody?.message ?? `Failed to ${action} wiki page.`);
+  }
+  return responseBody as T;
 }
 
 export async function uploadWikiImage(input: {

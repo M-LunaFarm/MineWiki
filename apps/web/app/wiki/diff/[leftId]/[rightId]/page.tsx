@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { fetchWikiRevisionDiff } from '../../../../../lib/wiki-api';
+import { fetchWikiRevisionDiff } from '../../../../../lib/wiki-server-api';
 
 interface PageProps {
   readonly params: Promise<{ leftId: string; rightId: string }>;

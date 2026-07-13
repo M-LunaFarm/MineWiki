@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { fetchWikiPageByPath, fetchWikiRevisions } from '../../lib/wiki-api';
+import { fetchWikiPageByPath, fetchWikiRevisions } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath } from '../../lib/wiki-routes.mjs';
+import { WikiRevertButton } from './wiki-revert-button';
 
 interface WikiHistoryRoutePageProps {
   readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'help' | 'project' | 'file';
@@ -29,7 +30,35 @@ export async function WikiHistoryRoutePage({ prefix, segments = [] }: WikiHistor
         <h1 className="text-3xl font-bold text-white">{page.displayTitle} 역사</h1>
         <p className="mt-3 text-sm text-slate-400">{routePath}</p>
       </header>
-      <section className="overflow-x-auto border border-white/10 bg-[#111821]">
+      <section className="space-y-3 sm:hidden">
+        {revisions.map((revision, index) => {
+          const previous = revisions[index + 1];
+          return (
+            <article key={revision.id} className="border border-white/10 bg-[#111821] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <strong className="text-white">rev {revision.revisionNo}</strong>
+                <time className="text-xs text-slate-500">{formatDate(revision.createdAt)}</time>
+              </div>
+              <p className="mt-3 break-words text-sm text-slate-300">{revision.editSummary ?? '요약 없음'}</p>
+              <p className="mt-2 text-xs text-slate-500">편집자 {revision.createdBy ?? 'unknown'}{revision.isMinor ? ' · minor' : ''}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Link href={`/wiki/revision/${revision.id}`} className="chip chip-accent">보기</Link>
+                {previous ? <Link href={`/wiki/diff/${previous.id}/${revision.id}`} className="chip chip-muted">diff</Link> : null}
+                {revision.id !== page.revision.id ? (
+                  <WikiRevertButton
+                    pageId={page.id}
+                    revisionId={revision.id}
+                    revisionNo={revision.revisionNo}
+                    currentRevisionId={page.revision.id}
+                    routePath={routePath}
+                  />
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </section>
+      <section className="hidden overflow-x-auto border border-white/10 bg-[#111821] sm:block">
         <table className="min-w-full text-left text-sm">
           <thead className="border-b border-white/10 text-xs uppercase text-slate-500">
             <tr>
@@ -61,6 +90,15 @@ export async function WikiHistoryRoutePage({ prefix, segments = [] }: WikiHistor
                         <Link href={`/wiki/diff/${previous.id}/${revision.id}`} className="chip chip-muted">
                           diff
                         </Link>
+                      ) : null}
+                      {revision.id !== page.revision.id ? (
+                        <WikiRevertButton
+                          pageId={page.id}
+                          revisionId={revision.id}
+                          revisionNo={revision.revisionNo}
+                          currentRevisionId={page.revision.id}
+                          routePath={routePath}
+                        />
                       ) : null}
                     </div>
                   </td>

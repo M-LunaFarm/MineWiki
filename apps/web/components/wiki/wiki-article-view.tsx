@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { PencilLine, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
+import { WikiPageTools } from './wiki-page-tools';
 
 interface WikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -95,6 +96,12 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
               </Link>
             </div>
           </section>
+          <WikiPageTools
+            pageId={page.id}
+            title={page.title}
+            displayTitle={page.displayTitle}
+            routePath={routePath}
+          />
           {page.categories.length > 0 ? (
             <section className="surface-flat p-4">
               <h2 className="text-sm font-semibold text-white">분류</h2>

@@ -4,7 +4,6 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
-  FileText,
   List,
   PencilLine,
   History,
@@ -14,6 +13,8 @@ import {
 
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiCreateLink } from './server-wiki-create-link';
+import { ServerWikiNavigation } from './server-wiki-navigation';
+import { WikiPageTools } from './wiki-page-tools';
 
 interface ServerWikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -69,23 +70,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
               <BookOpen className="size-4" />
               서버 핸드북
             </div>
-            <div className="flex gap-2 overflow-x-auto lg:mt-3 lg:block lg:space-y-1">
-              {wiki.navigation.map((item) => (
-                <Link
-                  key={item.id}
-                  href={item.path}
-                  aria-current={item.current ? 'page' : undefined}
-                  className={`flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition lg:w-full ${
-                    item.current
-                      ? 'bg-emerald-400/10 font-semibold text-emerald-300'
-                      : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-100'
-                  }`}
-                >
-                  <FileText className="size-4 shrink-0" />
-                  <span className="truncate">{item.title}</span>
-                </Link>
-              ))}
-            </div>
+            <ServerWikiNavigation items={wiki.navigation} />
             <div className="mt-3">
               <ServerWikiCreateLink serverSlug={wiki.slug} />
             </div>
@@ -157,6 +142,14 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
           <div className="mt-12 grid overflow-hidden rounded-xl border border-white/10 sm:grid-cols-2">
             <WikiPager item={previous} direction="previous" />
             <WikiPager item={next} direction="next" />
+          </div>
+          <div className="mt-8">
+            <WikiPageTools
+              pageId={page.id}
+              title={page.title}
+              displayTitle={page.displayTitle}
+              routePath={routePath}
+            />
           </div>
         </article>
 

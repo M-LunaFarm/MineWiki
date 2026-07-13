@@ -25,6 +25,40 @@ test('preview returns blocking markup errors', () => {
   assert.ok(preview.blockingErrors.some((error) => error.includes('HTML')));
 });
 
+test('revision source requires raw ACL while diff requires history ACL', async () => {
+  const actions: string[] = [];
+  const revision = {
+    id: 11n,
+    pageId: 7n,
+    revisionNo: 1,
+    parentRevisionId: null,
+    contentRaw: '문서 내용',
+    contentHash: 'a'.repeat(64),
+    contentSize: 13,
+    syntaxVersion: 'bwm-0.3',
+    editSummary: null,
+    isMinor: false,
+    createdBy: 3n,
+    actorUserId: 3n,
+    createdAt: new Date('2026-07-13T00:00:00Z'),
+    visibility: 'public'
+  };
+  const prisma = {
+    wikiPageRevision: { async findUnique() { return revision; } },
+    wikiPage: { async findUnique() { return { id: 7n, spaceId: 1n, title: '문서', protectionLevel: 'open', status: 'normal' }; } }
+  } as unknown as PrismaService;
+  const permissions = {
+    async assertCanReadPage() {},
+    async assertCanUsePageAction(input: { action: string }) { actions.push(input.action); }
+  } as unknown as WikiPermissionService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, permissions);
+
+  await edits.getRevision('11');
+  await edits.getRevisionDiff('11', '11');
+
+  assert.deepEqual(actions, ['raw', 'history', 'history']);
+});
+
 if (!hasDatabase) {
   test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});
 } else {

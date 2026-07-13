@@ -1,4 +1,4 @@
-import { fetchWikiPageByPath } from '../../lib/wiki-api';
+import { fetchWikiPageByPath } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiEditorClient } from './wiki-editor-client';
 

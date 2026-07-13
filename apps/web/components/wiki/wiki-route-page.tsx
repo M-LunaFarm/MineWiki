@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { fetchWikiPageByPath } from '../../lib/wiki-api';
+import { fetchWikiPageByPath } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath } from '../../lib/wiki-routes.mjs';
 import { WikiArticleView } from './wiki-article-view';
 import { ServerWikiArticleView } from './server-wiki-article-view';
