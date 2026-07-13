@@ -10,6 +10,7 @@ interface SearchPageProps {
   readonly searchParams: Promise<{
     q?: string;
     namespace?: string;
+    cursor?: string;
   }>;
 }
 
@@ -22,13 +23,14 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const params = await searchParams;
   const query = params.q?.trim().slice(0, 100) ?? '';
   const namespace = params.namespace?.trim() ?? '';
+  const cursor = params.cursor?.trim() ?? '';
   const [wikiResult, serverResult] = query
     ? await Promise.all([
-        searchWiki({ q: query, namespace: namespace || undefined, limit: 30 })
-          .then((items) => ({ items, available: true }))
+        searchWiki({ q: query, namespace: namespace || undefined, cursor: cursor || undefined, limit: 30 })
+          .then((result) => ({ ...result, available: true }))
           .catch((error) => {
             console.error('Unified search failed to load wiki results', error);
-            return { items: [] as WikiSearchResult[], available: false };
+            return { items: [] as WikiSearchResult[], nextCursor: null, available: false };
           }),
         fetchServerRankings({ search: query, page: 1, pageSize: 8 })
           .then((result) => ({ items: result.items, total: result.total, available: true }))
@@ -38,7 +40,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           }),
       ])
     : [
-        { items: [] as WikiSearchResult[], available: true },
+        { items: [] as WikiSearchResult[], nextCursor: null, available: true },
         { items: [] as ServerSummary[], total: 0, available: true },
       ];
   const total = wikiResult.items.length + serverResult.total;
@@ -123,6 +125,14 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             <div className="divide-y divide-white/[0.08] border-y border-white/[0.08]">
               {wikiResult.items.map((result) => <WikiResult key={result.pageId} result={result} />)}
             </div>
+            {wikiResult.nextCursor ? (
+              <Link
+                href={`/search?q=${encodeURIComponent(query)}${namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''}&cursor=${encodeURIComponent(wikiResult.nextCursor)}`}
+                className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-white/10 px-4 py-2 text-sm font-semibold text-[#35e5b7] transition hover:border-[#35e5b7]/40 hover:bg-[#35e5b7]/[.06]"
+              >
+                다음 위키 검색 결과
+              </Link>
+            ) : null}
           </SearchSection>
         </div>
       )}

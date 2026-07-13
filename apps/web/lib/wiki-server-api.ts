@@ -8,6 +8,7 @@ import type {
   WikiRevisionResponse,
   WikiRevisionListResponse,
   WikiSearchResult,
+  WikiSearchResponse,
   WikiSpecialDocumentResponse,
   WikiSpecialDocumentType
 } from './wiki-api';
@@ -61,11 +62,13 @@ export async function searchWiki(input: {
   readonly q: string;
   readonly namespace?: string;
   readonly limit?: number;
-}): Promise<WikiSearchResult[]> {
+  readonly cursor?: string;
+}): Promise<WikiSearchResponse> {
   const params = new URLSearchParams({ q: input.q, limit: String(input.limit ?? 20) });
   if (input.namespace) params.set('namespace', input.namespace);
+  if (input.cursor) params.set('cursor', input.cursor);
   const response = await wikiFetch(`/v1/wiki/search?${params.toString()}`);
-  return readWikiResponse<WikiSearchResult[]>(response, 'Failed to search wiki.');
+  return readWikiResponse<WikiSearchResponse>(response, 'Failed to search wiki.');
 }
 
 export async function fetchWikiSpecial(input: {

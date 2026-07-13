@@ -28,7 +28,7 @@ import {
   type WikiPageResponse,
   type WikiRecentChangeListResponse,
   type WikiRevisionListResponse,
-  type WikiSearchResult,
+  type WikiSearchResponse,
   type WikiSpecialDocumentResponse
 } from './wiki-read.service';
 import { WikiProfileService, type WikiMeResponse } from './wiki-profile.service';
@@ -149,12 +149,14 @@ export class WikiController {
     @Req() request: FastifyRequest,
     @Query('q') q: string | undefined,
     @Query('namespace') namespace: string | undefined,
-    @Query('limit') limit: string | undefined
-  ): Promise<WikiSearchResult[]> {
+    @Query('limit') limit: string | undefined,
+    @Query('cursor') cursor: string | undefined
+  ): Promise<WikiSearchResponse> {
     return this.wikiRead.search({
       q,
       namespace,
       limit,
+      cursor,
       accountId: request.sessionPayload?.userId ?? null
     });
   }

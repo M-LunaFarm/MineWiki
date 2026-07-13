@@ -150,6 +150,11 @@ export interface WikiSearchResult {
   readonly updatedAt: string;
 }
 
+export interface WikiSearchResponse {
+  readonly items: WikiSearchResult[];
+  readonly nextCursor: string | null;
+}
+
 export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'long' | 'short';
 
 export interface WikiSpecialDocumentResponse {
@@ -664,7 +669,8 @@ export async function searchWiki(input: {
   q: string;
   namespace?: string;
   limit?: number;
-}): Promise<WikiSearchResult[]> {
+  cursor?: string;
+}): Promise<WikiSearchResponse> {
   const params = new URLSearchParams({
     q: input.q,
     limit: String(input.limit ?? 20)
@@ -672,6 +678,7 @@ export async function searchWiki(input: {
   if (input.namespace) {
     params.set('namespace', input.namespace);
   }
+  if (input.cursor) params.set('cursor', input.cursor);
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/search?${params.toString()}`, {
     credentials: 'include',
     next: { revalidate: 30 }

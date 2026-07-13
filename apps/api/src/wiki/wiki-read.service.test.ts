@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
 import type { WikiPermissionService } from './wiki-permission.service';
-import { buildServerWikiNavigation, buildServerWikiPagePath, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
+import { buildServerWikiNavigation, buildServerWikiPagePath, encodeWikiSearchCursor, parseWikiSearchCursor, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
 
 test('server wiki navigation removes the duplicated space slug', () => {
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main'), '/server/luna-main');
@@ -29,6 +29,43 @@ test('server wiki navigation keeps every document beyond the former 100 item cap
   assert.equal(navigation[0]?.path, '/server/luna');
   assert.equal(navigation[0]?.hasChildren, true);
   assert.equal(navigation.at(-1)?.current, true);
+});
+
+test('wiki search cursor is stable and rejects tampering', () => {
+  const date = new Date('2026-07-13T12:34:56.000Z');
+  const cursor = encodeWikiSearchCursor(date, 42n);
+  assert.deepEqual(parseWikiSearchCursor(cursor), { updatedAt: date, id: 42n });
+  assert.throws(() => parseWikiSearchCursor('not-a-cursor'), /cursor is invalid/);
+});
+
+test('wiki search batches current revisions and returns a continuation cursor', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const pages = Array.from({ length: 6 }, (_, index) => ({
+    id: BigInt(10 - index), namespaceId: 1, spaceId: 1n, localPath: `doc-${index}`, slug: `doc-${index}`,
+    title: `검색 문서 ${index}`, displayTitle: `검색 문서 ${index}`, currentRevisionId: BigInt(100 - index),
+    pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n,
+    createdAt: now, updatedAt: new Date(now.getTime() - index * 1000)
+  }));
+  let revisionQueryCount = 0;
+  const prisma = {
+    wikiNamespace: {
+      async findUnique() { return null; },
+      async findMany() { return [{ id: 1, code: 'main' }]; }
+    },
+    wikiPage: { async findMany() { return pages; } },
+    wikiPageRevision: {
+      async findMany(args: { select?: unknown }) {
+        revisionQueryCount += 1;
+        if (args.select) return [];
+        return pages.map((page) => ({ id: page.currentRevisionId, pageId: page.id, revisionNo: 1, visibility: 'public', contentRaw: `본문 검색 ${page.id}`, createdAt: now }));
+      }
+    }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const result = await new WikiReadService(prisma, permissions).search({ q: '검색', limit: 2 });
+  assert.equal(revisionQueryCount, 2);
+  assert.equal(result.items.length, 2);
+  assert.ok(result.nextCursor);
 });
 
 test('revision history uses a stable revision number cursor beyond the first page', async () => {

@@ -110,6 +110,11 @@ export interface WikiSearchResult {
   readonly updatedAt: string;
 }
 
+export interface WikiSearchResponse {
+  readonly items: WikiSearchResult[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiBacklinkItem {
   readonly id: string;
   readonly sourcePageId: string;
@@ -908,18 +913,20 @@ export class WikiReadService {
     readonly q?: string;
     readonly namespace?: string;
     readonly limit?: string | number;
+    readonly cursor?: string;
     readonly accountId?: string | null;
-  }): Promise<WikiSearchResult[]> {
+  }): Promise<WikiSearchResponse> {
     const query = input.q?.trim() ?? '';
     if (!query) {
-      return [];
+      return { items: [], nextCursor: null };
     }
     const limit = Math.min(Math.max(Number(input.limit ?? 20) || 20, 1), 50);
+    const cursor = parseWikiSearchCursor(input.cursor);
     const namespace = input.namespace?.trim()
       ? await this.prisma.wikiNamespace.findUnique({ where: { code: input.namespace.trim() } })
       : null;
     if (input.namespace?.trim() && !namespace) {
-      return [];
+      return { items: [], nextCursor: null };
     }
 
     const contentMatches = await this.prisma.wikiPageRevision.findMany({
@@ -929,24 +936,32 @@ export class WikiReadService {
       },
       select: { pageId: true },
       orderBy: [{ createdAt: 'desc' }],
-      take: 200
+      take: 2000
     });
     const contentPageIds = [...new Set(contentMatches.map((match) => match.pageId))];
-    const pages = await this.prisma.wikiPage.findMany({
+    const scanLimit = Math.max(limit * 4, 50);
+    const pagesWithSentinel = await this.prisma.wikiPage.findMany({
       where: {
         namespaceId: namespace?.id,
         status: { in: ['normal', 'active', 'published'] },
-        OR: [
-          { title: { contains: query } },
-          { displayTitle: { contains: query } },
-          { slug: { contains: slugifyTitle(query) } },
-          { localPath: { contains: slugifyTitle(query) } },
-          ...(contentPageIds.length > 0 ? [{ id: { in: contentPageIds } }] : [])
+        AND: [
+          {
+            OR: [
+              { title: { contains: query } },
+              { displayTitle: { contains: query } },
+              { slug: { contains: slugifyTitle(query) } },
+              { localPath: { contains: slugifyTitle(query) } },
+              ...(contentPageIds.length > 0 ? [{ id: { in: contentPageIds } }] : [])
+            ]
+          },
+          ...(cursor ? [{ OR: [{ updatedAt: { lt: cursor.updatedAt } }, { updatedAt: cursor.updatedAt, id: { lt: cursor.id } }] }] : [])
         ]
       },
-      orderBy: [{ updatedAt: 'desc' }],
-      take: Math.max(limit * 4, 50)
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: scanLimit + 1
     });
+    const hasCandidateSentinel = pagesWithSentinel.length > scanLimit;
+    const pages = pagesWithSentinel.slice(0, scanLimit);
     const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
     const namespaces = namespaceIds.length > 0
       ? await this.prisma.wikiNamespace.findMany({
@@ -955,23 +970,27 @@ export class WikiReadService {
         })
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
-    const results: WikiSearchResult[] = [];
+    const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+    const fallbackPageIds = pages.filter((page) => !page.currentRevisionId).map((page) => page.id);
+    const revisions = pages.length > 0
+      ? await this.prisma.wikiPageRevision.findMany({
+          where: {
+            visibility: 'public',
+            OR: [
+              ...(currentRevisionIds.length > 0 ? [{ id: { in: currentRevisionIds } }] : []),
+              ...(fallbackPageIds.length > 0 ? [{ pageId: { in: fallbackPageIds } }] : [])
+            ]
+          },
+          orderBy: [{ pageId: 'asc' }, { revisionNo: 'desc' }]
+        })
+      : [];
+    const revisionByPageId = new Map<bigint, (typeof revisions)[number]>();
+    for (const revision of revisions) {
+      if (!revisionByPageId.has(revision.pageId)) revisionByPageId.set(revision.pageId, revision);
+    }
+    const visible: Array<{ item: WikiSearchResult; page: (typeof pages)[number] }> = [];
     for (const page of pages) {
-      const revision = page.currentRevisionId
-        ? await this.prisma.wikiPageRevision.findFirst({
-            where: {
-              id: page.currentRevisionId,
-              pageId: page.id,
-              visibility: 'public'
-            }
-          })
-        : await this.prisma.wikiPageRevision.findFirst({
-            where: {
-              pageId: page.id,
-              visibility: 'public'
-            },
-            orderBy: [{ revisionNo: 'desc' }]
-          });
+      const revision = revisionByPageId.get(page.id);
       if (!revision) {
         continue;
       }
@@ -992,7 +1011,7 @@ export class WikiReadService {
         continue;
       }
       const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
-      results.push({
+      visible.push({ item: {
         pageId: page.id.toString(),
         namespace: namespaceCode,
         title: page.title,
@@ -1000,12 +1019,20 @@ export class WikiReadService {
         routePath: wikiUrl(namespaceCode as Parameters<typeof wikiUrl>[0], page.title),
         snippet: makeSearchSnippet(revision.contentRaw, query),
         updatedAt: page.updatedAt.toISOString()
-      });
-      if (results.length >= limit) {
+      }, page });
+      if (visible.length > limit) {
         break;
       }
     }
-    return results;
+    const items = visible.slice(0, limit).map((entry) => entry.item);
+    const lastVisiblePage = visible.at(Math.min(visible.length, limit) - 1)?.page;
+    const lastScannedPage = pages.at(-1);
+    const hasMore = visible.length > limit || hasCandidateSentinel;
+    const cursorPage = visible.length > limit ? lastVisiblePage : lastScannedPage;
+    return {
+      items,
+      nextCursor: hasMore && cursorPage ? encodeWikiSearchCursor(cursorPage.updatedAt, cursorPage.id) : null
+    };
   }
 
   private async renderPage(namespace: string, page: {
@@ -1361,6 +1388,20 @@ function collectFileNames(ast: AstNode[], output = new Set<string>()): Set<strin
     }
   }
   return output;
+}
+
+export function encodeWikiSearchCursor(updatedAt: Date, id: bigint): string {
+  return `${updatedAt.toISOString()}_${id.toString()}`;
+}
+
+export function parseWikiSearchCursor(value: string | undefined): { updatedAt: Date; id: bigint } | null {
+  if (!value) return null;
+  const separator = value.lastIndexOf('_');
+  if (separator <= 0) throw new BadRequestException('cursor is invalid.');
+  const updatedAt = new Date(value.slice(0, separator));
+  const rawId = value.slice(separator + 1);
+  if (Number.isNaN(updatedAt.getTime()) || !/^\d+$/.test(rawId)) throw new BadRequestException('cursor is invalid.');
+  return { updatedAt, id: BigInt(rawId) };
 }
 
 function makeSearchSnippet(content: string, query: string): string {
