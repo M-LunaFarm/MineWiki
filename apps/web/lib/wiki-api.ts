@@ -249,6 +249,7 @@ export interface WikiThreadSummary {
 }
 
 export interface WikiThreadDetail extends WikiThreadSummary {
+  readonly canModerate: boolean;
   readonly comments: ReadonlyArray<{
     readonly id: string;
     readonly content: string | null;
@@ -256,6 +257,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly createdBy: string;
     readonly createdByName: string;
     readonly createdAt: string;
+    readonly canDelete: boolean;
   }>;
 }
 
@@ -464,6 +466,14 @@ export async function setWikiThreadStatus(input: { threadId: string; status: 'op
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/status`, 'PATCH', {
     status: input.status
   });
+}
+
+export async function deleteWikiThreadComment(input: { threadId: string; commentId: string }): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser<WikiThreadDetail>(
+    `/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/comments/${encodeURIComponent(input.commentId)}`,
+    'DELETE',
+    {}
+  );
 }
 
 export async function fetchWikiWatchStatus(pageId: string): Promise<WikiWatchStatus> {

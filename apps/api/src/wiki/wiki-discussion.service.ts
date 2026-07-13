@@ -19,6 +19,7 @@ export interface WikiThreadSummary {
 }
 
 export interface WikiThreadDetail extends WikiThreadSummary {
+  readonly canModerate: boolean;
   readonly comments: ReadonlyArray<{
     readonly id: string;
     readonly content: string | null;
@@ -26,6 +27,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly createdBy: string;
     readonly createdByName: string;
     readonly createdAt: string;
+    readonly canDelete: boolean;
   }>;
 }
 
@@ -58,26 +60,33 @@ export class WikiDiscussionService {
     return threads.map((thread) => this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0));
   }
 
-  async getThread(threadId: string, accountId?: string | null): Promise<WikiThreadDetail> {
+  async getThread(threadId: string, session?: SessionPayload | null): Promise<WikiThreadDetail> {
     const id = this.parseId(threadId, 'threadId');
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
     if (!thread) throw new NotFoundException('Wiki discussion thread not found.');
-    await this.readablePage(thread.pageId.toString(), accountId ?? null);
+    const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null);
     const comments = await this.prisma.wikiDiscussionComment.findMany({
       where: { threadId: thread.id },
       orderBy: [{ id: 'asc' }],
       take: 500
     });
     const profileById = await this.profileNames([thread.createdBy, ...comments.map((comment) => comment.createdBy)]);
+    const viewer = session ? await this.wikiProfiles.ensureWikiProfile(session.userId) : null;
+    const canManage = viewer && session
+      ? await this.wikiPermissions.canManagePage({ actor: this.wikiPermissions.actorFromSession(session, viewer), page })
+      : false;
+    const canModerate = Boolean(viewer && (thread.createdBy === viewer.id || canManage));
     return {
       ...this.toThreadSummary(thread, profileById, comments.length),
+      canModerate,
       comments: comments.map((comment) => ({
         id: comment.id.toString(),
         content: comment.status === 'deleted' ? null : comment.content,
         status: comment.status,
         createdBy: comment.createdBy.toString(),
         createdByName: profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
-        createdAt: comment.createdAt.toISOString()
+        createdAt: comment.createdAt.toISOString(),
+        canDelete: Boolean(comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage))
       }))
     };
   }
@@ -108,7 +117,7 @@ export class WikiDiscussionService {
       return created;
     });
     await this.audit('wiki.discussion.create', session, profile.id, page.id, thread.id);
-    return this.getThread(thread.id.toString(), session.userId);
+    return this.getThread(thread.id.toString(), session);
   }
 
   async addComment(
@@ -140,7 +149,7 @@ export class WikiDiscussionService {
       });
     });
     await this.audit('wiki.discussion.comment', session, profile.id, page.id, thread.id);
-    return this.getThread(thread.id.toString(), session.userId);
+    return this.getThread(thread.id.toString(), session);
   }
 
   async setThreadStatus(
@@ -160,7 +169,7 @@ export class WikiDiscussionService {
     }
     await this.prisma.wikiDiscussionThread.update({ where: { id }, data: { status, updatedAt: new Date() } });
     await this.audit(`wiki.discussion.${status}`, session, profile.id, page.id, thread.id);
-    return this.getThread(thread.id.toString(), session.userId);
+    return this.getThread(thread.id.toString(), session);
   }
 
   async deleteComment(session: SessionPayload, threadId: string, commentId: string): Promise<WikiThreadDetail> {
@@ -180,7 +189,7 @@ export class WikiDiscussionService {
       data: { status: 'deleted', content: '', updatedAt: new Date() }
     });
     await this.audit('wiki.discussion.comment_delete', session, profile.id, page.id, thread.id);
-    return this.getThread(thread.id.toString(), session.userId);
+    return this.getThread(thread.id.toString(), session);
   }
 
   private async readablePage(pageId: string, accountId: string | null) {

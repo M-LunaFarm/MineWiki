@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
-import { Loader2, MessageSquarePlus, MessagesSquare } from 'lucide-react';
+import { Loader2, MessageSquarePlus, MessagesSquare, Trash2 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import {
   addWikiThreadComment,
   createWikiThread,
+  deleteWikiThreadComment,
   fetchWikiThread,
   fetchWikiThreads,
   setWikiThreadStatus,
@@ -16,6 +18,8 @@ import { useAuth } from '../providers/auth-context';
 
 export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
   const { account } = useAuth();
+  const searchParams = useSearchParams();
+  const requestedThreadId = searchParams.get('thread');
   const [threads, setThreads] = useState<WikiThreadSummary[]>([]);
   const [selected, setSelected] = useState<WikiThreadDetail | null>(null);
   const [title, setTitle] = useState('');
@@ -28,11 +32,16 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   useEffect(() => {
     let active = true;
     void fetchWikiThreads(pageId)
-      .then((result) => { if (active) setThreads(result); })
+      .then(async (result) => {
+        if (!active) return;
+        setThreads(result);
+        const requested = requestedThreadId && result.find((thread) => thread.id === requestedThreadId);
+        if (requested) setSelected(await fetchWikiThread(requested.id));
+      })
       .catch((caught) => { if (active) setError(message(caught)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [pageId]);
+  }, [pageId, requestedThreadId]);
 
   async function open(thread: WikiThreadSummary) {
     setLoading(true); setError(null);
@@ -64,6 +73,15 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     } catch (caught) { setError(message(caught)); } finally { setWorking(false); }
   }
 
+  async function removeComment(commentId: string) {
+    if (!selected || !window.confirm('이 댓글을 삭제하시겠습니까?')) return;
+    setWorking(true); setError(null);
+    try {
+      const thread = await deleteWikiThreadComment({ threadId: selected.id, commentId });
+      setSelected(thread); setThreads((current) => current.map((item) => item.id === thread.id ? thread : item));
+    } catch (caught) { setError(message(caught)); } finally { setWorking(false); }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400"><Link href={returnTo} className="hover:text-emerald-200">문서로 돌아가기</Link><span>/</span><span className="text-slate-200">토론</span></nav>
@@ -79,7 +97,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
         </aside>
         <section className="min-w-0">
           {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}
-          {selected ? <div className="space-y-4"><div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4"><div><h2 className="text-2xl font-bold text-white">{selected.title}</h2><p className="mt-2 text-xs text-slate-500">{selected.createdByName} · {selected.status}</p></div>{account ? <button type="button" disabled={working} onClick={() => void toggleStatus()} className="chip chip-muted">{selected.status === 'open' ? '토론 닫기' : '다시 열기'}</button> : null}</div>{selected.comments.map((item) => <article key={item.id} className="border border-white/10 bg-[#111821] p-4"><div className="flex justify-between gap-3 text-xs text-slate-500"><Link href={`/wiki/contributions/${item.createdBy}`} className="hover:text-emerald-200">{item.createdByName}</Link><time>{formatDate(item.createdAt)}</time></div><p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-200">{item.content ?? '삭제된 댓글입니다.'}</p></article>)}{account && selected.status === 'open' ? <form onSubmit={reply} className="space-y-3"><textarea value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" /><button disabled={working} className="btn-primary">댓글 등록</button></form> : null}</div> : !loading ? <p className="border border-white/10 p-6 text-sm text-slate-400">왼쪽에서 토론을 선택하세요.</p> : null}
+          {selected ? <div className="space-y-4"><div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-4"><div><h2 className="text-2xl font-bold text-white">{selected.title}</h2><p className="mt-2 text-xs text-slate-500">{selected.createdByName} · {selected.status}</p></div>{selected.canModerate ? <button type="button" disabled={working} onClick={() => void toggleStatus()} className="chip chip-muted">{selected.status === 'open' ? '토론 닫기' : '다시 열기'}</button> : null}</div>{selected.comments.map((item) => <article key={item.id} className="border border-white/10 bg-[#111821] p-4"><div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500"><Link href={`/wiki/contributions/${item.createdBy}`} className="hover:text-emerald-200">{item.createdByName}</Link><span className="flex items-center gap-3"><time>{formatDate(item.createdAt)}</time>{item.canDelete ? <button type="button" disabled={working} onClick={() => void removeComment(item.id)} className="inline-flex items-center gap-1 text-slate-500 hover:text-red-200"><Trash2 className="size-3.5" /> 삭제</button> : null}</span></div><p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-200">{item.content ?? '삭제된 댓글입니다.'}</p></article>)}{account && selected.status === 'open' ? <form onSubmit={reply} className="space-y-3"><textarea value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" /><button disabled={working} className="btn-primary">댓글 등록</button></form> : null}</div> : !loading ? <p className="border border-white/10 p-6 text-sm text-slate-400">왼쪽에서 토론을 선택하세요.</p> : null}
         </section>
       </div>
     </div>

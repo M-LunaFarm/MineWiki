@@ -20,7 +20,7 @@ export class WikiDiscussionController {
   @Get('discussions/:threadId')
   @UseGuards(OptionalSessionGuard)
   get(@Param('threadId') threadId: string, @Req() request: FastifyRequest): Promise<WikiThreadDetail> {
-    return this.discussions.getThread(threadId, request.sessionPayload?.userId ?? null);
+    return this.discussions.getThread(threadId, request.sessionPayload ?? null);
   }
 
   @Post('pages/:pageId/discussions')
