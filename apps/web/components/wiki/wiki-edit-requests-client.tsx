@@ -1,15 +1,28 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, FilePenLine, Loader2, X } from 'lucide-react';
+import { Check, FilePenLine, GitCompare, Loader2, Pencil, RotateCcw, Save, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { fetchWikiEditRequests, reviewWikiEditRequest, type WikiEditRequestListResponse } from '../../lib/wiki-api';
+import {
+  changeWikiEditRequestState,
+  fetchWikiEditRequestDiff,
+  fetchWikiEditRequests,
+  reviewWikiEditRequest,
+  updateWikiEditRequest,
+  type WikiEditRequestDiffResponse,
+  type WikiEditRequestListResponse,
+  type WikiEditRequestSummary
+} from '../../lib/wiki-api';
+
+const EMPTY: WikiEditRequestListResponse = { items: [], canReview: false, viewerProfileId: null, nextCursor: null, currentRevisionId: null };
 
 export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
-  const [data, setData] = useState<WikiEditRequestListResponse>({ items: [], canReview: false });
+  const [data, setData] = useState<WikiEditRequestListResponse>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [diffs, setDiffs] = useState<Record<string, WikiEditRequestDiffResponse>>({});
+  const [editing, setEditing] = useState<WikiEditRequestSummary | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -20,42 +33,86 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
     return () => { active = false; };
   }, [pageId]);
 
-  async function review(requestId: string, action: 'accept' | 'reject') {
-    const reviewNote = window.prompt(action === 'accept' ? '승인 메모(선택)' : '반려 사유(선택)') ?? undefined;
-    setWorking(requestId); setError(null);
-    try {
-      const updated = await reviewWikiEditRequest({ requestId, action, reviewNote });
-      setData((current) => ({ ...current, items: current.items.map((item) => item.id === updated.id ? updated : item) }));
-    } catch (caught) {
-      setError(message(caught));
-    } finally {
-      setWorking(null);
-    }
+  function replace(updated: WikiEditRequestSummary) {
+    setData((current) => ({ ...current, items: current.items.map((item) => item.id === updated.id ? updated : item) }));
+    setDiffs((current) => { const next = { ...current }; delete next[updated.id]; return next; });
   }
 
-  return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400"><Link href={returnTo} className="hover:text-emerald-200">문서로 돌아가기</Link><span>/</span><span className="text-slate-200">편집 요청</span></nav>
-      <header className="border-b border-white/10 pb-6"><h1 className="flex items-center gap-3 text-3xl font-bold text-white"><FilePenLine className="size-7 text-emerald-300" /> 편집 요청</h1><p className="mt-3 text-sm text-slate-400">제안된 변경을 원문과 비교하고 승인 또는 반려합니다.</p></header>
-      {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
-      {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}
-      <div className="space-y-4">
-        {data.items.map((item) => (
-          <article key={item.id} className="border border-white/10 bg-[#111821] p-4 sm:p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div><h2 className="font-semibold text-white">{item.editSummary}</h2><p className="mt-2 text-xs text-slate-500">{item.createdByName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</p></div>
-              {data.canReview && item.status === 'pending' ? <div className="flex gap-2"><button type="button" disabled={working === item.id} onClick={() => void review(item.id, 'accept')} className="chip chip-accent inline-flex items-center gap-1"><Check className="size-3.5" /> 승인</button><button type="button" disabled={working === item.id} onClick={() => void review(item.id, 'reject')} className="chip chip-muted inline-flex items-center gap-1"><X className="size-3.5" /> 반려</button></div> : null}
-            </div>
-            <details className="mt-4"><summary className="cursor-pointer text-sm font-semibold text-slate-300">제안 원문 보기</summary><pre className="mt-3 max-h-[32rem] overflow-auto whitespace-pre-wrap break-words border border-white/10 bg-black/20 p-4 text-xs leading-6 text-slate-300">{item.proposedContent}</pre></details>
-            {item.reviewNote ? <p className="mt-4 border-l-2 border-emerald-400/40 pl-3 text-sm text-slate-300">검토 메모: {item.reviewNote}</p> : null}
-          </article>
-        ))}
-        {!loading && data.items.length === 0 ? <p className="border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">편집 요청이 없습니다.</p> : null}
-      </div>
-    </div>
-  );
+  async function review(requestId: string, action: 'accept' | 'reject') {
+    const reviewNote = window.prompt(action === 'accept' ? '승인 메모(선택)' : '반려 사유(선택)') ?? undefined;
+    await run(`${requestId}:${action}`, async () => replace(await reviewWikiEditRequest({ requestId, action, reviewNote })));
+  }
+
+  async function changeState(requestId: string, action: 'close' | 'reopen') {
+    if (action === 'close' && !window.confirm('이 편집 요청을 닫을까요?')) return;
+    await run(`${requestId}:${action}`, async () => replace(await changeWikiEditRequestState(requestId, action)));
+  }
+
+  async function loadDiff(requestId: string) {
+    if (diffs[requestId]) return;
+    await run(`${requestId}:diff`, async () => {
+      const diff = await fetchWikiEditRequestDiff(requestId);
+      setDiffs((current) => ({ ...current, [requestId]: diff }));
+    });
+  }
+
+  async function saveEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing || !data.currentRevisionId) return;
+    const form = new FormData(event.currentTarget);
+    await run(`${editing.id}:update`, async () => {
+      const updated = await updateWikiEditRequest({
+        requestId: editing.id, baseRevisionId: data.currentRevisionId!,
+        contentRaw: String(form.get('contentRaw') ?? ''), editSummary: String(form.get('editSummary') ?? ''),
+        isMinor: form.get('isMinor') === 'on'
+      });
+      replace(updated); setEditing(null);
+    });
+  }
+
+  async function loadMore() {
+    if (!data.nextCursor) return;
+    await run('more', async () => {
+      const next = await fetchWikiEditRequests(pageId, data.nextCursor ?? undefined);
+      setData((current) => ({ ...current, items: [...current.items, ...next.items.filter((item) => !current.items.some((existing) => existing.id === item.id))], nextCursor: next.nextCursor, currentRevisionId: next.currentRevisionId }));
+    });
+  }
+
+  async function run(key: string, action: () => Promise<void>) {
+    setWorking(key); setError(null);
+    try { await action(); } catch (caught) { setError(message(caught)); } finally { setWorking(null); }
+  }
+
+  return <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400"><Link href={returnTo} className="hover:text-emerald-200">문서로 돌아가기</Link><span>/</span><span className="text-slate-200">편집 요청</span></nav>
+    <header className="border-b border-white/10 pb-6"><h1 className="flex items-center gap-3 text-3xl font-bold text-white"><FilePenLine className="size-7 text-emerald-300" /> 편집 요청</h1><p className="mt-3 text-sm text-slate-400">기준판과 제안 내용을 비교하고, 작성자는 요청을 수정·닫기·다시 열 수 있습니다.</p></header>
+    {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
+    {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}
+    <div className="space-y-4">{data.items.map((item) => {
+      const isAuthor = data.viewerProfileId === item.createdBy;
+      const canEdit = isAuthor && ['pending', 'stale', 'closed'].includes(item.status) && Boolean(data.currentRevisionId);
+      return <article key={item.id} className="border border-white/10 bg-[#111821] p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="font-semibold text-white">{item.editSummary}</h2><p className="mt-2 text-xs text-slate-500">{item.createdByName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</p></div>
+          <div className="flex flex-wrap gap-2">
+            {data.canReview && item.status === 'pending' ? <><Action disabled={Boolean(working)} onClick={() => void review(item.id, 'accept')} accent icon={<Check />}>승인</Action><Action disabled={Boolean(working)} onClick={() => void review(item.id, 'reject')} icon={<X />}>반려</Action></> : null}
+            {canEdit ? <Action disabled={Boolean(working)} onClick={() => setEditing(item)} icon={<Pencil />}>수정</Action> : null}
+            {isAuthor && ['pending', 'stale'].includes(item.status) ? <Action disabled={Boolean(working)} onClick={() => void changeState(item.id, 'close')} icon={<X />}>닫기</Action> : null}
+            {isAuthor && item.status === 'closed' ? <Action disabled={Boolean(working)} onClick={() => void changeState(item.id, 'reopen')} icon={<RotateCcw />}>다시 열기</Action> : null}
+          </div>
+        </div>
+        {editing?.id === item.id ? <form onSubmit={(event) => void saveEdit(event)} className="mt-4 grid gap-3 border border-emerald-300/20 bg-black/20 p-4"><label className="grid gap-2 text-sm text-slate-300">요약<input name="editSummary" defaultValue={item.editSummary} maxLength={255} required className="input min-h-11" /></label><label className="grid gap-2 text-sm text-slate-300">제안 원문<textarea name="contentRaw" defaultValue={item.proposedContent} required rows={12} className="input min-h-64 resize-y font-mono text-xs" /></label><label className="flex min-h-11 items-center gap-2 text-sm text-slate-300"><input name="isMinor" type="checkbox" defaultChecked={item.isMinor} /> 사소한 편집</label><div className="flex flex-wrap gap-2"><button type="submit" disabled={Boolean(working)} className="chip chip-accent inline-flex min-h-11 items-center gap-1"><Save className="size-4" /> 저장</button><button type="button" onClick={() => setEditing(null)} className="chip chip-muted min-h-11">취소</button></div></form> : null}
+        <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={Boolean(working)} onClick={() => void loadDiff(item.id)} className="chip chip-muted inline-flex min-h-11 items-center gap-1"><GitCompare className="size-4" /> 기준판과 비교</button><details><summary className="chip chip-muted flex min-h-11 cursor-pointer items-center">제안 원문</summary><pre className="mt-3 max-h-[32rem] overflow-auto whitespace-pre-wrap break-words border border-white/10 bg-black/20 p-4 text-xs leading-6 text-slate-300">{item.proposedContent}</pre></details></div>
+        {diffs[item.id] ? <DiffTable diff={diffs[item.id]} /> : null}
+        {item.reviewNote ? <p className="mt-4 border-l-2 border-emerald-400/40 pl-3 text-sm text-slate-300">검토 메모: {item.reviewNote}</p> : null}
+      </article>;
+    })}{!loading && data.items.length === 0 ? <p className="border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">편집 요청이 없습니다.</p> : null}</div>
+    {data.nextCursor ? <button type="button" disabled={Boolean(working)} onClick={() => void loadMore()} className="btn-secondary min-h-11 self-start">이전 요청 더 보기</button> : null}
+  </div>;
 }
 
+function Action({ disabled, onClick, accent = false, icon, children }: { readonly disabled: boolean; readonly onClick: () => void; readonly accent?: boolean; readonly icon: React.ReactElement; readonly children: React.ReactNode }) { return <button type="button" disabled={disabled} onClick={onClick} className={`chip min-h-11 ${accent ? 'chip-accent' : 'chip-muted'} inline-flex items-center gap-1 [&>svg]:size-3.5`}>{icon}{children}</button>; }
+function DiffTable({ diff }: { readonly diff: WikiEditRequestDiffResponse }) { return <div className="mt-4 overflow-x-auto border border-white/10"><table className="min-w-full font-mono text-xs"><tbody>{diff.hunks.map((hunk, index) => <tr key={`${index}-${hunk.type}`} className={hunk.type === 'added' ? 'bg-emerald-500/10 text-emerald-100' : hunk.type === 'removed' ? 'bg-red-500/10 text-red-100' : 'text-slate-400'}><td className="w-12 px-2 py-1 text-right">{hunk.leftLine ?? ''}</td><td className="w-12 px-2 py-1 text-right">{hunk.rightLine ?? ''}</td><td className="w-6 px-2 py-1">{hunk.type === 'added' ? '+' : hunk.type === 'removed' ? '-' : ' '}</td><td className="whitespace-pre-wrap break-all px-2 py-1">{hunk.line || ' '}</td></tr>)}</tbody></table></div>; }
 function message(error: unknown) { return error instanceof Error ? error.message : '편집 요청 처리에 실패했습니다.'; }
 function formatDate(value: string) { return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Seoul' }).format(new Date(value)); }
-function statusLabel(status: string) { return ({ pending: '검토 대기', reviewing: '처리 중', accepted: '승인됨', rejected: '반려됨', stale: '기준 판 만료' } as Record<string, string>)[status] ?? status; }
+function statusLabel(status: string) { return ({ pending: '검토 대기', reviewing: '처리 중', accepted: '승인됨', rejected: '반려됨', stale: '기준 판 만료', closed: '작성자가 닫음' } as Record<string, string>)[status] ?? status; }

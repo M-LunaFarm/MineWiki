@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
@@ -13,8 +13,14 @@ export class WikiEditRequestController {
 
   @Get('pages/:pageId/edit-requests')
   @UseGuards(OptionalSessionGuard)
-  list(@Param('pageId') pageId: string, @Req() request: FastifyRequest) {
-    return this.requests.list(pageId, request.sessionPayload ?? null);
+  list(@Param('pageId') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string) {
+    return this.requests.list(pageId, request.sessionPayload ?? null, cursor, limit);
+  }
+
+  @Get('edit-requests/:requestId/diff')
+  @UseGuards(OptionalSessionGuard)
+  diff(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {
+    return this.requests.diff(requestId, request.sessionPayload?.userId ?? null);
   }
 
   @Post('pages/:pageId/edit-requests')
@@ -38,5 +44,26 @@ export class WikiEditRequestController {
   @Throttle({ default: { limit: 10, ttl: 60 } })
   reject(@Param('requestId') requestId: string, @Body() body: { reviewNote?: string }, @CurrentSession() session: SessionPayload) {
     return this.requests.reject(session, requestId, body.reviewNote);
+  }
+
+  @Patch('edit-requests/:requestId')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  update(@Param('requestId') requestId: string, @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean }, @CurrentSession() session: SessionPayload) {
+    return this.requests.update(session, requestId, body);
+  }
+
+  @Post('edit-requests/:requestId/close')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  close(@Param('requestId') requestId: string, @CurrentSession() session: SessionPayload) {
+    return this.requests.close(session, requestId);
+  }
+
+  @Post('edit-requests/:requestId/reopen')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  reopen(@Param('requestId') requestId: string, @CurrentSession() session: SessionPayload) {
+    return this.requests.reopen(session, requestId);
   }
 }

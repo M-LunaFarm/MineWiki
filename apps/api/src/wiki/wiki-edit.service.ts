@@ -7,7 +7,7 @@ import {
   Optional
 } from '@nestjs/common';
 import { hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, WikiEditRequest } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
@@ -259,10 +259,11 @@ export class WikiEditService {
     };
   }
 
-  async updatePage(session: SessionPayload, pageId: string, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
+  async updatePage(session: SessionPayload, pageId: string, request: WikiPageMutationRequest, options: { readonly attributionProfileId?: bigint } = {}): Promise<WikiMutationResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const contentRaw = this.requiredString(request.contentRaw, 'contentRaw');
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const attributionProfileId = options.attributionProfileId ?? actor.id;
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -297,7 +298,7 @@ export class WikiEditService {
         contentRaw,
         editSummary: this.cleanOptional(request.editSummary),
         isMinor: Boolean(request.isMinor),
-        actorId: actor.id,
+        actorId: attributionProfileId,
         title: page.displayTitle,
         createdAt: now
       });
@@ -311,7 +312,7 @@ export class WikiEditService {
       await this.insertRecentChange(tx, {
         pageId: page.id,
         revisionId: revision.id,
-        actorId: actor.id,
+        actorId: attributionProfileId,
         changeType: 'edit',
         title: page.title,
         namespaceCode: namespace.code,
@@ -338,8 +339,75 @@ export class WikiEditService {
         namespace: result.namespace,
         title: result.title,
         revisionId: result.revisionId,
+        attributionProfileId: attributionProfileId.toString(),
         revisionNo: result.revisionNo
       }
+    });
+    return result;
+  }
+
+  async acceptEditRequest(session: SessionPayload, input: { readonly requestId: bigint; readonly reviewNote: string | null }): Promise<{ readonly mutation: WikiMutationResponse; readonly request: WikiEditRequest }> {
+    const reviewer = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const editRequest = await tx.wikiEditRequest.findUnique({ where: { id: input.requestId } });
+      if (!editRequest) throw new NotFoundException('Wiki edit request not found.');
+      const page = await tx.wikiPage.findUnique({ where: { id: editRequest.pageId } });
+      if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+      const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
+      if (!namespace) throw new NotFoundException('Wiki namespace not found.');
+      const reviewerActor = this.wikiPermissions.actorFromSession(session, reviewer);
+      if (!(await this.wikiPermissions.canManagePage({ actor: reviewerActor, page, store: tx }))) {
+        throw new ForbiddenException('Edit request review is not allowed.');
+      }
+      const claimed = await tx.wikiEditRequest.updateMany({
+        where: { id: editRequest.id, status: 'pending' },
+        data: { status: 'reviewing', reviewedBy: reviewer.id, updatedAt: now }
+      });
+      if (claimed.count !== 1) throw new ConflictException('This edit request is no longer pending.');
+      if (page.currentRevisionId !== editRequest.baseRevisionId) throw new ConflictException('Base revision does not match current revision.');
+      const latest = await this.findLatestRevision(tx, page.id);
+      await this.assertLockedSectionsUnchanged({
+        actor: reviewerActor,
+        page,
+        currentContent: latest?.contentRaw ?? '',
+        nextContent: editRequest.proposedContent,
+        store: tx
+      });
+      const revision = await this.createRevision(tx, {
+        pageId: page.id,
+        revisionNo: latest ? latest.revisionNo + 1 : 1,
+        parentRevisionId: latest?.id ?? null,
+        contentRaw: editRequest.proposedContent,
+        editSummary: editRequest.editSummary,
+        isMinor: editRequest.isMinor,
+        actorId: editRequest.createdBy,
+        title: page.displayTitle,
+        createdAt: now
+      });
+      await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
+      await this.insertRecentChange(tx, {
+        pageId: page.id, revisionId: revision.id, actorId: editRequest.createdBy, changeType: 'edit',
+        title: page.title, namespaceCode: namespace.code, summary: revision.editSummary, isMinor: revision.isMinor, createdAt: now
+      });
+      const completed = await tx.wikiEditRequest.updateMany({
+        where: { id: editRequest.id, status: 'reviewing', reviewedBy: reviewer.id },
+        data: { status: 'accepted', acceptedRevisionId: revision.id, reviewNote: input.reviewNote, reviewedAt: now, updatedAt: now }
+      });
+      if (completed.count !== 1) throw new ConflictException('This edit request is no longer being reviewed.');
+      await this.notifications?.notifyEditRequestReviewed(tx, {
+        profileId: editRequest.createdBy, pageId: page.id, requestId: editRequest.id,
+        reviewerProfileId: reviewer.id, status: 'accepted', title: page.displayTitle
+      });
+      return {
+        mutation: { pageId: page.id.toString(), revisionId: revision.id.toString(), revisionNo: revision.revisionNo, namespace: namespace.code, title: page.title, slug: page.slug },
+        request: await tx.wikiEditRequest.findUniqueOrThrow({ where: { id: editRequest.id } })
+      };
+    });
+    await this.events?.audit('wiki.edit', {
+      category: 'wiki', actorAccountId: session.userId, actorProfileId: reviewer.id,
+      subjectType: 'wiki_page', subjectId: result.mutation.pageId,
+      metadata: { namespace: result.mutation.namespace, title: result.mutation.title, revisionId: result.mutation.revisionId, revisionNo: result.mutation.revisionNo, attributionProfileId: result.request.createdBy.toString(), editRequestId: result.request.id.toString() }
     });
     return result;
   }
@@ -776,7 +844,7 @@ export class WikiEditService {
     return {
       left,
       right,
-      hunks: this.diffLines(left.contentRaw, right.contentRaw)
+      hunks: this.diffText(left.contentRaw, right.contentRaw)
     };
   }
 
@@ -980,7 +1048,7 @@ export class WikiEditService {
     };
   }
 
-  private diffLines(left: string, right: string): WikiRevisionDiffResponse['hunks'] {
+  diffText(left: string, right: string): WikiRevisionDiffResponse['hunks'] {
     const leftLines = left.split('\n');
     const rightLines = right.split('\n');
     const max = Math.max(leftLines.length, rightLines.length);

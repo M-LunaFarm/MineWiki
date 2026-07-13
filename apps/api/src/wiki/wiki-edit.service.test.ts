@@ -6,6 +6,7 @@ import { WikiEditService } from './wiki-edit.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
+import type { WikiNotificationService } from './wiki-notification.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -284,6 +285,74 @@ if (!hasDatabase) {
         spaceId: fixture.space.id,
         pageId
       });
+    }
+  });
+
+  test('accepting an edit request attributes the revision to its author and the review to its reviewer', async () => {
+    const fixture = await createFixture();
+    const reviewer = await prisma.account.create({
+      data: { provider: 'email', providerUserId: `reviewer-${fixture.unique}`, email: `reviewer-${fixture.unique}@example.com`, displayName: `Reviewer_${fixture.unique}`, emailVerified: true }
+    });
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), { namespace: fixture.namespace.code, title: `제안 ${fixture.unique}`, spaceId: fixture.space.id.toString(), contentRaw: '기준 내용', editSummary: '생성' });
+      pageId = created.pageId;
+      const [authorProfile, reviewerProfile] = await Promise.all([profiles.ensureWikiProfile(fixture.account.id), profiles.ensureWikiProfile(reviewer.id)]);
+      const pending = await prisma.wikiEditRequest.create({
+        data: { pageId: BigInt(created.pageId), baseRevisionId: BigInt(created.revisionId), proposedContent: '기준 내용\n제안 추가', editSummary: '제안 반영', isMinor: false, status: 'pending', createdBy: authorProfile.id, createdAt: new Date(), updatedAt: new Date() }
+      });
+
+      const accepted = await edits.acceptEditRequest(session(reviewer.id, true), { requestId: pending.id, reviewNote: '검토 완료' });
+      const revision = await prisma.wikiPageRevision.findUniqueOrThrow({ where: { id: BigInt(accepted.mutation.revisionId) } });
+      const recent = await prisma.wikiRecentChange.findFirstOrThrow({ where: { revisionId: revision.id } });
+
+      assert.equal(revision.createdBy, authorProfile.id);
+      assert.equal(recent.actorId, authorProfile.id);
+      assert.equal(accepted.request.reviewedBy, reviewerProfile.id);
+      assert.equal(accepted.request.status, 'accepted');
+    } finally {
+      if (pageId) await prisma.wikiEditRequest.deleteMany({ where: { pageId: BigInt(pageId) } });
+      await cleanupFixture({ accountId: fixture.account.id, namespaceId: fixture.namespace.id, namespaceCode: fixture.namespace.code, spaceId: fixture.space.id, pageId });
+      await prisma.wikiProfile.deleteMany({ where: { accountId: reviewer.id } });
+      await prisma.account.delete({ where: { id: reviewer.id } }).catch(() => {});
+    }
+  });
+
+  test('edit request approval rolls back the document when completion delivery fails', async () => {
+    const fixture = await createFixture();
+    const reviewer = await prisma.account.create({
+      data: { provider: 'email', providerUserId: `rollback-reviewer-${fixture.unique}`, email: `rollback-reviewer-${fixture.unique}@example.com`, displayName: `RollbackReviewer_${fixture.unique}`, emailVerified: true }
+    });
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), { namespace: fixture.namespace.code, title: `원자성 ${fixture.unique}`, spaceId: fixture.space.id.toString(), contentRaw: '원래 내용', editSummary: '생성' });
+      pageId = created.pageId;
+      const authorProfile = await profiles.ensureWikiProfile(fixture.account.id);
+      await profiles.ensureWikiProfile(reviewer.id);
+      const pending = await prisma.wikiEditRequest.create({
+        data: { pageId: BigInt(created.pageId), baseRevisionId: BigInt(created.revisionId), proposedContent: '바뀐 내용', editSummary: '실패할 승인', isMinor: false, status: 'pending', createdBy: authorProfile.id, createdAt: new Date(), updatedAt: new Date() }
+      });
+      const failingNotifications = {
+        async notifyWatchedRevision() {},
+        async notifyEditRequestReviewed() { throw new Error('notification transaction failure'); }
+      } as unknown as WikiNotificationService;
+      const atomicEdits = new WikiEditService(prisma, profiles, permissions, undefined, undefined, failingNotifications);
+
+      await assert.rejects(atomicEdits.acceptEditRequest(session(reviewer.id, true), { requestId: pending.id, reviewNote: null }), /notification transaction failure/);
+
+      const [unchangedPage, unchangedRequest, revisionCount] = await Promise.all([
+        prisma.wikiPage.findUniqueOrThrow({ where: { id: BigInt(created.pageId) } }),
+        prisma.wikiEditRequest.findUniqueOrThrow({ where: { id: pending.id } }),
+        prisma.wikiPageRevision.count({ where: { pageId: BigInt(created.pageId) } })
+      ]);
+      assert.equal(unchangedPage.currentRevisionId, BigInt(created.revisionId));
+      assert.equal(unchangedRequest.status, 'pending');
+      assert.equal(revisionCount, 1);
+    } finally {
+      if (pageId) await prisma.wikiEditRequest.deleteMany({ where: { pageId: BigInt(pageId) } });
+      await cleanupFixture({ accountId: fixture.account.id, namespaceId: fixture.namespace.id, namespaceCode: fixture.namespace.code, spaceId: fixture.space.id, pageId });
+      await prisma.wikiProfile.deleteMany({ where: { accountId: reviewer.id } });
+      await prisma.account.delete({ where: { id: reviewer.id } }).catch(() => {});
     }
   });
 
