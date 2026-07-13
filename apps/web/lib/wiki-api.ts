@@ -218,6 +218,30 @@ export interface WikiWatchlistItem extends WikiWatchStatus {
   readonly updatedAt: string;
 }
 
+export interface WikiEditRequestSummary {
+  readonly id: string;
+  readonly pageId: string;
+  readonly baseRevisionId: string;
+  readonly proposedContent: string;
+  readonly editSummary: string;
+  readonly isMinor: boolean;
+  readonly status: string;
+  readonly createdBy: string;
+  readonly createdByName: string;
+  readonly reviewedBy: string | null;
+  readonly reviewedByName: string | null;
+  readonly reviewNote: string | null;
+  readonly acceptedRevisionId: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly reviewedAt: string | null;
+}
+
+export interface WikiEditRequestListResponse {
+  readonly items: WikiEditRequestSummary[];
+  readonly canReview: boolean;
+}
+
 export interface WikiAdminRecentChange {
   readonly id: string;
   readonly pageId: string | null;
@@ -388,6 +412,24 @@ export async function markWikiPageWatchRead(pageId: string): Promise<WikiWatchSt
 
 export async function fetchWikiWatchlist(): Promise<WikiWatchlistItem[]> {
   return readWikiBrowser<WikiWatchlistItem[]>('/v1/wiki/watchlist');
+}
+
+export async function fetchWikiEditRequests(pageId: string): Promise<WikiEditRequestListResponse> {
+  return readWikiBrowser<WikiEditRequestListResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/edit-requests`);
+}
+
+export async function createWikiEditRequest(input: {
+  pageId: string;
+  baseRevisionId: string;
+  contentRaw: string;
+  editSummary: string;
+  isMinor: boolean;
+}): Promise<WikiEditRequestSummary> {
+  return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/edit-requests`, 'POST', input);
+}
+
+export async function reviewWikiEditRequest(input: { requestId: string; action: 'accept' | 'reject'; reviewNote?: string }): Promise<WikiEditRequestSummary> {
+  return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(input.requestId)}/${input.action}`, 'POST', { reviewNote: input.reviewNote });
 }
 
 async function readWikiBrowser<T>(path: string): Promise<T> {

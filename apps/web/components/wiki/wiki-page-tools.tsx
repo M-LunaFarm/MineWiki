@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
-import { ArchiveRestore, Code2, FolderPen, Link2, Loader2, MessageSquareText, Trash2 } from 'lucide-react';
+import { ArchiveRestore, Code2, FilePenLine, FolderPen, Link2, Loader2, MessageSquareText, Trash2 } from 'lucide-react';
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { WikiWatchButton } from './wiki-watch-button';
@@ -27,6 +27,7 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
   const rawHref = isServerWiki ? `${routePath}/raw` : `/wiki/raw/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
   const backlinksHref = isServerWiki ? `${routePath}/backlinks` : `/wiki/backlinks/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
   const discussionHref = isServerWiki ? `${routePath}/discuss` : `/wiki/discuss/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const requestsHref = isServerWiki ? `${routePath}/requests` : `/wiki/edit-requests/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
 
   async function move(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,6 +88,7 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
         >
           <MessageSquareText className="size-3.5" /> 토론
         </Link>
+        <Link href={requestsHref} className="chip chip-muted inline-flex items-center gap-1.5"><FilePenLine className="size-3.5" /> 편집 요청</Link>
       </div>
       {!authLoading && !account ? (
         <p className="mt-4 border-t border-white/10 pt-4 text-xs text-slate-500">

@@ -7,6 +7,7 @@ import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition }
 import { useAuth } from '../providers/auth-context';
 import {
   fetchWikiRevision,
+  createWikiEditRequest,
   listWikiFiles,
   previewWikiMarkup,
   saveWikiPage,
@@ -120,6 +121,22 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       } catch (error) {
         const message = error instanceof Error ? error.message : '저장하지 못했습니다.';
         setFeedback(`${message} 충돌이 발생했다면 최신 리비전을 다시 불러온 뒤 재시도하세요.`);
+      }
+    });
+  }
+
+  function submitForReview() {
+    if (!account || !page || !baseRevisionId || !contentRaw.trim() || !editSummary.trim()) {
+      setFeedback('기존 문서의 본문과 편집 요약을 입력해야 편집 요청을 보낼 수 있습니다.');
+      return;
+    }
+    setFeedback(null);
+    startSaveTransition(async () => {
+      try {
+        await createWikiEditRequest({ pageId: page.id, baseRevisionId, contentRaw, editSummary, isMinor });
+        setFeedback('편집 요청을 제출했습니다. 문서 관리자가 검토하면 실제 리비전으로 반영됩니다.');
+      } catch (error) {
+        setFeedback(error instanceof Error ? error.message : '편집 요청을 제출하지 못했습니다.');
       }
     });
   }
@@ -260,6 +277,12 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
               저장
             </button>
           </div>
+          {page ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
+              <p className="max-w-2xl text-xs leading-5 text-slate-400">직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.</p>
+              <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim()} className="btn-secondary h-10 disabled:opacity-50">검토 요청</button>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
