@@ -63,6 +63,8 @@ export interface WikiPageResponse {
       readonly title: string;
       readonly path: string;
       readonly current: boolean;
+      readonly depth: number;
+      readonly hasChildren: boolean;
     }>;
   } | null;
 }
@@ -758,10 +760,15 @@ export class WikiReadService {
       this.prisma.wikiPage.findMany({
         where: { spaceId, status: { not: 'deleted' }, pageType: { not: 'redirect' } },
         select: { id: true, localPath: true, displayTitle: true },
-        orderBy: [{ id: 'asc' }],
+        orderBy: [{ localPath: 'asc' }, { id: 'asc' }],
         take: 100
       })
     ]);
+    const navigationPages = [...pages].sort((left, right) => {
+      const leftRoot = serverWikiRelativePath(serverWiki.slug, left.localPath) ? 0 : -1;
+      const rightRoot = serverWikiRelativePath(serverWiki.slug, right.localPath) ? 0 : -1;
+      return leftRoot - rightRoot || left.localPath.localeCompare(right.localPath, 'ko');
+    });
     return {
       directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
       context: {
@@ -776,12 +783,22 @@ export class WikiReadService {
         playersOnline: server?.playersOnline ?? null,
         playersMax: server?.playersMax ?? null,
         layout: normalizeServerWikiLayoutKey(serverWiki.layoutKey),
-        navigation: pages.map((item) => ({
-          id: item.id.toString(),
-          title: item.displayTitle,
-          path: buildServerWikiPagePath(serverWiki.slug, item.localPath),
-          current: item.id === currentPageId
-        }))
+        navigation: navigationPages.map((item) => {
+          const relativePath = serverWikiRelativePath(serverWiki.slug, item.localPath);
+          const hasChildren = navigationPages.some((candidate) => {
+            if (candidate.id === item.id) return false;
+            const candidatePath = serverWikiRelativePath(serverWiki.slug, candidate.localPath);
+            return relativePath ? candidatePath.startsWith(`${relativePath}/`) : Boolean(candidatePath);
+          });
+          return {
+            id: item.id.toString(),
+            title: item.displayTitle,
+            path: buildServerWikiPagePath(serverWiki.slug, item.localPath),
+            current: item.id === currentPageId,
+            depth: serverWikiNavigationDepth(serverWiki.slug, item.localPath),
+            hasChildren
+          };
+        })
       }
     };
   }
@@ -829,6 +846,20 @@ export function buildServerWikiPagePath(serverSlug: string, localPath: string): 
   if (!relativePath) return `/server/${encodedSlug}`;
   const encodedRelative = relativePath.split('/').map(encodeURIComponent).join('/');
   return `/server/${encodedSlug}/${encodedRelative}`;
+}
+
+export function serverWikiNavigationDepth(serverSlug: string, localPath: string): number {
+  const relativePath = serverWikiRelativePath(serverSlug, localPath);
+  return relativePath ? Math.max(0, relativePath.split('/').filter(Boolean).length - 1) : 0;
+}
+
+function serverWikiRelativePath(serverSlug: string, localPath: string): string {
+  const normalizedSlug = serverSlug.trim().replace(/^\/+|\/+$/g, '');
+  const normalizedPath = localPath.trim().replace(/^\/+|\/+$/g, '');
+  if (normalizedPath === normalizedSlug) return '';
+  return normalizedPath.startsWith(`${normalizedSlug}/`)
+    ? normalizedPath.slice(normalizedSlug.length + 1)
+    : normalizedPath;
 }
 
 function resolveContextualLinkTarget(namespace: string, localPath: string, target: string) {

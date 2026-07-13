@@ -55,6 +55,8 @@ export interface WikiPageResponse {
       readonly title: string;
       readonly path: string;
       readonly current: boolean;
+      readonly depth: number;
+      readonly hasChildren: boolean;
     }>;
   } | null;
 }

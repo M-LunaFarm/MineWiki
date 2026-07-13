@@ -3,12 +3,19 @@ import assert from 'node:assert/strict';
 import { WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
 import type { WikiPermissionService } from './wiki-permission.service';
-import { buildServerWikiPagePath, WikiReadService } from './wiki-read.service';
+import { buildServerWikiPagePath, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
 
 test('server wiki navigation removes the duplicated space slug', () => {
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main'), '/server/luna-main');
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main/규칙'), '/server/luna-main/%EA%B7%9C%EC%B9%99');
   assert.equal(buildServerWikiPagePath('luna-main', 'FAQ'), '/server/luna-main/FAQ');
+});
+
+test('server wiki navigation derives a stable document tree depth', () => {
+  assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main'), 0);
+  assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main/시작하기'), 0);
+  assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main/가이드/설치'), 1);
+  assert.equal(serverWikiNavigationDepth('luna-main', '운영/권한/ACL'), 2);
 });
 
 test('backlinks expose only links from the current readable source revision', async () => {
