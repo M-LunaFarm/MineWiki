@@ -27,7 +27,7 @@ import {
   type WikiDeletedPageSummary,
   type WikiPageResponse,
   type WikiRecentChangeSummary,
-  type WikiRevisionSummary,
+  type WikiRevisionListResponse,
   type WikiSearchResult,
   type WikiSpecialDocumentResponse
 } from './wiki-read.service';
@@ -70,14 +70,14 @@ export class WikiController {
 
   @Get('page/:id/revisions')
   @UseGuards(OptionalSessionGuard)
-  getRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiRevisionSummary[]> {
-    return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null);
+  getRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string): Promise<WikiRevisionListResponse> {
+    return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null, cursor, limit);
   }
 
   @Get('pages/:id/revisions')
   @UseGuards(OptionalSessionGuard)
-  getPageRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiRevisionSummary[]> {
-    return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null);
+  getPageRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string): Promise<WikiRevisionListResponse> {
+    return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null, cursor, limit);
   }
 
   @Get('pages/:id/raw')

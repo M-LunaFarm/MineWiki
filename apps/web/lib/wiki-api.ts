@@ -105,6 +105,11 @@ export interface WikiRevisionSummary {
   readonly contentSize: number;
 }
 
+export interface WikiRevisionListResponse {
+  readonly items: WikiRevisionSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiRevisionDiffResponse {
   readonly left: WikiRevisionResponse;
   readonly right: WikiRevisionResponse;
@@ -211,7 +216,7 @@ export interface WikiBacklinkResponse {
 }
 
 export interface WikiContributionResponse {
-  readonly profile: { readonly id: string; readonly username: string; readonly displayName: string };
+  readonly profile: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string };
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly pageId: string;
@@ -593,16 +598,10 @@ async function mutateWikiBrowser<T>(path: string, method: string, payload: Recor
   return body as T;
 }
 
-export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionSummary[]> {
-  const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions`, {
-    credentials: 'include',
-    next: { revalidate: 30 }
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body?.message ?? 'Failed to load wiki revisions.');
-  }
-  return response.json();
+export async function fetchWikiRevisions(pageId: string, cursor?: string): Promise<WikiRevisionListResponse> {
+  const params = new URLSearchParams({ limit: '50' });
+  if (cursor) params.set('cursor', cursor);
+  return readWikiBrowser(`/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions?${params.toString()}`);
 }
 
 export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {

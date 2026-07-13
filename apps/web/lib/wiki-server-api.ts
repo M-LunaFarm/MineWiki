@@ -6,7 +6,7 @@ import type {
   WikiRecentChangeSummary,
   WikiRevisionDiffResponse,
   WikiRevisionResponse,
-  WikiRevisionSummary,
+  WikiRevisionListResponse,
   WikiSearchResult,
   WikiSpecialDocumentResponse,
   WikiSpecialDocumentType
@@ -26,9 +26,9 @@ export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisio
   return readWikiResponse<WikiRevisionResponse>(response, 'Failed to load wiki revision.');
 }
 
-export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionSummary[]> {
-  const response = await wikiFetch(`/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions`);
-  return readWikiResponse<WikiRevisionSummary[]>(response, 'Failed to load wiki revisions.');
+export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionListResponse> {
+  const response = await wikiFetch(`/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions?limit=50`);
+  return readWikiResponse<WikiRevisionListResponse>(response, 'Failed to load wiki revisions.');
 }
 
 export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {

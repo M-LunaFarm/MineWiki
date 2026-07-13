@@ -139,8 +139,14 @@ export interface WikiContributionResponse {
     readonly id: string;
     readonly username: string;
     readonly displayName: string;
+    readonly status: string;
   };
   readonly items: WikiContributionItem[];
+  readonly nextCursor: string | null;
+}
+
+export interface WikiRevisionListResponse {
+  readonly items: WikiRevisionSummary[];
   readonly nextCursor: string | null;
 }
 
@@ -258,7 +264,7 @@ export class WikiReadService {
     return this.getPage(resolved.namespace, resolved.title, accountId ?? null, options);
   }
 
-  async getRevisions(pageId: string, accountId?: string | null): Promise<WikiRevisionSummary[]> {
+  async getRevisions(pageId: string, accountId?: string | null, cursor?: string, requestedLimit: string | number = 50): Promise<WikiRevisionListResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
     if (!page) {
@@ -273,15 +279,20 @@ export class WikiReadService {
       action: 'history',
       page
     });
+    const limit = Math.min(Math.max(Number(requestedLimit) || 50, 1), 100);
+    const cursorRevisionNo = cursor ? this.parsePositiveInt(cursor, 'cursor') : null;
     const revisions = await this.prisma.wikiPageRevision.findMany({
       where: {
         pageId: parsedPageId,
-        visibility: 'public'
+        visibility: 'public',
+        ...(cursorRevisionNo ? { revisionNo: { lt: cursorRevisionNo } } : {})
       },
       orderBy: [{ revisionNo: 'desc' }],
-      take: 100
+      take: limit + 1
     });
-    const profileIds = [...new Set(revisions.flatMap((revision) => revision.createdBy ? [revision.createdBy] : []))];
+    const hasMore = revisions.length > limit;
+    const pageRows = revisions.slice(0, limit);
+    const profileIds = [...new Set(pageRows.flatMap((revision) => revision.createdBy ? [revision.createdBy] : []))];
     const profiles = profileIds.length > 0
       ? await this.prisma.wikiProfile.findMany({
           where: { id: { in: profileIds } },
@@ -289,7 +300,7 @@ export class WikiReadService {
         })
       : [];
     const profileById = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
-    return revisions.map((revision) => ({
+    const items = pageRows.map((revision) => ({
       id: revision.id.toString(),
       revisionNo: revision.revisionNo,
       editSummary: revision.editSummary,
@@ -300,6 +311,7 @@ export class WikiReadService {
       contentHash: revision.contentHash,
       contentSize: revision.contentSize
     }));
+    return { items, nextCursor: hasMore ? pageRows.at(-1)?.revisionNo.toString() ?? null : null };
   }
 
   async getRecent(accountId?: string | null): Promise<WikiRecentChangeSummary[]> {
@@ -415,7 +427,7 @@ export class WikiReadService {
       where: { id: profileId },
       select: { id: true, username: true, displayName: true, status: true }
     });
-    if (!profile || profile.status !== 'active') throw new NotFoundException('Wiki profile not found.');
+    if (!profile || !['active', 'blocked'].includes(profile.status)) throw new NotFoundException('Wiki profile not found.');
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
     const changes = await this.prisma.wikiRecentChange.findMany({
@@ -467,7 +479,8 @@ export class WikiReadService {
       profile: {
         id: profile.id.toString(),
         username: profile.username,
-        displayName: profile.displayName
+        displayName: profile.displayName,
+        status: profile.status
       },
       items,
       nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
@@ -1060,6 +1073,13 @@ export class WikiReadService {
       throw new BadRequestException(`${label} must be an unsigned integer.`);
     }
     return BigInt(value);
+  }
+
+  private parsePositiveInt(value: string, label: string): number {
+    if (!/^\d+$/.test(value)) throw new BadRequestException(`${label} must be a positive integer.`);
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed) || parsed < 1) throw new BadRequestException(`${label} must be a positive integer.`);
+    return parsed;
   }
 }
 

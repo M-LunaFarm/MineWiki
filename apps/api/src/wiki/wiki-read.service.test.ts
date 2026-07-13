@@ -18,6 +18,34 @@ test('server wiki navigation derives a stable document tree depth', () => {
   assert.equal(serverWikiNavigationDepth('luna-main', '운영/권한/ACL'), 2);
 });
 
+test('revision history uses a stable revision number cursor beyond the first page', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  let revisionWhere: unknown;
+  const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'doc', slug: 'doc', title: '문서', displayTitle: '문서', currentRevisionId: 4n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
+  const makeRevision = (revisionNo: number) => ({ id: BigInt(revisionNo), pageId: 1n, revisionNo, editSummary: null, isMinor: false, createdBy: 1n, createdAt: now, contentHash: String(revisionNo), contentSize: revisionNo });
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageRevision: { async findMany(args: { where: unknown }) { revisionWhere = args.where; return [makeRevision(4), makeRevision(3), makeRevision(2)]; } },
+    wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'editor' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {}, async assertCanUsePageAction() {} } as unknown as WikiPermissionService;
+  const result = await new WikiReadService(prisma, permissions).getRevisions('1', null, '5', 2);
+  assert.deepEqual(revisionWhere, { pageId: 1n, visibility: 'public', revisionNo: { lt: 5 } });
+  assert.deepEqual(result.items.map((item) => item.revisionNo), [4, 3]);
+  assert.equal(result.nextCursor, '3');
+});
+
+test('blocked profiles keep their public contribution ledger', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 7n, username: 'blocked', displayName: '차단 사용자', status: 'blocked', createdAt: now, updatedAt: now }; } },
+    wikiRecentChange: { async findMany() { return []; } }
+  } as unknown as PrismaService;
+  const result = await new WikiReadService(prisma, {} as WikiPermissionService).getContributions({ profileId: '7' });
+  assert.equal(result.profile.status, 'blocked');
+  assert.deepEqual(result.items, []);
+});
+
 test('special long documents are sorted by current public source size', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const pages = [

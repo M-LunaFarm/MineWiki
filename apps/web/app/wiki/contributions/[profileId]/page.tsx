@@ -18,7 +18,7 @@ export default async function WikiContributionsPage({ params, searchParams }: Pa
       </nav>
       <header className="border-b border-white/10 pb-6">
         <h1 className="text-3xl font-bold text-white">{result.profile.displayName}의 기여</h1>
-        <p className="mt-3 text-sm text-slate-400">@{result.profile.username} · 읽을 권한이 있는 문서의 공개 변경만 표시됩니다.</p>
+        <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">@{result.profile.username}{result.profile.status === 'blocked' ? <span className="chip border-red-300/30 text-red-200">기여 차단됨</span> : null}<span>· 읽을 권한이 있는 문서의 공개 변경만 표시됩니다.</span></p>
       </header>
       <section className="divide-y divide-white/10 border border-white/10 bg-[#111821]">
         {result.items.map((item) => (

@@ -271,7 +271,7 @@ if (!hasDatabase) {
 
       const history = await reads.getRevisions(created.pageId);
       assert.deepEqual(
-        history.map((item) => item.revisionNo),
+        history.items.map((item) => item.revisionNo),
         [2, 1]
       );
       const diff = await edits.getRevisionDiff(created.revisionId, edited.revisionId);
