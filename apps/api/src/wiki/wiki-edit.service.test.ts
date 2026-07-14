@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
 import { parseMarkup } from '@minewiki/wiki-core';
-import { astContainsFile, categoryDocumentReferencesSelf, WikiEditService } from './wiki-edit.service';
+import {
+  astContainsFile,
+  categoryDocumentReferencesSelf,
+  replaceSectionByAnchor,
+  sectionByAnchor,
+  WikiEditService,
+  type WikiPageMutationRequest
+} from './wiki-edit.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
@@ -20,6 +27,29 @@ test('category documents cannot list themselves as a parent', () => {
   assert.equal(categoryDocumentReferencesSelf('category', '게임 플레이/몹', ['게임_플레이/몹']), true);
   assert.equal(categoryDocumentReferencesSelf('category', '게임 플레이/몹', ['게임 플레이']), false);
   assert.equal(categoryDocumentReferencesSelf('main', '게임 플레이/몹', ['게임 플레이/몹']), false);
+});
+
+test('section ranges are derived from server-parsed heading anchors', () => {
+  const content = '서문\r\n== 소개 ==\r\n소개 본문\r\n=== 세부 ===\r\n세부 본문\r\n== 마무리 ==\r\n마지막';
+  const section = sectionByAnchor(content, '소개');
+
+  assert.deepEqual(section, {
+    anchor: '소개',
+    title: '소개',
+    contentRaw: '== 소개 ==\n소개 본문',
+    startLine: 2,
+    endLine: 3
+  });
+  assert.equal(sectionByAnchor(content, '없음'), null);
+});
+
+test('section replacement preserves every adjacent line and supports the final section', () => {
+  const content = '서문\n== 소개 ==\n이전\n== 마무리 ==\n마지막';
+  const replaced = replaceSectionByAnchor(content, '소개', '== 소개 ==\n수정');
+  const final = replaceSectionByAnchor(replaced ?? '', '마무리', '== 결론 ==\n완료');
+
+  assert.equal(replaced, '서문\n== 소개 ==\n수정\n== 마무리 ==\n마지막');
+  assert.equal(final, '서문\n== 소개 ==\n수정\n== 결론 ==\n완료');
 });
 
 function session(userId: string, isElevated = false) {
@@ -106,6 +136,95 @@ test('request page types cannot override the space invariant', async () => {
   await assert.rejects(
     edits.createPage(session('account'), { namespace: 'main', title: '문서', spaceId: '9', pageType: 'server', contentRaw: '내용' }),
     /Page type must be article/
+  );
+});
+
+test('section edit checks read, raw, and edit ACL before returning source', async () => {
+  const actions: string[] = [];
+  const page = {
+    id: 7n, spaceId: 1n, namespaceId: 1, title: '문서', status: 'normal',
+    protectionLevel: 'open', currentRevisionId: 11n
+  };
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageRevision: {
+      async findFirst() { return { id: 11n, pageId: 7n, contentRaw: '== 소개 ==\n본문', visibility: 'public' }; }
+    }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 3n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    async assertCanReadPage() { actions.push('read'); },
+    async assertCanUsePageAction(input: { action: string }) { actions.push(input.action); },
+    async assertCanEditPage() { actions.push('edit'); },
+    actorFromSession() { return { accountId: 'account', profileId: 3n, status: 'active' }; }
+  } as unknown as WikiPermissionService;
+  const service = new WikiEditService(prisma, profiles, permissions);
+
+  const section = await service.getSectionForEdit(session('account'), '7', '소개');
+
+  assert.equal(section.contentRaw, '== 소개 ==\n본문');
+  assert.equal(section.baseRevisionId, '11');
+  assert.deepEqual(actions, ['read', 'raw', 'edit']);
+});
+
+test('section edit rebuilds the full document and delegates final validation to updatePage', async () => {
+  const page = {
+    id: 7n, spaceId: 1n, namespaceId: 1, title: '문서', status: 'normal',
+    protectionLevel: 'open', currentRevisionId: 11n
+  };
+  const revision = { id: 11n, pageId: 7n, contentRaw: '서문\n== 소개 ==\n이전\n== 다음 ==\n보존', visibility: 'public' };
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageRevision: {
+      async findFirst() { return revision; },
+      async findUnique() { return revision; }
+    }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 3n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    async assertCanReadPage() {}, async assertCanUsePageAction() {}, async assertCanEditPage() {},
+    actorFromSession() { return { accountId: 'account', profileId: 3n, status: 'active' }; }
+  } as unknown as WikiPermissionService;
+  const service = new WikiEditService(prisma, profiles, permissions);
+  let delegated: WikiPageMutationRequest | null = null;
+  service.updatePage = async (_session, _pageId, request) => {
+    delegated = request;
+    return { pageId: '7', revisionId: '12', revisionNo: 2, namespace: 'main', title: '문서', slug: '문서' };
+  };
+
+  const result = await service.updateSection(session('account'), '7', '소개', {
+    contentRaw: '== 새 소개 ==\n수정',
+    editSummary: '섹션 수정',
+    baseRevisionId: '11'
+  });
+
+  assert.equal(result.sectionAnchor, '새-소개');
+  assert.equal(delegated?.contentRaw, '서문\n== 새 소개 ==\n수정\n== 다음 ==\n보존');
+  assert.equal(delegated?.baseRevisionId, '11');
+  assert.equal(delegated?.editSummary, '섹션 수정');
+});
+
+test('section edit rejects stale bases and replacement without a heading', async () => {
+  const page = { id: 7n, spaceId: 1n, namespaceId: 1, title: '문서', status: 'normal', protectionLevel: 'open', currentRevisionId: 11n };
+  const revision = { id: 11n, pageId: 7n, contentRaw: '== 소개 ==\n본문', visibility: 'public' };
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageRevision: { async findFirst() { return revision; }, async findUnique() { return revision; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 3n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    async assertCanReadPage() {}, async assertCanUsePageAction() {}, async assertCanEditPage() {},
+    actorFromSession() { return { accountId: 'account', profileId: 3n, status: 'active' }; }
+  } as unknown as WikiPermissionService;
+  const service = new WikiEditService(prisma, profiles, permissions);
+
+  await assert.rejects(
+    service.updateSection(session('account'), '7', '소개', { contentRaw: '== 소개 ==\n수정', baseRevisionId: '10' }),
+    /Base revision/
+  );
+  await assert.rejects(
+    service.updateSection(session('account'), '7', '소개', { contentRaw: '제목 없음', baseRevisionId: '11' }),
+    /must begin with a wiki heading/
   );
 });
 
@@ -215,6 +334,49 @@ if (!hasDatabase) {
       });
       assert.equal(recentChange?.changeType, 'create');
       assert.equal(recentChange?.namespaceCode, fixture.namespace.code);
+    } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id,
+        pageId
+      });
+    }
+  });
+
+  test('edits one heading section without changing adjacent document content', async () => {
+    const fixture = await createFixture();
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        title: `섹션 편집 ${fixture.unique}`,
+        spaceId: fixture.space.id.toString(),
+        contentRaw: '서문\n== 소개 ==\n이전 본문\n== 보존 ==\n건드리지 않음',
+        editSummary: '섹션 테스트 생성'
+      });
+      pageId = created.pageId;
+      const section = await edits.getSectionForEdit(session(fixture.account.id), created.pageId, '소개');
+      assert.equal(section.contentRaw, '== 소개 ==\n이전 본문');
+
+      const updated = await edits.updateSection(session(fixture.account.id), created.pageId, '소개', {
+        contentRaw: '== 소개 개편 ==\n새 본문',
+        editSummary: '소개 섹션만 수정',
+        baseRevisionId: section.baseRevisionId
+      });
+      assert.equal(updated.sectionAnchor, '소개-개편');
+      const revision = await edits.getRevision(updated.revisionId, fixture.account.id);
+      assert.equal(revision.contentRaw, '서문\n== 소개 개편 ==\n새 본문\n== 보존 ==\n건드리지 않음');
+      assert.equal(revision.editSummary, '소개 섹션만 수정');
+
+      await assert.rejects(
+        edits.updateSection(session(fixture.account.id), created.pageId, '소개-개편', {
+          contentRaw: '== 소개 개편 ==\n지연된 수정',
+          baseRevisionId: section.baseRevisionId
+        }),
+        /Base revision/
+      );
     } finally {
       await cleanupFixture({
         accountId: fixture.account.id,

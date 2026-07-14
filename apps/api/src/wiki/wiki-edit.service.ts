@@ -38,6 +38,18 @@ export interface WikiSectionMutationRequest {
   readonly baseRevisionId?: string;
 }
 
+export interface WikiSectionEditResponse {
+  readonly pageId: string;
+  readonly anchor: string;
+  readonly title: string;
+  readonly contentRaw: string;
+  readonly baseRevisionId: string;
+}
+
+export interface WikiSectionMutationResponse extends WikiMutationResponse {
+  readonly sectionAnchor: string;
+}
+
 export interface WikiMoveRequest {
   readonly title?: string;
   readonly displayTitle?: string;
@@ -863,6 +875,74 @@ export class WikiEditService {
     });
   }
 
+  async getSectionForEdit(
+    session: SessionPayload,
+    pageId: string,
+    anchor: string
+  ): Promise<WikiSectionEditResponse> {
+    const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const normalizedAnchor = this.requiredString(anchor, 'anchor');
+    if (normalizedAnchor.length > 255) throw new BadRequestException('anchor is too long.');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
+    if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    await this.wikiPermissions.assertCanReadPage({ accountId: session.userId, page });
+    await this.wikiPermissions.assertCanUsePageAction({ accountId: session.userId, action: 'raw', page });
+    await this.wikiPermissions.assertCanEditPage({
+      actor: this.wikiPermissions.actorFromSession(session, profile),
+      page
+    });
+    const revision = page.currentRevisionId
+      ? await this.prisma.wikiPageRevision.findFirst({
+          where: { id: page.currentRevisionId, pageId: page.id, visibility: 'public' }
+        })
+      : null;
+    if (!revision) throw new NotFoundException('Public wiki revision not found.');
+    const section = sectionByAnchor(revision.contentRaw, normalizedAnchor);
+    if (!section) throw new NotFoundException('Wiki section not found.');
+    return {
+      pageId: page.id.toString(),
+      anchor: section.anchor,
+      title: section.title,
+      contentRaw: section.contentRaw,
+      baseRevisionId: revision.id.toString()
+    };
+  }
+
+  async updateSection(
+    session: SessionPayload,
+    pageId: string,
+    anchor: string,
+    request: WikiPageMutationRequest
+  ): Promise<WikiSectionMutationResponse> {
+    const baseRevisionId = this.requiredString(request.baseRevisionId, 'baseRevisionId');
+    this.parseBigIntId(baseRevisionId, 'baseRevisionId');
+    const section = await this.getSectionForEdit(session, pageId, anchor);
+    if (section.baseRevisionId !== baseRevisionId) {
+      throw new ConflictException('Base revision does not match current revision.');
+    }
+    const replacement = request.contentRaw?.replace(/\r\n/g, '\n');
+    if (!replacement?.trim()) throw new BadRequestException('contentRaw is required.');
+    const replacementParsed = parseMarkup(replacement);
+    const nextHeading = replacementParsed.headings.find((heading) => heading.startLine === 1);
+    if (!nextHeading) {
+      throw new BadRequestException('Section content must begin with a wiki heading.');
+    }
+    const fullContent = replaceSectionByAnchor(
+      (await this.prisma.wikiPageRevision.findUnique({ where: { id: BigInt(baseRevisionId) } }))?.contentRaw ?? '',
+      section.anchor,
+      replacement
+    );
+    if (fullContent === null) throw new ConflictException('Wiki section changed. Reload and try again.');
+    const mutation = await this.updatePage(session, pageId, {
+      contentRaw: fullContent,
+      editSummary: request.editSummary ?? `섹션 편집: ${section.title}`,
+      isMinor: request.isMinor,
+      baseRevisionId
+    });
+    return { ...mutation, sectionAnchor: nextHeading.anchor };
+  }
+
   async getRevision(revisionId: string, accountId?: string | null): Promise<WikiRevisionResponse> {
     return this.getRevisionForAction(revisionId, accountId ?? null, 'raw');
   }
@@ -1197,4 +1277,39 @@ function sectionContentsByAnchor(content: string, anchor: string): string[] {
   return parsed.headings
     .filter((heading) => heading.anchor === anchor)
     .map((heading) => lines.slice(heading.startLine - 1, heading.endLine).join('\n'));
+}
+
+export function sectionByAnchor(content: string, anchor: string): {
+  anchor: string;
+  title: string;
+  contentRaw: string;
+  startLine: number;
+  endLine: number;
+} | null {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const parsed = parseMarkup(normalized);
+  const matches = parsed.headings.filter((heading) => heading.anchor === anchor);
+  if (matches.length !== 1) return null;
+  const heading = matches[0]!;
+  const lines = normalized.split('\n');
+  return {
+    anchor: heading.anchor,
+    title: heading.title,
+    contentRaw: lines.slice(heading.startLine - 1, heading.endLine).join('\n'),
+    startLine: heading.startLine,
+    endLine: heading.endLine
+  };
+}
+
+export function replaceSectionByAnchor(content: string, anchor: string, replacement: string): string | null {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const section = sectionByAnchor(normalized, anchor);
+  if (!section) return null;
+  const lines = normalized.split('\n');
+  lines.splice(
+    section.startLine - 1,
+    section.endLine - section.startLine + 1,
+    ...replacement.replace(/\r\n/g, '\n').split('\n')
+  );
+  return lines.join('\n');
 }

@@ -16,6 +16,8 @@ import {
   type WikiRevisionDiffResponse,
   type WikiRevisionResponse,
   type WikiSectionMutationRequest,
+  type WikiSectionEditResponse,
+  type WikiSectionMutationResponse,
   type WikiStatusMutationRequest,
   type WikiStatusMutationResponse
 } from './wiki-edit.service';
@@ -318,6 +320,28 @@ export class WikiController {
     @CurrentSession() session: SessionPayload
   ): Promise<WikiMutationResponse> {
     return this.wikiEdit.appendSection(session, pageId, body);
+  }
+
+  @Get('pages/:id/sections/:anchor')
+  @UseGuards(SessionGuard)
+  getSectionForEdit(
+    @Param('id') pageId: string,
+    @Param('anchor') anchor: string,
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiSectionEditResponse> {
+    return this.wikiEdit.getSectionForEdit(session, pageId, anchor);
+  }
+
+  @Patch('pages/:id/sections/:anchor')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  @UseGuards(SessionGuard)
+  updateSection(
+    @Param('id') pageId: string,
+    @Param('anchor') anchor: string,
+    @Body() body: WikiPageMutationRequest,
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiSectionMutationResponse> {
+    return this.wikiEdit.updateSection(session, pageId, anchor, body);
   }
 
   @Get('me')
