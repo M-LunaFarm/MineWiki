@@ -31,6 +31,7 @@ import {
   type WikiRecentChangeListResponse,
   type WikiRevisionListResponse,
   type WikiSearchResponse,
+  type WikiSearchSuggestionResponse,
   type WikiSpecialDocumentResponse
 } from './wiki-read.service';
 import { WikiProfileService, type WikiMeResponse } from './wiki-profile.service';
@@ -161,6 +162,16 @@ export class WikiController {
       cursor,
       accountId: request.sessionPayload?.userId ?? null
     });
+  }
+
+  @Get('search/suggest')
+  @UseGuards(OptionalSessionGuard)
+  suggest(
+    @Req() request: FastifyRequest,
+    @Query('q') q: string | undefined,
+    @Query('limit') limit: string | undefined
+  ): Promise<WikiSearchSuggestionResponse> {
+    return this.wikiRead.suggest({ q, limit, accountId: request.sessionPayload?.userId ?? null });
   }
 
   @Get('special')

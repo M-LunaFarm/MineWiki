@@ -115,6 +115,11 @@ export interface WikiSearchResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiSearchSuggestionResponse {
+  readonly items: WikiSearchResult[];
+  readonly exactMatch: WikiSearchResult | null;
+}
+
 export interface WikiBacklinkItem {
   readonly id: string;
   readonly sourcePageId: string;
@@ -1175,6 +1180,65 @@ export class WikiReadService {
       items,
       nextCursor: hasMore && cursorPage ? encodeWikiSearchCursor(cursorPage.updatedAt, cursorPage.id) : null
     };
+  }
+
+  async suggest(input: {
+    readonly q?: string;
+    readonly limit?: string | number;
+    readonly accountId?: string | null;
+  }): Promise<WikiSearchSuggestionResponse> {
+    const query = input.q?.trim().slice(0, 100) ?? '';
+    if (!query) return { items: [], exactMatch: null };
+    const limit = Math.min(Math.max(Number(input.limit ?? 8) || 8, 1), 20);
+    const slug = slugifyTitle(query);
+    const pages = await this.prisma.wikiPage.findMany({
+      where: {
+        status: { in: ['normal', 'active', 'published'] },
+        pageType: { not: 'redirect' },
+        currentRevisionId: { not: null },
+        OR: [
+          { title: { contains: query } },
+          { displayTitle: { contains: query } },
+          ...(slug ? [{ slug: { contains: slug } }, { localPath: { contains: slug } }] : [])
+        ]
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: 200
+    });
+    const namespaces = pages.length > 0
+      ? await this.prisma.wikiNamespace.findMany({
+          where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
+          select: { id: true, code: true }
+        })
+      : [];
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const normalized = query.toLocaleLowerCase('ko-KR');
+    const ranked: Array<{ score: number; item: WikiSearchResult }> = [];
+    for (const page of pages) {
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+      } catch {
+        continue;
+      }
+      const candidates = [page.displayTitle, page.title, page.slug, page.localPath]
+        .map((value) => value.toLocaleLowerCase('ko-KR'));
+      const score = candidates.some((value) => value === normalized)
+        ? 0
+        : candidates.some((value) => value.startsWith(normalized))
+          ? 1
+          : 2;
+      const namespace = namespaceById.get(page.namespaceId) ?? 'main';
+      ranked.push({
+        score,
+        item: {
+          pageId: page.id.toString(), namespace, title: page.title, displayTitle: page.displayTitle,
+          routePath: wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title), snippet: '', updatedAt: page.updatedAt.toISOString()
+        }
+      });
+    }
+    ranked.sort((left, right) => left.score - right.score || right.item.updatedAt.localeCompare(left.item.updatedAt) || left.item.pageId.localeCompare(right.item.pageId));
+    const items = ranked.slice(0, limit).map(({ item }) => item);
+    return { items, exactMatch: ranked.find(({ score }) => score === 0)?.item ?? null };
   }
 
   private async renderPage(namespace: string, page: {
