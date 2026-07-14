@@ -210,6 +210,12 @@ test('invalidating a vote refreshes valid counters and writes an audit event', a
                   return { count: 2 };
                 },
               },
+              server: {
+                updateMany: (args: unknown) => {
+                  serverUpdates.push(args);
+                  return { count: 1 };
+                },
+              },
             })
           : operation,
     } as never,
@@ -224,6 +230,10 @@ test('invalidating a vote refreshes valid counters and writes an audit event', a
     rankRecalculationPending: true,
   });
   assert.deepEqual(serverUpdates, [
+    {
+      where: { id: serverId, reviewsCount: { gte: 2 } },
+      data: { reviewsCount: { decrement: 2 } },
+    },
     {
       where: { id: serverId },
       data: { votes24h: 4, votesMonthly: 20 },

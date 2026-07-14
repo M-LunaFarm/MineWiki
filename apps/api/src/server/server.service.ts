@@ -922,13 +922,6 @@ export class ServerService {
     return response;
   }
 
-  async incrementReviewCount(id: string): Promise<void> {
-    await this.prisma.server.update({
-      where: { id },
-      data: { reviewsCount: { increment: 1 } },
-    });
-  }
-
   async updateBanner(id: string, accountId: string, upload: FileImageUploadRequest): Promise<FileImageUploadResponse> {
     const startedAt = Date.now();
     try {

@@ -327,9 +327,52 @@ async function runValidation() {
   );
 
   await validatePluginCredentials();
+  await validatePublicReviewCounts();
   await validateEncryptedCredentials();
   await validateExpiredReplayGuards();
   await validateRenderCache();
+}
+
+async function validatePublicReviewCounts() {
+  const mismatches = await prisma.$queryRawUnsafe(
+    `
+      SELECT s.id
+      FROM Server s
+      LEFT JOIN (
+        SELECT r.serverId, COUNT(*) AS publicCount
+        FROM ServerReview r
+        WHERE r.visibility = 'public'
+        GROUP BY r.serverId
+      ) counted ON counted.serverId = s.id
+      WHERE s.reviewsCount <> COALESCE(counted.publicCount, 0)
+      LIMIT ${args.fixLimit}
+    `,
+  );
+  if (mismatches.length === 0) {
+    pass('Server.reviewsCount matches public reviews');
+    return;
+  }
+  if (!args.fix) {
+    const sample = mismatches.slice(0, args.sampleLimit).map((row) => stringifyId(row.id)).join(', ');
+    error(
+      'Server.reviewsCount matches public reviews',
+      `${mismatches.length} mismatched counters; sample: ${sample}; rerun with --fix to reconcile`,
+    );
+    return;
+  }
+  const fixed = await prisma.$executeRawUnsafe(`
+    UPDATE Server s
+    LEFT JOIN (
+      SELECT r.serverId, COUNT(*) AS publicCount
+      FROM ServerReview r
+      WHERE r.visibility = 'public'
+      GROUP BY r.serverId
+    ) counted ON counted.serverId = s.id
+    SET s.reviewsCount = COALESCE(counted.publicCount, 0)
+    WHERE s.reviewsCount <> COALESCE(counted.publicCount, 0)
+  `);
+  summary.fixes += fixed;
+  pass('Server.reviewsCount matches public reviews', `reconciled ${fixed} server counters`);
 }
 
 async function validatePluginCredentials() {
@@ -646,6 +689,7 @@ Discord verification, file, and plugin-sync tables.
 By default this command never mutates data.
 
 --fix performs safe repairs:
+  - reconcile Server.reviewsCount from public reviews
   - encrypt legacy OAuth, Votifier, and plugin credentials
   - delete expired PluginSyncReplayGuard rows
   - disable active plugin credentials whose canonical server no longer exists

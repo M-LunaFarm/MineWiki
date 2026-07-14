@@ -1,4 +1,4 @@
-﻿import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+﻿import { ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
   createReviewSchema,
@@ -170,7 +170,7 @@ export class ReviewService {
         session.userId,
         now
       );
-      return transaction.serverReview.create({
+      const created = await transaction.serverReview.create({
         data: {
           id: randomUUID(),
           serverId,
@@ -189,9 +189,14 @@ export class ReviewService {
           evidencePolicyVersion: '2026-07-12-v1'
         }
       });
+      if (visibility === 'public') {
+        await transaction.server.update({
+          where: { id: serverId },
+          data: { reviewsCount: { increment: 1 } }
+        });
+      }
+      return created;
     });
-
-    await this.serverService.incrementReviewCount(serverId);
 
     void this.events.track('review.submitted', {
       serverId,
@@ -248,18 +253,20 @@ export class ReviewService {
       throw new ForbiddenException('본인이 작성한 리뷰만 삭제할 수 있습니다.');
     }
 
-    await this.prisma.$transaction([
-      this.prisma.serverReview.delete({ where: { id: reviewId } }),
-      this.prisma.server.updateMany({
-        where: {
-          id: serverId,
-          reviewsCount: { gt: 0 }
-        },
-        data: {
-          reviewsCount: { decrement: 1 }
+    await this.prisma.$transaction(async (transaction) => {
+      const deleted = await transaction.serverReview.delete({ where: { id: reviewId } });
+      if (deleted.visibility === 'public') {
+        const counter = await transaction.server.updateMany({
+          where: { id: serverId, reviewsCount: { gt: 0 } },
+          data: { reviewsCount: { decrement: 1 } }
+        });
+        if (counter.count !== 1) {
+          throw new InternalServerErrorException(
+            '공개 리뷰 집계가 일치하지 않습니다. 데이터 검증 후 다시 시도해 주세요.',
+          );
         }
-      })
-    ]);
+      }
+    });
 
   }
 
@@ -272,15 +279,17 @@ export class ReviewService {
     }
 
     try {
-      await this.prisma.reviewReport.create({
-        data: {
-          reviewId,
-          accountId: reporterAccountId
-        }
-      });
-      await this.prisma.serverReview.update({
-        where: { id: reviewId },
-        data: { reports: { increment: 1 } }
+      await this.prisma.$transaction(async (transaction) => {
+        await transaction.reviewReport.create({
+          data: {
+            reviewId,
+            accountId: reporterAccountId
+          }
+        });
+        await transaction.serverReview.update({
+          where: { id: reviewId },
+          data: { reports: { increment: 1 } }
+        });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

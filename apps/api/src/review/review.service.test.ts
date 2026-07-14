@@ -175,6 +175,8 @@ if (!hasDatabase) {
     assert.equal(review.visibility, 'public');
     assert.equal(review.reports, 0);
     assert.equal(review.adminReply, null);
+    const countedServer = await prisma.server.findUniqueOrThrow({ where: { id: server.id } });
+    assert.equal(countedServer.reviewsCount, 1);
   });
 
   test('supports anonymous staff-only feedback and reporting', async () => {
@@ -191,6 +193,8 @@ if (!hasDatabase) {
     );
     assert.equal(review.visibility, 'staff');
     assert.equal(review.isAnonymous, true);
+    const staffOnlyServer = await prisma.server.findUniqueOrThrow({ where: { id: server.id } });
+    assert.equal(staffOnlyServer.reviewsCount, 0);
 
     const publicReviews = await reviewService.list(server.id);
     assert.equal(publicReviews.some((item) => item.id === review.id), false);
@@ -199,6 +203,24 @@ if (!hasDatabase) {
     assert.equal(reported.reports, 1);
     const duplicate = await reviewService.report(server.id, review.id, account.id);
     assert.equal(duplicate.reports, 1);
+  });
+
+  test('removing a review decrements only the public review counter', async () => {
+    const account = await createAccount();
+    const server = await createServer();
+    const session = createSession(account.id);
+    const uuid = await ensureIdentity(account.id);
+    await recordVote(server.id, account.id, uuid);
+    const review = await reviewService.create(
+      server.id,
+      { rating: 5, body: '삭제할 공개 리뷰', tags: ['community'] },
+      session
+    );
+
+    await reviewService.remove(server.id, review.id, session);
+
+    const countedServer = await prisma.server.findUniqueOrThrow({ where: { id: server.id } });
+    assert.equal(countedServer.reviewsCount, 0);
   });
 
   test('allows admin reply to be set and cleared', async () => {

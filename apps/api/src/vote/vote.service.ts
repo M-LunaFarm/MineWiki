@@ -2,6 +2,7 @@
   BadRequestException,
   ForbiddenException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException
 } from '@nestjs/common';
@@ -407,6 +408,17 @@ export class VoteService {
         where: { evidenceVoteId: voteId, visibility: 'public' },
         data: { visibility: 'staff' },
       });
+      if (reviews.count > 0) {
+        const counter = await transaction.server.updateMany({
+          where: { id: vote.serverId, reviewsCount: { gte: reviews.count } },
+          data: { reviewsCount: { decrement: reviews.count } },
+        });
+        if (counter.count !== 1) {
+          throw new InternalServerErrorException(
+            '공개 리뷰 집계가 일치하지 않습니다. 데이터 검증 후 다시 시도해 주세요.',
+          );
+        }
+      }
       return reviews.count;
     });
 
