@@ -1232,6 +1232,48 @@ model WikiDiscussionComment {
   @@map("wiki_discussion_comments")
 }
 
+model WikiDiscussionPoll {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  commentId         BigInt    @unique @map("comment_id") @db.UnsignedBigInt
+  question          String    @db.VarChar(255)
+  status            String    @default("open") @db.VarChar(16)
+  resultsVisibility String    @default("after_vote") @map("results_visibility") @db.VarChar(16)
+  createdBy         BigInt    @map("created_by") @db.UnsignedBigInt
+  closesAt          DateTime? @map("closes_at") @db.DateTime(3)
+  closedAt          DateTime? @map("closed_at") @db.DateTime(3)
+  createdAt         DateTime  @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime  @map("updated_at") @db.DateTime(3)
+
+  @@index([status, closesAt], map: "idx_wiki_discussion_polls_status_closes")
+  @@index([createdBy, createdAt], map: "idx_wiki_discussion_polls_creator")
+  @@map("wiki_discussion_polls")
+}
+
+model WikiDiscussionPollOption {
+  id       BigInt @id @default(autoincrement()) @db.UnsignedBigInt
+  pollId   BigInt @map("poll_id") @db.UnsignedBigInt
+  position Int
+  label    String @db.VarChar(120)
+
+  @@unique([pollId, position], map: "uk_wiki_discussion_poll_options_position")
+  @@index([pollId, id], map: "idx_wiki_discussion_poll_options_poll")
+  @@map("wiki_discussion_poll_options")
+}
+
+model WikiDiscussionPollVote {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pollId    BigInt   @map("poll_id") @db.UnsignedBigInt
+  optionId  BigInt   @map("option_id") @db.UnsignedBigInt
+  profileId BigInt   @map("profile_id") @db.UnsignedBigInt
+  createdAt DateTime @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @map("updated_at") @db.DateTime(3)
+
+  @@unique([pollId, profileId], map: "uk_wiki_discussion_poll_votes_voter")
+  @@index([pollId, optionId], map: "idx_wiki_discussion_poll_votes_option")
+  @@index([profileId, updatedAt], map: "idx_wiki_discussion_poll_votes_profile")
+  @@map("wiki_discussion_poll_votes")
+}
+
 model WikiDiscussionModerationEvent {
   id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   threadId       BigInt   @map("thread_id") @db.UnsignedBigInt

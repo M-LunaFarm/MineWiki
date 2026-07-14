@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { wikiUrl } from '@minewiki/wiki-core';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
@@ -58,6 +58,37 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly canDelete: boolean;
     readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
+    readonly poll: WikiDiscussionPollDetail | null;
+  }>;
+}
+
+export type WikiDiscussionPollResultsVisibility = 'always' | 'after_vote' | 'closed';
+
+export interface WikiDiscussionPollInput {
+  readonly question?: string;
+  readonly options?: readonly string[];
+  readonly resultsVisibility?: WikiDiscussionPollResultsVisibility;
+  readonly closesAt?: string | null;
+}
+
+export interface WikiDiscussionPollDetail {
+  readonly id: string;
+  readonly question: string;
+  readonly status: 'open' | 'closed';
+  readonly resultsVisibility: WikiDiscussionPollResultsVisibility;
+  readonly closesAt: string | null;
+  readonly closedAt: string | null;
+  readonly totalVoteCount: number | null;
+  readonly selectedOptionId: string | null;
+  readonly resultsVisible: boolean;
+  readonly privilegedResults: boolean;
+  readonly canVote: boolean;
+  readonly canClose: boolean;
+  readonly options: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly position: number;
+    readonly voteCount: number | null;
   }>;
 }
 
@@ -335,6 +366,13 @@ export class WikiDiscussionService {
       }
     }
     const canModerate = Boolean(viewer && (thread.createdBy === viewer.id || canManage));
+    const pollByCommentId = await this.hydratePolls({
+      comments: displayComments,
+      viewerProfileId: viewer?.id ?? null,
+      canManagePage: Boolean(canManage),
+      canReply,
+      threadStatus: thread.status
+    });
     return {
       ...this.toThreadSummary(thread, profileById, commentCount),
       canModerate,
@@ -358,7 +396,10 @@ export class WikiDiscussionService {
         createdAt: comment.createdAt.toISOString(),
         canDelete: Boolean(comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
         canChangeVisibility: Boolean(canManage && comment.status !== 'deleted'),
-        pinned: comment.id === thread.pinnedCommentId
+        pinned: comment.id === thread.pinnedCommentId,
+        poll: comment.status === 'deleted' || (comment.status === 'hidden' && !canManage)
+          ? null
+          : pollByCommentId.get(comment.id) ?? null
       }))
     };
   }
@@ -366,7 +407,7 @@ export class WikiDiscussionService {
   async createThread(
     session: SessionPayload,
     pageId: string,
-    input: { readonly title?: string; readonly content?: string }
+    input: { readonly title?: string; readonly content?: string; readonly poll?: WikiDiscussionPollInput }
   ): Promise<WikiThreadDetail> {
     const parsedPageId = this.parseId(pageId, 'pageId');
     const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
@@ -383,9 +424,10 @@ export class WikiDiscussionService {
       const created = await tx.wikiDiscussionThread.create({
         data: { pageId: page.id, title, status: 'open', createdBy: profile.id, createdAt: now, updatedAt: now }
       });
-      await tx.wikiDiscussionComment.create({
+      const comment = await tx.wikiDiscussionComment.create({
         data: { threadId: created.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
       });
+      if (input.poll) await this.createPoll(tx, comment.id, profile.id, input.poll, now);
       await tx.wikiDiscussionSubscription.create({
         data: { threadId: created.id, profileId: profile.id, muted: false, createdAt: now, updatedAt: now }
       });
@@ -398,7 +440,7 @@ export class WikiDiscussionService {
   async addComment(
     session: SessionPayload,
     threadId: string,
-    input: { readonly content?: string }
+    input: { readonly content?: string; readonly poll?: WikiDiscussionPollInput }
   ): Promise<WikiThreadDetail> {
     const id = this.parseId(threadId, 'threadId');
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
@@ -412,9 +454,14 @@ export class WikiDiscussionService {
     const content = this.requiredText(input.content, 'content', 10_000);
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, thread.id);
+      const currentThread = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
+      if (!currentThread || currentThread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
+      if (currentThread.status !== 'open') throw new BadRequestException('Wiki discussion thread is closed.');
       const comment = await tx.wikiDiscussionComment.create({
         data: { threadId: thread.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
       });
+      if (input.poll) await this.createPoll(tx, comment.id, profile.id, input.poll, now);
       await tx.wikiDiscussionSubscription.upsert({
         where: { threadId_profileId: { threadId: thread.id, profileId: profile.id } },
         create: { threadId: thread.id, profileId: profile.id, muted: false, createdAt: now, updatedAt: now },
@@ -430,6 +477,82 @@ export class WikiDiscussionService {
       });
     });
     await this.audit('wiki.discussion.comment', session, profile.id, page.id, thread.id);
+    return this.getThread(thread.id.toString(), session);
+  }
+
+  async votePoll(
+    session: SessionPayload,
+    threadId: string,
+    pollIdInput: string,
+    optionIdInput?: string
+  ): Promise<WikiThreadDetail> {
+    const threadIdValue = this.parseId(threadId, 'threadId');
+    const pollId = this.parseId(pollIdInput, 'pollId');
+    const optionId = this.parseId(optionIdInput ?? '', 'optionId');
+    const poll = await this.prisma.wikiDiscussionPoll.findUnique({ where: { id: pollId } });
+    if (!poll) throw new NotFoundException('Wiki discussion poll not found.');
+    const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: poll.commentId } });
+    if (!comment || comment.threadId !== threadIdValue || comment.status !== 'normal') {
+      throw new NotFoundException('Wiki discussion poll not found.');
+    }
+    const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: threadIdValue } });
+    if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
+    if (!page) throw new NotFoundException('Wiki page not found.');
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    await this.wikiPermissions.assertCanWriteThreadComment({
+      actor: this.wikiPermissions.actorFromSession(session, profile),
+      page
+    });
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, thread.id, comment.id, poll.id);
+      const [currentThread, currentComment, currentPoll, option] = await Promise.all([
+        tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } }),
+        tx.wikiDiscussionComment.findUnique({ where: { id: comment.id } }),
+        tx.wikiDiscussionPoll.findUnique({ where: { id: poll.id } }),
+        tx.wikiDiscussionPollOption.findFirst({ where: { id: optionId, pollId: poll.id } })
+      ]);
+      if (!currentThread || currentThread.status !== 'open') throw new ConflictException('Wiki discussion thread is closed.');
+      if (!currentComment || currentComment.status !== 'normal') throw new ConflictException('Wiki discussion poll is not available.');
+      if (!currentPoll || currentPoll.status !== 'open' || (currentPoll.closesAt && currentPoll.closesAt <= now)) {
+        throw new ConflictException('Wiki discussion poll is closed.');
+      }
+      if (!option) throw new BadRequestException('Poll option does not belong to this poll.');
+      await tx.wikiDiscussionPollVote.upsert({
+        where: { pollId_profileId: { pollId: poll.id, profileId: profile.id } },
+        create: { pollId: poll.id, optionId: option.id, profileId: profile.id, createdAt: now, updatedAt: now },
+        update: { optionId: option.id, updatedAt: now }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    await this.audit('wiki.discussion.poll_vote', session, profile.id, page.id, thread.id, { pollId: poll.id.toString() });
+    return this.getThread(thread.id.toString(), session);
+  }
+
+  async closePoll(session: SessionPayload, threadId: string, pollIdInput: string): Promise<WikiThreadDetail> {
+    const threadIdValue = this.parseId(threadId, 'threadId');
+    const pollId = this.parseId(pollIdInput, 'pollId');
+    const poll = await this.prisma.wikiDiscussionPoll.findUnique({ where: { id: pollId } });
+    if (!poll) throw new NotFoundException('Wiki discussion poll not found.');
+    const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: poll.commentId } });
+    if (!comment || comment.threadId !== threadIdValue) throw new NotFoundException('Wiki discussion poll not found.');
+    const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: threadIdValue } });
+    if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
+    if (!page) throw new NotFoundException('Wiki page not found.');
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    await this.wikiPermissions.assertCanReadPage({ accountId: session.userId, page });
+    const actor = this.wikiPermissions.actorFromSession(session, profile);
+    if (poll.createdBy !== profile.id && !(await this.wikiPermissions.canManagePage({ actor, page }))) {
+      throw new ForbiddenException('Wiki discussion poll moderation is not allowed.');
+    }
+    const now = new Date();
+    const changed = await this.prisma.wikiDiscussionPoll.updateMany({
+      where: { id: poll.id, status: 'open' },
+      data: { status: 'closed', closedAt: now, updatedAt: now }
+    });
+    if (changed.count !== 1) throw new ConflictException('Wiki discussion poll is already closed.');
+    await this.audit('wiki.discussion.poll_close', session, profile.id, page.id, thread.id, { pollId: poll.id.toString() });
     return this.getThread(thread.id.toString(), session);
   }
 
@@ -584,6 +707,7 @@ export class WikiDiscussionService {
     const reason = this.requiredText(reasonInput, 'reason', 1000);
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, thread.id, comment.id);
       await tx.wikiDiscussionComment.update({
         where: { id: comment.id },
         data: { status, updatedAt: now }
@@ -644,6 +768,147 @@ export class WikiDiscussionService {
     return { ...thread, profileId: profile.id, actor };
   }
 
+  private async createPoll(
+    tx: Prisma.TransactionClient,
+    commentId: bigint,
+    profileId: bigint,
+    input: WikiDiscussionPollInput,
+    now: Date
+  ): Promise<void> {
+    const question = this.requiredText(input.question, 'poll.question', 255);
+    if (!Array.isArray(input.options) || input.options.length < 2 || input.options.length > 10) {
+      throw new BadRequestException('poll.options must contain between 2 and 10 choices.');
+    }
+    const options = input.options.map((option, index) => this.requiredText(option, `poll.options[${index}]`, 120));
+    const normalized = options.map((option) => option.normalize('NFKC').replace(/\s+/gu, ' ').toLocaleLowerCase('ko-KR'));
+    if (new Set(normalized).size !== options.length) throw new BadRequestException('poll.options must be unique.');
+    const resultsVisibility = input.resultsVisibility ?? 'after_vote';
+    if (!['always', 'after_vote', 'closed'].includes(resultsVisibility)) {
+      throw new BadRequestException('poll.resultsVisibility is invalid.');
+    }
+    let closesAt: Date | null = null;
+    if (input.closesAt) {
+      if (typeof input.closesAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(input.closesAt)) {
+        throw new BadRequestException('poll.closesAt must be an ISO timestamp.');
+      }
+      closesAt = new Date(input.closesAt);
+      if (Number.isNaN(closesAt.getTime())) throw new BadRequestException('poll.closesAt must be an ISO timestamp.');
+      const minimum = now.getTime() + 5 * 60 * 1000;
+      const maximum = now.getTime() + 90 * 24 * 60 * 60 * 1000;
+      if (closesAt.getTime() < minimum || closesAt.getTime() > maximum) {
+        throw new BadRequestException('poll.closesAt must be between 5 minutes and 90 days from now.');
+      }
+    }
+    const poll = await tx.wikiDiscussionPoll.create({
+      data: {
+        commentId,
+        question,
+        status: 'open',
+        resultsVisibility,
+        createdBy: profileId,
+        closesAt,
+        createdAt: now,
+        updatedAt: now
+      }
+    });
+    await tx.wikiDiscussionPollOption.createMany({
+      data: options.map((label, position) => ({ pollId: poll.id, position, label }))
+    });
+  }
+
+  private async hydratePolls(input: {
+    readonly comments: ReadonlyArray<{ readonly id: bigint; readonly status: string }>;
+    readonly viewerProfileId: bigint | null;
+    readonly canManagePage: boolean;
+    readonly canReply: boolean;
+    readonly threadStatus: string;
+  }): Promise<Map<bigint, WikiDiscussionPollDetail>> {
+    const pollDelegate = (this.prisma as unknown as { wikiDiscussionPoll?: unknown }).wikiDiscussionPoll;
+    if (!pollDelegate || input.comments.length === 0) return new Map();
+    const commentIds = [...new Set(input.comments.map((comment) => comment.id))];
+    const polls = await this.prisma.wikiDiscussionPoll.findMany({ where: { commentId: { in: commentIds } } });
+    if (polls.length === 0) return new Map();
+    const pollIds = polls.map((poll) => poll.id);
+    const [options, countRows, viewerVotes] = await Promise.all([
+      this.prisma.wikiDiscussionPollOption.findMany({
+        where: { pollId: { in: pollIds } },
+        orderBy: [{ pollId: 'asc' }, { position: 'asc' }, { id: 'asc' }]
+      }),
+      this.prisma.wikiDiscussionPollVote.groupBy({
+        by: ['pollId', 'optionId'],
+        where: { pollId: { in: pollIds } },
+        _count: { _all: true }
+      }),
+      input.viewerProfileId
+        ? this.prisma.wikiDiscussionPollVote.findMany({
+            where: { pollId: { in: pollIds }, profileId: input.viewerProfileId },
+            select: { pollId: true, optionId: true }
+          })
+        : Promise.resolve([])
+    ]);
+    const optionsByPoll = new Map<bigint, typeof options>();
+    for (const option of options) {
+      const bucket = optionsByPoll.get(option.pollId) ?? [];
+      bucket.push(option);
+      optionsByPoll.set(option.pollId, bucket);
+    }
+    const countByOption = new Map(countRows.map((row) => [row.optionId, row._count._all]));
+    const viewerOptionByPoll = new Map(viewerVotes.map((vote) => [vote.pollId, vote.optionId]));
+    const now = new Date();
+    return new Map(polls.map((poll) => {
+      const expired = Boolean(poll.closesAt && poll.closesAt <= now);
+      const status: 'open' | 'closed' = poll.status === 'open' && !expired ? 'open' : 'closed';
+      const visibility: WikiDiscussionPollResultsVisibility = ['always', 'after_vote', 'closed'].includes(poll.resultsVisibility)
+        ? poll.resultsVisibility as WikiDiscussionPollResultsVisibility
+        : 'after_vote';
+      const selectedOptionId = viewerOptionByPoll.get(poll.id) ?? null;
+      const normallyVisible = status === 'closed' || visibility === 'always'
+        || (visibility === 'after_vote' && selectedOptionId !== null);
+      const resultsVisible = input.canManagePage || normallyVisible;
+      const pollOptions = optionsByPoll.get(poll.id) ?? [];
+      const totalVoteCount = resultsVisible
+        ? pollOptions.reduce((sum, option) => sum + (countByOption.get(option.id) ?? 0), 0)
+        : null;
+      return [poll.commentId, {
+        id: poll.id.toString(),
+        question: poll.question,
+        status,
+        resultsVisibility: visibility,
+        closesAt: poll.closesAt?.toISOString() ?? null,
+        closedAt: poll.closedAt?.toISOString() ?? (expired ? poll.closesAt?.toISOString() ?? null : null),
+        totalVoteCount,
+        selectedOptionId: selectedOptionId?.toString() ?? null,
+        resultsVisible,
+        privilegedResults: input.canManagePage && !normallyVisible,
+        canVote: Boolean(input.viewerProfileId && input.canReply && input.threadStatus === 'open' && status === 'open'),
+        canClose: Boolean(input.viewerProfileId && status === 'open' && (input.canManagePage || poll.createdBy === input.viewerProfileId)),
+        options: pollOptions.map((option) => ({
+          id: option.id.toString(),
+          label: option.label,
+          position: option.position,
+          voteCount: resultsVisible ? countByOption.get(option.id) ?? 0 : null
+        }))
+      } satisfies WikiDiscussionPollDetail] as const;
+    }));
+  }
+
+  private async lockDiscussionRows(
+    tx: Prisma.TransactionClient,
+    threadId: bigint,
+    commentId?: bigint,
+    pollId?: bigint
+  ): Promise<void> {
+    const queryable = tx as unknown as { $queryRaw?: unknown };
+    if (typeof queryable.$queryRaw !== 'function') return;
+    await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM wiki_discussion_threads WHERE id = ${threadId} FOR UPDATE`;
+    if (commentId) {
+      await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM wiki_discussion_comments WHERE id = ${commentId} FOR UPDATE`;
+    }
+    if (pollId) {
+      await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM wiki_discussion_polls WHERE id = ${pollId} FOR UPDATE`;
+    }
+  }
+
   private async profileNames(ids: readonly bigint[]) {
     const unique = [...new Set(ids)];
     const profiles = unique.length > 0
@@ -664,8 +929,8 @@ export class WikiDiscussionService {
     };
   }
 
-  private requiredText(value: string | undefined, label: string, maxLength: number): string {
-    const text = value?.trim();
+  private requiredText(value: unknown, label: string, maxLength: number): string {
+    const text = typeof value === 'string' ? value.trim() : '';
     if (!text) throw new BadRequestException(`${label} is required.`);
     if (text.length > maxLength) throw new BadRequestException(`${label} is too long.`);
     return text;

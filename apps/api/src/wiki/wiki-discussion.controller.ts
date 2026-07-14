@@ -5,7 +5,7 @@ import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
-import { WikiDiscussionService, type WikiRecentThreadListResponse, type WikiThreadDetail, type WikiThreadListResponse, type WikiThreadSummary } from './wiki-discussion.service';
+import { WikiDiscussionService, type WikiDiscussionPollInput, type WikiRecentThreadListResponse, type WikiThreadDetail, type WikiThreadListResponse, type WikiThreadSummary } from './wiki-discussion.service';
 
 @Controller('v1/wiki')
 export class WikiDiscussionController {
@@ -71,15 +71,38 @@ export class WikiDiscussionController {
   @Post('pages/:pageId/discussions')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 6, ttl: 60 } })
-  create(@Param('pageId') pageId: string, @Body() body: { title?: string; content?: string }, @CurrentSession() session: SessionPayload) {
+  create(@Param('pageId') pageId: string, @Body() body: { title?: string; content?: string; poll?: WikiDiscussionPollInput }, @CurrentSession() session: SessionPayload) {
     return this.discussions.createThread(session, pageId, body);
   }
 
   @Post('discussions/:threadId/comments')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 12, ttl: 60 } })
-  comment(@Param('threadId') threadId: string, @Body() body: { content?: string }, @CurrentSession() session: SessionPayload) {
+  comment(@Param('threadId') threadId: string, @Body() body: { content?: string; poll?: WikiDiscussionPollInput }, @CurrentSession() session: SessionPayload) {
     return this.discussions.addComment(session, threadId, body);
+  }
+
+  @Post('discussions/:threadId/polls/:pollId/vote')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 20, ttl: 60 } })
+  votePoll(
+    @Param('threadId') threadId: string,
+    @Param('pollId') pollId: string,
+    @Body() body: { optionId?: string },
+    @CurrentSession() session: SessionPayload
+  ) {
+    return this.discussions.votePoll(session, threadId, pollId, body.optionId);
+  }
+
+  @Post('discussions/:threadId/polls/:pollId/close')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  closePoll(
+    @Param('threadId') threadId: string,
+    @Param('pollId') pollId: string,
+    @CurrentSession() session: SessionPayload
+  ) {
+    return this.discussions.closePoll(session, threadId, pollId);
   }
 
   @Patch('discussions/:threadId/status')

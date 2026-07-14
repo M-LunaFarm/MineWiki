@@ -191,6 +191,53 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'wiki discussion polls have valid anchors and lifecycle values',
+    `
+      SELECT poll.id
+      FROM wiki_discussion_polls poll
+      LEFT JOIN wiki_discussion_comments comment ON comment.id = poll.comment_id
+      LEFT JOIN wiki_discussion_threads thread ON thread.id = comment.thread_id
+      WHERE comment.id IS NULL
+         OR thread.id IS NULL
+         OR poll.status NOT IN ('open', 'closed')
+         OR poll.results_visibility NOT IN ('always', 'after_vote', 'closed')
+         OR (poll.closed_at IS NOT NULL AND poll.status <> 'closed')
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'wiki discussion polls have two to ten ordered options',
+    `
+      SELECT poll.id
+      FROM wiki_discussion_polls poll
+      LEFT JOIN wiki_discussion_poll_options option_row ON option_row.poll_id = poll.id
+      GROUP BY poll.id
+      HAVING COUNT(option_row.id) < 2
+          OR COUNT(option_row.id) > 10
+          OR MIN(option_row.position) <> 0
+          OR MAX(option_row.position) <> COUNT(option_row.id) - 1
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'wiki discussion poll ballots reference their own poll options and profiles',
+    `
+      SELECT ballot.id
+      FROM wiki_discussion_poll_votes ballot
+      LEFT JOIN wiki_discussion_polls poll ON poll.id = ballot.poll_id
+      LEFT JOIN wiki_discussion_poll_options option_row ON option_row.id = ballot.option_id
+      LEFT JOIN users profile ON profile.id = ballot.profile_id
+      WHERE poll.id IS NULL
+         OR option_row.id IS NULL
+         OR option_row.poll_id <> ballot.poll_id
+         OR profile.id IS NULL
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'UploadedFile storagePath/publicPath present',
     `
       SELECT f.id
