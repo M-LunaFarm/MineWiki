@@ -61,3 +61,25 @@ export function buildServerWikiToolPath(routePath, tool) {
   const documentPath = match[2] ? `/${match[2]}` : '';
   return `/server/${match[1]}/_tools/${tool}${documentPath}`;
 }
+
+export function buildWikiRevisionPath(revisionId, returnTo) {
+  return appendWikiReturnTo(`/wiki/revision/${encodeURIComponent(revisionId)}`, returnTo);
+}
+
+export function buildWikiDiffPath(leftId, rightId, returnTo) {
+  return appendWikiReturnTo(
+    `/wiki/diff/${encodeURIComponent(leftId)}/${encodeURIComponent(rightId)}`,
+    returnTo,
+  );
+}
+
+export function safeWikiReturnTo(value) {
+  return typeof value === 'string' && /^\/(?!\/)[^\\\u0000-\u001F\u007F]*$/.test(value)
+    ? value
+    : null;
+}
+
+function appendWikiReturnTo(path, returnTo) {
+  const safeReturnTo = safeWikiReturnTo(returnTo);
+  return safeReturnTo ? `${path}?returnTo=${encodeURIComponent(safeReturnTo)}` : path;
+}

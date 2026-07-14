@@ -3,9 +3,12 @@ import test from 'node:test';
 import {
   buildCategoryWikiToolPath,
   buildServerWikiToolPath,
+  buildWikiDiffPath,
+  buildWikiRevisionPath,
   buildWikiRoutePath,
   decodeWikiRouteSegment,
   parseServerWikiToolRoute,
+  safeWikiReturnTo,
 } from '../lib/wiki-routes.mjs';
 
 test('builds readable Korean wiki paths from encoded Next route segments', () => {
@@ -67,4 +70,24 @@ test('keeps page ACL inside the canonical server wiki workspace', () => {
     tool: 'acl',
     documentSegments: ['luna', 'rules'],
   });
+});
+
+test('revision and diff links preserve the canonical source document', () => {
+  const returnTo = '/server/luna/API/requests';
+  assert.equal(
+    buildWikiRevisionPath('42', returnTo),
+    '/wiki/revision/42?returnTo=%2Fserver%2Fluna%2FAPI%2Frequests',
+  );
+  assert.equal(
+    buildWikiDiffPath('41', '42', returnTo),
+    '/wiki/diff/41/42?returnTo=%2Fserver%2Fluna%2FAPI%2Frequests',
+  );
+});
+
+test('wiki return paths reject external and protocol-relative destinations', () => {
+  assert.equal(safeWikiReturnTo('/server/luna/rules'), '/server/luna/rules');
+  assert.equal(safeWikiReturnTo('//evil.example/path'), null);
+  assert.equal(safeWikiReturnTo('/\\evil.example/path'), null);
+  assert.equal(safeWikiReturnTo('https://evil.example/path'), null);
+  assert.equal(buildWikiRevisionPath('42', '//evil.example/path'), '/wiki/revision/42');
 });
