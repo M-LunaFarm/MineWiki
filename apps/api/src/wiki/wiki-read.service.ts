@@ -1609,7 +1609,7 @@ export class WikiReadService {
             }
           }
         });
-    const files = cache ? {} : await this.findRenderableFiles(expanded.ast);
+    const files = cache ? {} : await this.findRenderableFiles(expanded.ast, accountId);
     const html = cache?.html ?? renderDocument(expanded.ast, {
       files,
       internalLinkBasePath: serverWiki ? `/server/${encodeURIComponent(serverWiki.context.slug)}` : undefined,
@@ -1719,7 +1719,7 @@ export class WikiReadService {
     };
   }
 
-  private async findRenderableFiles(ast: AstNode[]) {
+  private async findRenderableFiles(ast: AstNode[], accountId: string | null) {
     const fileNames = Array.from(collectFileNames(ast));
     if (fileNames.length === 0) {
       return {};
@@ -1727,16 +1727,45 @@ export class WikiReadService {
     const files = await this.prisma.uploadedFile.findMany({
       where: {
         filename: { in: fileNames },
+        usageContext: 'wiki_editor',
         status: 'active'
       }
     });
+    const visibleFiles = [];
+    for (const file of files) {
+      if (file.visibility === 'public' || file.visibility === 'unlisted') {
+        visibleFiles.push(file);
+        continue;
+      }
+      if (file.visibility === 'private') {
+        if (accountId && file.ownerAccountId === accountId) visibleFiles.push(file);
+        continue;
+      }
+      const linkedId = file.linkedResourceId?.trim();
+      if (file.visibility !== 'restricted' || !linkedId || !/^\d+$/.test(linkedId)) continue;
+      try {
+        if (file.linkedResourceType === 'wiki_page') {
+          const linkedPage = await this.prisma.wikiPage.findUnique({ where: { id: BigInt(linkedId) } });
+          await this.wikiPermissions.assertCanReadPage({ accountId, page: linkedPage });
+          visibleFiles.push(file);
+        } else if (file.linkedResourceType === 'wiki_space') {
+          await this.wikiPermissions.assertCanReadSpace({ accountId, spaceId: BigInt(linkedId) });
+          visibleFiles.push(file);
+        }
+      } catch {
+        // Render the same missing-file placeholder for unreadable and absent files.
+      }
+    }
     return Object.fromEntries(
-      files.map((file) => [
+      visibleFiles.map((file) => [
         file.filename,
         {
           url: file.publicPath,
           mimeType: file.mimeType,
-          originalName: file.originalName ?? file.filename
+          originalName: file.originalName ?? file.filename,
+          license: file.license,
+          sourceUrl: file.sourceUrl,
+          sourceText: file.sourceText
         }
       ])
     );

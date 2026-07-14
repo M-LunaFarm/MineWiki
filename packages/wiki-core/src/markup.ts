@@ -3,7 +3,7 @@ import type { AstNode, InlineNode, ParsedDocument } from './types.js';
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.3';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.4';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INCLUDE_OCCURRENCES = 20;
@@ -542,7 +542,7 @@ export interface RenderOptions {
   missingLinks?: Set<string>;
   /** Route prefix used for unqualified links inside an isolated subwiki. */
   internalLinkBasePath?: string;
-  files?: Record<string, { url: string; mimeType: string; originalName: string; license?: string | null; sourceText?: string | null }>;
+  files?: Record<string, { url: string; mimeType: string; originalName: string; license?: string | null; sourceUrl?: string | null; sourceText?: string | null }>;
   officialAreas?: Record<string, { status: string; lastModifiedAt?: string | null; renewalRequiredAt?: string | null }>;
   dataTables?: Record<string, { caption: string; headers: string[]; rows: string[][] }>;
   /** Internal heading scope shared by folding blocks, but not transclusions. */
@@ -817,9 +817,27 @@ function renderFile(fileName: string, thumbnail: boolean, caption: string | null
   if (!file) {
     return `<figure class="${thumbnail ? 'wiki-file thumb missing-file' : 'wiki-file missing-file'}"><figcaption>파일 없음: ${escapeHtml(fileName)}</figcaption></figure>`;
   }
-  const meta = [file.license ? `라이선스: ${file.license}` : '', file.sourceText ? `출처: ${file.sourceText}` : ''].filter(Boolean).join(' · ');
-  const metaHtml = meta ? `<small>${escapeHtml(meta)}</small>` : '';
+  const license = file.license ? `라이선스: ${wikiFileLicenseLabel(file.license)}` : '';
+  const sourceLabel = file.sourceText?.trim() || '원본 출처';
+  const source = file.sourceUrl
+    ? `출처: ${renderExternalLink(file.sourceUrl, sourceLabel)}`
+    : file.sourceText
+      ? `출처: ${escapeHtml(file.sourceText)}`
+      : '';
+  const metaHtml = license || source ? `<small>${license ? escapeHtml(license) : ''}${license && source ? ' · ' : ''}${source}</small>` : '';
   return `<figure class="${thumbnail ? 'wiki-file thumb' : 'wiki-file'}"><img src="${escapeAttr(file.url)}" alt="${escapeAttr(caption ?? file.originalName)}" loading="lazy">${caption ? `<figcaption>${escapeHtml(caption)}${metaHtml}</figcaption>` : metaHtml}</figure>`;
+}
+
+function wikiFileLicenseLabel(value: string): string {
+  return ({
+    'self-created': '직접 제작',
+    'cc-by-4.0': 'CC BY 4.0',
+    'cc-by-sa-4.0': 'CC BY-SA 4.0',
+    'cc0-1.0': 'CC0 1.0',
+    'public-domain': '퍼블릭 도메인',
+    'fair-use': '공정 이용',
+    'permission-granted': '권리자 이용 허락'
+  } as Record<string, string>)[value] ?? value;
 }
 
 function renderSimpleRows(props: Record<string, string>, headerText = '', caption = '표') {

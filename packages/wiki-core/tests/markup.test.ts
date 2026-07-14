@@ -60,6 +60,27 @@ test('extracts inline categories without rendering them as document links', () =
   assert.match(renderDocument(parsed.ast), /본문 끝/);
 });
 
+test('renders validated wiki file license and source attribution', () => {
+  const parsed = parseMarkup('[[파일:guide.webp|섬네일|설치 화면]]');
+  const html = renderDocument(parsed.ast, {
+    files: {
+      'guide.webp': {
+        url: '/v1/files/public/guide.webp/raw',
+        mimeType: 'image/webp',
+        originalName: 'guide.png',
+        license: 'cc-by-sa-4.0',
+        sourceUrl: 'https://example.com/original',
+        sourceText: 'Example 제작자'
+      }
+    }
+  });
+
+  assert.match(html, /라이선스: CC BY-SA 4\.0/);
+  assert.match(html, /href="https:\/\/example\.com\/original"/);
+  assert.match(html, /Example 제작자/);
+  assert.match(html, /rel="nofollow noopener"/);
+});
+
 test('resolves unqualified links inside a server subwiki', () => {
   const parsed = parseMarkup('[[규칙]] · [[도움말:문법]]');
   const html = renderDocument(parsed.ast, {

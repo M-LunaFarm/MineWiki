@@ -522,8 +522,21 @@ function createReadService(options: {
   readonly contentRaw?: string;
   readonly onCacheLookup?: (where: unknown) => void;
   readonly onCacheCreate?: (data: unknown) => void;
-  readonly files?: ReadonlyArray<{ filename: string; publicPath: string; mimeType: string; originalName: string | null }>;
+  readonly files?: ReadonlyArray<{
+    filename: string;
+    publicPath: string;
+    mimeType: string;
+    originalName: string | null;
+    visibility?: string;
+    ownerAccountId?: string | null;
+    linkedResourceType?: string | null;
+    linkedResourceId?: string | null;
+    license?: string | null;
+    sourceUrl?: string | null;
+    sourceText?: string | null;
+  }>;
   readonly includeService?: WikiIncludeService;
+  readonly denyLinkedPage?: boolean;
 }) {
   const now = new Date('2026-07-05T00:00:00.000Z');
   const prisma = {
@@ -533,9 +546,9 @@ function createReadService(options: {
       }
     },
     wikiPage: {
-      async findUnique() {
+      async findUnique(args?: { where?: { id?: bigint } }) {
         return {
-          id: 10n,
+          id: args?.where?.id ?? 10n,
           spaceId: 20n,
           slug: '대문',
           title: '대문',
@@ -573,7 +586,20 @@ function createReadService(options: {
       }
     },
     uploadedFile: {
-      async findMany() { return options.files ?? []; }
+      async findMany() {
+        return (options.files ?? []).map((file) => ({
+          usageContext: 'wiki_editor',
+          visibility: 'public',
+          status: 'active',
+          ownerAccountId: null,
+          linkedResourceType: null,
+          linkedResourceId: null,
+          license: null,
+          sourceUrl: null,
+          sourceText: null,
+          ...file
+        }));
+      }
     },
     serverWiki: {
       async findFirst() {
@@ -587,9 +613,11 @@ function createReadService(options: {
     }
   };
   const permissions = {
-    async assertCanReadPage() {
+    async assertCanReadPage({ page }: { page: { id: bigint } | null }) {
+      if (options.denyLinkedPage && page?.id !== 10n) throw new Error('denied');
       return undefined;
-    }
+    },
+    async assertCanReadSpace() { return undefined; }
   };
   return new WikiReadService(
     prisma as unknown as PrismaService,
@@ -666,6 +694,48 @@ test('wiki read ignores persistent render caches for file-dependent revisions', 
   assert.equal(createdCache, false);
   assert.match(page.html, /<img src="\/files\/logo\.png"/);
   assert.equal(page.html.includes('파일 없음'), false);
+});
+
+test('wiki read exposes attribution only for files readable through their linked resource', async () => {
+  const readable = createReadService({
+    contentRaw: '[[파일:licensed.webp|섬네일|가이드]]',
+    files: [{
+      filename: 'licensed.webp',
+      publicPath: '/v1/files/public/licensed.webp/raw',
+      mimeType: 'image/webp',
+      originalName: 'licensed.png',
+      visibility: 'restricted',
+      linkedResourceType: 'wiki_page',
+      linkedResourceId: '11',
+      license: 'cc-by-4.0',
+      sourceUrl: 'https://example.com/source',
+      sourceText: '원 제작자'
+    }]
+  });
+  const denied = createReadService({
+    contentRaw: '[[파일:licensed.webp|섬네일|가이드]]',
+    files: [{
+      filename: 'licensed.webp',
+      publicPath: '/v1/files/public/licensed.webp/raw',
+      mimeType: 'image/webp',
+      originalName: 'licensed.png',
+      visibility: 'restricted',
+      linkedResourceType: 'wiki_page',
+      linkedResourceId: '11',
+      license: 'cc-by-4.0',
+      sourceUrl: 'https://example.com/source',
+      sourceText: '비공개 제작자'
+    }],
+    denyLinkedPage: true
+  });
+
+  const readablePage = await readable.getPage('main', '대문');
+  const deniedPage = await denied.getPage('main', '대문');
+  assert.match(readablePage.html, /CC BY 4\.0/);
+  assert.match(readablePage.html, /원 제작자/);
+  assert.match(deniedPage.html, /파일 없음/);
+  assert.equal(deniedPage.html.includes('비공개 제작자'), false);
+  assert.equal(deniedPage.html.includes('example.com'), false);
 });
 
 test('wiki read never reuses or stores persistent caches for include-dependent revisions', async () => {
