@@ -125,6 +125,7 @@ test('server list exposes the aggregated global rank metadata', async () => {
             rankDelta24h: 3,
             rankBest: 1,
             votesTotal: 342,
+            rankCalculatedAt: new Date('2026-07-11T00:45:00.000Z'),
             lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
           },
         },
@@ -139,7 +140,7 @@ test('server list exposes the aggregated global rank metadata', async () => {
     current: 2,
     delta24h: 3,
     best: 1,
-    updatedAt: '2026-07-11T01:00:00.000Z',
+    updatedAt: '2026-07-11T00:45:00.000Z',
   });
 });
 
@@ -175,6 +176,7 @@ test('server list marks zero-vote servers as awaiting rank aggregation', async (
             rankDelta24h: 0,
             rankBest: 9,
             votesTotal: 0,
+            rankCalculatedAt: null,
             lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
           },
         },
@@ -220,6 +222,7 @@ test('server list preserves rank when only historical valid votes remain', async
             rankDelta24h: 0,
             rankBest: 1,
             votesTotal: 1,
+            rankCalculatedAt: new Date('2026-07-12T00:45:00.000Z'),
             lastUpdatedAt: new Date('2026-07-12T01:00:00.000Z'),
           },
         },
@@ -364,6 +367,7 @@ test('paginated rankings apply server-side filters and return page metadata', as
       rankCurrent: 2,
       rankDelta24h: 3,
       rankBest: 1,
+      rankCalculatedAt: new Date('2026-07-11T00:45:00.000Z'),
       lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
     },
   };
@@ -385,7 +389,7 @@ test('paginated rankings apply server-side filters and return page metadata', as
     serverStats: {
       aggregate: async (query: unknown) => {
         queries.push(query);
-        return { _max: { lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z') } };
+        return { _max: { rankCalculatedAt: new Date('2026-07-11T00:45:00.000Z') } };
       },
     },
     $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
@@ -408,7 +412,8 @@ test('paginated rankings apply server-side filters and return page metadata', as
   assert.equal(result.pageSize, 12);
   assert.equal(result.totalPages, 3);
   assert.deepEqual(result.summary, { online: 25, verified: 25, votes24h: 420 });
-  assert.equal(result.rankUpdatedAt, '2026-07-11T01:00:00.000Z');
+  assert.equal(result.rankUpdatedAt, '2026-07-11T00:45:00.000Z');
+  assert.equal(result.items[0]?.rank?.updatedAt, '2026-07-11T00:45:00.000Z');
   assert.equal(result.items[0]?.rank?.current, 2);
   assert.equal(queries.length, 6);
   assert.deepEqual((queries[0] as { skip: number; take: number }).skip, 12);

@@ -120,7 +120,8 @@ export function createRankAggregator(prisma: PrismaHandle) {
             uptimePercent: 0,
             sparkline,
             latencyMs: 0,
-            lastPingAt: null
+            lastPingAt: null,
+            rankCalculatedAt: now.toJSDate()
           },
           update: {
             rankCurrent: entry.rankCurrent,
@@ -130,7 +131,8 @@ export function createRankAggregator(prisma: PrismaHandle) {
             votesLast7d: entry.votes7d,
             votesMonthToDate: entry.votesMonth,
             votesTotal: entry.votesTotal,
-            sparkline
+            sparkline,
+            rankCalculatedAt: now.toJSDate()
           }
         }),
         prisma.server.update({

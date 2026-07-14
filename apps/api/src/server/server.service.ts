@@ -187,11 +187,11 @@ export class ServerService {
         }),
         this.prisma.serverStats.aggregate({
           where: { server: where },
-          _max: { lastUpdatedAt: true },
+          _max: { rankCalculatedAt: true },
         }),
       ]);
     const items = servers.map((server) => toSummary(server));
-    const rankUpdatedAt = rankAggregate._max.lastUpdatedAt?.toISOString() ?? null;
+    const rankUpdatedAt = rankAggregate._max.rankCalculatedAt?.toISOString() ?? null;
     return {
       items,
       total,
@@ -1612,6 +1612,7 @@ function toSummary(server: {
     rankDelta24h: number;
     rankBest: number;
     votesTotal: number;
+    rankCalculatedAt: Date | null;
     lastUpdatedAt: Date;
   } | null;
 }): ServerSummary {
@@ -1647,12 +1648,13 @@ function toSummary(server: {
     latencyMs: server.latencyMs ?? null,
     rank:
       server.stats &&
+      server.stats.rankCalculatedAt &&
       (server.stats.votesTotal > 0 || server.votes24h > 0 || (server.votesMonthly ?? 0) > 0)
       ? {
           current: server.stats.rankCurrent,
           delta24h: server.stats.rankDelta24h,
           best: server.stats.rankBest,
-          updatedAt: server.stats.lastUpdatedAt.toISOString(),
+          updatedAt: server.stats.rankCalculatedAt.toISOString(),
         }
       : null,
   };
@@ -1700,6 +1702,7 @@ function toDetail(
       rankDelta24h: number;
       rankBest: number;
       votesTotal: number;
+      rankCalculatedAt: Date | null;
       lastUpdatedAt: Date;
     } | null;
   },

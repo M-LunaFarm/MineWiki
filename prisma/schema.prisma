@@ -436,9 +436,12 @@ model ServerStats {
   sparkline            Json
   latencyMs            Int       @default(0)
   lastPingAt           DateTime?
+  rankCalculatedAt     DateTime? @map("rank_calculated_at") @db.DateTime(3)
   lastUpdatedAt        DateTime  @default(now()) @updatedAt
 
   server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([rankCalculatedAt])
 }
 
 model ServerPingSample {

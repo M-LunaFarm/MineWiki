@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { createRankAggregator } from './rank-aggregator';
 
 type CapturedUpsert = {
-  create: { rankBest: number };
-  update: { rankCurrent: number; rankBest: number };
+  create: { rankBest: number; rankCalculatedAt: Date };
+  update: { rankCurrent: number; rankBest: number; rankCalculatedAt: Date };
 };
 
 test('rank aggregation derives best rank from snapshots instead of placeholder stats', async () => {
@@ -56,6 +56,7 @@ test('rank aggregation derives best rank from snapshots instead of placeholder s
   assert.equal(statsUpserts[0]?.update.rankBest, 1);
   assert.equal(statsUpserts[1]?.update.rankCurrent, 2);
   assert.equal(statsUpserts[1]?.update.rankBest, 1);
+  assert.equal(statsUpserts[0]?.update.rankCalculatedAt.toISOString(), '2026-07-11T03:00:00.000Z');
   assert.equal(voteGroupCall, 11);
 });
 

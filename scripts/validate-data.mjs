@@ -254,6 +254,20 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'ranked ServerStats has a credible calculation timestamp',
+    `
+      SELECT stats.serverId AS id
+      FROM ServerStats stats
+      WHERE stats.votesTotal > 0
+        AND (
+          stats.rank_calculated_at IS NULL
+          OR stats.rank_calculated_at > DATE_ADD(NOW(3), INTERVAL 5 MINUTE)
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'vote dispatch attempt matches vote and target server',
     `
       SELECT a.id
