@@ -214,6 +214,10 @@ export type WikiSpecialDocumentType =
 
 export interface WikiSpecialDocumentResponse {
   readonly type: WikiSpecialDocumentType;
+  readonly generation?: string | null;
+  readonly generatedAt?: string | null;
+  readonly isRebuilding?: boolean;
+  readonly isStale?: boolean;
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly pageId: string | null;

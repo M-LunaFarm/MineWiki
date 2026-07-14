@@ -30,6 +30,12 @@ function createService(options: {
         return options.space === undefined
           ? { id: 10n, status: 'active', ownerUserId: null, createdBy: null, spaceType: 'basic' }
           : options.space;
+      },
+      async findMany() {
+        const space = options.space === undefined
+          ? { id: 10n, status: 'active', ownerUserId: null, createdBy: null, spaceType: 'basic' }
+          : options.space;
+        return space ? [space] : [];
       }
     },
     subwikiRole: {
@@ -86,6 +92,28 @@ test('anonymous public read is allowed', async () => {
   });
 
   assert.equal(decision.allowed, true);
+});
+
+test('batch page visibility loads ACL decisions once and preserves candidate order', async () => {
+  let batchCalls = 0;
+  const service = createService({
+    acl: {
+      async evaluateReadBatch() {
+        batchCalls += 1;
+        return new Map([
+          [1n, { matched: false, allowed: false, reason: 'acl_no_match' }],
+          [2n, { matched: true, allowed: false, reason: 'private_page' }]
+        ]);
+      }
+    } as WikiAclService
+  });
+
+  const result = await service.filterReadablePages({
+    pages: [page({ id: 1n }), page({ id: 2n }), page({ id: 3n, status: 'deleted' })]
+  });
+
+  assert.deepEqual(result.map((item) => item.id), [1n]);
+  assert.equal(batchCalls, 1);
 });
 
 test('hidden and deleted pages are denied for read', async () => {

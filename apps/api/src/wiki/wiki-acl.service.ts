@@ -63,6 +63,72 @@ const ROLE_GROUPS = {
 export class WikiAclService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async evaluateReadBatch(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly resources: ReadonlyArray<WikiAclResource & { readonly pageId: bigint }>;
+    readonly store?: WikiAclStore;
+    readonly requestIp?: string | null;
+  }): Promise<ReadonlyMap<bigint, WikiAclDecision>> {
+    const store = input.store ?? this.prisma;
+    const now = new Date();
+    const namespaceIds = [...new Set(input.resources.flatMap((resource) => resource.namespaceId ? [resource.namespaceId] : []))];
+    const spaceIds = [...new Set(input.resources.flatMap((resource) => resource.spaceId ? [resource.spaceId] : []))];
+    const pageIds = [...new Set(input.resources.map((resource) => resource.pageId))];
+    const rules = await store.aclRule.findMany({
+      where: {
+        action: 'read',
+        OR: [
+          { targetType: 'site', targetId: null },
+          ...(namespaceIds.length > 0 ? [{ targetType: 'namespace', targetId: { in: namespaceIds.map(BigInt) } }] : []),
+          ...(spaceIds.length > 0 ? [{ targetType: 'space', targetId: { in: spaceIds } }] : []),
+          ...(pageIds.length > 0 ? [{ targetType: 'page', targetId: { in: pageIds } }] : [])
+        ],
+        AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }]
+      }
+    });
+    const actor = input.actor ? await this.hydrateBatchActor(store, input.actor) : null;
+    const rulesByTarget = new Map<string, typeof rules>();
+    for (const rule of rules) {
+      const key = `${rule.targetType}:${rule.targetId?.toString() ?? ''}`;
+      rulesByTarget.set(key, [...(rulesByTarget.get(key) ?? []), rule]);
+    }
+    for (const scopedRules of rulesByTarget.values()) {
+      scopedRules.sort((left, right) => left.sortOrder - right.sortOrder);
+    }
+    const matches = new Map<string, Promise<boolean>>();
+    const decisions = new Map<bigint, WikiAclDecision>();
+    const requestIp = input.requestIp ?? actor?.requestIp ?? getCurrentRequestIp();
+    for (const resource of input.resources) {
+      const scopes: Array<{ readonly targetType: string; readonly targetId: bigint | null }> = [
+        { targetType: 'page', targetId: resource.pageId },
+        { targetType: 'space', targetId: resource.spaceId ?? null },
+        { targetType: 'namespace', targetId: resource.namespaceId ? BigInt(resource.namespaceId) : null },
+        { targetType: 'site', targetId: null }
+      ];
+      let decision: WikiAclDecision = { matched: false, allowed: false, reason: 'acl_no_match' };
+      scopeLoop: for (const scope of scopes) {
+        if (scope.targetType !== 'site' && scope.targetId === null) continue;
+        for (const rule of rulesByTarget.get(`${scope.targetType}:${scope.targetId?.toString() ?? ''}`) ?? []) {
+          const cacheKey = batchSubjectCacheKey(rule, resource);
+          let matched = matches.get(cacheKey);
+          if (!matched) {
+            matched = this.subjectMatches(store, rule, actor, resource, requestIp);
+            matches.set(cacheKey, matched);
+          }
+          if (!(await matched)) continue;
+          decision = rule.effect === 'allow'
+            ? { matched: true, allowed: true, reason: rule.reason ?? 'acl_allow' }
+            : rule.effect === 'deny'
+              ? { matched: true, allowed: false, reason: rule.reason ?? 'acl_deny' }
+              : { matched: true, allowed: false, reason: 'acl_unsupported_effect' };
+          break scopeLoop;
+        }
+      }
+      decisions.set(resource.pageId, decision);
+    }
+    return decisions;
+  }
+
   async evaluate(input: {
     readonly actor: WikiPermissionActor | null;
     readonly action: WikiAclAction;
@@ -195,8 +261,8 @@ export class WikiAclService {
     if (!actor) {
       return false;
     }
-    const groups = await this.groupCodes(store, actor);
-    const permissions = await this.permissionCodes(store, groups);
+    const groups = actor.groups ? [...actor.groups] : await this.groupCodes(store, actor);
+    const permissions = actor.permissions ? [...actor.permissions] : await this.permissionCodes(store, groups);
     if (permission === 'admin') {
       return actor.isElevated === true || groups.some((group) => ROLE_GROUPS.admin.has(group));
     }
@@ -375,6 +441,15 @@ export class WikiAclService {
     return [...new Set([...explicit, ...groups.map((group) => group.code)])];
   }
 
+  private async hydrateBatchActor(
+    store: WikiAclStore,
+    actor: WikiPermissionActor
+  ): Promise<WikiPermissionActor> {
+    const groups = await this.groupCodes(store, actor);
+    const permissions = await this.permissionCodes(store, groups);
+    return { ...actor, groups, permissions };
+  }
+
   private async permissionCodes(store: WikiAclStore, groupCodes: readonly string[]): Promise<string[]> {
     if (groupCodes.length === 0) {
       return [];
@@ -450,4 +525,16 @@ function safeBigInt(value: string): bigint | null {
   } catch {
     return null;
   }
+}
+
+function batchSubjectCacheKey(
+  rule: { readonly subjectType: string; readonly subjectValue: string },
+  resource: WikiAclResource
+): string {
+  if (rule.subjectType !== 'role') return `${rule.subjectType}:${rule.subjectValue}`;
+  const role = stripAclPrefix(rule.subjectValue, 'role');
+  if (role === 'owner_user' || role === 'page_contributor') {
+    return `role:${role}:page:${resource.pageId?.toString() ?? ''}`;
+  }
+  return `role:${role}:space:${resource.spaceId?.toString() ?? ''}`;
 }

@@ -47,10 +47,10 @@ export default async function WikiSpecialPage({ searchParams }: PageProps) {
       </form>
 
       <section>
-        <div className="mb-3 flex items-end justify-between gap-3"><div><h2 className="text-xl font-bold text-white">{current.label}</h2><p className="mt-1 text-sm text-slate-500">{current.description}</p></div><span className="chip chip-muted">{result.items.length}개</span></div>
+        <div className="mb-3 flex items-end justify-between gap-3"><div><h2 className="text-xl font-bold text-white">{current.label}</h2><p className="mt-1 text-sm text-slate-500">{current.description}</p>{result.generatedAt ? <p className="mt-1 text-xs text-slate-600">집계 {formatDateTime(result.generatedAt)}{result.isStale ? ' · 갱신 지연' : ''}</p> : null}</div><span className="chip chip-muted">{result.items.length}개</span></div>
         <div className="divide-y divide-white/10 border border-white/10 bg-[#111821]">
           {result.items.map((item) => <Link key={item.id} href={item.routePath} className="flex items-center justify-between gap-4 p-4 transition hover:bg-white/[0.03] sm:p-5"><div className="min-w-0"><p className="truncate font-semibold text-white">{item.displayTitle}</p><p className="mt-1 truncate text-xs text-slate-500">{item.namespace}:{item.title}</p></div><div className="flex shrink-0 items-center gap-3 text-xs text-slate-500">{type === 'old' && item.updatedAt ? <time dateTime={item.updatedAt}>{formatDate(item.updatedAt)}</time> : item.value !== null ? <span>{type === 'wanted' ? `링크 ${item.value}` : type === 'categories' ? `문서 ${item.value}` : `${item.value.toLocaleString('ko-KR')} bytes`}</span> : null}<ArrowUpRight className="size-4" /></div></Link>)}
-          {result.items.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">조건에 해당하는 문서가 없습니다.</p> : null}
+          {result.items.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">{result.isRebuilding ? '특수 문서 목록을 처음 집계하고 있습니다. 잠시 후 다시 확인해 주세요.' : '조건에 해당하는 문서가 없습니다.'}</p> : null}
         </div>
       </section>
     </div>
@@ -66,4 +66,8 @@ function href(type: WikiSpecialDocumentType, namespace: string, refresh?: string
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeZone: 'Asia/Seoul' }).format(new Date(value));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Seoul' }).format(new Date(value));
 }

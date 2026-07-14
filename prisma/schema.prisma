@@ -1209,6 +1209,20 @@ model WikiPageLink {
   @@map("page_links")
 }
 
+model WikiSpecialSnapshot {
+  type            String   @db.VarChar(32)
+  namespaceCode   String   @default("") @map("namespace_code") @db.VarChar(32)
+  generation      String   @db.Char(36)
+  items           Json
+  sourcePageCount Int      @default(0) @map("source_page_count") @db.UnsignedInt
+  sourceLinkCount Int      @default(0) @map("source_link_count") @db.UnsignedInt
+  generatedAt     DateTime @map("generated_at") @db.DateTime(3)
+
+  @@id([type, namespaceCode])
+  @@index([generatedAt], map: "idx_wiki_special_snapshots_generated")
+  @@map("wiki_special_snapshots")
+}
+
 model WikiDiscussionThread {
   id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   pageId    BigInt   @map("page_id") @db.UnsignedBigInt

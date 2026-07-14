@@ -119,6 +119,58 @@ export class WikiPermissionService {
     }
   }
 
+  async filterReadablePages<T extends WikiPermissionPage>(input: {
+    readonly accountId?: string | null;
+    readonly pages: readonly T[];
+    readonly store?: WikiPermissionStore;
+  }): Promise<T[]> {
+    if (input.pages.length === 0) return [];
+    const store = input.store ?? this.prisma;
+    const spaceIds = [...new Set(input.pages.map((page) => page.spaceId))];
+    const spaces = await store.wikiSpace.findMany({
+      where: { id: { in: spaceIds } },
+      select: { id: true, status: true }
+    });
+    const activeSpaceIds = new Set(spaces
+      .filter((space) => ACTIVE_SPACE_STATUSES.has(space.status))
+      .map((space) => space.id));
+    const actor = await this.resolveActor(input.accountId, store);
+    const normalCandidates = input.pages.filter((page) =>
+      activeSpaceIds.has(page.spaceId) &&
+      PUBLIC_PAGE_STATUSES.has(page.status) &&
+      PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)
+    );
+    const aclDecisions = this.wikiAcl
+      ? await this.wikiAcl.evaluateReadBatch({
+          actor,
+          resources: normalCandidates.map((page) => ({
+            pageId: page.id,
+            spaceId: page.spaceId,
+            namespaceId: page.namespaceId,
+            title: page.title,
+            createdBy: page.createdBy
+          })),
+          store
+        })
+      : new Map<bigint, WikiAclDecision>();
+    const readableIds = new Set(normalCandidates
+      .filter((page) => {
+        const acl = aclDecisions.get(page.id);
+        return !acl?.matched || acl.allowed;
+      })
+      .map((page) => page.id));
+    const unusual = input.pages.filter((page) =>
+      activeSpaceIds.has(page.spaceId) &&
+      PUBLIC_PAGE_STATUSES.has(page.status) &&
+      !PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)
+    );
+    for (const page of unusual) {
+      const decision = await this.canReadPage({ accountId: input.accountId, page, store });
+      if (decision.allowed) readableIds.add(page.id);
+    }
+    return input.pages.filter((page) => readableIds.has(page.id));
+  }
+
   async assertCanReadSpace(input: {
     readonly accountId?: string | null;
     readonly spaceId: bigint;

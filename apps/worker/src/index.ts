@@ -29,6 +29,7 @@ import { loadVoteDispatchExecutionJob } from './vote-job-loader';
 import { loadDiscordVerifyExecutionJob } from './discord-sync-job-loader';
 import { DiscordVerificationRepository } from './discord-verification.repository';
 import { processWikiNotificationOutbox } from './wiki-notification-outbox';
+import { rebuildWikiSpecialSnapshots } from './wiki-special-snapshots';
 import { loadDiscordDigestExecutionJob } from './discord-digest-job-loader';
 import type {
   ClaimVerificationJob,
@@ -47,6 +48,7 @@ const PING_INTERVAL_MS = 5 * 60 * 1000;
 const RANK_INTERVAL_MS = 60 * 60 * 1000;
 const CLAIM_SCAN_INTERVAL_MS = 60 * 60 * 1000;
 const WIKI_NOTIFICATION_INTERVAL_MS = 5 * 1000;
+const WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000;
 const ACCOUNT_DELETION_INTERVAL_MS = 60 * 60 * 1000;
 const ACCOUNT_DELETION_DISCORD_REVOCATION_INTERVAL_MS = 60 * 1000;
 const CLAIM_PENDING_THRESHOLD_HOURS = 1;
@@ -595,6 +597,10 @@ async function bootstrapWorker(): Promise<void> {
   scheduleInterval('wiki-notification-outbox', WIKI_NOTIFICATION_INTERVAL_MS, async () => {
     const count = await processWikiNotificationOutbox(prisma);
     if (count > 0) Logger.info({ count }, 'Delivered wiki notification outbox events');
+  });
+  scheduleInterval('wiki-special-snapshots', WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS, async () => {
+    const result = await rebuildWikiSpecialSnapshots(prisma);
+    Logger.info(result, 'Rebuilt wiki special document snapshots');
   });
   const internalApiBaseUrl = config.getOptional('INTERNAL_API_BASE_URL') ?? 'http://api:3000';
   const accountDeletionServiceToken = deriveAccountDeletionServiceToken(config.get('APP_ENCRYPTION_KEY'));

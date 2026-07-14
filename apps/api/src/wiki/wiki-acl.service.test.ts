@@ -140,6 +140,28 @@ test('page deny read rule rejects matching public actor', async () => {
   assert.equal(decision.reason, 'private_page');
 });
 
+test('batch read ACL evaluates one rule set with page scope before site scope', async () => {
+  const { service, store } = createService({
+    rules: [
+      { targetType: 'site', targetId: null, action: 'read', effect: 'deny', subjectType: 'perm', subjectValue: 'any' },
+      { targetType: 'page', targetId: 1n, action: 'read', effect: 'allow', subjectType: 'perm', subjectValue: 'any' }
+    ]
+  });
+
+  const decisions = await service.evaluateReadBatch({
+    actor: null,
+    resources: [
+      { pageId: 1n, spaceId: 10n, namespaceId: 1, title: '허용' },
+      { pageId: 2n, spaceId: 10n, namespaceId: 1, title: '차단' }
+    ],
+    store: store as unknown as PrismaService
+  });
+
+  assert.equal(decisions.get(1n)?.allowed, true);
+  assert.equal(decisions.get(2n)?.allowed, false);
+  assert.equal(decisions.get(2n)?.matched, true);
+});
+
 test('expired ACL rule is ignored', async () => {
   const { service, store } = createService({
     rules: [{
