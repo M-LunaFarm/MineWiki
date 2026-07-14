@@ -17,6 +17,7 @@ build/
 *.tsbuildinfo
 cache/
 .cache/
+.turbo/
 
 # Runtime storage, logs, and local test artifacts
 storage/
