@@ -64,7 +64,7 @@ export interface WikiPageResponse {
 export async function fetchWikiPageByPath(path: string): Promise<WikiPageResponse | null> {
   const searchParams = new URLSearchParams({ path });
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/page/by-path?${searchParams.toString()}`, {
-    next: { revalidate: 60 }
+    next: { revalidate: 60 },
   });
   if (response.status === 404) {
     return null;
@@ -258,7 +258,12 @@ export interface WikiBacklinkResponse {
 
 export interface WikiContributionResponse {
   readonly activity: 'edits' | 'discussions' | 'edit-requests' | 'reviews';
-  readonly profile: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string };
+  readonly profile: {
+    readonly id: string;
+    readonly username: string;
+    readonly displayName: string;
+    readonly status: string;
+  };
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly kind: 'document' | 'discussion' | 'edit_request' | 'review';
@@ -325,6 +330,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly createdByName: string;
     readonly createdAt: string;
     readonly canDelete: boolean;
+    readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
   }>;
 }
@@ -372,7 +378,12 @@ export interface WikiEditRequestListResponse {
 export interface WikiEditRequestDiffResponse {
   readonly requestId: string;
   readonly baseRevisionId: string;
-  readonly hunks: ReadonlyArray<{ readonly type: 'context' | 'added' | 'removed'; readonly line: string; readonly leftLine: number | null; readonly rightLine: number | null }>;
+  readonly hunks: ReadonlyArray<{
+    readonly type: 'context' | 'added' | 'removed';
+    readonly line: string;
+    readonly leftLine: number | null;
+    readonly rightLine: number | null;
+  }>;
 }
 
 export interface WikiAdminRecentChange {
@@ -437,8 +448,17 @@ export interface WikiAclRuleSummary {
 }
 
 export interface WikiAclCatalog {
-  readonly namespaces: ReadonlyArray<{ id: string; code: string; name: string }>;
-  readonly spaces: ReadonlyArray<{ id: string; name: string; type: string; path: string }>;
+  readonly namespaces: ReadonlyArray<{
+    id: string;
+    code: string;
+    name: string;
+  }>;
+  readonly spaces: ReadonlyArray<{
+    id: string;
+    name: string;
+    type: string;
+    path: string;
+  }>;
   readonly pages: ReadonlyArray<{ id: string; name: string; spaceId: string }>;
   readonly groups: ReadonlyArray<{ code: string; name: string }>;
   readonly aclGroups: ReadonlyArray<{ id: string; key: string; name: string }>;
@@ -498,7 +518,7 @@ export interface UploadedFileMetadata {
 
 export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisionResponse> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/revisions/${revisionId}`, {
-    credentials: 'include'
+    credentials: 'include',
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -512,7 +532,7 @@ export async function fetchWikiRaw(pageId: string, revisionId?: string): Promise
   if (revisionId) params.set('revisionId', revisionId);
   const suffix = params.size > 0 ? `?${params.toString()}` : '';
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/raw${suffix}`, {
-    credentials: 'include'
+    credentials: 'include',
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -524,10 +544,7 @@ export async function fetchWikiRaw(pageId: string, revisionId?: string): Promise
 export async function fetchWikiBacklinks(pageId: string, cursor?: string): Promise<WikiBacklinkResponse> {
   const params = new URLSearchParams({ limit: '30' });
   if (cursor) params.set('cursor', cursor);
-  const response = await fetch(
-    `${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/backlinks?${params.toString()}`,
-    { credentials: 'include' }
-  );
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/backlinks?${params.toString()}`, { credentials: 'include' });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to load wiki backlinks.');
@@ -543,14 +560,17 @@ export async function fetchWikiPageAcl(pageId: string): Promise<WikiPageAclRespo
   return readWikiBrowser<WikiPageAclResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl`);
 }
 
-export async function createWikiPageAclRule(pageId: string, input: {
-  readonly action: string;
-  readonly effect: WikiAclRuleSummary['effect'];
-  readonly subjectType: WikiAclRuleSummary['subjectType'];
-  readonly subjectValue: string;
-  readonly reason?: string;
-  readonly expiresAt?: string | null;
-}): Promise<WikiAclRuleSummary> {
+export async function createWikiPageAclRule(
+  pageId: string,
+  input: {
+    readonly action: string;
+    readonly effect: WikiAclRuleSummary['effect'];
+    readonly subjectType: WikiAclRuleSummary['subjectType'];
+    readonly subjectValue: string;
+    readonly reason?: string;
+    readonly expiresAt?: string | null;
+  },
+): Promise<WikiAclRuleSummary> {
   return mutateWikiBrowser<WikiAclRuleSummary>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl`, 'POST', input);
 }
 
@@ -558,11 +578,14 @@ export async function deleteWikiPageAclRule(pageId: string, ruleId: string, reas
   await mutateWikiBrowser(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl/${encodeURIComponent(ruleId)}`, 'DELETE', { reason });
 }
 
-export async function reorderWikiPageAclRules(pageId: string, input: {
-  readonly action: string;
-  readonly ruleIds: readonly string[];
-  readonly reason?: string;
-}): Promise<WikiAclRuleSummary[]> {
+export async function reorderWikiPageAclRules(
+  pageId: string,
+  input: {
+    readonly action: string;
+    readonly ruleIds: readonly string[];
+    readonly reason?: string;
+  },
+): Promise<WikiAclRuleSummary[]> {
   return mutateWikiBrowser<WikiAclRuleSummary[]>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl/order`, 'PATCH', input);
 }
 
@@ -581,7 +604,9 @@ export async function markAllWikiNotificationsRead(throughId: string): Promise<{
 }
 
 export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]> {
-  const response = await fetch(`${apiBaseUrl()}/v1/wiki/me/deleted-pages`, { credentials: 'include' });
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/me/deleted-pages`, {
+    credentials: 'include',
+  });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to load deleted wiki pages.');
@@ -608,28 +633,29 @@ export async function fetchRecentWikiThreads(cursor?: string): Promise<WikiRecen
 
 export async function createWikiThread(input: { pageId: string; title: string; content: string }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/discussions`, 'POST', {
-    title: input.title, content: input.content
+    title: input.title,
+    content: input.content,
   });
 }
 
 export async function addWikiThreadComment(input: { threadId: string; content: string }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/comments`, 'POST', {
-    content: input.content
+    content: input.content,
   });
 }
 
 export async function setWikiThreadStatus(input: { threadId: string; status: 'open' | 'closed' }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/status`, 'PATCH', {
-    status: input.status
+    status: input.status,
   });
 }
 
 export async function deleteWikiThreadComment(input: { threadId: string; commentId: string }): Promise<WikiThreadDetail> {
-  return mutateWikiBrowser<WikiThreadDetail>(
-    `/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/comments/${encodeURIComponent(input.commentId)}`,
-    'DELETE',
-    {}
-  );
+  return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/comments/${encodeURIComponent(input.commentId)}`, 'DELETE', {});
+}
+
+export async function setWikiThreadCommentVisibility(input: { threadId: string; commentId: string; status: 'normal' | 'hidden'; reason: string }): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/comments/${encodeURIComponent(input.commentId)}/visibility`, 'PATCH', { status: input.status, reason: input.reason });
 }
 
 export async function setWikiThreadSubscription(threadId: string, subscribed: boolean): Promise<{ readonly subscribed: boolean }> {
@@ -647,7 +673,7 @@ export async function setWikiThreadPinnedComment(threadId: string, commentId: st
 export async function moveWikiThread(input: { threadId: string; pageId: string; reason?: string }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/page`, 'PATCH', {
     pageId: input.pageId,
-    reason: input.reason
+    reason: input.reason,
   });
 }
 
@@ -657,12 +683,16 @@ export async function deleteWikiThread(threadId: string, reason?: string): Promi
 
 export async function fetchWikiThreadCommentRaw(threadId: string, commentId: string): Promise<string> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/discussions/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}/raw`, {
-    credentials: 'include'
+    credentials: 'include',
   });
   const body = await response.text();
   if (!response.ok) {
     let message = body;
-    try { message = JSON.parse(body)?.message ?? body; } catch { /* text response */ }
+    try {
+      message = JSON.parse(body)?.message ?? body;
+    } catch {
+      /* text response */
+    }
     throw new Error(message || '댓글 원문을 불러오지 못했습니다.');
   }
   return body;
@@ -673,11 +703,7 @@ export async function fetchWikiWatchStatus(pageId: string): Promise<WikiWatchSta
 }
 
 export async function setWikiPageWatched(pageId: string, watched: boolean): Promise<WikiWatchStatus> {
-  return mutateWikiBrowser<WikiWatchStatus>(
-    `/v1/wiki/pages/${encodeURIComponent(pageId)}/watch`,
-    watched ? 'PUT' : 'DELETE',
-    {}
-  );
+  return mutateWikiBrowser<WikiWatchStatus>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/watch`, watched ? 'PUT' : 'DELETE', {});
 }
 
 export async function markWikiPageWatchRead(pageId: string): Promise<WikiWatchStatus> {
@@ -694,13 +720,7 @@ export async function fetchWikiEditRequests(pageId: string, cursor?: string): Pr
   return readWikiBrowser<WikiEditRequestListResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/edit-requests?${params.toString()}`);
 }
 
-export async function createWikiEditRequest(input: {
-  pageId: string;
-  baseRevisionId: string;
-  contentRaw: string;
-  editSummary: string;
-  isMinor: boolean;
-}): Promise<WikiEditRequestSummary> {
+export async function createWikiEditRequest(input: { pageId: string; baseRevisionId: string; contentRaw: string; editSummary: string; isMinor: boolean }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/edit-requests`, 'POST', input);
 }
 
@@ -721,7 +741,9 @@ export async function fetchWikiEditRequestDiff(requestId: string): Promise<WikiE
 }
 
 async function readWikiBrowser<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl()}${path}`, { credentials: 'include' });
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
+    credentials: 'include',
+  });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body?.message ?? 'Wiki request failed.');
   return body as T;
@@ -729,9 +751,10 @@ async function readWikiBrowser<T>(path: string): Promise<T> {
 
 async function mutateWikiBrowser<T>(path: string, method: string, payload: Record<string, unknown>): Promise<T> {
   const response = await fetch(`${apiBaseUrl()}${path}`, {
-    method, credentials: 'include',
+    method,
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body?.message ?? 'Wiki mutation failed.');
@@ -745,12 +768,9 @@ export async function fetchWikiRevisions(pageId: string, cursor?: string): Promi
 }
 
 export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {
-  const response = await fetch(
-    `${apiBaseUrl()}/v1/wiki/revisions/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`,
-    {
-      credentials: 'include'
-    }
-  );
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/revisions/${encodeURIComponent(leftId)}/diff/${encodeURIComponent(rightId)}`, {
+    credentials: 'include',
+  });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to load wiki diff.');
@@ -758,7 +778,14 @@ export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Pr
   return response.json();
 }
 
-export async function fetchWikiRecent(input: { cursor?: string; changeType?: string; namespace?: string; minor?: string } = {}): Promise<WikiRecentChangeListResponse> {
+export async function fetchWikiRecent(
+  input: {
+    cursor?: string;
+    changeType?: string;
+    namespace?: string;
+    minor?: string;
+  } = {},
+): Promise<WikiRecentChangeListResponse> {
   const params = new URLSearchParams({ limit: '30' });
   if (input.cursor) params.set('cursor', input.cursor);
   if (input.changeType) params.set('changeType', input.changeType);
@@ -767,15 +794,10 @@ export async function fetchWikiRecent(input: { cursor?: string; changeType?: str
   return readWikiBrowser(`/v1/wiki/recent?${params.toString()}`);
 }
 
-export async function searchWiki(input: {
-  q: string;
-  namespace?: string;
-  limit?: number;
-  cursor?: string;
-}): Promise<WikiSearchResponse> {
+export async function searchWiki(input: { q: string; namespace?: string; limit?: number; cursor?: string }): Promise<WikiSearchResponse> {
   const params = new URLSearchParams({
     q: input.q,
-    limit: String(input.limit ?? 20)
+    limit: String(input.limit ?? 20),
   });
   if (input.namespace) {
     params.set('namespace', input.namespace);
@@ -783,7 +805,7 @@ export async function searchWiki(input: {
   if (input.cursor) params.set('cursor', input.cursor);
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/search?${params.toString()}`, {
     credentials: 'include',
-    next: { revalidate: 30 }
+    next: { revalidate: 30 },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -815,7 +837,8 @@ export async function fetchWikiUserBlockEvents(targetProfileId?: string): Promis
 
 export async function setWikiAdminUserBlocked(input: { profileId: string; blocked: boolean; reason: string }): Promise<WikiAdminUserSummary> {
   return fetchWikiAdminJson(`/users/${encodeURIComponent(input.profileId)}/${input.blocked ? 'block' : 'unblock'}`, {
-    method: 'POST', body: JSON.stringify({ reason: input.reason })
+    method: 'POST',
+    body: JSON.stringify({ reason: input.reason }),
   });
 }
 
@@ -827,48 +850,34 @@ export async function fetchWikiAclCatalog(): Promise<WikiAclCatalog> {
   return fetchWikiAdminJson('/acl/catalog');
 }
 
-export async function createWikiAclRule(input: {
-  targetType: WikiAclRuleSummary['targetType'];
-  targetId: string | null;
-  action: string;
-  effect: WikiAclRuleSummary['effect'];
-  subjectType: WikiAclRuleSummary['subjectType'];
-  subjectValue: string;
-  reason?: string;
-  expiresAt?: string | null;
-}): Promise<WikiAclRuleSummary> {
-  return fetchWikiAdminJson('/acl', { method: 'POST', body: JSON.stringify(input) });
+export async function createWikiAclRule(input: { targetType: WikiAclRuleSummary['targetType']; targetId: string | null; action: string; effect: WikiAclRuleSummary['effect']; subjectType: WikiAclRuleSummary['subjectType']; subjectValue: string; reason?: string; expiresAt?: string | null }): Promise<WikiAclRuleSummary> {
+  return fetchWikiAdminJson('/acl', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 }
 
 export async function deleteWikiAclRule(ruleId: string, reason?: string): Promise<void> {
   await fetchWikiAdminJson(`/acl/${encodeURIComponent(ruleId)}`, {
     method: 'DELETE',
-    body: JSON.stringify({ reason })
+    body: JSON.stringify({ reason }),
   });
 }
 
-export async function updateWikiPageProtection(input: {
-  pageId: string;
-  protectionLevel: string;
-  reason?: string;
-}): Promise<WikiAdminPageSummary> {
+export async function updateWikiPageProtection(input: { pageId: string; protectionLevel: string; reason?: string }): Promise<WikiAdminPageSummary> {
   return fetchWikiAdminJson(`/pages/${encodeURIComponent(input.pageId)}/protection`, {
     method: 'PATCH',
     body: JSON.stringify({
       protectionLevel: input.protectionLevel,
-      reason: input.reason
-    })
+      reason: input.reason,
+    }),
   });
 }
 
-export async function setWikiAdminPageDeleted(input: {
-  pageId: string;
-  deleted: boolean;
-  reason?: string;
-}): Promise<WikiAdminPageSummary> {
+export async function setWikiAdminPageDeleted(input: { pageId: string; deleted: boolean; reason?: string }): Promise<WikiAdminPageSummary> {
   return fetchWikiAdminJson(`/pages/${encodeURIComponent(input.pageId)}/${input.deleted ? 'delete' : 'restore'}`, {
     method: 'POST',
-    body: JSON.stringify({ reason: input.reason })
+    body: JSON.stringify({ reason: input.reason }),
   });
 }
 
@@ -879,8 +888,8 @@ async function fetchWikiAdminJson<T>(path: string, init?: RequestInit): Promise<
     headers: {
       'Content-Type': 'application/json',
       ...(init?.method && init.method !== 'GET' ? await csrfHeaders() : {}),
-      ...init?.headers
-    }
+      ...init?.headers,
+    },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -894,7 +903,7 @@ export async function previewWikiMarkup(contentRaw: string): Promise<{ html: str
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
-    body: JSON.stringify({ contentRaw })
+    body: JSON.stringify({ contentRaw }),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -903,15 +912,7 @@ export async function previewWikiMarkup(contentRaw: string): Promise<{ html: str
   return response.json();
 }
 
-export async function saveWikiPage(input: {
-  pageId?: string;
-  namespace: string;
-  title: string;
-  contentRaw: string;
-  editSummary: string;
-  isMinor: boolean;
-  baseRevisionId?: string;
-}): Promise<WikiMutationResponse> {
+export async function saveWikiPage(input: { pageId?: string; namespace: string; title: string; contentRaw: string; editSummary: string; isMinor: boolean; baseRevisionId?: string }): Promise<WikiMutationResponse> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages${input.pageId ? `/${input.pageId}` : ''}`, {
     method: input.pageId ? 'PATCH' : 'POST',
     credentials: 'include',
@@ -922,8 +923,8 @@ export async function saveWikiPage(input: {
       contentRaw: input.contentRaw,
       editSummary: input.editSummary,
       isMinor: input.isMinor,
-      baseRevisionId: input.baseRevisionId
-    })
+      baseRevisionId: input.baseRevisionId,
+    }),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -932,18 +933,12 @@ export async function saveWikiPage(input: {
   return response.json();
 }
 
-export async function moveWikiPage(input: {
-  pageId: string;
-  title: string;
-  displayTitle?: string;
-  reason: string;
-  leaveRedirect: boolean;
-}): Promise<WikiMoveResponse> {
+export async function moveWikiPage(input: { pageId: string; title: string; displayTitle?: string; reason: string; leaveRedirect: boolean }): Promise<WikiMoveResponse> {
   return mutateWikiPage(input.pageId, 'move', {
     title: input.title,
     displayTitle: input.displayTitle,
     reason: input.reason,
-    leaveRedirect: input.leaveRedirect
+    leaveRedirect: input.leaveRedirect,
   });
 }
 
@@ -955,16 +950,11 @@ export async function restoreWikiPage(input: { pageId: string; reason: string })
   return mutateWikiPage(input.pageId, 'restore', { reason: input.reason });
 }
 
-export async function revertWikiPage(input: {
-  pageId: string;
-  revisionId: string;
-  baseRevisionId: string;
-  reason: string;
-}): Promise<WikiMutationResponse> {
+export async function revertWikiPage(input: { pageId: string; revisionId: string; baseRevisionId: string; reason: string }): Promise<WikiMutationResponse> {
   return mutateWikiPage(input.pageId, 'revert', {
     revisionId: input.revisionId,
     baseRevisionId: input.baseRevisionId,
-    reason: input.reason
+    reason: input.reason,
   });
 }
 
@@ -973,7 +963,7 @@ async function mutateWikiPage<T>(pageId: string, action: string, body: Record<st
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
   const responseBody = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -982,11 +972,7 @@ async function mutateWikiPage<T>(pageId: string, action: string, body: Record<st
   return responseBody as T;
 }
 
-export async function uploadWikiImage(input: {
-  data: string;
-  filename: string;
-  pageId?: string;
-}): Promise<{ url: string; publicPath: string; id: string; filename: string }> {
+export async function uploadWikiImage(input: { data: string; filename: string; pageId?: string }): Promise<{ url: string; publicPath: string; id: string; filename: string }> {
   const response = await fetch(`${apiBaseUrl()}/v1/files/images`, {
     method: 'POST',
     credentials: 'include',
@@ -997,8 +983,8 @@ export async function uploadWikiImage(input: {
       usageContext: 'wiki_editor',
       visibility: input.pageId ? 'restricted' : 'public',
       linkedResourceType: input.pageId ? 'wiki_page' : undefined,
-      linkedResourceId: input.pageId
-    })
+      linkedResourceId: input.pageId,
+    }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -1008,23 +994,25 @@ export async function uploadWikiImage(input: {
     id: String(body.id),
     filename: String(body.filename),
     url: String(body.url ?? body.publicPath),
-    publicPath: String(body.publicPath ?? body.url)
+    publicPath: String(body.publicPath ?? body.url),
   };
 }
 
-export async function listWikiFiles(input: {
-  search?: string;
-  limit?: number;
-} = {}): Promise<UploadedFileMetadata[]> {
+export async function listWikiFiles(
+  input: {
+    search?: string;
+    limit?: number;
+  } = {},
+): Promise<UploadedFileMetadata[]> {
   const params = new URLSearchParams({
     usageContext: 'wiki_editor',
-    limit: String(input.limit ?? 40)
+    limit: String(input.limit ?? 40),
   });
   if (input.search?.trim()) {
     params.set('search', input.search.trim());
   }
   const response = await fetch(`${apiBaseUrl()}/v1/files?${params.toString()}`, {
-    credentials: 'include'
+    credentials: 'include',
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
