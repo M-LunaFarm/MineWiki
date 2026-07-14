@@ -119,6 +119,7 @@ const permissions = [
   ['wiki.edit.locked', 'Edit locked wiki pages'],
   ['wiki.admin', 'Manage wiki administration'],
   ['wiki.user.block', 'Block and unblock wiki contributors'],
+  ['wiki.batch_rollback', 'Preview and execute bounded wiki vandalism rollback'],
   ['server.admin', 'Manage server administration'],
   ['vote.admin', 'Invalidate abusive votes and manage vote integrity'],
   ['guild.admin', 'Manage Discord guild administration'],

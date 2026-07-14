@@ -12,7 +12,8 @@ test('wiki admin controller denies non-elevated sessions', async () => {
         return [];
       }
     } as unknown as WikiAdminService,
-    {} as WikiProfileService
+    {} as WikiProfileService,
+    {} as never
   );
 
   await assert.rejects(
@@ -35,6 +36,7 @@ test('wiki admin controller allows explicit wiki admin permission', async () => 
         return { id: 1n };
       },
     } as unknown as WikiProfileService,
+    {} as never,
   );
 
   const pages = await controller.getPages(undefined, {
@@ -47,4 +49,21 @@ test('wiki admin controller allows explicit wiki admin permission', async () => 
 
   assert.deepEqual(pages, []);
   assert.equal(ensured, true);
+});
+
+test('wiki batch rollback requires its dedicated permission', async () => {
+  const controller = new WikiAdminController(
+    {} as WikiAdminService,
+    { async ensureWikiProfile() { return { id: 5n }; } } as unknown as WikiProfileService,
+    { async preview() { return { candidates: [] }; } } as never
+  );
+  await assert.rejects(
+    controller.previewBatchRollback({ targetProfileId: '9' }, { sessionId: 's1', userId: 'account-1', isElevated: false, permissions: ['wiki.admin'], groups: [] }),
+    ForbiddenException
+  );
+  const result = await controller.previewBatchRollback(
+    { targetProfileId: '9' },
+    { sessionId: 's2', userId: 'account-2', isElevated: false, permissions: ['wiki.batch_rollback'], groups: [] }
+  );
+  assert.deepEqual(result, { candidates: [] });
 });

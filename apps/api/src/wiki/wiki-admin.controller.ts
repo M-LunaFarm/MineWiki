@@ -4,6 +4,7 @@ import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import { WikiAdminService, type WikiAdminPageSummary, type WikiAdminRecentChange } from './wiki-admin.service';
+import { WikiModerationService } from './wiki-moderation.service';
 import { WikiProfileService } from './wiki-profile.service';
 
 @Controller('v1/admin/wiki')
@@ -11,7 +12,8 @@ import { WikiProfileService } from './wiki-profile.service';
 export class WikiAdminController {
   constructor(
     private readonly wikiAdmin: WikiAdminService,
-    private readonly wikiProfiles: WikiProfileService
+    private readonly wikiProfiles: WikiProfileService,
+    private readonly wikiModeration: WikiModerationService
   ) {}
 
   @Get('recent')
@@ -112,6 +114,32 @@ export class WikiAdminController {
     });
   }
 
+  @Post('batch-rollback/preview')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  async previewBatchRollback(
+    @Body() body: { targetProfileId?: string; sinceMinutes?: number | string; limit?: number | string },
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertBatchRollbackAdmin(session);
+    return this.wikiModeration.preview(body);
+  }
+
+  @Post('batch-rollback/execute')
+  @Throttle({ default: { limit: 2, ttl: 60 } })
+  async executeBatchRollback(
+    @Body() body: {
+      targetProfileId?: string;
+      sinceMinutes?: number | string;
+      reason?: string;
+      confirmUsername?: string;
+      candidates?: Array<{ pageId?: string; expectedCurrentRevisionId?: string }>;
+    },
+    @CurrentSession() session: SessionPayload
+  ) {
+    const actor = await this.assertBatchRollbackAdmin(session);
+    return this.wikiModeration.execute({ ...body, actorProfileId: actor.id });
+  }
+
   @Patch('pages/:id/protection')
   @Throttle({ default: { limit: 12, ttl: 60 } })
   async updateProtection(
@@ -210,6 +238,17 @@ export class WikiAdminController {
       session.groups?.some((group) => group === 'owner' || group === 'admin') !== true
     ) {
       throw new ForbiddenException('Wiki user block permission is required.');
+    }
+    return this.wikiProfiles.ensureWikiProfile(session.userId);
+  }
+
+  private async assertBatchRollbackAdmin(session: SessionPayload): Promise<{ id: bigint }> {
+    if (
+      !session.isElevated &&
+      session.permissions?.includes('wiki.batch_rollback') !== true &&
+      session.groups?.some((group) => group === 'owner' || group === 'admin') !== true
+    ) {
+      throw new ForbiddenException('Wiki batch rollback permission is required.');
     }
     return this.wikiProfiles.ensureWikiProfile(session.userId);
   }

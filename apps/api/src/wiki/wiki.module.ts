@@ -11,6 +11,7 @@ import { WikiEditRequestService } from './wiki-edit-request.service';
 import { WikiDiscussionController } from './wiki-discussion.controller';
 import { WikiDiscussionService } from './wiki-discussion.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
+import { WikiModerationService } from './wiki-moderation.service';
 import { WikiIncludeService } from './wiki-include.service';
 import { WikiNotificationController } from './wiki-notification.controller';
 import { WikiNotificationService } from './wiki-notification.service';
@@ -25,7 +26,7 @@ import { WikiWatchService } from './wiki-watch.service';
 @Module({
   imports: [SessionModule, EventsModule],
   controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPageAclController],
-  providers: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiWatchService, WikiNotificationService, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService],
+  providers: [WikiProfileService, WikiAdminService, WikiModerationService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiWatchService, WikiNotificationService, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService],
   exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}
