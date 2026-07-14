@@ -48,7 +48,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-            <Link href="/" className="hover:text-emerald-300">MineWiki</Link>
+            <Link href="/wiki/%EB%8C%80%EB%AC%B8" className="hover:text-emerald-300">MineWiki</Link>
             <span>/</span>
             <span>server</span>
             <span>/</span>

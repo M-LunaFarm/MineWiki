@@ -21,7 +21,7 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
       <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
-        <Link href="/" className="hover:text-emerald-200">
+        <Link href="/wiki/%EB%8C%80%EB%AC%B8" className="hover:text-emerald-200">
           MineWiki
         </Link>
         <span>/</span>
