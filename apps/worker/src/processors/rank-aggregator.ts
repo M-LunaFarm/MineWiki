@@ -229,34 +229,41 @@ async function createDailySnapshot(
   now: DateTime,
   ranked: Array<{ id: string; rankCurrent: number; votes24h: number; votesMonth: number }>
 ): Promise<void> {
+  if (ranked.length === 0) {
+    return;
+  }
   const todayStart = now.setZone(KST_ZONE).startOf('day');
   const todayEnd = todayStart.plus({ days: 1 });
-  const existing = await prisma.serverRankSnapshot.findFirst({
+  const existing = await prisma.serverRankSnapshot.findMany({
     where: {
       recordedAt: {
         gte: todayStart.toUTC().toJSDate(),
         lt: todayEnd.toUTC().toJSDate()
       }
-    }
+    },
+    select: { serverId: true }
   });
-
-  if (existing) {
-    return;
-  }
-
-  if (ranked.length === 0) {
+  const existingServerIds = new Set(existing.map((snapshot) => snapshot.serverId));
+  const missing = ranked.filter((entry) => !existingServerIds.has(entry.id));
+  if (missing.length === 0) {
     return;
   }
 
   await prisma.serverRankSnapshot.createMany({
-    data: ranked.map((entry) => ({
+    data: missing.map((entry) => ({
+      id: dailySnapshotId(todayStart, entry.id),
       serverId: entry.id,
       rank: entry.rankCurrent,
       votes24h: entry.votes24h,
       votesMonthToDate: entry.votesMonth,
       recordedAt: now.toUTC().toJSDate()
-    }))
+    })),
+    skipDuplicates: true
   });
+}
+
+function dailySnapshotId(dayStart: DateTime, serverId: string): string {
+  return `rank:${dayStart.toFormat('yyyy-LL-dd')}:${serverId}`;
 }
 
 function toCountMap(

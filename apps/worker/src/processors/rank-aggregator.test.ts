@@ -98,3 +98,46 @@ test('rank aggregation uses the current rank when no historical snapshot exists'
   assert.equal(statsUpserts[0]?.create.rankBest, 1);
   assert.equal(statsUpserts[0]?.update.rankBest, 1);
 });
+
+test('daily rank snapshots stay idempotent when same-day aggregations overlap', async () => {
+  const storedIds = new Set<string>();
+  const createManyCalls: Array<{ data: Array<{ id: string }>; skipDuplicates?: boolean }> = [];
+  const prisma = {
+    vote: {
+      groupBy: async () => [{ serverId: 'server-a', _count: { _all: 3 } }],
+    },
+    server: {
+      findMany: async () => [{ id: 'server-a', name: 'Alpha', reviewsCount: 0 }],
+      update: (args: unknown) => ({ operation: 'server.update', args }),
+    },
+    serverStats: {
+      upsert: (args: unknown) => ({ operation: 'serverStats.upsert', args }),
+    },
+    serverRankSnapshot: {
+      groupBy: async () => [],
+      findMany: async () => [],
+      createMany: async (args: { data: Array<{ id: string }>; skipDuplicates?: boolean }) => {
+        createManyCalls.push(args);
+        let count = 0;
+        for (const row of args.data) {
+          if (!storedIds.has(row.id)) {
+            storedIds.add(row.id);
+            count += 1;
+          }
+        }
+        return { count };
+      },
+    },
+    $transaction: async (operations: unknown[]) => operations,
+  };
+  const aggregator = createRankAggregator(prisma as never);
+
+  await Promise.all([
+    aggregator.aggregate({ processedAt: '2026-07-15T01:00:00.000Z' }),
+    aggregator.aggregate({ processedAt: '2026-07-15T01:00:00.000Z' }),
+  ]);
+
+  assert.equal(createManyCalls.length, 2);
+  assert.equal(createManyCalls.every((call) => call.skipDuplicates === true), true);
+  assert.deepEqual([...storedIds], ['rank:2026-07-15:server-a']);
+});
