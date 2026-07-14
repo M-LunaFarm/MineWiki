@@ -337,6 +337,18 @@ html[data-theme='light'] .wiki-rendered .doc-status {
   color: #5f5025;
 }
 
+html[data-theme='light'] .wiki-rendered .doc-status strong {
+  color: #684d08;
+}
+
+html[data-theme='light'] .wiki-rendered .doc-status span {
+  color: #40371f;
+}
+
+html[data-theme='light'] .wiki-rendered .doc-status small {
+  color: #666d68;
+}
+
 html[data-theme='light'] .wiki-rendered .wiki-include-notice {
   border-color: rgba(92, 111, 99, 0.24);
   background: rgba(238, 243, 239, 0.82);
