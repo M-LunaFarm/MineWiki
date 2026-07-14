@@ -167,6 +167,26 @@ test('special long documents are sorted by current public source size', async ()
   assert.equal(Object.hasOwn(pageQuery as object, 'take'), false);
 });
 
+test('special old documents are sorted by the oldest current update first', async () => {
+  const old = new Date('2025-01-01T00:00:00Z');
+  const recent = new Date('2026-07-13T00:00:00Z');
+  const pages = [
+    { id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'recent', slug: 'recent', title: '최근', displayTitle: '최근', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: recent, updatedAt: recent },
+    { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'old', slug: 'old', title: '오래됨', displayTitle: '오래됨', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: old, updatedAt: old }
+  ];
+  const prisma = {
+    wikiPage: { async findMany() { return pages; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getSpecialDocuments({ type: 'old' });
+
+  assert.deepEqual(result.items.map((item) => [item.pageId, item.updatedAt]), [
+    ['1', old.toISOString()], ['2', recent.toISOString()]
+  ]);
+});
+
 test('special wanted documents aggregate unresolved current links', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'source', slug: 'source', title: '출처', displayTitle: '출처', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };

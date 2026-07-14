@@ -155,7 +155,7 @@ export interface WikiSearchResponse {
   readonly nextCursor: string | null;
 }
 
-export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'long' | 'short';
+export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'old' | 'long' | 'short';
 
 export interface WikiSpecialDocumentResponse {
   readonly type: WikiSpecialDocumentType;

@@ -174,7 +174,7 @@ export interface WikiDeletedPageSummary {
   readonly updatedAt: string;
 }
 
-export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'long' | 'short';
+export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'old' | 'long' | 'short';
 
 export interface WikiSpecialDocumentItem {
   readonly id: string;
@@ -857,7 +857,7 @@ export class WikiReadService {
     readonly limit?: string | number;
     readonly accountId?: string | null;
   }): Promise<WikiSpecialDocumentResponse> {
-    const allowedTypes: WikiSpecialDocumentType[] = ['random', 'orphaned', 'wanted', 'uncategorized', 'long', 'short'];
+    const allowedTypes: WikiSpecialDocumentType[] = ['random', 'orphaned', 'wanted', 'uncategorized', 'old', 'long', 'short'];
     const type = allowedTypes.includes(input.type as WikiSpecialDocumentType)
       ? input.type as WikiSpecialDocumentType
       : 'orphaned';
@@ -893,6 +893,16 @@ export class WikiReadService {
     if (type === 'random') {
       const page = visiblePages[Math.floor(Math.random() * visiblePages.length)];
       return { type, items: page ? [this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)] : [] };
+    }
+
+    if (type === 'old') {
+      const sorted = [...visiblePages]
+        .sort((left, right) => left.updatedAt.getTime() - right.updatedAt.getTime() || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+        .slice(0, limit);
+      return {
+        type,
+        items: sorted.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null))
+      };
     }
 
     const revisionIds = visiblePages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
