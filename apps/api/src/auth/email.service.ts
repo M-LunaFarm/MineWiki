@@ -24,7 +24,9 @@ export class EmailService {
       host,
       port,
       secure,
-      auth: user && pass ? { user, pass } : undefined
+      auth: user && pass ? { user, pass } : undefined,
+      disableFileAccess: true,
+      disableUrlAccess: true
     });
   }
 
