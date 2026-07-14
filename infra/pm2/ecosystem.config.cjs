@@ -14,16 +14,18 @@ const webPort = '4320';
 const verifyWebPort = '4322';
 const apiPort = '4321';
 const internalApiBaseUrl = `http://127.0.0.1:${apiPort}`;
+const webCwd = repoRoot;
+const webScript = path.join(repoRoot, 'scripts/run-web-release.mjs');
 
 module.exports = {
   apps: [
     {
       name: 'minewiki-web',
-      cwd: path.join(repoRoot, 'apps/web'),
-      script: 'node_modules/next/dist/bin/next',
-      args: `start -H 127.0.0.1 -p ${webPort}`,
+      cwd: webCwd,
+      script: webScript,
       env: {
         NODE_ENV: 'production',
+        HOSTNAME: '127.0.0.1',
         PORT: webPort,
         MINEWIKI_ENV_FILE: envFile,
         INTERNAL_API_BASE_URL: internalApiBaseUrl,
@@ -44,11 +46,11 @@ module.exports = {
     },
     {
       name: 'minewiki-verify-web',
-      cwd: path.join(repoRoot, 'apps/web'),
-      script: 'node_modules/next/dist/bin/next',
-      args: `start -H 127.0.0.1 -p ${verifyWebPort}`,
+      cwd: webCwd,
+      script: webScript,
       env: {
         NODE_ENV: 'production',
+        HOSTNAME: '127.0.0.1',
         PORT: verifyWebPort,
         MINEWIKI_ENV_FILE: envFile,
         INTERNAL_API_BASE_URL: internalApiBaseUrl,

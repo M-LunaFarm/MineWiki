@@ -49,13 +49,16 @@ if (
 ) {
   throw new Error('MineWiki web, verify web, and API must use distinct numeric ports.');
 }
-if (!web.args?.includes(`-H 127.0.0.1`) || !web.args?.includes(`-p ${webPort}`)) {
+const webUsesLoopback = web.args
+  ? web.args.includes('-H 127.0.0.1') && web.args.includes(`-p ${webPort}`)
+  : web.env?.HOSTNAME === '127.0.0.1' && web.script?.endsWith('/run-web-release.mjs');
+if (!webUsesLoopback) {
   throw new Error('minewiki-web must bind its configured port to loopback.');
 }
-if (
-  !verifyWeb.args?.includes(`-H 127.0.0.1`) ||
-  !verifyWeb.args?.includes(`-p ${verifyWebPort}`)
-) {
+const verifyWebUsesLoopback = verifyWeb.args
+  ? verifyWeb.args.includes('-H 127.0.0.1') && verifyWeb.args.includes(`-p ${verifyWebPort}`)
+  : verifyWeb.env?.HOSTNAME === '127.0.0.1' && verifyWeb.script?.endsWith('/run-web-release.mjs');
+if (!verifyWebUsesLoopback) {
   throw new Error('minewiki-verify-web must bind its configured port to loopback.');
 }
 if (api?.env?.API_HOST !== '127.0.0.1') {
