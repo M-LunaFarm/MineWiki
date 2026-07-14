@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { hashContent, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
@@ -511,92 +512,99 @@ export class WikiAdminService {
     readonly reason?: string | null;
   }): Promise<{ pageId: string; revisionId: string; revisionNo: number }> {
     const pageId = this.parseBigIntId(input.pageId, 'pageId');
-    const page = await this.prisma.wikiPage.findUnique({ where: { id: pageId } });
-    if (!page || page.status === 'deleted') {
-      throw new NotFoundException('Wiki page not found.');
-    }
-    const source = input.revisionId
-      ? await this.prisma.wikiPageRevision.findUnique({
-          where: { id: this.parseBigIntId(input.revisionId, 'revisionId') }
-        })
-      : await this.prisma.wikiPageRevision.findFirst({
+    const sourceRevisionId = input.revisionId
+      ? this.parseBigIntId(input.revisionId, 'revisionId')
+      : null;
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockPageForRevision(tx, pageId);
+      const page = await tx.wikiPage.findUnique({ where: { id: pageId } });
+      if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+      const [source, latest, namespace] = await Promise.all([
+        sourceRevisionId
+          ? tx.wikiPageRevision.findUnique({ where: { id: sourceRevisionId } })
+          : tx.wikiPageRevision.findFirst({
+              where: { pageId, visibility: 'public' },
+              orderBy: [{ revisionNo: 'asc' }]
+            }),
+        tx.wikiPageRevision.findFirst({
           where: { pageId, visibility: 'public' },
-          orderBy: [{ revisionNo: 'asc' }]
-        });
-    if (!source || source.pageId !== page.id || source.visibility !== 'public') {
-      throw new NotFoundException('Rollback source revision not found.');
-    }
-    const latest = await this.prisma.wikiPageRevision.findFirst({
-      where: { pageId, visibility: 'public' },
-      orderBy: [{ revisionNo: 'desc' }]
-    });
-    const now = new Date();
-    const parsed = parseMarkup(source.contentRaw);
-    if (parsed.blockingErrors.length > 0) {
-      throw new BadRequestException('Rollback source contains blocking wiki markup.');
-    }
-    const revision = await this.prisma.wikiPageRevision.create({
-      data: {
-        pageId: page.id,
-        revisionNo: latest ? latest.revisionNo + 1 : 1,
-        parentRevisionId: latest?.id ?? null,
-        contentRaw: source.contentRaw,
-        contentAst: JSON.parse(JSON.stringify(parsed.ast)),
-        contentHash: hashContent(source.contentRaw),
-        contentSize: Buffer.byteLength(source.contentRaw, 'utf8'),
-        syntaxVersion: source.syntaxVersion,
-        editSummary: input.reason?.trim() || `관리자 롤백: r${source.revisionNo}`,
-        isMinor: false,
-        editTags: null,
-        createdBy: input.actorProfileId,
-        actorType: 'user',
-        actorUserId: input.actorProfileId,
-        actorIp: null,
-        actorIpText: null,
-        actorIpHash: null,
-        createdAt: now,
-        visibility: 'public'
+          orderBy: [{ revisionNo: 'desc' }]
+        }),
+        tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } })
+      ]);
+      if (!source || source.pageId !== page.id || source.visibility !== 'public') {
+        throw new NotFoundException('Rollback source revision not found.');
       }
-    });
-    if (parsed.includes.length === 0) {
-      await this.prisma.wikiPageRenderCache.create({
+      const now = new Date();
+      const parsed = parseMarkup(source.contentRaw);
+      if (parsed.blockingErrors.length > 0) {
+        throw new BadRequestException('Rollback source contains blocking wiki markup.');
+      }
+      const revision = await tx.wikiPageRevision.create({
         data: {
           pageId: page.id,
-          revisionId: revision.id,
-          rendererVersion: WIKI_RENDERER_VERSION,
-          html: renderDocument(parsed.ast),
-          createdAt: now
+          revisionNo: latest ? latest.revisionNo + 1 : 1,
+          parentRevisionId: latest?.id ?? null,
+          contentRaw: source.contentRaw,
+          contentAst: JSON.parse(JSON.stringify(parsed.ast)),
+          contentHash: hashContent(source.contentRaw),
+          contentSize: Buffer.byteLength(source.contentRaw, 'utf8'),
+          syntaxVersion: source.syntaxVersion,
+          editSummary: input.reason?.trim() || `관리자 롤백: r${source.revisionNo}`,
+          isMinor: false,
+          editTags: null,
+          createdBy: input.actorProfileId,
+          actorType: 'user',
+          actorUserId: input.actorProfileId,
+          actorIp: null,
+          actorIpText: null,
+          actorIpHash: null,
+          createdAt: now,
+          visibility: 'public'
         }
       });
-    }
-    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links, parsed.categories, parsed.includes);
-    await this.prisma.wikiPage.update({
-      where: { id: page.id },
-      data: {
-        currentRevisionId: revision.id,
-        updatedAt: now
+      if (parsed.includes.length === 0) {
+        await tx.wikiPageRenderCache.create({
+          data: {
+            pageId: page.id,
+            revisionId: revision.id,
+            rendererVersion: WIKI_RENDERER_VERSION,
+            html: renderDocument(parsed.ast),
+            createdAt: now
+          }
+        });
       }
-    });
-    await this.insertRecentChange({
-      pageId: page.id,
-      revisionId: revision.id,
-      actorId: input.actorProfileId,
-      changeType: 'rollback',
-      title: page.title,
-      namespaceCode: await this.namespaceCode(page.namespaceId),
-      summary: revision.editSummary
+      await this.wikiLinks?.replaceForRevision(tx, page.id, revision.id, parsed.links, parsed.categories, parsed.includes);
+      await tx.wikiPage.update({
+        where: { id: page.id },
+        data: { currentRevisionId: revision.id, updatedAt: now }
+      });
+      await this.insertRecentChange({
+        pageId: page.id,
+        revisionId: revision.id,
+        actorId: input.actorProfileId,
+        changeType: 'rollback',
+        title: page.title,
+        namespaceCode: namespace?.code ?? 'main',
+        summary: revision.editSummary
+      }, tx);
+      return { page, revision, source };
     });
     await this.auditAdmin('wiki.rollback', {
       actorProfileId: input.actorProfileId,
-      pageId: page.id,
-      revisionId: revision.id,
+      pageId: result.page.id,
+      revisionId: result.revision.id,
       metadata: {
-        sourceRevisionId: source.id.toString(),
-        sourceRevisionNo: source.revisionNo,
+        sourceRevisionId: result.source.id.toString(),
+        sourceRevisionNo: result.source.revisionNo,
         reason: input.reason?.trim() || null
       }
     });
-    return { pageId: page.id.toString(), revisionId: revision.id.toString(), revisionNo: revision.revisionNo };
+    return {
+      pageId: result.page.id.toString(),
+      revisionId: result.revision.id.toString(),
+      revisionNo: result.revision.revisionNo
+    };
   }
 
   async setPageStatus(input: {
@@ -647,8 +655,8 @@ export class WikiAdminService {
     readonly title: string;
     readonly namespaceCode: string;
     readonly summary?: string | null;
-  }): Promise<void> {
-    await this.prisma.wikiRecentChange.create({
+  }, store: Pick<PrismaService, 'wikiRecentChange'> = this.prisma): Promise<void> {
+    await store.wikiRecentChange.create({
       data: {
         pageId: input.pageId,
         revisionId: input.revisionId,
@@ -661,6 +669,15 @@ export class WikiAdminService {
         createdAt: new Date()
       }
     });
+  }
+
+  private async lockPageForRevision(tx: Prisma.TransactionClient, pageId: bigint): Promise<void> {
+    await tx.$queryRaw<Array<{ id: bigint }>>`
+      SELECT id
+      FROM pages
+      WHERE id = ${pageId}
+      FOR UPDATE
+    `;
   }
 
   private async auditAdmin(

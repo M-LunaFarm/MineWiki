@@ -81,6 +81,12 @@ function createService() {
   const changes: TestRecentChange[] = [];
   const renderCaches: Array<Record<string, unknown>> = [];
   const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) {
+      return callback(prisma);
+    },
+    async $queryRaw() {
+      return [{ id: page.id }];
+    },
     wikiRecentChange: {
       async findMany() {
         return changes;

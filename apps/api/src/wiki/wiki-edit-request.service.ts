@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import type { WikiEditRequest } from '@prisma/client';
+import type { Prisma, WikiEditRequest } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
-import { WikiEditService } from './wiki-edit.service';
+import { WikiEditService, type WikiEditConflictDetails } from './wiki-edit.service';
+import { assertWikiSourceBounds, hasWikiConflictMarkers, mergeWikiSource, WikiMergeLimitError } from './wiki-merge';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
@@ -55,6 +56,7 @@ export class WikiEditRequestService {
   async list(pageId: string, session: SessionPayload | null, cursor?: string, requestedLimit: string | number = 30): Promise<WikiEditRequestListResponse> {
     const page = await this.page(pageId);
     await this.permissions.assertCanReadPage({ accountId: session?.userId ?? null, page });
+    await this.permissions.assertCanUsePageAction({ accountId: session?.userId ?? null, action: 'raw', page });
     const limit = Math.min(Math.max(Number(requestedLimit) || 30, 1), 100);
     const parsedCursor = cursor ? this.id(cursor, 'cursor') : null;
     const requests = await this.prisma.wikiEditRequest.findMany({
@@ -78,6 +80,7 @@ export class WikiEditRequestService {
     const request = await this.request(requestId);
     const page = await this.page(request.pageId.toString());
     await this.permissions.assertCanReadPage({ accountId: accountId ?? null, page });
+    await this.permissions.assertCanUsePageAction({ accountId: accountId ?? null, action: 'raw', page });
     const base = await this.prisma.wikiPageRevision.findUnique({ where: { id: request.baseRevisionId } });
     if (!base || base.pageId !== page.id || base.visibility !== 'public') throw new NotFoundException('Base revision not found.');
     return { requestId: request.id.toString(), baseRevisionId: base.id.toString(), hunks: this.edits.diffText(base.contentRaw, request.proposedContent) };
@@ -88,37 +91,41 @@ export class WikiEditRequestService {
     pageId: string,
     input: { readonly baseRevisionId?: string; readonly contentRaw?: string; readonly editSummary?: string; readonly isMinor?: boolean }
   ): Promise<WikiEditRequestSummary> {
-    const page = await this.page(pageId);
-    await this.permissions.assertCanReadPage({ accountId: session.userId, page });
+    const parsedPageId = this.id(pageId, 'pageId');
     const profile = await this.profiles.ensureWikiProfile(session.userId);
     const actor = this.permissions.actorFromSession(session, profile);
     if (actor.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot create edit requests.');
     const baseRevisionId = this.id(this.required(input.baseRevisionId, 'baseRevisionId'), 'baseRevisionId');
-    if (page.currentRevisionId !== baseRevisionId) throw new ConflictException('The document changed before this edit request was submitted.');
     const content = this.required(input.contentRaw, 'contentRaw');
-    if (content.length > 1_000_000) throw new BadRequestException('contentRaw is too long.');
+    if (hasWikiConflictMarkers(content)) throw new BadRequestException('Resolve every wiki edit conflict marker before submitting.');
+    this.assertContentBounds(content);
     const summary = this.required(input.editSummary, 'editSummary');
     if (summary.length > 255) throw new BadRequestException('editSummary is too long.');
-    const duplicate = await this.prisma.wikiEditRequest.findFirst({
-      where: { pageId: page.id, createdBy: profile.id, status: { in: ['pending', 'reviewing'] } },
-      select: { id: true }
-    });
-    if (duplicate) throw new ConflictException('You already have an open edit request for this document.');
     const now = new Date();
-    const request = await this.prisma.wikiEditRequest.create({
-      data: {
-        pageId: page.id,
-        baseRevisionId,
-        proposedContent: content,
-        editSummary: summary,
-        isMinor: Boolean(input.isMinor),
-        status: 'pending',
-        createdBy: profile.id,
-        createdAt: now,
-        updatedAt: now
+    const request = await this.prisma.$transaction(async (tx) => {
+      await this.lockPage(tx, parsedPageId);
+      const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
+      if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+      await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
+      if (page.currentRevisionId !== baseRevisionId) {
+        throw new ConflictException('The document changed before this edit request was submitted.');
       }
+      await this.assertNoOtherOpenRequest(tx, page.id, profile.id);
+      return tx.wikiEditRequest.create({
+        data: {
+          pageId: page.id,
+          baseRevisionId,
+          proposedContent: content,
+          editSummary: summary,
+          isMinor: Boolean(input.isMinor),
+          status: 'pending',
+          createdBy: profile.id,
+          createdAt: now,
+          updatedAt: now
+        }
+      });
     });
-    await this.audit('wiki.edit_request.create', session, profile.id, page.id, request.id);
+    await this.audit('wiki.edit_request.create', session, profile.id, parsedPageId, request.id);
     return (await this.present([request]))[0]!;
   }
 
@@ -128,17 +135,19 @@ export class WikiEditRequestService {
     const reviewer = await this.profiles.ensureWikiProfile(session.userId);
     const actor = this.permissions.actorFromSession(session, reviewer);
     if (!(await this.permissions.canManagePage({ actor, page }))) throw new ForbiddenException('Edit request review is not allowed.');
+    if (page.currentRevisionId !== request.baseRevisionId) {
+      await this.markStale(request);
+      throw new ConflictException({
+        code: 'wiki_edit_base_stale',
+        message: 'The edit request must be rebased before review.'
+      });
+    }
     try {
       const { request: updated } = await this.edits.acceptEditRequest(session, { requestId: request.id, reviewNote: this.note(reviewNote) });
       await this.audit('wiki.edit_request.accept', session, reviewer.id, page.id, request.id);
       return (await this.present([updated]))[0]!;
     } catch (error) {
-      if (error instanceof ConflictException) {
-        await this.prisma.wikiEditRequest.updateMany({
-          where: { id: request.id, status: 'pending', baseRevisionId: request.baseRevisionId },
-          data: { status: 'stale', reviewedBy: null, updatedAt: new Date() }
-        });
-      }
+      if (this.conflictCode(error) === 'wiki_edit_base_stale') await this.markStale(request);
       throw error;
     }
   }
@@ -173,31 +182,131 @@ export class WikiEditRequestService {
   }
 
   async update(session: SessionPayload, requestId: string, input: { readonly baseRevisionId?: string; readonly contentRaw?: string; readonly editSummary?: string; readonly isMinor?: boolean }): Promise<WikiEditRequestSummary> {
-    const request = await this.request(requestId);
-    const page = await this.page(request.pageId.toString());
-    await this.permissions.assertCanReadPage({ accountId: session.userId, page });
+    const parsedRequestId = this.id(requestId, 'requestId');
+    const initialRequest = await this.request(requestId);
     const profile = await this.profiles.ensureWikiProfile(session.userId);
-    if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can edit this request.');
     if (profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot edit requests.');
-    if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be edited.');
     const baseRevisionId = this.id(this.required(input.baseRevisionId, 'baseRevisionId'), 'baseRevisionId');
-    if (page.currentRevisionId !== baseRevisionId) throw new ConflictException('The document changed. Refresh the editor before updating this request.');
     const content = this.required(input.contentRaw, 'contentRaw');
-    if (content.length > 1_000_000) throw new BadRequestException('contentRaw is too long.');
+    if (hasWikiConflictMarkers(content)) throw new BadRequestException('Resolve every wiki edit conflict marker before saving.');
+    this.assertContentBounds(content);
     const summary = this.required(input.editSummary, 'editSummary');
     if (summary.length > 255) throw new BadRequestException('editSummary is too long.');
-    const updated = await this.prisma.wikiEditRequest.updateMany({
-      where: { id: request.id, createdBy: profile.id, status: request.status },
-      data: {
-        baseRevisionId, proposedContent: content, editSummary: summary, isMinor: Boolean(input.isMinor),
-        status: request.status === 'stale' ? 'pending' : request.status,
-        updatedAt: new Date()
-      }
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockPage(tx, initialRequest.pageId);
+      const [page, request] = await Promise.all([
+        tx.wikiPage.findUnique({ where: { id: initialRequest.pageId } }),
+        tx.wikiEditRequest.findUnique({ where: { id: parsedRequestId } })
+      ]);
+      if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+      if (!request || request.pageId !== page.id) throw new NotFoundException('Wiki edit request not found.');
+      await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
+      if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can edit this request.');
+      if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be edited.');
+      if (baseRevisionId !== request.baseRevisionId) throw new ConflictException('Rebase the edit request before changing its base revision.');
+      if (page.currentRevisionId !== request.baseRevisionId) throw new ConflictException('The document changed. Rebase this request before editing it.');
+      const nextStatus = request.status === 'stale' ? 'pending' : request.status;
+      if (nextStatus === 'pending') await this.assertNoOtherOpenRequest(tx, page.id, profile.id, request.id);
+      const updated = await tx.wikiEditRequest.updateMany({
+        where: { id: request.id, createdBy: profile.id, status: request.status, updatedAt: request.updatedAt },
+        data: {
+          baseRevisionId, proposedContent: content, editSummary: summary, isMinor: Boolean(input.isMinor),
+          status: nextStatus,
+          updatedAt: new Date()
+        }
+      });
+      if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
+      return tx.wikiEditRequest.findUniqueOrThrow({ where: { id: request.id } });
     });
-    if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
-    const result = await this.request(requestId);
-    await this.audit('wiki.edit_request.update', session, profile.id, page.id, request.id);
+    await this.audit('wiki.edit_request.update', session, profile.id, result.pageId, result.id);
     return (await this.present([result]))[0]!;
+  }
+
+  async rebase(
+    session: SessionPayload,
+    requestId: string,
+    input: { readonly contentRaw?: string; readonly currentRevisionId?: string } = {}
+  ): Promise<WikiEditRequestSummary> {
+    const parsedRequestId = this.id(requestId, 'requestId');
+    const initialRequest = await this.request(requestId);
+    const profile = await this.profiles.ensureWikiProfile(session.userId);
+    if (profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot rebase requests.');
+    const resolvedContent = input.contentRaw?.trim() ? input.contentRaw : null;
+    if (resolvedContent !== null) {
+      if (hasWikiConflictMarkers(resolvedContent)) throw new BadRequestException('Resolve every wiki edit conflict marker before rebasing.');
+      this.assertContentBounds(resolvedContent);
+    }
+    const expectedCurrentId = resolvedContent === null
+      ? null
+      : this.id(this.required(input.currentRevisionId, 'currentRevisionId'), 'currentRevisionId');
+    const transactionResult = await this.prisma.$transaction(async (tx) => {
+      await this.lockPage(tx, initialRequest.pageId);
+      const [page, request] = await Promise.all([
+        tx.wikiPage.findUnique({ where: { id: initialRequest.pageId } }),
+        tx.wikiEditRequest.findUnique({ where: { id: parsedRequestId } })
+      ]);
+      if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+      if (!request || request.pageId !== page.id) throw new NotFoundException('Wiki edit request not found.');
+      await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
+      await this.permissions.assertCanUsePageAction({ accountId: session.userId, action: 'raw', page, store: tx });
+      if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can rebase this request.');
+      if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be rebased.');
+      if (!page.currentRevisionId || page.currentRevisionId === request.baseRevisionId) {
+        return { request, auditAction: null as string | null };
+      }
+      const [base, current] = await Promise.all([
+        tx.wikiPageRevision.findUnique({ where: { id: request.baseRevisionId } }),
+        tx.wikiPageRevision.findUnique({ where: { id: page.currentRevisionId } })
+      ]);
+      if (!base || base.pageId !== page.id || base.visibility !== 'public' || !current || current.pageId !== page.id || current.visibility !== 'public') {
+        throw new ConflictException('The edit request base revision is no longer available.');
+      }
+      if (expectedCurrentId !== null && expectedCurrentId !== current.id) {
+        throw new ConflictException('The document changed again. Rebase the request against the newest revision.');
+      }
+      let nextContent = resolvedContent;
+      let auditAction = 'wiki.edit_request.rebase.resolve';
+      if (nextContent === null) {
+        try {
+          const merged = mergeWikiSource(request.proposedContent, base.contentRaw, current.contentRaw);
+          if (merged.hasConflicts) {
+            const details: WikiEditConflictDetails = {
+              type: 'wiki_edit_conflict', scope: 'page', baseRevisionId: base.id.toString(),
+              currentRevisionId: current.id.toString(), currentRevisionNo: current.revisionNo,
+              mergedContentRaw: merged.contentRaw, conflictCount: merged.conflictCount
+            };
+            throw new ConflictException({
+              code: 'wiki_edit_conflict',
+              message: 'The edit request has overlapping changes that require manual resolution.',
+              details
+            });
+          }
+          nextContent = merged.contentRaw;
+          auditAction = 'wiki.edit_request.rebase';
+        } catch (error) {
+          if (error instanceof WikiMergeLimitError) throw new ConflictException('The edit request is too large to rebase automatically.');
+          throw error;
+        }
+      }
+      const nextStatus = request.status === 'stale' ? 'pending' : request.status;
+      if (nextStatus === 'pending') await this.assertNoOtherOpenRequest(tx, page.id, profile.id, request.id);
+      const updated = await tx.wikiEditRequest.updateMany({
+        where: {
+          id: request.id, createdBy: profile.id, status: request.status,
+          baseRevisionId: request.baseRevisionId, updatedAt: request.updatedAt
+        },
+        data: { baseRevisionId: current.id, proposedContent: nextContent, status: nextStatus, updatedAt: new Date() }
+      });
+      if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
+      return {
+        request: await tx.wikiEditRequest.findUniqueOrThrow({ where: { id: request.id } }),
+        auditAction
+      };
+    });
+    if (transactionResult.auditAction) {
+      await this.audit(transactionResult.auditAction, session, profile.id, transactionResult.request.pageId, transactionResult.request.id);
+    }
+    return (await this.present([transactionResult.request]))[0]!;
   }
 
   async close(session: SessionPayload, requestId: string): Promise<WikiEditRequestSummary> {
@@ -270,6 +379,52 @@ export class WikiEditRequestService {
   private required(value: string | undefined, label: string) { const result = value?.trim(); if (!result) throw new BadRequestException(`${label} is required.`); return result; }
   private id(value: string, label: string) { if (!/^\d+$/.test(value)) throw new BadRequestException(`${label} must be an unsigned integer.`); return BigInt(value); }
   private note(value?: string) { const note = value?.trim() || null; if (note && note.length > 1000) throw new BadRequestException('reviewNote is too long.'); return note; }
+  private assertContentBounds(contentRaw: string): void {
+    try {
+      assertWikiSourceBounds(contentRaw);
+    } catch (error) {
+      if (error instanceof WikiMergeLimitError) throw new BadRequestException('contentRaw is too long.');
+      throw error;
+    }
+  }
+  private async lockPage(tx: Prisma.TransactionClient, pageId: bigint): Promise<void> {
+    await tx.$queryRaw<Array<{ id: bigint }>>`
+      SELECT id
+      FROM pages
+      WHERE id = ${pageId}
+      FOR UPDATE
+    `;
+  }
+  private async assertNoOtherOpenRequest(
+    tx: Prisma.TransactionClient,
+    pageId: bigint,
+    createdBy: bigint,
+    excludeId?: bigint
+  ): Promise<void> {
+    const duplicate = await tx.wikiEditRequest.findFirst({
+      where: {
+        pageId,
+        createdBy,
+        status: { in: ['pending', 'reviewing'] },
+        ...(excludeId ? { id: { not: excludeId } } : {})
+      },
+      select: { id: true }
+    });
+    if (duplicate) throw new ConflictException('You already have an open edit request for this document.');
+  }
+  private async markStale(request: WikiEditRequest) {
+    await this.prisma.wikiEditRequest.updateMany({
+      where: { id: request.id, status: 'pending', baseRevisionId: request.baseRevisionId },
+      data: { status: 'stale', reviewedBy: null, updatedAt: new Date() }
+    });
+  }
+  private conflictCode(error: unknown): string | null {
+    if (!(error instanceof ConflictException)) return null;
+    const response = error.getResponse();
+    return response && typeof response === 'object' && 'code' in response && typeof response.code === 'string'
+      ? response.code
+      : null;
+  }
   private async audit(action: string, session: SessionPayload, profileId: bigint, pageId: bigint, requestId: bigint) {
     await this.events?.audit(action, { category: 'wiki', actorAccountId: session.userId, actorProfileId: profileId, subjectType: 'wiki_edit_request', subjectId: requestId.toString(), metadata: { pageId: pageId.toString() } });
   }

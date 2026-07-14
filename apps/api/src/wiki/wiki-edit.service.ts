@@ -15,6 +15,7 @@ import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiNotificationService } from './wiki-notification.service';
+import { hasWikiConflictMarkers, mergeWikiSource, WikiMergeLimitError } from './wiki-merge';
 
 type ChangeType = 'create' | 'edit' | 'move' | 'delete' | 'restore' | 'revert';
 
@@ -74,6 +75,17 @@ export interface WikiMutationResponse {
   readonly namespace: string;
   readonly title: string;
   readonly slug: string;
+  readonly autoMerged?: boolean;
+}
+
+export interface WikiEditConflictDetails {
+  readonly type: 'wiki_edit_conflict';
+  readonly scope: 'page' | 'section';
+  readonly baseRevisionId: string;
+  readonly currentRevisionId: string;
+  readonly currentRevisionNo: number;
+  readonly mergedContentRaw: string;
+  readonly conflictCount: number;
 }
 
 export interface AuthorizedWikiFileDocumentRequest {
@@ -350,14 +362,28 @@ export class WikiEditService {
     };
   }
 
-  async updatePage(session: SessionPayload, pageId: string, request: WikiPageMutationRequest, options: { readonly attributionProfileId?: bigint } = {}): Promise<WikiMutationResponse> {
+  async updatePage(
+    session: SessionPayload,
+    pageId: string,
+    request: WikiPageMutationRequest,
+    options: {
+      readonly attributionProfileId?: bigint;
+      readonly conflictScope?: 'page' | 'section';
+    } = {}
+  ): Promise<WikiMutationResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const requestedBaseRevisionId = this.requiredString(request.baseRevisionId, 'baseRevisionId');
+    this.parseBigIntId(requestedBaseRevisionId, 'baseRevisionId');
     const contentRaw = this.requiredString(request.contentRaw, 'contentRaw');
+    if (hasWikiConflictMarkers(contentRaw)) {
+      throw new BadRequestException('Resolve every wiki edit conflict marker before saving.');
+    }
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const attributionProfileId = options.attributionProfileId ?? actor.id;
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockPageForRevision(tx, parsedPageId);
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page || page.status === 'deleted') {
         throw new NotFoundException('Wiki page not found.');
@@ -371,37 +397,89 @@ export class WikiEditService {
         page,
         store: tx
       });
-      if (request.baseRevisionId && page.currentRevisionId?.toString() !== request.baseRevisionId) {
-        throw new ConflictException('Base revision does not match current revision.');
-      }
+      await this.wikiPermissions.assertCanUsePageAction({
+        accountId: session.userId,
+        action: 'raw',
+        page,
+        store: tx
+      });
       const latest = await this.findLatestRevision(tx, page.id);
+      let nextContentRaw = contentRaw;
+      let autoMerged = false;
+      if (latest?.id.toString() !== requestedBaseRevisionId) {
+        const baseRevisionId = this.parseBigIntId(requestedBaseRevisionId, 'baseRevisionId');
+        const base = await tx.wikiPageRevision.findUnique({ where: { id: baseRevisionId } });
+        if (!base || base.pageId !== page.id || base.visibility !== 'public' || !latest) {
+          throw new ConflictException('Base revision does not match current revision.');
+        }
+        let merged;
+        try {
+          merged = mergeWikiSource(contentRaw, base.contentRaw, latest.contentRaw);
+        } catch (error) {
+          if (error instanceof WikiMergeLimitError) {
+            throw new ConflictException('The document is too large to merge automatically. Reload the latest revision and retry.');
+          }
+          throw error;
+        }
+        if (merged.hasConflicts) {
+          const details: WikiEditConflictDetails = {
+            type: 'wiki_edit_conflict',
+            scope: options.conflictScope ?? 'page',
+            baseRevisionId: base.id.toString(),
+            currentRevisionId: latest.id.toString(),
+            currentRevisionNo: latest.revisionNo,
+            mergedContentRaw: merged.contentRaw,
+            conflictCount: merged.conflictCount
+          };
+          throw new ConflictException({
+            code: 'wiki_edit_conflict',
+            message: 'The document changed and overlapping edits require manual resolution.',
+            details
+          });
+        }
+        nextContentRaw = merged.contentRaw;
+        autoMerged = true;
+      }
       await this.assertLockedSectionsUnchanged({
         actor: this.wikiPermissions.actorFromSession(session, actor),
         page,
         currentContent: latest?.contentRaw ?? '',
-        nextContent: contentRaw,
+        nextContent: nextContentRaw,
         store: tx
       });
       const revision = await this.createRevision(tx, {
         pageId: page.id,
         revisionNo: latest ? latest.revisionNo + 1 : 1,
         parentRevisionId: latest?.id ?? null,
-        contentRaw,
+        contentRaw: nextContentRaw,
         editSummary: this.cleanOptional(request.editSummary),
         isMinor: Boolean(request.isMinor),
         actorId: attributionProfileId,
         title: page.displayTitle,
         namespaceCode: namespace.code,
         pageTitle: page.title,
-        createdAt: now
+        createdAt: now,
+        editTags: autoMerged
+          ? {
+              autoMerged: true,
+              baseRevisionId: requestedBaseRevisionId,
+              currentRevisionId: latest?.id.toString() ?? null
+            }
+          : null
       });
-      await tx.wikiPage.update({
-        where: { id: page.id },
+      const claimed = await tx.wikiPage.updateMany({
+        where: {
+          id: page.id,
+          currentRevisionId: latest?.id ?? null
+        },
         data: {
           currentRevisionId: revision.id,
           updatedAt: now
         }
       });
+      if (claimed.count !== 1) {
+        throw new ConflictException('The document changed while this revision was being saved.');
+      }
       await this.insertRecentChange(tx, {
         pageId: page.id,
         revisionId: revision.id,
@@ -419,7 +497,8 @@ export class WikiEditService {
         revisionNo: revision.revisionNo,
         namespace: namespace.code,
         title: page.title,
-        slug: page.slug
+        slug: page.slug,
+        autoMerged
       };
     });
     await this.events?.audit('wiki.edit', {
@@ -433,7 +512,9 @@ export class WikiEditService {
         title: result.title,
         revisionId: result.revisionId,
         attributionProfileId: attributionProfileId.toString(),
-        revisionNo: result.revisionNo
+        revisionNo: result.revisionNo,
+        autoMerged: Boolean(result.autoMerged),
+        baseRevisionId: requestedBaseRevisionId
       }
     });
     return result;
@@ -443,8 +524,13 @@ export class WikiEditService {
     const reviewer = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
+      const initialRequest = await tx.wikiEditRequest.findUnique({ where: { id: input.requestId } });
+      if (!initialRequest) throw new NotFoundException('Wiki edit request not found.');
+      await this.lockPageForRevision(tx, initialRequest.pageId);
       const editRequest = await tx.wikiEditRequest.findUnique({ where: { id: input.requestId } });
-      if (!editRequest) throw new NotFoundException('Wiki edit request not found.');
+      if (!editRequest || editRequest.pageId !== initialRequest.pageId) {
+        throw new NotFoundException('Wiki edit request not found.');
+      }
       const page = await tx.wikiPage.findUnique({ where: { id: editRequest.pageId } });
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
       const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
@@ -454,11 +540,24 @@ export class WikiEditService {
         throw new ForbiddenException('Edit request review is not allowed.');
       }
       const claimed = await tx.wikiEditRequest.updateMany({
-        where: { id: editRequest.id, status: 'pending' },
+        where: {
+          id: editRequest.id,
+          status: 'pending',
+          baseRevisionId: editRequest.baseRevisionId,
+          proposedContent: editRequest.proposedContent,
+          editSummary: editRequest.editSummary,
+          isMinor: editRequest.isMinor,
+          updatedAt: editRequest.updatedAt
+        },
         data: { status: 'reviewing', reviewedBy: reviewer.id, updatedAt: now }
       });
       if (claimed.count !== 1) throw new ConflictException('This edit request is no longer pending.');
-      if (page.currentRevisionId !== editRequest.baseRevisionId) throw new ConflictException('Base revision does not match current revision.');
+      if (page.currentRevisionId !== editRequest.baseRevisionId) {
+        throw new ConflictException({
+          code: 'wiki_edit_base_stale',
+          message: 'Base revision does not match current revision.'
+        });
+      }
       const latest = await this.findLatestRevision(tx, page.id);
       await this.assertLockedSectionsUnchanged({
         actor: reviewerActor,
@@ -515,6 +614,7 @@ export class WikiEditService {
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockPageForRevision(tx, parsedPageId);
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page || page.status === 'deleted') {
         throw new NotFoundException('Wiki page not found.');
@@ -695,6 +795,7 @@ export class WikiEditService {
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockPageForRevision(tx, parsedPageId);
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page || page.status === 'deleted') {
         throw new NotFoundException('Wiki page not found.');
@@ -962,10 +1063,26 @@ export class WikiEditService {
     request: WikiPageMutationRequest
   ): Promise<WikiSectionMutationResponse> {
     const baseRevisionId = this.requiredString(request.baseRevisionId, 'baseRevisionId');
-    this.parseBigIntId(baseRevisionId, 'baseRevisionId');
-    const section = await this.getSectionForEdit(session, pageId, anchor);
-    if (section.baseRevisionId !== baseRevisionId) {
-      throw new ConflictException('Base revision does not match current revision.');
+    const parsedBaseRevisionId = this.parseBigIntId(baseRevisionId, 'baseRevisionId');
+    const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
+    if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    await this.wikiPermissions.assertCanReadPage({ accountId: session.userId, page });
+    await this.wikiPermissions.assertCanUsePageAction({ accountId: session.userId, action: 'raw', page });
+    await this.wikiPermissions.assertCanEditPage({
+      actor: this.wikiPermissions.actorFromSession(session, profile),
+      page
+    });
+    const baseRevision = await this.prisma.wikiPageRevision.findUnique({
+      where: { id: parsedBaseRevisionId }
+    });
+    if (!baseRevision || baseRevision.pageId !== parsedPageId || baseRevision.visibility !== 'public') {
+      throw new ConflictException('Base revision does not match this document.');
+    }
+    const baseSection = sectionByAnchor(baseRevision.contentRaw, anchor);
+    if (!baseSection) {
+      throw new ConflictException('Wiki section changed. Reload and try again.');
     }
     const replacement = request.contentRaw?.replace(/\r\n/g, '\n');
     if (!replacement?.trim()) throw new BadRequestException('contentRaw is required.');
@@ -975,17 +1092,22 @@ export class WikiEditService {
       throw new BadRequestException('Section content must begin with a wiki heading.');
     }
     const fullContent = replaceSectionByAnchor(
-      (await this.prisma.wikiPageRevision.findUnique({ where: { id: BigInt(baseRevisionId) } }))?.contentRaw ?? '',
-      section.anchor,
+      baseRevision.contentRaw,
+      baseSection.anchor,
       replacement
     );
     if (fullContent === null) throw new ConflictException('Wiki section changed. Reload and try again.');
-    const mutation = await this.updatePage(session, pageId, {
-      contentRaw: fullContent,
-      editSummary: request.editSummary ?? `섹션 편집: ${section.title}`,
-      isMinor: request.isMinor,
-      baseRevisionId
-    });
+    const mutation = await this.updatePage(
+      session,
+      pageId,
+      {
+        contentRaw: fullContent,
+        editSummary: request.editSummary ?? `섹션 편집: ${baseSection.title}`,
+        isMinor: request.isMinor,
+        baseRevisionId
+      },
+      { conflictScope: 'section' }
+    );
     return { ...mutation, sectionAnchor: nextHeading.anchor };
   }
 
@@ -1124,6 +1246,18 @@ export class WikiEditService {
     });
   }
 
+  private async lockPageForRevision(
+    tx: Prisma.TransactionClient,
+    pageId: bigint
+  ): Promise<void> {
+    await tx.$queryRaw<Array<{ id: bigint }>>`
+      SELECT id
+      FROM pages
+      WHERE id = ${pageId}
+      FOR UPDATE
+    `;
+  }
+
   private async createRevision(
     tx: Pick<PrismaService, 'wikiPageRenderCache' | 'wikiPageRevision'>,
     input: {
@@ -1138,6 +1272,7 @@ export class WikiEditService {
       namespaceCode: string;
       pageTitle: string;
       createdAt: Date;
+      editTags?: Prisma.InputJsonValue | null;
     }
   ) {
     const parsed = parseMarkup(input.contentRaw);
@@ -1159,7 +1294,7 @@ export class WikiEditService {
         syntaxVersion: 'bwm-0.3',
         editSummary: input.editSummary ?? null,
         isMinor: input.isMinor,
-        editTags: null,
+        editTags: input.editTags ?? null,
         createdBy: input.actorId,
         actorType: 'user',
         actorUserId: input.actorId,

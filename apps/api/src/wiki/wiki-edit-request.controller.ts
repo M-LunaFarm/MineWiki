@@ -53,6 +53,17 @@ export class WikiEditRequestController {
     return this.requests.update(session, requestId, body);
   }
 
+  @Post('edit-requests/:requestId/rebase')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  rebase(
+    @Param('requestId') requestId: string,
+    @Body() body: { contentRaw?: string; currentRevisionId?: string },
+    @CurrentSession() session: SessionPayload
+  ) {
+    return this.requests.rebase(session, requestId, body);
+  }
+
   @Post('edit-requests/:requestId/close')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })

@@ -22,6 +22,8 @@ const request = {
 
 function createService(canManage = false) {
   const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    async $queryRaw() { return [{ id: page.id }]; },
     wikiPage: { async findUnique() { return page; } },
     wikiEditRequest: {
       async findUnique() { return request; },
@@ -32,6 +34,7 @@ function createService(canManage = false) {
   const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
   const permissions = {
     async assertCanReadPage() {},
+    async assertCanUsePageAction() {},
     actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
     async canManagePage() { return canManage; }
   } as unknown as WikiPermissionService;
@@ -55,12 +58,43 @@ test('only a page manager can reject an edit request', async () => {
 });
 
 test('the author can rebase, close, and reopen an edit request', async () => {
-  const stored = { ...request, status: 'stale', baseRevisionId: 29n };
+  const stored = {
+    ...request,
+    status: 'stale',
+    baseRevisionId: 29n,
+    proposedContent: '== 소개 ==\n내 변경\n\n== 접속 ==\nold.example.kr\n'
+  };
   const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    async $queryRaw() { return [{ id: page.id }]; },
     wikiPage: { async findUnique() { return page; } },
     wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }]; } },
+    wikiPageRevision: {
+      async findUnique(args: { where: { id: bigint } }) {
+        if (args.where.id === 29n) {
+          return {
+            id: 29n,
+            pageId: page.id,
+            revisionNo: 1,
+            visibility: 'public',
+            contentRaw: '== 소개 ==\n기준\n\n== 접속 ==\nold.example.kr\n'
+          };
+        }
+        if (args.where.id === 30n) {
+          return {
+            id: 30n,
+            pageId: page.id,
+            revisionNo: 2,
+            visibility: 'public',
+            contentRaw: '== 소개 ==\n기준\n\n== 접속 ==\nplay.example.kr\n'
+          };
+        }
+        return null;
+      }
+    },
     wikiEditRequest: {
       async findUnique() { return { ...stored }; },
+      async findUniqueOrThrow() { return { ...stored }; },
       async findFirst() { return null; },
       async updateMany(args: { where: { status: string }; data: Record<string, unknown> }) {
         if (stored.status !== args.where.status) return { count: 0 };
@@ -70,13 +104,17 @@ test('the author can rebase, close, and reopen an edit request', async () => {
     }
   } as unknown as PrismaService;
   const profiles = { async ensureWikiProfile() { return { id: 99n, status: 'active' }; } } as unknown as WikiProfileService;
-  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const permissions = {
+    async assertCanReadPage() {},
+    async assertCanUsePageAction() {}
+  } as unknown as WikiPermissionService;
   const service = new WikiEditRequestService(prisma, profiles, permissions, {} as WikiEditService);
 
-  const updated = await service.update(session, '40', { baseRevisionId: '30', contentRaw: 'rebased', editSummary: 'rebased summary', isMinor: true });
+  const updated = await service.rebase(session, '40');
   assert.equal(updated.status, 'pending');
   assert.equal(updated.baseRevisionId, '30');
-  assert.equal(updated.proposedContent, 'rebased');
+  assert.match(updated.proposedContent, /내 변경/);
+  assert.match(updated.proposedContent, /play\.example\.kr/);
 
   assert.equal((await service.close(session, '40')).status, 'closed');
   assert.equal((await service.reopen(session, '40')).status, 'pending');
@@ -88,7 +126,14 @@ test('edit request diff is calculated from the exact base revision', async () =>
     wikiEditRequest: { async findUnique() { return request; } },
     wikiPageRevision: { async findUnique() { return { id: 30n, pageId: page.id, visibility: 'public', contentRaw: 'before' }; } }
   } as unknown as PrismaService;
-  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  let rawChecked = false;
+  const permissions = {
+    async assertCanReadPage() {},
+    async assertCanUsePageAction(input: { action: string }) {
+      assert.equal(input.action, 'raw');
+      rawChecked = true;
+    }
+  } as unknown as WikiPermissionService;
   let compared: [string, string] | null = null;
   const edits = { diffText(left: string, right: string) { compared = [left, right]; return [{ type: 'removed' as const, line: left, leftLine: 1, rightLine: null }]; } } as unknown as WikiEditService;
   const service = new WikiEditRequestService(prisma, {} as WikiProfileService, permissions, edits);
@@ -96,4 +141,5 @@ test('edit request diff is calculated from the exact base revision', async () =>
   const diff = await service.diff('40');
   assert.deepEqual(compared, ['before', 'next']);
   assert.equal(diff.baseRevisionId, '30');
+  assert.equal(rawChecked, true);
 });

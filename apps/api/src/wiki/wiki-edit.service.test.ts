@@ -204,12 +204,15 @@ test('section edit rebuilds the full document and delegates final validation to 
   assert.equal(delegated?.editSummary, '섹션 수정');
 });
 
-test('section edit rejects stale bases and replacement without a heading', async () => {
+test('section edit rejects foreign bases and replacement without a heading', async () => {
   const page = { id: 7n, spaceId: 1n, namespaceId: 1, title: '문서', status: 'normal', protectionLevel: 'open', currentRevisionId: 11n };
   const revision = { id: 11n, pageId: 7n, contentRaw: '== 소개 ==\n본문', visibility: 'public' };
   const prisma = {
     wikiPage: { async findUnique() { return page; } },
-    wikiPageRevision: { async findFirst() { return revision; }, async findUnique() { return revision; } }
+    wikiPageRevision: {
+      async findFirst() { return revision; },
+      async findUnique(input: { where: { id: bigint } }) { return input.where.id === revision.id ? revision : null; }
+    }
   } as unknown as PrismaService;
   const profiles = { async ensureWikiProfile() { return { id: 3n, status: 'active' }; } } as unknown as WikiProfileService;
   const permissions = {
@@ -220,7 +223,7 @@ test('section edit rejects stale bases and replacement without a heading', async
 
   await assert.rejects(
     service.updateSection(session('account'), '7', '소개', { contentRaw: '== 소개 ==\n수정', baseRevisionId: '10' }),
-    /Base revision/
+    /Base revision does not match this document/
   );
   await assert.rejects(
     service.updateSection(session('account'), '7', '소개', { contentRaw: '제목 없음', baseRevisionId: '11' }),
@@ -392,22 +395,129 @@ if (!hasDatabase) {
       assert.equal(section.contentRaw, '== 소개 ==\n이전 본문');
 
       const updated = await edits.updateSection(session(fixture.account.id), created.pageId, '소개', {
-        contentRaw: '== 소개 개편 ==\n새 본문',
+        contentRaw: '== 소개 ==\n새 본문',
         editSummary: '소개 섹션만 수정',
         baseRevisionId: section.baseRevisionId
       });
-      assert.equal(updated.sectionAnchor, '소개-개편');
+      assert.equal(updated.sectionAnchor, '소개');
       const revision = await edits.getRevision(updated.revisionId, fixture.account.id);
-      assert.equal(revision.contentRaw, '서문\n== 소개 개편 ==\n새 본문\n== 보존 ==\n건드리지 않음');
+      assert.equal(revision.contentRaw, '서문\n== 소개 ==\n새 본문\n== 보존 ==\n건드리지 않음');
       assert.equal(revision.editSummary, '소개 섹션만 수정');
 
+      const independent = await edits.updateSection(session(fixture.account.id), created.pageId, '보존', {
+        contentRaw: '== 보존 ==\n다른 사용자가 수정',
+        editSummary: '다른 섹션 수정',
+        baseRevisionId: section.baseRevisionId
+      });
+      assert.equal(independent.autoMerged, true);
+      const independentRevision = await edits.getRevision(independent.revisionId, fixture.account.id);
+      assert.match(independentRevision.contentRaw, /새 본문/);
+      assert.match(independentRevision.contentRaw, /다른 사용자가 수정/);
+
       await assert.rejects(
-        edits.updateSection(session(fixture.account.id), created.pageId, '소개-개편', {
-          contentRaw: '== 소개 개편 ==\n지연된 수정',
+        edits.updateSection(session(fixture.account.id), created.pageId, '소개', {
+          contentRaw: '== 소개 ==\n지연된 수정',
           baseRevisionId: section.baseRevisionId
         }),
-        /Base revision/
+        /overlapping edits/
       );
+    } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id,
+        pageId
+      });
+    }
+  });
+
+  test('auto-merges independent stale edits and preserves merge provenance', async () => {
+    const fixture = await createFixture();
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        title: `3-way merge ${fixture.unique}`,
+        spaceId: fixture.space.id.toString(),
+        contentRaw: '== 소개 ==\n기준 소개\n\n== 접속 ==\nold.example.kr\n',
+        editSummary: '병합 기준 생성'
+      });
+      pageId = created.pageId;
+
+      const current = await edits.updatePage(session(fixture.account.id), created.pageId, {
+        contentRaw: '== 소개 ==\n기준 소개\n\n== 접속 ==\nplay.example.kr\n',
+        editSummary: '접속 주소 수정',
+        baseRevisionId: created.revisionId
+      });
+      const merged = await edits.updatePage(session(fixture.account.id), created.pageId, {
+        contentRaw: '== 소개 ==\n내가 고친 소개\n\n== 접속 ==\nold.example.kr\n',
+        editSummary: '소개 수정',
+        baseRevisionId: created.revisionId
+      });
+
+      assert.equal(merged.autoMerged, true);
+      const mergedRevision = await prisma.wikiPageRevision.findUnique({
+        where: { id: BigInt(merged.revisionId) }
+      });
+      assert.equal(mergedRevision?.parentRevisionId, BigInt(current.revisionId));
+      assert.match(mergedRevision?.contentRaw ?? '', /내가 고친 소개/);
+      assert.match(mergedRevision?.contentRaw ?? '', /play\.example\.kr/);
+      assert.deepEqual(mergedRevision?.editTags, {
+        autoMerged: true,
+        baseRevisionId: created.revisionId,
+        currentRevisionId: current.revisionId
+      });
+    } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id,
+        pageId
+      });
+    }
+  });
+
+  test('overlapping stale edits return recoverable conflict content without writing a revision', async () => {
+    const fixture = await createFixture();
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        title: `merge conflict ${fixture.unique}`,
+        spaceId: fixture.space.id.toString(),
+        contentRaw: '기준 문장',
+        editSummary: '충돌 기준 생성'
+      });
+      pageId = created.pageId;
+      await edits.updatePage(session(fixture.account.id), created.pageId, {
+        contentRaw: '최신 문장',
+        editSummary: '최신 수정',
+        baseRevisionId: created.revisionId
+      });
+      const before = await prisma.wikiPageRevision.count({ where: { pageId: BigInt(created.pageId) } });
+
+      await assert.rejects(
+        edits.updatePage(session(fixture.account.id), created.pageId, {
+          contentRaw: '내 문장',
+          editSummary: '내 수정',
+          baseRevisionId: created.revisionId
+        }),
+        (error: unknown) => {
+          const response = error instanceof Error && 'getResponse' in error
+            ? (error as { getResponse(): unknown }).getResponse()
+            : null;
+          assert.equal(typeof response, 'object');
+          const payload = response as { code?: string; details?: { conflictCount?: number; mergedContentRaw?: string } };
+          assert.equal(payload.code, 'wiki_edit_conflict');
+          assert.equal(payload.details?.conflictCount, 1);
+          assert.match(payload.details?.mergedContentRaw ?? '', /^<<<<<<< 내 편집$/m);
+          return true;
+        }
+      );
+      const after = await prisma.wikiPageRevision.count({ where: { pageId: BigInt(created.pageId) } });
+      assert.equal(after, before);
     } finally {
       await cleanupFixture({
         accountId: fixture.account.id,
