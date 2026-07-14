@@ -58,6 +58,8 @@ export function ServerReviewSection({
   const [tags, setTags] = useState(availableTags);
   const [gateStatus, setGateStatus] = useState<ReviewGateStatus>(EMPTY_STATUS);
   const [reviews, setReviews] = useState(initialReviews);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
 
@@ -127,6 +129,7 @@ export function ServerReviewSection({
         }
         const payload = (await response.json()) as ServerReview[];
         setReviews(payload);
+        setNextCursor(null);
         setReviewCount(payload.length);
         if (payload.length > 0) {
           const average =
@@ -161,14 +164,15 @@ export function ServerReviewSection({
         }
         params.set('limit', String(Math.max(initialReviews.length, 12)));
         const response = await fetch(
-          `${baseUrl}/v1/servers/${serverId}/reviews?${params.toString()}`,
+          `${baseUrl}/v1/servers/${serverId}/reviews/page?${params.toString()}`,
           { credentials: 'include' }
         );
         if (!response.ok) {
           return;
         }
-        const payload = (await response.json()) as ServerReview[];
-        setReviews(payload);
+        const payload = (await response.json()) as { items: ServerReview[]; nextCursor: string | null };
+        setReviews(payload.items);
+        setNextCursor(payload.nextCursor);
       } catch (error) {
         console.warn('뷰어 리뷰 로드 실패', error);
       }
@@ -277,6 +281,37 @@ export function ServerReviewSection({
     });
   };
 
+  const loadMoreReviews = async () => {
+    if (!nextCursor || loadingMoreReviews || isOwner) return;
+    setLoadingMoreReviews(true);
+    try {
+      const params = new URLSearchParams({
+        sort: currentSort,
+        limit: String(Math.max(initialReviews.length, 12)),
+        cursor: nextCursor
+      });
+      if (currentRating && currentRating >= 1 && currentRating <= 5) {
+        params.set('rating', String(currentRating));
+      }
+      if (currentTag?.trim()) params.set('tag', currentTag.trim());
+      const response = await fetch(
+        `${baseUrl}/v1/servers/${serverId}/reviews/page?${params.toString()}`,
+        { credentials: 'include' }
+      );
+      if (!response.ok) throw new Error('failed to load more reviews');
+      const payload = (await response.json()) as { items: ServerReview[]; nextCursor: string | null };
+      setReviews((current) => [
+        ...current,
+        ...payload.items.filter((review) => !current.some((item) => item.id === review.id))
+      ]);
+      setNextCursor(payload.nextCursor);
+    } catch (error) {
+      console.warn('추가 리뷰 로드 실패', error);
+    } finally {
+      setLoadingMoreReviews(false);
+    }
+  };
+
   return (
     <section className="rounded-xl border border-[#30343b] bg-[#151922] p-6 md:p-8">
       <ServerReviewsHeader
@@ -312,6 +347,16 @@ export function ServerReviewSection({
         onReviewUpdated={handleReviewUpdated}
         onReviewDeleted={handleReviewDeleted}
       />
+      {nextCursor && !isOwner ? (
+        <button
+          type="button"
+          disabled={loadingMoreReviews}
+          onClick={() => void loadMoreReviews()}
+          className="btn-secondary mt-6 min-h-11 w-full"
+        >
+          {loadingMoreReviews ? '리뷰 불러오는 중…' : '리뷰 더 보기'}
+        </button>
+      ) : null}
       <ReviewComposerModal
         open={isComposerOpen}
         serverId={serverId}

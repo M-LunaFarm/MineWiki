@@ -1,4 +1,4 @@
-﻿import { ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
   createReviewSchema,
@@ -35,6 +35,15 @@ export interface ReviewListOptions {
   readonly sort?: ReviewSort;
 }
 
+export interface ReviewPageOptions extends ReviewListOptions {
+  readonly cursor?: string;
+}
+
+export interface ReviewPageResponse {
+  readonly items: ServerReview[];
+  readonly nextCursor: string | null;
+}
+
 const REVIEW_TAG_SET = new Set(reviewTagSchema.options);
 const REVIEW_VISIBILITY_SET = new Set(reviewVisibilitySchema.options);
 const updateReviewSchema = z.object({
@@ -43,6 +52,18 @@ const updateReviewSchema = z.object({
   tags: z.array(reviewTagSchema).max(3)
 });
 const reviewReportReasonSchema = z.string().trim().min(3).max(500);
+const reviewCursorSchema = z.object({
+  version: z.literal(1),
+  sort: z.enum(['wilson', 'newest']),
+  ratingFilter: z.number().int().min(1).max(5).nullable(),
+  tagFilter: reviewTagSchema.nullable(),
+  snapshotAt: z.string().datetime(),
+  createdAt: z.string().datetime(),
+  id: z.string().uuid(),
+  rating: z.number().int().min(1).max(5)
+}).strict();
+
+type ReviewCursor = z.infer<typeof reviewCursorSchema>;
 
 export function isReviewTag(
   value?: string | null
@@ -119,6 +140,77 @@ export class ReviewService {
     return sorted;
   }
 
+  async listPage(
+    serverId: string,
+    options: ReviewPageOptions = {},
+    viewerAccountId?: string
+  ): Promise<ReviewPageResponse> {
+    await this.serverService.ensureExists(serverId);
+    const limit = Math.min(Math.max(options.limit ?? 12, 1), 50);
+    const ratingFilter = options.rating && options.rating >= 1 && options.rating <= 5
+      ? options.rating
+      : null;
+    const tagFilter = options.tag ?? null;
+    const sort: ReviewSort = options.sort ?? 'wilson';
+    const cursor = options.cursor
+      ? this.decodeReviewCursor(options.cursor, { sort, ratingFilter, tagFilter })
+      : null;
+    const snapshotAt = cursor ? new Date(cursor.snapshotAt) : new Date();
+    const position = cursor
+      ? { id: cursor.id, rating: cursor.rating, createdAt: new Date(cursor.createdAt) }
+      : null;
+
+    const positionFilter: Prisma.ServerReviewWhereInput | undefined = position
+      ? sort === 'newest'
+        ? {
+            OR: [
+              { createdAt: { lt: position.createdAt } },
+              { createdAt: position.createdAt, id: { lt: position.id } }
+            ]
+          }
+        : {
+            OR: [
+              { rating: { lt: position.rating } },
+              { rating: position.rating, createdAt: { lt: position.createdAt } },
+              { rating: position.rating, createdAt: position.createdAt, id: { lt: position.id } }
+            ]
+          }
+      : undefined;
+    const rows = await this.prisma.serverReview.findMany({
+      where: {
+        serverId,
+        visibility: 'public',
+        createdAt: { lte: snapshotAt },
+        updatedAt: { lte: snapshotAt },
+        rating: ratingFilter ?? undefined,
+        tags: tagFilter ? { array_contains: [tagFilter] } : undefined,
+        AND: positionFilter
+      },
+      orderBy: sort === 'newest'
+        ? [{ createdAt: 'desc' }, { id: 'desc' }]
+        : [{ rating: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1
+    });
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const last = pageRows.at(-1);
+    return {
+      items: pageRows.map((review) => toReviewResponse(review, viewerAccountId)),
+      nextCursor: hasMore && last
+        ? this.encodeReviewCursor({
+            version: 1,
+            sort,
+            ratingFilter,
+            tagFilter,
+            snapshotAt: snapshotAt.toISOString(),
+            createdAt: last.createdAt.toISOString(),
+            id: last.id,
+            rating: last.rating
+          })
+        : null
+    };
+  }
+
   async listAll(serverId: string, viewerAccountId?: string): Promise<ServerReview[]> {
     await this.serverService.ensureExists(serverId);
     const reviews = await this.prisma.serverReview.findMany({
@@ -126,6 +218,30 @@ export class ReviewService {
       orderBy: { createdAt: 'desc' }
     });
     return reviews.map((review) => toReviewResponse(review, viewerAccountId));
+  }
+
+  private encodeReviewCursor(cursor: ReviewCursor): string {
+    return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+  }
+
+  private decodeReviewCursor(
+    encoded: string,
+    filters: Pick<ReviewCursor, 'sort' | 'ratingFilter' | 'tagFilter'>
+  ): ReviewCursor {
+    let cursor: ReviewCursor;
+    try {
+      cursor = reviewCursorSchema.parse(JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')));
+    } catch {
+      throw new BadRequestException('유효하지 않은 리뷰 페이지 커서입니다.');
+    }
+    if (
+      cursor.sort !== filters.sort ||
+      cursor.ratingFilter !== filters.ratingFilter ||
+      cursor.tagFilter !== filters.tagFilter
+    ) {
+      throw new BadRequestException('리뷰 필터가 변경되어 페이지를 이어갈 수 없습니다.');
+    }
+    return cursor;
   }
 
   async create(

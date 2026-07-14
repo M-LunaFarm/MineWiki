@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -18,6 +19,7 @@ import type { ServerReview } from '@minewiki/schemas';
 import {
   ReviewService,
   type ReviewListOptions,
+  type ReviewPageResponse,
   type ReviewSort,
   isReviewTag
 } from './review.service';
@@ -74,6 +76,33 @@ export class ReviewController {
     const sessionRecord = sessionToken ? await this.sessions.getSessionByToken(sessionToken) : undefined;
     const payload = sessionRecord ? this.sessions.toPayload(sessionRecord) : undefined;
     return this.reviewService.getGateStatus(serverId, payload);
+  }
+
+  @Get('page')
+  async page(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @Req() request: FastifyRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('rating', new ParseIntPipe({ optional: true })) ratingParam?: number,
+    @Query('tag') tag?: string | string[],
+    @Query('sort') sortParam?: string
+  ): Promise<ReviewPageResponse> {
+    if (cursor && cursor.length > 2048) {
+      throw new BadRequestException('리뷰 페이지 커서가 너무 깁니다.');
+    }
+    const rating = ratingParam && ratingParam >= 1 && ratingParam <= 5 ? ratingParam : undefined;
+    const normalizedTag = Array.isArray(tag) ? tag.at(0) : tag;
+    const tagFilter = isReviewTag(normalizedTag) ? normalizedTag : undefined;
+    const sessionToken = extractSessionToken(request);
+    const sessionRecord = sessionToken ? await this.sessions.getSessionByToken(sessionToken) : undefined;
+    return this.reviewService.listPage(serverId, {
+      cursor,
+      limit,
+      rating,
+      tag: tagFilter,
+      sort: normalizeReviewSort(sortParam)
+    }, sessionRecord?.userId);
   }
 
   @UseGuards(SessionGuard)

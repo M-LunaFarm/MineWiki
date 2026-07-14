@@ -2,14 +2,14 @@ import { z } from 'zod';
 
 export const CURRENT_POLICY_VERSIONS = {
   terms: {
-    version: 'v1.1',
-    consentVersion: '2026-07-11-v1.1',
-    effectiveDate: '2026-07-11',
+    version: 'v1.2',
+    consentVersion: '2026-07-15-v1.2',
+    effectiveDate: '2026-07-15',
   },
   privacy: {
-    version: 'v1.1',
-    consentVersion: '2026-07-11-v1.1',
-    effectiveDate: '2026-07-11',
+    version: 'v1.2',
+    consentVersion: '2026-07-15-v1.2',
+    effectiveDate: '2026-07-15',
   },
 } as const;
 
@@ -131,6 +131,18 @@ export const passwordChangeRequestSchema = z
     currentPassword: authPasswordSchema,
     newPassword: authPasswordSchema,
   })
+  .strict();
+
+export const accountDeletionRequestSchema = z
+  .object({ password: authPasswordSchema.optional() })
+  .strict();
+
+export const accountDeletionCancelSchema = z
+  .object({ cancelToken: z.string().trim().min(32).max(256) })
+  .strict();
+
+export const accountDeletionAdminActionSchema = z
+  .object({ note: z.string().trim().max(1000).optional() })
   .strict();
 
 export const policyConsentAcceptRequestSchema = z
@@ -369,6 +381,11 @@ export const serverReviewSchema = z.object({
   canManage: z.boolean().optional(),
 });
 
+export const serverReviewPageSchema = z.object({
+  items: z.array(serverReviewSchema),
+  nextCursor: z.string().min(1).max(2048).nullable(),
+});
+
 export const createReviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
   body: z.string().min(1).max(80),
@@ -605,6 +622,7 @@ export type ServerRankingResponse = z.infer<typeof serverRankingResponseSchema>;
 export type ServerStats = z.infer<typeof serverStatsSchema>;
 export type ServerUpdate = z.infer<typeof serverUpdateSchema>;
 export type ServerReview = z.infer<typeof serverReviewSchema>;
+export type ServerReviewPage = z.infer<typeof serverReviewPageSchema>;
 export type CreateReviewPayload = z.infer<typeof createReviewSchema>;
 export type ReviewVisibility = z.infer<typeof reviewVisibilitySchema>;
 export type ReviewAdminReply = z.infer<typeof reviewAdminReplySchema>;
@@ -649,6 +667,8 @@ export type EmailResendRequest = z.infer<typeof emailResendRequestSchema>;
 export type EmailLoginSetupRequest = z.infer<typeof emailLoginSetupRequestSchema>;
 export type PasswordResetRequest = z.infer<typeof passwordResetRequestSchema>;
 export type PasswordResetConfirmRequest = z.infer<typeof passwordResetConfirmRequestSchema>;
+export type AccountDeletionRequest = z.infer<typeof accountDeletionRequestSchema>;
+export type AccountDeletionCancel = z.infer<typeof accountDeletionCancelSchema>;
 export type EmailRegistrationResult = z.infer<typeof emailRegistrationResultSchema>;
 export type ResendVerificationResult = z.infer<typeof resendVerificationResultSchema>;
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;

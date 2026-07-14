@@ -6,9 +6,11 @@ import {
   serverStatsSchema,
   serverRankingResponseSchema,
   serverReviewSchema,
+  serverReviewPageSchema,
   serverReferralSchema,
   type ServerDetail,
   type ServerReview,
+  type ServerReviewPage,
   type ServerStats,
   type ServerRankingResponse,
   type ServerUpdate,
@@ -64,6 +66,7 @@ interface ServerReviewOptions {
   readonly sort?: 'wilson' | 'newest';
   readonly rating?: number;
   readonly tag?: string;
+  readonly cursor?: string;
 }
 
 export async function fetchServerSummaries(
@@ -145,6 +148,29 @@ export async function fetchServerReviews(
   }
   const payload = await response.json();
   return serverReviewSchema.array().parse(payload);
+}
+
+export async function fetchServerReviewPage(
+  id: string,
+  options: ServerReviewOptions = {}
+): Promise<ServerReviewPage> {
+  const searchParams = new URLSearchParams();
+  if (options.limit && options.limit > 0) searchParams.set('limit', String(options.limit));
+  if (options.sort) searchParams.set('sort', options.sort);
+  if (options.rating && options.rating >= 1 && options.rating <= 5) {
+    searchParams.set('rating', String(options.rating));
+  }
+  if (isReviewTag(options.tag)) searchParams.set('tag', options.tag);
+  if (options.cursor) searchParams.set('cursor', options.cursor);
+  const response = await fetch(
+    `${apiBaseUrl()}/v1/servers/${id}/reviews/page?${searchParams.toString()}`,
+    { cache: 'no-store', credentials: 'include' }
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? `Failed to load server review page (${id}).`);
+  }
+  return serverReviewPageSchema.parse(await response.json());
 }
 
 export async function fetchServerReferrals(
