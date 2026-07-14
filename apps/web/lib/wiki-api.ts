@@ -307,6 +307,7 @@ export interface WikiRecentThreadListResponse {
 
 export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canModerate: boolean;
+  readonly canManagePage: boolean;
   readonly canReply: boolean;
   readonly subscribed: boolean;
   readonly pinnedCommentId: string | null;
@@ -636,6 +637,30 @@ export async function updateWikiThreadTopic(threadId: string, title: string): Pr
 
 export async function setWikiThreadPinnedComment(threadId: string, commentId: string | null): Promise<WikiThreadDetail> {
   return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/pin`, 'PATCH', { commentId });
+}
+
+export async function moveWikiThread(input: { threadId: string; pageId: string; reason?: string }): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/page`, 'PATCH', {
+    pageId: input.pageId,
+    reason: input.reason
+  });
+}
+
+export async function deleteWikiThread(threadId: string, reason?: string): Promise<{ readonly deleted: true; readonly threadId: string }> {
+  return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}`, 'DELETE', { reason });
+}
+
+export async function fetchWikiThreadCommentRaw(threadId: string, commentId: string): Promise<string> {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/discussions/${encodeURIComponent(threadId)}/comments/${encodeURIComponent(commentId)}/raw`, {
+    credentials: 'include'
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    let message = body;
+    try { message = JSON.parse(body)?.message ?? body; } catch { /* text response */ }
+    throw new Error(message || '댓글 원문을 불러오지 못했습니다.');
+  }
+  return body;
 }
 
 export async function fetchWikiWatchStatus(pageId: string): Promise<WikiWatchStatus> {
