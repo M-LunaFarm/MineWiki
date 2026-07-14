@@ -40,3 +40,11 @@ test('builds canonical server tool paths for root and nested documents', () => {
   );
   assert.throws(() => buildServerWikiToolPath('/wiki/대문', 'history'), /Not a server wiki route/);
 });
+
+test('keeps page ACL inside the canonical server wiki workspace', () => {
+  assert.equal(buildServerWikiToolPath('/server/luna/rules', 'acl'), '/server/luna/_tools/acl/rules');
+  assert.deepEqual(parseServerWikiToolRoute(['luna', '_tools', 'acl', 'rules']), {
+    tool: 'acl',
+    documentSegments: ['luna', 'rules'],
+  });
+});

@@ -14,7 +14,7 @@ export default async function ServerWikiPage({ params }: PageProps) {
   const resolvedParams = await params;
   const path = resolvedParams.path ?? [];
   const toolRoute = parseServerWikiToolRoute(path);
-  if (toolRoute?.tool === 'raw' || toolRoute?.tool === 'backlinks' || toolRoute?.tool === 'discuss' || toolRoute?.tool === 'requests' || toolRoute?.tool === 'blame') {
+  if (toolRoute?.tool === 'raw' || toolRoute?.tool === 'backlinks' || toolRoute?.tool === 'discuss' || toolRoute?.tool === 'requests' || toolRoute?.tool === 'blame' || toolRoute?.tool === 'acl') {
     return <ServerWikiToolRoutePage segments={toolRoute.documentSegments} tool={toolRoute.tool} />;
   }
   if (toolRoute?.tool === 'edit') {

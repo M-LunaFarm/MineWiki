@@ -438,6 +438,26 @@ export interface WikiAclCatalog {
   readonly aclGroups: ReadonlyArray<{ id: string; key: string; name: string }>;
 }
 
+export interface WikiPageAclResponse {
+  readonly page: {
+    readonly id: string;
+    readonly spaceId: string;
+    readonly namespaceId: number;
+    readonly title: string;
+    readonly displayTitle: string;
+    readonly protectionLevel: string;
+  };
+  readonly actions: readonly string[];
+  readonly rules: readonly WikiAclRuleSummary[];
+  readonly canManage: boolean;
+  readonly manageReason: string;
+  readonly catalog: {
+    readonly groups: ReadonlyArray<{ code: string; name: string }>;
+    readonly aclGroups: ReadonlyArray<{ key: string; name: string }>;
+    readonly roles: readonly string[];
+  };
+}
+
 export interface WikiMutationResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -511,6 +531,33 @@ export async function fetchWikiBacklinks(pageId: string, cursor?: string): Promi
 
 export async function fetchWikiBlame(pageId: string): Promise<WikiBlameResponse> {
   return readWikiBrowser<WikiBlameResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/blame`);
+}
+
+export async function fetchWikiPageAcl(pageId: string): Promise<WikiPageAclResponse> {
+  return readWikiBrowser<WikiPageAclResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl`);
+}
+
+export async function createWikiPageAclRule(pageId: string, input: {
+  readonly action: string;
+  readonly effect: WikiAclRuleSummary['effect'];
+  readonly subjectType: WikiAclRuleSummary['subjectType'];
+  readonly subjectValue: string;
+  readonly reason?: string;
+  readonly expiresAt?: string | null;
+}): Promise<WikiAclRuleSummary> {
+  return mutateWikiBrowser<WikiAclRuleSummary>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl`, 'POST', input);
+}
+
+export async function deleteWikiPageAclRule(pageId: string, ruleId: string, reason?: string): Promise<void> {
+  await mutateWikiBrowser(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl/${encodeURIComponent(ruleId)}`, 'DELETE', { reason });
+}
+
+export async function reorderWikiPageAclRules(pageId: string, input: {
+  readonly action: string;
+  readonly ruleIds: readonly string[];
+  readonly reason?: string;
+}): Promise<WikiAclRuleSummary[]> {
+  return mutateWikiBrowser<WikiAclRuleSummary[]>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl/order`, 'PATCH', input);
 }
 
 export async function fetchWikiNotifications(cursor?: string): Promise<WikiNotificationListResponse> {

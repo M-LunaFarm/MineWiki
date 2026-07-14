@@ -17,6 +17,7 @@ export const SERVER_WIKI_TOOLS = Object.freeze([
   'discuss',
   'requests',
   'blame',
+  'acl',
   'edit',
   'history',
 ]);
