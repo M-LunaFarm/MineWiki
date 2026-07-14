@@ -20,7 +20,6 @@ export async function fetchWithTimeout(
   const timer = setTimeout(() => {
     controller.abort(new DOMException('External request timed out.', 'TimeoutError'));
   }, timeoutMs);
-  timer.unref?.();
 
   try {
     return await fetcher(input, { ...init, signal: controller.signal });
