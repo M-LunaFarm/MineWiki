@@ -97,7 +97,7 @@ export class FileController {
   ): StreamableFile | undefined {
     reply.header('Cache-Control', raw.cacheControl);
     if (raw.redirectUrl) {
-      reply.redirect(302, raw.redirectUrl);
+      reply.redirect(raw.redirectUrl, 302);
       return undefined;
     }
     reply.header('Content-Type', raw.mimeType);
