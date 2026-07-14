@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookOpenCheck, ClipboardList, Flag, Headphones, ShieldCheck, UsersRound } from 'lucide-react';
+import { BookOpenCheck, ClipboardList, Flag, Headphones, ShieldCheck, UserRoundX, UsersRound } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -26,6 +26,12 @@ const ADMIN_TOOLS: ReadonlyArray<{
     description: '운영자, 위키 관리자, 서버 관리자와 지원 담당자 권한을 관리합니다.',
     icon: UsersRound,
     accent: true,
+  },
+  {
+    href: '/admin/account-deletions',
+    title: '계정 종료 운영',
+    description: '14일 유예, 자산 이전 조건과 계정 비식별화 처리 상태를 관리합니다.',
+    icon: UserRoundX,
   },
   {
     href: '/admin/support',

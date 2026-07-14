@@ -24,15 +24,19 @@ import { useAuth } from '../../components/providers/auth-context';
 import { SiteHeader } from '../../components/layout/site-header';
 import {
   changePassword,
+  cancelAccountDeletion,
   clearProfileAvatar,
   createAccountMergeRequest,
   fetchAccountLinkConflicts,
   resendVerification,
   setupEmailLogin,
   startOAuthLink,
+  requestAccountDeletion,
   updateDisplayName,
   updateProfileAvatar,
   type AccountLinkConflict,
+  AccountDeletionBlockedError,
+  type AccountDeletionBlocker,
 } from '../../lib/auth-client';
 import { getApiBaseUrl } from '../../lib/runtime-config';
 
@@ -1042,9 +1046,81 @@ export function AccountClientPage() {
           </div>
 
           <MinecraftOwnershipPanel />
+          <AccountTerminationPanel hasPassword={hasPasswordLogin} />
         </div>
       </main>
     </div>
+  );
+}
+
+function AccountTerminationPanel({ hasPassword }: { readonly hasPassword: boolean }) {
+  const router = useRouter();
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [cancelToken, setCancelToken] = useState<string | null>(null);
+  const [scheduledFor, setScheduledFor] = useState<string | null>(null);
+  const [blockers, setBlockers] = useState<AccountDeletionBlocker[]>([]);
+  const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+  const [working, setWorking] = useState(false);
+  const [copiedCancelLink, setCopiedCancelLink] = useState(false);
+
+  const cancelUrl = cancelToken && typeof window !== 'undefined'
+    ? `${window.location.origin}/account-deletion/cancel#token=${encodeURIComponent(cancelToken)}`
+    : null;
+
+  const submit = async () => {
+    if (confirmation !== '계정 종료') { setFeedback({ type: 'error', text: '확인 문구 “계정 종료”를 정확히 입력해 주세요.' }); return; }
+    setWorking(true); setFeedback(null); setBlockers([]);
+    try {
+      const result = await requestAccountDeletion(password || undefined);
+      setCancelToken(result.cancelToken); setScheduledFor(result.scheduledFor);
+      setFeedback({ type: 'success', text: '종료 요청이 접수되었고 모든 로그인 세션과 인증 토큰이 폐기되었습니다.' });
+    } catch (error) {
+      if (error instanceof AccountDeletionBlockedError) setBlockers(error.blockers);
+      setFeedback({ type: 'error', text: error instanceof Error ? error.message : '계정 종료를 신청하지 못했습니다.' });
+    } finally { setWorking(false); }
+  };
+
+  const cancel = async () => {
+    if (!cancelToken) return;
+    setWorking(true); setFeedback(null);
+    try {
+      await cancelAccountDeletion(cancelToken);
+      setCancelToken(null); setScheduledFor(null);
+      setFeedback({ type: 'success', text: '계정 종료 요청을 취소했습니다. 폐기된 로그인 수단은 다시 로그인하며 갱신됩니다.' });
+      router.push('/login?returnTo=/me');
+    } catch (error) { setFeedback({ type: 'error', text: error instanceof Error ? error.message : '취소하지 못했습니다.' }); }
+    finally { setWorking(false); }
+  };
+
+  return (
+    <section className="mt-6 rounded-lg border border-red-400/25 bg-[#181a1d] p-6 shadow-sm">
+      <h3 className="flex items-center gap-2 text-lg font-bold text-red-200"><AlertTriangle className="h-5 w-5" />계정 종료</h3>
+      <p className="mt-2 text-sm leading-relaxed text-[#a0a0a0]">
+        신청 후 14일 동안 취소할 수 있습니다. 세션·OAuth 보관 토큰·재설정 토큰은 즉시 폐기되며, 유예기간 뒤 계정 정보는 비식별화됩니다. 위키 기여·리뷰·투표와 감사 기록은 서비스 무결성 및 법적 의무 범위에서 작성자 식별정보를 최소화해 보존합니다.
+      </p>
+      <p className="mt-2 text-xs text-[#8f98a3]">
+        자세한 기준은 <Link href="/policies/privacy" className="text-[#13ec80] hover:underline">개인정보 처리방침</Link>과 <Link href="/policies/terms" className="ml-1 text-[#13ec80] hover:underline">이용약관</Link>을 확인하세요.
+      </p>
+      {cancelToken ? (
+        <div className="mt-4 rounded-md border border-amber-300/30 bg-amber-300/10 p-4">
+          <p className="text-sm text-amber-100">처리 예정: {scheduledFor ? new Date(scheduledFor).toLocaleString('ko-KR') : '-'}</p>
+          <p className="mt-2 text-xs leading-5 text-amber-100/75">이 취소 링크는 지금 한 번만 표시됩니다. 안내 이메일을 받지 못할 경우를 대비해 안전한 곳에 보관하세요.</p>
+          {cancelUrl ? <div className="mt-3 flex flex-col gap-2 sm:flex-row"><input readOnly value={cancelUrl} aria-label="계정 종료 취소 링크" className="min-w-0 flex-1 rounded-md border border-amber-200/25 bg-black/20 px-3 py-2 text-xs text-amber-50" /><button type="button" onClick={async () => { try { await navigator.clipboard.writeText(cancelUrl); setCopiedCancelLink(true); } catch { setFeedback({ type: 'error', text: '취소 링크를 복사하지 못했습니다.' }); } }} className="rounded-md border border-amber-200/40 px-3 py-2 text-xs font-semibold text-amber-100">{copiedCancelLink ? '복사 완료' : '링크 복사'}</button></div> : null}
+          <button type="button" onClick={() => void cancel()} disabled={working} className="mt-3 rounded-md border border-amber-200/40 px-4 py-2 text-sm font-semibold text-amber-100 disabled:opacity-50">종료 요청 취소</button>
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3 lg:max-w-xl">
+          {hasPassword ? <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="현재 비밀번호로 본인 확인" className="rounded-md border border-[#30363d] bg-[#111315] px-3 py-2.5 text-sm text-white outline-none focus:border-red-300" /> : (
+            <p className="rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">OAuth 전용 계정은 새로 로그인한 뒤 15분 안에 신청할 수 있습니다. 시간이 지났다는 안내가 나오면 로그아웃 후 같은 OAuth 계정으로 다시 로그인해 주세요.</p>
+          )}
+          <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="계정 종료" className="rounded-md border border-[#30363d] bg-[#111315] px-3 py-2.5 text-sm text-white outline-none focus:border-red-300" />
+          <button type="button" onClick={() => void submit()} disabled={working || (hasPassword && !password)} className="w-fit rounded-md border border-red-300/40 bg-red-400/10 px-4 py-2 text-sm font-semibold text-red-200 disabled:opacity-40">{working ? '처리 중입니다.' : '14일 유예로 계정 종료 신청'}</button>
+        </div>
+      )}
+      {blockers.length > 0 ? <div className="mt-4 space-y-2">{blockers.map((blocker) => <div key={`${blocker.type}:${blocker.id}`} className="rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-2"><p className="text-sm font-semibold text-amber-100">{blocker.name}</p><p className="text-xs text-amber-100/75">{blocker.reason}</p></div>)}</div> : null}
+      <FeedbackText feedback={feedback} />
+    </section>
   );
 }
 

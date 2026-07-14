@@ -55,6 +55,27 @@ export interface AccountMergeRequestResponse {
   readonly conflicts: AccountLinkConflict[];
 }
 
+export interface AccountDeletionBlocker {
+  readonly type: string;
+  readonly id: string;
+  readonly name: string;
+  readonly reason: string;
+}
+
+export interface AccountDeletionStatus {
+  readonly id: string;
+  readonly status: string;
+  readonly requestedAt: string;
+  readonly scheduledFor: string;
+  readonly cancelledAt: string | null;
+  readonly processedAt: string | null;
+  readonly adminNote: string | null;
+}
+
+export class AccountDeletionBlockedError extends Error {
+  constructor(message: string, readonly blockers: AccountDeletionBlocker[]) { super(message); }
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -124,6 +145,34 @@ export async function acceptCurrentPolicies(): Promise<PolicyConsentStatus> {
     agreeTerms: true,
     agreePrivacy: true,
   });
+}
+
+export async function requestAccountDeletion(password?: string): Promise<AccountDeletionStatus & { cancelToken: string }> {
+  const response = await fetch(`${API_BASE}/v1/auth/account-deletion`, {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+    body: JSON.stringify(password ? { password } : {}),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    if (payload?.code === 'ACCOUNT_DELETION_ASSET_TRANSFER_REQUIRED' && Array.isArray(payload.blockers)) {
+      throw new AccountDeletionBlockedError(payload.message ?? '이전할 자산이 있습니다.', payload.blockers);
+    }
+    throw new Error(payload?.message ?? '계정 종료를 신청하지 못했습니다.');
+  }
+  return (await response.json()) as AccountDeletionStatus & { cancelToken: string };
+}
+
+export async function cancelAccountDeletion(cancelToken: string): Promise<AccountDeletionStatus> {
+  const response = await fetch(`${API_BASE}/v1/auth/account-deletion/cancel`, {
+    method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cancelToken }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.message ?? '계정 종료 요청을 취소하지 못했습니다.');
+  }
+  return (await response.json()) as AccountDeletionStatus;
 }
 
 export async function fetchCurrentAccount(): Promise<AuthAccount | null> {

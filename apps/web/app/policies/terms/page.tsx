@@ -13,14 +13,15 @@ export const metadata: Metadata = createPageMetadata({
 const versions: PolicyVersion[] = [
   {
     id: CURRENT_POLICY_VERSIONS.terms.effectiveDate,
-    label: `[2026.07.11 시행] 통합 이용약관 (${CURRENT_POLICY_VERSIONS.terms.version})`,
+    label: `[2026.07.15 시행] 통합 이용약관 (${CURRENT_POLICY_VERSIONS.terms.version})`,
     effectiveDate: CURRENT_POLICY_VERSIONS.terms.effectiveDate,
     summary:
-      '버전 v1.1 | 최종 개정일 2026.07.11. MineWiki 공식 서비스 정보, 서버 랭킹 기준, 가입 동의 기록 및 문의 채널을 명확히 한 통합 약관입니다.',
+      '버전 v1.2 | 최종 개정일 2026.07.15. 계정 종료 유예와 소유 자산 이전 요건을 명확히 한 통합 약관입니다.',
     changeNotes: [
       '공식 서비스명 MineWiki, 공식 도메인 minewiki.kr, 문의 이메일 support@minewiki.kr을 명시했습니다.',
       '서버 랭킹의 집계 기준과 유료 노출이 자연 순위에 영향을 주지 않는 원칙을 추가했습니다.',
       '회원가입 시 약관·개인정보 처리방침 동의 및 정책 버전 기록 기준을 추가했습니다.',
+      '계정 종료 전 서버·길드·위키·유료 권리 이전과 14일 취소 유예 기준을 추가했습니다.',
     ],
     sections: [
       {
@@ -129,6 +130,7 @@ const versions: PolicyVersion[] = [
           '1. 이용자는 자신이 게시한 콘텐츠에 대해 필요한 권리를 보유하거나 적법한 이용 허락을 받아야 합니다.',
           '2. 이용자는 콘텐츠를 서비스에 게시함으로써, 운영자에게 서비스 제공·홍보·검색/노출·모더레이션·통계 산출 범위 내에서 콘텐츠를 저장·복제·전송·전시할 수 있는 비독점적 이용 권한을 부여합니다.',
           '3. 이용자는 언제든지 서비스가 제공하는 방법으로 콘텐츠 삭제를 요청할 수 있으나, 운영자는 분쟁·법령 준수·부정 이용 대응을 위해 최소 범위에서 보관할 수 있습니다.',
+          '3-1. 계정 종료에는 14일의 취소 유예기간이 적용됩니다. 서버·길드·위키 공간·유료 권리 등 이전이 필요한 자산이 있으면 소유권 이전 또는 권리 종료 전까지 신청이나 처리가 제한될 수 있습니다.',
           '4. 운영자는 정책 위반 또는 권리 침해가 의심되는 콘텐츠를 사전 통지 없이 숨김/삭제할 수 있으며, 필요한 경우 소명 절차를 제공할 수 있습니다.',
         ],
       },

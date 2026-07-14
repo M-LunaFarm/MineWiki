@@ -20,6 +20,7 @@ export function AdminAccessGate({ children }: { readonly children: ReactNode }) 
     if (isGlobalAdmin || pathname === '/admin') return isGlobalAdmin || permissions.some((permission) => permission.endsWith('.admin'));
     if (pathname.startsWith('/admin/support')) return roles.includes('support_agent') || permissions.includes('support.admin');
     if (pathname.startsWith('/admin/reviews')) return roles.includes('moderator') || permissions.includes('review.moderate');
+    if (pathname.startsWith('/admin/account-deletions')) return permissions.includes('admin.account.delete');
     if (pathname.startsWith('/admin/wiki')) return roles.includes('wiki_admin') || permissions.includes('wiki.admin');
     if (pathname.startsWith('/admin/audit')) return permissions.some((permission) => permission.endsWith('.admin'));
     if (pathname.startsWith('/admin/users')) return false;
