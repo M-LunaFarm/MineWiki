@@ -571,6 +571,7 @@ test('server wiki discussion contributions keep the canonical workspace route', 
     wikiProfile: { async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; } },
     wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '토론 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
     wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '문서 방향', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
+    wikiEditRequest: { async findMany() { return [{ id: 31n, pageId: 20n, baseRevisionId: 200n, proposedContent: '내용', editSummary: '수정 제안', isMinor: false, status: 'accepted', createdBy: 5n, reviewedBy: 5n, reviewNote: '승인함', acceptedRevisionId: 201n, createdAt: now, updatedAt: now, reviewedAt: now }]; } },
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
     serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna' }]; } }
@@ -581,6 +582,10 @@ test('server wiki discussion contributions keep the canonical workspace route', 
 
   assert.equal(result.items[0]?.routePath, '/server/luna/API/requests');
   assert.equal(result.items[0]?.href, '/server/luna/_tools/discuss/API/requests?thread=40&comment=41');
+
+  const requests = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5', activity: 'edit-requests' });
+  assert.equal(requests.items[0]?.routePath, '/server/luna/API/requests');
+  assert.equal(requests.items[0]?.href, '/server/luna/_tools/requests/API/requests?request=31');
 });
 
 function createReadService(options: {

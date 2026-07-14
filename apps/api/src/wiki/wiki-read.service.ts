@@ -934,10 +934,14 @@ export class WikiReadService {
       if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
       const routePath = routePaths.routePath(page, namespace);
+      const serverSlug = namespace === 'server' ? routePaths.serverSlug(page) : undefined;
       items.push({
         id: request.id.toString(), kind: reviews ? 'review' : 'edit_request', pageId: page.id.toString(), revisionId: request.acceptedRevisionId?.toString() ?? null,
         changeType: reviews ? 'review' : 'edit_request', title: page.displayTitle, namespace, routePath,
-        href: `/wiki/edit-requests/${page.id.toString()}`, summary: reviews ? request.reviewNote ?? request.editSummary : request.editSummary,
+        href: serverSlug
+          ? `${buildServerWikiToolPath(serverSlug, page.localPath, 'requests')}?request=${request.id.toString()}`
+          : `/wiki/edit-requests/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&request=${request.id.toString()}`,
+        summary: reviews ? request.reviewNote ?? request.editSummary : request.editSummary,
         isMinor: request.isMinor, status: request.status,
         createdAt: (reviews ? request.reviewedAt ?? request.updatedAt : request.createdAt).toISOString()
       });

@@ -853,6 +853,10 @@ export async function fetchWikiEditRequests(pageId: string, cursor?: string): Pr
   return readWikiBrowser<WikiEditRequestListResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/edit-requests?${params.toString()}`);
 }
 
+export async function fetchWikiEditRequest(requestId: string): Promise<WikiEditRequestSummary> {
+  return readWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}`);
+}
+
 export async function createWikiEditRequest(input: { pageId: string; baseRevisionId: string; contentRaw: string; editSummary: string; isMinor: boolean }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/edit-requests`, 'POST', input);
 }

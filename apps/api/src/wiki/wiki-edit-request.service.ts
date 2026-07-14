@@ -76,6 +76,16 @@ export class WikiEditRequestService {
     return { items: await this.present(pageRows), canReview, viewerProfileId, nextCursor: hasMore ? pageRows.at(-1)?.id.toString() ?? null : null, currentRevisionId: page.currentRevisionId?.toString() ?? null };
   }
 
+  async get(requestId: string, accountId?: string | null): Promise<WikiEditRequestSummary> {
+    const request = await this.request(requestId);
+    const page = await this.page(request.pageId.toString());
+    await this.permissions.assertCanReadPage({ accountId: accountId ?? null, page });
+    await this.permissions.assertCanUsePageAction({ accountId: accountId ?? null, action: 'raw', page });
+    const [presented] = await this.present([request]);
+    if (!presented) throw new NotFoundException('Wiki edit request not found.');
+    return presented;
+  }
+
   async diff(requestId: string, accountId?: string | null): Promise<WikiEditRequestDiffResponse> {
     const request = await this.request(requestId);
     const page = await this.page(request.pageId.toString());

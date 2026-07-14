@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { AlertTriangle, Check, FilePenLine, GitCompare, Loader2, Pencil, RotateCcw, Save, X } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   changeWikiEditRequestState,
+  fetchWikiEditRequest,
   fetchWikiEditRequestDiff,
   fetchWikiEditRequests,
   rebaseWikiEditRequest,
@@ -26,6 +28,7 @@ interface RebaseConflictState {
 }
 
 export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
+  const requestedRequestId = useSearchParams().get('request');
   const [data, setData] = useState<WikiEditRequestListResponse>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
@@ -36,12 +39,33 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
 
   useEffect(() => {
     let active = true;
-    void fetchWikiEditRequests(pageId)
-      .then((result) => { if (active) setData(result); })
+    setLoading(true);
+    setError(null);
+    void Promise.all([
+      fetchWikiEditRequests(pageId),
+      requestedRequestId ? fetchWikiEditRequest(requestedRequestId) : Promise.resolve(null),
+    ])
+      .then(([result, requested]) => {
+        if (!active) return;
+        if (requested && requested.pageId !== pageId) throw new Error('이 문서의 편집 요청이 아닙니다.');
+        setData(requested && !result.items.some((item) => item.id === requested.id)
+          ? { ...result, items: [requested, ...result.items] }
+          : result);
+      })
       .catch((caught) => { if (active) setError(message(caught)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [pageId]);
+  }, [pageId, requestedRequestId]);
+
+  useEffect(() => {
+    if (loading || !requestedRequestId) return;
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(`edit-request-${requestedRequestId}`);
+      target?.scrollIntoView({ block: 'start' });
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loading, requestedRequestId]);
 
   function replace(updated: WikiEditRequestSummary) {
     setData((current) => ({ ...current, items: current.items.map((item) => item.id === updated.id ? updated : item) }));
@@ -152,7 +176,7 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
       const unresolvedMarkers = resolvingConflict && editing?.id === item.id
         ? containsWikiConflictMarkers(editing.proposedContent)
         : false;
-      return <article key={item.id} className="border border-white/10 bg-[#111821] p-4 sm:p-5">
+      return <article id={`edit-request-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedRequestId || undefined} key={item.id} className="border border-white/10 bg-[#111821] p-4 outline-none data-[highlighted=true]:border-emerald-300/60 data-[highlighted=true]:bg-emerald-300/[0.06] sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><h2 className="font-semibold text-white">{item.editSummary}</h2><p className="mt-2 text-xs text-slate-500">{item.createdByName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</p></div>
           <div className="flex flex-wrap gap-2">

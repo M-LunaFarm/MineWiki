@@ -50,6 +50,31 @@ test('edit request creation rejects a stale base revision before persistence', a
   );
 });
 
+test('edit request detail enforces page visibility and returns the exact request', async () => {
+  let readChecked = false;
+  let rawChecked = false;
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiEditRequest: { async findUnique() { return request; } },
+    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }]; } }
+  } as unknown as PrismaService;
+  const permissions = {
+    async assertCanReadPage() { readChecked = true; },
+    async assertCanUsePageAction(input: { action: string }) {
+      assert.equal(input.action, 'raw');
+      rawChecked = true;
+    }
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiEditRequestService(prisma, {} as WikiProfileService, permissions, {} as WikiEditService).get('40');
+
+  assert.equal(result.id, '40');
+  assert.equal(result.pageId, '10');
+  assert.equal(result.createdByName, '작성자');
+  assert.equal(readChecked, true);
+  assert.equal(rawChecked, true);
+});
+
 test('only a page manager can reject an edit request', async () => {
   await assert.rejects(
     createService(false).reject(session, request.id.toString(), 'not accepted'),

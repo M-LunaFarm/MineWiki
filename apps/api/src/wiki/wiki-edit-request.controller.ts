@@ -17,6 +17,12 @@ export class WikiEditRequestController {
     return this.requests.list(pageId, request.sessionPayload ?? null, cursor, limit);
   }
 
+  @Get('edit-requests/:requestId')
+  @UseGuards(OptionalSessionGuard)
+  get(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {
+    return this.requests.get(requestId, request.sessionPayload?.userId ?? null);
+  }
+
   @Get('edit-requests/:requestId/diff')
   @UseGuards(OptionalSessionGuard)
   diff(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {

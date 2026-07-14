@@ -119,7 +119,7 @@ export class WikiNotificationService {
           actorName: row.actorProfileId ? actorNames.get(row.actorProfileId) ?? '알 수 없는 사용자' : null,
           title: row.title,
           message: row.message,
-          href: this.canonicalNotificationHref(row.href, row.type, page, page ? serverSlugBySpace.get(page.spaceId) : undefined),
+          href: this.canonicalNotificationHref(row.href, row.type, row.sourceId, page, page ? serverSlugBySpace.get(page.spaceId) : undefined),
           read: row.readAt !== null,
           createdAt: row.createdAt.toISOString()
         };
@@ -232,10 +232,15 @@ export class WikiNotificationService {
   private canonicalNotificationHref(
     href: string,
     type: string,
+    sourceId: string,
     page?: { readonly localPath: string },
     serverSlug?: string
   ): string {
-    if (type !== 'discussion_reply' || !page || !serverSlug) return href;
+    if (!page || !serverSlug) return href;
+    if ((type === 'edit_request_accepted' || type === 'edit_request_rejected') && /^\d+$/.test(sourceId)) {
+      return `${buildServerWikiToolPath(serverSlug, page.localPath, 'requests')}?request=${sourceId}`;
+    }
+    if (type !== 'discussion_reply') return href;
     try {
       const parsed = new URL(href, 'https://minewiki.invalid');
       const threadId = parsed.searchParams.get('thread');
@@ -256,6 +261,7 @@ export class WikiNotificationService {
     readonly title: string;
   }): Promise<void> {
     if (input.profileId === input.reviewerProfileId) return;
+    const href = await this.editRequestHref(tx, input);
     await this.persistDeliveries(tx, `edit-request:${input.requestId.toString()}:${input.status}`, `edit_request_${input.status}`, [{
         profileId: input.profileId,
         type: `edit_request_${input.status}`,
@@ -265,11 +271,34 @@ export class WikiNotificationService {
         sourceId: input.requestId.toString(),
         title: input.title,
         message: input.status === 'accepted' ? '편집 요청이 승인되었습니다.' : '편집 요청이 반려되었습니다.',
-        href: `/wiki/edit-requests/${input.pageId.toString()}`,
+        href,
         dedupeKey: `edit-request:${input.requestId.toString()}:${input.status}:profile:${input.profileId.toString()}`,
         readAt: null,
         createdAt: new Date()
       }]);
+  }
+
+  private async editRequestHref(
+    tx: Prisma.TransactionClient,
+    input: { readonly pageId: bigint; readonly requestId: bigint }
+  ): Promise<string> {
+    const fallback = `/wiki/edit-requests/${input.pageId.toString()}?request=${input.requestId.toString()}`;
+    const page = await tx.wikiPage.findUnique({
+      where: { id: input.pageId },
+      select: { namespaceId: true, spaceId: true, localPath: true }
+    });
+    if (!page) return fallback;
+    const namespace = await tx.wikiNamespace.findUnique({
+      where: { id: page.namespaceId },
+      select: { code: true }
+    });
+    if (namespace?.code !== 'server') return fallback;
+    const serverWiki = await tx.serverWiki.findFirst({
+      where: { spaceId: page.spaceId, status: { not: 'disabled' } },
+      select: { slug: true }
+    });
+    if (!serverWiki) return fallback;
+    return `${buildServerWikiToolPath(serverWiki.slug, page.localPath, 'requests')}?request=${input.requestId.toString()}`;
   }
 
   private async persistDeliveries(
