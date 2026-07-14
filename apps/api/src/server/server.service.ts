@@ -515,6 +515,7 @@ export class ServerService {
         this.prisma.vote.findMany({
           where: {
             serverId: id,
+            status: 'valid',
             votedAt: { gte: since24h },
           },
           orderBy: { votedAt: 'desc' },

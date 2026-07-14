@@ -297,6 +297,15 @@ if (!hasDatabase) {
           votedAt: new Date()
         }
       });
+      await prisma.vote.create({
+        data: {
+          serverId: server.id,
+          username: `Invalid_${unique}`,
+          usernameNormalized: `invalid_${unique}`.toLowerCase(),
+          status: 'invalid',
+          votedAt: new Date()
+        }
+      });
 
       const updates = await service.updates(server.id, 10);
 
@@ -307,6 +316,9 @@ if (!hasDatabase) {
         false
       );
       assert.ok(updates.some((entry) => entry.type === 'vote'));
+      assert.ok(
+        updates.some((entry) => entry.type === 'vote' && entry.description.includes('1회 투표'))
+      );
     } finally {
       if (serverId) {
         await prisma.server.delete({ where: { id: serverId } }).catch(() => {});
