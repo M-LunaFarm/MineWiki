@@ -40,6 +40,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
     : isHandbook
       ? 'lg:grid-cols-[292px_minmax(0,1fr)] 2xl:grid-cols-[292px_minmax(0,1fr)_292px]'
       : 'lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_292px]';
+  const editPath = buildServerWikiToolPath(routePath, 'edit');
 
   return (
     <main className="server-wiki-layout min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
@@ -69,7 +70,7 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
                   역사
                 </Link>
                 <Link
-                  href={buildServerWikiToolPath(routePath, 'edit')}
+                  href={editPath}
                   className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-emerald-300/40 hover:text-emerald-200"
                 >
                   <PencilLine className="size-4" />
@@ -97,6 +98,20 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
 
           <div className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: page.html }} />
 
+          {page.headings.length > 0 ? (
+            <details className="mt-8 rounded-xl border border-white/10 p-4 2xl:hidden">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-300">섹션 목차·편집</summary>
+              <ul className="mt-3 space-y-2">
+                {page.headings.map((heading, index) => (
+                  <li key={`${heading.anchor}-mobile-${index}`} className="flex items-center gap-2 text-sm">
+                    <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-w-0 flex-1 truncate text-slate-400 hover:text-emerald-300">{heading.title}</a>
+                    <Link href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`} className="rounded p-1.5 text-slate-500 hover:bg-white/[0.05] hover:text-emerald-200" aria-label={`${heading.title} 섹션 편집`}><PencilLine className="size-3.5" /></Link>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+
           <div className="mt-12 grid overflow-hidden rounded-xl border border-white/10 sm:grid-cols-2">
             <WikiPager item={previous} direction="previous" />
             <WikiPager item={next} direction="next" />
@@ -117,13 +132,10 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-300"><List className="size-4" />이 페이지</h2>
               <nav className="mt-4 space-y-2 border-l border-white/10 pl-4 text-sm" aria-label="문서 목차">
                 {(page.headings?.length ?? 0) > 0 ? page.headings.map((heading) => (
-                  <a
-                    key={`${heading.anchor}-${heading.level}`}
-                    href={`#${encodeURIComponent(heading.anchor)}`}
-                    className={`block text-slate-400 transition hover:text-emerald-300 ${heading.level > 2 ? 'pl-3 text-xs' : ''}`}
-                  >
-                    {heading.title}
-                  </a>
+                  <span key={`${heading.anchor}-${heading.level}`} className={`flex items-center gap-2 ${heading.level > 2 ? 'pl-3 text-xs' : ''}`}>
+                    <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-w-0 flex-1 truncate text-slate-400 transition hover:text-emerald-300">{heading.title}</a>
+                    <Link href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`} className="rounded p-1 text-slate-600 hover:bg-white/[0.05] hover:text-emerald-200" aria-label={`${heading.title} 섹션 편집`}><PencilLine className="size-3" /></Link>
+                  </span>
                 )) : <span className="text-slate-600">목차가 없습니다.</span>}
               </nav>
             </section>

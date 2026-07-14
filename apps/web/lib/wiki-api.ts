@@ -93,6 +93,24 @@ export interface WikiRevisionResponse {
   readonly visibility: string;
 }
 
+export interface WikiSectionEditResponse {
+  readonly pageId: string;
+  readonly anchor: string;
+  readonly title: string;
+  readonly contentRaw: string;
+  readonly baseRevisionId: string;
+}
+
+export interface WikiSectionMutationResponse {
+  readonly pageId: string;
+  readonly revisionId: string;
+  readonly revisionNo: number;
+  readonly namespace: string;
+  readonly title: string;
+  readonly slug: string;
+  readonly sectionAnchor: string;
+}
+
 export interface WikiRevisionSummary {
   readonly id: string;
   readonly revisionNo: number;
@@ -570,6 +588,18 @@ export async function fetchWikiRaw(pageId: string, revisionId?: string): Promise
   return response.json();
 }
 
+export async function fetchWikiSection(pageId: string, anchor: string): Promise<WikiSectionEditResponse> {
+  const response = await fetch(
+    `${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/sections/${encodeURIComponent(anchor)}`,
+    { credentials: 'include' }
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to load wiki section.');
+  }
+  return response.json();
+}
+
 export async function fetchWikiBacklinks(pageId: string, cursor?: string): Promise<WikiBacklinkResponse> {
   const params = new URLSearchParams({ limit: '30' });
   if (cursor) params.set('cursor', cursor);
@@ -962,6 +992,35 @@ export async function saveWikiPage(input: { pageId?: string; namespace: string; 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body?.message ?? 'Failed to save wiki page.');
+  }
+  return response.json();
+}
+
+export async function saveWikiSection(input: {
+  pageId: string;
+  anchor: string;
+  contentRaw: string;
+  editSummary: string;
+  isMinor: boolean;
+  baseRevisionId: string;
+}): Promise<WikiSectionMutationResponse> {
+  const response = await fetch(
+    `${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(input.pageId)}/sections/${encodeURIComponent(input.anchor)}`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+      body: JSON.stringify({
+        contentRaw: input.contentRaw,
+        editSummary: input.editSummary,
+        isMinor: input.isMinor,
+        baseRevisionId: input.baseRevisionId
+      })
+    }
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'Failed to save wiki section.');
   }
   return response.json();
 }

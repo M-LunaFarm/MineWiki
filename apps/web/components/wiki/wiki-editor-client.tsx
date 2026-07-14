@@ -8,11 +8,13 @@ import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition }
 import { useAuth } from '../providers/auth-context';
 import {
   fetchWikiRevision,
+  fetchWikiSection,
   createWikiEditRequest,
   listWikiFiles,
   listWikiDocumentTemplates,
   previewWikiMarkup,
   saveWikiPage,
+  saveWikiSection,
   uploadWikiImage,
   type UploadedFileMetadata,
   type WikiDocumentTemplateSummary,
@@ -45,31 +47,59 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [loadingRevision, setLoadingRevision] = useState(Boolean(page));
+  const [sectionAnchor, setSectionAnchor] = useState<string | null | undefined>(undefined);
+  const [sectionTitle, setSectionTitle] = useState<string | null>(null);
+  const [baseRevisionId, setBaseRevisionId] = useState<string | undefined>(page?.revision.id);
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
 
-  const baseRevisionId = page?.revision.id;
-  const heading = page ? `${page.displayTitle} 편집` : `${title} 새 문서 작성`;
+  const heading = page
+    ? sectionAnchor
+      ? `${sectionTitle ?? page.displayTitle} 섹션 편집`
+      : `${page.displayTitle} 편집`
+    : `${title} 새 문서 작성`;
   const editorPath = routePath.startsWith('/server/')
     ? buildServerWikiToolPath(routePath, 'edit')
     : routePath.startsWith('/wiki/category/')
       ? buildCategoryWikiToolPath(routePath, 'edit')
       : `${routePath}/edit`;
-  const loginHref = `/login?returnTo=${encodeURIComponent(editorPath)}`;
+  const loginReturnTo = sectionAnchor ? `${editorPath}?section=${encodeURIComponent(sectionAnchor)}` : editorPath;
+  const loginHref = `/login?returnTo=${encodeURIComponent(loginReturnTo)}`;
+
+  useEffect(() => {
+    const anchor = new URLSearchParams(window.location.search).get('section')?.trim();
+    setSectionAnchor(anchor || null);
+  }, [page?.id]);
 
   useEffect(() => {
     let cancelled = false;
     async function loadRevision() {
+      if (sectionAnchor === undefined) return;
       if (!page) {
         setContentRaw('');
         setLoadingRevision(false);
         return;
       }
+      if (sectionAnchor && !account) {
+        setLoadingRevision(false);
+        return;
+      }
       try {
         setLoadingRevision(true);
-        const revision = await fetchWikiRevision(page.revision.id);
-        if (!cancelled) {
-          setContentRaw(revision.contentRaw);
+        if (sectionAnchor) {
+          const section = await fetchWikiSection(page.id, sectionAnchor);
+          if (!cancelled) {
+            setContentRaw(section.contentRaw);
+            setSectionTitle(section.title);
+            setBaseRevisionId(section.baseRevisionId);
+          }
+        } else {
+          const revision = await fetchWikiRevision(page.revision.id);
+          if (!cancelled) {
+            setContentRaw(revision.contentRaw);
+            setSectionTitle(null);
+            setBaseRevisionId(revision.id);
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -85,7 +115,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     return () => {
       cancelled = true;
     };
-  }, [page]);
+  }, [account, page, sectionAnchor]);
 
   useEffect(() => {
     if (!account || page) return;
@@ -137,16 +167,28 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     setFeedback(null);
     startSaveTransition(async () => {
       try {
-        await saveWikiPage({
-          pageId: page?.id,
-          namespace,
-          title,
-          contentRaw,
-          editSummary,
-          isMinor,
-          baseRevisionId
-        });
-        router.push(routePath);
+        if (sectionAnchor && page && baseRevisionId) {
+          const result = await saveWikiSection({
+            pageId: page.id,
+            anchor: sectionAnchor,
+            contentRaw,
+            editSummary,
+            isMinor,
+            baseRevisionId
+          });
+          router.push(`${routePath}#${encodeURIComponent(result.sectionAnchor)}`);
+        } else {
+          await saveWikiPage({
+            pageId: page?.id,
+            namespace,
+            title,
+            contentRaw,
+            editSummary,
+            isMinor,
+            baseRevisionId
+          });
+          router.push(routePath);
+        }
         router.refresh();
       } catch (error) {
         const message = error instanceof Error ? error.message : '저장하지 못했습니다.';
@@ -268,6 +310,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
         </div>
         <h1 className="text-3xl font-bold text-white">{heading}</h1>
         <p className="mt-2 text-sm text-slate-400">기존 MineWiki 마크업 문법으로 저장됩니다.</p>
+        {sectionAnchor ? <p className="mt-2 text-sm font-medium text-emerald-300">선택한 섹션만 수정하며 나머지 문서는 그대로 유지됩니다.</p> : null}
       </header>
 
       {feedback ? (
@@ -286,6 +329,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="space-y-4">
           <textarea
+            aria-label={sectionAnchor ? '위키 섹션 본문' : '위키 문서 본문'}
             value={contentRaw}
             onChange={(event) => {
               setContentRaw(event.target.value);
@@ -297,6 +341,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
           />
           <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
             <input
+              aria-label="편집 요약"
               value={editSummary}
               onChange={(event) => setEditSummary(event.target.value)}
               placeholder="편집 요약"
@@ -321,7 +366,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
               저장
             </button>
           </div>
-          {page ? (
+          {page && !sectionAnchor ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
               <p className="max-w-2xl text-xs leading-5 text-slate-400">직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.</p>
               <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim()} className="btn-secondary h-10 disabled:opacity-50">검토 요청</button>
@@ -435,6 +480,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
                 <dt className="text-slate-500">충돌 처리</dt>
                 <dd>최신 판과 다르면 저장 차단</dd>
               </div>
+              {sectionAnchor ? <div className="flex justify-between gap-4"><dt className="text-slate-500">편집 범위</dt><dd className="text-right">{sectionTitle ?? sectionAnchor}</dd></div> : null}
             </dl>
           </section>
 

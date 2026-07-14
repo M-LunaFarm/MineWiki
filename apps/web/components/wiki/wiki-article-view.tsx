@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { PencilLine, Star } from 'lucide-react';
+import { Pencil, PencilLine, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
@@ -90,9 +90,19 @@ export function WikiArticleView({ page, routePath, afterContent }: WikiArticleVi
                     key={`${heading.anchor}-${index}`}
                     style={{ paddingInlineStart: `${Math.max(0, heading.level - 2) * 0.75}rem` }}
                   >
-                    <a href={`#${heading.anchor}`} className="block truncate text-slate-400 transition hover:text-emerald-200">
-                      {heading.title}
-                    </a>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-w-0 flex-1 truncate text-slate-400 transition hover:text-emerald-200">
+                        {heading.title}
+                      </a>
+                      <Link
+                        href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`}
+                        className="rounded p-1 text-slate-600 transition hover:bg-white/[0.05] hover:text-emerald-200"
+                        aria-label={`${heading.title} 섹션 편집`}
+                        title="섹션 편집"
+                      >
+                        <Pencil className="size-3.5" />
+                      </Link>
+                    </span>
                   </li>
                 ))}
               </ol>
