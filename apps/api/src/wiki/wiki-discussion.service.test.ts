@@ -30,6 +30,7 @@ const thread = {
   title: '문서 토론',
   status: 'open',
   createdBy: 20n,
+  pinnedCommentId: null,
   createdAt: new Date('2026-01-01T00:00:00Z'),
   updatedAt: new Date('2026-01-01T00:00:00Z')
 };
@@ -40,6 +41,8 @@ function service(options: {
   canManage?: boolean;
   onDiscuss?: () => void;
   onThreadUpdate?: (args: unknown) => void;
+  onCommentUpdate?: (args: unknown) => void;
+  onModerationCreate?: (args: unknown) => void;
 } = {}) {
   const store = {
     wikiPage: { async findUnique() { return page; } },
@@ -51,11 +54,16 @@ function service(options: {
       async findUnique() { return options.comment ?? null; },
       async findMany() { return []; },
       async count() { return 0; },
-      async update() { return options.comment; }
+      async update(args: unknown) { options.onCommentUpdate?.(args); return options.comment; }
     },
+    wikiDiscussionModerationEvent: {
+      async create(args: unknown) { options.onModerationCreate?.(args); return args; }
+    },
+    wikiDiscussionSubscription: { async findUnique() { return null; } },
     wikiProfile: {
       async findMany() { return [{ id: 20n, displayName: '테스터' }]; }
-    }
+    },
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) { return callback(store); }
   };
   const profiles = {
     async ensureWikiProfile() { return { id: 20n }; }
@@ -187,6 +195,82 @@ test('deleted discussion comments do not expose their former content', async () 
   const result = await discussions.getThread(thread.id.toString());
   assert.equal(result.comments[0]?.content, null);
   assert.equal(result.comments[0]?.status, 'deleted');
+});
+
+test('hidden discussion comments mask content for readers but remain visible to page managers', async () => {
+  const hiddenComment = {
+    id: 40n, threadId: thread.id, content: 'moderation evidence', status: 'hidden', createdBy: 20n,
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-02T00:00:00Z')
+  };
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiDiscussionComment: { async count() { return 1; }, async findMany() { return [hiddenComment]; } },
+    wikiDiscussionSubscription: { async findUnique() { return null; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const profiles = { async ensureWikiProfile() { return { id: 20n }; } } as unknown as WikiProfileService;
+  const readerPermissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const managerPermissions = {
+    async assertCanReadPage() {},
+    actorFromSession() { return { accountId: session.userId, profileId: 20n }; },
+    async canManagePage() { return true; }
+  } as unknown as WikiPermissionService;
+
+  const reader = await new WikiDiscussionService(store as unknown as PrismaService, profiles, readerPermissions).getThread('30');
+  const manager = await new WikiDiscussionService(store as unknown as PrismaService, profiles, managerPermissions).getThread('30', session);
+
+  assert.equal(reader.comments[0]?.content, null);
+  assert.equal(reader.comments[0]?.canChangeVisibility, false);
+  assert.equal(manager.comments[0]?.content, 'moderation evidence');
+  assert.equal(manager.comments[0]?.canChangeVisibility, true);
+});
+
+test('page manager hides a pinned comment and appends moderation history atomically', async () => {
+  const hiddenTarget = {
+    id: 40n, threadId: thread.id, content: 'evidence', status: 'normal', createdBy: 99n,
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: null
+  };
+  let commentUpdate: unknown;
+  let threadUpdate: unknown;
+  let moderationCreate: unknown;
+  const discussions = service({
+    thread: { ...thread, pinnedCommentId: 40n },
+    comment: hiddenTarget,
+    canManage: true,
+    onCommentUpdate: (args) => { commentUpdate = args; },
+    onThreadUpdate: (args) => { threadUpdate = args; },
+    onModerationCreate: (args) => { moderationCreate = args; }
+  });
+
+  await discussions.setCommentVisibility(session, '30', '40', 'hidden', '개인정보 노출');
+
+  assert.equal((commentUpdate as { data: { status: string } }).data.status, 'hidden');
+  assert.equal((threadUpdate as { data: { pinnedCommentId: bigint | null } }).data.pinnedCommentId, null);
+  const event = (moderationCreate as { data: { action: string; reason: string; commentId: bigint } }).data;
+  assert.deepEqual([event.action, event.reason, event.commentId], ['hide', '개인정보 노출', 40n]);
+});
+
+test('hidden comment raw source is available only to a page manager', async () => {
+  const hiddenComment = {
+    id: 40n, threadId: thread.id, content: 'preserved source', status: 'hidden', createdBy: 20n,
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-02T00:00:00Z')
+  };
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiDiscussionComment: { async findUnique() { return hiddenComment; } }
+  };
+  const profiles = { async ensureWikiProfile() { return { id: 20n }; } } as unknown as WikiProfileService;
+  const permissions = {
+    async assertCanReadPage() {},
+    actorFromSession() { return { accountId: session.userId, profileId: 20n }; },
+    async canManagePage() { return true; }
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(store as unknown as PrismaService, profiles, permissions);
+
+  await assert.rejects(discussions.getCommentRaw('30', '40', null));
+  assert.equal(await discussions.getCommentRaw('30', '40', session), 'preserved source');
 });
 
 test('recent discussion cursors fail closed when tampered', async () => {

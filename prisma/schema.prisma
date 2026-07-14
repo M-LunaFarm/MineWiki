@@ -1149,6 +1149,21 @@ model WikiDiscussionComment {
   @@map("wiki_discussion_comments")
 }
 
+model WikiDiscussionModerationEvent {
+  id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  threadId       BigInt   @map("thread_id") @db.UnsignedBigInt
+  commentId      BigInt   @map("comment_id") @db.UnsignedBigInt
+  actorProfileId BigInt   @map("actor_profile_id") @db.UnsignedBigInt
+  action         String   @db.VarChar(32)
+  reason         String   @db.VarChar(1000)
+  createdAt      DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([commentId, id], map: "idx_wiki_comment_moderation_comment")
+  @@index([threadId, id], map: "idx_wiki_comment_moderation_thread")
+  @@index([actorProfileId, createdAt], map: "idx_wiki_comment_moderation_actor")
+  @@map("wiki_discussion_moderation_events")
+}
+
 model WikiPageWatch {
   id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   profileId          BigInt    @map("profile_id") @db.UnsignedBigInt

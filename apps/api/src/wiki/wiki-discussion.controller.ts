@@ -97,7 +97,20 @@ export class WikiDiscussionController {
     @Param('commentId') commentId: string,
     @Req() request: FastifyRequest
   ): Promise<string> {
-    return this.discussions.getCommentRaw(threadId, commentId, request.sessionPayload?.userId ?? null);
+    return this.discussions.getCommentRaw(threadId, commentId, request.sessionPayload ?? null);
+  }
+
+  @Patch('discussions/:threadId/comments/:commentId/visibility')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  visibility(
+    @Param('threadId') threadId: string,
+    @Param('commentId') commentId: string,
+    @Body() body: { status?: string; reason?: string },
+    @CurrentSession() session: SessionPayload
+  ) {
+    if (body.status !== 'normal' && body.status !== 'hidden') throw new BadRequestException('Invalid comment visibility status.');
+    return this.discussions.setCommentVisibility(session, threadId, commentId, body.status, body.reason);
   }
 
   @Patch('discussions/:threadId/pin')

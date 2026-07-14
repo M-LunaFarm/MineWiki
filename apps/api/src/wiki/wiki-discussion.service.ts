@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { wikiUrl } from '@minewiki/wiki-core';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -48,6 +48,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly createdByName: string;
     readonly createdAt: string;
     readonly canDelete: boolean;
+    readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
   }>;
 }
@@ -240,12 +241,13 @@ export class WikiDiscussionService {
         return left.id < right.id ? -1 : 1;
       }).map((comment) => ({
         id: comment.id.toString(),
-        content: comment.status === 'deleted' ? null : comment.content,
+        content: comment.status === 'deleted' || (comment.status === 'hidden' && !canManage) ? null : comment.content,
         status: comment.status,
         createdBy: comment.createdBy.toString(),
         createdByName: profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
         createdAt: comment.createdAt.toISOString(),
         canDelete: Boolean(comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
+        canChangeVisibility: Boolean(canManage && comment.status !== 'deleted'),
         pinned: comment.id === thread.pinnedCommentId
       }))
     };
@@ -403,13 +405,21 @@ export class WikiDiscussionService {
     return { deleted: true, threadId: thread.id.toString() };
   }
 
-  async getCommentRaw(threadId: string, commentId: string, accountId?: string | null): Promise<string> {
+  async getCommentRaw(threadId: string, commentId: string, session?: SessionPayload | null): Promise<string> {
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: this.parseId(threadId, 'threadId') } });
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-    await this.readablePage(thread.pageId.toString(), accountId ?? null);
+    const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null);
     const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: this.parseId(commentId, 'commentId') } });
-    if (!comment || comment.threadId !== thread.id || comment.status !== 'normal') {
+    if (!comment || comment.threadId !== thread.id || !['normal', 'hidden'].includes(comment.status)) {
       throw new NotFoundException('Wiki discussion comment not found.');
+    }
+    if (comment.status === 'hidden') {
+      if (!session) throw new NotFoundException('Wiki discussion comment not found.');
+      const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+      const actor = this.wikiPermissions.actorFromSession(session, profile);
+      if (!(await this.wikiPermissions.canManagePage({ actor, page }))) {
+        throw new NotFoundException('Wiki discussion comment not found.');
+      }
     }
     return comment.content;
   }
@@ -419,7 +429,7 @@ export class WikiDiscussionService {
     const parsedCommentId = commentId ? this.parseId(commentId, 'commentId') : null;
     if (parsedCommentId) {
       const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: parsedCommentId } });
-      if (!comment || comment.threadId !== thread.id || comment.status === 'deleted') throw new NotFoundException('Wiki discussion comment not found.');
+      if (!comment || comment.threadId !== thread.id || comment.status !== 'normal') throw new NotFoundException('Wiki discussion comment not found.');
     }
     await this.prisma.wikiDiscussionThread.update({ where: { id: thread.id }, data: { pinnedCommentId: parsedCommentId, updatedAt: new Date() } });
     await this.audit(parsedCommentId ? 'wiki.discussion.pin' : 'wiki.discussion.unpin', session, thread.profileId, thread.pageId, thread.id);
@@ -443,6 +453,51 @@ export class WikiDiscussionService {
       data: { status: 'deleted', content: '', updatedAt: new Date() }
     });
     await this.audit('wiki.discussion.comment_delete', session, profile.id, page.id, thread.id);
+    return this.getThread(thread.id.toString(), session);
+  }
+
+  async setCommentVisibility(
+    session: SessionPayload,
+    threadId: string,
+    commentId: string,
+    status: 'normal' | 'hidden',
+    reasonInput?: string
+  ): Promise<WikiThreadDetail> {
+    const thread = await this.managedThread(session, threadId);
+    const commentIdValue = this.parseId(commentId, 'commentId');
+    const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: commentIdValue } });
+    if (!comment || comment.threadId !== thread.id || comment.status === 'deleted') {
+      throw new NotFoundException('Wiki discussion comment not found.');
+    }
+    if (comment.status === status) throw new ConflictException(`Wiki discussion comment is already ${status}.`);
+    if (!['normal', 'hidden'].includes(comment.status)) throw new BadRequestException('Wiki discussion comment status cannot be changed.');
+    const reason = this.requiredText(reasonInput, 'reason', 1000);
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.wikiDiscussionComment.update({
+        where: { id: comment.id },
+        data: { status, updatedAt: now }
+      });
+      if (status === 'hidden' && thread.pinnedCommentId === comment.id) {
+        await tx.wikiDiscussionThread.update({
+          where: { id: thread.id },
+          data: { pinnedCommentId: null, updatedAt: now }
+        });
+      }
+      await tx.wikiDiscussionModerationEvent.create({
+        data: {
+          threadId: thread.id,
+          commentId: comment.id,
+          actorProfileId: thread.profileId,
+          action: status === 'hidden' ? 'hide' : 'restore',
+          reason,
+          createdAt: now
+        }
+      });
+    });
+    await this.audit(`wiki.discussion.comment_${status === 'hidden' ? 'hide' : 'restore'}`, session, thread.profileId, thread.pageId, thread.id, {
+      commentId: comment.id.toString(), reason
+    });
     return this.getThread(thread.id.toString(), session);
   }
 
