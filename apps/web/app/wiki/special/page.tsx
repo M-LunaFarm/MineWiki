@@ -8,6 +8,7 @@ interface PageProps { readonly searchParams: Promise<{ type?: string; namespace?
 const TYPES: ReadonlyArray<{ key: WikiSpecialDocumentType; label: string; description: string }> = [
   { key: 'orphaned', label: '고립된 문서', description: '다른 공개 문서에서 연결되지 않은 문서' },
   { key: 'wanted', label: '필요한 문서', description: '링크는 있지만 아직 생성되지 않은 문서' },
+  { key: 'categories', label: '분류 목록', description: '현재 공개 문서에서 사용하는 분류와 문서 수' },
   { key: 'uncategorized', label: '분류 없는 문서', description: '문서 분류가 지정되지 않은 문서' },
   { key: 'old', label: '오래된 문서', description: '가장 오랫동안 갱신되지 않은 문서부터 정렬' },
   { key: 'long', label: '긴 문서', description: '원문 크기가 큰 문서부터 정렬' },
@@ -47,7 +48,7 @@ export default async function WikiSpecialPage({ searchParams }: PageProps) {
       <section>
         <div className="mb-3 flex items-end justify-between gap-3"><div><h2 className="text-xl font-bold text-white">{current.label}</h2><p className="mt-1 text-sm text-slate-500">{current.description}</p></div><span className="chip chip-muted">{result.items.length}개</span></div>
         <div className="divide-y divide-white/10 border border-white/10 bg-[#111821]">
-          {result.items.map((item) => <Link key={item.id} href={item.routePath} className="flex items-center justify-between gap-4 p-4 transition hover:bg-white/[0.03] sm:p-5"><div className="min-w-0"><p className="truncate font-semibold text-white">{item.displayTitle}</p><p className="mt-1 truncate text-xs text-slate-500">{item.namespace}:{item.title}</p></div><div className="flex shrink-0 items-center gap-3 text-xs text-slate-500">{type === 'old' && item.updatedAt ? <time dateTime={item.updatedAt}>{formatDate(item.updatedAt)}</time> : item.value !== null ? <span>{type === 'wanted' ? `링크 ${item.value}` : `${item.value.toLocaleString('ko-KR')} bytes`}</span> : null}<ArrowUpRight className="size-4" /></div></Link>)}
+          {result.items.map((item) => <Link key={item.id} href={item.routePath} className="flex items-center justify-between gap-4 p-4 transition hover:bg-white/[0.03] sm:p-5"><div className="min-w-0"><p className="truncate font-semibold text-white">{item.displayTitle}</p><p className="mt-1 truncate text-xs text-slate-500">{item.namespace}:{item.title}</p></div><div className="flex shrink-0 items-center gap-3 text-xs text-slate-500">{type === 'old' && item.updatedAt ? <time dateTime={item.updatedAt}>{formatDate(item.updatedAt)}</time> : item.value !== null ? <span>{type === 'wanted' ? `링크 ${item.value}` : type === 'categories' ? `문서 ${item.value}` : `${item.value.toLocaleString('ko-KR')} bytes`}</span> : null}<ArrowUpRight className="size-4" /></div></Link>)}
           {result.items.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">조건에 해당하는 문서가 없습니다.</p> : null}
         </div>
       </section>

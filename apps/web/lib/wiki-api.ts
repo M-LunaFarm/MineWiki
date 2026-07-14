@@ -160,7 +160,7 @@ export interface WikiSearchSuggestionResponse {
   readonly exactMatch: WikiSearchResult | null;
 }
 
-export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'old' | 'long' | 'short';
+export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'categories' | 'uncategorized' | 'old' | 'long' | 'short';
 
 export interface WikiSpecialDocumentResponse {
   readonly type: WikiSpecialDocumentType;

@@ -179,7 +179,7 @@ export interface WikiDeletedPageSummary {
   readonly updatedAt: string;
 }
 
-export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'old' | 'long' | 'short';
+export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'categories' | 'uncategorized' | 'old' | 'long' | 'short';
 
 export interface WikiSpecialDocumentItem {
   readonly id: string;
@@ -862,7 +862,7 @@ export class WikiReadService {
     readonly limit?: string | number;
     readonly accountId?: string | null;
   }): Promise<WikiSpecialDocumentResponse> {
-    const allowedTypes: WikiSpecialDocumentType[] = ['random', 'orphaned', 'wanted', 'uncategorized', 'old', 'long', 'short'];
+    const allowedTypes: WikiSpecialDocumentType[] = ['random', 'orphaned', 'wanted', 'categories', 'uncategorized', 'old', 'long', 'short'];
     const type = allowedTypes.includes(input.type as WikiSpecialDocumentType)
       ? input.type as WikiSpecialDocumentType
       : 'orphaned';
@@ -939,16 +939,19 @@ export class WikiReadService {
     }
 
     const visiblePageIds = new Set(visiblePages.map((page) => page.id));
-    const links = visiblePageIds.size > 0
+    const visiblePageById = new Map(visiblePages.map((page) => [page.id, page]));
+    const indexedLinks = visiblePageIds.size > 0
       ? await this.prisma.wikiPageLink.findMany({
           where: { sourcePageId: { in: [...visiblePageIds] } },
-          select: { sourcePageId: true, targetNamespaceCode: true, targetSlug: true }
+          select: { sourcePageId: true, sourceRevisionId: true, targetNamespaceCode: true, targetSlug: true, linkType: true }
         })
       : [];
+    const currentLinks = indexedLinks.filter((link) => visiblePageById.get(link.sourcePageId)?.currentRevisionId === link.sourceRevisionId);
+    const documentLinks = currentLinks.filter((link) => link.linkType === 'link');
     if (type === 'wanted') {
       const existing = new Set(visiblePages.map((page) => `${namespaceById.get(page.namespaceId) ?? 'main'}:${page.slug}`));
       const counts = new Map<string, { namespace: string; slug: string; count: number }>();
-      for (const link of links) {
+      for (const link of documentLinks) {
         const key = `${link.targetNamespaceCode}:${link.targetSlug}`;
         if (existing.has(key)) continue;
         const current = counts.get(key);
@@ -970,7 +973,31 @@ export class WikiReadService {
       };
     }
 
-    const incoming = new Set(links.map((link) => `${link.targetNamespaceCode}:${link.targetSlug}`));
+    if (type === 'categories') {
+      const counts = new Map<string, number>();
+      for (const link of currentLinks) {
+        if (link.linkType !== 'category' || link.targetNamespaceCode !== 'category') continue;
+        counts.set(link.targetSlug, (counts.get(link.targetSlug) ?? 0) + 1);
+      }
+      const categories = [...counts.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'ko'))
+        .slice(0, limit);
+      return {
+        type,
+        items: categories.map(([slug, count]) => ({
+          id: `category:${slug}`,
+          pageId: null,
+          namespace: 'category',
+          title: slug,
+          displayTitle: slug.replace(/_/g, ' '),
+          routePath: `/wiki/category/${slug.split('/').map((part) => encodeURIComponent(part)).join('/')}`,
+          value: count,
+          updatedAt: null
+        }))
+      };
+    }
+
+    const incoming = new Set(documentLinks.map((link) => `${link.targetNamespaceCode}:${link.targetSlug}`));
     const spaces = visiblePages.length > 0
       ? await this.prisma.wikiSpace.findMany({
           where: { id: { in: [...new Set(visiblePages.map((page) => page.spaceId))] } },

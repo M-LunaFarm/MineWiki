@@ -217,8 +217,10 @@ test('special wanted documents aggregate unresolved current links', async () => 
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
     wikiPageRevision: { async findMany() { return [{ id: 11n, contentRaw: '[[없는 문서]]', contentSize: 8 }]; } },
     wikiPageLink: { async findMany(args: unknown) { linkQuery = args; return [
-      { sourcePageId: 1n, targetNamespaceCode: 'main', targetSlug: '없는 문서' },
-      { sourcePageId: 1n, targetNamespaceCode: 'main', targetSlug: '없는 문서' }
+      { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'main', targetSlug: '없는 문서', linkType: 'link' },
+      { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'main', targetSlug: '없는 문서', linkType: 'link' },
+      { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'category', targetSlug: '가이드', linkType: 'category' },
+      { sourcePageId: 1n, sourceRevisionId: 10n, targetNamespaceCode: 'main', targetSlug: '오래된 링크', linkType: 'link' }
     ]; } }
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
@@ -227,6 +229,31 @@ test('special wanted documents aggregate unresolved current links', async () => 
   assert.equal(result.items[0]?.title, '없는 문서');
   assert.equal(result.items[0]?.value, 2);
   assert.equal(Object.hasOwn(linkQuery as object, 'take'), false);
+});
+
+test('special category list counts only current categories from readable documents', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const readable = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'source', slug: 'source', title: '출처', displayTitle: '출처', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
+  const hidden = { ...readable, id: 2n, currentRevisionId: 21n, slug: 'hidden', title: '비공개', displayTitle: '비공개' };
+  const prisma = {
+    wikiPage: { async findMany() { return [readable, hidden]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 11n, contentRaw: '[[분류:가이드]]', contentSize: 9 }]; } },
+    wikiPageLink: { async findMany() { return [
+      { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'category', targetSlug: '가이드', linkType: 'category' },
+      { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'category', targetSlug: '초보자', linkType: 'category' },
+      { sourcePageId: 1n, sourceRevisionId: 10n, targetNamespaceCode: 'category', targetSlug: '과거', linkType: 'category' },
+      { sourcePageId: 2n, sourceRevisionId: 21n, targetNamespaceCode: 'category', targetSlug: '비공개', linkType: 'category' }
+    ]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage({ page }: { page: { id: bigint } }) { if (page.id === 2n) throw new Error('hidden'); } } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getSpecialDocuments({ type: 'categories' });
+
+  assert.deepEqual(result.items.map((item) => [item.title, item.value, item.routePath]), [
+    ['가이드', 1, '/wiki/category/%EA%B0%80%EC%9D%B4%EB%93%9C'],
+    ['초보자', 1, '/wiki/category/%EC%B4%88%EB%B3%B4%EC%9E%90']
+  ]);
 });
 
 test('blame keeps attribution for lines preserved across later revisions', async () => {
