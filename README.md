@@ -24,6 +24,16 @@ DISCORD_REDIRECT_URI=https://minewiki.kr/auth/callback/discord
 MICROSOFT_REDIRECT_URI=https://verify.minewiki.kr/minecraft/callback
 ```
 
+### OAuth 운영자 등록 체크리스트
+
+아래 값은 경로, 대소문자, 마지막 슬래시까지 완전히 일치해야 합니다. 운영 앱에는 `localhost` 콜백을 섞지 말고, 개발용 앱 등록을 별도로 사용합니다.
+
+1. **네이버 로그인** — [NAVER Developers 애플리케이션](https://developers.naver.com/apps/#/list)에서 MineWiki 앱을 열고 **API 설정 → 네이버 로그인 → Callback URL**에 `https://minewiki.kr/auth/callback/naver`를 등록합니다. 서비스 URL은 `https://minewiki.kr`입니다.
+2. **Discord OAuth2** — [Discord Developer Portal](https://discord.com/developers/applications)에서 애플리케이션을 열고 **OAuth2 → Redirects**에 `https://minewiki.kr/auth/callback/discord`를 등록한 뒤 저장합니다.
+3. **Microsoft / Minecraft 소유권 인증** — [Microsoft Entra 앱 등록](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)에서 앱을 열고 **Authentication → Platform configurations → Web**에 `https://verify.minewiki.kr/minecraft/callback`를 등록합니다. 이 주소는 로그인용 `minewiki.kr`이 아니라 격리된 인증 서비스 주소입니다.
+
+등록 후 배포 환경의 `NAVER_REDIRECT_URI`, `DISCORD_REDIRECT_URI`, `MICROSOFT_REDIRECT_URI`에도 위와 동일한 값을 넣습니다. 콜백 URL에는 쿼리 문자열을 미리 붙이지 않습니다.
+
 These are public redirect addresses, not OAuth client secrets. Keep each provider's client ID and client secret only in the production secret store.
 
 Useful provider registration URLs:
@@ -46,6 +56,14 @@ The following production URLs return the original downloadable PNG files and may
 | Open Graph image | 1200 × 630 | [Download PNG](https://minewiki.kr/og) |
 
 ![MineWiki app icon](https://minewiki.kr/icon)
+
+서버에서 원본 크기로 바로 저장하려면 다음 명령을 사용할 수 있습니다.
+
+```bash
+curl -L https://minewiki.kr/icon -o minewiki-icon-512.png
+curl -L https://minewiki.kr/apple-icon -o minewiki-apple-icon-180.png
+curl -L https://minewiki.kr/og -o minewiki-open-graph-1200x630.png
+```
 
 ## Product Routing
 
