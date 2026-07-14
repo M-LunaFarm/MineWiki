@@ -67,7 +67,7 @@ const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published']);
 const PUBLIC_REVISION_VISIBILITIES = new Set(['public']);
 const ACTIVE_SPACE_STATUSES = new Set(['active']);
 const ACTIVE_PROFILE_STATUSES = new Set(['active']);
-const RESTRICTED_CREATE_NAMESPACES = new Set(['dev', 'help', 'project', 'template', 'file']);
+const RESTRICTED_CREATE_NAMESPACES = new Set(['dev', 'help', 'project', 'template', 'category', 'file']);
 const PUBLIC_READ_PROTECTION_LEVELS = new Set([
   'open',
   'login_required',

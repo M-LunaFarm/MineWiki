@@ -17,6 +17,7 @@ export const namespaceSpecs: Array<{
   { code: 'help', displayName: '도움말', pathPrefix: '/wiki/도움말', isContent: false },
   { code: 'project', displayName: '프로젝트', pathPrefix: '/wiki/프로젝트', isContent: false },
   { code: 'template', displayName: '틀', pathPrefix: '/wiki/틀', isContent: false },
+  { code: 'category', displayName: '분류', pathPrefix: '/wiki/category', isContent: false },
   { code: 'file', displayName: '파일', pathPrefix: '/file', isContent: false }
 ];
 
@@ -31,6 +32,7 @@ const prefixToNamespace: Array<[string, NamespaceCode]> = [
   ['help', 'help'],
   ['project', 'project'],
   ['template', 'template'],
+  ['category', 'category'],
   ['file', 'file'],
   ['files', 'file'],
   ['모드팩', 'modpack'],
@@ -42,6 +44,7 @@ const prefixToNamespace: Array<[string, NamespaceCode]> = [
   ['도움말', 'help'],
   ['프로젝트', 'project'],
   ['틀', 'template'],
+  ['분류', 'category'],
   ['파일', 'file']
 ];
 
@@ -79,6 +82,7 @@ export function wikiUrl(namespace: NamespaceCode, title: string) {
   if (namespace === 'guide') return `/guide/${encodedTitle}`;
   if (namespace === 'data') return `/data/${encodedTitle}`;
   if (namespace === 'template') return `/template/${encodedTitle}`;
+  if (namespace === 'category') return `/wiki/category/${encodedTitle}`;
   const spec = namespaceSpecs.find((item) => item.code === namespace) ?? namespaceSpecs[0];
   return `${encodePathPrefix(spec.pathPrefix)}/${encodedTitle}`;
 }

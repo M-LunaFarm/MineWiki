@@ -563,6 +563,32 @@ test('locked editor cannot create in a restricted namespace', async () => {
   assert.equal(decision.reason, 'restricted_namespace');
 });
 
+test('category creation requires an explicit trusted ACL or elevated access', async () => {
+  const denied = await createService().canCreatePage({
+    actor: actor({ profileId: 200n }),
+    namespaceCode: 'category',
+    spaceId: 10n,
+    title: '게임 플레이'
+  });
+  const allowed = await createService({
+    acl: {
+      async evaluate(input) {
+        return input.action === 'create'
+          ? { matched: true, allowed: true, reason: 'trusted_category_editor' }
+          : { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  }).canCreatePage({
+    actor: actor({ profileId: 200n, groups: ['trusted'] }),
+    namespaceCode: 'category',
+    spaceId: 10n,
+    title: '게임 플레이'
+  });
+
+  assert.deepEqual(denied, { allowed: false, reason: 'restricted_namespace' });
+  assert.deepEqual(allowed, { allowed: true, reason: 'trusted_category_editor' });
+});
+
 test('blocked wiki profile cannot create a page', async () => {
   const service = createService();
   const decision = await service.canCreatePage({

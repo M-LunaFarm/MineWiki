@@ -197,6 +197,18 @@ export class WikiController {
     return this.wikiRead.getCategoryMembers({ category, namespace, cursor, limit, accountId: request.sessionPayload?.userId ?? null });
   }
 
+  @Get('categories')
+  @UseGuards(OptionalSessionGuard)
+  categoryMembersByQuery(
+    @Query('category') category: string | undefined,
+    @Req() request: FastifyRequest,
+    @Query('namespace') namespace?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiCategoryResponse> {
+    return this.wikiRead.getCategoryMembers({ category: category ?? '', namespace, cursor, limit, accountId: request.sessionPayload?.userId ?? null });
+  }
+
   @Get('templates')
   @UseGuards(OptionalSessionGuard)
   templates(

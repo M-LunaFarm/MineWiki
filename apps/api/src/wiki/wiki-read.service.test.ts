@@ -322,13 +322,24 @@ test('category membership exposes only current readable documents', async () => 
   const stale = { ...current, id: 30n, slug: '과거', title: '과거', displayTitle: '과거', currentRevisionId: 301n };
   const hidden = { ...current, id: 40n, slug: '비공개', title: '비공개', displayTitle: '비공개', currentRevisionId: 400n };
   const prisma = {
-    wikiPageLink: { async findMany() { return [
-      { id: 3n, sourcePageId: 20n, sourceRevisionId: 200n },
-      { id: 2n, sourcePageId: 30n, sourceRevisionId: 300n },
-      { id: 1n, sourcePageId: 40n, sourceRevisionId: 400n }
-    ]; } },
-    wikiPage: { async findMany() { return [current, stale, hidden]; } },
-    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+    wikiPageLink: {
+      async findMany(args: { take?: number }) {
+        if (args.take === 501) return [];
+        return [
+          { id: 3n, sourcePageId: 20n, sourceRevisionId: 200n },
+          { id: 2n, sourcePageId: 30n, sourceRevisionId: 300n },
+          { id: 1n, sourcePageId: 40n, sourceRevisionId: 400n }
+        ];
+      }
+    },
+    wikiPage: {
+      async findUnique() { return null; },
+      async findMany() { return [current, stale, hidden]; }
+    },
+    wikiNamespace: {
+      async findUnique() { return { id: 2, code: 'category' }; },
+      async findMany() { return [{ id: 1, code: 'main' }]; }
+    }
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage({ page }: { page: { id: bigint } }) { if (page.id === 40n) throw new Error('hidden'); } } as unknown as WikiPermissionService;
 
@@ -337,6 +348,105 @@ test('category membership exposes only current readable documents', async () => 
   assert.equal(response.category, '초보자');
   assert.deepEqual(response.items.map((item) => item.pageId), ['20']);
   assert.equal(response.items[0]?.routePath, '/wiki/%EA%B0%80%EC%9D%B4%EB%93%9C');
+});
+
+test('category hierarchy exposes its document, parents, and current readable subcategories', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const category = { id: 101n, namespaceId: 2, spaceId: 2n, slug: '몹', title: '몹', displayTitle: '몹', currentRevisionId: 1001n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now, localPath: '몹' };
+  const child = { ...category, id: 102n, slug: '적대적_몹', title: '적대적 몹', displayTitle: '적대적 몹', currentRevisionId: 1002n };
+  const member = { ...category, id: 20n, namespaceId: 1, spaceId: 1n, slug: '좀비', title: '좀비', displayTitle: '좀비', currentRevisionId: 200n };
+  const parentLink = { id: 10n, sourcePageId: 101n, sourceRevisionId: 1001n, targetSlug: '분류' };
+  const childLink = { id: 9n, sourcePageId: 102n, sourceRevisionId: 1002n, targetSlug: '몹' };
+  const memberLink = { id: 8n, sourcePageId: 20n, sourceRevisionId: 200n, targetSlug: '몹' };
+  const prisma = {
+    wikiNamespace: {
+      async findUnique() { return { id: 2, code: 'category' }; },
+      async findMany() { return [{ id: 1, code: 'main' }]; }
+    },
+    wikiPage: {
+      async findUnique() { return category; },
+      async findMany(args: { where: { namespaceId?: number | { not: number } } }) {
+        return typeof args.where.namespaceId === 'number' ? [child] : [member];
+      }
+    },
+    wikiPageLink: {
+      async findMany(args: { where: { sourcePageId?: bigint }; take?: number }) {
+        if (args.where.sourcePageId === category.id) return [parentLink];
+        return [childLink, memberLink];
+      }
+    }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const response = await new WikiReadService(prisma, permissions).getCategoryMembers({ category: '몹' });
+
+  assert.deepEqual(response.document, { pageId: '101', routePath: '/wiki/category/%EB%AA%B9' });
+  assert.deepEqual(response.parents, [{ category: '분류', routePath: '/wiki/category/%EB%B6%84%EB%A5%98' }]);
+  assert.deepEqual(response.subcategories.map((item) => item.pageId), ['102']);
+  assert.deepEqual(response.items.map((item) => item.pageId), ['20']);
+  assert.equal(response.isOrphan, false);
+});
+
+test('category hierarchy detects a cycle that cannot reach the root', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const categoryA = { id: 101n, namespaceId: 2, spaceId: 2n, slug: 'A', title: 'A', displayTitle: 'A', currentRevisionId: 1001n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now, localPath: 'A' };
+  const categoryB = { ...categoryA, id: 102n, slug: 'B', title: 'B', displayTitle: 'B', currentRevisionId: 1002n };
+  const linkAtoB = { id: 10n, sourcePageId: 101n, sourceRevisionId: 1001n, targetSlug: 'B' };
+  const linkBtoA = { id: 9n, sourcePageId: 102n, sourceRevisionId: 1002n, targetSlug: 'A' };
+  const prisma = {
+    wikiNamespace: {
+      async findUnique() { return { id: 2, code: 'category' }; },
+      async findMany() { return []; }
+    },
+    wikiPage: {
+      async findUnique(args: { where: { namespaceId_slug: { slug: string } } }) {
+        return args.where.namespaceId_slug.slug === 'B' ? categoryB : categoryA;
+      },
+      async findMany(args: { where: { namespaceId?: number | { not: number } } }) {
+        return typeof args.where.namespaceId === 'number' ? [categoryB] : [];
+      }
+    },
+    wikiPageLink: {
+      async findMany(args: { where: { sourcePageId?: bigint }; take?: number }) {
+        if (args.where.sourcePageId === categoryA.id) return [linkAtoB];
+        if (args.where.sourcePageId === categoryB.id) return [linkBtoA];
+        return [linkBtoA];
+      }
+    }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const response = await new WikiReadService(prisma, permissions).getCategoryMembers({ category: 'A' });
+
+  assert.equal(response.isOrphan, true);
+});
+
+test('special orphaned categories excludes descendants reachable from the root', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const page = (id: bigint, slug: string, revisionId: bigint) => ({
+    id, namespaceId: 2, spaceId: 2n, slug, title: slug, displayTitle: slug,
+    currentRevisionId: revisionId, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 1n, createdAt: now, updatedAt: now, localPath: slug
+  });
+  const pages = [page(1n, '분류', 11n), page(2n, '연결됨', 12n), page(3n, '고립_A', 13n), page(4n, '고립_B', 14n)];
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 2, code: 'category' }; } },
+    wikiPage: { async findMany() { return pages; } },
+    wikiPageLink: { async findMany() { return [
+      { sourcePageId: 2n, sourceRevisionId: 12n, targetSlug: '분류' },
+      { sourcePageId: 3n, sourceRevisionId: 13n, targetSlug: '고립_B' },
+      { sourcePageId: 4n, sourceRevisionId: 14n, targetSlug: '고립_A' }
+    ]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getSpecialDocuments({ type: 'orphaned_categories' });
+
+  assert.deepEqual(result.items.map((item) => item.pageId), ['3', '4']);
+  assert.deepEqual(result.items.map((item) => item.routePath), [
+    '/wiki/category/%EA%B3%A0%EB%A6%BD_A',
+    '/wiki/category/%EA%B3%A0%EB%A6%BD_B'
+  ]);
 });
 
 test('contributions resolve public changes to stable document routes', async () => {

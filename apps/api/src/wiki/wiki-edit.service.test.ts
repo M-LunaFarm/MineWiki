@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
 import { parseMarkup } from '@minewiki/wiki-core';
-import { astContainsFile, WikiEditService } from './wiki-edit.service';
+import { astContainsFile, categoryDocumentReferencesSelf, WikiEditService } from './wiki-edit.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
@@ -14,6 +14,12 @@ const hasDatabase = Boolean(process.env.DATABASE_URL);
 test('file dependencies are detected inside nested folding blocks', () => {
   assert.equal(astContainsFile(parseMarkup('일반 문서').ast), false);
   assert.equal(astContainsFile(parseMarkup('{{{#!folding 자세히\n[[파일:logo.png]]\n}}}').ast), true);
+});
+
+test('category documents cannot list themselves as a parent', () => {
+  assert.equal(categoryDocumentReferencesSelf('category', '게임 플레이/몹', ['게임_플레이/몹']), true);
+  assert.equal(categoryDocumentReferencesSelf('category', '게임 플레이/몹', ['게임 플레이']), false);
+  assert.equal(categoryDocumentReferencesSelf('main', '게임 플레이/몹', ['게임 플레이/몹']), false);
 });
 
 function session(userId: string, isElevated = false) {

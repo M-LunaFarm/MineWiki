@@ -185,6 +185,8 @@ export class WikiEditService {
         isMinor: Boolean(request.isMinor),
         actorId: actor.id,
         title: page.displayTitle,
+        namespaceCode,
+        pageTitle: page.title,
         createdAt: now
       });
       await tx.wikiPage.update({
@@ -331,6 +333,8 @@ export class WikiEditService {
         isMinor: Boolean(request.isMinor),
         actorId: attributionProfileId,
         title: page.displayTitle,
+        namespaceCode: namespace.code,
+        pageTitle: page.title,
         createdAt: now
       });
       await tx.wikiPage.update({
@@ -414,6 +418,8 @@ export class WikiEditService {
         isMinor: editRequest.isMinor,
         actorId: editRequest.createdBy,
         title: page.displayTitle,
+        namespaceCode: namespace.code,
+        pageTitle: page.title,
         createdAt: now
       });
       await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
@@ -558,6 +564,8 @@ export class WikiEditService {
           isMinor: false,
           actorId: actor.id,
           title: redirect.displayTitle,
+          namespaceCode: namespace.code,
+          pageTitle: redirect.title,
           createdAt: now
         });
         await tx.wikiPage.update({
@@ -672,6 +680,8 @@ export class WikiEditService {
         isMinor: false,
         actorId: actor.id,
         title: page.displayTitle,
+        namespaceCode: namespace.code,
+        pageTitle: page.title,
         createdAt: now
       });
       await tx.wikiPage.update({
@@ -999,12 +1009,17 @@ export class WikiEditService {
       isMinor: boolean;
       actorId: bigint;
       title: string;
+      namespaceCode: string;
+      pageTitle: string;
       createdAt: Date;
     }
   ) {
     const parsed = parseMarkup(input.contentRaw);
     if (parsed.blockingErrors.length > 0) {
       throw new BadRequestException(`Wiki markup contains blocking errors: ${parsed.blockingErrors.join(', ')}`);
+    }
+    if (categoryDocumentReferencesSelf(input.namespaceCode, input.pageTitle, parsed.categories)) {
+      throw new BadRequestException('A category document cannot list itself as a parent category.');
     }
     const revision = await tx.wikiPageRevision.create({
       data: {
@@ -1164,6 +1179,16 @@ export class WikiEditService {
 
 export function astContainsFile(ast: readonly AstNode[]): boolean {
   return ast.some((node) => node.type === 'file' || (node.type === 'folding' && astContainsFile(node.children)));
+}
+
+export function categoryDocumentReferencesSelf(
+  namespaceCode: string,
+  pageTitle: string,
+  categories: readonly string[]
+): boolean {
+  if (namespaceCode !== 'category') return false;
+  const pageSlug = slugifyTitle(pageTitle);
+  return categories.some((category) => slugifyTitle(category) === pageSlug);
 }
 
 function sectionContentsByAnchor(content: string, anchor: string): string[] {

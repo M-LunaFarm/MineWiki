@@ -179,7 +179,16 @@ export interface WikiDeletedPageSummary {
   readonly updatedAt: string;
 }
 
-export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'categories' | 'uncategorized' | 'old' | 'long' | 'short';
+export type WikiSpecialDocumentType =
+  | 'random'
+  | 'orphaned'
+  | 'orphaned_categories'
+  | 'wanted'
+  | 'categories'
+  | 'uncategorized'
+  | 'old'
+  | 'long'
+  | 'short';
 
 export interface WikiSpecialDocumentItem {
   readonly id: string;
@@ -199,6 +208,22 @@ export interface WikiSpecialDocumentResponse {
 
 export interface WikiCategoryResponse {
   readonly category: string;
+  readonly document: {
+    readonly pageId: string;
+    readonly routePath: string;
+  } | null;
+  readonly parents: ReadonlyArray<{
+    readonly category: string;
+    readonly routePath: string;
+  }>;
+  readonly subcategories: ReadonlyArray<{
+    readonly pageId: string;
+    readonly category: string;
+    readonly displayTitle: string;
+    readonly routePath: string;
+  }>;
+  readonly isRoot: boolean;
+  readonly isOrphan: boolean;
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly pageId: string;
@@ -499,10 +524,95 @@ export class WikiReadService {
     const category = input.category.trim().replace(/_/g, ' ');
     const categorySlug = slugifyTitle(category);
     if (!categorySlug) throw new BadRequestException('category is required.');
+    const categoryNamespace = await this.prisma.wikiNamespace.findUnique({
+      where: { code: 'category' },
+      select: { id: true, code: true }
+    });
     const namespace = input.namespace?.trim()
       ? await this.prisma.wikiNamespace.findUnique({ where: { code: input.namespace.trim() }, select: { id: true, code: true } })
       : null;
-    if (input.namespace?.trim() && !namespace) return { category, items: [], nextCursor: null };
+    const emptyHierarchy = {
+      document: null,
+      parents: [],
+      subcategories: [],
+      isRoot: categorySlug === slugifyTitle('분류'),
+      isOrphan: false
+    };
+    if (input.namespace?.trim() && !namespace) return { category, ...emptyHierarchy, items: [], nextCursor: null };
+    const categoryPage = categoryNamespace
+      ? await this.prisma.wikiPage.findUnique({
+          where: { namespaceId_slug: { namespaceId: categoryNamespace.id, slug: categorySlug } }
+        })
+      : null;
+    let readableCategoryPage = null as typeof categoryPage;
+    if (categoryPage && categoryPage.status !== 'deleted' && categoryPage.currentRevisionId) {
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: categoryPage });
+        readableCategoryPage = categoryPage;
+      } catch {
+        readableCategoryPage = null;
+      }
+    }
+    const parentLinks = readableCategoryPage
+      ? await this.prisma.wikiPageLink.findMany({
+          where: {
+            sourcePageId: readableCategoryPage.id,
+            sourceRevisionId: readableCategoryPage.currentRevisionId ?? undefined,
+            targetNamespaceCode: 'category',
+            linkType: 'category'
+          },
+          orderBy: [{ targetSlug: 'asc' }],
+          take: 100
+        })
+      : [];
+    const parents = parentLinks.map((link) => ({
+      category: categoryTitleFromSlug(link.targetSlug),
+      routePath: wikiUrl('category', link.targetSlug)
+    }));
+    const childLinks = categoryNamespace
+      ? await this.prisma.wikiPageLink.findMany({
+          where: {
+            targetNamespaceCode: 'category',
+            targetSlug: categorySlug,
+            linkType: 'category'
+          },
+          orderBy: [{ id: 'desc' }],
+          take: 501
+        })
+      : [];
+    const childPageIds = [...new Set(childLinks.map((link) => link.sourcePageId))];
+    const childPages = categoryNamespace && childPageIds.length > 0
+      ? await this.prisma.wikiPage.findMany({
+          where: {
+            id: { in: childPageIds },
+            namespaceId: categoryNamespace.id,
+            status: { in: ['normal', 'active', 'published'] },
+            pageType: { not: 'redirect' }
+          }
+        })
+      : [];
+    const childLinkByPageId = new Map(childLinks.map((link) => [link.sourcePageId, link]));
+    const subcategories: WikiCategoryResponse['subcategories'][number][] = [];
+    for (const childPage of childPages) {
+      const link = childLinkByPageId.get(childPage.id);
+      if (!link || childPage.currentRevisionId !== link.sourceRevisionId) continue;
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: childPage });
+      } catch {
+        continue;
+      }
+      subcategories.push({
+        pageId: childPage.id.toString(),
+        category: childPage.title,
+        displayTitle: childPage.displayTitle,
+        routePath: wikiUrl('category', childPage.title)
+      });
+    }
+    subcategories.sort((left, right) => left.displayTitle.localeCompare(right.displayTitle, 'ko'));
+    const isRoot = categorySlug === slugifyTitle('분류');
+    const reachesRoot = isRoot || (readableCategoryPage && categoryNamespace
+      ? await this.categoryParentsReachRoot(parentLinks.map((link) => link.targetSlug), categoryNamespace.id, input.accountId ?? null)
+      : false);
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
     const scanLimit = Math.min(limit * 4 + 1, 401);
@@ -521,7 +631,11 @@ export class WikiReadService {
       ? await this.prisma.wikiPage.findMany({
           where: {
             id: { in: pageIds },
-            namespaceId: namespace?.id,
+            ...(namespace
+              ? { namespaceId: namespace.id }
+              : categoryNamespace
+                ? { namespaceId: { not: categoryNamespace.id } }
+                : {}),
             status: { in: ['normal', 'active', 'published'] },
             pageType: { not: 'redirect' }
           }
@@ -557,7 +671,52 @@ export class WikiReadService {
       if (items.length >= limit) break;
     }
     const mayHaveMore = links.length > 0 && (items.length >= limit || links.length >= scanLimit);
-    return { category, items, nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null };
+    return {
+      category,
+      document: readableCategoryPage ? {
+        pageId: readableCategoryPage.id.toString(),
+        routePath: wikiUrl('category', readableCategoryPage.title)
+      } : null,
+      parents,
+      subcategories,
+      isRoot,
+      isOrphan: Boolean(readableCategoryPage && !reachesRoot),
+      items,
+      nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
+    };
+  }
+
+  private async categoryParentsReachRoot(initialParentSlugs: readonly string[], namespaceId: number, accountId: string | null): Promise<boolean> {
+    const rootSlug = slugifyTitle('분류');
+    const queue = [...initialParentSlugs];
+    const visited = new Set<string>();
+    while (queue.length > 0 && visited.size < 1000) {
+      const slug = queue.shift();
+      if (!slug || visited.has(slug)) continue;
+      if (slug === rootSlug) return true;
+      visited.add(slug);
+      const page = await this.prisma.wikiPage.findUnique({
+        where: { namespaceId_slug: { namespaceId, slug } }
+      });
+      if (!page || page.status === 'deleted' || !page.currentRevisionId) continue;
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId, page });
+      } catch {
+        continue;
+      }
+      const links = await this.prisma.wikiPageLink.findMany({
+        where: {
+          sourcePageId: page.id,
+          sourceRevisionId: page.currentRevisionId,
+          targetNamespaceCode: 'category',
+          linkType: 'category'
+        },
+        orderBy: [{ targetSlug: 'asc' }],
+        take: 100
+      });
+      for (const link of links) if (!visited.has(link.targetSlug)) queue.push(link.targetSlug);
+    }
+    return false;
   }
 
   async getDocumentTemplates(input: {
@@ -862,7 +1021,17 @@ export class WikiReadService {
     readonly limit?: string | number;
     readonly accountId?: string | null;
   }): Promise<WikiSpecialDocumentResponse> {
-    const allowedTypes: WikiSpecialDocumentType[] = ['random', 'orphaned', 'wanted', 'categories', 'uncategorized', 'old', 'long', 'short'];
+    const allowedTypes: WikiSpecialDocumentType[] = [
+      'random',
+      'orphaned',
+      'orphaned_categories',
+      'wanted',
+      'categories',
+      'uncategorized',
+      'old',
+      'long',
+      'short'
+    ];
     const type = allowedTypes.includes(input.type as WikiSpecialDocumentType)
       ? input.type as WikiSpecialDocumentType
       : 'orphaned';
@@ -871,6 +1040,10 @@ export class WikiReadService {
       ? await this.prisma.wikiNamespace.findUnique({ where: { code: input.namespace.trim() } })
       : null;
     if (input.namespace?.trim() && !namespace) return { type, items: [] };
+    if (type === 'orphaned_categories') {
+      if (namespace && namespace.code !== 'category') return { type, items: [] };
+      return this.getOrphanedCategories(type, limit, input.accountId ?? null);
+    }
 
     const pages = await this.prisma.wikiPage.findMany({
       where: {
@@ -1010,6 +1183,78 @@ export class WikiReadService {
       return !rootPageIds.has(page.id) && !incoming.has(key);
     }).slice(0, limit);
     return { type, items: orphaned.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)) };
+  }
+
+  private async getOrphanedCategories(
+    type: WikiSpecialDocumentType,
+    limit: number,
+    accountId: string | null
+  ): Promise<WikiSpecialDocumentResponse> {
+    const namespace = await this.prisma.wikiNamespace.findUnique({
+      where: { code: 'category' },
+      select: { id: true, code: true }
+    });
+    if (!namespace) return { type, items: [] };
+
+    const pages = await this.prisma.wikiPage.findMany({
+      where: {
+        namespaceId: namespace.id,
+        status: { in: ['normal', 'active', 'published'] },
+        pageType: { not: 'redirect' },
+        currentRevisionId: { not: null }
+      },
+      orderBy: [{ updatedAt: 'desc' }]
+    });
+    const visiblePages: typeof pages = [];
+    for (const page of pages) {
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId, page });
+        visiblePages.push(page);
+      } catch {
+        continue;
+      }
+    }
+    if (visiblePages.length === 0) return { type, items: [] };
+
+    const pageById = new Map(visiblePages.map((page) => [page.id, page]));
+    const pageBySlug = new Map(visiblePages.map((page) => [page.slug, page]));
+    const links = await this.prisma.wikiPageLink.findMany({
+      where: {
+        sourcePageId: { in: [...pageById.keys()] },
+        targetNamespaceCode: 'category',
+        linkType: 'category'
+      },
+      select: { sourcePageId: true, sourceRevisionId: true, targetSlug: true }
+    });
+    const childrenByParentSlug = new Map<string, Set<string>>();
+    for (const link of links) {
+      const source = pageById.get(link.sourcePageId);
+      if (!source || source.currentRevisionId !== link.sourceRevisionId) continue;
+      const children = childrenByParentSlug.get(link.targetSlug) ?? new Set<string>();
+      children.add(source.slug);
+      childrenByParentSlug.set(link.targetSlug, children);
+    }
+
+    const rootSlug = slugifyTitle('분류');
+    const reachable = new Set<string>();
+    const queue = pageBySlug.has(rootSlug) ? [rootSlug] : [];
+    while (queue.length > 0) {
+      const slug = queue.shift();
+      if (!slug || reachable.has(slug)) continue;
+      reachable.add(slug);
+      for (const childSlug of childrenByParentSlug.get(slug) ?? []) {
+        if (pageBySlug.has(childSlug) && !reachable.has(childSlug)) queue.push(childSlug);
+      }
+    }
+
+    const orphaned = visiblePages
+      .filter((page) => page.slug !== rootSlug && !reachable.has(page.slug))
+      .sort((left, right) => left.displayTitle.localeCompare(right.displayTitle, 'ko'))
+      .slice(0, limit);
+    return {
+      type,
+      items: orphaned.map((page) => this.specialPageItem(page, namespace.code, null))
+    };
   }
 
   async getBlame(pageId: string, accountId?: string | null): Promise<WikiBlameResponse> {
@@ -1638,6 +1883,10 @@ function collectFileNames(ast: AstNode[], output = new Set<string>()): Set<strin
     }
   }
   return output;
+}
+
+function categoryTitleFromSlug(slug: string): string {
+  return slug.split('/').map((part) => part.replace(/_/g, ' ')).join('/');
 }
 
 export function encodeWikiSearchCursor(updatedAt: Date, id: bigint): string {

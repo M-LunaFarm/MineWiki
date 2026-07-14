@@ -29,6 +29,7 @@ const namespaces = [
   { code: 'help', displayName: '도움말', pathPrefix: '/wiki/도움말', isContent: false },
   { code: 'project', displayName: '프로젝트', pathPrefix: '/wiki/프로젝트', isContent: false },
   { code: 'template', displayName: '틀', pathPrefix: '/wiki/틀', isContent: false },
+  { code: 'category', displayName: '분류', pathPrefix: '/wiki/category', isContent: false },
   { code: 'file', displayName: '파일', pathPrefix: '/file', isContent: false },
 ];
 
@@ -49,6 +50,22 @@ const rootSpaces = [
 
 {{대문 카드|제목=서버 찾기|설명=인증된 서버와 투표 순위를 확인하세요.|링크=/servers}}
 {{대문 카드|제목=도움말|설명=편집과 계정 사용법을 확인하세요.|링크=/help/대문}}`,
+  },
+  {
+    code: 'category',
+    spaceKey: 'category',
+    name: '분류',
+    title: '분류',
+    rootNamespaceCode: 'category',
+    rootPath: '/wiki/category',
+    description: '위키 분류 문서와 상하위 분류 계층',
+    pagePath: '/wiki/category/분류',
+    pageTitle: '분류',
+    content: `== 분류 ==
+
+MineWiki 분류 계층의 루트 문서입니다. 하위 분류 문서는 이 분류를 상위 분류로 지정할 수 있습니다.
+
+분류 문서에는 분류의 범위와 포함 기준을 설명해 주세요.`,
   },
   {
     code: 'help',
@@ -223,11 +240,72 @@ try {
 async function seed() {
   await seedNamespaces();
   await seedRootSpacesAndPages();
+  await seedCategoryAcl();
   await seedRolesAndPermissions();
   await seedSiteSettings();
   await seedDocumentTemplates();
   if (args.adminEmail) {
     await grantFirstAdmin(args.adminEmail);
+  }
+}
+
+async function seedCategoryAcl() {
+  const namespace = await prisma.wikiNamespace.findUnique({ where: { code: 'category' } });
+  const rules = [
+    ['create', 'allow', 'trusted', 10], ['create', 'deny', 'any', 100],
+    ['edit', 'allow', 'trusted', 10], ['edit', 'deny', 'any', 100],
+    ['move', 'allow', 'moderator', 10], ['move', 'deny', 'any', 100],
+    ['delete', 'allow', 'moderator', 10], ['delete', 'deny', 'any', 100],
+  ];
+  if (!namespace) {
+    if (!args.dryRun) throw new Error('Missing namespace category');
+    for (const [action, effect, subjectValue] of rules) {
+      changes.push(`would create category ACL ${action} ${effect} ${subjectValue}`);
+    }
+    return;
+  }
+  const reason = 'MineWiki category namespace default';
+  for (const [action, effect, subjectValue, sortOrder] of rules) {
+    const label = `category ACL ${action} ${effect} ${subjectValue}`;
+    const existing = await prisma.aclRule.findFirst({
+      where: {
+        targetType: 'namespace',
+        targetId: BigInt(namespace.id),
+        action,
+        effect,
+        subjectType: 'perm',
+        subjectValue,
+        reason,
+      },
+    });
+    if (args.dryRun) {
+      changes.push(`${existing ? 'would update' : 'would create'} ${label}`);
+      continue;
+    }
+    if (existing) {
+      await prisma.aclRule.update({
+        where: { id: existing.id },
+        data: { sortOrder, expiresAt: null, updatedAt: now() },
+      });
+      changes.push(`updated ${label}`);
+    } else {
+      await prisma.aclRule.create({
+        data: {
+          targetType: 'namespace',
+          targetId: BigInt(namespace.id),
+          action,
+          effect,
+          subjectType: 'perm',
+          subjectValue,
+          sortOrder,
+          reason,
+          createdBy: null,
+          createdAt: now(),
+          updatedAt: now(),
+        },
+      });
+      changes.push(`created ${label}`);
+    }
   }
 }
 

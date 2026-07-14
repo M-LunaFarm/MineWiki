@@ -9,6 +9,7 @@ export type NamespaceCode =
   | 'help'
   | 'project'
   | 'template'
+  | 'category'
   | 'file';
 
 export type AstNode =

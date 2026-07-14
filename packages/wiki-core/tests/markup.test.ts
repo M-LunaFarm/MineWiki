@@ -24,8 +24,10 @@ test('resolves canonical wiki route mappings', () => {
   assert.deepEqual(resolveWikiPath('/dev/API'), { namespace: 'dev', title: 'API', slug: 'API' });
   assert.deepEqual(resolveWikiPath('/wiki/가이드/서버 접속'), { namespace: 'guide', title: '서버 접속', slug: '서버_접속' });
   assert.deepEqual(resolveWikiPath('/guide/서버 접속'), { namespace: 'guide', title: '서버 접속', slug: '서버_접속' });
+  assert.deepEqual(resolveWikiPath('/wiki/category/게임플레이/몹'), { namespace: 'category', title: '게임플레이/몹', slug: '게임플레이/몹' });
   assert.equal(wikiUrl('server', 'luna'), '/server/luna');
   assert.equal(wikiUrl('guide', '서버 접속'), '/guide/%EC%84%9C%EB%B2%84_%EC%A0%91%EC%86%8D');
+  assert.equal(wikiUrl('category', '게임플레이/몹'), '/wiki/category/%EA%B2%8C%EC%9E%84%ED%94%8C%EB%A0%88%EC%9D%B4/%EB%AA%B9');
 });
 
 test('parses links, categories, components, and safe HTML', () => {
