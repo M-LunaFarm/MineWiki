@@ -27,6 +27,11 @@ import type { SessionPayload } from '../session/session.service';
 import type { FastifyRequest } from 'fastify';
 import { SessionService } from '../session/session.service';
 import { ClaimService } from '../claim/claim.service';
+import { z } from 'zod';
+
+const reviewReportRequestSchema = z
+  .object({ reason: z.string().trim().min(3).max(500) })
+  .strict();
 
 @Controller('v1/servers/:serverId/reviews')
 export class ReviewController {
@@ -136,9 +141,11 @@ export class ReviewController {
   async report(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Param('reviewId', new ParseUUIDPipe()) reviewId: string,
-    @CurrentSession() session: SessionPayload
+    @CurrentSession() session: SessionPayload,
+    @Body() body: unknown
   ): Promise<ServerReview> {
-    return this.reviewService.report(serverId, reviewId, session.userId);
+    const payload = reviewReportRequestSchema.parse(body);
+    return this.reviewService.report(serverId, reviewId, session.userId, payload.reason);
   }
 
   @UseGuards(SessionGuard)

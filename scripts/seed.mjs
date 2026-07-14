@@ -121,6 +121,7 @@ const permissions = [
   ['wiki.user.block', 'Block and unblock wiki contributors'],
   ['wiki.batch_rollback', 'Preview and execute bounded wiki vandalism rollback'],
   ['server.admin', 'Manage server administration'],
+  ['review.moderate', 'Moderate review reports and review visibility'],
   ['vote.admin', 'Invalidate abusive votes and manage vote integrity'],
   ['guild.admin', 'Manage Discord guild administration'],
   ['support.admin', 'Manage support tickets'],
@@ -131,10 +132,10 @@ const rolePermissions = {
   owner: permissions.map(([code]) => code),
   admin: permissions.map(([code]) => code),
   wiki_admin: ['wiki.admin', 'wiki.edit.locked', 'wiki.read.restricted'],
-  server_admin: ['server.admin'],
+  server_admin: ['server.admin', 'review.moderate'],
   vote_moderator: ['vote.admin'],
   support_agent: ['support.admin'],
-  moderator: ['wiki.edit.locked', 'wiki.read.restricted'],
+  moderator: ['wiki.edit.locked', 'wiki.read.restricted', 'review.moderate'],
 };
 
 const siteSettings = [

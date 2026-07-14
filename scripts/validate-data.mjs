@@ -342,6 +342,7 @@ async function runValidation() {
 
   await validatePluginCredentials();
   await validatePublicReviewCounts();
+  await validateReviewReportCounts();
   await validateEncryptedCredentials();
   await validateExpiredReplayGuards();
   await validateRenderCache();
@@ -387,6 +388,44 @@ async function validatePublicReviewCounts() {
   `);
   summary.fixes += fixed;
   pass('Server.reviewsCount matches public reviews', `reconciled ${fixed} server counters`);
+}
+
+async function validateReviewReportCounts() {
+  const mismatches = await prisma.$queryRawUnsafe(`
+    SELECT r.id
+    FROM ServerReview r
+    LEFT JOIN (
+      SELECT rr.reviewId, COUNT(*) AS reportCount
+      FROM ReviewReport rr
+      GROUP BY rr.reviewId
+    ) counted ON counted.reviewId = r.id
+    WHERE r.reports <> COALESCE(counted.reportCount, 0)
+    LIMIT ${args.fixLimit}
+  `);
+  if (mismatches.length === 0) {
+    pass('ServerReview.reports matches report records');
+    return;
+  }
+  if (!args.fix) {
+    const sample = mismatches.slice(0, args.sampleLimit).map((row) => stringifyId(row.id)).join(', ');
+    error(
+      'ServerReview.reports matches report records',
+      `${mismatches.length} mismatched counters; sample: ${sample}; rerun with --fix to reconcile`,
+    );
+    return;
+  }
+  const fixed = await prisma.$executeRawUnsafe(`
+    UPDATE ServerReview r
+    LEFT JOIN (
+      SELECT rr.reviewId, COUNT(*) AS reportCount
+      FROM ReviewReport rr
+      GROUP BY rr.reviewId
+    ) counted ON counted.reviewId = r.id
+    SET r.reports = COALESCE(counted.reportCount, 0)
+    WHERE r.reports <> COALESCE(counted.reportCount, 0)
+  `);
+  summary.fixes += fixed;
+  pass('ServerReview.reports matches report records', `reconciled ${fixed} review counters`);
 }
 
 async function validatePluginCredentials() {
@@ -704,6 +743,7 @@ By default this command never mutates data.
 
 --fix performs safe repairs:
   - reconcile Server.reviewsCount from public reviews
+  - reconcile ServerReview.reports from report records
   - encrypt legacy OAuth, Votifier, and plugin credentials
   - delete expired PluginSyncReplayGuard rows
   - disable active plugin credentials whose canonical server no longer exists

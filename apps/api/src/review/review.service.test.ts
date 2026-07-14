@@ -25,7 +25,7 @@ if (!hasDatabase) {
   const uploads = new UploadService(config);
   const files = new FileService(prisma, uploads);
   const serverService = new ServerService(files, prisma, new WikiProfileService(prisma));
-  const events = { track: async () => {} } as BusinessEventService;
+  const events = { track: async () => {}, audit: async () => {} } as BusinessEventService;
   const voteStore = new VoteStore(prisma);
   const accounts = new AccountSeparationService(prisma);
   const minecraft = new MinecraftService(events, config, prisma);
@@ -199,9 +199,9 @@ if (!hasDatabase) {
     const publicReviews = await reviewService.list(server.id);
     assert.equal(publicReviews.some((item) => item.id === review.id), false);
 
-    const reported = await reviewService.report(server.id, review.id, account.id);
+    const reported = await reviewService.report(server.id, review.id, account.id, '운영 정책 위반');
     assert.equal(reported.reports, 1);
-    const duplicate = await reviewService.report(server.id, review.id, account.id);
+    const duplicate = await reviewService.report(server.id, review.id, account.id, '중복 신고');
     assert.equal(duplicate.reports, 1);
   });
 

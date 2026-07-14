@@ -40,6 +40,13 @@ enum ReviewVisibility {
   staff
 }
 
+enum ReviewReportStatus {
+  open
+  in_review
+  resolved
+  dismissed
+}
+
 enum ClaimMethod {
   plugin
   dns
@@ -112,7 +119,8 @@ model Account {
   reviews                 ServerReview[]
   votes                   Vote[]
   reviewHelpfulVotes      ReviewHelpfulVote[]
-  reviewReports           ReviewReport[]
+  reviewReports           ReviewReport[]          @relation("ReviewReportReporter")
+  assignedReviewReports   ReviewReport[]          @relation("ReviewReportAssignee")
   supportAgentProfile     SupportAgent?
   requestedSupportTickets SupportTicket[]          @relation("SupportTicketRequester")
   assignedSupportTickets  SupportTicket[]          @relation("SupportTicketAssignee")
@@ -583,16 +591,29 @@ model ReviewHelpfulVote {
 }
 
 model ReviewReport {
-  id        String   @id @default(uuid())
-  reviewId  String
-  accountId String
-  createdAt DateTime @default(now())
+  id                String             @id @default(uuid())
+  reviewId          String
+  accountId         String
+  reason            String             @db.VarChar(500)
+  status            ReviewReportStatus @default(open)
+  assigneeAccountId String?
+  resolution        String?            @db.VarChar(1000)
+  assignedAt        DateTime?
+  statusUpdatedAt   DateTime           @default(now())
+  resolvedAt        DateTime?
+  dismissedAt       DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
-  review  ServerReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
-  account Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  review   ServerReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reporter Account      @relation("ReviewReportReporter", fields: [accountId], references: [id], onDelete: Cascade)
+  assignee Account?     @relation("ReviewReportAssignee", fields: [assigneeAccountId], references: [id], onDelete: SetNull)
 
   @@unique([reviewId, accountId])
   @@index([accountId])
+  @@index([status, createdAt])
+  @@index([assigneeAccountId, status])
+  @@index([reviewId, status])
 }
 
 model ServerClaimMethod {

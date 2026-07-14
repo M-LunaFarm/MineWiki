@@ -8,10 +8,12 @@ import { MinecraftModule } from '../minecraft/minecraft.module';
 import { SessionModule } from '../session/session.module';
 import { AuthModule } from '../auth/auth.module';
 import { ClaimModule } from '../claim/claim.module';
+import { ReviewModerationController } from './review-moderation.controller';
+import { ReviewModerationService } from './review-moderation.service';
 
 @Module({
   imports: [ServerModule, EventsModule, VoteModule, MinecraftModule, SessionModule, AuthModule, ClaimModule],
-  providers: [ReviewService],
-  controllers: [ReviewController]
+  providers: [ReviewService, ReviewModerationService],
+  controllers: [ReviewController, ReviewModerationController]
 })
 export class ReviewModule {}

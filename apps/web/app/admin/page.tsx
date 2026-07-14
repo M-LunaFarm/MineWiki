@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookOpenCheck, ClipboardList, Headphones, ShieldCheck, UsersRound } from 'lucide-react';
+import { BookOpenCheck, ClipboardList, Flag, Headphones, ShieldCheck, UsersRound } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -14,6 +14,12 @@ const ADMIN_TOOLS: ReadonlyArray<{
   readonly icon: typeof UsersRound;
   readonly accent?: boolean;
 }> = [
+  {
+    href: '/admin/reviews',
+    title: '리뷰 신고',
+    description: '신고된 서버 리뷰를 배정하고 해결·기각 및 공개 상태를 관리합니다.',
+    icon: Flag,
+  },
   {
     href: '/admin/users',
     title: '사용자 및 역할',

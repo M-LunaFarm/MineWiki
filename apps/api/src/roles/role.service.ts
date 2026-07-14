@@ -18,6 +18,7 @@ export const BUILT_IN_PERMISSION_CODES = [
   'wiki.admin',
   'wiki.batch_rollback',
   'server.admin',
+  'review.moderate',
   'vote.admin',
   'guild.admin',
   'support.admin',

@@ -135,12 +135,22 @@ export function ReviewList({
     if (reporting === reviewId) {
       return;
     }
+    const reason = window.prompt('신고 사유를 3자 이상 500자 이하로 입력해 주세요.');
+    if (!reason?.trim()) {
+      return;
+    }
+    const normalizedReason = reason.trim();
+    if (normalizedReason.length < 3 || normalizedReason.length > 500) {
+      window.alert('신고 사유는 3자 이상 500자 이하로 입력해 주세요.');
+      return;
+    }
     setReporting(reviewId);
     try {
       const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews/${reviewId}/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
+        body: JSON.stringify({ reason: normalizedReason }),
       });
       if (!response.ok) {
         throw new Error(`API responded with ${response.status}`);

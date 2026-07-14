@@ -10,6 +10,7 @@ import { PluginClaimController } from '../claim/plugin-claim.controller';
 import { VoteDiagnosticsController } from '../vote/vote-diagnostics.controller';
 import { ServerVerificationController } from '../server/server-verification.controller';
 import { ReviewController } from '../review/review.controller';
+import { ReviewModerationController } from '../review/review-moderation.controller';
 
 const THROTTLER_LIMIT = 'THROTTLER:LIMITdefault';
 const THROTTLER_TTL = 'THROTTLER:TTLdefault';
@@ -34,6 +35,9 @@ const protectedHandlers = [
   [VoteDiagnosticsController, 'runDiagnostics'],
   [ServerVerificationController, 'recheck'],
   [ReviewController, 'reply'],
+  [ReviewModerationController, 'assign'],
+  [ReviewModerationController, 'resolve'],
+  [ReviewModerationController, 'dismiss'],
 ] as const;
 
 test('high-risk mutation endpoints define explicit rate limits', () => {

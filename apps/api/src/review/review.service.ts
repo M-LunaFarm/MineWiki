@@ -42,6 +42,7 @@ const updateReviewSchema = z.object({
   body: z.string().trim().min(1).max(80),
   tags: z.array(reviewTagSchema).max(3)
 });
+const reviewReportReasonSchema = z.string().trim().min(3).max(500);
 
 export function isReviewTag(
   value?: string | null
@@ -270,7 +271,13 @@ export class ReviewService {
 
   }
 
-  async report(serverId: string, reviewId: string, reporterAccountId: string): Promise<ServerReview> {
+  async report(
+    serverId: string,
+    reviewId: string,
+    reporterAccountId: string,
+    reason: string,
+  ): Promise<ServerReview> {
+    const normalizedReason = reviewReportReasonSchema.parse(reason);
     const review = await this.prisma.serverReview.findFirst({
       where: { id: reviewId, serverId }
     });
@@ -278,12 +285,16 @@ export class ReviewService {
       throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
     }
 
+    let created = false;
     try {
       await this.prisma.$transaction(async (transaction) => {
         await transaction.reviewReport.create({
           data: {
             reviewId,
-            accountId: reporterAccountId
+            accountId: reporterAccountId,
+            reason: normalizedReason,
+            status: 'open',
+            statusUpdatedAt: new Date(),
           }
         });
         await transaction.serverReview.update({
@@ -291,6 +302,7 @@ export class ReviewService {
           data: { reports: { increment: 1 } }
         });
       });
+      created = true;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         // Duplicate report; ignore.
@@ -304,6 +316,16 @@ export class ReviewService {
     });
     if (!updated) {
       throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
+    }
+    if (created) {
+      await this.events.audit('review.report.created', {
+        category: 'review',
+        severity: 'warning',
+        actorAccountId: reporterAccountId,
+        subjectType: 'review_report',
+        subjectId: reviewId,
+        metadata: { serverId, reviewId },
+      });
     }
     return toReviewResponse(updated, reporterAccountId);
   }
