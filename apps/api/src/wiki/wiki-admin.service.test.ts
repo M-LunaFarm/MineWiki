@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PrismaService } from '../common/prisma.service';
 import { WikiAdminService } from './wiki-admin.service';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 interface TestRevision {
   id: bigint;
@@ -165,13 +166,21 @@ test('wiki user block updates status and appends immutable history in one transa
   const profile = { id: 9n, accountId: 'account-9', username: 'user9', displayName: '사용자 9', status: 'active', createdAt: now, updatedAt: now };
   let eventData: Record<string, unknown> | null = null;
   const tx = {
-    wikiProfile: { async update(args: { data: { status: string; updatedAt: Date } }) { Object.assign(profile, args.data); return profile; } },
+    wikiProfile: {
+      async findUnique() { return profile; },
+      async updateMany(args: { data: { status: string; updatedAt: Date } }) {
+        Object.assign(profile, args.data);
+        return { count: 1 };
+      }
+    },
+    accountRole: { async findMany() { return []; } },
     wikiUserBlockEvent: { async create(args: { data: Record<string, unknown> }) { eventData = args.data; return { id: 1n, ...args.data }; } }
   };
   const prisma = {
-    wikiProfile: { async findUnique() { return profile; } },
-    accountRole: { async findMany() { return []; } },
-    async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); }
+    async $transaction(callback: (store: typeof tx) => unknown, options: { isolationLevel: string }) {
+      assert.equal(options.isolationLevel, Prisma.TransactionIsolationLevel.Serializable);
+      return callback(tx);
+    }
   };
   const service = new WikiAdminService(prisma as unknown as PrismaService);
 
@@ -180,6 +189,50 @@ test('wiki user block updates status and appends immutable history in one transa
   assert.deepEqual(eventData && { action: eventData.action, previousStatus: eventData.previousStatus, newStatus: eventData.newStatus }, {
     action: 'block', previousStatus: 'active', newStatus: 'blocked'
   });
+});
+
+test('wiki user block rejects a concurrent status change without appending history', async () => {
+  const now = new Date('2026-07-06T00:00:00.000Z');
+  const profile = { id: 9n, accountId: null, username: 'user9', displayName: '사용자 9', status: 'active', createdAt: now, updatedAt: now };
+  let eventCreated = false;
+  const tx = {
+    wikiProfile: {
+      async findUnique() { return profile; },
+      async updateMany() { return { count: 0 }; }
+    },
+    accountRole: { async findMany() { return []; } },
+    wikiUserBlockEvent: { async create() { eventCreated = true; } }
+  };
+  const prisma = { async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); } };
+  const service = new WikiAdminService(prisma as unknown as PrismaService);
+
+  await assert.rejects(
+    service.setUserBlocked({ targetProfileId: '9', actorProfileId: 2n, blocked: true, reason: '반복적인 문서 훼손' }),
+    ConflictException
+  );
+  assert.equal(eventCreated, false);
+});
+
+test('wiki user block checks protected roles inside the status transaction', async () => {
+  const now = new Date('2026-07-06T00:00:00.000Z');
+  const profile = { id: 9n, accountId: 'account-9', username: 'admin9', displayName: '관리자 9', status: 'active', createdAt: now, updatedAt: now };
+  let changed = false;
+  const tx = {
+    wikiProfile: {
+      async findUnique() { return profile; },
+      async updateMany() { changed = true; return { count: 1 }; }
+    },
+    accountRole: { async findMany() { return [{ role: { code: 'admin' } }]; } },
+    wikiUserBlockEvent: { async create() { throw new Error('must not create'); } }
+  };
+  const prisma = { async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); } };
+  const service = new WikiAdminService(prisma as unknown as PrismaService);
+
+  await assert.rejects(
+    service.setUserBlocked({ targetProfileId: '9', actorProfileId: 2n, blocked: true, reason: '반복적인 문서 훼손' }),
+    BadRequestException
+  );
+  assert.equal(changed, false);
 });
 
 test('wiki user block rejects self-targeting before data access', async () => {

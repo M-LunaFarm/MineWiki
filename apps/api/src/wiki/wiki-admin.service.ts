@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { hashContent, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
@@ -158,43 +158,52 @@ export class WikiAdminService {
     if (targetId === input.actorProfileId) throw new BadRequestException('자기 자신의 위키 기여 권한은 변경할 수 없습니다.');
     const reason = input.reason?.trim() ?? '';
     if (reason.length < 5 || reason.length > 1000) throw new BadRequestException('사유는 5자 이상 1000자 이하로 입력하세요.');
-    const target = await this.prisma.wikiProfile.findUnique({ where: { id: targetId } });
-    if (!target) throw new NotFoundException('Wiki profile not found.');
-    if (target.accountId) {
-      const protectedRoles = await this.prisma.accountRole.findMany({
-        where: { accountId: target.accountId },
-        include: { role: true }
-      });
-      if (protectedRoles.some((entry) => entry.role.code === 'owner' || entry.role.code === 'admin')) {
-        throw new BadRequestException('보호된 운영자 계정의 위키 기여 권한은 이 화면에서 변경할 수 없습니다.');
-      }
-    }
     const newStatus = input.blocked ? 'blocked' : 'active';
-    if (target.status === newStatus) throw new BadRequestException(input.blocked ? '이미 차단된 사용자입니다.' : '이미 활성 상태인 사용자입니다.');
-    if (input.blocked && target.status !== 'active') throw new BadRequestException('활성 사용자만 차단할 수 있습니다.');
-    if (!input.blocked && target.status !== 'blocked') throw new BadRequestException('차단된 사용자만 해제할 수 있습니다.');
-    const previousStatus = target.status;
+    const previousStatus = input.blocked ? 'active' : 'blocked';
     const now = new Date();
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.wikiProfile.update({ where: { id: target.id }, data: { status: newStatus, updatedAt: now } });
-      await tx.wikiUserBlockEvent.create({
-        data: {
-          targetProfileId: target.id,
-          actorProfileId: input.actorProfileId,
-          action: input.blocked ? 'block' : 'unblock',
-          previousStatus,
-          newStatus,
-          reason,
-          createdAt: now
+    const updated = await this.prisma.$transaction(
+      async (tx) => {
+        const target = await tx.wikiProfile.findUnique({ where: { id: targetId } });
+        if (!target) throw new NotFoundException('Wiki profile not found.');
+        if (target.accountId) {
+          const protectedRoles = await tx.accountRole.findMany({
+            where: { accountId: target.accountId },
+            include: { role: true }
+          });
+          if (protectedRoles.some((entry) => entry.role.code === 'owner' || entry.role.code === 'admin')) {
+            throw new BadRequestException('보호된 운영자 계정의 위키 기여 권한은 이 화면에서 변경할 수 없습니다.');
+          }
         }
-      });
-      return user;
-    });
+        if (target.status !== previousStatus) {
+          throw new ConflictException(input.blocked ? '이미 차단되었거나 상태가 변경된 사용자입니다.' : '이미 해제되었거나 상태가 변경된 사용자입니다.');
+        }
+        const changed = await tx.wikiProfile.updateMany({
+          where: { id: target.id, status: previousStatus },
+          data: { status: newStatus, updatedAt: now }
+        });
+        if (changed.count !== 1) {
+          throw new ConflictException('사용자 상태가 동시에 변경되었습니다. 새로고침 후 다시 시도하세요.');
+        }
+        await tx.wikiUserBlockEvent.create({
+          data: {
+            targetProfileId: target.id,
+            actorProfileId: input.actorProfileId,
+            action: input.blocked ? 'block' : 'unblock',
+            previousStatus,
+            newStatus,
+            reason,
+            createdAt: now
+          }
+        });
+        return { ...target, status: newStatus, updatedAt: now };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
     await this.events?.audit(input.blocked ? 'wiki.user_block' : 'wiki.user_unblock', {
       category: 'wiki',
       actorProfileId: input.actorProfileId,
       subjectType: 'wiki_profile',
-      subjectId: target.id,
+      subjectId: targetId,
       metadata: { previousStatus, status: newStatus, reason }
     });
     return {
