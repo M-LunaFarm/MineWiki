@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Loader2, RotateCcw, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlertTriangle, History, Loader2, RotateCcw, ShieldCheck, Trash2 } from 'lucide-react';
 import { useAuth } from '../providers/auth-context';
 import {
   fetchWikiAdminPages,
@@ -182,7 +182,9 @@ function RecentTable({ rows }: { readonly rows: WikiAdminRecentChange[] }) {
           {rows.map((row) => (
             <tr key={row.id}>
               <td className="px-4 py-3 font-semibold text-white">{row.changeType}</td>
-              <td className="px-4 py-3">{row.namespaceCode}:{row.title}</td>
+              <td className="px-4 py-3">
+                {row.revisionId ? <Link href={`/admin/wiki/revisions/${encodeURIComponent(row.revisionId)}`} className="text-emerald-200 hover:text-emerald-100">{row.namespaceCode}:{row.title}</Link> : `${row.namespaceCode}:${row.title}`}
+              </td>
               <td className="px-4 py-3">{row.summary ?? '요약 없음'}</td>
               <td className="px-4 py-3">{formatDate(row.createdAt)}</td>
             </tr>
@@ -240,15 +242,23 @@ function PagesTable({
               </td>
               <td className="px-4 py-3">{formatDate(page.updatedAt)}</td>
               <td className="px-4 py-3">
-                <button
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href={`/admin/wiki/pages/${encodeURIComponent(page.id)}/revisions${page.routePath ? `?returnTo=${encodeURIComponent(page.routePath)}` : ''}`}
+                    className="inline-flex h-8 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40"
+                  >
+                    <History className="h-3.5 w-3.5" /> 판 관리
+                  </Link>
+                  <button
                   type="button"
                   onClick={() => onToggleDeleted(page)}
                   disabled={workingPageId === page.id}
                   className="inline-flex h-8 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:opacity-50"
-                >
-                  {page.status === 'deleted' ? <RotateCcw className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
-                  {page.status === 'deleted' ? '복구' : '삭제'}
-                </button>
+                  >
+                    {page.status === 'deleted' ? <RotateCcw className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    {page.status === 'deleted' ? '복구' : '삭제'}
+                  </button>
+                </div>
               </td>
             </tr>
           ))}

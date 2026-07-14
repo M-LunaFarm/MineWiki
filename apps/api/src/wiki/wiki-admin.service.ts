@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
+import { WikiRoutePathResolver } from './wiki-route-path.resolver';
 
 const ALLOWED_PROTECTION_LEVELS = new Set([
   'open',
@@ -44,6 +45,36 @@ export interface WikiAdminPageSummary {
   readonly status: string;
   readonly currentRevisionId: string | null;
   readonly updatedAt: string;
+  readonly namespaceCode?: string;
+  readonly routePath?: string;
+}
+
+export interface WikiAdminRevisionSummary {
+  readonly id: string;
+  readonly pageId: string;
+  readonly revisionNo: number;
+  readonly parentRevisionId: string | null;
+  readonly contentSize: number;
+  readonly editSummary: string | null;
+  readonly isMinor: boolean;
+  readonly createdBy: string | null;
+  readonly createdByName: string;
+  readonly createdAt: string;
+  readonly visibility: string;
+  readonly isCurrent: boolean;
+}
+
+export interface WikiAdminRevisionPage {
+  readonly page: WikiAdminPageSummary;
+  readonly items: WikiAdminRevisionSummary[];
+  readonly nextCursor: string | null;
+}
+
+export interface WikiAdminRevisionDetail extends WikiAdminRevisionSummary {
+  readonly contentRaw: string;
+  readonly contentHash: string;
+  readonly syntaxVersion: string;
+  readonly page: WikiAdminPageSummary;
 }
 
 export interface WikiAdminUserSummary {
@@ -74,7 +105,8 @@ export class WikiAdminService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly events?: BusinessEventService,
-    @Optional() private readonly wikiLinks?: WikiLinkIndexService
+    @Optional() private readonly wikiLinks?: WikiLinkIndexService,
+    @Optional() private readonly routePaths?: WikiRoutePathResolver
   ) {}
 
   async getRecent(): Promise<WikiAdminRecentChange[]> {
@@ -101,7 +133,51 @@ export class WikiAdminService {
       orderBy: [{ updatedAt: 'desc' }],
       take: 100
     });
-    return pages.map(toPageSummary);
+    return this.toPageSummaries(pages);
+  }
+
+  async getPageRevisions(pageIdValue: string, cursorValue?: string, limitValue?: string): Promise<WikiAdminRevisionPage> {
+    const pageId = this.parseBigIntId(pageIdValue, 'pageId');
+    const cursor = cursorValue?.trim() ? Number(cursorValue) : null;
+    if (cursor !== null && (!Number.isSafeInteger(cursor) || cursor < 1)) {
+      throw new BadRequestException('cursor must be a positive revision number.');
+    }
+    const requestedLimit = limitValue?.trim() ? Number(limitValue) : 50;
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+      throw new BadRequestException('limit must be a positive integer.');
+    }
+    const limit = Math.min(requestedLimit, 100);
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: pageId } });
+    if (!page) throw new NotFoundException('Wiki page not found.');
+    const revisions = await this.prisma.wikiPageRevision.findMany({
+      where: { pageId, ...(cursor === null ? {} : { revisionNo: { lt: cursor } }) },
+      orderBy: [{ revisionNo: 'desc' }],
+      take: limit + 1
+    });
+    const hasMore = revisions.length > limit;
+    const items = revisions.slice(0, limit);
+    const names = await this.revisionAuthorNames(items);
+    return {
+      page: (await this.toPageSummaries([page]))[0],
+      items: items.map((revision) => toRevisionSummary(revision, page.currentRevisionId, names)),
+      nextCursor: hasMore ? String(items[items.length - 1].revisionNo) : null
+    };
+  }
+
+  async getRevision(revisionIdValue: string): Promise<WikiAdminRevisionDetail> {
+    const revisionId = this.parseBigIntId(revisionIdValue, 'revisionId');
+    const revision = await this.prisma.wikiPageRevision.findUnique({ where: { id: revisionId } });
+    if (!revision) throw new NotFoundException('Wiki revision not found.');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: revision.pageId } });
+    if (!page) throw new NotFoundException('Wiki page not found.');
+    const names = await this.revisionAuthorNames([revision]);
+    return {
+      ...toRevisionSummary(revision, page.currentRevisionId, names),
+      contentRaw: revision.contentRaw,
+      contentHash: revision.contentHash,
+      syntaxVersion: revision.syntaxVersion,
+      page: (await this.toPageSummaries([page]))[0]
+    };
   }
 
   async getUsers(query?: string): Promise<WikiAdminUserSummary[]> {
@@ -450,7 +526,7 @@ export class WikiAdminService {
         reason: input.reason?.trim() || null
       }
     });
-    return toPageSummary(updated);
+    return (await this.toPageSummaries([updated]))[0];
   }
 
   async updateRevisionVisibility(input: {
@@ -461,6 +537,7 @@ export class WikiAdminService {
   }): Promise<{ revisionId: string; visibility: string }> {
     const revisionId = this.parseBigIntId(input.revisionId, 'revisionId');
     const visibility = input.visibility?.trim();
+    const reason = this.requiredModerationReason(input.reason);
     if (!visibility || !ALLOWED_REVISION_VISIBILITIES.has(visibility)) {
       throw new BadRequestException('Invalid wiki revision visibility.');
     }
@@ -506,7 +583,7 @@ export class WikiAdminService {
         changeType: 'revision_visibility',
         title: page.title,
         namespaceCode: namespace?.code ?? 'main',
-        summary: input.reason?.trim() || `리비전 표시 상태 변경: ${visibility}`
+        summary: reason
       }, tx);
       return { updated, page };
     });
@@ -516,7 +593,7 @@ export class WikiAdminService {
       revisionId: result.updated.id,
       metadata: {
         visibility,
-        reason: input.reason?.trim() || null
+        reason
       }
     });
     return { revisionId: result.updated.id.toString(), visibility: result.updated.visibility };
@@ -529,6 +606,7 @@ export class WikiAdminService {
     readonly reason?: string | null;
   }): Promise<{ pageId: string; revisionId: string; revisionNo: number }> {
     const pageId = this.parseBigIntId(input.pageId, 'pageId');
+    const reason = this.requiredModerationReason(input.reason);
     const sourceRevisionId = input.revisionId
       ? this.parseBigIntId(input.revisionId, 'revisionId')
       : null;
@@ -570,7 +648,7 @@ export class WikiAdminService {
           contentHash: hashContent(source.contentRaw),
           contentSize: Buffer.byteLength(source.contentRaw, 'utf8'),
           syntaxVersion: source.syntaxVersion,
-          editSummary: input.reason?.trim() || `관리자 롤백: r${source.revisionNo}`,
+          editSummary: reason,
           isMinor: false,
           editTags: null,
           createdBy: input.actorProfileId,
@@ -617,7 +695,7 @@ export class WikiAdminService {
       metadata: {
         sourceRevisionId: result.source.id.toString(),
         sourceRevisionNo: result.source.revisionNo,
-        reason: input.reason?.trim() || null
+        reason
       }
     });
     return {
@@ -664,7 +742,7 @@ export class WikiAdminService {
         reason: input.reason?.trim() || null
       }
     });
-    return toPageSummary(updated);
+    return (await this.toPageSummaries([updated]))[0];
   }
 
   private async insertRecentChange(input: {
@@ -727,11 +805,50 @@ export class WikiAdminService {
     return namespace?.code ?? 'main';
   }
 
+  private async toPageSummaries<T extends Parameters<typeof toPageSummary>[0] & { localPath: string }>(pages: readonly T[]): Promise<WikiAdminPageSummary[]> {
+    if (pages.length === 0) return [];
+    const routes = await this.routePaths?.preload(pages);
+    if (routes) {
+      return pages.map((page) => ({
+        ...toPageSummary(page),
+        namespaceCode: routes.namespace(page),
+        routePath: routes.routePath(page)
+      }));
+    }
+    const namespaces = await this.prisma.wikiNamespace.findMany({
+      where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
+      select: { id: true, code: true }
+    });
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    return pages.map((page) => ({
+      ...toPageSummary(page),
+      namespaceCode: namespaceById.get(page.namespaceId) ?? 'main'
+    }));
+  }
+
+  private async revisionAuthorNames(revisions: readonly { createdBy: bigint | null }[]): Promise<ReadonlyMap<bigint, string>> {
+    const profileIds = [...new Set(revisions.flatMap((revision) => revision.createdBy === null ? [] : [revision.createdBy]))];
+    if (profileIds.length === 0) return new Map();
+    const profiles = await this.prisma.wikiProfile.findMany({
+      where: { id: { in: profileIds } },
+      select: { id: true, displayName: true }
+    });
+    return new Map(profiles.map((profile) => [profile.id, profile.displayName]));
+  }
+
   private parseBigIntId(value: string, label: string): bigint {
     if (!/^\d+$/.test(value)) {
       throw new BadRequestException(`${label} must be an unsigned integer.`);
     }
     return BigInt(value);
+  }
+
+  private requiredModerationReason(value?: string | null): string {
+    const reason = value?.trim() ?? '';
+    if (reason.length < 5 || reason.length > 1000) {
+      throw new BadRequestException('Moderation reason must be between 5 and 1000 characters.');
+    }
+    return reason;
   }
 }
 
@@ -756,6 +873,38 @@ function toPageSummary(page: {
     status: page.status,
     currentRevisionId: page.currentRevisionId?.toString() ?? null,
     updatedAt: page.updatedAt.toISOString()
+  };
+}
+
+function toRevisionSummary(
+  revision: {
+    id: bigint;
+    pageId: bigint;
+    revisionNo: number;
+    parentRevisionId: bigint | null;
+    contentSize: number;
+    editSummary: string | null;
+    isMinor: boolean;
+    createdBy: bigint | null;
+    createdAt: Date;
+    visibility: string;
+  },
+  currentRevisionId: bigint | null,
+  authorNames: ReadonlyMap<bigint, string>
+): WikiAdminRevisionSummary {
+  return {
+    id: revision.id.toString(),
+    pageId: revision.pageId.toString(),
+    revisionNo: revision.revisionNo,
+    parentRevisionId: revision.parentRevisionId?.toString() ?? null,
+    contentSize: revision.contentSize,
+    editSummary: revision.editSummary,
+    isMinor: revision.isMinor,
+    createdBy: revision.createdBy?.toString() ?? null,
+    createdByName: revision.createdBy === null ? '시스템' : authorNames.get(revision.createdBy) ?? '알 수 없는 사용자',
+    createdAt: revision.createdAt.toISOString(),
+    visibility: revision.visibility,
+    isCurrent: revision.id === currentRevisionId
   };
 }
 

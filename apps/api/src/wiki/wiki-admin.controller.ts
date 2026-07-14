@@ -3,7 +3,13 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
-import { WikiAdminService, type WikiAdminPageSummary, type WikiAdminRecentChange } from './wiki-admin.service';
+import {
+  WikiAdminService,
+  type WikiAdminPageSummary,
+  type WikiAdminRecentChange,
+  type WikiAdminRevisionDetail,
+  type WikiAdminRevisionPage
+} from './wiki-admin.service';
 import { WikiModerationService } from './wiki-moderation.service';
 import { WikiProfileService } from './wiki-profile.service';
 
@@ -29,6 +35,26 @@ export class WikiAdminController {
   ): Promise<WikiAdminPageSummary[]> {
     await this.assertAdmin(session);
     return this.wikiAdmin.getPages(status);
+  }
+
+  @Get('pages/:id/revisions')
+  async getPageRevisions(
+    @Param('id') pageId: string,
+    @Query('cursor') cursor: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiAdminRevisionPage> {
+    await this.assertAdmin(session);
+    return this.wikiAdmin.getPageRevisions(pageId, cursor, limit);
+  }
+
+  @Get('revisions/:id')
+  async getRevision(
+    @Param('id') revisionId: string,
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiAdminRevisionDetail> {
+    await this.assertAdmin(session);
+    return this.wikiAdmin.getRevision(revisionId);
   }
 
   @Get('users')

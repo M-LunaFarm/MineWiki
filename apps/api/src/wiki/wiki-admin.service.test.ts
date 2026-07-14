@@ -23,6 +23,7 @@ interface RevisionWhere {
   pageId?: bigint;
   visibility?: string;
   id?: { not?: bigint };
+  revisionNo?: { lt?: number };
 }
 
 function createService() {
@@ -117,6 +118,14 @@ function createService() {
     wikiNamespace: {
       async findUnique() {
         return { id: 1, code: 'main' };
+      },
+      async findMany() {
+        return [{ id: 1, code: 'main' }];
+      }
+    },
+    wikiProfile: {
+      async findMany() {
+        return [{ id: 1n, displayName: '테스트 편집자' }];
       }
     },
     wikiPageRevision: {
@@ -136,6 +145,12 @@ function createService() {
           list.sort((left, right) => right.revisionNo - left.revisionNo);
         }
         return list[0] ?? null;
+      },
+      async findMany(args: { where: RevisionWhere; take: number }) {
+        return [...revisions.values()]
+          .filter((revision) => revision.pageId === args.where.pageId && (args.where.revisionNo?.lt === undefined || revision.revisionNo < args.where.revisionNo.lt))
+          .sort((left, right) => right.revisionNo - left.revisionNo)
+          .slice(0, args.take);
       },
       async update(args: { where: { id: bigint }; data: Partial<TestRevision> }) {
         operations.push('revision:update');
@@ -159,6 +174,7 @@ function createService() {
   };
   return {
     service: new WikiAdminService(prisma as unknown as PrismaService),
+    prisma: prisma as unknown as PrismaService,
     page,
     revisions,
     changes,
@@ -265,13 +281,54 @@ test('wiki admin service updates page protection and records recent change', asy
   assert.equal(changes.at(-1)?.summary, '반달 대응');
 });
 
+test('wiki admin revision listing includes hidden revisions and uses a stable revision cursor', async () => {
+  const { service, revisions } = createService();
+  const hidden = revisions.get(101n);
+  assert.ok(hidden);
+  hidden.visibility = 'hidden';
+
+  const first = await service.getPageRevisions('10', undefined, '1');
+  assert.equal(first.items.length, 1);
+  assert.equal(first.items[0].visibility, 'hidden');
+  assert.equal(first.items[0].createdByName, '테스트 편집자');
+  assert.equal(first.nextCursor, '2');
+
+  const second = await service.getPageRevisions('10', first.nextCursor ?? undefined, '1');
+  assert.deepEqual(second.items.map((revision) => revision.revisionNo), [1]);
+  assert.equal(second.nextCursor, null);
+});
+
+test('wiki admin revision detail returns raw content with the canonical route path', async () => {
+  const fixture = createService();
+  const routePaths = {
+    async preload() {
+      return {
+        namespace() { return 'server'; },
+        routePath() { return '/server/soul-online/대문'; }
+      };
+    }
+  };
+  const service = new WikiAdminService(
+    fixture.prisma,
+    undefined,
+    undefined,
+    routePaths as never
+  );
+
+  const detail = await service.getRevision('101');
+  assert.equal(detail.contentRaw, '두 번째 내용');
+  assert.equal(detail.page.namespaceCode, 'server');
+  assert.equal(detail.page.routePath, '/server/soul-online/대문');
+});
+
 test('wiki admin service hides current revision and falls back to previous public revision', async () => {
   const { service, page, revisions, changes, operations } = createService();
 
   const result = await service.updateRevisionVisibility({
     revisionId: '101',
     visibility: 'hidden',
-    actorProfileId: 99n
+    actorProfileId: 99n,
+    reason: '테스트 숨김 처리'
   });
 
   assert.equal(result.visibility, 'hidden');
@@ -290,12 +347,30 @@ test('wiki admin visibility change never overwrites a newer current revision', a
   await service.updateRevisionVisibility({
     revisionId: '101',
     visibility: 'hidden',
-    actorProfileId: 99n
+    actorProfileId: 99n,
+    reason: '신규 현재판 보존'
   });
 
   assert.equal(revisions.get(101n)?.visibility, 'hidden');
   assert.equal(page.currentRevisionId, 999n);
   assert.equal(operations.includes('page:update'), false);
+});
+
+test('wiki admin revision mutations require an auditable moderation reason', async () => {
+  const { service } = createService();
+  await assert.rejects(
+    service.updateRevisionVisibility({
+      revisionId: '101',
+      visibility: 'hidden',
+      actorProfileId: 99n,
+      reason: '  '
+    }),
+    BadRequestException
+  );
+  await assert.rejects(
+    service.rollback({ pageId: '10', revisionId: '100', actorProfileId: 99n, reason: 'four' }),
+    BadRequestException
+  );
 });
 
 test('wiki admin service rollback creates new public revision and render cache', async () => {

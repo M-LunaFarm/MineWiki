@@ -51,6 +51,26 @@ test('wiki admin controller allows explicit wiki admin permission', async () => 
   assert.equal(ensured, true);
 });
 
+test('wiki revision management reads require wiki admin permission and preserve pagination inputs', async () => {
+  let received: unknown[] = [];
+  const controller = new WikiAdminController(
+    {
+      async getPageRevisions(...args: unknown[]) {
+        received = args;
+        return { page: {}, items: [], nextCursor: null };
+      }
+    } as unknown as WikiAdminService,
+    { async ensureWikiProfile() { return { id: 5n }; } } as unknown as WikiProfileService,
+    {} as never
+  );
+  const session = { sessionId: 's1', userId: 'account-1', isElevated: false, permissions: ['wiki.admin'], groups: [] };
+
+  const result = await controller.getPageRevisions('10', '50', '25', session);
+
+  assert.deepEqual(received, ['10', '50', '25']);
+  assert.deepEqual(result.items, []);
+});
+
 test('wiki batch rollback requires its dedicated permission', async () => {
   const controller = new WikiAdminController(
     {} as WikiAdminService,

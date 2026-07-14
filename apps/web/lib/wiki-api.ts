@@ -430,7 +430,7 @@ export interface WikiEditRequestSummary {
   readonly pageId: string;
   readonly baseRevisionId: string;
   readonly proposedContent: string;
-  readonly editSummary: string;
+  readonly editSummary: string | null;
   readonly isMinor: boolean;
   readonly status: string;
   readonly createdBy: string;
@@ -485,6 +485,36 @@ export interface WikiAdminPageSummary {
   readonly status: string;
   readonly currentRevisionId: string | null;
   readonly updatedAt: string;
+  readonly namespaceCode?: string;
+  readonly routePath?: string;
+}
+
+export interface WikiAdminRevisionSummary {
+  readonly id: string;
+  readonly pageId: string;
+  readonly revisionNo: number;
+  readonly parentRevisionId: string | null;
+  readonly contentSize: number;
+  readonly editSummary: string;
+  readonly isMinor: boolean;
+  readonly createdBy: string | null;
+  readonly createdByName: string;
+  readonly createdAt: string;
+  readonly visibility: string;
+  readonly isCurrent: boolean;
+}
+
+export interface WikiAdminRevisionPage {
+  readonly page: WikiAdminPageSummary;
+  readonly items: WikiAdminRevisionSummary[];
+  readonly nextCursor: string | null;
+}
+
+export interface WikiAdminRevisionDetail extends WikiAdminRevisionSummary {
+  readonly contentRaw: string;
+  readonly contentHash: string;
+  readonly syntaxVersion: string;
+  readonly page: WikiAdminPageSummary;
 }
 
 export interface WikiAdminUserSummary {
@@ -1009,6 +1039,41 @@ export async function fetchWikiAdminRecent(): Promise<WikiAdminRecentChange[]> {
 
 export async function fetchWikiAdminPages(status?: string): Promise<WikiAdminPageSummary[]> {
   return fetchWikiAdminJson(`/pages${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+}
+
+export async function fetchWikiAdminPageRevisions(
+  pageId: string,
+  input: { cursor?: string; limit?: number } = {}
+): Promise<WikiAdminRevisionPage> {
+  const params = new URLSearchParams({ limit: String(input.limit ?? 50) });
+  if (input.cursor) params.set('cursor', input.cursor);
+  return fetchWikiAdminJson(`/pages/${encodeURIComponent(pageId)}/revisions?${params.toString()}`);
+}
+
+export async function fetchWikiAdminRevision(revisionId: string): Promise<WikiAdminRevisionDetail> {
+  return fetchWikiAdminJson(`/revisions/${encodeURIComponent(revisionId)}`);
+}
+
+export async function updateWikiAdminRevisionVisibility(input: {
+  revisionId: string;
+  visibility: 'public' | 'hidden' | 'deleted' | 'private';
+  reason: string;
+}): Promise<{ revisionId: string; visibility: string }> {
+  return fetchWikiAdminJson(`/revisions/${encodeURIComponent(input.revisionId)}/visibility`, {
+    method: 'PATCH',
+    body: JSON.stringify({ visibility: input.visibility, reason: input.reason })
+  });
+}
+
+export async function rollbackWikiAdminPage(input: {
+  pageId: string;
+  revisionId: string;
+  reason: string;
+}): Promise<{ pageId: string; revisionId: string; revisionNo: number }> {
+  return fetchWikiAdminJson(`/pages/${encodeURIComponent(input.pageId)}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({ revisionId: input.revisionId, reason: input.reason })
+  });
 }
 
 export async function fetchWikiAdminUsers(query?: string): Promise<WikiAdminUserSummary[]> {
