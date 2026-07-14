@@ -13,6 +13,7 @@ import { PrismaService } from '../common/prisma.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiIncludeService } from './wiki-include.service';
+import { buildCanonicalServerWikiPath, WikiRoutePathResolver, type WikiRoutePathBatch } from './wiki-route-path.resolver';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -273,8 +274,13 @@ export class WikiReadService {
     private readonly prisma: PrismaService,
     private readonly wikiPermissions: WikiPermissionService,
     @Optional() private readonly wikiLinks?: WikiLinkIndexService,
-    @Optional() private readonly wikiIncludes?: WikiIncludeService
+    @Optional() private readonly wikiIncludes?: WikiIncludeService,
+    @Optional() private readonly injectedRoutePaths?: WikiRoutePathResolver
   ) {}
+
+  private get routePaths(): WikiRoutePathResolver {
+    return this.injectedRoutePaths ?? new WikiRoutePathResolver(this.prisma);
+  }
 
   async getPage(
     namespaceCode: string,
@@ -414,6 +420,12 @@ export class WikiReadService {
     const pageIds = [...new Set(changes.flatMap((change) => change.pageId ? [change.pageId] : []))];
     const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
+    const knownNamespaces = new Map<number, string>();
+    for (const change of changes) {
+      const page = change.pageId ? pageById.get(change.pageId) : null;
+      if (page) knownNamespaces.set(page.namespaceId, change.namespaceCode);
+    }
+    const routePaths = await this.routePaths.preload(pages, knownNamespaces);
     const readableByPageId = new Map<bigint, boolean>();
     const visible: WikiRecentChangeSummary[] = [];
     let lastScannedId: bigint | null = null;
@@ -440,7 +452,9 @@ export class WikiReadService {
         changeType: change.changeType,
         title: change.title,
         namespaceCode: change.namespaceCode,
-        routePath: wikiUrl(change.namespaceCode as Parameters<typeof wikiUrl>[0], change.title),
+        routePath: change.pageId && pageById.has(change.pageId)
+          ? routePaths.routePath(pageById.get(change.pageId)!, change.namespaceCode)
+          : wikiUrl(change.namespaceCode as Parameters<typeof wikiUrl>[0], change.title),
         summary: change.summary,
         isMinor: change.isMinor,
         createdAt: change.createdAt.toISOString()
@@ -484,6 +498,7 @@ export class WikiReadService {
       : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
+    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const items: WikiBacklinkItem[] = [];
     let lastScannedId: bigint | null = null;
     for (const link of links) {
@@ -503,7 +518,7 @@ export class WikiReadService {
         namespace: sourceNamespace,
         title: source.title,
         displayTitle: source.displayTitle,
-        routePath: wikiUrl(sourceNamespace as Parameters<typeof wikiUrl>[0], source.title),
+        routePath: routePaths.routePath(source, sourceNamespace),
         linkType: link.linkType,
         updatedAt: source.updatedAt.toISOString()
       });
@@ -649,6 +664,7 @@ export class WikiReadService {
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
     const pageById = new Map(pages.map((page) => [page.id, page]));
+    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const items: WikiCategoryResponse['items'][number][] = [];
     let lastScannedId: bigint | null = null;
     for (const link of links) {
@@ -667,7 +683,7 @@ export class WikiReadService {
         namespace: namespaceCode,
         title: page.title,
         displayTitle: page.displayTitle,
-        routePath: wikiUrl(namespaceCode as Parameters<typeof wikiUrl>[0], page.title),
+        routePath: routePaths.routePath(page, namespaceCode),
         updatedAt: page.updatedAt.toISOString()
       });
       if (items.length >= limit) break;
@@ -797,6 +813,7 @@ export class WikiReadService {
       : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const items: WikiContributionItem[] = [];
     let lastScannedId: bigint | null = null;
     for (const change of changes) {
@@ -818,8 +835,8 @@ export class WikiReadService {
         changeType: change.changeType,
         title: page.displayTitle,
         namespace,
-        routePath: wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title),
-        href: change.revisionId ? `/wiki/revision/${change.revisionId.toString()}` : wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title),
+        routePath: routePaths.routePath(page, namespace),
+        href: change.revisionId ? `/wiki/revision/${change.revisionId.toString()}` : routePaths.routePath(page, namespace),
         summary: change.summary,
         isMinor: change.isMinor,
         status: null,
@@ -861,16 +878,7 @@ export class WikiReadService {
     const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    const serverSpaceIds = [...new Set(pages
-      .filter((page) => namespaceById.get(page.namespaceId) === 'server')
-      .map((page) => page.spaceId))];
-    const serverWikis = serverSpaceIds.length > 0
-      ? await this.prisma.serverWiki.findMany({
-          where: { spaceId: { in: serverSpaceIds }, status: { not: 'disabled' } },
-          select: { spaceId: true, slug: true }
-        })
-      : [];
-    const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
+    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const readable = new Map<bigint, boolean>();
     const items: WikiContributionItem[] = [];
     let lastScannedId: bigint | null = null;
@@ -881,10 +889,8 @@ export class WikiReadService {
       const page = pageById.get(thread.pageId);
       if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
-      const serverSlug = namespace === 'server' ? serverSlugBySpace.get(page.spaceId) : undefined;
-      const routePath = serverSlug
-        ? buildServerWikiPagePath(serverSlug, page.localPath)
-        : wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
+      const serverSlug = namespace === 'server' ? routePaths.serverSlug(page) : undefined;
+      const routePath = routePaths.routePath(page, namespace);
       items.push({
         id: comment.id.toString(), kind: 'discussion', pageId: page.id.toString(), revisionId: null,
         changeType: 'comment', title: thread.title, namespace, routePath,
@@ -918,6 +924,7 @@ export class WikiReadService {
     const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const readable = new Map<bigint, boolean>();
     const items: WikiContributionItem[] = [];
     let lastScannedId: bigint | null = null;
@@ -926,7 +933,7 @@ export class WikiReadService {
       const page = pageById.get(request.pageId);
       if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
-      const routePath = wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
+      const routePath = routePaths.routePath(page, namespace);
       items.push({
         id: request.id.toString(), kind: reviews ? 'review' : 'edit_request', pageId: page.id.toString(), revisionId: request.acceptedRevisionId?.toString() ?? null,
         changeType: reviews ? 'review' : 'edit_request', title: page.displayTitle, namespace, routePath,
@@ -1085,9 +1092,10 @@ export class WikiReadService {
       ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } }, select: { id: true, code: true } })
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
+    const routePaths = await this.routePaths.preload(visiblePages, namespaceById);
     if (type === 'random') {
       const page = visiblePages[Math.floor(Math.random() * visiblePages.length)];
-      return { type, items: page ? [this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)] : [] };
+      return { type, items: page ? [this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null, routePaths)] : [] };
     }
 
     if (type === 'old') {
@@ -1096,7 +1104,7 @@ export class WikiReadService {
         .slice(0, limit);
       return {
         type,
-        items: sorted.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null))
+        items: sorted.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null, routePaths))
       };
     }
 
@@ -1116,7 +1124,7 @@ export class WikiReadService {
         .slice(0, limit);
       return {
         type,
-        items: sorted.map(({ page, size }) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', size))
+        items: sorted.map(({ page, size }) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', size, routePaths))
       };
     }
 
@@ -1125,7 +1133,7 @@ export class WikiReadService {
         const revision = page.currentRevisionId ? revisionById.get(page.currentRevisionId) : null;
         return revision ? parseMarkup(revision.contentRaw).categories.length === 0 : false;
       }).slice(0, limit);
-      return { type, items: items.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)) };
+      return { type, items: items.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null, routePaths)) };
     }
 
     const visiblePageIds = new Set(visiblePages.map((page) => page.id));
@@ -1139,13 +1147,18 @@ export class WikiReadService {
     const currentLinks = indexedLinks.filter((link) => visiblePageById.get(link.sourcePageId)?.currentRevisionId === link.sourceRevisionId);
     const documentLinks = currentLinks.filter((link) => link.linkType === 'link');
     if (type === 'wanted') {
-      const existing = new Set(visiblePages.map((page) => `${namespaceById.get(page.namespaceId) ?? 'main'}:${page.slug}`));
-      const counts = new Map<string, { namespace: string; slug: string; count: number }>();
+      const existing = new Set(visiblePages.map((page) => {
+        const pageNamespace = namespaceById.get(page.namespaceId) ?? 'main';
+        return `${pageNamespace}:${page.slug}${pageNamespace === 'server' ? `:${page.spaceId.toString()}` : ''}`;
+      }));
+      const counts = new Map<string, { namespace: string; slug: string; count: number; sourcePage: (typeof visiblePages)[number] | null }>();
       for (const link of documentLinks) {
-        const key = `${link.targetNamespaceCode}:${link.targetSlug}`;
+        const sourcePage = visiblePageById.get(link.sourcePageId) ?? null;
+        const serverSpaceKey = link.targetNamespaceCode === 'server' ? `:${sourcePage?.spaceId.toString() ?? 'unknown'}` : '';
+        const key = `${link.targetNamespaceCode}:${link.targetSlug}${serverSpaceKey}`;
         if (existing.has(key)) continue;
         const current = counts.get(key);
-        counts.set(key, { namespace: link.targetNamespaceCode, slug: link.targetSlug, count: (current?.count ?? 0) + 1 });
+        counts.set(key, { namespace: link.targetNamespaceCode, slug: link.targetSlug, count: (current?.count ?? 0) + 1, sourcePage });
       }
       const items = [...counts.entries()].sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0], 'ko')).slice(0, limit);
       return {
@@ -1156,7 +1169,7 @@ export class WikiReadService {
           namespace: target.namespace,
           title: target.slug,
           displayTitle: target.slug.split('/').at(-1) ?? target.slug,
-          routePath: wikiUrl(target.namespace as Parameters<typeof wikiUrl>[0], target.slug),
+          routePath: routePaths.targetRoutePath(target.namespace, target.slug, target.sourcePage ?? undefined),
           value: target.count,
           updatedAt: null
         }))
@@ -1199,7 +1212,7 @@ export class WikiReadService {
       const key = `${namespaceById.get(page.namespaceId) ?? 'main'}:${page.slug}`;
       return !rootPageIds.has(page.id) && !incoming.has(key);
     }).slice(0, limit);
-    return { type, items: orphaned.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null)) };
+    return { type, items: orphaned.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null, routePaths)) };
   }
 
   private async getOrphanedCategories(
@@ -1335,13 +1348,14 @@ export class WikiReadService {
   }
 
   private specialPageItem(
-    page: { id: bigint; title: string; displayTitle: string; updatedAt: Date },
+    page: { id: bigint; namespaceId: number; spaceId: bigint; localPath: string; title: string; displayTitle: string; updatedAt: Date },
     namespace: string,
-    value: number | null
+    value: number | null,
+    routePaths?: WikiRoutePathBatch
   ): WikiSpecialDocumentItem {
     return {
       id: page.id.toString(), pageId: page.id.toString(), namespace, title: page.title, displayTitle: page.displayTitle,
-      routePath: wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title), value, updatedAt: page.updatedAt.toISOString()
+      routePath: routePaths?.routePath(page, namespace) ?? wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title), value, updatedAt: page.updatedAt.toISOString()
     };
   }
 
@@ -1392,6 +1406,7 @@ export class WikiReadService {
         })
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
+    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
     const revisions = currentRevisionIds.length > 0
       ? await this.prisma.wikiPageRevision.findMany({
@@ -1423,7 +1438,7 @@ export class WikiReadService {
         namespace: namespaceCode,
         title: page.title,
         displayTitle: page.displayTitle,
-        routePath: wikiUrl(namespaceCode as Parameters<typeof wikiUrl>[0], page.title),
+        routePath: routePaths.routePath(page, namespaceCode),
         snippet: makeSearchSnippet(revision.contentRaw, query),
         updatedAt: page.updatedAt.toISOString()
       }, page });
@@ -1472,6 +1487,7 @@ export class WikiReadService {
         })
       : [];
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const normalized = query.toLocaleLowerCase('ko-KR');
     const ranked: Array<{ score: number; exact: boolean; item: WikiSearchResult }> = [];
     for (const page of pages) {
@@ -1491,7 +1507,7 @@ export class WikiReadService {
         exact,
         item: {
           pageId: page.id.toString(), namespace, title: page.title, displayTitle: page.displayTitle,
-          routePath: wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title), snippet: '', updatedAt: page.updatedAt.toISOString()
+          routePath: routePaths.routePath(page, namespace), snippet: '', updatedAt: page.updatedAt.toISOString()
         }
       });
     }
@@ -1780,17 +1796,7 @@ export class WikiReadService {
 }
 
 export function buildServerWikiPagePath(serverSlug: string, localPath: string): string {
-  const normalizedSlug = slugifyTitle(serverSlug);
-  const normalizedPath = slugifyTitle(localPath);
-  const relativePath = normalizedPath === normalizedSlug
-    ? ''
-    : normalizedPath.startsWith(`${normalizedSlug}/`)
-      ? normalizedPath.slice(normalizedSlug.length + 1)
-      : normalizedPath;
-  const encodedSlug = normalizedSlug.split('/').map(encodeURIComponent).join('/');
-  if (!relativePath) return `/server/${encodedSlug}`;
-  const encodedRelative = relativePath.split('/').map(encodeURIComponent).join('/');
-  return `/server/${encodedSlug}/${encodedRelative}`;
+  return buildCanonicalServerWikiPath(serverSlug, localPath);
 }
 
 export function buildServerWikiToolPath(serverSlug: string, localPath: string, tool: string): string {

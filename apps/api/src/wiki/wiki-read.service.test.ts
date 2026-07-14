@@ -157,7 +157,7 @@ test('revision history uses a stable revision number cursor beyond the first pag
 
 test('recent changes use filters, a stable cursor, and one page visibility check per document', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
-  const readablePage = { id: 1n, namespaceId: 1, spaceId: 1n, title: '공개 문서', createdBy: 1n, protectionLevel: 'open', status: 'normal' };
+  const readablePage = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'alpha/공개 문서', title: '공개 문서', createdBy: 1n, protectionLevel: 'open', status: 'normal' };
   const hiddenPage = { ...readablePage, id: 2n, title: '비공개 문서' };
   let recentQuery: unknown;
   let pageQueryCount = 0;
@@ -174,6 +174,9 @@ test('recent changes use filters, a stable cursor, and one page visibility check
         pageQueryCount += 1;
         return [readablePage, hiddenPage];
       }
+    },
+    serverWiki: {
+      async findMany() { return [{ spaceId: 1n, slug: 'alpha' }]; }
     }
   } as unknown as PrismaService;
   const checked = new Map<bigint, number>();
@@ -195,7 +198,7 @@ test('recent changes use filters, a stable cursor, and one page visibility check
   assert.equal(pageQueryCount, 1);
   assert.deepEqual([...checked.entries()], [[1n, 1], [2n, 1]]);
   assert.deepEqual(result.items.map((item) => item.id), ['10', '8']);
-  assert.equal(result.items[0]?.routePath, '/server/%EA%B3%B5%EA%B0%9C_%EB%AC%B8%EC%84%9C');
+  assert.equal(result.items[0]?.routePath, '/server/alpha/%EA%B3%B5%EA%B0%9C_%EB%AC%B8%EC%84%9C');
   assert.equal(result.nextCursor, '8');
 });
 

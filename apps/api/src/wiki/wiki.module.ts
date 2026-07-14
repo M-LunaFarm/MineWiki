@@ -22,11 +22,12 @@ import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
 import { WikiWatchController } from './wiki-watch.controller';
 import { WikiWatchService } from './wiki-watch.service';
+import { WikiRoutePathResolver } from './wiki-route-path.resolver';
 
 @Module({
   imports: [SessionModule, EventsModule],
   controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPageAclController],
-  providers: [WikiProfileService, WikiAdminService, WikiModerationService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiWatchService, WikiNotificationService, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService],
+  providers: [WikiProfileService, WikiAdminService, WikiModerationService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiWatchService, WikiNotificationService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService],
   exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}
