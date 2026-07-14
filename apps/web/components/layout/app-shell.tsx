@@ -16,6 +16,17 @@ export function AppShell({ children }: AppShellProps) {
     (pathname.startsWith('/servers/') && pathname !== '/servers/register');
   const isSupportPage = pathname === '/support' || pathname.startsWith('/support/');
   const isServerWikiPage = pathname === '/server' || pathname.startsWith('/server/');
+  const isWikiPage =
+    pathname === '/wiki' || pathname.startsWith('/wiki/') ||
+    pathname === '/mod' || pathname.startsWith('/mod/') ||
+    pathname === '/modpack' || pathname.startsWith('/modpack/') ||
+    pathname === '/guide' || pathname.startsWith('/guide/') ||
+    pathname === '/data' || pathname.startsWith('/data/') ||
+    pathname === '/template' || pathname.startsWith('/template/') ||
+    pathname === '/dev' || pathname.startsWith('/dev/') ||
+    pathname === '/help' || pathname.startsWith('/help/') ||
+    pathname === '/project' || pathname.startsWith('/project/') ||
+    pathname === '/file' || pathname.startsWith('/file/');
   const isAuthPage =
     pathname === '/login' ||
     pathname === '/auth' ||
@@ -49,6 +60,16 @@ export function AppShell({ children }: AppShellProps) {
       <div className="min-h-screen bg-[#0b0e12] text-slate-100">
         <SiteHeader />
         <div className="pt-16">{children}</div>
+      </div>
+    );
+  }
+
+  if (isWikiPage) {
+    return (
+      <div className="wiki-shell min-h-screen text-slate-100">
+        <SiteHeader />
+        <main className="mx-auto w-full max-w-7xl px-4 pb-12 pt-28 sm:px-6 lg:px-10">{children}</main>
+        <SiteFooter />
       </div>
     );
   }

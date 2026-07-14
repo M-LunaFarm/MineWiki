@@ -18,7 +18,7 @@ type NavigationLink = {
 };
 
 const NAV_LINKS: readonly NavigationLink[] = [
-  { href: '/wiki', label: '위키', key: 'wiki' },
+  { href: '/wiki/%EB%8C%80%EB%AC%B8', label: '위키', key: 'wiki' },
   { href: '/servers', label: '서버 목록', key: 'servers' },
   { href: '/recent', label: '최근 변경', key: 'recent' },
   { href: '/wiki/discussions', label: '토론', key: 'discussions' },
@@ -225,6 +225,9 @@ function isActive(pathname: string | null, key: NavigationLink['key']): boolean 
       pathname.startsWith('/server/') ||
       pathname.startsWith('/mod/') ||
       pathname.startsWith('/modpack/') ||
+      pathname.startsWith('/guide/') ||
+      pathname.startsWith('/data/') ||
+      pathname.startsWith('/template/') ||
       pathname.startsWith('/project/') ||
       pathname.startsWith('/file/') ||
       pathname.startsWith('/dev/') ||
