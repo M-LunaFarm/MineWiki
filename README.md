@@ -16,6 +16,16 @@ Register the following URLs exactly in each provider console. Production callbac
 | Discord OAuth2 | `https://minewiki.kr/auth/callback/discord` | `DISCORD_REDIRECT_URI` |
 | Microsoft identity platform / Minecraft ownership | `https://verify.minewiki.kr/minecraft/callback` | `MICROSOFT_REDIRECT_URI` |
 
+Copy-and-paste values:
+
+```dotenv
+NAVER_REDIRECT_URI=https://minewiki.kr/auth/callback/naver
+DISCORD_REDIRECT_URI=https://minewiki.kr/auth/callback/discord
+MICROSOFT_REDIRECT_URI=https://verify.minewiki.kr/minecraft/callback
+```
+
+These are public redirect addresses, not OAuth client secrets. Keep each provider's client ID and client secret only in the production secret store.
+
 Useful provider registration URLs:
 
 - Homepage URL: `https://minewiki.kr`
@@ -27,7 +37,7 @@ The Microsoft callback intentionally belongs to the isolated verification servic
 
 ## Brand Assets
 
-The following production URLs return downloadable PNG files and may be supplied to OAuth provider consoles:
+The following production URLs return the original downloadable PNG files and may be supplied to OAuth provider consoles. Open a link and save the image without resizing it.
 
 | Asset | Size | Download |
 | --- | ---: | --- |
