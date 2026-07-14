@@ -80,19 +80,20 @@ test('wiki suggestions rank exact and prefix title matches without reading docum
   const now = new Date('2026-07-14T00:00:00Z');
   const pages = [
     { id: 2n, namespaceId: 1, spaceId: 1n, localPath: '대문 안내', slug: '대문 안내', title: '대문 안내', displayTitle: '대문 안내', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now },
-    { id: 1n, namespaceId: 1, spaceId: 1n, localPath: '대문', slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: new Date('2025-01-01T00:00:00Z') }
+    { id: 1n, namespaceId: 1, spaceId: 1n, localPath: '대문', slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: new Date('2025-01-01T00:00:00Z') },
+    { id: 3n, namespaceId: 2, spaceId: 2n, localPath: '대문', slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 13n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now }
   ];
   let pageQuery: unknown;
   const prisma = {
     wikiPage: { async findMany(args: unknown) { pageQuery = args; return pages; } },
-    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }, { id: 2, code: 'help' }]; } }
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
 
   const result = await new WikiReadService(prisma, permissions).suggest({ q: '대문', limit: 8 });
 
   assert.equal(result.exactMatch?.pageId, '1');
-  assert.deepEqual(result.items.map((item) => item.pageId), ['1', '2']);
+  assert.deepEqual(result.items.map((item) => item.pageId), ['1', '3', '2']);
   assert.equal(JSON.stringify(pageQuery).includes('contentRaw'), false);
 });
 

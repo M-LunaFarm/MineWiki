@@ -1213,7 +1213,7 @@ export class WikiReadService {
       : [];
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
     const normalized = query.toLocaleLowerCase('ko-KR');
-    const ranked: Array<{ score: number; item: WikiSearchResult }> = [];
+    const ranked: Array<{ score: number; exact: boolean; item: WikiSearchResult }> = [];
     for (const page of pages) {
       try {
         await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
@@ -1222,14 +1222,13 @@ export class WikiReadService {
       }
       const candidates = [page.displayTitle, page.title, page.slug, page.localPath]
         .map((value) => value.toLocaleLowerCase('ko-KR'));
-      const score = candidates.some((value) => value === normalized)
-        ? 0
-        : candidates.some((value) => value.startsWith(normalized))
-          ? 1
-          : 2;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
+      const exact = candidates.some((value) => value === normalized);
+      const matchRank = exact ? 0 : candidates.some((value) => value.startsWith(normalized)) ? 2 : 4;
+      const score = matchRank + (namespace === 'main' ? 0 : 1);
       ranked.push({
         score,
+        exact,
         item: {
           pageId: page.id.toString(), namespace, title: page.title, displayTitle: page.displayTitle,
           routePath: wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title), snippet: '', updatedAt: page.updatedAt.toISOString()
@@ -1238,7 +1237,14 @@ export class WikiReadService {
     }
     ranked.sort((left, right) => left.score - right.score || right.item.updatedAt.localeCompare(left.item.updatedAt) || left.item.pageId.localeCompare(right.item.pageId));
     const items = ranked.slice(0, limit).map(({ item }) => item);
-    return { items, exactMatch: ranked.find(({ score }) => score === 0)?.item ?? null };
+    const exact = ranked.filter((entry) => entry.exact);
+    const mainExact = exact.filter((entry) => entry.item.namespace === 'main');
+    const exactMatch = mainExact.length === 1
+      ? mainExact[0].item
+      : exact.length === 1
+        ? exact[0].item
+        : null;
+    return { items, exactMatch };
   }
 
   private async renderPage(namespace: string, page: {
