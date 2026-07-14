@@ -119,6 +119,7 @@ test.describe('End-to-end flows', () => {
         await prisma.server.deleteMany({ where: { id: serverId } });
       }
       if (accountId) {
+        await prisma.wikiProfile.deleteMany({ where: { accountId } });
         await prisma.account.deleteMany({ where: { id: accountId } });
       }
       await prisma.$disconnect();
@@ -190,11 +191,11 @@ test.describe('End-to-end flows', () => {
     await expect(page.getByText(/정품 계정을 인증/)).toBeVisible();
   });
 
-  test('landing page shows server discovery entry points', async ({ page }) => {
+  test('landing page is the searchable server directory', async ({ page }) => {
     await page.goto('/');
-    await expect(
-      page.getByRole('heading', { name: /검증된 서버를 찾고, 투표와 리뷰로 비교하세요/ }),
-    ).toBeVisible();
-    await expect(page.getByRole('link', { name: /전체 보기/ })).toBeVisible();
+    await expect(page).toHaveURL(/\/servers(?:\?|$)/);
+    await expect(page.getByRole('searchbox').first()).toBeVisible();
+    await expect(page.getByRole('combobox', { name: '서버 정렬' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: '서버 정렬' })).toContainText('동접순');
   });
 });

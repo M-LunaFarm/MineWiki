@@ -321,6 +321,7 @@ export function ServerListExplorer({
 
               <div className="relative min-w-[120px]">
                 <select
+                  aria-label="서버 정렬"
                   value={sort}
                   onChange={(event) => setSort(event.target.value as SortFilter)}
                   className="paper-control h-10 w-full cursor-pointer appearance-none px-3 pr-8 font-medium"
@@ -578,6 +579,7 @@ export function ServerListExplorer({
                   정렬
                 </p>
                 <select
+                  aria-label="서버 정렬"
                   value={sort}
                   onChange={(event) => setSort(event.target.value as SortFilter)}
                   className="paper-control h-10 w-full px-3"

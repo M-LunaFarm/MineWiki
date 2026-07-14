@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Landing page', () => {
-  test('shows the server discovery headline', async ({ page }) => {
+  test('opens the server directory without a promotional headline', async ({ page }) => {
     await page.goto('/');
-    await expect(
-      page.getByRole('heading', { name: /검증된 서버를 찾고, 투표와 리뷰로 비교하세요/ }),
-    ).toBeVisible();
+    await expect(page).toHaveURL(/\/servers(?:\?|$)/);
+    await expect(page.getByRole('searchbox').first()).toBeVisible();
+    await expect(page.getByRole('combobox', { name: '서버 정렬' })).toContainText('동접순');
   });
 });
