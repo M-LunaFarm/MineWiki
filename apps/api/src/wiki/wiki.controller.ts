@@ -150,6 +150,7 @@ export class WikiController {
 
   @Get('search')
   @UseGuards(OptionalSessionGuard)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
   search(
     @Req() request: FastifyRequest,
     @Query('q') q: string | undefined,
@@ -168,6 +169,7 @@ export class WikiController {
 
   @Get('search/suggest')
   @UseGuards(OptionalSessionGuard)
+  @Throttle({ default: { limit: 60, ttl: 60 } })
   suggest(
     @Req() request: FastifyRequest,
     @Query('q') q: string | undefined,

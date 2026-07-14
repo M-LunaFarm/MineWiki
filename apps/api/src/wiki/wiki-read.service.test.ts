@@ -56,6 +56,7 @@ test('wiki search batches current revisions and returns a continuation cursor', 
     createdAt: now, updatedAt: new Date(now.getTime() - index * 1000)
   }));
   let revisionQueryCount = 0;
+  const revisionSelects: unknown[] = [];
   let currentSearchQueryCount = 0;
   const prisma = {
     async $queryRawUnsafe() {
@@ -68,16 +69,23 @@ test('wiki search batches current revisions and returns a continuation cursor', 
     },
     wikiPage: { async findMany() { return pages; } },
     wikiPageRevision: {
-      async findMany() {
+      async findMany(args: { select?: { contentRaw?: boolean } }) {
         revisionQueryCount += 1;
-        return pages.map((page) => ({ id: page.currentRevisionId, pageId: page.id, revisionNo: 1, visibility: 'public', contentRaw: `본문 검색 ${page.id}`, createdAt: now }));
+        revisionSelects.push(args.select);
+        return args.select?.contentRaw
+          ? pages.map((page) => ({ id: page.currentRevisionId, contentRaw: `본문 검색 ${page.id}` }))
+          : pages.map((page) => ({ id: page.currentRevisionId, visibility: 'public' }));
       }
     }
   } as unknown as PrismaService;
-  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const permissions = {
+    async filterReadablePages({ pages: candidates }: { pages: typeof pages }) { return [...candidates]; }
+  } as unknown as WikiPermissionService;
   const result = await new WikiReadService(prisma, permissions).search({ q: '검색', limit: 2 });
   assert.equal(currentSearchQueryCount, 1);
-  assert.equal(revisionQueryCount, 1);
+  assert.equal(revisionQueryCount, 2);
+  assert.equal(JSON.stringify(revisionSelects[0]).includes('contentRaw'), false);
+  assert.equal(JSON.stringify(revisionSelects[1]).includes('contentRaw'), true);
   assert.equal(result.items.length, 2);
   assert.ok(result.nextCursor);
 });
@@ -102,12 +110,16 @@ test('wiki search never uses matching historical revisions as current-document c
     },
     wikiPage: { async findMany() { return [currentPage]; } },
     wikiPageRevision: {
-      async findMany() {
-        return [{ id: 70n, pageId: 7n, revisionNo: 3, visibility: 'public', contentRaw: '현재 본문 검색어', createdAt: now }];
+      async findMany(args: { select?: { contentRaw?: boolean } }) {
+        return args.select?.contentRaw
+          ? [{ id: 70n, contentRaw: '현재 본문 검색어' }]
+          : [{ id: 70n, visibility: 'public' }];
       }
     }
   } as unknown as PrismaService;
-  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const permissions = {
+    async filterReadablePages({ pages }: { pages: typeof currentPage[] }) { return [...pages]; }
+  } as unknown as WikiPermissionService;
 
   const result = await new WikiReadService(prisma, permissions).search({ q: '검색어' });
 
@@ -115,6 +127,20 @@ test('wiki search never uses matching historical revisions as current-document c
   assert.match(rawSql, /LOCATE\(\?, r\.content_raw\)/);
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0]?.pageId, '7');
+});
+
+test('wiki search rejects oversized queries before reading the database', async () => {
+  let queryCount = 0;
+  const prisma = {
+    async $queryRawUnsafe() { queryCount += 1; return []; }
+  } as unknown as PrismaService;
+  const permissions = {} as WikiPermissionService;
+
+  await assert.rejects(
+    () => new WikiReadService(prisma, permissions).search({ q: '가'.repeat(101) }),
+    /q is too long/
+  );
+  assert.equal(queryCount, 0);
 });
 
 test('wiki suggestions rank exact and prefix title matches without reading document bodies', async () => {
