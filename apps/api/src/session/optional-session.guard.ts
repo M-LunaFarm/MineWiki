@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { extractClientIp } from '../common/http/client-ip';
 import { SessionService } from './session.service';
@@ -35,7 +35,18 @@ export class OptionalSessionGuard implements CanActivate {
       request.headers['user-agent'] ?? null
     );
     assertCsrfToken(request, session.token);
-    request.sessionPayload = this.sessions.toPayload(session);
+    const payload = this.sessions.toPayload(session);
+    if (
+      payload.policyConsent?.required &&
+      !['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase())
+    ) {
+      throw new ForbiddenException({
+        code: 'POLICY_CONSENT_REQUIRED',
+        message: '개정된 이용약관과 개인정보 처리방침에 동의해 주세요.',
+        policyConsent: payload.policyConsent,
+      });
+    }
+    request.sessionPayload = payload;
     request.sessionToken = session.token;
     return true;
   }

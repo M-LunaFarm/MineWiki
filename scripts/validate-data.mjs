@@ -215,6 +215,45 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'session policy snapshots are backed by immutable consent records',
+    `
+      SELECT session_record.id
+      FROM Session session_record
+      JOIN Account session_account ON session_account.id = session_record.accountId
+      WHERE (
+        session_record.terms_policy_version IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM account_consents consent
+          JOIN Account member_account ON member_account.id = consent.account_id
+          WHERE consent.consent_type = 'terms'
+            AND consent.policy_version = session_record.terms_policy_version
+            AND (
+              member_account.id = session_record.accountId
+              OR member_account.id = COALESCE(session_account.canonicalAccountId, session_account.id)
+              OR member_account.canonicalAccountId = COALESCE(session_account.canonicalAccountId, session_account.id)
+            )
+        )
+      ) OR (
+        session_record.privacy_policy_version IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM account_consents consent
+          JOIN Account member_account ON member_account.id = consent.account_id
+          WHERE consent.consent_type = 'privacy'
+            AND consent.policy_version = session_record.privacy_policy_version
+            AND (
+              member_account.id = session_record.accountId
+              OR member_account.id = COALESCE(session_account.canonicalAccountId, session_account.id)
+              OR member_account.canonicalAccountId = COALESCE(session_account.canonicalAccountId, session_account.id)
+            )
+        )
+      )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'review trust evidence is complete',
     `
       SELECT r.id

@@ -303,12 +303,15 @@ model Session {
   ipAddress    String?
   userAgent    String?
   lastActiveAt DateTime
+  termsPolicyVersion   String?  @map("terms_policy_version") @db.VarChar(32)
+  privacyPolicyVersion String?  @map("privacy_policy_version") @db.VarChar(32)
   createdAt    DateTime @default(now())
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@index([accountId])
   @@index([expiresAt])
+  @@index([termsPolicyVersion, privacyPolicyVersion])
 }
 
 model OAuthState {

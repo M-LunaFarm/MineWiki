@@ -2,8 +2,13 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { serialize } from 'cookie';
 import { DEFAULT_SESSION_TTL_SECONDS, MINEWIKI_SESSION_COOKIE } from '@minewiki/auth';
+import {
+  CURRENT_POLICY_VERSIONS,
+  type PolicyConsentStatus,
+} from '@minewiki/schemas';
 import { PrismaService } from '../common/prisma.service';
 import { RoleService } from '../roles/role.service';
+import { policyConsentStatus } from './policy-consent';
 
 interface SessionRecord {
   readonly sessionId: string;
@@ -18,6 +23,8 @@ interface SessionRecord {
   ipAddress: string | null;
   userAgent: string | null;
   lastActiveAt: Date;
+  termsPolicyVersion: string | null;
+  privacyPolicyVersion: string | null;
 }
 
 export interface IssueSessionOptions {
@@ -32,6 +39,7 @@ export interface RotatedSession {
   readonly sessionId: string;
   readonly cookie: string;
   readonly expiresAt: string;
+  readonly policyConsent: PolicyConsentStatus;
 }
 
 export interface SessionPayload {
@@ -41,6 +49,7 @@ export interface SessionPayload {
   readonly authenticatedAt: string;
   readonly permissions?: readonly string[];
   readonly groups?: readonly string[];
+  readonly policyConsent?: PolicyConsentStatus;
 }
 
 export interface SessionSummary {
@@ -68,6 +77,7 @@ export class SessionService {
     const expiresAt = new Date(
       issuedAt.getTime() + (options.ttlSeconds ?? DEFAULT_SESSION_TTL_SECONDS) * 1000
     );
+    const policyConsent = await this.getPolicyConsentStatus(options.userId);
 
     await this.prisma.session.create({
       data: {
@@ -80,7 +90,9 @@ export class SessionService {
         isElevated: Boolean(options.elevated),
         ipAddress: options.ipAddress ?? null,
         userAgent: options.userAgent ?? null,
-        lastActiveAt: issuedAt
+        lastActiveAt: issuedAt,
+        termsPolicyVersion: policyConsent.terms.acceptedVersion,
+        privacyPolicyVersion: policyConsent.privacy.acceptedVersion,
       }
     });
 
@@ -98,9 +110,12 @@ export class SessionService {
         groups: [],
         ipAddress: options.ipAddress ?? null,
         userAgent: options.userAgent ?? null,
-        lastActiveAt: issuedAt
+        lastActiveAt: issuedAt,
+        termsPolicyVersion: policyConsent.terms.acceptedVersion,
+        privacyPolicyVersion: policyConsent.privacy.acceptedVersion,
       }),
-      expiresAt: expiresAt.toISOString()
+      expiresAt: expiresAt.toISOString(),
+      policyConsent,
     };
   }
 
@@ -143,9 +158,15 @@ export class SessionService {
         groups: [],
         ipAddress: updated.ipAddress,
         userAgent: updated.userAgent,
-        lastActiveAt: updated.lastActiveAt
+        lastActiveAt: updated.lastActiveAt,
+        termsPolicyVersion: updated.termsPolicyVersion,
+        privacyPolicyVersion: updated.privacyPolicyVersion,
       }),
-      expiresAt: updated.expiresAt.toISOString()
+      expiresAt: updated.expiresAt.toISOString(),
+      policyConsent: policyConsentStatus(
+        updated.termsPolicyVersion,
+        updated.privacyPolicyVersion,
+      ),
     };
   }
 
@@ -201,7 +222,9 @@ export class SessionService {
       groups: access?.roles ?? [],
       ipAddress: record.ipAddress,
       userAgent: record.userAgent,
-      lastActiveAt: record.lastActiveAt
+      lastActiveAt: record.lastActiveAt,
+      termsPolicyVersion: record.termsPolicyVersion,
+      privacyPolicyVersion: record.privacyPolicyVersion,
     };
   }
 
@@ -229,8 +252,84 @@ export class SessionService {
       isElevated: record.isElevated,
       authenticatedAt: record.issuedAt.toISOString(),
       permissions: record.permissions,
-      groups: record.groups
+      groups: record.groups,
+      policyConsent: policyConsentStatus(
+        record.termsPolicyVersion,
+        record.privacyPolicyVersion,
+      ),
     };
+  }
+
+  async getPolicyConsentStatus(userId: string): Promise<PolicyConsentStatus> {
+    const accountIds = await this.getCanonicalAccountIds(userId);
+    const consents = await this.prisma.accountConsent.findMany({
+      where: {
+        accountId: { in: accountIds },
+        consentType: { in: ['terms', 'privacy'] },
+      },
+      orderBy: { consentedAt: 'desc' },
+      select: { consentType: true, policyVersion: true },
+    });
+    const termsVersion = consents.find((item) => item.consentType === 'terms')?.policyVersion;
+    const privacyVersion = consents.find((item) => item.consentType === 'privacy')?.policyVersion;
+    return policyConsentStatus(termsVersion, privacyVersion);
+  }
+
+  async acceptCurrentPolicies(
+    userId: string,
+    context: { readonly ipAddress?: string | null; readonly userAgent?: string | null },
+  ): Promise<PolicyConsentStatus> {
+    const accountIds = await this.getCanonicalAccountIds(userId);
+    const consentedAt = new Date();
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.accountConsent.upsert({
+        where: {
+          accountId_consentType_policyVersion: {
+            accountId: userId,
+            consentType: 'terms',
+            policyVersion: CURRENT_POLICY_VERSIONS.terms.consentVersion,
+          },
+        },
+        create: {
+          accountId: userId,
+          consentType: 'terms',
+          policyVersion: CURRENT_POLICY_VERSIONS.terms.consentVersion,
+          consentedAt,
+          ipAddress: context.ipAddress ?? null,
+          userAgent: context.userAgent ?? null,
+        },
+        update: {},
+      });
+      await transaction.accountConsent.upsert({
+        where: {
+          accountId_consentType_policyVersion: {
+            accountId: userId,
+            consentType: 'privacy',
+            policyVersion: CURRENT_POLICY_VERSIONS.privacy.consentVersion,
+          },
+        },
+        create: {
+          accountId: userId,
+          consentType: 'privacy',
+          policyVersion: CURRENT_POLICY_VERSIONS.privacy.consentVersion,
+          consentedAt,
+          ipAddress: context.ipAddress ?? null,
+          userAgent: context.userAgent ?? null,
+        },
+        update: {},
+      });
+      await transaction.session.updateMany({
+        where: { accountId: { in: accountIds } },
+        data: {
+          termsPolicyVersion: CURRENT_POLICY_VERSIONS.terms.consentVersion,
+          privacyPolicyVersion: CURRENT_POLICY_VERSIONS.privacy.consentVersion,
+        },
+      });
+    });
+    return policyConsentStatus(
+      CURRENT_POLICY_VERSIONS.terms.consentVersion,
+      CURRENT_POLICY_VERSIONS.privacy.consentVersion,
+    );
   }
 
   async listSessionsForUser(
@@ -292,6 +391,28 @@ export class SessionService {
 
   private generateToken(): string {
     return randomBytes(32).toString('base64url');
+  }
+
+  private async getCanonicalAccountIds(userId: string): Promise<string[]> {
+    const account = await this.prisma.account.findUnique({
+      where: { id: userId },
+      select: { canonicalAccountId: true },
+    });
+    if (!account) {
+      throw new UnauthorizedException('계정이 존재하지 않습니다.');
+    }
+    const canonicalId = account.canonicalAccountId ?? userId;
+    const accounts = await this.prisma.account.findMany({
+      where: {
+        OR: [
+          { id: canonicalId },
+          { id: userId },
+          { canonicalAccountId: canonicalId },
+        ],
+      },
+      select: { id: true },
+    });
+    return [...new Set(accounts.map((item) => item.id))];
   }
 }
 

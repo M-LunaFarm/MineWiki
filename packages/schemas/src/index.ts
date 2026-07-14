@@ -23,6 +23,20 @@ export const linkedAccountSchema = z.object({
   displayName: z.string().min(1).max(32).nullable().optional(),
 });
 
+export const policyConsentStatusSchema = z.object({
+  required: z.boolean(),
+  terms: z.object({
+    currentVersion: z.string().min(1),
+    acceptedVersion: z.string().min(1).nullable(),
+    accepted: z.boolean(),
+  }),
+  privacy: z.object({
+    currentVersion: z.string().min(1),
+    acceptedVersion: z.string().min(1).nullable(),
+    accepted: z.boolean(),
+  }),
+});
+
 export const authAccountSchema = z.object({
   id: z.string().uuid(),
   provider: authProviderSchema,
@@ -36,6 +50,7 @@ export const authAccountSchema = z.object({
   lastLoginAt: z.string().datetime().nullable(),
   linkedAccountIds: z.array(z.string().uuid()),
   linkedAccounts: z.array(linkedAccountSchema),
+  policyConsent: policyConsentStatusSchema.optional(),
   access: z
     .object({
       isElevated: z.boolean(),
@@ -115,6 +130,13 @@ export const passwordChangeRequestSchema = z
   .object({
     currentPassword: authPasswordSchema,
     newPassword: authPasswordSchema,
+  })
+  .strict();
+
+export const policyConsentAcceptRequestSchema = z
+  .object({
+    agreeTerms: z.literal(true),
+    agreePrivacy: z.literal(true),
   })
   .strict();
 
@@ -613,6 +635,7 @@ export type DiscordVerifySyncJob = z.infer<typeof discordVerifySyncJobSchema>;
 export type PluginSyncEvent = z.infer<typeof pluginSyncEventSchema>;
 export type AuthProvider = z.infer<typeof authProviderSchema>;
 export type OAuthProvider = z.infer<typeof oauthProviderSchema>;
+export type PolicyConsentStatus = z.infer<typeof policyConsentStatusSchema>;
 export type AuthAccount = z.infer<typeof authAccountSchema>;
 export type LinkedAccount = z.infer<typeof linkedAccountSchema>;
 export type OAuthStartRequest = z.infer<typeof oauthStartRequestSchema>;

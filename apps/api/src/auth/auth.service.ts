@@ -8,7 +8,7 @@
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
-import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
+import { CURRENT_POLICY_VERSIONS, type PolicyConsentStatus } from '@minewiki/schemas';
 import { hash, verify, Algorithm } from '@node-rs/argon2';
 import { createHash, randomBytes } from 'node:crypto';
 import type { AuthProvider } from './account-separation.service';
@@ -89,6 +89,7 @@ export interface AuthAccountView {
   readonly lastLoginAt: string | null;
   readonly linkedAccountIds: string[];
   readonly linkedAccounts: LinkedAccountView[];
+  readonly policyConsent?: PolicyConsentStatus;
 }
 
 export interface LinkedAccountView {
@@ -252,7 +253,13 @@ export class AuthService {
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
     });
-    return this.toSessionResult(account, session.cookie, session.sessionId, session.expiresAt);
+    return this.toSessionResult(
+      account,
+      session.cookie,
+      session.sessionId,
+      session.expiresAt,
+      session.policyConsent,
+    );
   }
 
   async verifyEmail(token: string, context: SessionContext = {}): Promise<AuthSessionResult> {
@@ -294,7 +301,13 @@ export class AuthService {
       ipAddress: context.ipAddress,
       userAgent: context.userAgent,
     });
-    return this.toSessionResult(account, session.cookie, session.sessionId, session.expiresAt);
+    return this.toSessionResult(
+      account,
+      session.cookie,
+      session.sessionId,
+      session.expiresAt,
+      session.policyConsent,
+    );
   }
 
   async setupEmailLogin(
@@ -459,12 +472,15 @@ export class AuthService {
     return this.accounts.confirmLink(requestId, verificationCode);
   }
 
-  async getAccountView(accountId: string): Promise<AuthAccountView> {
+  async getAccountView(
+    accountId: string,
+    policyConsent?: PolicyConsentStatus,
+  ): Promise<AuthAccountView> {
     const account = await this.accounts.getAccount(accountId);
     if (!account) {
       throw new NotFoundAccountError();
     }
-    return this.toAccountView(account);
+    return this.toAccountView(account, policyConsent);
   }
 
   getOAuthProviderAvailability(): { discord: boolean; naver: boolean } {
@@ -658,6 +674,7 @@ export class AuthService {
       session.cookie,
       session.sessionId,
       session.expiresAt,
+      session.policyConsent,
     );
   }
 
@@ -768,16 +785,20 @@ export class AuthService {
     cookie: string,
     sessionId: string,
     expiresAt: string,
+    policyConsent: PolicyConsentStatus,
   ): Promise<AuthSessionResult> {
     return {
-      account: await this.toAccountView(account),
+      account: await this.toAccountView(account, policyConsent),
       sessionId,
       expiresAt,
       cookie,
     };
   }
 
-  private async toAccountView(account: AccountRecord): Promise<AuthAccountView> {
+  private async toAccountView(
+    account: AccountRecord,
+    policyConsent?: PolicyConsentStatus,
+  ): Promise<AuthAccountView> {
     const linkedAccounts = await this.accounts.listLinkedAccounts(account.id);
     return {
       id: account.id,
@@ -792,6 +813,7 @@ export class AuthService {
       lastLoginAt: account.lastLoginAt,
       linkedAccountIds: await this.accounts.getLinkedAccountIds(account.id),
       linkedAccounts,
+      policyConsent,
     };
   }
 

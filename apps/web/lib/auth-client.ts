@@ -10,6 +10,7 @@ import {
   type SessionListResponse,
   type SessionSummary,
   type OAuthProviderAvailability,
+  type PolicyConsentStatus,
 } from '@minewiki/schemas';
 import { normalizeApiBaseUrl } from './runtime-config';
 import { clearCsrfToken, csrfHeaders } from './csrf';
@@ -116,6 +117,13 @@ export async function resetPassword(payload: {
 export async function logout(): Promise<void> {
   await postJson('/v1/auth/logout', {});
   clearCsrfToken();
+}
+
+export async function acceptCurrentPolicies(): Promise<PolicyConsentStatus> {
+  return postJson<PolicyConsentStatus>('/v1/auth/policies/accept', {
+    agreeTerms: true,
+    agreePrivacy: true,
+  });
 }
 
 export async function fetchCurrentAccount(): Promise<AuthAccount | null> {

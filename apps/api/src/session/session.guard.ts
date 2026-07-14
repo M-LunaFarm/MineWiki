@@ -1,6 +1,7 @@
 ﻿import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException
 } from '@nestjs/common';
@@ -47,8 +48,24 @@ export class SessionGuard implements CanActivate {
       request.headers['user-agent'] ?? null
     );
     assertCsrfToken(request, session.token);
-    request.sessionPayload = this.sessions.toPayload(session);
+    const payload = this.sessions.toPayload(session);
+    if (payload.policyConsent?.required && !isPolicyConsentExempt(request)) {
+      throw new ForbiddenException({
+        code: 'POLICY_CONSENT_REQUIRED',
+        message: '개정된 이용약관과 개인정보 처리방침에 동의해 주세요.',
+        policyConsent: payload.policyConsent,
+      });
+    }
+    request.sessionPayload = payload;
     request.sessionToken = session.token;
     return true;
   }
+}
+
+function isPolicyConsentExempt(request: FastifyRequest): boolean {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase())) {
+    return true;
+  }
+  const pathname = request.url.split('?', 1)[0]?.replace(/\/$/, '');
+  return pathname === '/v1/auth/policies/accept' || pathname === '/v1/auth/logout';
 }

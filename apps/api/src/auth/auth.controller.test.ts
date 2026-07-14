@@ -216,6 +216,37 @@ test('existing OAuth login can start without repeated policy consent', async () 
   assert.match(responseHeaders.get('Set-Cookie') ?? '', /SameSite=Lax/u);
 });
 
+test('policy reconsent requires explicit agreement and persists request context', async () => {
+  const calls: unknown[] = [];
+  const controller = new AuthController(
+    {} as never,
+    {
+      async acceptCurrentPolicies(...args: unknown[]) {
+        calls.push(args);
+        return { required: false };
+      },
+    } as never,
+    {} as never,
+  );
+  const session = {
+    sessionId: 'session-current',
+    userId: '11111111-1111-4111-8111-111111111111',
+    isElevated: false,
+  } satisfies SessionPayload;
+
+  assert.throws(
+    () => controller.acceptPolicies(session, { agreeTerms: true }, { headers: {} } as never),
+    (error: unknown) => error instanceof ZodError,
+  );
+  const result = await controller.acceptPolicies(
+    session,
+    { agreeTerms: true, agreePrivacy: true },
+    { headers: { 'user-agent': 'PolicyTest/1.0' } } as never,
+  );
+  assert.deepEqual(result, { required: false });
+  assert.deepEqual(calls, [[session.userId, { ipAddress: null, userAgent: 'PolicyTest/1.0' }]]);
+});
+
 test('OAuth completion rejects a browser without its binding cookie before provider exchange', async () => {
   let completeCalls = 0;
   const controller = new AuthController(

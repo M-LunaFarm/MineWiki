@@ -107,7 +107,12 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         }
         setStatus('success');
         setMessage('로그인이 완료되었습니다. 계정 페이지로 이동합니다.');
-        router.replace(isSafeReturnPath(result.returnTo) ? result.returnTo : '/me');
+        const returnTo = isSafeReturnPath(result.returnTo) ? result.returnTo : '/me';
+        router.replace(
+          result.account.policyConsent?.required
+            ? `/policies/consent?returnTo=${encodeURIComponent(returnTo)}`
+            : returnTo,
+        );
       } catch (error) {
         setStatus('error');
         const nextMessage =

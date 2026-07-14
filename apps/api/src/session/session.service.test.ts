@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { SessionService, hashSessionToken } from './session.service';
 import { PrismaService } from '../common/prisma.service';
+import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -55,6 +56,45 @@ if (!hasDatabase) {
       assert.notEqual(stored?.token, rawToken);
       assert.equal(await service.getSessionByToken(stored?.token), undefined);
       assert.equal((await service.getSessionByToken(rawToken))?.sessionId, result.sessionId);
+    } finally {
+      await cleanupTestAccount(userId);
+    }
+  });
+
+  test('policy acceptance is immutable and unlocks every active canonical session', async () => {
+    const userId = await createTestAccount();
+    try {
+      const first = await service.issueSession({ userId });
+      const second = await service.issueSession({ userId });
+      assert.equal(first.policyConsent.required, true);
+      assert.equal(second.policyConsent.required, true);
+
+      const accepted = await service.acceptCurrentPolicies(userId, {
+        ipAddress: '192.0.2.10',
+        userAgent: 'PolicyTest/1.0',
+      });
+      assert.equal(accepted.required, false);
+      assert.equal(
+        await prisma.accountConsent.count({
+          where: {
+            accountId: userId,
+            policyVersion: {
+              in: [
+                CURRENT_POLICY_VERSIONS.terms.consentVersion,
+                CURRENT_POLICY_VERSIONS.privacy.consentVersion,
+              ],
+            },
+          },
+        }),
+        2,
+      );
+
+      await service.acceptCurrentPolicies(userId, {});
+      assert.equal(await prisma.accountConsent.count({ where: { accountId: userId } }), 2);
+      const firstPayload = service.toPayload((await service.getSession(first.sessionId))!);
+      const secondPayload = service.toPayload((await service.getSession(second.sessionId))!);
+      assert.equal(firstPayload.policyConsent?.required, false);
+      assert.equal(secondPayload.policyConsent?.required, false);
     } finally {
       await cleanupTestAccount(userId);
     }

@@ -28,7 +28,11 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (redirectTargetReady && !loading && account) {
-      router.replace(redirectTarget);
+      router.replace(
+        account.policyConsent?.required
+          ? `/policies/consent?returnTo=${encodeURIComponent(redirectTarget)}`
+          : redirectTarget,
+      );
     }
   }, [account, loading, redirectTarget, redirectTargetReady, router]);
 

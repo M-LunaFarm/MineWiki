@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   fetchCurrentAccount,
   loginEmail,
@@ -36,6 +37,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
   const [account, setAccount] = useState<AuthAccount | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -55,6 +58,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (
+      loading ||
+      !account?.policyConsent?.required ||
+      pathname.startsWith('/policies') ||
+      pathname.startsWith('/auth/callback')
+    ) {
+      return;
+    }
+    const currentPath = `${pathname}${typeof window === 'undefined' ? '' : window.location.search}`;
+    router.replace(`/policies/consent?returnTo=${encodeURIComponent(currentPath)}`);
+  }, [account, loading, pathname, router]);
 
   const login = useCallback(async (payload: { email: string; password: string }) => {
     setLoading(true);

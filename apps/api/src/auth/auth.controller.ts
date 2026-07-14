@@ -37,6 +37,7 @@ import {
   oauthStartRequestSchema,
   oauthCompleteRequestSchema,
   passwordChangeRequestSchema,
+  policyConsentAcceptRequestSchema,
   passwordResetConfirmRequestSchema,
   passwordResetRequestSchema,
   type OAuthProvider,
@@ -288,7 +289,7 @@ export class AuthController {
   @UseGuards(SessionGuard)
   @Get('me')
   async me(@CurrentSession() session: SessionPayload) {
-    const account = await this.auth.getAccountView(session.userId);
+    const account = await this.auth.getAccountView(session.userId, session.policyConsent);
     return {
       ...account,
       access: {
@@ -297,6 +298,18 @@ export class AuthController {
         permissions: [...(session.permissions ?? [])],
       },
     };
+  }
+
+  @UseGuards(SessionGuard)
+  @Post('policies/accept')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
+  acceptPolicies(
+    @CurrentSession() session: SessionPayload,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+  ) {
+    policyConsentAcceptRequestSchema.parse(body);
+    return this.sessions.acceptCurrentPolicies(session.userId, this.extractSessionContext(request));
   }
 
   @UseGuards(SessionGuard)
