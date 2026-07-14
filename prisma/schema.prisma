@@ -1131,9 +1131,12 @@ model WikiPage {
   @@index([title])
   @@index([pageType])
   @@index([updatedAt])
-  @@index([status, pageType, namespaceId, updatedAt, id], map: "idx_pages_special_old")
-  @@index([status, pageType, namespaceId, currentContentSize, id], map: "idx_pages_special_size")
-  @@index([status, pageType, namespaceId, currentCategoryCount, updatedAt, id], map: "idx_pages_special_category")
+  @@index([updatedAt, id], map: "idx_pages_special_old")
+  @@index([namespaceId, updatedAt, id], map: "idx_pages_special_old_namespace")
+  @@index([currentContentSize, id], map: "idx_pages_special_size")
+  @@index([namespaceId, currentContentSize, id], map: "idx_pages_special_size_namespace")
+  @@index([currentCategoryCount, updatedAt, id], map: "idx_pages_special_category")
+  @@index([namespaceId, currentCategoryCount, updatedAt, id], map: "idx_pages_special_category_namespace")
   @@map("pages")
 }
 
