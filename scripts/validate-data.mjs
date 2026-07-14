@@ -381,6 +381,7 @@ async function runValidation() {
 
   await validatePluginCredentials();
   await validatePublicReviewCounts();
+  await validateReviewHelpfulCounts();
   await validateReviewReportCounts();
   await validateEncryptedCredentials();
   await validateExpiredReplayGuards();
@@ -427,6 +428,46 @@ async function validatePublicReviewCounts() {
   `);
   summary.fixes += fixed;
   pass('Server.reviewsCount matches public reviews', `reconciled ${fixed} server counters`);
+}
+
+async function validateReviewHelpfulCounts() {
+  const mismatches = await prisma.$queryRawUnsafe(`
+    SELECT r.id
+    FROM ServerReview r
+    LEFT JOIN (
+      SELECT hv.reviewId, COUNT(*) AS helpfulCount
+      FROM ReviewHelpfulVote hv
+      WHERE hv.isHelpful = TRUE
+      GROUP BY hv.reviewId
+    ) counted ON counted.reviewId = r.id
+    WHERE r.helpfulCount <> COALESCE(counted.helpfulCount, 0)
+    LIMIT ${args.fixLimit}
+  `);
+  if (mismatches.length === 0) {
+    pass('ServerReview.helpfulCount matches active helpful votes');
+    return;
+  }
+  if (!args.fix) {
+    const sample = mismatches.slice(0, args.sampleLimit).map((row) => stringifyId(row.id)).join(', ');
+    error(
+      'ServerReview.helpfulCount matches active helpful votes',
+      `${mismatches.length} mismatched counters; sample: ${sample}; rerun with --fix to reconcile`,
+    );
+    return;
+  }
+  const fixed = await prisma.$executeRawUnsafe(`
+    UPDATE ServerReview r
+    LEFT JOIN (
+      SELECT hv.reviewId, COUNT(*) AS helpfulCount
+      FROM ReviewHelpfulVote hv
+      WHERE hv.isHelpful = TRUE
+      GROUP BY hv.reviewId
+    ) counted ON counted.reviewId = r.id
+    SET r.helpfulCount = COALESCE(counted.helpfulCount, 0)
+    WHERE r.helpfulCount <> COALESCE(counted.helpfulCount, 0)
+  `);
+  summary.fixes += fixed;
+  pass('ServerReview.helpfulCount matches active helpful votes', `reconciled ${fixed} review counters`);
 }
 
 async function validateReviewReportCounts() {

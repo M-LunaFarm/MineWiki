@@ -123,6 +123,19 @@ if (!hasDatabase) {
     });
   };
 
+  const createEligibleReview = async () => {
+    const author = await createAccount('Review author');
+    const server = await createServer();
+    const uuid = await ensureIdentity(author.id);
+    await recordVote(server.id, author.id, uuid);
+    const review = await reviewService.create(
+      server.id,
+      { rating: 5, body: '도움표시 동시성 테스트 리뷰', tags: ['community'] },
+      createSession(author.id)
+    );
+    return { review, server };
+  };
+
   test('throws when account information is missing', async () => {
     const server = await createServer();
     const session = createSession(randomUUID());
@@ -240,6 +253,75 @@ if (!hasDatabase) {
     assert.equal(replied.adminReply?.body, '??????.');
     const cleared = await reviewService.setAdminReply(server.id, review.id, '???', '   ');
     assert.equal(cleared.adminReply, null);
+  });
+
+  test('serializes concurrent helpful marks from the same voter', async () => {
+    const { review, server } = await createEligibleReview();
+    const voter = await createAccount('Helpful voter');
+    await prisma.reviewHelpfulVote.create({
+      data: {
+        reviewId: review.id,
+        accountId: voter.id,
+        isHelpful: false,
+        lastMarkedAt: new Date(Date.now() - 10 * 60 * 1000)
+      }
+    });
+
+    const attempts = await Promise.allSettled([
+      reviewService.markHelpful(server.id, review.id, voter.id, true),
+      reviewService.markHelpful(server.id, review.id, voter.id, true)
+    ]);
+    assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
+    const rejected = attempts.find((attempt) => attempt.status === 'rejected');
+    assert.ok(rejected?.status === 'rejected' && rejected.reason instanceof ForbiddenException);
+
+    const [storedReview, activeVotes] = await Promise.all([
+      prisma.serverReview.findUniqueOrThrow({ where: { id: review.id } }),
+      prisma.reviewHelpfulVote.count({ where: { reviewId: review.id, isHelpful: true } })
+    ]);
+    assert.equal(activeVotes, 1);
+    assert.equal(storedReview.helpfulCount, activeVotes);
+  });
+
+  test('keeps helpfulCount exact during concurrent true and false transitions', async () => {
+    const { review, server } = await createEligibleReview();
+    const [upVoter, downVoter] = await Promise.all([
+      createAccount('Helpful up voter'),
+      createAccount('Helpful down voter')
+    ]);
+    const beforeCooldown = new Date(Date.now() - 10 * 60 * 1000);
+    await prisma.reviewHelpfulVote.createMany({
+      data: [
+        {
+          reviewId: review.id,
+          accountId: upVoter.id,
+          isHelpful: false,
+          lastMarkedAt: beforeCooldown
+        },
+        {
+          reviewId: review.id,
+          accountId: downVoter.id,
+          isHelpful: true,
+          lastMarkedAt: beforeCooldown
+        }
+      ]
+    });
+    await prisma.serverReview.update({
+      where: { id: review.id },
+      data: { helpfulCount: 1 }
+    });
+
+    await Promise.all([
+      reviewService.markHelpful(server.id, review.id, upVoter.id, true),
+      reviewService.markHelpful(server.id, review.id, downVoter.id, false)
+    ]);
+
+    const [storedReview, activeVotes] = await Promise.all([
+      prisma.serverReview.findUniqueOrThrow({ where: { id: review.id } }),
+      prisma.reviewHelpfulVote.count({ where: { reviewId: review.id, isHelpful: true } })
+    ]);
+    assert.equal(activeVotes, 1);
+    assert.equal(storedReview.helpfulCount, activeVotes);
   });
 
   test('gate status reflects login and vote state', async () => {

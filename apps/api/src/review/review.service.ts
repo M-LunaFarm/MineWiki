@@ -369,75 +369,62 @@ export class ReviewService {
     voterAccountId: string,
     isHelpful: boolean
   ): Promise<ServerReview> {
-    const review = await this.prisma.serverReview.findFirst({
-      where: { id: reviewId, serverId }
-    });
-    if (!review) {
-      throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
-    }
-
     const now = new Date();
-    const existing = await this.prisma.reviewHelpfulVote.findUnique({
-      where: {
-        reviewId_accountId: {
-          reviewId,
-          accountId: voterAccountId
-        }
+    const updated = await this.prisma.$transaction(async (transaction) => {
+      const lockedReviews = await transaction.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM ServerReview
+        WHERE id = ${reviewId} AND serverId = ${serverId}
+        FOR UPDATE
+      `;
+      if (lockedReviews.length !== 1) {
+        throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
       }
-    });
 
-    if (existing && now.getTime() - existing.lastMarkedAt.getTime() < HELPFUL_COOLDOWN_MS) {
-      throw new ForbiddenException('잠시 후 다시 시도해주세요. (도움표시 쿨다운)');
-    }
+      const existing = await transaction.reviewHelpfulVote.findUnique({
+        where: {
+          reviewId_accountId: {
+            reviewId,
+            accountId: voterAccountId
+          }
+        }
+      });
+      if (existing && now.getTime() - existing.lastMarkedAt.getTime() < HELPFUL_COOLDOWN_MS) {
+        throw new ForbiddenException('잠시 후 다시 시도해주세요. (도움표시 쿨다운)');
+      }
 
-    let delta = 0;
-    if (!existing && isHelpful) {
-      delta = 1;
-    } else if (existing && existing.isHelpful && !isHelpful) {
-      delta = -1;
-    } else if (existing && !existing.isHelpful && isHelpful) {
-      delta = 1;
-    }
-
-    await this.prisma.$transaction([
-      existing
-        ? this.prisma.reviewHelpfulVote.update({
-            where: {
-              reviewId_accountId: {
-                reviewId,
-                accountId: voterAccountId
-              }
-            },
-            data: {
-              isHelpful,
-              lastMarkedAt: now
-            }
-          })
-        : this.prisma.reviewHelpfulVote.create({
-            data: {
+      if (existing) {
+        await transaction.reviewHelpfulVote.update({
+          where: {
+            reviewId_accountId: {
               reviewId,
-              accountId: voterAccountId,
-              isHelpful,
-              lastMarkedAt: now
+              accountId: voterAccountId
             }
-          }),
-      delta !== 0
-        ? this.prisma.serverReview.update({
-            where: { id: reviewId },
-            data: { helpfulCount: { increment: delta } }
-          })
-        : this.prisma.serverReview.update({
-            where: { id: reviewId },
-            data: {}
-          })
-    ]);
+          },
+          data: {
+            isHelpful,
+            lastMarkedAt: now
+          }
+        });
+      } else {
+        await transaction.reviewHelpfulVote.create({
+          data: {
+            reviewId,
+            accountId: voterAccountId,
+            isHelpful,
+            lastMarkedAt: now
+          }
+        });
+      }
 
-    const updated = await this.prisma.serverReview.findUnique({
-      where: { id: reviewId }
+      const helpfulCount = await transaction.reviewHelpfulVote.count({
+        where: { reviewId, isHelpful: true }
+      });
+      return transaction.serverReview.update({
+        where: { id: reviewId },
+        data: { helpfulCount }
+      });
     });
-    if (!updated) {
-      throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
-    }
 
     return toReviewResponse(updated, voterAccountId);
   }
