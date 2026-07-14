@@ -40,9 +40,21 @@ export class WikiDiscussionController {
     @Req() request: FastifyRequest,
     @Query('commentCursor') commentCursor?: string,
     @Query('focusCommentId') focusCommentId?: string,
+    @Query('commentDirection') commentDirection?: string,
     @Query('commentLimit', new ParseIntPipe({ optional: true })) commentLimit?: number
   ): Promise<WikiThreadDetail> {
-    return this.discussions.getThread(threadId, request.sessionPayload ?? null, commentCursor, commentLimit ?? 100, focusCommentId);
+    if (commentDirection !== undefined && commentDirection !== 'older' && commentDirection !== 'newer') {
+      throw new BadRequestException('commentDirection must be older or newer.');
+    }
+    const direction: 'older' | 'newer' = commentDirection === 'newer' ? 'newer' : 'older';
+    return this.discussions.getThread(
+      threadId,
+      request.sessionPayload ?? null,
+      commentCursor,
+      commentLimit ?? 100,
+      focusCommentId,
+      direction
+    );
   }
 
   @Post('pages/:pageId/discussions')

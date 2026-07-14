@@ -327,17 +327,18 @@ test('recent server discussions deep-link through the canonical tool route', asy
   );
 });
 
-test('focused comment windows include the requested comment', async () => {
-  let commentWhere: unknown;
+test('focused comment windows include both sides of the requested comment', async () => {
+  const commentQueries: Array<{ where: unknown; orderBy: unknown; take: number }> = [];
+  const makeComment = (id: bigint) => ({ id, threadId: thread.id, content: `comment-${id}`, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: null });
   const store = {
     wikiPage: { async findUnique() { return page; } },
     wikiDiscussionThread: { async findUnique() { return thread; } },
     wikiDiscussionComment: {
       async findUnique() { return { threadId: thread.id }; },
-      async count() { return 1; },
-      async findMany(args: { where: unknown }) {
-        commentWhere = args.where;
-        return [{ id: 40n, threadId: thread.id, content: 'target', status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: null }];
+      async count() { return 150; },
+      async findMany(args: { where: { id?: { lte?: bigint; gt?: bigint } }; orderBy: unknown; take: number }) {
+        commentQueries.push(args);
+        return args.where.id?.lte ? [makeComment(40n), makeComment(39n), makeComment(38n)] : [makeComment(41n), makeComment(42n), makeComment(43n)];
       }
     },
     wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
@@ -348,9 +349,47 @@ test('focused comment windows include the requested comment', async () => {
     { async assertCanReadPage() {} } as unknown as WikiPermissionService
   );
 
-  const result = await discussions.getThread(thread.id.toString(), null, undefined, 100, '40');
-  assert.deepEqual(commentWhere, { threadId: thread.id, id: { lte: 40n } });
-  assert.equal(result.comments[0]?.id, '40');
+  const result = await discussions.getThread(thread.id.toString(), null, undefined, 4, '40');
+  assert.deepEqual(commentQueries.map((query) => query.where), [
+    { threadId: thread.id, id: { lte: 40n } },
+    { threadId: thread.id, id: { gt: 40n } }
+  ]);
+  assert.deepEqual(result.comments.map((comment) => comment.id), ['39', '40', '41', '42']);
+  assert.equal(result.olderCommentCursor, '39');
+  assert.equal(result.newerCommentCursor, '42');
+  assert.equal(result.nextCommentCursor, '39');
+});
+
+test('newer comment cursors continue forward from a focused window', async () => {
+  let commentQuery: { where: unknown; orderBy: unknown; take: number } | undefined;
+  const makeComment = (id: bigint) => ({ id, threadId: thread.id, content: `comment-${id}`, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: null });
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiDiscussionComment: {
+      async count() { return 150; },
+      async findMany(args: { where: unknown; orderBy: unknown; take: number }) {
+        commentQuery = args;
+        return [makeComment(43n), makeComment(44n), makeComment(45n)];
+      }
+    },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async assertCanReadPage() {} } as unknown as WikiPermissionService
+  );
+
+  const result = await discussions.getThread(thread.id.toString(), null, '42', 2, undefined, 'newer');
+  assert.deepEqual(commentQuery, {
+    where: { threadId: thread.id, id: { gt: 42n } },
+    orderBy: [{ id: 'asc' }],
+    take: 3
+  });
+  assert.deepEqual(result.comments.map((comment) => comment.id), ['43', '44']);
+  assert.equal(result.olderCommentCursor, null);
+  assert.equal(result.newerCommentCursor, '44');
 });
 
 test('pinned discussion comment is included ahead of the current comment window', async () => {

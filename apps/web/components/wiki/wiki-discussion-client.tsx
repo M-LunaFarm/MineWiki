@@ -22,6 +22,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -331,7 +332,8 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   }
 
   async function loadOlderComments() {
-    if (!selected?.nextCommentCursor) return;
+    const cursor = selected?.olderCommentCursor ?? selected?.nextCommentCursor;
+    if (!selected || !cursor) return;
     setLoadingOlder(true);
     setError(null);
     try {
@@ -342,12 +344,13 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
           id: first.id,
           top: element.getBoundingClientRect().top,
         };
-      const older = await fetchWikiThread(selected.id, selected.nextCommentCursor);
+      const older = await fetchWikiThread(selected.id, cursor);
       setSelected((current) =>
         current?.id === older.id
           ? {
               ...current,
               comments: [...older.comments, ...current.comments.filter((comment) => !older.comments.some((item) => item.id === comment.id))],
+              olderCommentCursor: older.olderCommentCursor,
               nextCommentCursor: older.nextCommentCursor,
             }
           : current,
@@ -356,6 +359,28 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       setError(message(caught));
     } finally {
       setLoadingOlder(false);
+    }
+  }
+
+  async function loadNewerComments() {
+    if (!selected?.newerCommentCursor) return;
+    setLoadingNewer(true);
+    setError(null);
+    try {
+      const newer = await fetchWikiThread(selected.id, selected.newerCommentCursor, undefined, 'newer');
+      setSelected((current) =>
+        current?.id === newer.id
+          ? {
+              ...current,
+              comments: [...current.comments, ...newer.comments.filter((comment) => !current.comments.some((item) => item.id === comment.id))],
+              newerCommentCursor: newer.newerCommentCursor,
+            }
+          : current,
+      );
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setLoadingNewer(false);
     }
   }
 
@@ -540,7 +565,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                   </div>
                 </details>
               ) : null}
-              {selected.nextCommentCursor ? (
+              {(selected.olderCommentCursor ?? selected.nextCommentCursor) ? (
                 <button type="button" disabled={loadingOlder} onClick={() => void loadOlderComments()} className="chip chip-muted mx-auto flex min-h-11 items-center gap-2">
                   {loadingOlder ? <Loader2 className="size-4 animate-spin" /> : null} 이전 댓글 더 보기
                 </button>
@@ -625,6 +650,11 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                   ) : null}
                 </article>
               ))}
+              {selected.newerCommentCursor ? (
+                <button type="button" disabled={loadingNewer} onClick={() => void loadNewerComments()} className="chip chip-muted mx-auto flex min-h-11 items-center gap-2">
+                  {loadingNewer ? <Loader2 className="size-4 animate-spin" /> : null} 다음 댓글 더 보기
+                </button>
+              ) : null}
               {selected.canReply ? (
                 <form onSubmit={reply} className="space-y-3">
                   <textarea value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />

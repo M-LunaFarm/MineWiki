@@ -387,6 +387,8 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canReply: boolean;
   readonly subscribed: boolean;
   readonly pinnedCommentId: string | null;
+  readonly olderCommentCursor: string | null;
+  readonly newerCommentCursor: string | null;
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
@@ -736,10 +738,16 @@ export async function fetchWikiDiscussionPermissions(pageId: string): Promise<Wi
   return readWikiBrowser<WikiDiscussionPermissions>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussion-permissions`);
 }
 
-export async function fetchWikiThread(threadId: string, commentCursor?: string, focusCommentId?: string): Promise<WikiThreadDetail> {
+export async function fetchWikiThread(
+  threadId: string,
+  commentCursor?: string,
+  focusCommentId?: string,
+  commentDirection: 'older' | 'newer' = 'older',
+): Promise<WikiThreadDetail> {
   const params = new URLSearchParams({ commentLimit: '100' });
   if (commentCursor) params.set('commentCursor', commentCursor);
   if (focusCommentId) params.set('focusCommentId', focusCommentId);
+  if (commentCursor && commentDirection === 'newer') params.set('commentDirection', commentDirection);
   return readWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(threadId)}?${params.toString()}`);
 }
 

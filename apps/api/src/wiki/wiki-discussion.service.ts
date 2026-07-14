@@ -39,6 +39,9 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canReply: boolean;
   readonly subscribed: boolean;
   readonly pinnedCommentId: string | null;
+  readonly olderCommentCursor: string | null;
+  readonly newerCommentCursor: string | null;
+  /** @deprecated Use olderCommentCursor. */
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
@@ -195,7 +198,8 @@ export class WikiDiscussionService {
     session?: SessionPayload | null,
     commentCursor?: string,
     requestedLimit = 100,
-    focusCommentId?: string
+    focusCommentId?: string,
+    commentDirection: 'older' | 'newer' = 'older'
   ): Promise<WikiThreadDetail> {
     const id = this.parseId(threadId, 'threadId');
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
@@ -204,21 +208,59 @@ export class WikiDiscussionService {
     const commentLimit = Math.min(Math.max(requestedLimit, 1), 200);
     const cursorId = commentCursor ? this.parseId(commentCursor, 'commentCursor') : null;
     const focusId = focusCommentId ? this.parseId(focusCommentId, 'focusCommentId') : null;
+    if (commentDirection !== 'older' && commentDirection !== 'newer') {
+      throw new BadRequestException('commentDirection must be older or newer.');
+    }
     if (cursorId && focusId) throw new BadRequestException('commentCursor and focusCommentId cannot be combined.');
     if (focusId) {
       const focused = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: focusId }, select: { threadId: true } });
       if (!focused || focused.threadId !== thread.id) throw new NotFoundException('Wiki discussion comment not found.');
     }
-    const comments = await this.prisma.wikiDiscussionComment.findMany({
-      where: {
-        threadId: thread.id,
-        ...(cursorId ? { id: { lt: cursorId } } : focusId ? { id: { lte: focusId } } : {})
-      },
-      orderBy: [{ id: 'desc' }],
-      take: commentLimit + 1
-    });
-    const hasOlderComments = comments.length > commentLimit;
-    const pageComments = comments.slice(0, commentLimit);
+    let pageComments: Awaited<ReturnType<typeof this.prisma.wikiDiscussionComment.findMany>>;
+    let olderCommentCursor: string | null = null;
+    let newerCommentCursor: string | null = null;
+    if (focusId) {
+      const olderWindowSize = Math.ceil(commentLimit / 2);
+      const newerWindowSize = Math.floor(commentLimit / 2);
+      const [olderRows, newerRows] = await Promise.all([
+        this.prisma.wikiDiscussionComment.findMany({
+          where: { threadId: thread.id, id: { lte: focusId } },
+          orderBy: [{ id: 'desc' }],
+          take: olderWindowSize + 1
+        }),
+        this.prisma.wikiDiscussionComment.findMany({
+          where: { threadId: thread.id, id: { gt: focusId } },
+          orderBy: [{ id: 'asc' }],
+          take: newerWindowSize + 1
+        })
+      ]);
+      const olderPage = olderRows.slice(0, olderWindowSize);
+      const newerPage = newerRows.slice(0, newerWindowSize);
+      pageComments = [...olderPage, ...newerPage];
+      olderCommentCursor = olderRows.length > olderWindowSize
+        ? olderPage.at(-1)?.id.toString() ?? null
+        : null;
+      newerCommentCursor = newerRows.length > newerWindowSize
+        ? (newerPage.at(-1)?.id ?? focusId).toString()
+        : null;
+    } else {
+      const loadNewer = Boolean(cursorId && commentDirection === 'newer');
+      const comments = await this.prisma.wikiDiscussionComment.findMany({
+        where: {
+          threadId: thread.id,
+          ...(cursorId ? { id: loadNewer ? { gt: cursorId } : { lt: cursorId } } : {})
+        },
+        orderBy: [{ id: loadNewer ? 'asc' : 'desc' }],
+        take: commentLimit + 1
+      });
+      const hasMoreComments = comments.length > commentLimit;
+      pageComments = comments.slice(0, commentLimit);
+      if (hasMoreComments) {
+        const continuation = pageComments.at(-1)?.id.toString() ?? null;
+        if (loadNewer) newerCommentCursor = continuation;
+        else olderCommentCursor = continuation;
+      }
+    }
     const pinnedComment = thread.pinnedCommentId && !pageComments.some((comment) => comment.id === thread.pinnedCommentId)
       ? await this.prisma.wikiDiscussionComment.findUnique({ where: { id: thread.pinnedCommentId } })
       : null;
@@ -252,7 +294,9 @@ export class WikiDiscussionService {
       canReply,
       subscribed: Boolean(subscription && !subscription.muted),
       pinnedCommentId: thread.pinnedCommentId?.toString() ?? null,
-      nextCommentCursor: hasOlderComments ? pageComments.at(-1)?.id.toString() ?? null : null,
+      olderCommentCursor,
+      newerCommentCursor,
+      nextCommentCursor: olderCommentCursor,
       comments: displayComments.sort((left, right) => {
         if (left.id === thread.pinnedCommentId) return -1;
         if (right.id === thread.pinnedCommentId) return 1;
