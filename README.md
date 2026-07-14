@@ -2,6 +2,41 @@
 
 MineWiki keeps the wiki as the main product, promotes the former VoteWeb code into the server directory and voting engine, and freezes the former LunaVotifier service as a legacy migration source.
 
+## Official Service and OAuth Callbacks
+
+- Service: [MineWiki](https://minewiki.kr)
+- Verification service: [verify.minewiki.kr](https://verify.minewiki.kr)
+- Support: [support@minewiki.kr](mailto:support@minewiki.kr)
+
+Register the following URLs exactly in each provider console. Production callbacks must use HTTPS and must not be replaced with the local development address.
+
+| Provider | Provider console callback / redirect URI | Environment variable |
+| --- | --- | --- |
+| NAVER Login | `https://minewiki.kr/auth/callback/naver` | `NAVER_REDIRECT_URI` |
+| Discord OAuth2 | `https://minewiki.kr/auth/callback/discord` | `DISCORD_REDIRECT_URI` |
+| Microsoft identity platform / Minecraft ownership | `https://verify.minewiki.kr/minecraft/callback` | `MICROSOFT_REDIRECT_URI` |
+
+Useful provider registration URLs:
+
+- Homepage URL: `https://minewiki.kr`
+- Terms of service: `https://minewiki.kr/policies/terms`
+- Privacy policy: `https://minewiki.kr/policies/privacy`
+- Microsoft publisher verification file: `https://minewiki.kr/.well-known/microsoft-identity-association.json`
+
+The Microsoft callback intentionally belongs to the isolated verification service. `verify.minewiki.kr` completes the ownership proof without receiving the main `minewiki.kr` session cookie.
+
+## Brand Assets
+
+The following production URLs return downloadable PNG files and may be supplied to OAuth provider consoles:
+
+| Asset | Size | Download |
+| --- | ---: | --- |
+| MineWiki app icon | 512 × 512 | [Download PNG](https://minewiki.kr/icon) |
+| Apple touch icon | 180 × 180 | [Download PNG](https://minewiki.kr/apple-icon) |
+| Open Graph image | 1200 × 630 | [Download PNG](https://minewiki.kr/og) |
+
+![MineWiki app icon](https://minewiki.kr/icon)
+
 ## Product Routing
 
 - `/`, `/wiki/*`, `/mod/*`, `/server/*`, `/dev/*`: `apps/web`
