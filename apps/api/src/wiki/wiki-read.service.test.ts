@@ -56,25 +56,65 @@ test('wiki search batches current revisions and returns a continuation cursor', 
     createdAt: now, updatedAt: new Date(now.getTime() - index * 1000)
   }));
   let revisionQueryCount = 0;
+  let currentSearchQueryCount = 0;
   const prisma = {
+    async $queryRawUnsafe() {
+      currentSearchQueryCount += 1;
+      return pages.map((page) => ({ id: page.id }));
+    },
     wikiNamespace: {
       async findUnique() { return null; },
       async findMany() { return [{ id: 1, code: 'main' }]; }
     },
     wikiPage: { async findMany() { return pages; } },
     wikiPageRevision: {
-      async findMany(args: { select?: unknown }) {
+      async findMany() {
         revisionQueryCount += 1;
-        if (args.select) return [];
         return pages.map((page) => ({ id: page.currentRevisionId, pageId: page.id, revisionNo: 1, visibility: 'public', contentRaw: `본문 검색 ${page.id}`, createdAt: now }));
       }
     }
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
   const result = await new WikiReadService(prisma, permissions).search({ q: '검색', limit: 2 });
-  assert.equal(revisionQueryCount, 2);
+  assert.equal(currentSearchQueryCount, 1);
+  assert.equal(revisionQueryCount, 1);
   assert.equal(result.items.length, 2);
   assert.ok(result.nextCursor);
+});
+
+test('wiki search never uses matching historical revisions as current-document candidates', async () => {
+  const now = new Date('2026-07-15T00:00:00Z');
+  const currentPage = {
+    id: 7n, namespaceId: 1, spaceId: 1n, localPath: 'current', slug: 'current',
+    title: '현재 문서', displayTitle: '현재 문서', currentRevisionId: 70n,
+    pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n,
+    createdAt: now, updatedAt: now
+  };
+  let rawSql = '';
+  const prisma = {
+    async $queryRawUnsafe(sql: string) {
+      rawSql = sql;
+      return [{ id: currentPage.id }];
+    },
+    wikiNamespace: {
+      async findUnique() { return null; },
+      async findMany() { return [{ id: 1, code: 'main' }]; }
+    },
+    wikiPage: { async findMany() { return [currentPage]; } },
+    wikiPageRevision: {
+      async findMany() {
+        return [{ id: 70n, pageId: 7n, revisionNo: 3, visibility: 'public', contentRaw: '현재 본문 검색어', createdAt: now }];
+      }
+    }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).search({ q: '검색어' });
+
+  assert.match(rawSql, /r\.id = p\.current_revision_id/);
+  assert.match(rawSql, /LOCATE\(\?, r\.content_raw\)/);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.pageId, '7');
 });
 
 test('wiki suggestions rank exact and prefix title matches without reading document bodies', async () => {

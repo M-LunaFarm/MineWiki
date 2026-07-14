@@ -1365,39 +1365,25 @@ export class WikiReadService {
       return { items: [], nextCursor: null };
     }
 
-    const contentMatches = await this.prisma.wikiPageRevision.findMany({
-      where: {
-        visibility: 'public',
-        contentRaw: { contains: query }
-      },
-      select: { pageId: true },
-      orderBy: [{ createdAt: 'desc' }],
-      take: 2000
-    });
-    const contentPageIds = [...new Set(contentMatches.map((match) => match.pageId))];
     const scanLimit = Math.max(limit * 4, 50);
-    const pagesWithSentinel = await this.prisma.wikiPage.findMany({
-      where: {
-        namespaceId: namespace?.id,
-        status: { in: ['normal', 'active', 'published'] },
-        AND: [
-          {
-            OR: [
-              { title: { contains: query } },
-              { displayTitle: { contains: query } },
-              { slug: { contains: slugifyTitle(query) } },
-              { localPath: { contains: slugifyTitle(query) } },
-              ...(contentPageIds.length > 0 ? [{ id: { in: contentPageIds } }] : [])
-            ]
-          },
-          ...(cursor ? [{ OR: [{ updatedAt: { lt: cursor.updatedAt } }, { updatedAt: cursor.updatedAt, id: { lt: cursor.id } }] }] : [])
-        ]
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: scanLimit + 1
+    const slugQuery = slugifyTitle(query);
+    const currentMatchIds = await findCurrentSearchMatchIds(this.prisma, {
+      query,
+      slugQuery,
+      namespaceId: namespace?.id ?? null,
+      cursor,
+      limit: scanLimit + 1
     });
-    const hasCandidateSentinel = pagesWithSentinel.length > scanLimit;
-    const pages = pagesWithSentinel.slice(0, scanLimit);
+    const hasCandidateSentinel = currentMatchIds.length > scanLimit;
+    const candidateIds = currentMatchIds.slice(0, scanLimit);
+    const unorderedPages = candidateIds.length > 0
+      ? await this.prisma.wikiPage.findMany({ where: { id: { in: candidateIds } } })
+      : [];
+    const pageById = new Map(unorderedPages.map((page) => [page.id, page]));
+    const pages = candidateIds.flatMap((id) => {
+      const page = pageById.get(id);
+      return page ? [page] : [];
+    });
     const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
     const namespaces = namespaceIds.length > 0
       ? await this.prisma.wikiNamespace.findMany({
@@ -1407,34 +1393,19 @@ export class WikiReadService {
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
-    const fallbackPageIds = pages.filter((page) => !page.currentRevisionId).map((page) => page.id);
-    const revisions = pages.length > 0
+    const revisions = currentRevisionIds.length > 0
       ? await this.prisma.wikiPageRevision.findMany({
           where: {
-            visibility: 'public',
-            OR: [
-              ...(currentRevisionIds.length > 0 ? [{ id: { in: currentRevisionIds } }] : []),
-              ...(fallbackPageIds.length > 0 ? [{ pageId: { in: fallbackPageIds } }] : [])
-            ]
-          },
-          orderBy: [{ pageId: 'asc' }, { revisionNo: 'desc' }]
+            id: { in: currentRevisionIds },
+            visibility: 'public'
+          }
         })
       : [];
-    const revisionByPageId = new Map<bigint, (typeof revisions)[number]>();
-    for (const revision of revisions) {
-      if (!revisionByPageId.has(revision.pageId)) revisionByPageId.set(revision.pageId, revision);
-    }
+    const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
     const visible: Array<{ item: WikiSearchResult; page: (typeof pages)[number] }> = [];
     for (const page of pages) {
-      const revision = revisionByPageId.get(page.id);
+      const revision = page.currentRevisionId ? revisionById.get(page.currentRevisionId) : null;
       if (!revision) {
-        continue;
-      }
-      const matchesPage = [page.title, page.displayTitle, page.slug, page.localPath].some((value) =>
-        value.toLocaleLowerCase().includes(query.toLocaleLowerCase())
-      );
-      const matchesContent = revision.contentRaw.toLocaleLowerCase().includes(query.toLocaleLowerCase());
-      if (!matchesPage && !matchesContent) {
         continue;
       }
       try {
@@ -1953,6 +1924,55 @@ function collectFileNames(ast: AstNode[], output = new Set<string>()): Set<strin
 
 function categoryTitleFromSlug(slug: string): string {
   return slug.split('/').map((part) => part.replace(/_/g, ' ')).join('/');
+}
+
+async function findCurrentSearchMatchIds(
+  prisma: PrismaService,
+  input: {
+    readonly query: string;
+    readonly slugQuery: string;
+    readonly namespaceId: number | null;
+    readonly cursor: { readonly updatedAt: Date; readonly id: bigint } | null;
+    readonly limit: number;
+  }
+): Promise<bigint[]> {
+  const where = [
+    "p.status IN ('normal', 'active', 'published')",
+    "r.visibility = 'public'"
+  ];
+  const values: unknown[] = [];
+  const matches = [
+    'LOCATE(?, p.title) > 0',
+    'LOCATE(?, p.display_title) > 0',
+    'LOCATE(?, r.content_raw) > 0'
+  ];
+  values.push(input.query, input.query, input.query);
+  if (input.slugQuery) {
+    matches.push('LOCATE(?, p.slug) > 0', 'LOCATE(?, p.local_path) > 0');
+    values.push(input.slugQuery, input.slugQuery);
+  }
+  where.push(`(${matches.join(' OR ')})`);
+  if (input.namespaceId !== null) {
+    where.push('p.namespace_id = ?');
+    values.push(input.namespaceId);
+  }
+  if (input.cursor) {
+    where.push('(p.updated_at < ? OR (p.updated_at = ? AND p.id < ?))');
+    values.push(input.cursor.updatedAt, input.cursor.updatedAt, input.cursor.id);
+  }
+  const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 201);
+  const rows = await prisma.$queryRawUnsafe<Array<{ id: bigint | number | string }>>(
+    `
+      SELECT p.id
+      FROM pages AS p
+      INNER JOIN page_revisions AS r ON r.id = p.current_revision_id
+      WHERE ${where.join('\n        AND ')}
+      ORDER BY p.updated_at DESC, p.id DESC
+      LIMIT ${limit}
+    `,
+    ...values
+  );
+  return rows.map((row) => BigInt(row.id));
 }
 
 export function encodeWikiSearchCursor(updatedAt: Date, id: bigint): string {
