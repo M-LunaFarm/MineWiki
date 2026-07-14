@@ -3,6 +3,7 @@
   Injectable,
   InternalServerErrorException,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException
 } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
@@ -14,6 +15,7 @@ import {
 } from './oauth-browser-binding';
 import { PrismaService } from '../common/prisma.service';
 import { encryptAppSecret } from '../common/secret-codec';
+import { fetchWithTimeout } from '../common/http/external-fetch';
 
 interface PendingOAuthState {
   readonly provider: OAuthProvider;
@@ -191,13 +193,13 @@ export class OAuthFlowService {
       redirect_uri: redirectUri
     });
 
-    const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
+    const tokenResponse = await fetchWithTimeout('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString()
     }).catch((error) => {
       this.logger.error({ err: error }, 'Discord 토큰 요청 실패');
-      throw new UnauthorizedException('Discord OAuth 요청에 실패했습니다.');
+      throw new ServiceUnavailableException('Discord OAuth 서비스에 일시적으로 연결할 수 없습니다.');
     });
 
     if (!tokenResponse.ok) {
@@ -217,13 +219,13 @@ export class OAuthFlowService {
       throw new UnauthorizedException('Discord 액세스 토큰을 받지 못했습니다.');
     }
 
-    const userResponse = await fetch('https://discord.com/api/users/@me', {
+    const userResponse = await fetchWithTimeout('https://discord.com/api/users/@me', {
       headers: {
         Authorization: `Bearer ${tokenPayload.access_token}`
       }
     }).catch((error) => {
       this.logger.error({ err: error }, 'Discord 사용자 정보 요청 실패');
-      throw new UnauthorizedException('Discord 사용자 정보를 확인할 수 없습니다.');
+      throw new ServiceUnavailableException('Discord 사용자 정보를 일시적으로 확인할 수 없습니다.');
     });
 
     if (!userResponse.ok) {
@@ -329,13 +331,13 @@ export class OAuthFlowService {
       redirect_uri: redirectUri
     });
 
-    const tokenResponse = await fetch('https://nid.naver.com/oauth2.0/token', {
+    const tokenResponse = await fetchWithTimeout('https://nid.naver.com/oauth2.0/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString()
     }).catch((error) => {
       this.logger.error({ err: error }, 'NAVER 토큰 요청 실패');
-      throw new UnauthorizedException('NAVER OAuth 요청에 실패했습니다.');
+      throw new ServiceUnavailableException('NAVER OAuth 서비스에 일시적으로 연결할 수 없습니다.');
     });
 
     if (!tokenResponse.ok) {
@@ -352,13 +354,13 @@ export class OAuthFlowService {
       throw new UnauthorizedException('NAVER 액세스 토큰을 받지 못했습니다.');
     }
 
-    const userResponse = await fetch('https://openapi.naver.com/v1/nid/me', {
+    const userResponse = await fetchWithTimeout('https://openapi.naver.com/v1/nid/me', {
       headers: {
         Authorization: `Bearer ${tokenPayload.access_token}`
       }
     }).catch((error) => {
       this.logger.error({ err: error }, 'NAVER 사용자 정보 요청 실패');
-      throw new UnauthorizedException('NAVER 사용자 정보를 확인할 수 없습니다.');
+      throw new ServiceUnavailableException('NAVER 사용자 정보를 일시적으로 확인할 수 없습니다.');
     });
 
     if (!userResponse.ok) {

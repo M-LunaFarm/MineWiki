@@ -18,6 +18,7 @@ import type {
 import { BusinessEventService } from '../events/business-event.service';
 import { PrismaService } from '../common/prisma.service';
 import { Prisma } from '@prisma/client';
+import { fetchWithTimeout } from '../common/http/external-fetch';
 
 const MICROSOFT_TOKEN_URL =
   'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
@@ -649,7 +650,7 @@ export class MinecraftService {
     context: string
   ): Promise<Response> {
     try {
-      return await fetch(input, init);
+      return await fetchWithTimeout(input, init);
     } catch (error) {
       this.logger.error({ err: error }, `${context} network error`);
       throw new ServiceUnavailableException(

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
+import { fetchWithTimeout } from '../common/http/external-fetch';
 
 interface CaptchaVerificationResult {
   readonly success: boolean;
@@ -77,7 +78,7 @@ export class CaptchaService {
     }
 
     try {
-      const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      const response = await fetchWithTimeout('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString()
@@ -126,7 +127,7 @@ export class CaptchaService {
     }
 
     try {
-      const response = await fetch('https://hcaptcha.com/siteverify', {
+      const response = await fetchWithTimeout('https://hcaptcha.com/siteverify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString()

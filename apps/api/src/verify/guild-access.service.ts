@@ -5,6 +5,7 @@ import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
 import type { SessionPayload } from '../session/session.service';
 import { GuildSettingsRepository, toGuildResponse } from './guild.repositories';
 import type { GuildSummaryResponse } from './guild.types';
+import { fetchWithTimeout } from '../common/http/external-fetch';
 
 const DISCORD_MANAGE_GUILD = 0x20n;
 const TOKEN_REFRESH_SKEW_MS = 60_000;
@@ -151,7 +152,7 @@ export class GuildAccessService {
       grant_type: 'refresh_token',
       refresh_token: decryptAppSecret(credential.refreshToken) ?? '',
     });
-    const response = await fetch('https://discord.com/api/oauth2/token', {
+    const response = await fetchWithTimeout('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
@@ -183,7 +184,7 @@ export class GuildAccessService {
   }
 
   private async fetchDiscordGuilds(credential: OAuthCredentialRecord): Promise<DiscordGuild[]> {
-    const response = await fetch('https://discord.com/api/users/@me/guilds', {
+    const response = await fetchWithTimeout('https://discord.com/api/users/@me/guilds', {
       headers: { Authorization: `Bearer ${credential.accessToken}` },
     });
     if (!response.ok) {
