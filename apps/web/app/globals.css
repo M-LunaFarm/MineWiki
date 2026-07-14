@@ -343,6 +343,13 @@ html[data-theme='light'] .wiki-rendered .wiki-include-notice {
   color: #566159;
 }
 
+html[data-theme='light'] .wiki-rendered .wiki-toc,
+html[data-theme='light'] .wiki-rendered .wiki-toc-empty {
+  border-color: rgba(37, 49, 41, 0.16);
+  background: rgba(250, 251, 248, 0.86);
+  color: #37443b;
+}
+
 html[data-theme='light'] .support-surface {
   background: #f4f5f2;
   color: #202820;
@@ -735,6 +742,33 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   }
   .wiki-rendered .wiki-include-notice {
     @apply my-4 block rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-sm text-slate-400;
+  }
+  .wiki-rendered .wiki-toc {
+    @apply my-5 max-w-2xl rounded-xl border border-white/10 bg-white/[0.025] px-4 py-3;
+  }
+  .wiki-rendered .wiki-toc summary {
+    @apply cursor-pointer text-sm font-bold text-slate-200;
+  }
+  .wiki-rendered .wiki-toc ol {
+    @apply mt-3 list-none space-y-1 p-0;
+  }
+  .wiki-rendered .wiki-toc li {
+    @apply m-0;
+  }
+  .wiki-rendered .wiki-toc li.wiki-toc-level-2 {
+    @apply pl-4;
+  }
+  .wiki-rendered .wiki-toc li.wiki-toc-level-3 {
+    @apply pl-8;
+  }
+  .wiki-rendered .wiki-toc a {
+    @apply flex gap-2 rounded px-1 py-0.5 text-sm text-slate-300 no-underline hover:bg-white/[0.04] hover:text-emerald-200;
+  }
+  .wiki-rendered .wiki-toc a span {
+    @apply min-w-6 text-slate-500;
+  }
+  .wiki-rendered .wiki-toc-empty {
+    @apply my-4 block rounded-lg border border-white/10 bg-white/[0.025] px-4 py-3 text-sm text-slate-500;
   }
   .wiki-rendered .front-wiki-component {
     @apply border-t border-white/[0.07] py-6 first:border-t-0 first:pt-0 last:pb-0;

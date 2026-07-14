@@ -156,3 +156,34 @@ test('renders resolved and unavailable includes without exposing a target', () =
   assert.match(unavailable, /포함 문서를 불러올 수 없습니다/);
   assert.equal(unavailable.includes('비공개'), false);
 });
+
+test('renders open and collapsed table-of-contents macros with stable numbering', () => {
+  const open = parseMarkup('[목차]\n== 소개 ==\n=== 설치 ===\n== 사용법 ==');
+  const collapsed = parseMarkup('[tableofcontents(hide)]\n== 제목 ==');
+  const openHtml = renderDocument(open.ast);
+  const collapsedHtml = renderDocument(collapsed.ast);
+
+  assert.equal(open.ast[0]?.type, 'toc');
+  assert.match(openHtml, /<nav class="wiki-toc" aria-label="문서 목차"><details open>/);
+  assert.match(openHtml, /<span>1<\/span>소개/);
+  assert.match(openHtml, /<span>1\.1<\/span>설치/);
+  assert.match(openHtml, /<span>2<\/span>사용법/);
+  assert.match(collapsedHtml, /<details><summary>목차/);
+});
+
+test('parent table of contents excludes transcluded headings', () => {
+  const ast = parseMarkup('[목차]\n== 부모 제목 ==').ast;
+  ast.push({
+    type: 'include',
+    target: '틀:안내',
+    params: {},
+    state: 'resolved',
+    children: [{ type: 'heading', level: 2, text: '포함 제목', id: 'inc-1-포함-제목' }]
+  });
+  const html = renderDocument(ast);
+  const toc = html.slice(html.indexOf('<nav class="wiki-toc"'), html.indexOf('</nav>') + 6);
+
+  assert.match(toc, /부모 제목/);
+  assert.equal(toc.includes('포함 제목'), false);
+  assert.match(html, /id="inc-1-포함-제목"/);
+});

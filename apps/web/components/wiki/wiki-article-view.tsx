@@ -81,6 +81,23 @@ export function WikiArticleView({ page, routePath, afterContent }: WikiArticleVi
               <Star className="h-4 w-4 text-amber-100" />
             </Link>
           ) : null}
+          {page.headings.length > 0 ? (
+            <nav className="surface-flat p-4" aria-label="문서 목차">
+              <h2 className="text-sm font-semibold text-white">목차</h2>
+              <ol className="mt-3 space-y-1.5 text-sm">
+                {page.headings.map((heading, index) => (
+                  <li
+                    key={`${heading.anchor}-${index}`}
+                    style={{ paddingInlineStart: `${Math.max(0, heading.level - 2) * 0.75}rem` }}
+                  >
+                    <a href={`#${heading.anchor}`} className="block truncate text-slate-400 transition hover:text-emerald-200">
+                      {heading.title}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          ) : null}
           <section className="surface-flat p-4">
             <h2 className="text-sm font-semibold text-white">문서 정보</h2>
             <dl className="mt-3 space-y-2 text-sm text-slate-300">

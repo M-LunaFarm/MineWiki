@@ -3,7 +3,7 @@ import type { AstNode, InlineNode, ParsedDocument } from './types.js';
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.2';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.3';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INCLUDE_OCCURRENCES = 20;
@@ -93,6 +93,7 @@ const allowedTags = [
   'sup',
   'sub',
   'section',
+  'nav',
   'aside',
   'details',
   'summary'
@@ -186,6 +187,12 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
           state: 'unresolved'
         });
       }
+      continue;
+    }
+
+    const toc = line.trim().match(/^\[(?:목차|tableofcontents)(?:\((hide)\))?\]$/i);
+    if (toc) {
+      ast.push({ type: 'toc', collapsed: Boolean(toc[1]) });
       continue;
     }
 
@@ -538,10 +545,13 @@ export interface RenderOptions {
   files?: Record<string, { url: string; mimeType: string; originalName: string; license?: string | null; sourceText?: string | null }>;
   officialAreas?: Record<string, { status: string; lastModifiedAt?: string | null; renewalRequiredAt?: string | null }>;
   dataTables?: Record<string, { caption: string; headers: string[]; rows: string[][] }>;
+  /** Internal heading scope shared by folding blocks, but not transclusions. */
+  tocHeadings?: ReadonlyArray<{ level: number; text: string; id: string }>;
 }
 
 export function renderDocument(ast: AstNode[], options: RenderOptions = {}): string {
   const footnotes: string[] = [];
+  const tocHeadings = options.tocHeadings ?? collectTocHeadings(ast);
   const html = ast
     .map((node) => {
       if (node.type === 'heading') return `<h${node.level} id="${escapeAttr(node.id)}">${escapeHtml(node.text)}</h${node.level}>`;
@@ -550,7 +560,8 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       if (node.type === 'blockquote') return `<blockquote class="wiki-quote">${renderInline(node.children, footnotes, options)}</blockquote>`;
       if (node.type === 'hr') return '<hr>';
       if (node.type === 'wiki_table') return renderWikiTable(node.rows, footnotes, options);
-      if (node.type === 'folding') return `<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, options)}</summary>${renderDocument(node.children, options)}</details>`;
+      if (node.type === 'folding') return `<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, options)}</summary>${renderDocument(node.children, { ...options, tocHeadings })}</details>`;
+      if (node.type === 'toc') return renderTableOfContents(tocHeadings, node.collapsed);
       if (node.type === 'include') {
         if (node.state === 'resolved' && node.children) {
           return `<section class="wiki-transclusion">${renderDocument(node.children, options)}</section>`;
@@ -590,6 +601,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       img: ['src', 'alt', 'loading'],
       figcaption: ['class'],
       section: ['class'],
+      nav: ['class', 'aria-label'],
       blockquote: ['class'],
       caption: ['class'],
       span: ['class', 'style'],
@@ -600,7 +612,8 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       table: ['class', 'data-table-key'],
       th: ['class'],
       td: ['class'],
-      details: ['class'],
+      details: ['class', 'open'],
+      li: ['class'],
       summary: ['class']
     },
     allowedSchemes: ['http', 'https', 'mailto'],
@@ -611,6 +624,35 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       }
     }
   });
+}
+
+function collectTocHeadings(ast: readonly AstNode[]): Array<{ level: number; text: string; id: string }> {
+  const headings: Array<{ level: number; text: string; id: string }> = [];
+  for (const node of ast) {
+    if (node.type === 'heading') headings.push(node);
+    // Included headings belong to their own heading scope and must not leak into
+    // the caller's table of contents.
+    if (node.type === 'folding') headings.push(...collectTocHeadings(node.children));
+  }
+  return headings;
+}
+
+function renderTableOfContents(
+  headings: ReadonlyArray<{ level: number; text: string; id: string }>,
+  collapsed: boolean
+) {
+  if (headings.length === 0) {
+    return '<aside class="wiki-toc-empty">목차에 표시할 제목이 없습니다.</aside>';
+  }
+  const counters = [0, 0, 0];
+  const items = headings.map((heading) => {
+    const depth = Math.max(0, Math.min(2, heading.level - 2));
+    counters[depth] = (counters[depth] ?? 0) + 1;
+    for (let index = depth + 1; index < counters.length; index += 1) counters[index] = 0;
+    const number = counters.slice(0, depth + 1).filter(Boolean).join('.');
+    return `<li class="wiki-toc-level-${depth + 1}"><a href="#${escapeAttr(heading.id)}"><span>${number}</span>${escapeHtml(heading.text)}</a></li>`;
+  }).join('');
+  return `<nav class="wiki-toc" aria-label="문서 목차"><details${collapsed ? '' : ' open'}><summary>목차</summary><ol>${items}</ol></details></nav>`;
 }
 
 export function renderInline(nodes: InlineNode[], footnotes: string[], options: RenderOptions = {}) {

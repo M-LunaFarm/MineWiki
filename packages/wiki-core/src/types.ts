@@ -20,6 +20,7 @@ export type AstNode =
   | { type: 'hr' }
   | { type: 'wiki_table'; rows: InlineNode[][][] }
   | { type: 'folding'; title: InlineNode[]; children: AstNode[] }
+  | { type: 'toc'; collapsed: boolean }
   | {
       type: 'include';
       target: string;
