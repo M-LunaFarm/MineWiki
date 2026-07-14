@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { PrismaClient } from '@prisma/client';
+import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
@@ -31,6 +32,24 @@ test.describe('End-to-end flows', () => {
         displayName: 'E2E User',
         emailVerified: true,
       },
+    });
+    await prisma.accountConsent.createMany({
+      data: [
+        {
+          accountId,
+          consentType: 'terms',
+          policyVersion: CURRENT_POLICY_VERSIONS.terms.consentVersion,
+          ipAddress: '127.0.0.1',
+          userAgent: 'Playwright',
+        },
+        {
+          accountId,
+          consentType: 'privacy',
+          policyVersion: CURRENT_POLICY_VERSIONS.privacy.consentVersion,
+          ipAddress: '127.0.0.1',
+          userAgent: 'Playwright',
+        },
+      ],
     });
 
     serverName = 'E2E Server ' + randomUUID().slice(0, 6);
@@ -88,6 +107,8 @@ test.describe('End-to-end flows', () => {
         ipAddress: '127.0.0.1',
         userAgent: 'Playwright',
         lastActiveAt: issuedAt,
+        termsPolicyVersion: CURRENT_POLICY_VERSIONS.terms.consentVersion,
+        privacyPolicyVersion: CURRENT_POLICY_VERSIONS.privacy.consentVersion,
       },
     });
   });
