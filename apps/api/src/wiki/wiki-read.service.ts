@@ -861,6 +861,16 @@ export class WikiReadService {
     const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const serverSpaceIds = [...new Set(pages
+      .filter((page) => namespaceById.get(page.namespaceId) === 'server')
+      .map((page) => page.spaceId))];
+    const serverWikis = serverSpaceIds.length > 0
+      ? await this.prisma.serverWiki.findMany({
+          where: { spaceId: { in: serverSpaceIds }, status: { not: 'disabled' } },
+          select: { spaceId: true, slug: true }
+        })
+      : [];
+    const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
     const readable = new Map<bigint, boolean>();
     const items: WikiContributionItem[] = [];
     let lastScannedId: bigint | null = null;
@@ -871,11 +881,16 @@ export class WikiReadService {
       const page = pageById.get(thread.pageId);
       if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
-      const routePath = wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
+      const serverSlug = namespace === 'server' ? serverSlugBySpace.get(page.spaceId) : undefined;
+      const routePath = serverSlug
+        ? buildServerWikiPagePath(serverSlug, page.localPath)
+        : wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
       items.push({
         id: comment.id.toString(), kind: 'discussion', pageId: page.id.toString(), revisionId: null,
         changeType: 'comment', title: thread.title, namespace, routePath,
-        href: `/wiki/discuss/${page.id.toString()}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`,
+        href: serverSlug
+          ? `${buildServerWikiToolPath(serverSlug, page.localPath, 'discuss')}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`
+          : `/wiki/discuss/${page.id.toString()}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`,
         summary: comment.status === 'normal' ? comment.content.slice(0, 255) : '삭제된 댓글', isMinor: false,
         status: thread.status, createdAt: comment.createdAt.toISOString()
       });

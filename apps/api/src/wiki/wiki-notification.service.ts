@@ -4,6 +4,7 @@ import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
+import { buildServerWikiToolPath } from './wiki-read.service';
 
 export interface WikiNotificationItem {
   readonly id: string;
@@ -61,6 +62,23 @@ export class WikiNotificationService {
       ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } })
       : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
+    const namespaces = pages.length > 0
+      ? await this.prisma.wikiNamespace.findMany({
+          where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
+          select: { id: true, code: true }
+        })
+      : [];
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const serverSpaceIds = [...new Set(pages
+      .filter((page) => namespaceById.get(page.namespaceId) === 'server')
+      .map((page) => page.spaceId))];
+    const serverWikis = serverSpaceIds.length > 0
+      ? await this.prisma.serverWiki.findMany({
+          where: { spaceId: { in: serverSpaceIds }, status: { not: 'disabled' } },
+          select: { spaceId: true, slug: true }
+        })
+      : [];
+    const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
     const visible = [];
     const hiddenIds: bigint[] = [];
     for (const row of rows) {
@@ -91,18 +109,21 @@ export class WikiNotificationService {
     const actorNames = new Map(actors.map((actor) => [actor.id, actor.displayName]));
     const unreadCount = await this.prisma.wikiNotification.count({ where: { profileId: profile.id, readAt: null } });
     return {
-      items: pageRows.map((row) => ({
-        id: row.id.toString(),
-        type: row.type,
-        pageId: row.pageId?.toString() ?? null,
-        actorProfileId: row.actorProfileId?.toString() ?? null,
-        actorName: row.actorProfileId ? actorNames.get(row.actorProfileId) ?? '알 수 없는 사용자' : null,
-        title: row.title,
-        message: row.message,
-        href: row.href,
-        read: row.readAt !== null,
-        createdAt: row.createdAt.toISOString()
-      })),
+      items: pageRows.map((row) => {
+        const page = row.pageId ? pageById.get(row.pageId) : undefined;
+        return {
+          id: row.id.toString(),
+          type: row.type,
+          pageId: row.pageId?.toString() ?? null,
+          actorProfileId: row.actorProfileId?.toString() ?? null,
+          actorName: row.actorProfileId ? actorNames.get(row.actorProfileId) ?? '알 수 없는 사용자' : null,
+          title: row.title,
+          message: row.message,
+          href: this.canonicalNotificationHref(row.href, row.type, page, page ? serverSlugBySpace.get(page.spaceId) : undefined),
+          read: row.readAt !== null,
+          createdAt: row.createdAt.toISOString()
+        };
+      }),
       unreadCount,
       nextCursor: hasMore ? rows[limit - 1]?.id.toString() ?? null : null
     };
@@ -168,6 +189,7 @@ export class WikiNotificationService {
     const activeRecipients = recipients.filter((profileId) => !muted.has(profileId));
     if (activeRecipients.length === 0) return;
     const now = new Date();
+    const href = await this.discussionReplyHref(tx, input);
     await this.persistDeliveries(tx, `discussion-comment:${input.commentId.toString()}`, 'discussion_reply', activeRecipients.map((profileId) => ({
         profileId,
         type: 'discussion_reply',
@@ -177,11 +199,52 @@ export class WikiNotificationService {
         sourceId: input.commentId.toString(),
         title: input.title,
         message: '참여한 토론에 새 댓글이 등록되었습니다.',
-        href: `/wiki/discuss/${input.pageId.toString()}?thread=${input.threadId.toString()}&comment=${input.commentId.toString()}`,
+        href,
         dedupeKey: `discussion-comment:${input.commentId.toString()}:profile:${profileId.toString()}`,
         readAt: null,
         createdAt: now
       })));
+  }
+
+  private async discussionReplyHref(
+    tx: Prisma.TransactionClient,
+    input: { readonly pageId: bigint; readonly threadId: bigint; readonly commentId: bigint }
+  ): Promise<string> {
+    const fallback = `/wiki/discuss/${input.pageId.toString()}?thread=${input.threadId.toString()}&comment=${input.commentId.toString()}`;
+    const page = await tx.wikiPage.findUnique({
+      where: { id: input.pageId },
+      select: { namespaceId: true, spaceId: true, localPath: true }
+    });
+    if (!page) return fallback;
+    const namespace = await tx.wikiNamespace.findUnique({
+      where: { id: page.namespaceId },
+      select: { code: true }
+    });
+    if (namespace?.code !== 'server') return fallback;
+    const serverWiki = await tx.serverWiki.findFirst({
+      where: { spaceId: page.spaceId, status: { not: 'disabled' } },
+      select: { slug: true }
+    });
+    if (!serverWiki) return fallback;
+    return `${buildServerWikiToolPath(serverWiki.slug, page.localPath, 'discuss')}?thread=${input.threadId.toString()}&comment=${input.commentId.toString()}`;
+  }
+
+  private canonicalNotificationHref(
+    href: string,
+    type: string,
+    page?: { readonly localPath: string },
+    serverSlug?: string
+  ): string {
+    if (type !== 'discussion_reply' || !page || !serverSlug) return href;
+    try {
+      const parsed = new URL(href, 'https://minewiki.invalid');
+      const threadId = parsed.searchParams.get('thread');
+      const commentId = parsed.searchParams.get('comment');
+      if (!threadId || !commentId || !/^\d+$/.test(threadId) || !/^\d+$/.test(commentId)) return href;
+      return `${buildServerWikiToolPath(serverSlug, page.localPath, 'discuss')}?thread=${threadId}&comment=${commentId}`;
+    } catch {
+      return href;
+    }
   }
 
   async notifyEditRequestReviewed(tx: Prisma.TransactionClient, input: {

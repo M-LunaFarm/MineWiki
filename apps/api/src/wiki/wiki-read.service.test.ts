@@ -517,6 +517,29 @@ test('contribution tabs expose discussion, edit-request, and reviewer ledgers', 
   assert.equal(reviews.items[0]?.createdAt, now.toISOString());
 });
 
+test('server wiki discussion contributions keep the canonical workspace route', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const page = {
+    id: 20n, namespaceId: 2, spaceId: 9n, slug: 'luna_API_requests', title: 'luna/API/requests', displayTitle: 'API requests',
+    currentRevisionId: 200n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 5n, createdAt: now, updatedAt: now, localPath: 'luna/API/requests'
+  };
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; } },
+    wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '토론 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
+    wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '문서 방향', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
+    serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5', activity: 'discussions' });
+
+  assert.equal(result.items[0]?.routePath, '/server/luna/API/requests');
+  assert.equal(result.items[0]?.href, '/server/luna/_tools/discuss/API/requests?thread=40&comment=41');
+});
+
 function createReadService(options: {
   readonly cacheHtml?: string | null;
   readonly contentRaw?: string;

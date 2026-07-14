@@ -27,6 +27,25 @@ test('notification inbox belongs to the authenticated wiki profile', async () =>
   assert.equal(result.items[0]?.id, '4');
 });
 
+test('notification inbox upgrades legacy server discussion links to canonical routes', async () => {
+  const prisma = {
+    wikiNotification: {
+      async findMany() { return [{ id: 4n, profileId: 8n, type: 'discussion_reply', pageId: 2n, actorProfileId: null, sourceType: 'discussion_comment', sourceId: '4', title: 'Guide', message: null, href: '/wiki/discuss/2?thread=3&comment=4', dedupeKey: 'key', readAt: null, createdAt: now }]; },
+      async count() { return 1; }
+    },
+    wikiPage: { async findMany() { return [{ id: 2n, namespaceId: 2, spaceId: 9n, localPath: 'luna/API/requests', status: 'normal' }]; } },
+    wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
+    serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna' }]; } },
+    wikiProfile: { async findMany() { return []; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 8n }; } } as unknown as WikiProfileService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiNotificationService(prisma, profiles, permissions).list(session);
+
+  assert.equal(result.items[0]?.href, '/server/luna/_tools/discuss/API/requests?thread=3&comment=4');
+});
+
 test('watched revision notifications exclude the editor and deduplicate per recipient', async () => {
   let deliveries: Array<{ profileId: string; dedupeKey: string }> = [];
   const tx = {
@@ -46,6 +65,8 @@ test('discussion reply notifications deep-link to the exact comment', async () =
     wikiDiscussionThread: { async findUnique() { return { createdBy: 8n }; } },
     wikiDiscussionComment: { async findMany() { return []; } },
     wikiDiscussionSubscription: { async findMany() { return []; } },
+    wikiPage: { async findUnique() { return { namespaceId: 1, spaceId: 1n, localPath: 'Guide' }; } },
+    wikiNamespace: { async findUnique() { return { code: 'main' }; } },
     wikiNotificationEvent: {
       async createMany(args: { data: Array<{ payloadJson: { deliveries: Array<{ href: string }> } }> }) { href = args.data[0]?.payloadJson.deliveries[0]?.href ?? ''; return { count: 1 }; }
     }
@@ -56,12 +77,33 @@ test('discussion reply notifications deep-link to the exact comment', async () =
   assert.equal(href, '/wiki/discuss/2?thread=3&comment=4');
 });
 
+test('server wiki discussion notifications keep the canonical workspace route', async () => {
+  let href = '';
+  const tx = {
+    wikiDiscussionThread: { async findUnique() { return { createdBy: 8n }; } },
+    wikiDiscussionComment: { async findMany() { return []; } },
+    wikiDiscussionSubscription: { async findMany() { return []; } },
+    wikiPage: { async findUnique() { return { namespaceId: 2, spaceId: 9n, localPath: 'luna/API/requests' }; } },
+    wikiNamespace: { async findUnique() { return { code: 'server' }; } },
+    serverWiki: { async findFirst() { return { slug: 'luna' }; } },
+    wikiNotificationEvent: {
+      async createMany(args: { data: Array<{ payloadJson: { deliveries: Array<{ href: string }> } }> }) { href = args.data[0]?.payloadJson.deliveries[0]?.href ?? ''; return { count: 1 }; }
+    }
+  };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+  await service.notifyDiscussionReply(tx as never, { pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide' });
+
+  assert.equal(href, '/server/luna/_tools/discuss/API/requests?thread=3&comment=4');
+});
+
 test('muted discussion subscribers are excluded from reply delivery', async () => {
   let deliveries: Array<{ profileId: string }> = [];
   const tx = {
     wikiDiscussionThread: { async findUnique() { return { createdBy: 8n }; } },
     wikiDiscussionComment: { async findMany() { return [{ createdBy: 9n }]; } },
     wikiDiscussionSubscription: { async findMany() { return [{ profileId: 8n, muted: true }, { profileId: 9n, muted: false }]; } },
+    wikiPage: { async findUnique() { return { namespaceId: 1, spaceId: 1n, localPath: 'Guide' }; } },
+    wikiNamespace: { async findUnique() { return { code: 'main' }; } },
     wikiNotificationEvent: {
       async createMany(args: { data: Array<{ payloadJson: { deliveries: typeof deliveries } }> }) { deliveries = args.data[0]?.payloadJson.deliveries ?? []; return { count: 1 }; }
     }
