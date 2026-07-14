@@ -138,6 +138,9 @@ export function WikiAdminConsole({ view }: { readonly view: 'overview' | 'pages'
             <Link href="/admin/wiki/users" className="chip chip-muted">
               사용자 차단
             </Link>
+            <Link href="/admin/wiki/batch-rollback" className="chip chip-muted">
+              일괄 복구
+            </Link>
           </nav>
         </div>
       </section>

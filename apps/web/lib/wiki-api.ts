@@ -503,6 +503,33 @@ export interface WikiUserBlockEventSummary {
   readonly createdAt: string;
 }
 
+export interface WikiBatchRollbackCandidate {
+  readonly pageId: string;
+  readonly title: string;
+  readonly routePath: string | null;
+  readonly expectedCurrentRevisionId: string | null;
+  readonly rollbackToRevisionId: string | null;
+  readonly affectedRevisionIds: string[];
+  readonly action: 'rollback' | 'manual';
+  readonly skipReason: string | null;
+}
+
+export interface WikiBatchRollbackPreview {
+  readonly target: Pick<WikiAdminUserSummary, 'id' | 'username' | 'displayName' | 'status'>;
+  readonly sinceMinutes: number;
+  readonly candidates: WikiBatchRollbackCandidate[];
+}
+
+export interface WikiBatchRollbackExecution {
+  readonly targetProfileId: string;
+  readonly results: ReadonlyArray<{
+    readonly pageId: string;
+    readonly status: 'rolled_back' | 'skipped' | 'failed';
+    readonly reason: string | null;
+    readonly newRevisionId: string | null;
+  }>;
+}
+
 export interface WikiAclRuleSummary {
   readonly id: string;
   readonly targetType: 'site' | 'namespace' | 'space' | 'page';
@@ -946,6 +973,30 @@ export async function setWikiAdminUserBlocked(input: { profileId: string; blocke
   return fetchWikiAdminJson(`/users/${encodeURIComponent(input.profileId)}/${input.blocked ? 'block' : 'unblock'}`, {
     method: 'POST',
     body: JSON.stringify({ reason: input.reason }),
+  });
+}
+
+export async function previewWikiBatchRollback(input: {
+  targetProfileId: string;
+  sinceMinutes: number;
+  limit?: number;
+}): Promise<WikiBatchRollbackPreview> {
+  return fetchWikiAdminJson('/batch-rollback/preview', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function executeWikiBatchRollback(input: {
+  targetProfileId: string;
+  sinceMinutes: number;
+  reason: string;
+  confirmUsername: string;
+  candidates: ReadonlyArray<{ pageId: string; expectedCurrentRevisionId: string }>;
+}): Promise<WikiBatchRollbackExecution> {
+  return fetchWikiAdminJson('/batch-rollback/execute', {
+    method: 'POST',
+    body: JSON.stringify(input),
   });
 }
 

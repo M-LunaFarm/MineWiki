@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Loader2, Plus, Shield, Trash2 } from 'lucide-react';
 
@@ -120,7 +121,7 @@ export function WikiAclConsole() {
   return (
     <div className="space-y-6">
       <section className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
-        <div className="flex items-center gap-3"><Shield className="size-5 text-emerald-300" /><div><h1 className="text-2xl font-bold text-white">위키 ACL</h1><p className="mt-1 text-sm text-slate-400">문서가 가장 우선이며 공간, 네임스페이스, 사이트 순으로 상속됩니다. 같은 범위에서는 위 규칙부터 처음 일치한 항목을 적용합니다.</p></div></div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div className="flex items-center gap-3"><Shield className="size-5 text-emerald-300" /><div><h1 className="text-2xl font-bold text-white">위키 ACL</h1><p className="mt-1 text-sm text-slate-400">문서가 가장 우선이며 공간, 네임스페이스, 사이트 순으로 상속됩니다. 같은 범위에서는 위 규칙부터 처음 일치한 항목을 적용합니다.</p></div></div><nav className="flex flex-wrap gap-2"><Link href="/admin/wiki" className="chip chip-muted">최근 변경</Link><Link href="/admin/wiki/pages" className="chip chip-muted">문서</Link><span className="chip chip-accent">ACL</span><Link href="/admin/wiki/users" className="chip chip-muted">사용자 차단</Link><Link href="/admin/wiki/batch-rollback" className="chip chip-muted">일괄 복구</Link></nav></div>
       </section>
 
       {error ? <div className="flex gap-3 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100"><AlertTriangle className="size-4 shrink-0" />{error}</div> : null}
