@@ -155,6 +155,11 @@ export interface WikiSearchResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiSearchSuggestionResponse {
+  readonly items: WikiSearchResult[];
+  readonly exactMatch: WikiSearchResult | null;
+}
+
 export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'uncategorized' | 'old' | 'long' | 'short';
 
 export interface WikiSpecialDocumentResponse {
@@ -785,6 +790,11 @@ export async function searchWiki(input: {
     throw new Error(body?.message ?? 'Failed to search wiki.');
   }
   return response.json();
+}
+
+export async function fetchWikiSuggestions(query: string, limit = 8): Promise<WikiSearchSuggestionResponse> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return readWikiBrowser<WikiSearchSuggestionResponse>(`/v1/wiki/search/suggest?${params.toString()}`);
 }
 
 export async function fetchWikiAdminRecent(): Promise<WikiAdminRecentChange[]> {
