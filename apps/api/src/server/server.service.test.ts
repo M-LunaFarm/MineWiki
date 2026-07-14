@@ -276,6 +276,18 @@ if (!hasDatabase) {
           isAnonymous: false
         }
       });
+      await prisma.serverReview.create({
+        data: {
+          serverId: server.id,
+          authorAccountId: account.id,
+          authorDisplayName: `Hidden_${unique}`,
+          rating: 1,
+          body: '관리자에게만 보여야 하는 숨김 리뷰입니다.',
+          tags: ['other'],
+          visibility: 'staff',
+          isAnonymous: false
+        }
+      });
 
       await prisma.vote.create({
         data: {
@@ -290,6 +302,10 @@ if (!hasDatabase) {
 
       assert.ok(updates.length > 0);
       assert.ok(updates.some((entry) => entry.type === 'review'));
+      assert.equal(
+        updates.some((entry) => entry.description.includes('관리자에게만 보여야 하는 숨김 리뷰')),
+        false
+      );
       assert.ok(updates.some((entry) => entry.type === 'vote'));
     } finally {
       if (serverId) {

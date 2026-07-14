@@ -501,7 +501,7 @@ export class ServerService {
           select: { method: true, verifiedAt: true },
         }),
         this.prisma.serverReview.findMany({
-          where: { serverId: id },
+          where: { serverId: id, visibility: 'public' },
           orderBy: { createdAt: 'desc' },
           take: 5,
           select: {
