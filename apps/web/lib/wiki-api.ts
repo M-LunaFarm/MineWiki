@@ -558,6 +558,9 @@ export interface UploadedFileMetadata {
   readonly publicPath: string;
   readonly usageContext: string;
   readonly visibility: string;
+  readonly license: string | null;
+  readonly sourceUrl: string | null;
+  readonly sourceText: string | null;
   readonly status: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -1064,7 +1067,14 @@ async function mutateWikiPage<T>(pageId: string, action: string, body: Record<st
   return responseBody as T;
 }
 
-export async function uploadWikiImage(input: { data: string; filename: string; pageId?: string }): Promise<{ url: string; publicPath: string; id: string; filename: string }> {
+export async function uploadWikiImage(input: {
+  data: string;
+  filename: string;
+  pageId: string;
+  license: string;
+  sourceUrl?: string;
+  sourceText?: string;
+}): Promise<{ url: string; publicPath: string; id: string; filename: string }> {
   const response = await fetch(`${apiBaseUrl()}/v1/files/images`, {
     method: 'POST',
     credentials: 'include',
@@ -1073,8 +1083,11 @@ export async function uploadWikiImage(input: { data: string; filename: string; p
       data: input.data,
       filename: input.filename,
       usageContext: 'wiki_editor',
-      visibility: input.pageId ? 'restricted' : 'public',
-      linkedResourceType: input.pageId ? 'wiki_page' : undefined,
+      visibility: 'restricted',
+      license: input.license,
+      sourceUrl: input.sourceUrl,
+      sourceText: input.sourceText,
+      linkedResourceType: 'wiki_page',
       linkedResourceId: input.pageId,
     }),
   });

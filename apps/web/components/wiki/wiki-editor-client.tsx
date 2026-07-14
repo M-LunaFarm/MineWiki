@@ -43,6 +43,9 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [fileSearch, setFileSearch] = useState('');
   const [wikiFiles, setWikiFiles] = useState<UploadedFileMetadata[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [fileLicense, setFileLicense] = useState('');
+  const [fileSourceUrl, setFileSourceUrl] = useState('');
+  const [fileSourceText, setFileSourceText] = useState('');
   const [templates, setTemplates] = useState<WikiDocumentTemplateSummary[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
@@ -52,6 +55,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [baseRevisionId, setBaseRevisionId] = useState<string | undefined>(page?.revision.id);
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
+  const fileSourceRequired = Boolean(fileLicense && fileLicense !== 'self-created');
+  const canUploadImage = Boolean(page && fileLicense && (!fileSourceRequired || fileSourceUrl.trim()));
 
   const heading = page
     ? sectionAnchor
@@ -253,6 +258,18 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     if (!file) {
       return;
     }
+    if (!page) {
+      setFeedback('새 문서를 먼저 저장한 뒤 파일을 업로드해 주세요. 파일은 저장된 문서의 ACL에 연결됩니다.');
+      return;
+    }
+    if (!fileLicense) {
+      setFeedback('파일의 라이선스를 선택해 주세요.');
+      return;
+    }
+    if (fileSourceRequired && !fileSourceUrl.trim()) {
+      setFeedback('직접 제작하지 않은 파일은 원본 출처 URL이 필요합니다.');
+      return;
+    }
     if (!file.type.startsWith('image/')) {
       setFeedback('이미지 파일만 업로드할 수 있습니다.');
       return;
@@ -264,7 +281,10 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       const uploaded = await uploadWikiImage({
         data,
         filename: file.name,
-        pageId: page?.id,
+        pageId: page.id,
+        license: fileLicense,
+        sourceUrl: fileSourceUrl.trim() || undefined,
+        sourceText: fileSourceText.trim() || undefined,
       });
       const alt = normalizeAltText(file.name);
       setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${uploaded.filename}|섬네일|${alt}]]\n`);
@@ -372,12 +392,35 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
               <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim()} className="btn-secondary h-10 disabled:opacity-50">검토 요청</button>
             </div>
           ) : null}
+          <section className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
+            <h2 className="text-sm font-semibold text-white">파일 저작권·출처</h2>
+            <p className="mt-2 text-xs leading-5 text-slate-400">업로드 파일은 이 문서의 <code>upload_file</code> ACL을 따릅니다. 라이선스와 출처는 파일이 표시되는 모든 문서에 함께 노출됩니다.</p>
+            {page ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-300">
+                  라이선스 <span className="text-red-300">필수</span>
+                  <select value={fileLicense} onChange={(event) => setFileLicense(event.target.value)} className="h-10 rounded-lg border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100" aria-label="파일 라이선스">
+                    <option value="">선택하세요</option>
+                    {WIKI_FILE_LICENSES.map((license) => <option key={license.value} value={license.value}>{license.label}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-300">
+                  원본 출처 URL {fileSourceRequired ? <span className="text-red-300">필수</span> : <span className="text-slate-500">선택</span>}
+                  <input type="url" value={fileSourceUrl} onChange={(event) => setFileSourceUrl(event.target.value)} placeholder="https://..." className="h-10 rounded-lg border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-300/50" />
+                </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-slate-300 sm:col-span-2">
+                  제작자·출처 표기 <span className="text-slate-500">선택</span>
+                  <input value={fileSourceText} maxLength={255} onChange={(event) => setFileSourceText(event.target.value)} placeholder="예: Mojang Studios / 공식 위키" className="h-10 rounded-lg border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-300/50" />
+                </label>
+              </div>
+            ) : <p className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs text-amber-100">새 문서를 먼저 저장해야 파일을 문서 ACL에 안전하게 연결할 수 있습니다.</p>}
+          </section>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploadingImage || saving || loadingRevision}
+              disabled={!canUploadImage || uploadingImage || saving || loadingRevision}
             >
               {uploadingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
               이미지
@@ -438,6 +481,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
                     <span className="min-w-0">
                       <span className="block truncate font-semibold text-white">{file.originalName ?? file.filename}</span>
                       <span className="block truncate text-xs text-slate-500">{file.filename}</span>
+                      {file.license ? <span className="mt-1 block truncate text-[11px] text-emerald-300">{wikiFileLicenseLabel(file.license)}{file.sourceText ? ` · ${file.sourceText}` : ''}</span> : null}
                     </span>
                   </button>
                 ))}
@@ -538,4 +582,18 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 function normalizeAltText(filename: string): string {
   return filename.trim().replace(/\.[^.]+$/u, '').replace(/[|[\]]/g, '').slice(0, 80) || 'image';
+}
+
+const WIKI_FILE_LICENSES = [
+  { value: 'self-created', label: '직접 제작' },
+  { value: 'cc-by-4.0', label: 'CC BY 4.0' },
+  { value: 'cc-by-sa-4.0', label: 'CC BY-SA 4.0' },
+  { value: 'cc0-1.0', label: 'CC0 1.0' },
+  { value: 'public-domain', label: '퍼블릭 도메인' },
+  { value: 'fair-use', label: '공정 이용' },
+  { value: 'permission-granted', label: '권리자 이용 허락' },
+] as const;
+
+function wikiFileLicenseLabel(value: string): string {
+  return WIKI_FILE_LICENSES.find((item) => item.value === value)?.label ?? value;
 }
