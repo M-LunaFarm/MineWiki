@@ -21,6 +21,11 @@ export interface WikiThreadSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiThreadListResponse {
+  readonly items: WikiThreadSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiRecentThreadSummary extends WikiThreadSummary {
   readonly pageTitle: string;
   readonly namespace: string;
@@ -83,6 +88,49 @@ export class WikiDiscussionService {
       : [];
     const countByThreadId = new Map(countRows.map((row) => [row.threadId, row._count._all]));
     return threads.map((thread) => this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0));
+  }
+
+  async listThreadsPage(
+    pageId: string,
+    accountId?: string | null,
+    cursor?: string,
+    requestedLimit = 30
+  ): Promise<WikiThreadListResponse> {
+    const page = await this.readablePage(pageId, accountId ?? null);
+    const limit = Math.min(Math.max(requestedLimit, 1), 50);
+    const decoded = cursor ? this.decodeRecentCursor(cursor) : null;
+    const snapshotAt = decoded?.snapshotAt ?? new Date();
+    const threads = await this.prisma.wikiDiscussionThread.findMany({
+      where: {
+        pageId: page.id,
+        status: { not: 'deleted' },
+        updatedAt: { lte: snapshotAt },
+        ...(decoded ? {
+          OR: [
+            { updatedAt: { lt: decoded.updatedAt } },
+            { updatedAt: decoded.updatedAt, id: { lt: decoded.id } }
+          ]
+        } : {})
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1
+    });
+    const hasMore = threads.length > limit;
+    const pageThreads = threads.slice(0, limit);
+    const profileById = await this.profileNames(pageThreads.map((thread) => thread.createdBy));
+    const countRows = pageThreads.length > 0
+      ? await this.prisma.wikiDiscussionComment.groupBy({
+          by: ['threadId'],
+          where: { threadId: { in: pageThreads.map((thread) => thread.id) } },
+          _count: { _all: true }
+        })
+      : [];
+    const countByThreadId = new Map(countRows.map((row) => [row.threadId, row._count._all]));
+    const last = pageThreads.at(-1);
+    return {
+      items: pageThreads.map((thread) => this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0)),
+      nextCursor: hasMore && last ? this.encodeRecentCursor(snapshotAt, last.updatedAt, last.id) : null
+    };
   }
 
   async getPageDiscussionPermissions(pageId: string, session?: SessionPayload | null): Promise<{ readonly canCreateThread: boolean }> {

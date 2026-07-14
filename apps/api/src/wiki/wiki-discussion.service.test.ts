@@ -305,6 +305,45 @@ test('recent discussion cursors fail closed when tampered', async () => {
   await assert.rejects(discussions.listRecent(null, 'not-a-valid-cursor'), BadRequestException);
 });
 
+test('page discussion lists paginate beyond the legacy one-hundred thread window', async () => {
+  const updatedAt = new Date('2026-07-13T00:00:00Z');
+  const rows = Array.from({ length: 31 }, (_, index) => ({ ...thread, id: BigInt(100 - index), updatedAt }));
+  const queries: Array<{ where: unknown; orderBy: unknown; take: number }> = [];
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: {
+      async findMany(args: { where: unknown; orderBy: unknown; take: number }) {
+        queries.push(args);
+        return queries.length === 1 ? rows : [];
+      }
+    },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async assertCanReadPage() {} } as unknown as WikiPermissionService
+  );
+
+  const first = await discussions.listThreadsPage(page.id.toString(), null, undefined, 30);
+  assert.equal(first.items.length, 30);
+  assert.ok(first.nextCursor);
+
+  const second = await discussions.listThreadsPage(page.id.toString(), null, first.nextCursor ?? undefined, 30);
+  assert.deepEqual(second, { items: [], nextCursor: null });
+  assert.deepEqual(queries[1]?.orderBy, [{ updatedAt: 'desc' }, { id: 'desc' }]);
+  assert.equal(queries[1]?.take, 31);
+  const secondWhere = queries[1]?.where as { pageId: bigint; status: unknown; updatedAt: { lte: Date }; OR: unknown };
+  assert.equal(secondWhere.pageId, page.id);
+  assert.deepEqual(secondWhere.status, { not: 'deleted' });
+  assert.ok(secondWhere.updatedAt.lte instanceof Date);
+  assert.deepEqual(secondWhere.OR, [
+      { updatedAt: { lt: updatedAt } },
+      { updatedAt, id: { lt: 71n } }
+  ]);
+});
+
 test('recent server discussions deep-link through the canonical tool route', async () => {
   const serverPage = { ...page, namespaceId: 2, spaceId: 9n, localPath: 'luna/API/requests', title: 'luna/API/requests' };
   const store = {

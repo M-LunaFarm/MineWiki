@@ -369,6 +369,11 @@ export interface WikiThreadSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiThreadListResponse {
+  readonly items: WikiThreadSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiRecentThreadSummary extends WikiThreadSummary {
   readonly pageTitle: string;
   readonly namespace: string;
@@ -730,8 +735,10 @@ export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]>
   return response.json();
 }
 
-export async function fetchWikiThreads(pageId: string): Promise<WikiThreadSummary[]> {
-  return readWikiBrowser<WikiThreadSummary[]>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussions`);
+export async function fetchWikiThreads(pageId: string, cursor?: string): Promise<WikiThreadListResponse> {
+  const params = new URLSearchParams({ limit: '30' });
+  if (cursor) params.set('cursor', cursor);
+  return readWikiBrowser<WikiThreadListResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussion-threads?${params.toString()}`);
 }
 
 export async function fetchWikiDiscussionPermissions(pageId: string): Promise<WikiDiscussionPermissions> {

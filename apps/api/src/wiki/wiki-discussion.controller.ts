@@ -5,7 +5,7 @@ import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
-import { WikiDiscussionService, type WikiRecentThreadListResponse, type WikiThreadDetail, type WikiThreadSummary } from './wiki-discussion.service';
+import { WikiDiscussionService, type WikiRecentThreadListResponse, type WikiThreadDetail, type WikiThreadListResponse, type WikiThreadSummary } from './wiki-discussion.service';
 
 @Controller('v1/wiki')
 export class WikiDiscussionController {
@@ -25,6 +25,17 @@ export class WikiDiscussionController {
   @UseGuards(OptionalSessionGuard)
   list(@Param('pageId') pageId: string, @Req() request: FastifyRequest): Promise<WikiThreadSummary[]> {
     return this.discussions.listThreads(pageId, request.sessionPayload?.userId ?? null);
+  }
+
+  @Get('pages/:pageId/discussion-threads')
+  @UseGuards(OptionalSessionGuard)
+  listPage(
+    @Param('pageId') pageId: string,
+    @Req() request: FastifyRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number
+  ): Promise<WikiThreadListResponse> {
+    return this.discussions.listThreadsPage(pageId, request.sessionPayload?.userId ?? null, cursor, limit ?? 30);
   }
 
   @Get('pages/:pageId/discussion-permissions')

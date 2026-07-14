@@ -14,6 +14,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const requestedThreadId = searchParams.get('thread');
   const requestedCommentId = searchParams.get('comment');
   const [threads, setThreads] = useState<WikiThreadSummary[]>([]);
+  const [nextThreadCursor, setNextThreadCursor] = useState<string | null>(null);
   const [canCreateThread, setCanCreateThread] = useState(false);
   const [selected, setSelected] = useState<WikiThreadDetail | null>(null);
   const [title, setTitle] = useState('');
@@ -23,6 +24,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [working, setWorking] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [loadingNewer, setLoadingNewer] = useState(false);
+  const [loadingMoreThreads, setLoadingMoreThreads] = useState(false);
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +51,8 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     void Promise.all([fetchWikiThreads(pageId), fetchWikiDiscussionPermissions(pageId)])
       .then(async ([result, permissions]) => {
         if (!active) return;
-        setThreads(result);
+        setThreads(result.items);
+        setNextThreadCursor(result.nextCursor);
         setCanCreateThread(permissions.canCreateThread);
         if (requestedThreadId) {
           const detail = await fetchWikiThread(requestedThreadId, undefined, requestedCommentId ?? undefined);
@@ -100,6 +103,21 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       setError(message(caught));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadMoreThreads() {
+    if (!nextThreadCursor) return;
+    setLoadingMoreThreads(true);
+    setError(null);
+    try {
+      const result = await fetchWikiThreads(pageId, nextThreadCursor);
+      setThreads((current) => [...current, ...result.items.filter((thread) => !current.some((item) => item.id === thread.id))]);
+      setNextThreadCursor(result.nextCursor);
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setLoadingMoreThreads(false);
     }
   }
 
@@ -439,6 +457,11 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
               </button>
             ))}
             {!loading && threads.length === 0 ? <p className="p-4 text-sm text-slate-500">아직 토론이 없습니다.</p> : null}
+            {nextThreadCursor ? (
+              <button type="button" disabled={loadingMoreThreads} onClick={() => void loadMoreThreads()} className="flex min-h-12 w-full items-center justify-center gap-2 p-3 text-sm font-semibold text-emerald-200 hover:bg-white/[0.03]">
+                {loadingMoreThreads ? <Loader2 className="size-4 animate-spin" /> : null} 더 오래된 토론 보기
+              </button>
+            ) : null}
           </section>
         </aside>
         <section className={`min-w-0 ${selected ? '' : 'hidden lg:block'}`}>
