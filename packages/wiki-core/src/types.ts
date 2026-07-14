@@ -20,6 +20,13 @@ export type AstNode =
   | { type: 'hr' }
   | { type: 'wiki_table'; rows: InlineNode[][][] }
   | { type: 'folding'; title: InlineNode[]; children: AstNode[] }
+  | {
+      type: 'include';
+      target: string;
+      params: Record<string, string>;
+      state: 'unresolved' | 'resolved' | 'unavailable';
+      children?: AstNode[];
+    }
   | { type: 'component'; name: string; props: Record<string, string> }
   | { type: 'category'; title: string }
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null }
@@ -45,6 +52,7 @@ export interface ParsedDocument {
   ast: AstNode[];
   links: string[];
   categories: string[];
+  includes: string[];
   components: Array<{ name: string; props: Record<string, string> }>;
   headings: Array<{ level: number; title: string; anchor: string; startLine: number; endLine: number }>;
   footnotes: string[];

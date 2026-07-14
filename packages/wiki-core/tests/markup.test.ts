@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
+import { applyIncludeParametersToAst, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
 import { resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
@@ -92,4 +92,67 @@ test('duplicate heading anchors are blocking markup errors', () => {
     parsed.blockingErrors.some((error) => error.includes('중복 제목 앵커')),
     true,
   );
+});
+
+test('parses standalone include macros and bounded parameters', () => {
+  const parsed = parseMarkup('[include(틀:서버 안내,서버=소울 온라인,설명=쉽게\\,빠르게)]');
+
+  assert.deepEqual(parsed.includes, ['틀:서버 안내']);
+  assert.deepEqual(parsed.ast[0], {
+    type: 'include',
+    target: '틀:서버 안내',
+    params: { 서버: '소울 온라인', 설명: '쉽게,빠르게' },
+    state: 'unresolved'
+  });
+  assert.match(renderDocument(parsed.ast), /포함 문서는 저장한 뒤/);
+});
+
+test('does not parse include syntax inside literal code blocks or inline prose', () => {
+  const parsed = parseMarkup('{{{\n[include(틀:비밀)]\n}}}\n문장 안 [include(틀:인라인)]');
+
+  assert.deepEqual(parsed.includes, []);
+  assert.equal(parsed.ast[0]?.type, 'codeblock');
+  assert.equal(parsed.ast[1]?.type, 'paragraph');
+});
+
+test('rejects malformed, duplicate, and excessive include parameters', () => {
+  const malformed = parseMarkup('[include(틀:안내,키)]');
+  const duplicate = parseMarkup('[include(틀:안내,키=1,키=2)]');
+  const excessive = parseMarkup(`[include(틀:안내,${Array.from({ length: 33 }, (_, index) => `k${index}=v`).join(',')})]`);
+
+  assert.match(malformed.blockingErrors[0] ?? '', /키=값/);
+  assert.match(duplicate.blockingErrors[0] ?? '', /중복/);
+  assert.match(excessive.blockingErrors[0] ?? '', /32개/);
+});
+
+test('interpolates include parameters only after parsing and prefixes heading ids', () => {
+  const template = parseMarkup('== @제목=기본@ ==\n[[가이드/@문서@|@표시@]]\n{{{\n@제목@ [[비밀]]\n}}}');
+  const expanded = applyIncludeParametersToAst(template.ast, {
+    제목: '<script>안전</script>',
+    문서: '시작',
+    표시: "'''<b>주입 불가</b>'''"
+  }, 'inc-2-');
+  const html = renderDocument(expanded);
+
+  assert.equal(expanded[0]?.type, 'heading');
+  if (expanded[0]?.type === 'heading') assert.match(expanded[0].id, /^inc-2-/);
+  assert.equal(html.includes('<script>'), false);
+  assert.match(html, /&lt;script&gt;안전&lt;\/script&gt;/);
+  assert.match(html, /'''&lt;b&gt;주입 불가&lt;\/b&gt;'''/);
+  assert.match(html, /@제목@ \[\[비밀\]\]/);
+});
+
+test('renders resolved and unavailable includes without exposing a target', () => {
+  const resolved = renderDocument([{
+    type: 'include', target: '틀:안내', params: {}, state: 'resolved',
+    children: [{ type: 'paragraph', children: [{ type: 'text', text: '포함된 본문' }] }]
+  }]);
+  const unavailable = renderDocument([{
+    type: 'include', target: '틀:비공개', params: {}, state: 'unavailable'
+  }]);
+
+  assert.match(resolved, /class="wiki-transclusion"/);
+  assert.match(resolved, /포함된 본문/);
+  assert.match(unavailable, /포함 문서를 불러올 수 없습니다/);
+  assert.equal(unavailable.includes('비공개'), false);
 });

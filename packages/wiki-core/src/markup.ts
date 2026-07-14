@@ -3,9 +3,15 @@ import type { AstNode, InlineNode, ParsedDocument } from './types.js';
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.1';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.2';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
+const MAX_INCLUDE_OCCURRENCES = 20;
+const MAX_INCLUDE_PARAMS = 32;
+const MAX_INCLUDE_PARAM_KEY_LENGTH = 64;
+const MAX_INCLUDE_PARAM_VALUE_BYTES = 4096;
+const MAX_INCLUDE_PARAM_BYTES = 32 * 1024;
+const INCLUDE_PARAM_KEY = /^[A-Za-z0-9가-힣_]+$/u;
 
 const componentNameMap: Record<string, string> = {
   '문서 상태': 'document_status',
@@ -103,6 +109,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
   const ast: AstNode[] = [];
   const links = new Set<string>();
   const categories = new Set<string>();
+  const includes: string[] = [];
   const components: Array<{ name: string; props: Record<string, string> }> = [];
   const errors: string[] = [];
   const blockingErrors: string[] = [];
@@ -155,11 +162,30 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
       const nested = parseMarkup(bodyLines.join('\n'), foldingDepth + 1);
       nested.links.forEach((link) => links.add(link));
       nested.categories.forEach((categoryTitle) => categories.add(categoryTitle));
+      nested.includes.forEach((target) => includes.push(target));
       nested.components.forEach((component) => components.push(component));
       nested.footnotes.forEach((note) => footnotes.push(note));
       nested.errors.forEach((error) => errors.push(error));
       nested.blockingErrors.forEach((error) => blockingErrors.push(error));
       ast.push({ type: 'folding', title: parseInline(foldingBlock[1]?.trim() || '펼치기', links, errors, footnotes), children: nested.ast });
+      continue;
+    }
+
+    const include = parseIncludeLine(line);
+    if (include) {
+      if ('error' in include) {
+        blockingErrors.push(include.error);
+      } else if (includes.length >= MAX_INCLUDE_OCCURRENCES) {
+        blockingErrors.push(`include 문서는 문서당 ${MAX_INCLUDE_OCCURRENCES}개까지 사용할 수 있습니다.`);
+      } else {
+        includes.push(include.target);
+        ast.push({
+          type: 'include',
+          target: include.target,
+          params: include.params,
+          state: 'unresolved'
+        });
+      }
       continue;
     }
 
@@ -307,6 +333,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
     ast,
     links: [...links],
     categories: [...categories],
+    includes,
     components,
     headings: headings.map((heading) => ({
       level: heading.level,
@@ -335,6 +362,7 @@ function rejectedDocument(message: string): ParsedDocument {
     ast: [],
     links: [],
     categories: [],
+    includes: [],
     components: [],
     headings: [],
     footnotes: [],
@@ -343,6 +371,125 @@ function rejectedDocument(message: string): ParsedDocument {
     errors: [],
     blockingErrors: [message]
   };
+}
+
+type ParsedIncludeLine =
+  | { target: string; params: Record<string, string> }
+  | { error: string };
+
+function parseIncludeLine(line: string): ParsedIncludeLine | null {
+  const trimmed = line.trim();
+  if (!/^\[include\(/i.test(trimmed)) return null;
+  const match = trimmed.match(/^\[include\(([\s\S]*)\)\]$/i);
+  if (!match) return { error: 'include 문법이 올바르지 않습니다.' };
+  const parts = splitIncludeArguments(match[1] ?? '');
+  const target = normalizeTitle(parts.shift() ?? '');
+  if (!target || target.includes('@') || Buffer.byteLength(target, 'utf8') > 255) {
+    return { error: 'include 대상 문서명이 올바르지 않습니다.' };
+  }
+  if (parts.length > MAX_INCLUDE_PARAMS) {
+    return { error: `include 매개변수는 ${MAX_INCLUDE_PARAMS}개까지 사용할 수 있습니다.` };
+  }
+  const params: Record<string, string> = {};
+  let totalBytes = 0;
+  for (const part of parts) {
+    const separator = part.indexOf('=');
+    if (separator <= 0) return { error: 'include 매개변수는 키=값 형식이어야 합니다.' };
+    const key = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1);
+    if (!INCLUDE_PARAM_KEY.test(key) || key.length > MAX_INCLUDE_PARAM_KEY_LENGTH) {
+      return { error: `include 매개변수 키가 올바르지 않습니다: ${key || '(빈 키)'}` };
+    }
+    if (Object.prototype.hasOwnProperty.call(params, key)) {
+      return { error: `include 매개변수가 중복되었습니다: ${key}` };
+    }
+    const valueBytes = Buffer.byteLength(value, 'utf8');
+    if (valueBytes > MAX_INCLUDE_PARAM_VALUE_BYTES) {
+      return { error: `include 매개변수 값이 너무 큽니다: ${key}` };
+    }
+    totalBytes += Buffer.byteLength(key, 'utf8') + valueBytes;
+    if (totalBytes > MAX_INCLUDE_PARAM_BYTES) {
+      return { error: 'include 매개변수 전체 크기 제한을 초과했습니다.' };
+    }
+    params[key] = value;
+  }
+  return { target, params };
+}
+
+function splitIncludeArguments(value: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+    } else if (character === '\\') {
+      escaped = true;
+    } else if (character === ',') {
+      parts.push(current.trim());
+      current = '';
+    } else {
+      current += character;
+    }
+  }
+  if (escaped) current += '\\';
+  parts.push(current.trim());
+  return parts;
+}
+
+/**
+ * Applies include parameters to an already parsed AST. Values therefore remain
+ * plain data and cannot inject new wiki syntax, HTML, or nested includes.
+ */
+export function applyIncludeParametersToAst(
+  ast: readonly AstNode[],
+  params: Readonly<Record<string, string>>,
+  headingPrefix: string
+): AstNode[] {
+  const replace = (value: string) => value.replace(
+    /@([A-Za-z0-9가-힣_]+)(?:=([^@\n]*))?@/gu,
+    (_match, key: string, fallback: string | undefined) => params[key] ?? fallback ?? ''
+  );
+  const inline = (nodes: readonly InlineNode[]): InlineNode[] => nodes.map((node) => {
+    if (node.type === 'internal_link') return { ...node, target: replace(node.target), label: replace(node.label) };
+    if (node.type === 'external_link') return { ...node, href: replace(node.href), label: replace(node.label) };
+    if (node.type === 'code') return { ...node, code: replace(node.code) };
+    return { ...node, text: replace(node.text) };
+  });
+  return ast.map((node): AstNode => {
+    if (node.type === 'heading') {
+      const text = replace(node.text);
+      return { ...node, text, id: `${headingPrefix}${makeHeadingId(text)}` };
+    }
+    if (node.type === 'paragraph' || node.type === 'blockquote') return { ...node, children: inline(node.children) };
+    if (node.type === 'list') return { ...node, items: node.items.map(inline) };
+    if (node.type === 'wiki_table') return { ...node, rows: node.rows.map((row) => row.map(inline)) };
+    if (node.type === 'folding') return {
+      ...node,
+      title: inline(node.title),
+      children: applyIncludeParametersToAst(node.children, params, headingPrefix)
+    };
+    if (node.type === 'component') return {
+      ...node,
+      props: Object.fromEntries(Object.entries(node.props).map(([key, value]) => [key, replace(value)]))
+    };
+    if (node.type === 'category') return { ...node, title: replace(node.title) };
+    if (node.type === 'file') return {
+      ...node,
+      fileName: replace(node.fileName),
+      caption: node.caption === null ? null : replace(node.caption)
+    };
+    if (node.type === 'redirect') return { ...node, target: replace(node.target) };
+    if (node.type === 'include') return {
+      ...node,
+      target: replace(node.target),
+      params: Object.fromEntries(Object.entries(node.params).map(([key, value]) => [key, replace(value)])),
+      children: node.children ? applyIncludeParametersToAst(node.children, params, headingPrefix) : undefined
+    };
+    // Literal code blocks deliberately do not interpolate include parameters.
+    return { ...node };
+  });
 }
 
 function parseInline(input: string, links: Set<string>, errors: string[], footnotes: string[]): InlineNode[] {
@@ -404,6 +551,15 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       if (node.type === 'hr') return '<hr>';
       if (node.type === 'wiki_table') return renderWikiTable(node.rows, footnotes, options);
       if (node.type === 'folding') return `<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, options)}</summary>${renderDocument(node.children, options)}</details>`;
+      if (node.type === 'include') {
+        if (node.state === 'resolved' && node.children) {
+          return `<section class="wiki-transclusion">${renderDocument(node.children, options)}</section>`;
+        }
+        const message = node.state === 'unavailable'
+          ? '포함 문서를 불러올 수 없습니다.'
+          : '포함 문서는 저장한 뒤 표시됩니다.';
+        return `<aside class="wiki-include-notice">${message}</aside>`;
+      }
       if (node.type === 'category') return '';
       if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options);
       if (node.type === 'redirect') return `<p class="notice">넘겨주기: ${renderInternalLink(node.target, node.target, options)}</p>`;
