@@ -38,6 +38,7 @@ import type {
   ServerPingJob,
   VoteDispatchJob,
 } from '@minewiki/schemas';
+import { terminateOnRunLoopFailure } from './runtime-failure';
 
 const PING_INTERVAL_MS = 5 * 60 * 1000;
 const RANK_INTERVAL_MS = 60 * 60 * 1000;
@@ -566,7 +567,20 @@ async function bootstrapWorker(): Promise<void> {
 
   for (const worker of workers) {
     void worker.run().catch((error) => {
-      Logger.error({ err: error, worker: worker.name }, 'Worker run loop stopped unexpectedly');
+      return terminateOnRunLoopFailure({
+        error,
+        workerName: worker.name,
+        isShuttingDown: () => shuttingDown,
+        markShuttingDown: () => { shuttingDown = true; },
+        closeResources,
+        logFailure: (failure, workerName) => {
+          Logger.error(
+            { err: failure, worker: workerName },
+            'Worker run loop stopped unexpectedly; terminating for supervisor restart',
+          );
+        },
+        exit: (code) => process.exit(code),
+      });
     });
   }
 
