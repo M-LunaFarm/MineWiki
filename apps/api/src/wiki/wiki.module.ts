@@ -23,11 +23,13 @@ import { WikiReadService } from './wiki-read.service';
 import { WikiWatchController } from './wiki-watch.controller';
 import { WikiWatchService } from './wiki-watch.service';
 import { WikiRoutePathResolver } from './wiki-route-path.resolver';
+import { WikiAclGroupAdminController, WikiAclGroupSelfController } from './wiki-acl-group.controller';
+import { WikiAclGroupService } from './wiki-acl-group.service';
 
 @Module({
   imports: [SessionModule, EventsModule],
-  controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPageAclController],
-  providers: [WikiProfileService, WikiAdminService, WikiModerationService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiWatchService, WikiNotificationService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService],
-  exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiReadService, WikiEditService]
+  controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPageAclController, WikiAclGroupAdminController, WikiAclGroupSelfController],
+  providers: [WikiProfileService, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiWatchService, WikiNotificationService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService],
+  exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}

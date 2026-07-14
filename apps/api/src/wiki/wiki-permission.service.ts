@@ -29,6 +29,8 @@ export interface WikiPermissionActor {
   readonly isElevated?: boolean;
   readonly permissions?: readonly string[];
   readonly groups?: readonly string[];
+  /** Current request address from the central HTTP extraction boundary. */
+  readonly requestIp?: string | null;
 }
 
 type WikiPermissionSession = SessionPayload & {
@@ -363,7 +365,8 @@ export class WikiPermissionService {
       status: profile.status,
       isElevated: session.isElevated,
       permissions: session.permissions,
-      groups: session.groups
+      groups: session.groups,
+      requestIp: session.requestIp
     };
   }
 

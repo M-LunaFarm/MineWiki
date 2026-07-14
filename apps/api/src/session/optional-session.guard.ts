@@ -1,6 +1,5 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { extractClientIp } from '../common/http/client-ip';
 import { SessionService } from './session.service';
 import { assertCsrfToken } from './csrf';
 
@@ -24,6 +23,7 @@ export class OptionalSessionGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
+    const requestIp = request.clientIp ?? null;
     const token = parseCookie(request.headers.cookie, 'mw_session');
     const session = await this.sessions.getSessionByToken(token);
     if (!session) {
@@ -31,11 +31,11 @@ export class OptionalSessionGuard implements CanActivate {
     }
     await this.sessions.touchSession(
       session.sessionId,
-      extractClientIp(request) ?? null,
+      requestIp,
       request.headers['user-agent'] ?? null
     );
     assertCsrfToken(request, session.token);
-    const payload = this.sessions.toPayload(session);
+    const payload = { ...this.sessions.toPayload(session), requestIp };
     if (
       payload.policyConsent?.required &&
       !['GET', 'HEAD', 'OPTIONS'].includes(request.method.toUpperCase())

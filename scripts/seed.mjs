@@ -118,6 +118,7 @@ const permissions = [
   ['wiki.read.restricted', 'Read restricted wiki resources'],
   ['wiki.edit.locked', 'Edit locked wiki pages'],
   ['wiki.admin', 'Manage wiki administration'],
+  ['wiki.acl.manage', 'Manage wiki ACL groups and memberships'],
   ['wiki.user.block', 'Block and unblock wiki contributors'],
   ['wiki.batch_rollback', 'Preview and execute bounded wiki vandalism rollback'],
   ['server.admin', 'Manage server administration'],
@@ -131,7 +132,7 @@ const permissions = [
 const rolePermissions = {
   owner: permissions.map(([code]) => code),
   admin: permissions.map(([code]) => code),
-  wiki_admin: ['wiki.admin', 'wiki.edit.locked', 'wiki.read.restricted'],
+  wiki_admin: ['wiki.admin', 'wiki.acl.manage', 'wiki.edit.locked', 'wiki.read.restricted'],
   server_admin: ['server.admin', 'review.moderate'],
   vote_moderator: ['vote.admin'],
   support_agent: ['support.admin'],

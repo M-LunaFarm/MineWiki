@@ -10,6 +10,7 @@ import * as Sentry from '@sentry/node';
 import { TelemetryInterceptor } from './telemetry/telemetry.interceptor';
 import { randomUUID } from 'node:crypto';
 import { ApiExceptionFilter } from './common/api-exception.filter';
+import { runInHttpRequestContext } from './common/http/request-context';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -42,6 +43,7 @@ async function bootstrap(): Promise<void> {
     });
   }
 
+  app.getHttpAdapter().getInstance().addHook('onRequest', runInHttpRequestContext);
   app.getHttpAdapter().getInstance().addHook('onRequest', (request, reply, done) => {
     const requestIdHeader = request.headers['x-request-id'];
     const requestId = Array.isArray(requestIdHeader)

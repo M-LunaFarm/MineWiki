@@ -238,9 +238,8 @@ export class WikiAdminService {
       }),
       this.prisma.wikiGroup.findMany({ orderBy: [{ displayName: 'asc' }] }),
       this.prisma.aclGroup.findMany({
-        where: { status: 'active' },
-        orderBy: [{ title: 'asc' }],
-        select: { id: true, groupKey: true, title: true }
+        orderBy: [{ status: 'asc' }, { title: 'asc' }],
+        select: { id: true, groupKey: true, title: true, status: true }
       })
     ]);
     return {
@@ -248,7 +247,7 @@ export class WikiAdminService {
       spaces: spaces.map((item) => ({ id: item.id.toString(), name: item.name, type: item.spaceType, path: item.rootPath })),
       pages: pages.map((item) => ({ id: item.id.toString(), name: item.displayTitle, spaceId: item.spaceId.toString() })),
       groups: groups.map((item) => ({ code: item.code, name: item.displayName })),
-      aclGroups: aclGroups.map((item) => ({ id: item.id.toString(), key: item.groupKey, name: item.title }))
+      aclGroups: aclGroups.map((item) => ({ id: item.id.toString(), key: item.groupKey, name: item.title, status: item.status }))
     };
   }
 

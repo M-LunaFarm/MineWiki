@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { PrismaService } from '../common/prisma.service';
+import { runWithHttpRequestContext } from '../common/http/request-context';
 import { WikiAclService } from './wiki-acl.service';
 
 function createService(options: {
@@ -17,6 +18,7 @@ function createService(options: {
   }>;
   readonly aclGroup?: { id: bigint; groupKey: string; status: string } | null;
   readonly aclGroupMember?: { id: bigint } | null;
+  readonly aclGroupIpMembers?: Array<{ cidr: string | null }>;
   readonly userGroups?: Array<{ groupId: number }>;
   readonly groups?: Array<{ id: number; code: string }>;
   readonly groupPermissions?: Array<{ permissionCode: string }>;
@@ -59,6 +61,9 @@ function createService(options: {
     aclGroupMember: {
       async findFirst() {
         return options.aclGroupMember ?? null;
+      },
+      async findMany() {
+        return options.aclGroupIpMembers ?? [];
       }
     },
     wikiUserGroup: {
@@ -181,6 +186,84 @@ test('ACL group member can match allow rule', async () => {
 
   assert.equal(decision.matched, true);
   assert.equal(decision.allowed, true);
+});
+
+test('ACL group CIDR member matches a centrally supplied IPv4 request address for guests', async () => {
+  const { service, store } = createService({
+    rules: [{
+      targetType: 'site', action: 'read', effect: 'deny',
+      subjectType: 'aclgroup', subjectValue: 'blocked_networks'
+    }],
+    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active' },
+    aclGroupIpMembers: [{ cidr: '192.0.2.0/24' }]
+  });
+
+  const decision = await service.evaluate({
+    actor: null,
+    requestIp: '192.0.2.50',
+    action: 'read',
+    resource: {},
+    store: store as unknown as PrismaService
+  });
+
+  assert.equal(decision.matched, true);
+  assert.equal(decision.allowed, false);
+});
+
+test('ACL group CIDR member uses the isolated HTTP request context for anonymous reads', async () => {
+  const { service, store } = createService({
+    rules: [{
+      targetType: 'site', action: 'read', effect: 'deny',
+      subjectType: 'aclgroup', subjectValue: 'blocked_networks'
+    }],
+    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active' },
+    aclGroupIpMembers: [{ cidr: '192.0.2.0/24' }]
+  });
+
+  const decision = await runWithHttpRequestContext('192.0.2.50', () => service.evaluate({
+    actor: null,
+    action: 'read',
+    resource: {},
+    store: store as unknown as PrismaService
+  }));
+
+  assert.equal(decision.matched, true);
+  assert.equal(decision.allowed, false);
+});
+
+test('ACL group CIDR member does not match another network or an invalid address', async () => {
+  const { service, store } = createService({
+    rules: [{
+      targetType: 'site', action: 'read', effect: 'deny',
+      subjectType: 'aclgroup', subjectValue: 'blocked_networks'
+    }],
+    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active' },
+    aclGroupIpMembers: [{ cidr: '2001:db8::/32' }]
+  });
+
+  for (const requestIp of ['2001:db9::1', 'not-an-ip']) {
+    const decision = await service.evaluate({
+      actor: null, requestIp, action: 'read', resource: {},
+      store: store as unknown as PrismaService
+    });
+    assert.equal(decision.matched, false);
+  }
+});
+
+test('rules referencing an archived ACL group remain inert without becoming an implicit deny', async () => {
+  const { service, store } = createService({
+    rules: [{
+      targetType: 'site', action: 'edit', effect: 'allow',
+      subjectType: 'aclgroup', subjectValue: 'retired_editors'
+    }],
+    aclGroup: { id: 7n, groupKey: 'retired_editors', status: 'archived' },
+    aclGroupMember: { id: 11n }
+  });
+  const decision = await service.evaluate({
+    actor: { accountId: 'account-1', profileId: 100n, status: 'active' },
+    action: 'edit', resource: {}, store: store as unknown as PrismaService
+  });
+  assert.deepEqual(decision, { matched: false, allowed: false, reason: 'acl_no_match' });
 });
 
 test('space allow server owner role works', async () => {

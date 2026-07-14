@@ -7,7 +7,6 @@
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { SessionService, type SessionPayload } from './session.service';
-import { extractClientIp } from '../common/http/client-ip';
 import { assertCsrfToken } from './csrf';
 
 function parseCookie(header: string | undefined, name: string): string | undefined {
@@ -37,6 +36,7 @@ export class SessionGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
+    const requestIp = request.clientIp ?? null;
     const token = parseCookie(request.headers.cookie, 'mw_session');
     const session = await this.sessions.getSessionByToken(token);
     if (!session) {
@@ -44,11 +44,11 @@ export class SessionGuard implements CanActivate {
     }
     await this.sessions.touchSession(
       session.sessionId,
-      extractClientIp(request) ?? null,
+      requestIp,
       request.headers['user-agent'] ?? null
     );
     assertCsrfToken(request, session.token);
-    const payload = this.sessions.toPayload(session);
+    const payload = { ...this.sessions.toPayload(session), requestIp };
     if (payload.policyConsent?.required && !isPolicyConsentExempt(request)) {
       throw new ForbiddenException({
         code: 'POLICY_CONSENT_REQUIRED',

@@ -44,3 +44,17 @@ declare module 'sharp' {
 
   export default sharp;
 }
+
+declare module 'ipaddr.js' {
+  interface Address {
+    kind(): 'ipv4' | 'ipv6';
+    toByteArray(): number[];
+    toString(): string;
+    isIPv4MappedAddress?(): boolean;
+    toIPv4Address?(): Address;
+  }
+
+  export function parse(value: string): Address;
+  export function parseCIDR(value: string): [Address, number];
+  export function fromByteArray(bytes: number[]): Address;
+}

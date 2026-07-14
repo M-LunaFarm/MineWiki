@@ -234,4 +234,11 @@ export async function validateOutboundTarget(
 
 export { validateImageUpload, ImageValidationError } from './upload';
 export type { SanitizedImage } from './upload';
+export {
+  cidrContains,
+  CidrValidationError,
+  normalizeIpAddress,
+  normalizeIpOrCidr
+} from './cidr';
+export type { IpFamily, NormalizedCidr } from './cidr';
 export { decryptSecret, encryptSecret, hashSecret, isEncryptedSecret } from './secrets';

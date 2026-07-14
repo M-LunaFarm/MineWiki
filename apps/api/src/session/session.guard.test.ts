@@ -34,6 +34,43 @@ test('optional authenticated mutation paths enforce the same policy gate', async
   );
 });
 
+test('session payload request IP comes from the central request boundary', async () => {
+  const guard = new SessionGuard(sessionService() as never);
+  const request = {
+    method: 'GET',
+    url: '/v1/wiki/pages/1',
+    ip: '198.51.100.25',
+    clientIp: '198.51.100.25',
+    headers: { cookie: 'mw_session=session-token', 'sec-fetch-site': 'same-origin' }
+  } as unknown as FastifyRequest;
+  const executionContext = {
+    switchToHttp: () => ({ getRequest: () => request })
+  } as unknown as ExecutionContext;
+  assert.equal(await guard.canActivate(executionContext), true);
+  assert.equal(request.sessionPayload?.requestIp, '198.51.100.25');
+  assert.equal(request.clientIp, '198.51.100.25');
+});
+
+test('optional session guard preserves the centrally extracted IP for anonymous requests', async () => {
+  const guard = new OptionalSessionGuard({
+    async getSessionByToken() { return null; }
+  } as never);
+  const request = {
+    method: 'GET',
+    url: '/v1/wiki/page',
+    ip: '2001:db8::25',
+    clientIp: '2001:db8::25',
+    headers: {}
+  } as unknown as FastifyRequest;
+  const executionContext = {
+    switchToHttp: () => ({ getRequest: () => request })
+  } as unknown as ExecutionContext;
+
+  assert.equal(await guard.canActivate(executionContext), true);
+  assert.equal(request.clientIp, '2001:db8::25');
+  assert.equal(request.sessionPayload, undefined);
+});
+
 function sessionService() {
   const session = { sessionId: 'session-id', token: 'session-token' };
   return {

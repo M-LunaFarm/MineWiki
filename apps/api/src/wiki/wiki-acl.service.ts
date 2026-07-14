@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { cidrContains, normalizeIpOrCidr } from '@minewiki/security';
 import { PrismaService } from '../common/prisma.service';
+import { getCurrentRequestIp } from '../common/http/request-context';
 import type { WikiPermissionActor } from './wiki-permission.service';
 
 type WikiAclStore = Pick<
@@ -66,6 +68,7 @@ export class WikiAclService {
     readonly action: WikiAclAction;
     readonly resource: WikiAclResource;
     readonly store?: WikiAclStore;
+    readonly requestIp?: string | null;
   }): Promise<WikiAclDecision> {
     const store = input.store ?? this.prisma;
     const now = new Date();
@@ -123,7 +126,13 @@ export class WikiAclService {
         )
         .sort((left, right) => left.sortOrder - right.sortOrder);
       for (const rule of scopedRules) {
-        if (!(await this.subjectMatches(store, rule, input.actor, input.resource))) {
+        if (!(await this.subjectMatches(
+          store,
+          rule,
+          input.actor,
+          input.resource,
+          input.requestIp ?? input.actor?.requestIp ?? getCurrentRequestIp()
+        ))) {
           continue;
         }
         if (rule.effect === 'allow') {
@@ -146,7 +155,8 @@ export class WikiAclService {
       readonly subjectValue: string;
     },
     actor: WikiPermissionActor | null,
-    resource: WikiAclResource
+    resource: WikiAclResource,
+    requestIp: string | null
   ): Promise<boolean> {
     const subjectType = rule.subjectType;
     const subjectValue = stripAclPrefix(rule.subjectValue, subjectType);
@@ -157,7 +167,7 @@ export class WikiAclService {
       return Boolean(actor && safeBigInt(subjectValue) === actor.profileId);
     }
     if (subjectType === 'aclgroup') {
-      return this.aclGroupMatches(store, subjectValue, actor);
+      return this.aclGroupMatches(store, subjectValue, actor, requestIp);
     }
     if (subjectType === 'role') {
       return this.roleMatches(store, subjectValue, actor, resource);
@@ -307,10 +317,12 @@ export class WikiAclService {
     return modWiki?.verifiedBy === actor.profileId;
   }
 
-  private async aclGroupMatches(store: WikiAclStore, groupKey: string, actor: WikiPermissionActor | null): Promise<boolean> {
-    if (!actor) {
-      return false;
-    }
+  private async aclGroupMatches(
+    store: WikiAclStore,
+    groupKey: string,
+    actor: WikiPermissionActor | null,
+    requestIp: string | null
+  ): Promise<boolean> {
     const group = await store.aclGroup.findUnique({
       where: { groupKey },
       select: { id: true, status: true }
@@ -318,17 +330,33 @@ export class WikiAclService {
     if (!group || group.status !== 'active') {
       return false;
     }
-    const member = await store.aclGroupMember.findFirst({
+    const now = new Date();
+    if (actor) {
+      const member = await store.aclGroupMember.findFirst({
+        where: {
+          groupId: group.id,
+          memberType: 'user',
+          userId: actor.profileId,
+          removedAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+        },
+        select: { id: true }
+      });
+      if (member) return true;
+    }
+    const normalizedIp = normalizeRequestIp(requestIp);
+    if (!normalizedIp) return false;
+    const candidates = await store.aclGroupMember.findMany({
       where: {
         groupId: group.id,
-        memberType: 'user',
-        userId: actor.profileId,
+        memberType: { in: ['ip', 'cidr'] },
+        ipVersion: normalizedIp.family,
         removedAt: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
       },
-      select: { id: true }
+      select: { cidr: true }
     });
-    return Boolean(member);
+    return candidates.some((member) => Boolean(member.cidr && cidrContains(member.cidr, normalizedIp.address)));
   }
 
   private async groupCodes(store: WikiAclStore, actor: WikiPermissionActor): Promise<string[]> {
@@ -381,6 +409,19 @@ export class WikiAclService {
       select: { id: true }
     });
     return Boolean(role);
+  }
+}
+
+function normalizeRequestIp(value: string | null): { readonly address: string; readonly family: 4 | 6 } | null {
+  if (!value) return null;
+  try {
+    const normalized = normalizeIpOrCidr(value);
+    const maximumPrefix = normalized.family === 4 ? 32 : 128;
+    return normalized.prefixLength === maximumPrefix
+      ? { address: normalized.address, family: normalized.family }
+      : null;
+  } catch {
+    return null;
   }
 }
 

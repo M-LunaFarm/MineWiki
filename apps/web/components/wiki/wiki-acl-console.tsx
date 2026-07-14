@@ -12,6 +12,7 @@ import {
   type WikiAclCatalog,
   type WikiAclRuleSummary,
 } from '../../lib/wiki-api';
+import { WikiAclGroupConsole } from './wiki-acl-group-console';
 
 const ACTIONS = [
   ['read', '읽기'], ['edit', '편집'], ['create', '문서 생성'], ['move', '이동'],
@@ -74,7 +75,7 @@ export function WikiAclConsole() {
     if (subjectType === 'perm') return PERMISSION_SUBJECTS.map(([value, label]) => ({ value, label }));
     if (subjectType === 'role') return ROLE_SUBJECTS.map(([value, label]) => ({ value, label }));
     if (subjectType === 'group') return catalog.groups.map((item) => ({ value: item.code, label: item.name }));
-    if (subjectType === 'aclgroup') return catalog.aclGroups.map((item) => ({ value: item.key, label: item.name }));
+    if (subjectType === 'aclgroup') return catalog.aclGroups.filter((item) => item.status === 'active').map((item) => ({ value: item.key, label: item.name }));
     return [];
   }, [catalog, subjectType]);
 
@@ -116,6 +117,13 @@ export function WikiAclConsole() {
     } finally { setWorking(false); }
   }
 
+  function subjectLabel(rule: WikiAclRuleSummary): string {
+    if (rule.subjectType !== 'aclgroup') return `${rule.subjectType}:${rule.subjectValue}`;
+    const group = catalog?.aclGroups.find((item) => item.key === rule.subjectValue);
+    if (!group) return `aclgroup:${rule.subjectValue} (삭제됨)`;
+    return `aclgroup:${group.name}${group.status === 'active' ? '' : ' (보관됨)'}`;
+  }
+
   if (loading) return <div className="flex min-h-[40vh] items-center justify-center"><Loader2 className="size-6 animate-spin text-emerald-300" /></div>;
 
   return (
@@ -125,6 +133,8 @@ export function WikiAclConsole() {
       </section>
 
       {error ? <div className="flex gap-3 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100"><AlertTriangle className="size-4 shrink-0" />{error}</div> : null}
+
+      <WikiAclGroupConsole />
 
       <form onSubmit={submit} className="grid gap-4 rounded-xl border border-white/10 bg-[#111821] p-5 lg:grid-cols-4">
         <Field label="범위"><select value={targetType} onChange={(e) => setTargetType(e.target.value as WikiAclRuleSummary['targetType'])} className="admin-acl-input"><option value="site">사이트 전체</option><option value="namespace">네임스페이스</option><option value="space">위키 공간</option><option value="page">개별 문서</option></select></Field>
@@ -138,7 +148,7 @@ export function WikiAclConsole() {
       </form>
 
       <section className="overflow-x-auto rounded-xl border border-white/10 bg-[#111821]">
-        <table className="min-w-full text-left text-sm"><thead className="border-b border-white/10 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">범위</th><th className="px-4 py-3">동작</th><th className="px-4 py-3">주체</th><th className="px-4 py-3">효과</th><th className="px-4 py-3">사유</th><th className="px-4 py-3">작업</th></tr></thead><tbody className="divide-y divide-white/10 text-slate-300">{rules.map((rule) => <tr key={rule.id}><td className="px-4 py-3 font-mono text-xs">{rule.targetType}:{rule.targetId ?? '*'}</td><td className="px-4 py-3">{rule.action}</td><td className="px-4 py-3">{rule.subjectType}:{rule.subjectValue}</td><td className={`px-4 py-3 font-semibold ${rule.effect === 'allow' ? 'text-emerald-300' : 'text-red-300'}`}>{rule.effect === 'allow' ? '허용' : '거부'}</td><td className="max-w-xs px-4 py-3 text-slate-400">{rule.reason ?? '-'}</td><td className="px-4 py-3"><button type="button" onClick={() => void remove(rule)} disabled={working} className="rounded-md border border-white/10 p-2 hover:border-red-300/40 hover:text-red-300"><Trash2 className="size-4" /></button></td></tr>)}</tbody></table>
+        <table className="min-w-full text-left text-sm"><thead className="border-b border-white/10 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">범위</th><th className="px-4 py-3">동작</th><th className="px-4 py-3">주체</th><th className="px-4 py-3">효과</th><th className="px-4 py-3">사유</th><th className="px-4 py-3">작업</th></tr></thead><tbody className="divide-y divide-white/10 text-slate-300">{rules.map((rule) => <tr key={rule.id}><td className="px-4 py-3 font-mono text-xs">{rule.targetType}:{rule.targetId ?? '*'}</td><td className="px-4 py-3">{rule.action}</td><td className="px-4 py-3">{subjectLabel(rule)}</td><td className={`px-4 py-3 font-semibold ${rule.effect === 'allow' ? 'text-emerald-300' : 'text-red-300'}`}>{rule.effect === 'allow' ? '허용' : '거부'}</td><td className="max-w-xs px-4 py-3 text-slate-400">{rule.reason ?? '-'}</td><td className="px-4 py-3"><button type="button" onClick={() => void remove(rule)} disabled={working} className="rounded-md border border-white/10 p-2 hover:border-red-300/40 hover:text-red-300"><Trash2 className="size-4" /></button></td></tr>)}</tbody></table>
         {rules.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">등록된 ACL 규칙이 없습니다. 기본 보호 정책이 적용됩니다.</p> : null}
       </section>
     </div>

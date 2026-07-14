@@ -50,6 +50,8 @@ export interface SessionPayload {
   readonly permissions?: readonly string[];
   readonly groups?: readonly string[];
   readonly policyConsent?: PolicyConsentStatus;
+  /** Current request address populated only by the central HTTP client-IP extractor. */
+  readonly requestIp?: string | null;
 }
 
 export interface SessionSummary {

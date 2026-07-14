@@ -16,6 +16,7 @@ export const BUILT_IN_PERMISSION_CODES = [
   'wiki.read.restricted',
   'wiki.edit.locked',
   'wiki.admin',
+  'wiki.acl.manage',
   'wiki.batch_rollback',
   'server.admin',
   'review.moderate',

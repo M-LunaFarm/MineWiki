@@ -565,7 +565,38 @@ export interface WikiAclCatalog {
   }>;
   readonly pages: ReadonlyArray<{ id: string; name: string; spaceId: string }>;
   readonly groups: ReadonlyArray<{ code: string; name: string }>;
-  readonly aclGroups: ReadonlyArray<{ id: string; key: string; name: string }>;
+  readonly aclGroups: ReadonlyArray<{ id: string; key: string; name: string; status: string }>;
+}
+
+export interface WikiAclGroupSummary {
+  readonly id: string;
+  readonly key: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly status: string;
+  readonly selfRemovable: boolean;
+  readonly activeMemberCount: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface WikiAclGroupMemberSummary {
+  readonly id: string;
+  readonly groupId: string;
+  readonly memberType: 'user' | 'ip' | 'cidr';
+  readonly userId: string | null;
+  readonly userName: string | null;
+  readonly cidr: string | null;
+  readonly reason: string | null;
+  readonly expiresAt: string | null;
+  readonly addedBy: string | null;
+  readonly addedAt: string;
+  readonly removedAt: string | null;
+}
+
+export interface WikiAclGroupPage<T> {
+  readonly items: T[];
+  readonly nextCursor: string | null;
 }
 
 export interface WikiPageAclResponse {
@@ -1039,6 +1070,59 @@ export async function deleteWikiAclRule(ruleId: string, reason?: string): Promis
     method: 'DELETE',
     body: JSON.stringify({ reason }),
   });
+}
+
+export async function fetchWikiAclGroups(input: { cursor?: string; status?: string } = {}): Promise<WikiAclGroupPage<WikiAclGroupSummary>> {
+  const params = new URLSearchParams({ limit: '50' });
+  if (input.cursor) params.set('cursor', input.cursor);
+  if (input.status) params.set('status', input.status);
+  return fetchWikiAdminJson(`/acl-groups?${params.toString()}`);
+}
+
+export async function createWikiAclGroup(input: { key: string; title: string; description?: string; selfRemovable: boolean }): Promise<WikiAclGroupSummary> {
+  return fetchWikiAdminJson('/acl-groups', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function updateWikiAclGroup(groupId: string, input: { title?: string; description?: string | null; status?: string; selfRemovable?: boolean; reason?: string }): Promise<WikiAclGroupSummary> {
+  return fetchWikiAdminJson(`/acl-groups/${encodeURIComponent(groupId)}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export async function deleteWikiAclGroup(groupId: string, reason: string): Promise<void> {
+  await fetchWikiAdminJson(`/acl-groups/${encodeURIComponent(groupId)}`, { method: 'DELETE', body: JSON.stringify({ reason }) });
+}
+
+export async function fetchWikiAclGroupMembers(groupId: string, input: { cursor?: string; includeRemoved?: boolean } = {}): Promise<WikiAclGroupPage<WikiAclGroupMemberSummary>> {
+  const params = new URLSearchParams({ limit: '50' });
+  if (input.cursor) params.set('cursor', input.cursor);
+  if (input.includeRemoved) params.set('includeRemoved', 'true');
+  return fetchWikiAdminJson(`/acl-groups/${encodeURIComponent(groupId)}/members?${params.toString()}`);
+}
+
+export async function addWikiAclGroupMember(groupId: string, input: { memberType: 'user' | 'ip' | 'cidr'; userId?: string; address?: string; expiresAt?: string | null; reason: string }): Promise<WikiAclGroupMemberSummary> {
+  return fetchWikiAdminJson(`/acl-groups/${encodeURIComponent(groupId)}/members`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function updateWikiAclGroupMemberExpiry(groupId: string, memberId: string, expiresAt: string | null, reason: string): Promise<WikiAclGroupMemberSummary> {
+  return fetchWikiAdminJson(`/acl-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(memberId)}/expiry`, {
+    method: 'PATCH', body: JSON.stringify({ expiresAt, reason })
+  });
+}
+
+export async function removeWikiAclGroupMember(groupId: string, memberId: string, reason: string): Promise<void> {
+  await fetchWikiAdminJson(`/acl-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(memberId)}`, {
+    method: 'DELETE', body: JSON.stringify({ reason })
+  });
+}
+
+export async function selfRemoveFromWikiAclGroup(groupId: string): Promise<{ readonly removed: true; readonly memberIds: string[] }> {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/acl-groups/${encodeURIComponent(groupId)}/self-remove`, {
+    method: 'POST', credentials: 'include', headers: { ...(await csrfHeaders()) }
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body?.message ?? 'ACL 그룹에서 직접 제거하지 못했습니다.');
+  }
+  return response.json();
 }
 
 export async function updateWikiPageProtection(input: { pageId: string; protectionLevel: string; reason?: string }): Promise<WikiAdminPageSummary> {
