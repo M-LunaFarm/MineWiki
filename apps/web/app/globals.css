@@ -337,6 +337,12 @@ html[data-theme='light'] .wiki-rendered .doc-status {
   color: #5f5025;
 }
 
+html[data-theme='light'] .wiki-rendered .wiki-include-notice {
+  border-color: rgba(92, 111, 99, 0.24);
+  background: rgba(238, 243, 239, 0.82);
+  color: #566159;
+}
+
 html[data-theme='light'] .support-surface {
   background: #f4f5f2;
   color: #202820;
@@ -717,6 +723,18 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   }
   .wiki-rendered .doc-status small {
     @apply text-xs text-slate-500;
+  }
+  .wiki-rendered .wiki-transclusion {
+    @apply my-4 block;
+  }
+  .wiki-rendered .wiki-transclusion > :first-child {
+    @apply mt-0;
+  }
+  .wiki-rendered .wiki-transclusion > :last-child {
+    @apply mb-0;
+  }
+  .wiki-rendered .wiki-include-notice {
+    @apply my-4 block rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-sm text-slate-400;
   }
   .wiki-rendered .front-wiki-component {
     @apply border-t border-white/[0.07] py-6 first:border-t-0 first:pt-0 last:pb-0;

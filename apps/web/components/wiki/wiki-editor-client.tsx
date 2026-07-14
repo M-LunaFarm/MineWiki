@@ -439,6 +439,15 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
           </section>
 
           <section className="surface-flat p-4">
+            <h2 className="text-sm font-semibold text-white">포함 문서</h2>
+            <p className="mt-2 text-xs leading-5 text-slate-400">반복하는 안내를 틀 문서로 나누고, 저장된 문서에서 불러올 수 있습니다.</p>
+            <code className="mt-3 block overflow-x-auto rounded-md border border-white/10 bg-[#0d1219] px-3 py-2 text-xs text-emerald-200">
+              {'[include(틀:안내,이름=값)]'}
+            </code>
+            <p className="mt-3 text-xs leading-5 text-slate-500">틀의 <code>@이름@</code> 또는 <code>@이름=기본값@</code>이 전달한 값으로 표시됩니다. 미리보기에서는 포함 본문을 해석하지 않으며, 저장 후 읽기 권한이 있는 틀만 표시됩니다.</p>
+          </section>
+
+          <section className="surface-flat p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-sm font-semibold text-white">미리보기</h2>
               <button
