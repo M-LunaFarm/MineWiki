@@ -9,7 +9,7 @@ test('ACL group admin controller requires the dedicated ACL or wiki admin permis
   const controller = new WikiAclGroupAdminController({} as WikiAclGroupService, {} as WikiProfileService);
   await assert.rejects(
     () => controller.list(undefined, undefined, undefined, {
-      sessionId: 's', userId: 'account', isElevated: false, authenticatedAt: new Date().toISOString(), permissions: [], groups: []
+      sessionId: 's', userId: 'account', isElevated: true, authenticatedAt: new Date().toISOString(), permissions: [], groups: []
     }),
     ForbiddenException
   );

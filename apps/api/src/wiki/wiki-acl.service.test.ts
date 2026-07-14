@@ -140,6 +140,28 @@ test('page deny read rule rejects matching public actor', async () => {
   assert.equal(decision.reason, 'private_page');
 });
 
+test('elevation alone never matches the admin ACL subject', async () => {
+  const { service, store } = createService({
+    rules: [{
+      targetType: 'site', action: 'edit', effect: 'allow',
+      subjectType: 'perm', subjectValue: 'admin'
+    }]
+  });
+  const resource = { pageId: 1n, spaceId: 10n, title: '관리 문서' };
+
+  const elevated = await service.evaluate({
+    actor: { accountId: 'account-1', profileId: 100n, status: 'active', isElevated: true, groups: [] },
+    action: 'edit', resource, store: store as unknown as PrismaService
+  });
+  const administrator = await service.evaluate({
+    actor: { accountId: 'account-2', profileId: 101n, status: 'active', isElevated: false, groups: ['admin'] },
+    action: 'edit', resource, store: store as unknown as PrismaService
+  });
+
+  assert.equal(elevated.matched, false);
+  assert.equal(administrator.allowed, true);
+});
+
 test('batch read ACL evaluates one rule set with page scope before site scope', async () => {
   const { service, store } = createService({
     rules: [

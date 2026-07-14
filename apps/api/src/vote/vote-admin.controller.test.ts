@@ -24,7 +24,7 @@ test('vote invalidation rejects regular users before changing data', () => {
   const session = {
     sessionId: 'session-1',
     userId: '22222222-2222-4222-8222-222222222222',
-    isElevated: false,
+    isElevated: true,
     groups: ['user'],
     permissions: [],
   } satisfies SessionPayload;

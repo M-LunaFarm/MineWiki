@@ -45,7 +45,6 @@ export class VoteDispatchController {
 
   private async ensureCanManage(serverId: string, session: SessionPayload): Promise<void> {
     if (
-      session.isElevated ||
       session.permissions?.includes('server.admin') === true ||
       (await this.claimService.isOwner(serverId, session.userId))
     ) {

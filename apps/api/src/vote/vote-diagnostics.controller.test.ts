@@ -35,7 +35,11 @@ test('Votifier diagnostics reject non-owners before opening a connection', async
   );
 
   await assert.rejects(
-    () => controller.runDiagnostics('11111111-1111-4111-8111-111111111111', {}, session()),
+    () => controller.runDiagnostics(
+      '11111111-1111-4111-8111-111111111111',
+      {},
+      { ...session(), isElevated: true }
+    ),
     /Votifier 진단을 실행할 권한이 없습니다/
   );
   assert.equal(diagnosticsCalled, false);

@@ -34,6 +34,23 @@ test('plugin credential creation requires Discord guild management access', asyn
   );
 });
 
+test('elevation without server authority cannot create a server wiki', async () => {
+  let created = false;
+  const controller = new ServerController(
+    { async createServerWiki() { created = true; return {}; } } as never,
+    { async isOwner() { return false; } } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    () => controller.createServerWiki('server-1', { ...session, isElevated: true }),
+    /서버 위키를 만들거나 연결할 권한이 없습니다/
+  );
+  assert.equal(created, false);
+});
+
 test('plugin credential creation binds only an accessible guild', async () => {
   let checkedGuildId = '';
   let createdGuildId = '';

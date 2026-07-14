@@ -30,7 +30,10 @@ test('queue monitoring rejects regular users without querying queue state', asyn
     }
   } as never);
 
-  await assert.rejects(() => controller.summary(session()), /운영 모니터링 권한이 필요합니다/);
+  await assert.rejects(
+    () => controller.summary({ ...session(), isElevated: true }),
+    /운영 모니터링 권한이 필요합니다/
+  );
   assert.equal(queried, false);
 });
 

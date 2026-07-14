@@ -52,11 +52,12 @@ test('section replacement preserves every adjacent line and supports the final s
   assert.equal(final, '서문\n== 소개 ==\n수정\n== 결론 ==\n완료');
 });
 
-function session(userId: string, isElevated = false) {
+function session(userId: string, isElevated = false, permissions: string[] = []) {
   return {
     sessionId: `test-session-${userId}`,
     userId,
-    isElevated
+    isElevated,
+    permissions
   };
 }
 
@@ -779,7 +780,10 @@ if (!hasDatabase) {
         data: { pageId: BigInt(created.pageId), baseRevisionId: BigInt(created.revisionId), proposedContent: '기준 내용\n제안 추가', editSummary: '제안 반영', isMinor: false, status: 'pending', createdBy: authorProfile.id, createdAt: new Date(), updatedAt: new Date() }
       });
 
-      const accepted = await edits.acceptEditRequest(session(reviewer.id, true), { requestId: pending.id, reviewNote: '검토 완료' });
+      const accepted = await edits.acceptEditRequest(
+        session(reviewer.id, false, ['wiki.admin']),
+        { requestId: pending.id, reviewNote: '검토 완료' }
+      );
       const revision = await prisma.wikiPageRevision.findUniqueOrThrow({ where: { id: BigInt(accepted.mutation.revisionId) } });
       const recent = await prisma.wikiRecentChange.findFirstOrThrow({ where: { revisionId: revision.id } });
 
@@ -815,7 +819,13 @@ if (!hasDatabase) {
       } as unknown as WikiNotificationService;
       const atomicEdits = new WikiEditService(prisma, profiles, permissions, undefined, undefined, failingNotifications);
 
-      await assert.rejects(atomicEdits.acceptEditRequest(session(reviewer.id, true), { requestId: pending.id, reviewNote: null }), /notification transaction failure/);
+      await assert.rejects(
+        atomicEdits.acceptEditRequest(
+          session(reviewer.id, false, ['wiki.admin']),
+          { requestId: pending.id, reviewNote: null }
+        ),
+        /notification transaction failure/
+      );
 
       const [unchangedPage, unchangedRequest, revisionCount] = await Promise.all([
         prisma.wikiPage.findUniqueOrThrow({ where: { id: BigInt(created.pageId) } }),
@@ -878,11 +888,11 @@ if (!hasDatabase) {
         /Wiki section is locked: Intro/
       );
 
-      const elevated = await edits.updatePage(session(fixture.account.id, true), created.pageId, {
+      const administrative = await edits.updatePage(session(fixture.account.id, false, ['wiki.admin']), created.pageId, {
         contentRaw: '== Intro ==\n관리자 수정\n\n== Notes ==\n수정된 메모',
         baseRevisionId: unrelated.revisionId
       });
-      assert.equal(elevated.revisionNo, 3);
+      assert.equal(administrative.revisionNo, 3);
     } finally {
       await cleanupFixture({
         accountId: fixture.account.id,

@@ -68,7 +68,7 @@ export class GuildAccessService {
   }
 
   private hasGuildAdmin(session: SessionPayload): boolean {
-    return session.isElevated || session.permissions?.includes('guild.admin') === true;
+    return session.permissions?.includes('guild.admin') === true;
   }
 
   private async resolveManageableGuildIds(accountId: string): Promise<Set<string>> {

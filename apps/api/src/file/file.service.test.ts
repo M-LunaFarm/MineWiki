@@ -253,7 +253,7 @@ test('file service list hides private and unlisted files from non-owners', async
   assert.equal(owner.length, 3);
 
   const elevated = await service.listFiles({ usageContext: 'general', session: session('admin', true) });
-  assert.equal(elevated.length, 3);
+  assert.equal(elevated.length, 1);
 
   const fileAdmin = await service.listFiles({
     usageContext: 'general',
@@ -269,11 +269,11 @@ test('file service requires owner before delete', async () => {
     filename: 'wiki.png'
   });
 
-  await assert.rejects(() => service.deleteFile(uploaded.id, session('account-2')), /owner is required/);
+  await assert.rejects(() => service.deleteFile(uploaded.id, session('account-2', true)), /owner is required/);
   await assert.doesNotReject(() => service.deleteFile(uploaded.id, session('account-1')));
 });
 
-test('private raw file is only readable by owner or elevated session', async () => {
+test('private raw file is only readable by owner or file administrator', async () => {
   const { service, files } = createService();
   const directory = mkdtempSync(join(tmpdir(), 'minewiki-file-test-'));
   const storagePath = join(directory, 'private.webp');
@@ -296,7 +296,8 @@ test('private raw file is only readable by owner or elevated session', async () 
     assert.equal(ownerRaw.redirectUrl, undefined);
     assert.equal(ownerRaw.buffer?.toString(), 'private image');
     assert.equal(ownerRaw.cacheControl, 'private, no-store');
-    const adminRaw = await service.getRawFile(uploaded.id, session('admin', true));
+    await assert.rejects(() => service.getRawFile(uploaded.id, session('elevated', true)), /File not found/);
+    const adminRaw = await service.getRawFile(uploaded.id, session('admin', false, ['file.admin']));
     assert.equal(adminRaw.redirectUrl, undefined);
     assert.equal(adminRaw.cacheControl, 'private, no-store');
   } finally {

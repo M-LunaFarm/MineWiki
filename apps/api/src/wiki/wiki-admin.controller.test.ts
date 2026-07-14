@@ -5,7 +5,7 @@ import { WikiAdminController } from './wiki-admin.controller';
 import type { WikiAdminService } from './wiki-admin.service';
 import type { WikiProfileService } from './wiki-profile.service';
 
-test('wiki admin controller denies non-elevated sessions', async () => {
+test('wiki admin controller denies sessions without wiki admin authority', async () => {
   const controller = new WikiAdminController(
     {
       async getPages() {
@@ -17,7 +17,7 @@ test('wiki admin controller denies non-elevated sessions', async () => {
   );
 
   await assert.rejects(
-    () => controller.getPages(undefined, { sessionId: 's1', userId: 'account-1', isElevated: false }),
+    () => controller.getPages(undefined, { sessionId: 's1', userId: 'account-1', isElevated: true }),
     (error: unknown) => error instanceof ForbiddenException
   );
 });

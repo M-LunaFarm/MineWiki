@@ -264,7 +264,7 @@ export class WikiAclService {
     const groups = actor.groups ? [...actor.groups] : await this.groupCodes(store, actor);
     const permissions = actor.permissions ? [...actor.permissions] : await this.permissionCodes(store, groups);
     if (permission === 'admin') {
-      return actor.isElevated === true || groups.some((group) => ROLE_GROUPS.admin.has(group));
+      return groups.some((group) => ROLE_GROUPS.admin.has(group));
     }
     if (permission === 'developer') {
       return groups.includes('developer');

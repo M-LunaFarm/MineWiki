@@ -236,7 +236,7 @@ export class FileService {
         usageContext: usageContext ?? undefined,
         OR: [
           { visibility: { in: ['public', 'restricted'] } },
-          ...(input.session?.isElevated || input.session?.permissions?.includes('file.admin')
+          ...(input.session?.permissions?.includes('file.admin')
             ? [{}]
             : input.session
               ? [{ ownerAccountId: input.session.userId }]

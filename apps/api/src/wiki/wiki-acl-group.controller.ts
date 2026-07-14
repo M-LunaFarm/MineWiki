@@ -106,7 +106,6 @@ export class WikiAclGroupAdminController {
 
   private async assertAdmin(session: SessionPayload): Promise<{ id: bigint }> {
     if (
-      !session.isElevated &&
       session.permissions?.includes('wiki.admin') !== true &&
       session.permissions?.includes('wiki.acl.manage') !== true &&
       session.groups?.some((group) => group === 'owner' || group === 'admin') !== true

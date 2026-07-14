@@ -12,7 +12,6 @@ export class VoteMonitorController {
   @Get('vote-dispatch')
   async summary(@CurrentSession() session: SessionPayload) {
     if (
-      !session.isElevated &&
       session.groups?.includes('admin') !== true &&
       !(session.permissions ?? []).some((permission) => permission.endsWith('.admin'))
     ) {

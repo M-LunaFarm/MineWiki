@@ -30,7 +30,6 @@ export class VoteDiagnosticsController {
     @CurrentSession() session: SessionPayload
   ): Promise<DiagnosticsResult> {
     if (
-      !session.isElevated &&
       session.permissions?.includes('server.admin') !== true &&
       !(await this.claims.isOwner(serverId, session.userId))
     ) {

@@ -88,7 +88,6 @@ export class RoleAdminController {
 
   private assertRoleAdmin(session: SessionPayload): void {
     if (
-      !session.isElevated &&
       session.groups?.includes('owner') !== true &&
       session.groups?.includes('admin') !== true
     ) {
@@ -104,7 +103,6 @@ export class RoleAdminController {
     }
     if (
       PROTECTED_ROLE_CODES.has(roleCode) &&
-      !session.isElevated &&
       session.groups?.includes('owner') !== true
     ) {
       throw new ForbiddenException('Only an owner can manage owner or admin roles.');

@@ -172,14 +172,14 @@ test('normal user cannot edit locked page', async () => {
   assert.equal(decision.allowed, false);
 });
 
-test('elevated user can edit locked page', async () => {
+test('elevation without wiki authority cannot edit a locked page', async () => {
   const service = createService();
   const decision = await service.canEditPage({
     actor: actor({ isElevated: true, profileId: 200n }),
     page: page({ protectionLevel: 'locked', createdBy: 100n })
   });
 
-  assert.equal(decision.allowed, true);
+  assert.equal(decision.allowed, false);
 });
 
 test('normal user cannot edit admin-only page', async () => {
@@ -335,7 +335,7 @@ test('normal editor cannot change an admin-only section lock', async () => {
   assert.equal(allowed, false);
 });
 
-test('elevated editor can change a locked section', async () => {
+test('elevation without wiki authority cannot change a locked section', async () => {
   const service = createService();
   const allowed = await service.canEditSectionLock({
     actor: actor({ profileId: 200n, isElevated: true }),
@@ -343,7 +343,7 @@ test('elevated editor can change a locked section', async () => {
     lock: { lockType: 'locked' }
   });
 
-  assert.equal(allowed, true);
+  assert.equal(allowed, false);
 });
 
 test('trusted section lock accepts trusted group and rejects ordinary member', async () => {
@@ -416,7 +416,7 @@ test('explicit ACL rule can grant or deny page ACL management', async () => {
   assert.equal((await service.canManagePageAcl({ actor: manager, page: target })).allowed, false);
 });
 
-test('elevated wiki admin cannot be locked out by a page ACL deny rule', async () => {
+test('explicit wiki admin cannot be locked out by a page ACL deny rule', async () => {
   const service = createService({
     acl: {
       async evaluate() {
@@ -566,7 +566,7 @@ test('subwiki editor can create in server wiki space', async () => {
   assert.equal(decision.allowed, true);
 });
 
-test('elevated user can create in restricted namespace', async () => {
+test('elevation without wiki authority cannot create in a restricted namespace', async () => {
   const service = createService();
   const decision = await service.canCreatePage({
     actor: actor({ isElevated: true, profileId: 200n }),
@@ -575,7 +575,7 @@ test('elevated user can create in restricted namespace', async () => {
     title: '틀 문서'
   });
 
-  assert.equal(decision.allowed, true);
+  assert.equal(decision.allowed, false);
 });
 
 test('locked editor cannot create in a restricted namespace', async () => {
@@ -591,7 +591,7 @@ test('locked editor cannot create in a restricted namespace', async () => {
   assert.equal(decision.reason, 'restricted_namespace');
 });
 
-test('category creation requires an explicit trusted ACL or elevated access', async () => {
+test('category creation requires an explicit trusted ACL or wiki authority', async () => {
   const denied = await createService().canCreatePage({
     actor: actor({ profileId: 200n }),
     namespaceCode: 'category',

@@ -23,7 +23,6 @@ export class AuditController {
   private assertAdmin(session: SessionPayload): void {
     const permissions = session.permissions ?? [];
     if (
-      !session.isElevated &&
       session.groups?.includes('admin') !== true &&
       !permissions.some((permission) => permission.endsWith('.admin') || permission === 'support.admin')
     ) {

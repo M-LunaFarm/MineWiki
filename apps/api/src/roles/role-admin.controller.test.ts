@@ -21,7 +21,7 @@ const ownerSession: SessionPayload = {
 test('role admin denies non-admin sessions', async () => {
   const controller = createController();
   await assert.rejects(
-    () => controller.listRoles({ ...adminSession, groups: [] }),
+    () => controller.listRoles({ ...adminSession, isElevated: true, groups: [] }),
     ForbiddenException,
   );
 });
@@ -29,7 +29,7 @@ test('role admin denies non-admin sessions', async () => {
 test('admin cannot grant protected owner role', async () => {
   const controller = createController();
   await assert.rejects(
-    () => controller.assignRole('account-1', { roleCode: 'owner' }, adminSession),
+    () => controller.assignRole('account-1', { roleCode: 'owner' }, { ...adminSession, isElevated: true }),
     (error: unknown) =>
       error instanceof ForbiddenException && /only an owner/i.test(error.message),
   );

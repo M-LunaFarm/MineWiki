@@ -360,7 +360,7 @@ export class WikiController {
     return this.wikiRead.getDeletedPages({
       accountId: session.userId,
       profileId: profile.id,
-      includeAll: session.isElevated === true || session.permissions?.includes('wiki.admin') === true || session.groups?.includes('admin') === true
+      includeAll: session.permissions?.includes('wiki.admin') === true || session.groups?.includes('admin') === true
     });
   }
 }

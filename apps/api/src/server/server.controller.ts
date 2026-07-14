@@ -415,7 +415,7 @@ export class ServerController {
   }
 
   private async ensureServerWikiAccess(id: string, session: SessionPayload): Promise<void> {
-    if (session.isElevated || session.permissions?.includes('server.admin') === true) {
+    if (session.permissions?.includes('server.admin') === true) {
       return;
     }
     if (!(await this.claimService.isOwner(id, session.userId))) {
@@ -425,7 +425,6 @@ export class ServerController {
 
   private async canManageServer(id: string, session: SessionPayload): Promise<boolean> {
     return (
-      session.isElevated ||
       session.permissions?.includes('server.admin') === true ||
       (await this.claimService.isOwner(id, session.userId))
     );

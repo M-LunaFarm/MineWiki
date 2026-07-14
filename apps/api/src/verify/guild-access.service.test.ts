@@ -4,8 +4,10 @@ import type { ConfigService } from '@minewiki/config';
 import { ForbiddenException } from '@nestjs/common';
 import { GuildAccessService } from './guild-access.service';
 
-test('elevated session can list all configured guilds', async () => {
+test('elevated session without guild authority cannot list configured guilds', async () => {
   const prisma = {
+    accountLink: { async findMany() { return []; } },
+    oAuthCredential: { async findMany() { return []; } },
     lunaGuild: {
       async findMany() {
         return [
@@ -32,8 +34,7 @@ test('elevated session can list all configured guilds', async () => {
     isElevated: true,
   });
 
-  assert.equal(guilds.length, 1);
-  assert.equal(guilds[0].guildId, 'guild-1');
+  assert.equal(guilds.length, 0);
 });
 
 test('guild admin permission can list all configured guilds', async () => {

@@ -721,8 +721,7 @@ export class WikiPermissionService {
   }
 
   private isAdminActor(actor: WikiPermissionActor): boolean {
-    return actor.isElevated === true ||
-      actor.permissions?.includes('wiki.admin') === true ||
+    return actor.permissions?.includes('wiki.admin') === true ||
       actor.groups?.includes('admin') === true;
   }
 

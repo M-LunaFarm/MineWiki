@@ -9,7 +9,7 @@ const accountId = '22222222-2222-4222-8222-222222222222';
 test('review moderation queue requires review.moderate access', () => {
   const controller = new ReviewModerationController({} as never);
   assert.throws(
-    () => controller.list(session()),
+    () => controller.list({ ...session(), isElevated: true }),
     (error: unknown) => error instanceof ForbiddenException,
   );
 });

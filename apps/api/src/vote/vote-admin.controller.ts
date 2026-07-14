@@ -71,7 +71,6 @@ export class VoteAdminController {
     const roles = session.groups ?? [];
     const permissions = session.permissions ?? [];
     if (
-      !session.isElevated &&
       !roles.some((role) => role === 'admin' || role === 'owner') &&
       !permissions.some((permission) => permission === 'vote.admin' || permission === 'server.admin')
     ) {

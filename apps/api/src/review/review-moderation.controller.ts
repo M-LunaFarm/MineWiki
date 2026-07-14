@@ -124,7 +124,6 @@ export class ReviewModerationController {
 
   private assertModerator(session: SessionPayload): void {
     if (
-      !session.isElevated &&
       !session.groups?.some((role) => role === 'owner' || role === 'admin') &&
       !session.permissions?.includes('review.moderate')
     ) {

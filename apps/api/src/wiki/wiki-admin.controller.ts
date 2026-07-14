@@ -248,9 +248,8 @@ export class WikiAdminController {
 
   private async assertAdmin(session: SessionPayload): Promise<{ id: bigint }> {
     if (
-      !session.isElevated &&
       session.permissions?.includes('wiki.admin') !== true &&
-      session.groups?.includes('admin') !== true
+      session.groups?.some((group) => group === 'owner' || group === 'admin') !== true
     ) {
       throw new ForbiddenException('Wiki admin permission is required.');
     }
@@ -259,7 +258,6 @@ export class WikiAdminController {
 
   private async assertBlockAdmin(session: SessionPayload): Promise<{ id: bigint }> {
     if (
-      !session.isElevated &&
       session.permissions?.includes('wiki.user.block') !== true &&
       session.groups?.some((group) => group === 'owner' || group === 'admin') !== true
     ) {
@@ -270,7 +268,6 @@ export class WikiAdminController {
 
   private async assertBatchRollbackAdmin(session: SessionPayload): Promise<{ id: bigint }> {
     if (
-      !session.isElevated &&
       session.permissions?.includes('wiki.batch_rollback') !== true &&
       session.groups?.some((group) => group === 'owner' || group === 'admin') !== true
     ) {
