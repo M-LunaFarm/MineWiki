@@ -57,9 +57,10 @@ function session(userId: string, isElevated = false, permissions: string[] = [])
   };
 }
 
-function createService(options: { denyUploadFile?: boolean } = {}) {
+function createService(options: { denyUploadFile?: boolean; failFileDocument?: boolean } = {}) {
   const files = new Map<string, TestFile>();
   const actionCalls: string[] = [];
+  const fileDocuments: Array<{ filename: string; linkedPageId: string }> = [];
   const wikiPages = new Map<bigint, { id: bigint; status: string }>([
     [7n, { id: 7n, status: 'normal' }]
   ]);
@@ -175,16 +176,27 @@ function createService(options: { denyUploadFile?: boolean } = {}) {
     }
   };
   const filePermissions = new FilePermissionService(prisma as never, wikiPermissions as never);
+  const wikiEdits = {
+    async createFileDocumentAfterAuthorizedUpload(
+      _session: unknown,
+      request: { filename: string; linkedPageId: string }
+    ) {
+      if (options.failFileDocument) throw new Error('File document failed.');
+      fileDocuments.push(request);
+      return { pageId: '99' };
+    }
+  };
   return {
-    service: new FileService(prisma as never, uploads as never, filePermissions),
+    service: new FileService(prisma as never, uploads as never, filePermissions, undefined, wikiEdits as never),
     files,
     wikiPages,
-    actionCalls
+    actionCalls,
+    fileDocuments
   };
 }
 
 test('file service stores canonical image metadata', async () => {
-  const { service, actionCalls } = createService();
+  const { service, actionCalls, fileDocuments } = createService();
   const uploaded = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'wiki.png',
@@ -203,6 +215,8 @@ test('file service stores canonical image metadata', async () => {
   assert.equal(uploaded.license, 'self-created');
   assert.equal(uploaded.sourceText, '업로더 직접 제작');
   assert.deepEqual(actionCalls, ['upload_file']);
+  assert.deepEqual(fileDocuments, [{ filename: 'stored.webp', linkedPageId: '7' }]);
+  assert.equal(uploaded.wikiDocumentPath, '/file/stored.webp');
   assert.equal(uploaded.url, 'upload://stored.webp');
 });
 
@@ -388,4 +402,20 @@ test('wiki uploads enforce upload_file ACL separately from edit access', async (
     /Wiki page not found/
   );
   assert.equal(files.size, 0);
+});
+
+test('failed file document creation disables the uploaded record', async () => {
+  const { service, files } = createService({ failFileDocument: true });
+  await assert.rejects(
+    () => service.createImage('account-1', {
+      data: 'data:image/png;base64,aW1hZ2U=',
+      filename: 'orphaned.png',
+      usageContext: 'wiki_editor',
+      license: 'self-created',
+      linkedResourceType: 'wiki_page',
+      linkedResourceId: '7'
+    }, session('account-1')),
+    /File document failed/
+  );
+  assert.equal([...files.values()][0]?.status, 'deleted');
 });

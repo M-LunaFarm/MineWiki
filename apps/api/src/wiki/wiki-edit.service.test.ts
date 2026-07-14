@@ -228,6 +228,37 @@ test('section edit rejects stale bases and replacement without a heading', async
   );
 });
 
+test('file document creation rechecks edit and upload_file permissions', async () => {
+  const actions: string[] = [];
+  const prisma = {
+    wikiPage: { async findUnique() { return { id: 7n, spaceId: 1n, title: '문서', protectionLevel: 'open', status: 'normal' }; } },
+    wikiNamespace: { async findUnique() { return null; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 3n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: 'account', profileId: 3n, status: 'active' }; },
+    async assertCanEditPage() { actions.push('edit'); },
+    async assertCanUsePageAction(input: { action: string }) { actions.push(input.action); }
+  } as unknown as WikiPermissionService;
+  const service = new WikiEditService(prisma, profiles, permissions);
+
+  await assert.rejects(
+    service.createFileDocumentAfterAuthorizedUpload(session('account'), {
+      filename: '12345678-1234-1234-1234-123456789abc.webp',
+      linkedPageId: '7'
+    }),
+    /namespace not found/i
+  );
+  assert.deepEqual(actions, ['edit', 'upload_file']);
+  await assert.rejects(
+    service.createFileDocumentAfterAuthorizedUpload(session('account'), {
+      filename: '../escape.webp',
+      linkedPageId: '7'
+    }),
+    /filename is invalid/
+  );
+});
+
 if (!hasDatabase) {
   test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});
 } else {
@@ -384,6 +415,47 @@ if (!hasDatabase) {
         namespaceCode: fixture.namespace.code,
         spaceId: fixture.space.id,
         pageId
+      });
+    }
+  });
+
+  test('creates a file namespace document after an authorized upload', async () => {
+    const fixture = await createFixture();
+    let sourcePageId: string | undefined;
+    let filePageId: string | undefined;
+    try {
+      const source = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        title: `파일 출처 ${fixture.unique}`,
+        spaceId: fixture.space.id.toString(),
+        contentRaw: '파일 업로드 대상 문서'
+      });
+      sourcePageId = source.pageId;
+      const filename = `${randomUUID()}.webp`;
+      const fileDocument = await edits.createFileDocumentAfterAuthorizedUpload(session(fixture.account.id), {
+        filename,
+        linkedPageId: source.pageId
+      });
+      filePageId = fileDocument.pageId;
+      assert.equal(fileDocument.namespace, 'file');
+      assert.equal(fileDocument.title, filename);
+      const revision = await edits.getRevision(fileDocument.revisionId, fixture.account.id);
+      assert.match(revision.contentRaw, new RegExp(`\\[\\[파일:${filename.replace('.', '\\.')}`));
+      assert.match(revision.contentRaw, /\[\[분류:파일\]\]/);
+    } finally {
+      if (filePageId) {
+        const id = BigInt(filePageId);
+        await prisma.wikiRecentChange.deleteMany({ where: { pageId: id } });
+        await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: id } });
+        await prisma.wikiPageRevision.deleteMany({ where: { pageId: id } });
+        await prisma.wikiPage.delete({ where: { id } }).catch(() => {});
+      }
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id,
+        pageId: sourcePageId
       });
     }
   });

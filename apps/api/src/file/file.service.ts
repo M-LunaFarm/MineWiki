@@ -10,6 +10,7 @@ import {
 } from '../upload/upload.service';
 import { decodeBase64 } from '../upload/upload.utils';
 import { FilePermissionService } from './file-permission.service';
+import { WikiEditService } from '../wiki/wiki-edit.service';
 
 export interface FileImageUploadRequest {
   readonly data?: string;
@@ -51,6 +52,7 @@ export interface FileMetadataResponse {
   readonly license: string | null;
   readonly sourceUrl: string | null;
   readonly sourceText: string | null;
+  readonly wikiDocumentPath: string | null;
   readonly linkedResourceType: string | null;
   readonly linkedResourceId: string | null;
   readonly status: string;
@@ -76,7 +78,8 @@ export class FileService {
     private readonly prisma: PrismaService,
     private readonly uploads: UploadService,
     private readonly permissions: FilePermissionService,
-    @Optional() private readonly events?: BusinessEventService
+    @Optional() private readonly events?: BusinessEventService,
+    @Optional() private readonly wikiEdits?: WikiEditService
   ) {}
 
   async createImage(
@@ -93,7 +96,7 @@ export class FileService {
       filename: request.filename?.trim() || undefined,
       visibility: policy.visibility
     });
-    return this.createImageRecord(accountId, request, stored, policy);
+    return this.createImageRecord(accountId, request, stored, policy, session ?? null);
   }
 
   async createImageFromBuffer(
@@ -106,7 +109,7 @@ export class FileService {
       filename: request.filename?.trim() || undefined,
       visibility: policy.visibility
     });
-    return this.createImageRecord(accountId, request, stored, policy);
+    return this.createImageRecord(accountId, request, stored, policy, null);
   }
 
   private async prepareUploadPolicy(
@@ -129,7 +132,10 @@ export class FileService {
     );
     const metadata = normalizeWikiFileMetadata(request, usageContext);
     if (usageContext === 'wiki_editor' && !linkedResource) {
-      throw new BadRequestException('Wiki file uploads require a linked wiki page or space.');
+      throw new BadRequestException('Wiki file uploads require a linked wiki page.');
+    }
+    if (usageContext === 'wiki_editor' && linkedResource?.type !== 'wiki_page') {
+      throw new BadRequestException('Wiki editor uploads must be linked to a wiki page.');
     }
     if (linkedResource && session) {
       await this.permissions.assertCanLink(linkedResource, session);
@@ -150,7 +156,8 @@ export class FileService {
       sourceUrl: string | null;
       sourceText: string | null;
       linkedResource: { type: 'wiki_page' | 'wiki_space'; id: string } | null;
-    }
+    },
+    session: SessionPayload | null
   ): Promise<FileImageUploadResponse> {
     const { usageContext, visibility, license, sourceUrl, sourceText, linkedResource } = policy;
     const created = await this.prisma.uploadedFile.create({
@@ -174,6 +181,21 @@ export class FileService {
         linkedResourceId: linkedResource?.id ?? null
       }
     });
+    if (usageContext === 'wiki_editor') {
+      if (!session || !this.wikiEdits) {
+        await this.prisma.uploadedFile.update({ where: { id: created.id }, data: { status: 'deleted' } });
+        throw new BadRequestException('Wiki file document service is unavailable.');
+      }
+      try {
+        await this.wikiEdits.createFileDocumentAfterAuthorizedUpload(session, {
+          filename: created.filename,
+          linkedPageId: linkedResource!.id
+        });
+      } catch (error) {
+        await this.prisma.uploadedFile.update({ where: { id: created.id }, data: { status: 'deleted' } });
+        throw error;
+      }
+    }
     await this.events?.audit('file.upload', {
       category: 'file',
       actorAccountId: accountId,
@@ -381,6 +403,9 @@ function toFileMetadata(file: {
     license: file.license,
     sourceUrl: file.sourceUrl,
     sourceText: file.sourceText,
+    wikiDocumentPath: file.usageContext === 'wiki_editor'
+      ? `/file/${encodeURIComponent(file.filename)}`
+      : null,
     linkedResourceType: file.linkedResourceType,
     linkedResourceId: file.linkedResourceId,
     status: file.status,

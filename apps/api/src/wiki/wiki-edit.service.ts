@@ -76,6 +76,11 @@ export interface WikiMutationResponse {
   readonly slug: string;
 }
 
+export interface AuthorizedWikiFileDocumentRequest {
+  readonly filename: string;
+  readonly linkedPageId: string;
+}
+
 export interface WikiMoveResponse extends WikiMutationResponse {
   readonly previousTitle: string;
   readonly redirectPageId: string | null;
@@ -134,6 +139,43 @@ export class WikiEditService {
   ) {}
 
   async createPage(session: SessionPayload, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
+    return this.createPageInternal(session, request, false);
+  }
+
+  async createFileDocumentAfterAuthorizedUpload(
+    session: SessionPayload,
+    request: AuthorizedWikiFileDocumentRequest
+  ): Promise<WikiMutationResponse> {
+    const filename = this.requiredString(request.filename, 'filename');
+    if (!/^[a-f0-9-]{16,64}\.(?:png|jpe?g|webp)$/i.test(filename)) {
+      throw new BadRequestException('Stored wiki filename is invalid.');
+    }
+    const linkedPageId = this.parseBigIntId(request.linkedPageId, 'linkedPageId');
+    const [actor, linkedPage] = await Promise.all([
+      this.wikiProfiles.ensureWikiProfile(session.userId),
+      this.prisma.wikiPage.findUnique({ where: { id: linkedPageId } })
+    ]);
+    const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
+    await this.wikiPermissions.assertCanEditPage({ actor: permissionActor, page: linkedPage });
+    await this.wikiPermissions.assertCanUsePageAction({
+      accountId: session.userId,
+      action: 'upload_file',
+      page: linkedPage
+    });
+    return this.createPageInternal(session, {
+      namespace: 'file',
+      title: filename,
+      displayTitle: filename,
+      contentRaw: `== 파일 ==\n[[파일:${filename}|섬네일|업로드 파일]]\n\n== 이용 안내 ==\n라이선스와 출처는 이미지 아래에 표시됩니다.\n\n[[분류:파일]]`,
+      editSummary: '위키 파일 업로드'
+    }, true);
+  }
+
+  private async createPageInternal(
+    session: SessionPayload,
+    request: WikiPageMutationRequest,
+    authorizedFileUpload: boolean
+  ): Promise<WikiMutationResponse> {
     const namespaceCode = this.cleanNamespace(request.namespace);
     const title = this.requiredString(request.title, 'title');
     const contentRaw = this.requiredString(request.contentRaw, 'contentRaw');
@@ -152,13 +194,17 @@ export class WikiEditService {
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const slug = slugifyTitle(title);
     const now = new Date();
-    await this.wikiPermissions.assertCanCreatePage({
-      actor: this.wikiPermissions.actorFromSession(session, actor),
-      namespaceCode,
-      spaceId,
-      title,
-      pageType: createTarget.pageType
-    });
+    if (!authorizedFileUpload) {
+      await this.wikiPermissions.assertCanCreatePage({
+        actor: this.wikiPermissions.actorFromSession(session, actor),
+        namespaceCode,
+        spaceId,
+        title,
+        pageType: createTarget.pageType
+      });
+    } else if (namespaceCode !== 'file') {
+      throw new ForbiddenException('Authorized file uploads can only create file documents.');
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.wikiPage.findUnique({
