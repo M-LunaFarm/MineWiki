@@ -379,6 +379,49 @@ if (!hasDatabase) {
     }
   });
 
+  test('new edits advance beyond hidden revision numbers without changing the public parent', async () => {
+    const fixture = await createFixture();
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        title: `숨김 판 번호 ${fixture.unique}`,
+        spaceId: fixture.space.id.toString(),
+        contentRaw: '공개 기준판',
+        editSummary: '기준판 생성'
+      });
+      pageId = created.pageId;
+      const profile = await prisma.wikiProfile.findUniqueOrThrow({ where: { accountId: fixture.account.id } });
+      await prisma.wikiPageRevision.create({
+        data: {
+          pageId: BigInt(created.pageId), revisionNo: 2, parentRevisionId: BigInt(created.revisionId),
+          contentRaw: '숨겨진 판', contentAst: null, contentHash: 'a'.repeat(64), contentSize: 13,
+          syntaxVersion: 'bwm-0.3', editSummary: '숨김', isMinor: false, editTags: null,
+          createdBy: profile.id, actorType: 'user', actorUserId: profile.id,
+          actorIp: null, actorIpText: null, actorIpHash: null, createdAt: new Date(), visibility: 'hidden'
+        }
+      });
+
+      const updated = await edits.updatePage(session(fixture.account.id), created.pageId, {
+        contentRaw: '새 공개판',
+        editSummary: '숨김 판 이후 수정',
+        baseRevisionId: created.revisionId
+      });
+      const revision = await prisma.wikiPageRevision.findUniqueOrThrow({ where: { id: BigInt(updated.revisionId) } });
+
+      assert.equal(updated.revisionNo, 3);
+      assert.equal(revision.parentRevisionId, BigInt(created.revisionId));
+    } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id,
+        pageId
+      });
+    }
+  });
+
   test('edits one heading section without changing adjacent document content', async () => {
     const fixture = await createFixture();
     let pageId: string | undefined;

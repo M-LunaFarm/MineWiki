@@ -537,15 +537,18 @@ export class WikiAdminService {
       await this.lockPageForRevision(tx, pageId);
       const page = await tx.wikiPage.findUnique({ where: { id: pageId } });
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
-      const [source, latest, namespace] = await Promise.all([
+      const [source, current, latestStored, namespace] = await Promise.all([
         sourceRevisionId
           ? tx.wikiPageRevision.findUnique({ where: { id: sourceRevisionId } })
           : tx.wikiPageRevision.findFirst({
               where: { pageId, visibility: 'public' },
               orderBy: [{ revisionNo: 'asc' }]
             }),
+        page.currentRevisionId
+          ? tx.wikiPageRevision.findUnique({ where: { id: page.currentRevisionId } })
+          : Promise.resolve(null),
         tx.wikiPageRevision.findFirst({
-          where: { pageId, visibility: 'public' },
+          where: { pageId },
           orderBy: [{ revisionNo: 'desc' }]
         }),
         tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } })
@@ -561,8 +564,8 @@ export class WikiAdminService {
       const revision = await tx.wikiPageRevision.create({
         data: {
           pageId: page.id,
-          revisionNo: latest ? latest.revisionNo + 1 : 1,
-          parentRevisionId: latest?.id ?? null,
+          revisionNo: latestStored ? latestStored.revisionNo + 1 : 1,
+          parentRevisionId: current?.id ?? null,
           contentRaw: source.contentRaw,
           contentAst: JSON.parse(JSON.stringify(parsed.ast)),
           contentHash: hashContent(source.contentRaw),

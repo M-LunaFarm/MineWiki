@@ -403,7 +403,10 @@ export class WikiEditService {
         page,
         store: tx
       });
-      const latest = await this.findLatestRevision(tx, page.id);
+      const [latest, latestStored] = await Promise.all([
+        this.findCurrentRevision(tx, page),
+        this.findLatestStoredRevision(tx, page.id)
+      ]);
       let nextContentRaw = contentRaw;
       let autoMerged = false;
       if (latest?.id.toString() !== requestedBaseRevisionId) {
@@ -449,7 +452,7 @@ export class WikiEditService {
       });
       const revision = await this.createRevision(tx, {
         pageId: page.id,
-        revisionNo: latest ? latest.revisionNo + 1 : 1,
+        revisionNo: latestStored ? latestStored.revisionNo + 1 : 1,
         parentRevisionId: latest?.id ?? null,
         contentRaw: nextContentRaw,
         editSummary: this.cleanOptional(request.editSummary),
@@ -558,7 +561,10 @@ export class WikiEditService {
           message: 'Base revision does not match current revision.'
         });
       }
-      const latest = await this.findLatestRevision(tx, page.id);
+      const [latest, latestStored] = await Promise.all([
+        this.findCurrentRevision(tx, page),
+        this.findLatestStoredRevision(tx, page.id)
+      ]);
       await this.assertLockedSectionsUnchanged({
         actor: reviewerActor,
         page,
@@ -568,7 +574,7 @@ export class WikiEditService {
       });
       const revision = await this.createRevision(tx, {
         pageId: page.id,
-        revisionNo: latest ? latest.revisionNo + 1 : 1,
+        revisionNo: latestStored ? latestStored.revisionNo + 1 : 1,
         parentRevisionId: latest?.id ?? null,
         contentRaw: editRequest.proposedContent,
         editSummary: editRequest.editSummary,
@@ -813,9 +819,10 @@ export class WikiEditService {
       if (request.baseRevisionId && page.currentRevisionId?.toString() !== request.baseRevisionId) {
         throw new ConflictException('Base revision does not match current revision.');
       }
-      const [source, latest] = await Promise.all([
+      const [source, latest, latestStored] = await Promise.all([
         tx.wikiPageRevision.findUnique({ where: { id: sourceRevisionId } }),
-        this.findLatestRevision(tx, page.id)
+        this.findCurrentRevision(tx, page),
+        this.findLatestStoredRevision(tx, page.id)
       ]);
       if (!source || source.pageId !== page.id || source.visibility !== 'public') {
         throw new NotFoundException('Revert source revision not found.');
@@ -832,7 +839,7 @@ export class WikiEditService {
       });
       const revision = await this.createRevision(tx, {
         pageId: page.id,
-        revisionNo: latest ? latest.revisionNo + 1 : 1,
+        revisionNo: latestStored ? latestStored.revisionNo + 1 : 1,
         parentRevisionId: latest?.id ?? null,
         contentRaw: source.contentRaw,
         editSummary: this.cleanOptional(request.reason) ?? `r${source.revisionNo} 판으로 되돌리기`,
@@ -1242,6 +1249,22 @@ export class WikiEditService {
         pageId,
         visibility: 'public'
       },
+      orderBy: [{ revisionNo: 'desc' }]
+    });
+  }
+
+  private async findCurrentRevision(
+    tx: Pick<PrismaService, 'wikiPageRevision'>,
+    page: { readonly id: bigint; readonly currentRevisionId: bigint | null }
+  ) {
+    if (!page.currentRevisionId) return null;
+    const revision = await tx.wikiPageRevision.findUnique({ where: { id: page.currentRevisionId } });
+    return revision?.pageId === page.id && revision.visibility === 'public' ? revision : null;
+  }
+
+  private async findLatestStoredRevision(tx: Pick<PrismaService, 'wikiPageRevision'>, pageId: bigint) {
+    return tx.wikiPageRevision.findFirst({
+      where: { pageId },
       orderBy: [{ revisionNo: 'desc' }]
     });
   }
