@@ -405,6 +405,37 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly canDelete: boolean;
     readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
+    readonly poll: WikiDiscussionPollDetail | null;
+  }>;
+}
+
+export type WikiDiscussionPollResultsVisibility = 'always' | 'after_vote' | 'closed';
+
+export interface WikiDiscussionPollInput {
+  readonly question: string;
+  readonly options: readonly string[];
+  readonly resultsVisibility: WikiDiscussionPollResultsVisibility;
+  readonly closesAt?: string | null;
+}
+
+export interface WikiDiscussionPollDetail {
+  readonly id: string;
+  readonly question: string;
+  readonly status: 'open' | 'closed';
+  readonly resultsVisibility: WikiDiscussionPollResultsVisibility;
+  readonly closesAt: string | null;
+  readonly closedAt: string | null;
+  readonly totalVoteCount: number | null;
+  readonly selectedOptionId: string | null;
+  readonly resultsVisible: boolean;
+  readonly privilegedResults: boolean;
+  readonly canVote: boolean;
+  readonly canClose: boolean;
+  readonly options: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly position: number;
+    readonly voteCount: number | null;
   }>;
 }
 
@@ -825,17 +856,29 @@ export async function fetchRecentWikiThreads(cursor?: string): Promise<WikiRecen
   return readWikiBrowser<WikiRecentThreadListResponse>(`/v1/wiki/discussions/recent?${params.toString()}`);
 }
 
-export async function createWikiThread(input: { pageId: string; title: string; content: string }): Promise<WikiThreadDetail> {
+export async function createWikiThread(input: { pageId: string; title: string; content: string; poll?: WikiDiscussionPollInput }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/discussions`, 'POST', {
     title: input.title,
     content: input.content,
+    poll: input.poll,
   });
 }
 
-export async function addWikiThreadComment(input: { threadId: string; content: string }): Promise<WikiThreadDetail> {
+export async function addWikiThreadComment(input: { threadId: string; content: string; poll?: WikiDiscussionPollInput }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/comments`, 'POST', {
     content: input.content,
+    poll: input.poll,
   });
+}
+
+export async function voteWikiDiscussionPoll(input: { threadId: string; pollId: string; optionId: string }): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/polls/${encodeURIComponent(input.pollId)}/vote`, 'POST', {
+    optionId: input.optionId,
+  });
+}
+
+export async function closeWikiDiscussionPoll(input: { threadId: string; pollId: string }): Promise<WikiThreadDetail> {
+  return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/polls/${encodeURIComponent(input.pollId)}/close`, 'POST', {});
 }
 
 export async function setWikiThreadStatus(input: { threadId: string; status: 'open' | 'closed' }): Promise<WikiThreadDetail> {

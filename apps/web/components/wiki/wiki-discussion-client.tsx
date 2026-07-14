@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Bell, BellOff, Code2, Eye, EyeOff, FileInput, Loader2, MessageSquarePlus, MessagesSquare, Pencil, Pin, Search, Trash2 } from 'lucide-react';
+import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, Loader2, MessageSquarePlus, MessagesSquare, Pencil, Pin, Plus, Search, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { addWikiThreadComment, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, type WikiThreadDetail, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
+import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiThreadDetail, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 
@@ -20,6 +20,12 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [comment, setComment] = useState('');
+  const [createPollEnabled, setCreatePollEnabled] = useState(false);
+  const [createPollDraft, setCreatePollDraft] = useState<PollDraft>(emptyPollDraft);
+  const [replyPollEnabled, setReplyPollEnabled] = useState(false);
+  const [replyPollDraft, setReplyPollDraft] = useState<PollDraft>(emptyPollDraft);
+  const [pollChoices, setPollChoices] = useState<Record<string, string>>({});
+  const [pollAnnouncement, setPollAnnouncement] = useState('');
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -134,11 +140,18 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     setWorking(true);
     setError(null);
     try {
-      const thread = await createWikiThread({ pageId, title, content });
+      const thread = await createWikiThread({
+        pageId,
+        title,
+        content,
+        poll: createPollEnabled ? toPollInput(createPollDraft) : undefined,
+      });
       setThreads((current) => [thread, ...current]);
       setSelected(thread);
       setTitle('');
       setContent('');
+      setCreatePollEnabled(false);
+      setCreatePollDraft(emptyPollDraft());
     } catch (caught) {
       setError(message(caught));
     } finally {
@@ -155,10 +168,50 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       const thread = await addWikiThreadComment({
         threadId: selected.id,
         content: comment,
+        poll: replyPollEnabled ? toPollInput(replyPollDraft) : undefined,
       });
       setSelected(thread);
       setComment('');
+      setReplyPollEnabled(false);
+      setReplyPollDraft(emptyPollDraft());
       setThreads((current) => current.map((item) => (item.id === thread.id ? thread : item)));
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function castPollVote(poll: WikiDiscussionPollDetail) {
+    if (!selected) return;
+    const optionId = pollChoices[poll.id] ?? poll.selectedOptionId;
+    if (!optionId) {
+      setError('선택지를 하나 골라 주세요.');
+      return;
+    }
+    setWorking(true);
+    setError(null);
+    setPollAnnouncement('');
+    try {
+      const thread = await voteWikiDiscussionPoll({ threadId: selected.id, pollId: poll.id, optionId });
+      setSelected(thread);
+      setPollAnnouncement('투표가 반영되었습니다. 선택은 마감 전까지 변경할 수 있습니다.');
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function closePoll(poll: WikiDiscussionPollDetail) {
+    if (!selected || !window.confirm('이 설문을 지금 마감할까요? 마감 후에는 다시 열 수 없습니다.')) return;
+    setWorking(true);
+    setError(null);
+    setPollAnnouncement('');
+    try {
+      const thread = await closeWikiDiscussionPoll({ threadId: selected.id, pollId: poll.id });
+      setSelected(thread);
+      setPollAnnouncement('설문을 마감했습니다.');
     } catch (caught) {
       setError(message(caught));
     } finally {
@@ -422,6 +475,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
           {error}
         </p>
       ) : null}
+      <p className="sr-only" aria-live="polite">{pollAnnouncement}</p>
       <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <aside className={`space-y-4 ${selected ? 'hidden lg:block' : ''}`}>
           {account && canCreateThread ? (
@@ -430,6 +484,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
               <form onSubmit={create} className="mt-4 space-y-3">
                 <input value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={255} placeholder="토론 제목" aria-label="토론 제목" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
                 <textarea value={content} onChange={(event) => setContent(event.target.value)} required maxLength={10000} rows={5} placeholder="첫 의견" aria-label="첫 의견" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
+                <PollComposer enabled={createPollEnabled} onEnabledChange={setCreatePollEnabled} draft={createPollDraft} onDraftChange={setCreatePollDraft} compact />
                 <button disabled={working} className="btn-primary inline-flex items-center gap-2">
                   <MessageSquarePlus className="size-4" /> 토론 만들기
                 </button>
@@ -644,6 +699,16 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                     </span>
                   </div>
                   <p className="mt-3 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-200">{item.content ?? (item.status === 'hidden' ? '관리자에 의해 숨겨진 댓글입니다.' : '삭제된 댓글입니다.')}</p>
+                  {item.poll ? (
+                    <DiscussionPollCard
+                      poll={item.poll}
+                      selectedOptionId={pollChoices[item.poll.id] ?? item.poll.selectedOptionId}
+                      working={working}
+                      onSelect={(optionId) => setPollChoices((current) => ({ ...current, [item.poll!.id]: optionId }))}
+                      onVote={() => void castPollVote(item.poll!)}
+                      onClose={() => void closePoll(item.poll!)}
+                    />
+                  ) : null}
                   {rawComment?.id === item.id ? <pre className="mt-3 overflow-x-auto whitespace-pre-wrap border-t border-white/10 pt-3 text-xs leading-5 text-slate-400">{rawComment.content}</pre> : null}
                   {moderation?.commentId === item.id ? (
                     <form onSubmit={changeCommentVisibility} className="mt-4 border-t border-amber-300/20 pt-4">
@@ -681,6 +746,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
               {selected.canReply ? (
                 <form onSubmit={reply} className="space-y-3">
                   <textarea value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
+                  <PollComposer enabled={replyPollEnabled} onEnabledChange={setReplyPollEnabled} draft={replyPollDraft} onDraftChange={setReplyPollDraft} />
                   <button disabled={working} className="btn-primary w-full sm:w-auto">
                     댓글 등록
                   </button>
@@ -693,6 +759,170 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
         </section>
       </div>
     </div>
+  );
+}
+
+type PollDraft = {
+  readonly question: string;
+  readonly options: readonly string[];
+  readonly resultsVisibility: WikiDiscussionPollResultsVisibility;
+  readonly closesAt: string;
+};
+
+function emptyPollDraft(): PollDraft {
+  return { question: '', options: ['', ''], resultsVisibility: 'after_vote', closesAt: '' };
+}
+
+function toPollInput(draft: PollDraft): WikiDiscussionPollInput {
+  let closesAt: string | null = null;
+  if (draft.closesAt) {
+    const parsed = new Date(draft.closesAt);
+    if (Number.isNaN(parsed.getTime())) throw new Error('설문 마감 시간을 확인해 주세요.');
+    closesAt = parsed.toISOString();
+  }
+  return {
+    question: draft.question,
+    options: draft.options,
+    resultsVisibility: draft.resultsVisibility,
+    closesAt,
+  };
+}
+
+function PollComposer({
+  enabled,
+  onEnabledChange,
+  draft,
+  onDraftChange,
+  compact = false,
+}: {
+  readonly enabled: boolean;
+  readonly onEnabledChange: (enabled: boolean) => void;
+  readonly draft: PollDraft;
+  readonly onDraftChange: (draft: PollDraft) => void;
+  readonly compact?: boolean;
+}) {
+  if (!enabled) {
+    return (
+      <button type="button" onClick={() => onEnabledChange(true)} className="chip chip-muted inline-flex min-h-11 items-center gap-2">
+        <BarChart3 className="size-4" /> 설문 추가
+      </button>
+    );
+  }
+  return (
+    <section aria-label="댓글 설문 만들기" className="space-y-3 border border-emerald-300/20 bg-emerald-300/[0.035] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-100">
+          <BarChart3 className="size-4" /> 댓글 설문
+        </h3>
+        <button type="button" onClick={() => onEnabledChange(false)} className="inline-flex min-h-11 items-center gap-1 text-xs text-slate-400 hover:text-red-200">
+          <X className="size-3.5" /> 제거
+        </button>
+      </div>
+      <input
+        value={draft.question}
+        onChange={(event) => onDraftChange({ ...draft, question: event.target.value })}
+        required
+        maxLength={255}
+        placeholder="설문 질문"
+        aria-label="설문 질문"
+        className="min-h-11 w-full rounded-md border border-white/10 bg-black/20 px-3 text-sm text-white"
+      />
+      <div className="space-y-2">
+        {draft.options.map((option, index) => (
+          <div key={index} className="flex gap-2">
+            <input
+              value={option}
+              onChange={(event) => onDraftChange({ ...draft, options: draft.options.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })}
+              required
+              maxLength={120}
+              placeholder={`선택지 ${index + 1}`}
+              aria-label={`설문 선택지 ${index + 1}`}
+              className="min-h-11 min-w-0 flex-1 rounded-md border border-white/10 bg-black/20 px-3 text-sm text-white"
+            />
+            {draft.options.length > 2 ? (
+              <button type="button" onClick={() => onDraftChange({ ...draft, options: draft.options.filter((_, itemIndex) => itemIndex !== index) })} aria-label={`선택지 ${index + 1} 삭제`} className="min-h-11 px-3 text-slate-500 hover:text-red-200">
+                <X className="size-4" />
+              </button>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      {draft.options.length < 10 ? (
+        <button type="button" onClick={() => onDraftChange({ ...draft, options: [...draft.options, ''] })} className="inline-flex min-h-11 items-center gap-1 text-xs font-semibold text-emerald-200">
+          <Plus className="size-3.5" /> 선택지 추가
+        </button>
+      ) : null}
+      <div className={`grid gap-3 ${compact ? '' : 'sm:grid-cols-2'}`}>
+        <label className="text-xs text-slate-400">
+          결과 공개
+          <select value={draft.resultsVisibility} onChange={(event) => onDraftChange({ ...draft, resultsVisibility: event.target.value as WikiDiscussionPollResultsVisibility })} className="mt-1 min-h-11 w-full rounded-md border border-white/10 bg-[#111821] px-3 text-sm text-white">
+            <option value="after_vote">투표한 뒤 공개</option>
+            <option value="always">항상 공개</option>
+            <option value="closed">마감 뒤 공개</option>
+          </select>
+        </label>
+        <label className="text-xs text-slate-400">
+          자동 마감 (선택)
+          <input type="datetime-local" value={draft.closesAt} onChange={(event) => onDraftChange({ ...draft, closesAt: event.target.value })} className="mt-1 min-h-11 w-full rounded-md border border-white/10 bg-black/20 px-3 text-sm text-white" />
+        </label>
+      </div>
+      <p className="text-xs leading-5 text-slate-500">단일 선택·투표자 비공개 방식입니다. 마감 전에는 선택을 변경할 수 있습니다.</p>
+    </section>
+  );
+}
+
+function DiscussionPollCard({
+  poll,
+  selectedOptionId,
+  working,
+  onSelect,
+  onVote,
+  onClose,
+}: {
+  readonly poll: WikiDiscussionPollDetail;
+  readonly selectedOptionId: string | null;
+  readonly working: boolean;
+  readonly onSelect: (optionId: string) => void;
+  readonly onVote: () => void;
+  readonly onClose: () => void;
+}) {
+  const total = poll.totalVoteCount ?? 0;
+  return (
+    <section aria-labelledby={`poll-question-${poll.id}`} className="mt-4 border border-emerald-300/25 bg-black/20 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h3 id={`poll-question-${poll.id}`} className="flex items-center gap-2 pr-2 font-semibold text-white">
+          <BarChart3 className="size-4 text-emerald-300" /> {poll.question}
+        </h3>
+        <span className={`chip ${poll.status === 'open' ? 'chip-success' : 'chip-muted'}`}>{poll.status === 'open' ? '진행 중' : '마감'}</span>
+      </div>
+      <div className="mt-4 space-y-2">
+        {poll.options.map((option) => {
+          const checked = selectedOptionId === option.id;
+          const percentage = poll.resultsVisible && total > 0 ? Math.round(((option.voteCount ?? 0) / total) * 100) : 0;
+          return (
+            <label key={option.id} className={`relative block overflow-hidden border p-3 ${checked ? 'border-emerald-300/60 bg-emerald-300/10' : 'border-white/10 bg-white/[0.02]'} ${poll.canVote ? 'cursor-pointer' : ''}`}>
+              {poll.resultsVisible ? <span aria-hidden="true" className="absolute inset-y-0 left-0 bg-emerald-300/[0.08]" style={{ width: `${percentage}%` }} /> : null}
+              <span className="relative flex min-w-0 items-center gap-3">
+                <input type="radio" name={`poll-${poll.id}`} value={option.id} checked={checked} disabled={!poll.canVote || working} onChange={() => onSelect(option.id)} className="size-4 accent-emerald-400" />
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere] text-sm text-slate-200">{option.label}</span>
+                {poll.resultsVisible ? <span className="shrink-0 text-xs text-slate-400">{option.voteCount ?? 0}표 · {percentage}%</span> : null}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs leading-5 text-slate-500">
+          <p>투표자 비공개{poll.resultsVisible ? ` · 총 ${total}표` : ' · 결과는 아직 공개되지 않았습니다.'}</p>
+          {poll.privilegedResults ? <p className="text-amber-200">문서 관리 권한으로 비공개 결과를 확인 중입니다.</p> : null}
+          {poll.closesAt ? <p>자동 마감 {formatDate(poll.closesAt)}</p> : null}
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {poll.canClose ? <button type="button" disabled={working} onClick={onClose} className="btn-secondary min-h-11 w-full sm:w-auto">설문 마감</button> : null}
+          {poll.canVote ? <button type="button" disabled={working || !selectedOptionId} onClick={onVote} className="btn-primary min-h-11 w-full sm:w-auto">{poll.selectedOptionId ? '선택 변경' : '투표하기'}</button> : null}
+        </div>
+      </div>
+    </section>
   );
 }
 
