@@ -196,17 +196,30 @@ if (!hasDatabase) {
           data: { wikiSpaceId: null, wikiPageId: null, wikiSlug: null }
         }).catch(() => {});
       }
-      if (pageId) {
+      if (spaceId) {
+        const parsedSpaceId = BigInt(spaceId);
+        const pages = await prisma.wikiPage.findMany({
+          where: { spaceId: parsedSpaceId },
+          select: { id: true }
+        });
+        const pageIds = pages.map((page) => page.id);
+        if (pageIds.length > 0) {
+          await prisma.wikiPageLink.deleteMany({ where: { sourcePageId: { in: pageIds } } });
+          await prisma.wikiRecentChange.deleteMany({ where: { pageId: { in: pageIds } } });
+          await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: { in: pageIds } } });
+          await prisma.wikiPageRevision.deleteMany({ where: { pageId: { in: pageIds } } });
+          await prisma.wikiPage.deleteMany({ where: { id: { in: pageIds } } });
+        }
+        assert.equal(await prisma.wikiPage.count({ where: { spaceId: parsedSpaceId } }), 0);
+        await prisma.serverWiki.deleteMany({ where: { spaceId: parsedSpaceId } });
+        await prisma.wikiSpace.delete({ where: { id: parsedSpaceId } }).catch(() => {});
+      } else if (pageId) {
         const parsedPageId = BigInt(pageId);
+        await prisma.wikiPageLink.deleteMany({ where: { sourcePageId: parsedPageId } });
         await prisma.wikiRecentChange.deleteMany({ where: { pageId: parsedPageId } });
         await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: parsedPageId } });
         await prisma.wikiPageRevision.deleteMany({ where: { pageId: parsedPageId } });
         await prisma.wikiPage.delete({ where: { id: parsedPageId } }).catch(() => {});
-      }
-      if (spaceId) {
-        const parsedSpaceId = BigInt(spaceId);
-        await prisma.serverWiki.deleteMany({ where: { spaceId: parsedSpaceId } });
-        await prisma.wikiSpace.delete({ where: { id: parsedSpaceId } }).catch(() => {});
       }
       if (serverId) {
         await prisma.server.delete({ where: { id: serverId } }).catch(() => {});
