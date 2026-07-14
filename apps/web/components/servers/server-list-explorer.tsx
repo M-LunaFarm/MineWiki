@@ -705,7 +705,7 @@ function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly
             />
           ) : (
             <div className={`flex h-full w-full items-center justify-center ${fallback}`}>
-              <span className="text-2xl font-black text-white/45">{fallbackInitial}</span>
+              <span className="server-preview-initial text-2xl font-black">{fallbackInitial}</span>
             </div>
           )}
         </div>

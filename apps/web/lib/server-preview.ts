@@ -51,5 +51,10 @@ export function getServerPreviewInitial(name: string): string {
   if (!normalized) {
     return 'S';
   }
-  return normalized.slice(0, 1).toUpperCase();
+
+  const withoutVersionPrefix = normalized.replace(/^(?:\[[^\]]{1,32}\]\s*)+/, '');
+  const initial = withoutVersionPrefix.match(/[\p{L}\p{N}]/u)?.[0]
+    ?? normalized.match(/[\p{L}\p{N}]/u)?.[0];
+
+  return initial?.toLocaleUpperCase('ko-KR') ?? 'S';
 }

@@ -724,6 +724,11 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
     color: #806018;
   }
 
+  .paper-directory .paper-server-row .server-preview-initial {
+    color: rgba(255, 255, 255, 0.74);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+  }
+
   .paper-mobile-filter {
     background-color: #f4f2ec;
     background-image: url('/images/paper-newsprint-texture.png');
