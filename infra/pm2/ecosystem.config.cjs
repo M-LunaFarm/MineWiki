@@ -74,6 +74,9 @@ module.exports = {
       name: 'minewiki-api',
       cwd: path.join(repoRoot, 'apps/api'),
       script: 'dist/apps/api/src/main.js',
+      wait_ready: true,
+      listen_timeout: 15000,
+      kill_timeout: 10000,
       env: {
         NODE_ENV: 'production',
         MINEWIKI_SERVICE: 'api',

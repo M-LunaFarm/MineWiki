@@ -56,6 +56,9 @@ async function bootstrap(): Promise<void> {
   app.useGlobalInterceptors(app.get(TelemetryInterceptor));
   app.enableShutdownHooks();
   await app.listen({ port, host });
+  if (typeof process.send === 'function') {
+    process.send('ready');
+  }
   Logger.info({ port, host }, 'API server listening');
 }
 
