@@ -7,6 +7,7 @@ interface PageProps { readonly searchParams: Promise<{ type?: string; namespace?
 
 const TYPES: ReadonlyArray<{ key: WikiSpecialDocumentType; label: string; description: string }> = [
   { key: 'orphaned', label: '고립된 문서', description: '다른 공개 문서에서 연결되지 않은 문서' },
+  { key: 'orphaned_categories', label: '고립된 분류', description: '루트 분류에서 도달할 수 없는 분류 문서' },
   { key: 'wanted', label: '필요한 문서', description: '링크는 있지만 아직 생성되지 않은 문서' },
   { key: 'categories', label: '분류 목록', description: '현재 공개 문서에서 사용하는 분류와 문서 수' },
   { key: 'uncategorized', label: '분류 없는 문서', description: '문서 분류가 지정되지 않은 문서' },
@@ -15,7 +16,7 @@ const TYPES: ReadonlyArray<{ key: WikiSpecialDocumentType; label: string; descri
   { key: 'short', label: '짧은 문서', description: '원문 크기가 작은 문서부터 정렬' },
   { key: 'random', label: '임의 문서', description: '읽을 수 있는 문서 중 하나를 무작위 선택' }
 ];
-const NAMESPACES = ['', 'main', 'server', 'mod', 'modpack', 'guide', 'data', 'dev', 'help', 'project', 'template', 'file'];
+const NAMESPACES = ['', 'main', 'server', 'mod', 'modpack', 'guide', 'data', 'dev', 'help', 'project', 'template', 'category', 'file'];
 
 export const dynamic = 'force-dynamic';
 

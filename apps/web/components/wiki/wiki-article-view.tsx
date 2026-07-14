@@ -1,17 +1,28 @@
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { PencilLine, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
-import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { buildCategoryWikiToolPath, buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
 
 interface WikiArticleViewProps {
   readonly page: WikiPageResponse;
   readonly routePath: string;
+  readonly afterContent?: ReactNode;
 }
 
-export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
-  const editPath = routePath.startsWith('/server/') ? buildServerWikiToolPath(routePath, 'edit') : `${routePath}/edit`;
-  const historyPath = routePath.startsWith('/server/') ? buildServerWikiToolPath(routePath, 'history') : `${routePath}/history`;
+export function WikiArticleView({ page, routePath, afterContent }: WikiArticleViewProps) {
+  const isCategoryDocument = routePath.startsWith('/wiki/category/');
+  const editPath = routePath.startsWith('/server/')
+    ? buildServerWikiToolPath(routePath, 'edit')
+    : isCategoryDocument
+      ? buildCategoryWikiToolPath(routePath, 'edit')
+      : `${routePath}/edit`;
+  const historyPath = routePath.startsWith('/server/')
+    ? buildServerWikiToolPath(routePath, 'history')
+    : isCategoryDocument
+      ? buildCategoryWikiToolPath(routePath, 'history')
+      : `${routePath}/history`;
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -119,6 +130,7 @@ export function WikiArticleView({ page, routePath }: WikiArticleViewProps) {
           ) : null}
         </aside>
       </div>
+      {afterContent}
     </main>
   );
 }

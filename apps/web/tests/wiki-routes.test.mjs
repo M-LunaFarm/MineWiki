@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildCategoryWikiToolPath,
   buildServerWikiToolPath,
   buildWikiRoutePath,
   decodeWikiRouteSegment,
@@ -21,6 +22,25 @@ test('preserves plain and malformed route segments safely', () => {
 
 test('uses the namespace front page when no path segments are present', () => {
   assert.equal(buildWikiRoutePath('help'), '/help/대문');
+});
+
+test('builds nested category document paths inside the category namespace', () => {
+  assert.equal(
+    buildWikiRoutePath('category', ['%EA%B2%8C%EC%9E%84%ED%94%8C%EB%A0%88%EC%9D%B4', '%EB%AA%B9']),
+    '/wiki/category/게임플레이/몹',
+  );
+});
+
+test('keeps category edit and history tools outside document title space', () => {
+  assert.equal(
+    buildCategoryWikiToolPath('/wiki/category/게임플레이/몹', 'edit'),
+    '/wiki/category/_tools/edit/게임플레이/몹',
+  );
+  assert.equal(
+    buildCategoryWikiToolPath('/wiki/category/게임플레이/몹', 'history'),
+    '/wiki/category/_tools/history/게임플레이/몹',
+  );
+  assert.throws(() => buildCategoryWikiToolPath('/wiki/대문', 'edit'), /Not a category wiki route/);
 });
 
 test('keeps reserved-looking document names separate from canonical server tools', () => {

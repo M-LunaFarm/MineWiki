@@ -160,7 +160,16 @@ export interface WikiSearchSuggestionResponse {
   readonly exactMatch: WikiSearchResult | null;
 }
 
-export type WikiSpecialDocumentType = 'random' | 'orphaned' | 'wanted' | 'categories' | 'uncategorized' | 'old' | 'long' | 'short';
+export type WikiSpecialDocumentType =
+  | 'random'
+  | 'orphaned'
+  | 'orphaned_categories'
+  | 'wanted'
+  | 'categories'
+  | 'uncategorized'
+  | 'old'
+  | 'long'
+  | 'short';
 
 export interface WikiSpecialDocumentResponse {
   readonly type: WikiSpecialDocumentType;
@@ -178,6 +187,22 @@ export interface WikiSpecialDocumentResponse {
 
 export interface WikiCategoryResponse {
   readonly category: string;
+  readonly document: {
+    readonly pageId: string;
+    readonly routePath: string;
+  } | null;
+  readonly parents: ReadonlyArray<{
+    readonly category: string;
+    readonly routePath: string;
+  }>;
+  readonly subcategories: ReadonlyArray<{
+    readonly pageId: string;
+    readonly category: string;
+    readonly displayTitle: string;
+    readonly routePath: string;
+  }>;
+  readonly isRoot: boolean;
+  readonly isOrphan: boolean;
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly pageId: string;

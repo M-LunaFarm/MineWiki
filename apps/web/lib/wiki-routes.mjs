@@ -8,7 +8,25 @@ export function decodeWikiRouteSegment(segment) {
 
 export function buildWikiRoutePath(prefix, segments = []) {
   const suffix = segments.map(decodeWikiRouteSegment).join('/');
-  return `/${prefix}${suffix ? `/${suffix}` : '/대문'}`;
+  const base = prefix === 'category' ? '/wiki/category' : `/${prefix}`;
+  return `${base}${suffix ? `/${suffix}` : '/대문'}`;
+}
+
+export const CATEGORY_WIKI_TOOLS = Object.freeze(['edit', 'history']);
+
+export function buildCategoryWikiToolPath(routePath, tool) {
+  if (!CATEGORY_WIKI_TOOLS.includes(tool)) {
+    throw new Error(`Unsupported category wiki tool: ${tool}`);
+  }
+  const prefix = '/wiki/category/';
+  if (!routePath.startsWith(prefix)) {
+    throw new Error(`Not a category wiki route: ${routePath}`);
+  }
+  const documentPath = routePath.slice(prefix.length);
+  if (!documentPath || documentPath.startsWith('_tools/')) {
+    throw new Error(`Invalid category document route: ${routePath}`);
+  }
+  return `${prefix}_tools/${tool}/${documentPath}`;
 }
 
 export const SERVER_WIKI_TOOLS = Object.freeze([

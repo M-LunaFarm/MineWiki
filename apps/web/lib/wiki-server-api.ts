@@ -89,10 +89,10 @@ export async function fetchWikiCategory(input: {
   readonly cursor?: string;
   readonly limit?: number;
 }): Promise<WikiCategoryResponse> {
-  const params = new URLSearchParams({ limit: String(input.limit ?? 30) });
+  const params = new URLSearchParams({ category: input.category, limit: String(input.limit ?? 30) });
   if (input.namespace) params.set('namespace', input.namespace);
   if (input.cursor) params.set('cursor', input.cursor);
-  const response = await wikiFetch(`/v1/wiki/categories/${encodeURIComponent(input.category)}?${params.toString()}`);
+  const response = await wikiFetch(`/v1/wiki/categories?${params.toString()}`);
   return readWikiResponse<WikiCategoryResponse>(response, 'Failed to load wiki category.');
 }
 

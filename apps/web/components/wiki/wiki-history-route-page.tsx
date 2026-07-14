@@ -6,7 +6,7 @@ import { ServerWikiWorkspace } from './server-wiki-workspace';
 import { WikiHistoryListClient } from './wiki-history-list-client';
 
 interface WikiHistoryRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'file';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'category' | 'file';
   readonly segments?: string[];
 }
 
