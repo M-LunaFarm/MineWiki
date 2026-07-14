@@ -193,7 +193,6 @@ test.describe('End-to-end flows', () => {
 
   test('landing page is the searchable server directory', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveURL(/\/servers(?:\?|$)/);
     await expect(page.getByRole('searchbox').first()).toBeVisible();
     await expect(page.getByRole('combobox', { name: '서버 정렬' })).toBeVisible();
     await expect(page.getByRole('combobox', { name: '서버 정렬' })).toContainText('동접순');

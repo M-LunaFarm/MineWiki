@@ -14,6 +14,14 @@ export default defineConfig({
     {
       name: 'chromium',
       use: devices['Desktop Chrome']
+    },
+    {
+      name: 'mobile-chrome',
+      use: devices['Pixel 7']
+    },
+    {
+      name: 'mobile-compact',
+      use: { ...devices['iPhone 13'], browserName: 'chromium' }
     }
   ]
 });
