@@ -178,6 +178,7 @@ export class WikiController {
 
   @Get('special')
   @UseGuards(OptionalSessionGuard)
+  @Throttle({ default: { limit: 20, ttl: 60 } })
   special(
     @Req() request: FastifyRequest,
     @Query('type') type?: string,

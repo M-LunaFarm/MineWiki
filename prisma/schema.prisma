@@ -1119,6 +1119,8 @@ model WikiPage {
   pageType          String   @default("article") @map("page_type") @db.VarChar(32)
   protectionLevel   String   @default("open") @map("protection_level") @db.VarChar(32)
   status            String   @default("normal") @db.VarChar(32)
+  currentContentSize Int     @default(0) @map("current_content_size") @db.UnsignedInt
+  currentCategoryCount Int   @default(0) @map("current_category_count") @db.UnsignedInt
   createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
   createdAt         DateTime @map("created_at")
   updatedAt         DateTime @map("updated_at")
@@ -1129,6 +1131,9 @@ model WikiPage {
   @@index([title])
   @@index([pageType])
   @@index([updatedAt])
+  @@index([status, pageType, namespaceId, updatedAt, id], map: "idx_pages_special_old")
+  @@index([status, pageType, namespaceId, currentContentSize, id], map: "idx_pages_special_size")
+  @@index([status, pageType, namespaceId, currentCategoryCount, updatedAt, id], map: "idx_pages_special_category")
   @@map("pages")
 }
 

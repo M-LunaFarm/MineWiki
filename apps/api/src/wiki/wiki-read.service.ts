@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+import type { WikiPage } from '@prisma/client';
 import {
   type AstNode,
   parseLinkTarget,
@@ -1072,6 +1074,9 @@ export class WikiReadService {
       if (namespace && namespace.code !== 'category') return { type, items: [] };
       return this.getOrphanedCategories(type, limit, input.accountId ?? null);
     }
+    if (type === 'random' || type === 'old' || type === 'long' || type === 'short' || type === 'uncategorized') {
+      return this.getIndexedSpecialDocuments(type, limit, namespace?.id, input.accountId ?? null);
+    }
 
     const pages = await this.prisma.wikiPage.findMany({
       where: {
@@ -1097,49 +1102,6 @@ export class WikiReadService {
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
     const routePaths = await this.routePaths.preload(visiblePages, namespaceById);
-    if (type === 'random') {
-      const page = visiblePages[Math.floor(Math.random() * visiblePages.length)];
-      return { type, items: page ? [this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null, routePaths)] : [] };
-    }
-
-    if (type === 'old') {
-      const sorted = [...visiblePages]
-        .sort((left, right) => left.updatedAt.getTime() - right.updatedAt.getTime() || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
-        .slice(0, limit);
-      return {
-        type,
-        items: sorted.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null, routePaths))
-      };
-    }
-
-    const revisionIds = visiblePages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
-    const revisions = revisionIds.length > 0
-      ? await this.prisma.wikiPageRevision.findMany({
-          where: { id: { in: revisionIds }, visibility: 'public' },
-          select: { id: true, contentRaw: true, contentSize: true }
-        })
-      : [];
-    const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
-
-    if (type === 'long' || type === 'short') {
-      const sorted = visiblePages
-        .map((page) => ({ page, size: page.currentRevisionId ? revisionById.get(page.currentRevisionId)?.contentSize ?? 0 : 0 }))
-        .sort((left, right) => type === 'long' ? right.size - left.size : left.size - right.size)
-        .slice(0, limit);
-      return {
-        type,
-        items: sorted.map(({ page, size }) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', size, routePaths))
-      };
-    }
-
-    if (type === 'uncategorized') {
-      const items = visiblePages.filter((page) => {
-        const revision = page.currentRevisionId ? revisionById.get(page.currentRevisionId) : null;
-        return revision ? parseMarkup(revision.contentRaw).categories.length === 0 : false;
-      }).slice(0, limit);
-      return { type, items: items.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null, routePaths)) };
-    }
-
     const visiblePageIds = new Set(visiblePages.map((page) => page.id));
     const visiblePageById = new Map(visiblePages.map((page) => [page.id, page]));
     const indexedLinks = visiblePageIds.size > 0
@@ -1217,6 +1179,87 @@ export class WikiReadService {
       return !rootPageIds.has(page.id) && !incoming.has(key);
     }).slice(0, limit);
     return { type, items: orphaned.map((page) => this.specialPageItem(page, namespaceById.get(page.namespaceId) ?? 'main', null, routePaths)) };
+  }
+
+  private async getIndexedSpecialDocuments(
+    type: 'random' | 'old' | 'long' | 'short' | 'uncategorized',
+    limit: number,
+    namespaceId: number | undefined,
+    accountId: string | null
+  ): Promise<WikiSpecialDocumentResponse> {
+    const scanBudget = Math.min(Math.max(limit * 5, 50), 500);
+    const where = {
+      namespaceId,
+      status: { in: ['normal', 'active', 'published'] },
+      pageType: { not: 'redirect' },
+      currentRevisionId: { not: null },
+      ...(type === 'uncategorized' ? { currentCategoryCount: 0 } : {})
+    };
+    let candidates: WikiPage[];
+    if (type === 'random') {
+      const bounds = await this.prisma.wikiPage.aggregate({
+        where,
+        _min: { id: true },
+        _max: { id: true }
+      });
+      if (bounds._min.id === null || bounds._max.id === null) return { type, items: [] };
+      const anchor = randomBigIntBetween(bounds._min.id, bounds._max.id);
+      const after = await this.prisma.wikiPage.findMany({
+        where: { ...where, id: { gte: anchor } },
+        orderBy: [{ id: 'asc' }],
+        take: scanBudget
+      });
+      const remaining = scanBudget - after.length;
+      const before = remaining > 0
+        ? await this.prisma.wikiPage.findMany({
+            where: { ...where, id: { lt: anchor } },
+            orderBy: [{ id: 'asc' }],
+            take: remaining
+          })
+        : [];
+      candidates = [...after, ...before];
+    } else {
+      const orderBy = type === 'old'
+        ? [{ updatedAt: 'asc' as const }, { id: 'asc' as const }]
+        : type === 'long'
+          ? [{ currentContentSize: 'desc' as const }, { id: 'asc' as const }]
+          : type === 'short'
+            ? [{ currentContentSize: 'asc' as const }, { id: 'asc' as const }]
+            : [{ updatedAt: 'desc' as const }, { id: 'desc' as const }];
+      candidates = await this.prisma.wikiPage.findMany({ where, orderBy, take: scanBudget });
+    }
+
+    const visible = [] as typeof candidates;
+    for (const page of candidates) {
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId, page });
+        visible.push(page);
+        if (visible.length >= (type === 'random' ? Math.min(scanBudget, 50) : limit)) break;
+      } catch {
+        continue;
+      }
+    }
+    const selected = type === 'random'
+      ? visible.length > 0 ? [visible[Math.floor(Math.random() * visible.length)]!] : []
+      : visible.slice(0, limit);
+    const namespaceIds = [...new Set(selected.map((page) => page.namespaceId))];
+    const namespaces = namespaceIds.length > 0
+      ? await this.prisma.wikiNamespace.findMany({
+          where: { id: { in: namespaceIds } },
+          select: { id: true, code: true }
+        })
+      : [];
+    const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
+    const routePaths = await this.routePaths.preload(selected, namespaceById);
+    return {
+      type,
+      items: selected.map((page) => this.specialPageItem(
+        page,
+        namespaceById.get(page.namespaceId) ?? 'main',
+        type === 'long' || type === 'short' ? page.currentContentSize : null,
+        routePaths
+      ))
+    };
   }
 
   private async getOrphanedCategories(
@@ -1997,6 +2040,12 @@ export function parseWikiSearchCursor(value: string | undefined): { updatedAt: D
   const rawId = value.slice(separator + 1);
   if (Number.isNaN(updatedAt.getTime()) || !/^\d+$/.test(rawId)) throw new BadRequestException('cursor is invalid.');
   return { updatedAt, id: BigInt(rawId) };
+}
+
+function randomBigIntBetween(minimum: bigint, maximum: bigint): bigint {
+  const span = maximum - minimum + 1n;
+  if (span <= 1n) return minimum;
+  return minimum + (randomBytes(8).readBigUInt64BE() % span);
 }
 
 function makeSearchSnippet(content: string, query: string): string {

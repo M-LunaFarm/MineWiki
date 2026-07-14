@@ -12,7 +12,8 @@ export class WikiLinkIndexService {
     revisionId: bigint,
     links: readonly string[],
     categories: readonly string[] = [],
-    includes: readonly string[] = []
+    includes: readonly string[] = [],
+    metrics?: { readonly contentSize: number }
   ): Promise<void> {
     const page = await store.wikiPage.findUnique({
       where: { id: pageId },
@@ -55,18 +56,28 @@ export class WikiLinkIndexService {
       });
     }
     await store.wikiPageLink.deleteMany({ where: { sourcePageId: pageId } });
-    if (normalized.size === 0) return;
-    await store.wikiPageLink.createMany({
-      data: [...normalized.values()].map((target) => ({
-        sourcePageId: pageId,
-        sourceRevisionId: revisionId,
-        targetNamespaceCode: target.targetNamespaceCode,
-        targetSlug: target.targetSlug,
-        linkType: target.linkType,
-        createdAt: new Date()
-      })),
-      skipDuplicates: true
-    });
+    if (normalized.size > 0) {
+      await store.wikiPageLink.createMany({
+        data: [...normalized.values()].map((target) => ({
+          sourcePageId: pageId,
+          sourceRevisionId: revisionId,
+          targetNamespaceCode: target.targetNamespaceCode,
+          targetSlug: target.targetSlug,
+          linkType: target.linkType,
+          createdAt: new Date()
+        })),
+        skipDuplicates: true
+      });
+    }
+    if (metrics) {
+      await store.wikiPage.update({
+        where: { id: pageId },
+        data: {
+          currentContentSize: metrics.contentSize,
+          currentCategoryCount: [...normalized.values()].filter((target) => target.linkType === 'category').length
+        }
+      });
+    }
   }
 }
 

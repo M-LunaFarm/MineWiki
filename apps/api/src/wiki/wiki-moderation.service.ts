@@ -210,7 +210,15 @@ export class WikiModerationService {
         }
       });
     }
-    await this.wikiLinks.replaceForRevision(tx, page.id, revision.id, parsed.links, parsed.categories, parsed.includes);
+    await this.wikiLinks.replaceForRevision(
+      tx,
+      page.id,
+      revision.id,
+      parsed.links,
+      parsed.categories,
+      parsed.includes,
+      { contentSize: revision.contentSize }
+    );
     await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
     const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
     await tx.wikiRecentChange.create({

@@ -5,9 +5,14 @@ import { WikiLinkIndexService } from './wiki-link-index.service';
 
 function createStore(namespaceCode: string, localPath: string) {
   const calls: Array<Record<string, unknown>> = [];
+  const metricUpdates: Array<Record<string, unknown>> = [];
   const store = {
     wikiPage: {
-      async findUnique() { return { namespaceId: 1, localPath }; }
+      async findUnique() { return { namespaceId: 1, localPath }; },
+      async update(input: { data: Record<string, unknown> }) {
+        metricUpdates.push(input.data);
+        return { id: 10n };
+      }
     },
     wikiNamespace: {
       async findUnique() { return { code: namespaceCode }; }
@@ -20,7 +25,7 @@ function createStore(namespaceCode: string, localPath: string) {
       }
     }
   } as unknown as Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPageLink'>;
-  return { store, calls };
+  return { store, calls, metricUpdates };
 }
 
 test('link index normalizes and deduplicates generic wiki targets', async () => {
@@ -34,6 +39,21 @@ test('link index normalizes and deduplicates generic wiki targets', async () => 
   );
   assert.equal(calls.at(-1)?.linkType, 'category');
   assert.ok(calls.every((item) => item.sourceRevisionId === 20n));
+});
+
+test('link index atomically materializes current source metrics', async () => {
+  const { store, metricUpdates } = createStore('main', '대문');
+  await new WikiLinkIndexService().replaceForRevision(
+    store,
+    10n,
+    20n,
+    [],
+    ['가이드', '운영'],
+    [],
+    { contentSize: 4096 }
+  );
+
+  assert.deepEqual(metricUpdates, [{ currentContentSize: 4096, currentCategoryCount: 2 }]);
 });
 
 test('link index skips unresolved template placeholders', async () => {

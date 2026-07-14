@@ -216,20 +216,21 @@ test('blocked profiles keep their public contribution ledger', async () => {
 test('special long documents are sorted by current public source size', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const pages = [
-    { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'short', slug: 'short', title: '짧음', displayTitle: '짧음', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now },
-    { id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'long', slug: 'long', title: '김', displayTitle: '김', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now }
+    { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'short', slug: 'short', title: '짧음', displayTitle: '짧음', currentRevisionId: 11n, currentContentSize: 5, currentCategoryCount: 0, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now },
+    { id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'long', slug: 'long', title: '김', displayTitle: '김', currentRevisionId: 12n, currentContentSize: 500, currentCategoryCount: 0, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now }
   ];
   let pageQuery: unknown;
   const prisma = {
-    wikiPage: { async findMany(args: unknown) { pageQuery = args; return pages; } },
+    wikiPage: { async findMany(args: unknown) { pageQuery = args; return [pages[1]!, pages[0]!]; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
-    wikiPageRevision: { async findMany() { return [{ id: 11n, contentRaw: 'short', contentSize: 5 }, { id: 12n, contentRaw: 'long content', contentSize: 500 }]; } }
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
   const result = await new WikiReadService(prisma, permissions).getSpecialDocuments({ type: 'long' });
 
   assert.deepEqual(result.items.map((item) => [item.pageId, item.value]), [['2', 500], ['1', 5]]);
-  assert.equal(Object.hasOwn(pageQuery as object, 'take'), false);
+  assert.deepEqual((pageQuery as { orderBy: unknown }).orderBy, [{ currentContentSize: 'desc' }, { id: 'asc' }]);
+  assert.equal((pageQuery as { take: number }).take, 250);
+  assert.equal(JSON.stringify(pageQuery).includes('contentRaw'), false);
 });
 
 test('special old documents are sorted by the oldest current update first', async () => {
@@ -240,7 +241,7 @@ test('special old documents are sorted by the oldest current update first', asyn
     { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'old', slug: 'old', title: '오래됨', displayTitle: '오래됨', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: old, updatedAt: old }
   ];
   const prisma = {
-    wikiPage: { async findMany() { return pages; } },
+    wikiPage: { async findMany() { return [pages[1]!, pages[0]!]; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
@@ -250,6 +251,32 @@ test('special old documents are sorted by the oldest current update first', asyn
   assert.deepEqual(result.items.map((item) => [item.pageId, item.updatedAt]), [
     ['1', old.toISOString()], ['2', recent.toISOString()]
   ]);
+});
+
+test('special uncategorized documents use bounded materialized metrics without reading source bodies', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const page = {
+    id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'no-category', slug: 'no-category',
+    title: '분류 없음', displayTitle: '분류 없음', currentRevisionId: 11n,
+    currentContentSize: 300, currentCategoryCount: 0, pageType: 'article', protectionLevel: 'open',
+    status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now
+  };
+  let pageQuery: unknown;
+  let revisionReads = 0;
+  const prisma = {
+    wikiPage: { async findMany(args: unknown) { pageQuery = args; return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiPageRevision: { async findMany() { revisionReads += 1; return []; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getSpecialDocuments({ type: 'uncategorized', limit: 20 });
+
+  assert.deepEqual(result.items.map((item) => item.pageId), ['1']);
+  assert.equal(revisionReads, 0);
+  assert.equal((pageQuery as { take: number }).take, 100);
+  assert.equal(JSON.stringify(pageQuery).includes('currentCategoryCount'), true);
+  assert.equal(JSON.stringify(pageQuery).includes('contentRaw'), false);
 });
 
 test('special wanted documents aggregate unresolved current links', async () => {
