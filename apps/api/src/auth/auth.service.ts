@@ -69,6 +69,13 @@ interface PendingPasswordReset {
   readonly expiresAt: Date;
 }
 
+interface ResolvedAuthToken {
+  readonly accountId: string;
+  readonly email: string;
+  readonly storedToken: string;
+  readonly expiresAt: Date;
+}
+
 export interface AuthAccountView {
   readonly id: string;
   readonly provider: AuthProvider;
@@ -249,9 +256,39 @@ export class AuthService {
   }
 
   async verifyEmail(token: string, context: SessionContext = {}): Promise<AuthSessionResult> {
-    const verification = await this.consumeEmailVerification(token);
-    const account = await this.accounts.markEmailVerified(verification.accountId);
-    await this.accounts.updateLastLogin(account.id, new Date());
+    const verification = await this.resolveEmailVerification(token);
+    const verifiedAt = new Date();
+    await this.prisma.$transaction(async (transaction) => {
+      const claimed = await transaction.emailVerification.deleteMany({
+        where: {
+          token: verification.storedToken,
+          accountId: verification.accountId,
+          expiresAt: { gte: verifiedAt },
+        },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException('유효하지 않거나 만료된 인증 토큰입니다.');
+      }
+
+      const updated = await transaction.account.updateMany({
+        where: {
+          id: verification.accountId,
+          email: verification.email,
+        },
+        data: {
+          emailVerified: true,
+          lastLoginAt: verifiedAt,
+        },
+      });
+      if (updated.count !== 1) {
+        throw new BadRequestException('인증할 계정의 이메일 정보가 변경되었습니다.');
+      }
+    });
+
+    const account = await this.accounts.getAccount(verification.accountId);
+    if (!account) {
+      throw new NotFoundAccountError();
+    }
     const session = await this.sessions.issueSession({
       userId: account.id,
       ipAddress: context.ipAddress,
@@ -353,18 +390,41 @@ export class AuthService {
     if (!newPassword || !PASSWORD_POLICY.test(newPassword)) {
       throw new BadRequestException('비밀번호는 8자 이상, 대문자 및 특수문자를 포함해야 합니다.');
     }
-    const reset = await this.consumePasswordReset(normalizedToken);
+    const reset = await this.resolvePasswordReset(normalizedToken);
     const passwordHash = await hash(newPassword, ARGON_OPTIONS);
-    await this.prisma.$transaction([
-      this.prisma.account.update({
-        where: { id: reset.accountId },
+    const resetAt = new Date();
+    await this.prisma.$transaction(async (transaction) => {
+      const claimed = await transaction.passwordReset.deleteMany({
+        where: {
+          token: reset.storedToken,
+          accountId: reset.accountId,
+          expiresAt: { gte: resetAt },
+        },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException(
+          '유효하지 않거나 만료된 비밀번호 재설정 토큰입니다.',
+        );
+      }
+
+      const updated = await transaction.account.updateMany({
+        where: {
+          id: reset.accountId,
+          email: reset.email,
+        },
         data: { passwordHash, emailVerified: true },
-      }),
-      this.prisma.passwordReset.deleteMany({
+      });
+      if (updated.count !== 1) {
+        throw new BadRequestException('비밀번호를 변경할 계정의 이메일 정보가 변경되었습니다.');
+      }
+
+      await transaction.passwordReset.deleteMany({
         where: { accountId: reset.accountId },
-      }),
-    ]);
-    await this.sessions.revokeAllSessions(reset.accountId);
+      });
+      await transaction.session.deleteMany({
+        where: { accountId: reset.accountId },
+      });
+    });
     return { success: true };
   }
 
@@ -777,7 +837,7 @@ export class AuthService {
     };
   }
 
-  private async consumeEmailVerification(token: string): Promise<PendingEmailVerification> {
+  private async resolveEmailVerification(token: string): Promise<ResolvedAuthToken> {
     await this.prisma.emailVerification.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
@@ -789,11 +849,10 @@ export class AuthService {
       await this.prisma.emailVerification.delete({ where: { token: pending.token } });
       throw new BadRequestException('유효하지 않거나 만료된 인증 토큰입니다.');
     }
-    await this.prisma.emailVerification.delete({ where: { token: pending.token } });
     return {
       accountId: pending.accountId,
       email: pending.email,
-      token,
+      storedToken: pending.token,
       expiresAt: pending.expiresAt,
     };
   }
@@ -823,7 +882,7 @@ export class AuthService {
     };
   }
 
-  private async consumePasswordReset(token: string): Promise<PendingPasswordReset> {
+  private async resolvePasswordReset(token: string): Promise<ResolvedAuthToken> {
     await this.prisma.passwordReset.deleteMany({
       where: { expiresAt: { lt: new Date() } },
     });
@@ -835,11 +894,10 @@ export class AuthService {
       await this.prisma.passwordReset.delete({ where: { token: pending.token } });
       throw new BadRequestException('유효하지 않거나 만료된 비밀번호 재설정 토큰입니다.');
     }
-    await this.prisma.passwordReset.delete({ where: { token: pending.token } });
     return {
       accountId: pending.accountId,
       email: pending.email,
-      token,
+      storedToken: pending.token,
       expiresAt: pending.expiresAt,
     };
   }

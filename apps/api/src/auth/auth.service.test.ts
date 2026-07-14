@@ -156,6 +156,35 @@ if (!hasDatabase) {
     );
   });
 
+  test('email verification keeps the token when the account update cannot be committed', async () => {
+    const service = createAuthService();
+    const email = 'verify-rollback-' + randomUUID() + '@example.com';
+    const registration = await service.registerEmail({
+      email,
+      password: 'SupersafePW1!',
+      displayName: 'RollbackPlayer',
+      agreeTerms: true,
+      agreePrivacy: true,
+    });
+    const token = await getVerificationToken(registration.accountId);
+
+    await prisma.account.update({
+      where: { id: registration.accountId },
+      data: { email: 'changed-' + randomUUID() + '@example.com' },
+    });
+
+    await assert.rejects(
+      () => service.verifyEmail(token),
+      (error: unknown) => error instanceof BadRequestException,
+    );
+    assert.equal(
+      await prisma.emailVerification.count({ where: { accountId: registration.accountId } }),
+      1,
+    );
+    const account = await prisma.account.findUnique({ where: { id: registration.accountId } });
+    assert.equal(account?.emailVerified, false);
+  });
+
   test('password reset updates credentials', async () => {
     const service = createAuthService();
     const email = 'reset-' + randomUUID() + '@example.com';
@@ -188,6 +217,87 @@ if (!hasDatabase) {
     );
     const login = await service.loginEmail({ email, password: 'UpdatedPW1!' });
     assert.equal(login.account.email, email);
+  });
+
+  test('password reset atomically preserves credentials, token, and sessions on account drift', async () => {
+    const service = createAuthService();
+    const email = 'reset-rollback-' + randomUUID() + '@example.com';
+    const registration = await service.registerEmail({
+      email,
+      password: 'SupersafePW1!',
+      displayName: 'RollbackPlayer',
+      agreeTerms: true,
+      agreePrivacy: true,
+    });
+    await service.verifyEmail(await getVerificationToken(registration.accountId));
+    await service.requestPasswordReset(email);
+    const resetToken = await getPasswordResetToken(registration.accountId);
+    const before = await prisma.account.findUnique({ where: { id: registration.accountId } });
+    const sessionCount = await prisma.session.count({
+      where: { accountId: registration.accountId },
+    });
+
+    await prisma.account.update({
+      where: { id: registration.accountId },
+      data: { email: 'changed-' + randomUUID() + '@example.com' },
+    });
+
+    await assert.rejects(
+      () => service.resetPassword(resetToken, 'UpdatedPW1!'),
+      (error: unknown) => error instanceof BadRequestException,
+    );
+    const after = await prisma.account.findUnique({ where: { id: registration.accountId } });
+    assert.equal(after?.passwordHash, before?.passwordHash);
+    assert.equal(
+      await prisma.passwordReset.count({ where: { accountId: registration.accountId } }),
+      1,
+    );
+    assert.equal(
+      await prisma.session.count({ where: { accountId: registration.accountId } }),
+      sessionCount,
+    );
+  });
+
+  test('verification and reset tokens can only be claimed once under concurrency', async () => {
+    const service = createAuthService();
+    const email = 'token-race-' + randomUUID() + '@example.com';
+    const registration = await service.registerEmail({
+      email,
+      password: 'SupersafePW1!',
+      displayName: 'RacePlayer',
+      agreeTerms: true,
+      agreePrivacy: true,
+    });
+    const verificationToken = await getVerificationToken(registration.accountId);
+    const verificationResults = await Promise.allSettled([
+      service.verifyEmail(verificationToken),
+      service.verifyEmail(verificationToken),
+    ]);
+    assert.equal(
+      verificationResults.filter((result) => result.status === 'fulfilled').length,
+      1,
+    );
+    assert.equal(
+      verificationResults.filter((result) => result.status === 'rejected').length,
+      1,
+    );
+
+    await service.requestPasswordReset(email);
+    const resetToken = await getPasswordResetToken(registration.accountId);
+    const resetResults = await Promise.allSettled([
+      service.resetPassword(resetToken, 'FirstResetPW1!'),
+      service.resetPassword(resetToken, 'SecondResetPW1!'),
+    ]);
+    assert.equal(resetResults.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(resetResults.filter((result) => result.status === 'rejected').length, 1);
+    assert.equal(
+      await prisma.passwordReset.count({ where: { accountId: registration.accountId } }),
+      0,
+    );
+    assert.equal(
+      await prisma.session.count({ where: { accountId: registration.accountId } }),
+      0,
+    );
   });
 
   test('password change invalidates every outstanding reset token', async () => {
