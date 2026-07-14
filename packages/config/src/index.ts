@@ -124,6 +124,7 @@ const botProductionKeys: Array<keyof EnvSchema> = [
 const workerProductionKeys: Array<keyof EnvSchema> = [
   ...commonProductionKeys,
   'APP_ENCRYPTION_KEY',
+  'INTERNAL_API_BASE_URL',
 ];
 
 const productionStorageKeys: Array<keyof EnvSchema> = [

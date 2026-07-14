@@ -102,6 +102,9 @@ model Account {
   passwordHash       String?
   createdAt          DateTime     @default(now())
   lastLoginAt        DateTime?
+  lifecycleStatus    String       @default("active") @map("lifecycle_status") @db.VarChar(32)
+  deletionRequestedAt DateTime?   @map("deletion_requested_at") @db.DateTime(3)
+  anonymizedAt       DateTime?    @map("anonymized_at") @db.DateTime(3)
 
   sessions                Session[]
   emailVerifications      EmailVerification[]
@@ -132,6 +135,54 @@ model Account {
   @@unique([provider, providerUserId])
   @@index([email])
   @@index([canonicalAccountId])
+  @@index([lifecycleStatus, deletionRequestedAt])
+}
+
+model AccountDeletionRequest {
+  id                 String    @id @default(uuid()) @db.Char(36)
+  canonicalAccountId String    @unique @map("canonical_account_id") @db.Char(36)
+  accountIds         Json      @map("account_ids")
+  status             String    @default("requested") @db.VarChar(32)
+  reauthMethod       String    @map("reauth_method") @db.VarChar(32)
+  cancelTokenHash    String    @unique @map("cancel_token_hash") @db.Char(64)
+  blockerSnapshot    Json?     @map("blocker_snapshot")
+  requestedBy        String    @map("requested_by") @db.Char(36)
+  requestedAt        DateTime  @default(now()) @map("requested_at") @db.DateTime(3)
+  scheduledFor       DateTime  @map("scheduled_for") @db.DateTime(3)
+  cancelledAt        DateTime? @map("cancelled_at") @db.DateTime(3)
+  cancelledBy        String?   @map("cancelled_by") @db.VarChar(64)
+  processedAt        DateTime? @map("processed_at") @db.DateTime(3)
+  processedBy        String?   @map("processed_by") @db.Char(36)
+  adminNote          String?   @map("admin_note") @db.VarChar(1000)
+  version            Int       @default(1)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([status, scheduledFor])
+  @@map("account_deletion_requests")
+}
+
+model AccountDeletionDiscordRevocation {
+  id                    String    @id @default(uuid()) @db.Char(36)
+  dedupeKey             String    @unique @map("dedupe_key") @db.VarChar(191)
+  deletionRequestId     String    @map("deletion_request_id") @db.Char(36)
+  verificationSessionId String?   @map("verification_session_id") @db.VarChar(191)
+  guildId               String    @map("guild_id") @db.VarChar(32)
+  discordUserId         String?   @map("discord_user_id") @db.VarChar(32)
+  roleId                String?   @map("role_id") @db.VarChar(32)
+  status                String    @default("pending") @db.VarChar(32)
+  attempts              Int       @default(0)
+  availableAt           DateTime  @default(now()) @map("available_at") @db.DateTime(3)
+  lockedAt              DateTime? @map("locked_at") @db.DateTime(3)
+  lockedBy              String?   @map("locked_by") @db.VarChar(64)
+  processedAt           DateTime? @map("processed_at") @db.DateTime(3)
+  lastError             String?   @map("last_error") @db.VarChar(500)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([status, availableAt])
+  @@index([deletionRequestId])
+  @@map("account_deletion_discord_revocations")
 }
 
 model AccountConsent {
@@ -854,6 +905,7 @@ model UploadedFile {
 
 model LunaGuild {
   guildId            String   @id @map("guild_id") @db.VarChar(32)
+  ownerAccountId     String?  @map("owner_account_id") @db.Char(36)
   verifiedRoleId     String?  @map("verified_role_id") @db.VarChar(32)
   logChannelId       String?  @map("log_channel_id") @db.VarChar(32)
   nicknameFormat     String?  @map("nickname_format") @db.VarChar(128)
@@ -865,6 +917,7 @@ model LunaGuild {
   updatedAt          DateTime @map("updated_at")
 
   @@map("guilds")
+  @@index([ownerAccountId])
 }
 
 model LunaGuildChannelSetting {

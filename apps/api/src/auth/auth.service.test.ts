@@ -91,8 +91,8 @@ if (!hasDatabase) {
     assert.deepEqual(
       consents.map((consent) => [consent.consentType, consent.policyVersion]),
       [
-        ['privacy', '2026-07-11-v1.1'],
-        ['terms', '2026-07-11-v1.1'],
+        ['privacy', '2026-07-15-v1.2'],
+        ['terms', '2026-07-15-v1.2'],
       ],
     );
     const token = await getVerificationToken(registration.accountId);

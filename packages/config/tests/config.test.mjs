@@ -129,11 +129,23 @@ test('worker production config requires the credential encryption key', () => {
     NODE_ENV: 'production',
     MINEWIKI_SERVICE: 'worker',
     DATABASE_URL: 'mysql://minewiki:strong@mysql:3306/minewiki',
-    REDIS_URL: 'redis://redis:6379'
+    REDIS_URL: 'redis://redis:6379',
+    INTERNAL_API_BASE_URL: 'http://api:3000'
   };
   assert.throws(() => new ConfigService(source), /APP_ENCRYPTION_KEY is required/);
   const config = new ConfigService({ ...source, APP_ENCRYPTION_KEY: 'worker-encryption-key' });
   assert.equal(config.get('MINEWIKI_SERVICE'), 'worker');
+});
+
+test('worker production config requires the account lifecycle API address', () => {
+  const source = {
+    NODE_ENV: 'production',
+    MINEWIKI_SERVICE: 'worker',
+    DATABASE_URL: 'mysql://minewiki:strong@mysql:3306/minewiki',
+    REDIS_URL: 'redis://redis:6379',
+    APP_ENCRYPTION_KEY: 'worker-encryption-key'
+  };
+  assert.throws(() => new ConfigService(source), /INTERNAL_API_BASE_URL is required/);
 });
 
 function validProductionEnv() {

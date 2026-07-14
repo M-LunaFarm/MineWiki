@@ -24,6 +24,7 @@ export const BUILT_IN_PERMISSION_CODES = [
   'guild.admin',
   'support.admin',
   'file.admin',
+  'admin.account.delete',
 ] as const;
 
 export interface AccountAccess {

@@ -16,6 +16,7 @@ import {
 import { PrismaService } from '../common/prisma.service';
 import { encryptAppSecret } from '../common/secret-codec';
 import { fetchWithTimeout } from '../common/http/external-fetch';
+import { withActiveCanonicalAccountGroup } from './account-lifecycle-fence';
 
 interface PendingOAuthState {
   readonly provider: OAuthProvider;
@@ -269,7 +270,8 @@ export class OAuthFlowService {
     if (!credential?.accessToken) {
       return;
     }
-    await this.prisma.oAuthCredential.upsert({
+    await withActiveCanonicalAccountGroup(this.prisma, [accountId], async (tx) => {
+      await tx.oAuthCredential.upsert({
       where: {
         accountId_provider_providerUserId: {
           accountId,
@@ -294,6 +296,7 @@ export class OAuthFlowService {
         scope: credential.scope ?? null,
         expiresAt: credential.expiresAt ?? null
       }
+      });
     });
   }
 

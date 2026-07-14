@@ -127,6 +127,7 @@ const permissions = [
   ['guild.admin', 'Manage Discord guild administration'],
   ['support.admin', 'Manage support tickets'],
   ['file.admin', 'Manage uploaded files'],
+  ['admin.account.delete', 'Process account termination lifecycle requests'],
 ];
 
 const rolePermissions = {

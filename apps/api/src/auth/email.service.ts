@@ -88,6 +88,30 @@ export class EmailService {
     });
   }
 
+  async sendAccountDeletionCancellationEmail(payload: {
+    email: string;
+    cancelUrl: string;
+    scheduledFor: Date;
+  }): Promise<void> {
+    if (!this.transporter || !this.from) {
+      throw new Error('SMTP is not configured.');
+    }
+    await this.transporter.sendMail({
+      from: this.from,
+      to: payload.email,
+      subject: 'MineWiki 계정 종료 요청 및 취소 안내',
+      text: [
+        'MineWiki 계정 종료 요청이 접수되었습니다.',
+        `처리 예정 시각: ${payload.scheduledFor.toISOString()}`,
+        '',
+        '14일 유예기간 안에 아래 링크에서 요청을 취소할 수 있습니다.',
+        payload.cancelUrl,
+        '',
+        '본인이 요청하지 않았다면 즉시 취소하고 support@minewiki.kr로 문의해 주세요.'
+      ].join('\n')
+    });
+  }
+
   logDeliveryFailure(error: unknown): void {
     this.logger.warn({ err: error }, 'Email delivery failed');
   }

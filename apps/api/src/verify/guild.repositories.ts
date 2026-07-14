@@ -33,6 +33,13 @@ export class GuildSettingsRepository {
     });
   }
 
+  listOwnedByAccountIds(accountIds: string[], store: Pick<PrismaService, 'lunaGuild'> = this.prisma) {
+    return store.lunaGuild.findMany({
+      where: { ownerAccountId: { in: accountIds } },
+      select: { guildId: true }
+    });
+  }
+
   find(guildId: string): Promise<GuildSettingsRecord | null> {
     return this.prisma.lunaGuild.findUnique({ where: { guildId } });
   }
@@ -48,6 +55,13 @@ export class GuildSettingsRepository {
       update: {
         updatedAt: now
       }
+    });
+  }
+
+  async claimOwnerIfUnset(guildId: string, accountId: string): Promise<void> {
+    await this.prisma.lunaGuild.updateMany({
+      where: { guildId, ownerAccountId: null },
+      data: { ownerAccountId: accountId }
     });
   }
 
@@ -211,10 +225,11 @@ export class DiscordMinecraftLinkRepository {
     readonly accountId: string;
     readonly minecraftUuid: string;
     readonly minecraftName: string;
-  }): Promise<void> {
+  }, store?: Prisma.TransactionClient): Promise<void> {
     const now = new Date();
-    await this.prisma.$transaction([
-      this.prisma.minecraftIdentity.upsert({
+    const db = store ?? this.prisma;
+    const operations = [
+      db.minecraftIdentity.upsert({
         where: { accountId: input.accountId },
         create: {
           accountId: input.accountId,
@@ -230,7 +245,7 @@ export class DiscordMinecraftLinkRepository {
           lastVerifiedAt: now
         }
       }),
-      this.prisma.lunaDiscordAccountLink.upsert({
+      db.lunaDiscordAccountLink.upsert({
         where: { discordUserId: input.discordUserId },
         create: {
           discordUserId: input.discordUserId,
@@ -246,7 +261,7 @@ export class DiscordMinecraftLinkRepository {
           updatedAt: now
         }
       }),
-      this.prisma.lunaGuildVerification.upsert({
+      db.lunaGuildVerification.upsert({
         where: {
           guildId_discordUserId: {
             guildId: input.guildId,
@@ -266,7 +281,7 @@ export class DiscordMinecraftLinkRepository {
           verifiedAt: now
         }
       }),
-      this.prisma.lunaPrivacyConsent.upsert({
+      db.lunaPrivacyConsent.upsert({
         where: {
           discordUserId_consentType: {
             discordUserId: input.discordUserId,
@@ -284,7 +299,7 @@ export class DiscordMinecraftLinkRepository {
           updatedAt: now
         }
       }),
-      this.prisma.lunaEvent.create({
+      db.lunaEvent.create({
         data: {
           eventId: createLegacyEventId(),
           eventType: 'minecraft_verified',
@@ -298,7 +313,86 @@ export class DiscordMinecraftLinkRepository {
           createdAt: now
         }
       })
-    ]);
+    ];
+    if (store) {
+      for (const operation of operations) await operation;
+    } else {
+      await this.prisma.$transaction(operations);
+    }
+  }
+}
+
+@Injectable()
+export class AccountDeletionLegacyIdentityRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  listLinks(discordUserIds: string[], minecraftUuids: string[], store?: Prisma.TransactionClient) {
+    const db = store ?? this.prisma;
+    if (discordUserIds.length === 0 && minecraftUuids.length === 0) return Promise.resolve([]);
+    return db.lunaDiscordAccountLink.findMany({
+      where: {
+        OR: [
+          ...(discordUserIds.length ? [{ discordUserId: { in: discordUserIds } }] : []),
+          ...(minecraftUuids.length ? [{ minecraftUuid: { in: minecraftUuids } }] : []),
+        ],
+      },
+      select: { discordUserId: true, minecraftUuid: true },
+    });
+  }
+
+  listVerifications(discordUserIds: string[], minecraftUuids: string[], store?: Prisma.TransactionClient) {
+    const db = store ?? this.prisma;
+    if (discordUserIds.length === 0 && minecraftUuids.length === 0) return Promise.resolve([]);
+    return db.lunaGuildVerification.findMany({
+      where: {
+        OR: [
+          ...(discordUserIds.length ? [{ discordUserId: { in: discordUserIds } }] : []),
+          ...(minecraftUuids.length ? [{ minecraftUuid: { in: minecraftUuids } }] : []),
+        ],
+      },
+      select: { guildId: true, discordUserId: true, minecraftUuid: true },
+    });
+  }
+
+  listGuildRoles(guildIds: string[], store?: Prisma.TransactionClient) {
+    const db = store ?? this.prisma;
+    if (guildIds.length === 0) return Promise.resolve([]);
+    return db.lunaGuild.findMany({
+      where: { guildId: { in: guildIds } },
+      select: { guildId: true, verifiedRoleId: true },
+    });
+  }
+
+  async scrub(
+    discordUserIds: string[],
+    minecraftUuids: string[],
+    store?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const db = store ?? this.prisma;
+    if (discordUserIds.length === 0 && minecraftUuids.length === 0) return;
+    const identityWhere = {
+      OR: [
+        ...(discordUserIds.length ? [{ discordUserId: { in: discordUserIds } }] : []),
+        ...(minecraftUuids.length ? [{ minecraftUuid: { in: minecraftUuids } }] : []),
+      ],
+    };
+    await db.lunaDiscordAccountLink.deleteMany({ where: identityWhere });
+    await db.lunaGuildVerification.deleteMany({ where: identityWhere });
+    if (discordUserIds.length > 0) {
+      await db.lunaPrivacyConsent.deleteMany({ where: { discordUserId: { in: discordUserIds } } });
+    }
+    const events = await db.lunaEvent.findMany({ where: identityWhere, select: { eventId: true } });
+    for (const event of events) {
+      await db.lunaEvent.update({
+        where: { eventId: event.eventId },
+        data: {
+          discordUserId: `deleted:${event.eventId}`.slice(0, 32),
+          minecraftUuid: '00000000-0000-0000-0000-000000000000',
+          minecraftName: '탈퇴한 사용자',
+          payloadJson: Prisma.JsonNull,
+        },
+      });
+    }
   }
 }
 

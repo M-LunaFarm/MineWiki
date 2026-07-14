@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type { z } from 'zod';
 import { authProviderSchema } from '@minewiki/schemas';
 import { PrismaService } from '../common/prisma.service';
+import { withActiveCanonicalAccountGroup } from './account-lifecycle-fence';
 
 export type AuthProvider = z.infer<typeof authProviderSchema>;
 
@@ -22,6 +23,7 @@ export interface AccountRecord {
   readonly lastLoginAt: string | null;
   readonly emailVerified: boolean;
   readonly passwordHash: string | null;
+  readonly lifecycleStatus: string;
 }
 
 export interface RegisterAccountInput {
@@ -151,6 +153,9 @@ export class AccountSeparationService {
     if (!primary || !target) {
       throw new NotFoundException('계정 정보를 찾을 수 없습니다.');
     }
+    if (primary.lifecycleStatus !== 'active' || target.lifecycleStatus !== 'active') {
+      throw new ConflictException('종료가 진행 중인 계정은 연결할 수 없습니다.');
+    }
     if (primary.provider === target.provider) {
       throw new BadRequestException('같은 공급자의 계정은 연결할 수 없습니다.');
     }
@@ -200,31 +205,27 @@ export class AccountSeparationService {
       throw new BadRequestException('검증 코드가 일치하지 않습니다.');
     }
 
-    await this.prisma.$transaction([
-      this.prisma.accountLink.create({
-        data: {
-          primaryAccountId: request.primaryAccountId,
-          linkedAccountId: request.targetAccountId
+    await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [request.primaryAccountId, request.targetAccountId],
+      async (tx, group) => {
+        const fresh = await tx.accountLinkRequest.findUnique({ where: { id: requestId } });
+        if (!fresh || fresh.status !== 'pending' || fresh.verificationCode !== code) {
+          throw new ConflictException('계정 연결 요청 상태가 변경되었습니다.');
         }
-      }),
-      this.prisma.accountLink.create({
-        data: {
-          primaryAccountId: request.targetAccountId,
-          linkedAccountId: request.primaryAccountId
-        }
-      }),
-      this.prisma.accountLinkRequest.update({
-        where: { id: requestId },
-        data: {
-          status: 'linked',
-          confirmedAt: new Date()
-        }
-      })
-    ]);
-
-    await this.stabilizeCanonicalAccount(
-      request.primaryAccountId,
-      request.targetAccountId
+        await tx.accountLink.createMany({
+          data: [
+            { primaryAccountId: fresh.primaryAccountId, linkedAccountId: fresh.targetAccountId },
+            { primaryAccountId: fresh.targetAccountId, linkedAccountId: fresh.primaryAccountId },
+          ],
+          skipDuplicates: true,
+        });
+        await this.stabilizeCanonicalAccountInTransaction(tx, fresh.primaryAccountId, group.accountIds);
+        await tx.accountLinkRequest.update({
+          where: { id: requestId },
+          data: { status: 'linked', confirmedAt: new Date() },
+        });
+      },
     );
 
     const linkedAccountIds = await this.getLinkedAccountIds(request.primaryAccountId);
@@ -236,21 +237,34 @@ export class AccountSeparationService {
     };
   }
 
+  async linkActiveAccounts(primaryAccountId: string, linkedAccountId: string): Promise<void> {
+    await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [primaryAccountId, linkedAccountId],
+      async (tx, group) => {
+        await tx.accountLink.createMany({
+          data: [
+            { primaryAccountId, linkedAccountId },
+            { primaryAccountId: linkedAccountId, linkedAccountId: primaryAccountId },
+          ],
+          skipDuplicates: true,
+        });
+        await this.stabilizeCanonicalAccountInTransaction(tx, primaryAccountId, group.accountIds);
+      },
+    );
+  }
+
   async markEmailVerified(accountId: string): Promise<AccountRecord> {
-    const account = await this.ensureAccount(accountId);
-    const updated = await this.prisma.account.update({
-      where: { id: account.id },
-      data: { emailVerified: true }
-    });
+    const updated = await withActiveCanonicalAccountGroup(this.prisma, [accountId], (tx) =>
+      tx.account.update({ where: { id: accountId }, data: { emailVerified: true } })
+    );
     return this.toAccountRecord(updated);
   }
 
   async setPasswordHash(accountId: string, passwordHash: string): Promise<AccountRecord> {
-    const account = await this.ensureAccount(accountId);
-    const updated = await this.prisma.account.update({
-      where: { id: account.id },
-      data: { passwordHash }
-    });
+    const updated = await withActiveCanonicalAccountGroup(this.prisma, [accountId], (tx) =>
+      tx.account.update({ where: { id: accountId }, data: { passwordHash } })
+    );
     return this.toAccountRecord(updated);
   }
 
@@ -310,6 +324,25 @@ export class AccountSeparationService {
     return canonicalAccountId;
   }
 
+  private async stabilizeCanonicalAccountInTransaction(
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    primaryAccountId: string,
+    accountIds: readonly string[],
+  ): Promise<void> {
+    const primary = await tx.account.findUnique({
+      where: { id: primaryAccountId },
+      select: { canonicalAccountId: true },
+    });
+    if (!primary) throw new NotFoundException('계정 정보를 찾을 수 없습니다.');
+    const canonicalAccountId = primary.canonicalAccountId && accountIds.includes(primary.canonicalAccountId)
+      ? primary.canonicalAccountId
+      : primaryAccountId;
+    await tx.account.updateMany({
+      where: { id: { in: [...accountIds] } },
+      data: { canonicalAccountId },
+    });
+  }
+
   private async ensureAccount(accountId: string) {
     const account = await this.prisma.account.findUnique({
       where: { id: accountId }
@@ -336,6 +369,7 @@ export class AccountSeparationService {
     lastLoginAt: Date | null;
     emailVerified: boolean;
     passwordHash: string | null;
+    lifecycleStatus: string;
   }): AccountRecord {
     return {
       id: account.id,
@@ -347,7 +381,8 @@ export class AccountSeparationService {
       createdAt: account.createdAt.toISOString(),
       lastLoginAt: account.lastLoginAt ? account.lastLoginAt.toISOString() : null,
       emailVerified: account.emailVerified,
-      passwordHash: account.passwordHash
+      passwordHash: account.passwordHash,
+      lifecycleStatus: account.lifecycleStatus
     };
   }
 }

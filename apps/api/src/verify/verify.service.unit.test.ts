@@ -13,6 +13,18 @@ function createHarness(options: {
   let session: Record<string, unknown> | null = null;
   const minecraftUuid = randomUUID();
   const prisma = {
+    account: {
+      async findMany(args: { where: { OR: Array<{ id?: { in: string[] } }> } }) {
+        const ids = args.where.OR.flatMap((item) => item.id?.in ?? []);
+        return ids.map((id) => ({ id, canonicalAccountId: id }));
+      },
+      async count(args: { where: { id: { in: string[] } } }) {
+        return args.where.id.in.length;
+      }
+    },
+    accountLink: {
+      async findMany() { return []; }
+    },
     discordVerificationSession: {
       async create(args: { data: Record<string, unknown> }) {
         session = {
@@ -95,8 +107,11 @@ function createHarness(options: {
         return {};
       }
     },
-    async $transaction(operations: Array<Promise<unknown>>) {
-      return Promise.all(operations);
+    async $queryRaw(query: { values?: unknown[] }) {
+      return (query.values ?? []).filter((value): value is string => typeof value === 'string').map((id) => ({ id }));
+    },
+    async $transaction<T>(operations: Array<Promise<unknown>> | ((tx: typeof prisma) => Promise<T>)) {
+      return typeof operations === 'function' ? operations(prisma) : Promise.all(operations);
     }
   };
   const config = {

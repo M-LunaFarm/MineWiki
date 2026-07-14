@@ -1,0 +1,22 @@
+CREATE TABLE `account_deletion_discord_revocations` (
+  `id` CHAR(36) NOT NULL,
+  `dedupe_key` VARCHAR(191) NOT NULL,
+  `deletion_request_id` CHAR(36) NOT NULL,
+  `verification_session_id` VARCHAR(191) NULL,
+  `guild_id` VARCHAR(32) NOT NULL,
+  `discord_user_id` VARCHAR(32) NULL,
+  `role_id` VARCHAR(32) NULL,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'pending',
+  `attempts` INTEGER NOT NULL DEFAULT 0,
+  `available_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `locked_at` DATETIME(3) NULL,
+  `locked_by` VARCHAR(64) NULL,
+  `processed_at` DATETIME(3) NULL,
+  `last_error` VARCHAR(500) NULL,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL,
+  UNIQUE INDEX `account_deletion_discord_revocations_dedupe_key_key` (`dedupe_key`),
+  INDEX `account_deletion_discord_revocations_status_available_at_idx` (`status`, `available_at`),
+  INDEX `account_deletion_discord_revocations_deletion_request_id_idx` (`deletion_request_id`),
+  PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

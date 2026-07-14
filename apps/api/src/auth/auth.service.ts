@@ -22,6 +22,8 @@ import { SessionService } from '../session/session.service';
 import { PrismaService } from '../common/prisma.service';
 import { EmailService } from './email.service';
 import { FileService, type FileImageUploadRequest } from '../file/file.service';
+import type { Prisma } from '@prisma/client';
+import { withActiveCanonicalAccountGroup } from './account-lifecycle-fence';
 
 interface EmailRegistrationDto {
   readonly email: string;
@@ -244,6 +246,7 @@ export class AuthService {
     if (!account) {
       throw new UnauthorizedException('이메일 또는 비밀번호가 올바르지 않습니다.');
     }
+    this.assertAccountActive(account);
     if (!account.emailVerified) {
       throw new ForbiddenException('이메일 인증을 완료한 후 다시 로그인해 주세요.');
     }
@@ -265,7 +268,7 @@ export class AuthService {
   async verifyEmail(token: string, context: SessionContext = {}): Promise<AuthSessionResult> {
     const verification = await this.resolveEmailVerification(token);
     const verifiedAt = new Date();
-    await this.prisma.$transaction(async (transaction) => {
+    await withActiveCanonicalAccountGroup(this.prisma, [verification.accountId], async (transaction) => {
       const claimed = await transaction.emailVerification.deleteMany({
         where: {
           token: verification.storedToken,
@@ -296,6 +299,7 @@ export class AuthService {
     if (!account) {
       throw new NotFoundAccountError();
     }
+    this.assertAccountActive(account);
     const session = await this.sessions.issueSession({
       userId: account.id,
       ipAddress: context.ipAddress,
@@ -328,6 +332,7 @@ export class AuthService {
     if (!account) {
       throw new NotFoundAccountError();
     }
+    this.assertAccountActive(account);
     if (account.passwordHash) {
       throw new BadRequestException('이미 비밀번호 로그인이 설정된 계정입니다.');
     }
@@ -342,16 +347,24 @@ export class AuthService {
     }
 
     const passwordHash = await hash(payload.password, ARGON_OPTIONS);
-    await this.prisma.account.update({
-      where: { id: account.id },
-      data: {
-        email,
-        passwordHash,
-        emailVerified: false,
+    const verification = await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [account.id],
+      async (tx) => {
+        const fresh = await tx.account.findUnique({
+          where: { id: account.id },
+          select: { passwordHash: true },
+        });
+        if (fresh?.passwordHash) {
+          throw new BadRequestException('이미 비밀번호 로그인이 설정된 계정입니다.');
+        }
+        await tx.account.update({
+          where: { id: account.id },
+          data: { email, passwordHash, emailVerified: false },
+        });
+        return this.createEmailVerification(account.id, email, tx);
       },
-    });
-
-    const verification = await this.createEmailVerification(account.id, email);
+    );
     await this.dispatchVerificationEmail(verification);
     return {
       email,
@@ -373,7 +386,11 @@ export class AuthService {
         expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS).toISOString(),
       };
     }
-    const verification = await this.createEmailVerification(account.id, normalized);
+    const verification = await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [account.id],
+      (tx) => this.createEmailVerification(account.id, normalized, tx),
+    );
     await this.dispatchVerificationEmail(verification);
     return {
       email: normalized,
@@ -390,7 +407,11 @@ export class AuthService {
     if (!target || !target.email) {
       return { accepted: true };
     }
-    const reset = await this.createPasswordReset(target.id, target.email);
+    const reset = await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [target.id],
+      (tx) => this.createPasswordReset(target.id, target.email!, tx),
+    );
     await this.dispatchPasswordResetEmail(reset);
     return { accepted: true };
   }
@@ -406,7 +427,7 @@ export class AuthService {
     const reset = await this.resolvePasswordReset(normalizedToken);
     const passwordHash = await hash(newPassword, ARGON_OPTIONS);
     const resetAt = new Date();
-    await this.prisma.$transaction(async (transaction) => {
+    await withActiveCanonicalAccountGroup(this.prisma, [reset.accountId], async (transaction) => {
       const claimed = await transaction.passwordReset.deleteMany({
         where: {
           token: reset.storedToken,
@@ -553,6 +574,7 @@ export class AuthService {
     if (!account) {
       throw new NotFoundAccountError();
     }
+    this.assertAccountActive(account);
     if (!account.passwordHash) {
       throw new ForbiddenException('비밀번호가 설정되지 않은 계정입니다.');
     }
@@ -566,15 +588,10 @@ export class AuthService {
       throw new BadRequestException('비밀번호는 8자 이상이며 대문자/특수문자를 포함해야 합니다.');
     }
     const passwordHash = await hash(newPassword, ARGON_OPTIONS);
-    await this.prisma.$transaction([
-      this.prisma.account.update({
-        where: { id: account.id },
-        data: { passwordHash },
-      }),
-      this.prisma.passwordReset.deleteMany({
-        where: { accountId: account.id },
-      }),
-    ]);
+    await withActiveCanonicalAccountGroup(this.prisma, [account.id], async (tx) => {
+      await tx.account.update({ where: { id: account.id }, data: { passwordHash } });
+      await tx.passwordReset.deleteMany({ where: { accountId: account.id } });
+    });
   }
 
   async linkOAuthAccount(
@@ -593,6 +610,7 @@ export class AuthService {
     if (!primary) {
       throw new NotFoundAccountError();
     }
+    this.assertAccountActive(primary);
 
     let linked = await this.accounts.findByProvider(provider, payload.userId);
     if (!linked) {
@@ -605,30 +623,13 @@ export class AuthService {
       });
     }
 
+    this.assertAccountActive(linked);
+
     if (linked.id === primaryAccountId) {
       return this.toAccountView(primary);
     }
 
-    const existing = await this.prisma.accountLink.findUnique({
-      where: {
-        primaryAccountId_linkedAccountId: {
-          primaryAccountId,
-          linkedAccountId: linked.id,
-        },
-      },
-    });
-    if (!existing) {
-      await this.prisma.$transaction([
-        this.prisma.accountLink.create({
-          data: { primaryAccountId, linkedAccountId: linked.id },
-        }),
-        this.prisma.accountLink.create({
-          data: { primaryAccountId: linked.id, linkedAccountId: primaryAccountId },
-        }),
-      ]);
-    }
-
-    await this.accounts.stabilizeCanonicalAccount(primaryAccountId, linked.id);
+    await this.accounts.linkActiveAccounts(primaryAccountId, linked.id);
 
     return this.toAccountView(primary);
   }
@@ -659,6 +660,8 @@ export class AuthService {
             { consentType: 'privacy', policyVersion: PRIVACY_POLICY_VERSION, ipAddress: context.ipAddress, userAgent: context.userAgent },
           ],
         });
+
+    this.assertAccountActive(account);
 
     const sessionAccount = await this.resolveSessionAccount(account.id);
     const updatedSessionAccount = await this.accounts.updateLastLogin(sessionAccount.id, new Date());
@@ -732,7 +735,14 @@ export class AuthService {
     if (!resolved) {
       throw new NotFoundAccountError();
     }
+    this.assertAccountActive(resolved);
     return resolved;
+  }
+
+  private assertAccountActive(account: Pick<AccountRecord, 'lifecycleStatus'>): void {
+    if (account.lifecycleStatus && account.lifecycleStatus !== 'active') {
+      throw new ForbiddenException('계정 종료가 진행 중이거나 완료되어 로그인할 수 없습니다.');
+    }
   }
 
   private async collectConnectedAccountIds(seedAccountId: string): Promise<Set<string>> {
@@ -831,19 +841,20 @@ export class AuthService {
 
   private async findPasswordAccountsByEmail(email: string): Promise<AccountRecord[]> {
     const accounts = await this.accounts.listAccountsByEmail(email);
-    return accounts.filter((account) => Boolean(account.passwordHash));
+    return accounts.filter((account) => (!account.lifecycleStatus || account.lifecycleStatus === 'active') && Boolean(account.passwordHash));
   }
 
   private async createEmailVerification(
     accountId: string,
     email: string,
+    store: Pick<Prisma.TransactionClient, 'emailVerification'> | PrismaService = this.prisma,
   ): Promise<PendingEmailVerification> {
     const token = this.generateToken();
     const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS);
-    await this.prisma.emailVerification.deleteMany({
+    await store.emailVerification.deleteMany({
       where: { accountId },
     });
-    const record = await this.prisma.emailVerification.create({
+    const record = await store.emailVerification.create({
       data: {
         token: hashAuthToken(token),
         accountId,
@@ -882,13 +893,14 @@ export class AuthService {
   private async createPasswordReset(
     accountId: string,
     email: string,
+    store: Pick<Prisma.TransactionClient, 'passwordReset'> | PrismaService = this.prisma,
   ): Promise<PendingPasswordReset> {
     const token = this.generateToken();
     const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
-    await this.prisma.passwordReset.deleteMany({
+    await store.passwordReset.deleteMany({
       where: { OR: [{ accountId }, { email }] },
     });
-    const record = await this.prisma.passwordReset.create({
+    const record = await store.passwordReset.create({
       data: {
         token: hashAuthToken(token),
         accountId,

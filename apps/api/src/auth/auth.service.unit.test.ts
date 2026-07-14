@@ -48,10 +48,15 @@ test('password change atomically clears pending reset tokens', async () => {
   const operations: string[] = [];
   const prisma = {
     account: {
+      findMany: async () => [{ id: accountId, canonicalAccountId: null }],
+      count: async () => 1,
       update: (input: unknown) => {
         operations.push('password');
         return { kind: 'password', input };
       },
+    },
+    accountLink: {
+      findMany: async () => [],
     },
     passwordReset: {
       deleteMany: (input: unknown) => {
@@ -59,8 +64,9 @@ test('password change atomically clears pending reset tokens', async () => {
         return { kind: 'reset-tokens', input };
       },
     },
-    $transaction: async (queries: unknown[]) => {
-      assert.equal(queries.length, 2);
+    $queryRaw: async () => [{ id: accountId }],
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => {
+      return callback(prisma);
     },
   };
   const service = new AuthService(
@@ -194,6 +200,13 @@ test('auth fallback logs never include verification or password reset tokens', a
     listAccountsByEmail: async () => [account],
   };
   const prisma = {
+    account: {
+      findMany: async () => [{ id: accountId, canonicalAccountId: null }],
+      count: async () => 1,
+    },
+    accountLink: {
+      findMany: async () => [],
+    },
     emailVerification: {
       deleteMany: async () => ({ count: 0 }),
       create: async () => ({
@@ -211,6 +224,10 @@ test('auth fallback logs never include verification or password reset tokens', a
         token: resetToken,
         expiresAt: new Date('2030-01-01T00:00:00.000Z'),
       }),
+    },
+    $queryRaw: async () => [{ id: accountId }],
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => {
+      return callback(prisma);
     },
   };
   const emailService = { isEnabled: () => false };

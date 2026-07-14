@@ -19,6 +19,7 @@ import type {
 } from '@minewiki/schemas';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
+import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import {
   DiscordMinecraftLinkRepository,
   GuildChannelSettingsRepository,
@@ -92,6 +93,10 @@ export class VerifyService {
   isInternalBotToken(headerValue: string | undefined): boolean {
     const expected = this.config.getOptional('INTERNAL_BOT_API_TOKEN');
     return Boolean(expected && headerValue === `Bearer ${expected}`);
+  }
+
+  claimGuildOwnership(guildId: string, accountId: string): Promise<void> {
+    return this.guildSettings.claimOwnerIfUnset(guildId, accountId);
   }
 
   assertPluginSyncToken(headerValue: string | undefined): void {
@@ -201,36 +206,32 @@ export class VerifyService {
     }
     const minecraftName = ownedIdentity.playerName;
     await this.assertDiscordVerifyLinkConflicts(session, minecraftUuid);
-    const result = await this.prisma.discordVerificationSession.updateMany({
-      where: { id: session.id, status: 'pending' },
-      data: {
-        status: 'sync_pending',
+    await this.ensureGuild(session.guildId, new Date());
+    const updated = await withActiveCanonicalAccountGroup(this.prisma, [accountId], async (tx) => {
+      const result = await tx.discordVerificationSession.updateMany({
+        where: { id: session.id, status: 'pending' },
+        data: {
+          status: 'sync_pending', accountId, minecraftUuid, minecraftName, completedAt: new Date(),
+          eventLog: [
+            ...(Array.isArray(session.eventLog) ? session.eventLog : []),
+            { type: 'completed', at: new Date().toISOString(), accountId, minecraftUuid }
+          ]
+        }
+      });
+      if (result.count !== 1) throw new ConflictException('Discord verification session is already completed.');
+      const stored = await tx.discordVerificationSession.findUnique({ where: { id: session.id } });
+      if (!stored) throw new NotFoundException('Discord verification session not found.');
+      await this.discordMinecraftLinks.persistVerifiedLink({
+        sessionId: stored.id,
+        guildId: stored.guildId,
+        channelId: stored.channelId,
+        discordUserId: stored.requesterDiscordId,
         accountId,
         minecraftUuid,
         minecraftName,
-        completedAt: new Date(),
-        eventLog: [
-          ...(Array.isArray(session.eventLog) ? session.eventLog : []),
-          {
-            type: 'completed',
-            at: new Date().toISOString(),
-            accountId,
-            minecraftUuid
-          }
-        ]
-      }
+      }, tx);
+      return stored;
     });
-    if (result.count !== 1) {
-      throw new ConflictException('Discord verification session is already completed.');
-    }
-    const updated = await this.prisma.discordVerificationSession.findUnique({
-      where: { id: session.id }
-    });
-    if (!updated) {
-      throw new NotFoundException('Discord verification session not found.');
-    }
-
-    await this.persistDiscordVerification(updated, accountId, minecraftUuid, minecraftName);
 
     await this.events.track('discord.verify.completed', {
       sessionId: updated.id,
@@ -366,30 +367,6 @@ export class VerifyService {
       return;
     }
     await this.syncQueue.add('sync', job, { jobId: `discord-verify:${job.sessionId}` });
-  }
-
-  private async persistDiscordVerification(
-    session: {
-      id: string;
-      guildId: string;
-      channelId: string;
-      requesterDiscordId: string;
-    },
-    accountId: string,
-    minecraftUuid: string,
-    minecraftName: string
-  ): Promise<void> {
-    const now = new Date();
-    await this.ensureGuild(session.guildId, now);
-    await this.discordMinecraftLinks.persistVerifiedLink({
-      sessionId: session.id,
-      guildId: session.guildId,
-      channelId: session.channelId,
-      discordUserId: session.requesterDiscordId,
-      accountId,
-      minecraftUuid,
-      minecraftName
-    });
   }
 
   private assertCompletionToken(expectedHash: string | null, token: string): void {

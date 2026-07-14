@@ -19,6 +19,7 @@ import { BusinessEventService } from '../events/business-event.service';
 import { PrismaService } from '../common/prisma.service';
 import { Prisma } from '@prisma/client';
 import { fetchWithTimeout } from '../common/http/external-fetch';
+import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 
 const MICROSOFT_TOKEN_URL =
   'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
@@ -188,29 +189,22 @@ export class MinecraftService {
       lastVerifiedAt: new Date().toISOString()
     };
 
-    const clusterAccountIds = await this.resolveCanonicalAccountIds(payload.userId);
-
-    const existingIdentity = await this.prisma.minecraftIdentity.findFirst({
-      where: {
-        uuid: identity.uuid,
-        accountId: { notIn: clusterAccountIds }
-      },
-      select: { accountId: true }
-    });
-    if (existingIdentity) {
-      throw new ConflictException(
-        'Minecraft identity is already linked to another MineWiki account.'
-      );
-    }
-
     try {
-      await this.prisma.$transaction([
-        this.prisma.minecraftIdentity.deleteMany({
+      await withActiveCanonicalAccountGroup(this.prisma, [payload.userId], async (tx, group) => {
+        const clusterAccountIds = [...group.accountIds];
+        const existingIdentity = await tx.minecraftIdentity.findFirst({
+          where: { uuid: identity.uuid, accountId: { notIn: clusterAccountIds } },
+          select: { accountId: true },
+        });
+        if (existingIdentity) {
+          throw new ConflictException('Minecraft identity is already linked to another MineWiki account.');
+        }
+        await tx.minecraftIdentity.deleteMany({
           where: {
             accountId: { in: clusterAccountIds, not: payload.userId }
           }
-        }),
-        this.prisma.minecraftIdentity.upsert({
+        });
+        await tx.minecraftIdentity.upsert({
           where: { accountId: payload.userId },
           update: {
             uuid: identity.uuid,
@@ -225,8 +219,8 @@ export class MinecraftService {
             msOwned: identity.msOwned,
             lastVerifiedAt: new Date(identity.lastVerifiedAt)
           }
-        })
-      ]);
+        });
+      });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException(

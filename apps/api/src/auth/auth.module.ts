@@ -8,7 +8,11 @@ import { SessionModule } from '../session/session.module';
 import { OAuthFlowService } from './oauth-flow.service';
 import { EmailService } from './email.service';
 import { FileModule } from '../file/file.module';
-import { DiscordMinecraftLinkRepository } from '../verify/guild.repositories';
+import { DiscordMinecraftLinkRepository, GuildSettingsRepository } from '../verify/guild.repositories';
+import { AccountDeletionService } from './account-deletion.service';
+import { AccountDeletionController } from './account-deletion.controller';
+import { AccountDeletionAdminController } from './account-deletion-admin.controller';
+import { AccountDeletionInternalController } from './account-deletion-internal.controller';
 
 @Module({
   imports: [SessionModule, FileModule],
@@ -18,9 +22,11 @@ import { DiscordMinecraftLinkRepository } from '../verify/guild.repositories';
     AccountSeparationService,
     OAuthFlowService,
     EmailService,
-    DiscordMinecraftLinkRepository
+    DiscordMinecraftLinkRepository,
+    GuildSettingsRepository,
+    AccountDeletionService
   ],
-  controllers: [AuthController, AccountConflictController],
+  controllers: [AuthController, AccountConflictController, AccountDeletionController, AccountDeletionAdminController, AccountDeletionInternalController],
   exports: [AuthService, AccountSeparationService, OAuthFlowService, EmailService]
 })
 export class AuthModule {}

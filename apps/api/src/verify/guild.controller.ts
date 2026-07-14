@@ -83,7 +83,9 @@ export class GuildController {
     @Req() request: FastifyRequest
   ) {
     if (!this.verifyService.isInternalBotToken(authorization)) {
-      await this.guildAccess.assertCanManageGuild(requireSession(request), guildId);
+      const session = requireSession(request);
+      await this.guildAccess.assertCanManageGuild(session, guildId);
+      await this.verifyService.claimGuildOwnership(guildId, session.userId);
     }
     const payload = guildSettingsSchema.parse(body) as GuildSettingsRequest;
     return this.verifyService.updateGuildSettings(guildId, payload);

@@ -279,6 +279,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@minewiki/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@minewiki/config':
         specifier: workspace:*
         version: link:../../packages/config

@@ -1,0 +1,267 @@
+import { after, before, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { Algorithm, hash } from '@node-rs/argon2';
+import { PrismaService } from '../common/prisma.service';
+import { AccountDeletionService } from './account-deletion.service';
+import type { SessionPayload } from '../session/session.service';
+import { SessionService } from '../session/session.service';
+
+const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+if (!hasDatabase) {
+  test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});
+} else {
+  const prisma = new PrismaService();
+  const service = new AccountDeletionService(prisma);
+  before(async () => prisma.$connect());
+  after(async () => prisma.$disconnect());
+
+  async function createGroup() {
+    const firstId = randomUUID();
+    const secondId = randomUUID();
+    const passwordHash = await hash('CurrentPW1!', { memoryCost: 19456, timeCost: 2, parallelism: 1, outputLen: 32, algorithm: Algorithm.Argon2id });
+    await prisma.account.createMany({ data: [
+      { id: firstId, canonicalAccountId: firstId, provider: 'email', providerUserId: `delete-${firstId}@example.com`, email: `delete-${firstId}@example.com`, emailVerified: true, passwordHash },
+      { id: secondId, canonicalAccountId: firstId, provider: 'discord', providerUserId: `delete-${secondId}`, emailVerified: true },
+    ] });
+    await prisma.accountLink.createMany({ data: [
+      { primaryAccountId: firstId, linkedAccountId: secondId },
+      { primaryAccountId: secondId, linkedAccountId: firstId },
+    ] });
+    return { firstId, secondId, session: { sessionId: randomUUID(), userId: firstId, isElevated: false, authenticatedAt: new Date().toISOString() } satisfies SessionPayload };
+  }
+
+  async function cleanup(accountIds: string[], serverId?: string) {
+    const deletionRequests = await prisma.accountDeletionRequest.findMany({ where: { canonicalAccountId: accountIds[0] }, select: { id: true } });
+    if (deletionRequests.length) await prisma.accountDeletionDiscordRevocation.deleteMany({ where: { deletionRequestId: { in: deletionRequests.map((row) => row.id) } } });
+    await prisma.auditEvent.deleteMany({ where: { OR: [{ actorAccountId: { in: accountIds } }, { subjectType: 'account_deletion_request', metadata: { path: ['canonicalAccountId'], equals: accountIds[0] } }] } }).catch(() => undefined);
+    await prisma.accountDeletionRequest.deleteMany({ where: { canonicalAccountId: accountIds[0] } });
+    if (serverId) await prisma.server.delete({ where: { id: serverId } }).catch(() => undefined);
+    await prisma.accountLink.deleteMany({ where: { OR: [{ primaryAccountId: { in: accountIds } }, { linkedAccountId: { in: accountIds } }] } });
+    await prisma.account.deleteMany({ where: { id: { in: accountIds } } });
+  }
+
+  test('owned assets block termination before credentials or canonical account state change', async () => {
+    const group = await createGroup();
+    const server = await prisma.server.create({ data: {
+      ownerAccountId: group.secondId, name: `Owned ${randomUUID()}`, joinHost: 'owned.example.com', joinPort: 25565,
+      edition: 'java', supportedVersions: ['1.21'], tags: ['test'], shortDescription: 'owned', longDescription: 'owned server',
+    } });
+    await prisma.session.create({ data: { id: group.session.sessionId, accountId: group.firstId, token: randomUUID(), issuedAt: new Date(), expiresAt: new Date(Date.now() + 60_000), tokenVersion: 1, lastActiveAt: new Date() } });
+    try {
+      await assert.rejects(() => service.requestDeletion({ session: group.session, password: 'CurrentPW1!' }), (error: unknown) => {
+        const response = (error as { getResponse?: () => unknown }).getResponse?.() as { code?: string; blockers?: Array<{ type: string; id: string }> };
+        return response?.code === 'ACCOUNT_DELETION_ASSET_TRANSFER_REQUIRED' && response.blockers?.some((item) => item.type === 'server' && item.id === server.id) === true;
+      });
+      assert.equal(await prisma.session.count({ where: { accountId: group.firstId } }), 1);
+      assert.equal(await prisma.account.count({ where: { id: { in: [group.firstId, group.secondId] }, lifecycleStatus: 'active' } }), 2);
+    } finally { await cleanup([group.firstId, group.secondId], server.id); }
+  });
+
+  test('request revokes the entire canonical group and concurrent cancellation succeeds only once', async () => {
+    const group = await createGroup();
+    await prisma.session.createMany({ data: [
+      { id: group.session.sessionId, accountId: group.firstId, token: randomUUID(), issuedAt: new Date(), expiresAt: new Date(Date.now() + 60_000), tokenVersion: 1, lastActiveAt: new Date() },
+      { id: randomUUID(), accountId: group.secondId, token: randomUUID(), issuedAt: new Date(), expiresAt: new Date(Date.now() + 60_000), tokenVersion: 1, lastActiveAt: new Date() },
+    ] });
+    await prisma.oAuthCredential.create({ data: { accountId: group.secondId, provider: 'discord', providerUserId: `delete-${group.secondId}`, accessToken: 'secret' } });
+    await prisma.passwordReset.create({ data: { token: randomUUID(), accountId: group.firstId, email: `delete-${group.firstId}@example.com`, expiresAt: new Date(Date.now() + 60_000) } });
+    try {
+      const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
+      assert.equal(await prisma.account.count({ where: { id: { in: [group.firstId, group.secondId] }, lifecycleStatus: 'deletion_pending' } }), 2);
+      assert.equal(await prisma.session.count({ where: { accountId: { in: [group.firstId, group.secondId] } } }), 0);
+      assert.equal(await prisma.oAuthCredential.count({ where: { accountId: group.secondId } }), 0);
+      assert.equal(await prisma.passwordReset.count({ where: { accountId: group.firstId } }), 0);
+      await assert.rejects(() => new SessionService(prisma).issueSession({ userId: group.secondId }), /활성 상태가 아닙니다/);
+
+      const results = await Promise.allSettled([service.cancel(requested.cancelToken), service.cancel(requested.cancelToken)]);
+      assert.equal(results.filter((item) => item.status === 'fulfilled').length, 1);
+      assert.equal(await prisma.account.count({ where: { id: { in: [group.firstId, group.secondId] }, lifecycleStatus: 'active' } }), 2);
+    } finally { await cleanup([group.firstId, group.secondId]); }
+  });
+
+  test('a password account always requires its current password even with a fresh elevated session', async () => {
+    const group = await createGroup();
+    try {
+      await assert.rejects(() => service.requestDeletion({
+        session: { ...group.session, isElevated: true, authenticatedAt: new Date().toISOString() }
+      }), /현재 비밀번호/);
+      assert.equal(await prisma.account.count({ where: { id: { in: [group.firstId, group.secondId] }, lifecycleStatus: 'active' } }), 2);
+    } finally { await cleanup([group.firstId, group.secondId]); }
+  });
+
+  test('cancellation email keeps the one-time token in a URL fragment', async () => {
+    const group = await createGroup();
+    let deliveredUrl = '';
+    const email = {
+      async sendAccountDeletionCancellationEmail(payload: { cancelUrl: string }) { deliveredUrl = payload.cancelUrl; },
+      logDeliveryFailure() {},
+    };
+    const configuredService = new AccountDeletionService(
+      prisma,
+      undefined,
+      email as never,
+      { getOptional: () => 'https://minewiki.kr' } as never,
+    );
+    try {
+      const requested = await configuredService.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
+      assert.ok(deliveredUrl.startsWith('https://minewiki.kr/account-deletion/cancel#token='));
+      assert.equal(new URL(deliveredUrl).search, '');
+      assert.equal(new URL(deliveredUrl).hash.slice('#token='.length), requested.cancelToken);
+      await configuredService.cancel(requested.cancelToken);
+    } finally { await cleanup([group.firstId, group.secondId]); }
+  });
+
+  test('creator and registrant authority are explicit account termination blockers', async () => {
+    const group = await createGroup();
+    const now = new Date();
+    const profile = await prisma.wikiProfile.create({ data: {
+      accountId: group.firstId, username: `delete-${randomUUID()}`, displayName: '종료 테스트', status: 'active', createdAt: now, updatedAt: now,
+    } });
+    const space = await prisma.wikiSpace.create({ data: {
+      code: `delete-${randomUUID()}`, name: '종료 테스트 공간', title: '종료 테스트 공간', rootNamespaceCode: 'wiki', rootPath: `delete-${randomUUID()}`, status: 'active', createdBy: profile.id, createdAt: now, updatedAt: now,
+    } });
+    const serverWiki = await prisma.serverWiki.create({ data: {
+      spaceId: space.id, serverName: '종료 테스트 서버 위키', slug: `delete-${randomUUID()}`, status: 'active', createdBy: profile.id, createdAt: now, updatedAt: now,
+    } });
+    const modWiki = await prisma.modWiki.create({ data: {
+      spaceId: space.id, modName: '종료 테스트 모드', slug: `delete-${randomUUID()}`, status: 'active', verifiedBy: profile.id, createdAt: now, updatedAt: now,
+    } });
+    const server = await prisma.server.create({ data: {
+      registrantAccountId: group.secondId, name: `Registered ${randomUUID()}`, joinHost: 'registered.example.com', joinPort: 25565,
+      edition: 'java', supportedVersions: ['1.21'], tags: ['test'], shortDescription: 'registered', longDescription: 'registered server',
+    } });
+    const claim = await prisma.serverClaimMethod.create({ data: {
+      serverId: server.id, accountId: group.firstId, method: 'dns', token: randomUUID(), issuedAt: now, status: 'pending',
+    } });
+    try {
+      await assert.rejects(() => service.requestDeletion({ session: group.session, password: 'CurrentPW1!' }), (error: unknown) => {
+        const response = (error as { getResponse?: () => unknown }).getResponse?.() as { blockers?: Array<{ type: string }> };
+        const types = new Set(response?.blockers?.map((item) => item.type));
+        return ['wiki_space', 'server_wiki', 'mod_wiki', 'server_registration', 'server_claim'].every((type) => types.has(type));
+      });
+    } finally {
+      await prisma.serverClaimMethod.delete({ where: { id: claim.id } }).catch(() => undefined);
+      await prisma.server.delete({ where: { id: server.id } }).catch(() => undefined);
+      await prisma.modWiki.delete({ where: { id: modWiki.id } }).catch(() => undefined);
+      await prisma.serverWiki.delete({ where: { id: serverWiki.id } }).catch(() => undefined);
+      await prisma.wikiSpace.delete({ where: { id: space.id } }).catch(() => undefined);
+      await prisma.wikiProfile.delete({ where: { id: profile.id } }).catch(() => undefined);
+      await cleanup([group.firstId, group.secondId]);
+    }
+  });
+
+  test('an OAuth-only account can request deletion only within 15 minutes of a new login', async () => {
+    const group = await createGroup();
+    await prisma.account.update({ where: { id: group.firstId }, data: { passwordHash: null } });
+    try {
+      await assert.rejects(() => service.requestDeletion({
+        session: { ...group.session, authenticatedAt: new Date(Date.now() - 16 * 60_000).toISOString() },
+      }), /다시 로그인한 뒤 15분/);
+      const requested = await service.requestDeletion({ session: group.session });
+      assert.equal(requested.status, 'requested');
+      await service.cancel(requested.cancelToken);
+    } finally { await cleanup([group.firstId, group.secondId]); }
+  });
+
+  test('due processing preserves public review and vote rows while removing account identifiers', async () => {
+    const group = await createGroup();
+    const minecraftUuid = randomUUID();
+    const discordUserId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const guildId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const verificationSessionId = randomUUID();
+    const eventId = randomUUID().replaceAll('-', '');
+    await prisma.minecraftIdentity.create({ data: { accountId: group.secondId, uuid: minecraftUuid, playerName: 'Player', msOwned: true, lastVerifiedAt: new Date() } });
+    await prisma.lunaGuild.create({ data: { guildId, verifiedRoleId: 'role-1', createdAt: new Date(), updatedAt: new Date() } });
+    await prisma.lunaDiscordAccountLink.create({ data: { discordUserId, minecraftUuid, minecraftName: 'Player', lastVerifiedAt: new Date(), updatedAt: new Date() } });
+    await prisma.lunaGuildVerification.create({ data: { guildId, discordUserId, minecraftUuid, status: 'verified', verifiedAt: new Date() } });
+    await prisma.lunaPrivacyConsent.create({ data: { discordUserId, consentType: 'verify', consentedAt: new Date(), updatedAt: new Date() } });
+    await prisma.lunaEvent.create({ data: { eventId, eventType: 'minecraft_verified', guildId, discordUserId, minecraftUuid, minecraftName: 'Player', occurredAt: new Date().toISOString(), createdAt: new Date() } });
+    const pluginEvent = await prisma.serverPluginSyncEvent.create({ data: { discordUserId, minecraftUuid, playerName: 'Player', action: 'verified', payload: { accountId: group.firstId } } });
+    await prisma.discordVerificationSession.create({ data: {
+      id: verificationSessionId, status: 'synced', guildId, channelId: 'channel-1', requesterDiscordId: discordUserId,
+      accountId: group.firstId, minecraftUuid, minecraftName: 'Player', roleId: 'role-1', eventLog: { discordUserId },
+      expiresAt: new Date(Date.now() + 60_000), completedAt: new Date(),
+    } });
+    const server = await prisma.server.create({ data: {
+      name: `Public ${randomUUID()}`, joinHost: 'public.example.com', joinPort: 25565, edition: 'java',
+      supportedVersions: ['1.21'], tags: ['test'], shortDescription: 'public', longDescription: 'public server',
+    } });
+    const vote = await prisma.vote.create({ data: { serverId: server.id, accountId: group.secondId, minecraftUuid, username: 'Player', usernameNormalized: 'player', ipAddress: '192.0.2.1', votedAt: new Date() } });
+    const review = await prisma.serverReview.create({ data: { serverId: server.id, authorAccountId: group.firstId, authorDisplayName: 'Player', rating: 5, body: '보존할 리뷰', tags: [], evidenceMinecraftUuid: minecraftUuid, evidenceVoteId: vote.id, evidenceVerifiedAt: new Date(), evidencePolicyVersion: 'v1' } });
+    try {
+      const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
+      await prisma.accountDeletionRequest.update({ where: { id: requested.id }, data: { scheduledFor: new Date(Date.now() - 1000) } });
+      const completed = await service.process(requested.id, randomUUID(), 'retention test');
+      assert.equal(completed.status, 'completed');
+      const [storedReview, storedVote] = await Promise.all([
+        prisma.serverReview.findUnique({ where: { id: review.id } }), prisma.vote.findUnique({ where: { id: vote.id } }),
+      ]);
+      assert.equal(storedReview?.body, '보존할 리뷰');
+      assert.equal(storedReview?.authorDisplayName, '탈퇴한 사용자');
+      assert.equal(storedReview?.isAnonymous, true);
+      assert.equal(storedReview?.evidenceMinecraftUuid, null);
+      assert.equal(storedReview?.evidenceVoteId, null);
+      assert.equal(storedVote?.accountId, null);
+      assert.equal(storedVote?.minecraftUuid, null);
+      assert.equal(storedVote?.ipAddress, null);
+      const storedSession = await prisma.discordVerificationSession.findUnique({ where: { id: verificationSessionId } });
+      assert.equal(storedSession?.accountId, null);
+      assert.equal(storedSession?.minecraftUuid, null);
+      assert.equal(storedSession?.status, 'revoke_pending');
+      assert.match(storedSession?.requesterDiscordId ?? '', /^deleted:/u);
+      assert.equal(await prisma.accountDeletionDiscordRevocation.count({ where: { deletionRequestId: requested.id, discordUserId } }), 2);
+      assert.equal(await prisma.lunaDiscordAccountLink.count({ where: { discordUserId } }), 0);
+      assert.equal(await prisma.lunaGuildVerification.count({ where: { guildId, discordUserId } }), 0);
+      assert.equal(await prisma.lunaPrivacyConsent.count({ where: { discordUserId } }), 0);
+      assert.equal((await prisma.serverPluginSyncEvent.findUnique({ where: { id: pluginEvent.id } }))?.minecraftUuid, '00000000-0000-0000-0000-000000000000');
+      assert.equal((await prisma.lunaEvent.findUnique({ where: { eventId } }))?.minecraftUuid, '00000000-0000-0000-0000-000000000000');
+      assert.equal(await prisma.account.count({ where: { id: { in: [group.firstId, group.secondId] }, lifecycleStatus: 'anonymized', email: null, passwordHash: null } }), 2);
+    } finally {
+      await prisma.discordVerificationSession.deleteMany({ where: { id: verificationSessionId } });
+      await prisma.serverPluginSyncEvent.deleteMany({ where: { id: pluginEvent.id } });
+      await prisma.lunaEvent.deleteMany({ where: { eventId } });
+      await prisma.lunaPrivacyConsent.deleteMany({ where: { discordUserId } });
+      await prisma.lunaGuildVerification.deleteMany({ where: { guildId, discordUserId } });
+      await prisma.lunaDiscordAccountLink.deleteMany({ where: { discordUserId } });
+      await prisma.lunaGuild.deleteMany({ where: { guildId } });
+      await cleanup([group.firstId, group.secondId], server.id);
+    }
+  });
+
+  test('concurrent due processors claim once and emit one completion audit event', async () => {
+    const group = await createGroup();
+    try {
+      const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
+      await prisma.accountDeletionRequest.update({ where: { id: requested.id }, data: { scheduledFor: new Date(Date.now() - 1000) } });
+      const results = await Promise.allSettled([
+        service.process(requested.id, randomUUID(), 'first processor'),
+        service.process(requested.id, randomUUID(), 'second processor'),
+      ]);
+      assert.equal(results.filter((item) => item.status === 'rejected').length, 0);
+      assert.equal((await prisma.accountDeletionRequest.findUnique({ where: { id: requested.id } }))?.status, 'completed');
+      assert.equal(await prisma.auditEvent.count({ where: { subjectType: 'account_deletion_request', subjectId: requested.id, action: 'account.deletion.completed' } }), 1);
+      assert.equal(await prisma.account.count({ where: { id: { in: [group.firstId, group.secondId] }, lifecycleStatus: 'anonymized' } }), 2);
+    } finally { await cleanup([group.firstId, group.secondId]); }
+  });
+
+  test('automatic processing includes only stale processing claims in its recovery query', async () => {
+    let receivedWhere: unknown;
+    const recoveryService = new AccountDeletionService({
+      accountDeletionRequest: {
+        async findMany(input: { where: unknown }) { receivedWhere = input.where; return [{ id: 'stale-processing' }]; },
+      },
+    } as never);
+    Object.assign(recoveryService, {
+      async process(requestId: string) {
+        assert.equal(requestId, 'stale-processing');
+        return { status: 'completed' };
+      },
+    });
+    assert.deepEqual(await recoveryService.processDue('internal:worker', 1), { processed: 1, blocked: 0, failed: 0 });
+    const serialized = JSON.stringify(receivedWhere);
+    assert.match(serialized, /"status":"processing"/u);
+    assert.match(serialized, /"updatedAt":\{"lte":"/u);
+  });
+}

@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../common/prisma.service';
 import { RoleService } from '../roles/role.service';
 import { policyConsentStatus } from './policy-consent';
+import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 
 interface SessionRecord {
   readonly sessionId: string;
@@ -79,24 +80,42 @@ export class SessionService {
     const expiresAt = new Date(
       issuedAt.getTime() + (options.ttlSeconds ?? DEFAULT_SESSION_TTL_SECONDS) * 1000
     );
-    const policyConsent = await this.getPolicyConsentStatus(options.userId);
-
-    await this.prisma.session.create({
-      data: {
-        id: sessionId,
-        accountId: options.userId,
-        issuedAt,
-        expiresAt,
-        token: hashSessionToken(token),
-        tokenVersion: 1,
-        isElevated: Boolean(options.elevated),
-        ipAddress: options.ipAddress ?? null,
-        userAgent: options.userAgent ?? null,
-        lastActiveAt: issuedAt,
-        termsPolicyVersion: policyConsent.terms.acceptedVersion,
-        privacyPolicyVersion: policyConsent.privacy.acceptedVersion,
-      }
-    });
+    const policyConsent = await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [options.userId],
+      async (tx, group) => {
+        const consents = await tx.accountConsent.findMany({
+          where: {
+            accountId: { in: [...group.accountIds] },
+            consentType: { in: ['terms', 'privacy'] },
+          },
+          orderBy: { consentedAt: 'desc' },
+          select: { consentType: true, policyVersion: true },
+        });
+        const status = policyConsentStatus(
+          consents.find((item) => item.consentType === 'terms')?.policyVersion,
+          consents.find((item) => item.consentType === 'privacy')?.policyVersion,
+        );
+        await tx.session.create({
+          data: {
+            id: sessionId,
+            accountId: options.userId,
+            issuedAt,
+            expiresAt,
+            token: hashSessionToken(token),
+            tokenVersion: 1,
+            isElevated: Boolean(options.elevated),
+            ipAddress: options.ipAddress ?? null,
+            userAgent: options.userAgent ?? null,
+            lastActiveAt: issuedAt,
+            termsPolicyVersion: status.terms.acceptedVersion,
+            privacyPolicyVersion: status.privacy.acceptedVersion,
+          },
+        });
+        return status;
+      },
+      { inactiveError: () => new UnauthorizedException('계정이 활성 상태가 아닙니다.') },
+    );
 
     return {
       sessionId,
@@ -202,9 +221,10 @@ export class SessionService {
     presentedToken?: string,
   ): Promise<SessionRecord | undefined> {
     const record = await this.prisma.session.findUnique({
-      where: { id: sessionId }
+      where: { id: sessionId },
+      include: { account: { select: { lifecycleStatus: true } } }
     });
-    if (!record) {
+    if (!record || (record.account && record.account.lifecycleStatus !== 'active')) {
       return undefined;
     }
     if (record.expiresAt.getTime() < Date.now()) {
