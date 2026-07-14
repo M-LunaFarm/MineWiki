@@ -270,21 +270,21 @@ function HeaderSearch({
       placeholder="서버와 위키 통합 검색"
       className={`${mobile ? 'w-full' : 'w-64'} h-10 rounded-xl pl-10 pr-3 text-sm transition-colors focus:border-[#14c794]/60 focus:outline-none focus:ring-2 focus:ring-[#14c794]/15 ${variant === 'paper' ? 'border border-[#aaa79e] bg-white/35 text-[#222720] placeholder:text-[#777b73]' : 'border border-white/[0.08] bg-white/[0.03] text-white placeholder:text-slate-500 focus:bg-white/[0.05]'}`}
     />
-    {open ? <div id={listId} role="listbox" onMouseDown={(event) => event.preventDefault()} className={`absolute inset-x-0 top-12 z-50 overflow-hidden rounded-xl border shadow-2xl ${variant === 'paper' ? 'border-[#aaa79e] bg-[#faf9f4] text-[#202820]' : 'border-white/10 bg-[#10151b] text-slate-100'}`}>
+    {open ? <div id={listId} role="listbox" onMouseDown={(event) => event.preventDefault()} className={`header-search-results absolute inset-x-0 top-12 z-50 overflow-hidden rounded-xl border shadow-2xl ${variant === 'paper' ? 'border-[#aaa79e] bg-[#faf9f4] text-[#202820]' : 'border-white/10 bg-[#10151b] text-slate-100'}`}>
       {items.map((item, index) => <Link
         id={`${listId}-${index}`}
         role="option"
         aria-selected={activeIndex === index}
         key={item.pageId}
         href={item.routePath}
-        className={`block border-b px-3 py-2.5 text-left last:border-0 ${variant === 'paper' ? 'border-[#d9d5ca] hover:bg-[#e8eee7]' : 'border-white/[0.07] hover:bg-white/[0.05]'} ${activeIndex === index ? variant === 'paper' ? 'bg-[#e8eee7]' : 'bg-emerald-300/10' : ''}`}
+        className={`header-search-result block border-b px-3 py-2.5 text-left last:border-0 ${variant === 'paper' ? 'border-[#d9d5ca] hover:bg-[#e8eee7]' : 'border-white/[0.07] hover:bg-white/[0.05]'} ${activeIndex === index ? variant === 'paper' ? 'bg-[#e8eee7]' : 'bg-emerald-300/10' : ''}`}
       >
         <span className="block truncate text-sm font-semibold">{item.displayTitle}</span>
-        <span className={`mt-0.5 block truncate text-[11px] ${variant === 'paper' ? 'text-[#697168]' : 'text-slate-500'}`}>{item.namespace}:{item.title}</span>
+        <span className={`header-search-meta mt-0.5 block truncate text-[11px] ${variant === 'paper' ? 'text-[#697168]' : 'text-slate-500'}`}>{item.namespace}:{item.title}</span>
       </Link>)}
-      {!loading && items.length === 0 ? <p className="px-3 py-3 text-xs text-slate-500">일치하는 위키 문서가 없습니다. Enter로 통합 검색합니다.</p> : null}
-      {loading ? <p className="px-3 py-3 text-xs text-slate-500">문서 찾는 중...</p> : null}
-      {exactMatch ? <p className={`border-t px-3 py-2 text-[11px] ${variant === 'paper' ? 'border-[#d9d5ca] text-[#697168]' : 'border-white/[0.07] text-slate-500'}`}>Enter를 누르면 정확히 일치하는 문서로 바로 이동합니다.</p> : null}
+      {!loading && items.length === 0 ? <p className="header-search-meta px-3 py-3 text-xs text-slate-500">일치하는 위키 문서가 없습니다. Enter로 통합 검색합니다.</p> : null}
+      {loading ? <p className="header-search-meta px-3 py-3 text-xs text-slate-500">문서 찾는 중...</p> : null}
+      {exactMatch ? <p className={`header-search-hint border-t px-3 py-2 text-[11px] ${variant === 'paper' ? 'border-[#d9d5ca] text-[#697168]' : 'border-white/[0.07] text-slate-500'}`}>Enter를 누르면 정확히 일치하는 문서로 바로 이동합니다.</p> : null}
     </div> : null}
   </form>;
 }

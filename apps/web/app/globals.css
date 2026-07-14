@@ -473,6 +473,30 @@ html[data-theme='dark'] .paper-directory > header button {
   color: #e5e9e3;
 }
 
+html[data-theme='dark'] .paper-directory > header .header-search-results {
+  border-color: rgba(148, 174, 205, 0.2);
+  background-color: #101713;
+  color: #edf2ec;
+}
+
+html[data-theme='dark'] .paper-directory > header .header-search-result {
+  border-color: rgba(148, 174, 205, 0.12);
+}
+
+html[data-theme='dark'] .paper-directory > header .header-search-result:hover,
+html[data-theme='dark'] .paper-directory > header .header-search-result[aria-selected='true'] {
+  background-color: rgba(20, 199, 148, 0.12);
+}
+
+html[data-theme='dark'] .paper-directory > header .header-search-meta,
+html[data-theme='dark'] .paper-directory > header .header-search-hint {
+  color: #9eaaa1;
+}
+
+html[data-theme='dark'] .paper-directory > header .header-search-hint {
+  border-color: rgba(148, 174, 205, 0.12);
+}
+
 html[data-theme='dark'] .paper-directory > footer {
   border-color: #3d4941;
   background-color: rgba(13, 19, 15, 0.92);
