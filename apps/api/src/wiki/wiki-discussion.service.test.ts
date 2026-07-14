@@ -39,12 +39,13 @@ function service(options: {
   comment?: { id: bigint; threadId: bigint; content: string; status: string; createdBy: bigint; createdAt: Date; updatedAt: Date | null };
   canManage?: boolean;
   onDiscuss?: () => void;
+  onThreadUpdate?: (args: unknown) => void;
 } = {}) {
   const store = {
     wikiPage: { async findUnique() { return page; } },
     wikiDiscussionThread: {
       async findUnique() { return options.thread ?? thread; },
-      async update() { return options.thread ?? thread; }
+      async update(args: unknown) { options.onThreadUpdate?.(args); return options.thread ?? thread; }
     },
     wikiDiscussionComment: {
       async findUnique() { return options.comment ?? null; },
@@ -112,6 +113,53 @@ test('non-author without page management cannot delete another comment', async (
     discussions.deleteComment(session, thread.id.toString(), '40'),
     ForbiddenException
   );
+});
+
+test('thread author without page management cannot move or delete the whole discussion', async () => {
+  const discussions = service({ canManage: false });
+  await assert.rejects(
+    discussions.moveThread(session, thread.id.toString(), '11', 'wrong page'),
+    ForbiddenException
+  );
+  await assert.rejects(
+    discussions.deleteThread(session, thread.id.toString(), 'remove thread'),
+    ForbiddenException
+  );
+});
+
+test('page manager soft-deletes a discussion without erasing its comments', async () => {
+  let update: unknown;
+  const discussions = service({ canManage: true, onThreadUpdate: (args) => { update = args; } });
+
+  const result = await discussions.deleteThread(session, thread.id.toString(), 'duplicate');
+
+  assert.deepEqual(result, { deleted: true, threadId: '30' });
+  const mutation = update as { where: { id: bigint }; data: { status: string; pinnedCommentId: bigint | null; updatedAt: Date } };
+  assert.equal(mutation.where.id, 30n);
+  assert.equal(mutation.data.status, 'deleted');
+  assert.equal(mutation.data.pinnedCommentId, null);
+  assert.ok(mutation.data.updatedAt instanceof Date);
+});
+
+test('comment raw returns exact source only after the page read check', async () => {
+  let readable = false;
+  const rawComment = {
+    id: 40n, threadId: thread.id, content: '원문 **그대로**', status: 'normal', createdBy: 20n,
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: null
+  };
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiDiscussionComment: { async findUnique() { return rawComment; } }
+  };
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async assertCanReadPage() { readable = true; } } as unknown as WikiPermissionService
+  );
+
+  assert.equal(await discussions.getCommentRaw('30', '40', null), '원문 **그대로**');
+  assert.equal(readable, true);
 });
 
 test('deleted discussion comments do not expose their former content', async () => {

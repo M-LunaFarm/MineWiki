@@ -68,6 +68,38 @@ export class WikiDiscussionController {
     return this.discussions.updateThreadTopic(session, threadId, body.title);
   }
 
+  @Patch('discussions/:threadId/page')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  move(
+    @Param('threadId') threadId: string,
+    @Body() body: { pageId?: string; reason?: string },
+    @CurrentSession() session: SessionPayload
+  ) {
+    return this.discussions.moveThread(session, threadId, body.pageId, body.reason);
+  }
+
+  @Delete('discussions/:threadId')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  remove(
+    @Param('threadId') threadId: string,
+    @Body() body: { reason?: string },
+    @CurrentSession() session: SessionPayload
+  ) {
+    return this.discussions.deleteThread(session, threadId, body.reason);
+  }
+
+  @Get('discussions/:threadId/comments/:commentId/raw')
+  @UseGuards(OptionalSessionGuard)
+  rawComment(
+    @Param('threadId') threadId: string,
+    @Param('commentId') commentId: string,
+    @Req() request: FastifyRequest
+  ): Promise<string> {
+    return this.discussions.getCommentRaw(threadId, commentId, request.sessionPayload?.userId ?? null);
+  }
+
   @Patch('discussions/:threadId/pin')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 12, ttl: 60 } })
