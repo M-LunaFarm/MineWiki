@@ -231,3 +231,19 @@ test('wiki admin service rollback creates new public revision and render cache',
   assert.equal(renderCaches.length, 1);
   assert.equal(changes.at(-1)?.changeType, 'rollback');
 });
+
+test('wiki admin rollback does not persist viewer-dependent include HTML', async () => {
+  const { service, revisions, renderCaches } = createService();
+  const source = revisions.get(100n);
+  assert.ok(source);
+  source.contentRaw = '[include(틀:권한별 안내)]';
+
+  await service.rollback({
+    pageId: '10',
+    revisionId: '100',
+    actorProfileId: 99n,
+    reason: 'include 복구'
+  });
+
+  assert.equal(renderCaches.length, 0);
+});

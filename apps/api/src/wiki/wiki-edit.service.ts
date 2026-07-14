@@ -1044,7 +1044,7 @@ export class WikiEditService {
         visibility: 'public'
       }
     });
-    if (!astContainsFile(parsed.ast)) {
+    if (!astContainsFile(parsed.ast) && parsed.includes.length === 0) {
       await tx.wikiPageRenderCache.create({
         data: {
           pageId: input.pageId,
@@ -1055,7 +1055,7 @@ export class WikiEditService {
         }
       });
     }
-    await this.wikiLinks?.replaceForRevision(tx as Prisma.TransactionClient, input.pageId, revision.id, parsed.links, parsed.categories);
+    await this.wikiLinks?.replaceForRevision(tx as Prisma.TransactionClient, input.pageId, revision.id, parsed.links, parsed.categories, parsed.includes);
     await this.notifications?.notifyWatchedRevision(tx as Prisma.TransactionClient, {
       pageId: input.pageId,
       revisionId: revision.id,

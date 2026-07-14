@@ -12,6 +12,7 @@ import {
 import { PrismaService } from '../common/prisma.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
+import { WikiIncludeService } from './wiki-include.service';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -271,7 +272,8 @@ export class WikiReadService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly wikiPermissions: WikiPermissionService,
-    @Optional() private readonly wikiLinks?: WikiLinkIndexService
+    @Optional() private readonly wikiLinks?: WikiLinkIndexService,
+    @Optional() private readonly wikiIncludes?: WikiIncludeService
   ) {}
 
   async getPage(
@@ -1561,7 +1563,14 @@ export class WikiReadService {
       revision
     });
     const parsed = parseMarkup(revision.contentRaw);
-    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links, parsed.categories).catch(() => undefined);
+    await this.wikiLinks?.replaceForRevision(
+      this.prisma,
+      page.id,
+      revision.id,
+      parsed.links,
+      parsed.categories,
+      parsed.includes
+    ).catch(() => undefined);
     if (parsed.redirectTarget && options.followRedirects) {
       const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
       const redirected = await this.getPageInternal(target.namespace, target.title, accountId, {
@@ -1579,8 +1588,18 @@ export class WikiReadService {
     }
 
     const serverWiki = await this.findServerWikiContext(namespace, page.spaceId, page.id);
-    const hasFileDependencies = collectFileNames(parsed.ast).size > 0;
-    const cache = hasFileDependencies
+    const expanded = parsed.includes.length > 0 && this.wikiIncludes
+      ? await this.wikiIncludes.expand({
+          ast: parsed.ast,
+          accountId,
+          sourcePageId: page.id,
+          sourceNamespace: namespace,
+          sourceLocalPath: page.localPath
+        })
+      : { ast: parsed.ast, includedSourceBytes: 0 };
+    const hasFileDependencies = collectFileNames(expanded.ast).size > 0;
+    const hasIncludeDependencies = parsed.includes.length > 0;
+    const cache = hasFileDependencies || hasIncludeDependencies
       ? null
       : await this.prisma.wikiPageRenderCache.findUnique({
           where: {
@@ -1590,12 +1609,15 @@ export class WikiReadService {
             }
           }
         });
-    const files = cache ? {} : await this.findRenderableFiles(parsed.ast);
-    const html = cache?.html ?? renderDocument(parsed.ast, {
+    const files = cache ? {} : await this.findRenderableFiles(expanded.ast);
+    const html = cache?.html ?? renderDocument(expanded.ast, {
       files,
       internalLinkBasePath: serverWiki ? `/server/${encodeURIComponent(serverWiki.context.slug)}` : undefined,
     });
-    if (!cache && !hasFileDependencies) {
+    if (Buffer.byteLength(html, 'utf8') > 2 * 1024 * 1024) {
+      throw new BadRequestException('Rendered wiki document exceeds the size limit.');
+    }
+    if (!cache && !hasFileDependencies && !hasIncludeDependencies) {
       await this.prisma.wikiPageRenderCache
         .create({
           data: {
@@ -1878,7 +1900,7 @@ function collectFileNames(ast: AstNode[], output = new Set<string>()): Set<strin
   for (const node of ast) {
     if (node.type === 'file') {
       output.add(node.fileName);
-    } else if (node.type === 'folding') {
+    } else if (node.type === 'folding' || (node.type === 'include' && node.children)) {
       collectFileNames(node.children, output);
     }
   }

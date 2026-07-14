@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
 import type { WikiPermissionService } from './wiki-permission.service';
+import type { WikiIncludeService } from './wiki-include.service';
 import { buildServerWikiNavigation, buildServerWikiPagePath, buildServerWikiToolPath, encodeWikiSearchCursor, parseWikiSearchCursor, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
 
 test('server wiki navigation removes the duplicated space slug', () => {
@@ -522,6 +523,7 @@ function createReadService(options: {
   readonly onCacheLookup?: (where: unknown) => void;
   readonly onCacheCreate?: (data: unknown) => void;
   readonly files?: ReadonlyArray<{ filename: string; publicPath: string; mimeType: string; originalName: string | null }>;
+  readonly includeService?: WikiIncludeService;
 }) {
   const now = new Date('2026-07-05T00:00:00.000Z');
   const prisma = {
@@ -591,7 +593,9 @@ function createReadService(options: {
   };
   return new WikiReadService(
     prisma as unknown as PrismaService,
-    permissions as unknown as WikiPermissionService
+    permissions as unknown as WikiPermissionService,
+    undefined,
+    options.includeService
   );
 }
 
@@ -662,6 +666,41 @@ test('wiki read ignores persistent render caches for file-dependent revisions', 
   assert.equal(createdCache, false);
   assert.match(page.html, /<img src="\/files\/logo\.png"/);
   assert.equal(page.html.includes('파일 없음'), false);
+});
+
+test('wiki read never reuses or stores persistent caches for include-dependent revisions', async () => {
+  let lookedUpCache = false;
+  let createdCache = false;
+  const service = createReadService({
+    cacheHtml: '<p>비공개 포함 결과</p>',
+    contentRaw: '[include(틀:권한별 안내)]',
+    onCacheLookup() { lookedUpCache = true; },
+    onCacheCreate() { createdCache = true; }
+  });
+
+  const page = await service.getPage('main', '대문');
+
+  assert.equal(lookedUpCache, false);
+  assert.equal(createdCache, false);
+  assert.equal(page.html.includes('비공개 포함 결과'), false);
+  assert.match(page.html, /포함 문서는 저장한 뒤/);
+});
+
+test('wiki read rejects expanded include output beyond the rendered HTML limit', async () => {
+  const includeService = {
+    async expand() {
+      return {
+        ast: [{ type: 'paragraph' as const, children: [{ type: 'text' as const, text: '&'.repeat(500_000) }] }],
+        includedSourceBytes: 500_000
+      };
+    }
+  } as unknown as WikiIncludeService;
+  const service = createReadService({
+    contentRaw: '[include(틀:큰 문서)]',
+    includeService
+  });
+
+  await assert.rejects(service.getPage('main', '대문'), /exceeds the size limit/);
 });
 
 function createRedirectReadService(pages: Record<string, { id: bigint; title: string; contentRaw: string }>) {

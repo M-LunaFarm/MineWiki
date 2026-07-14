@@ -36,12 +36,41 @@ test('link index normalizes and deduplicates generic wiki targets', async () => 
   assert.ok(calls.every((item) => item.sourceRevisionId === 20n));
 });
 
-test('server wiki links without a namespace stay in the current server space', async () => {
-  const { store, calls } = createStore('server', 'mine-server/시작하기');
-  await new WikiLinkIndexService().replaceForRevision(store, 10n, 20n, ['규칙', 'mod:공용 모드']);
+test('link index skips unresolved template placeholders', async () => {
+  const { store, calls } = createStore('template', '서버 안내');
+  await new WikiLinkIndexService().replaceForRevision(
+    store,
+    10n,
+    20n,
+    ['가이드/@문서@', '공통'],
+    ['@분류=기타@', '틀'],
+    []
+  );
 
   assert.deepEqual(
-    calls.map((item) => [item.targetNamespaceCode, item.targetSlug]),
-    [['server', 'mine-server/규칙'], ['mod', '공용_모드']]
+    calls.map((item) => [item.targetNamespaceCode, item.targetSlug, item.linkType]),
+    [['main', '공통', 'link'], ['category', '틀', 'category']]
+  );
+});
+
+test('server wiki links without a namespace stay in the current server space', async () => {
+  const { store, calls } = createStore('server', 'mine-server/시작하기');
+  await new WikiLinkIndexService().replaceForRevision(
+    store,
+    10n,
+    20n,
+    ['규칙', 'mod:공용 모드'],
+    [],
+    ['틀:공지', '시작하기']
+  );
+
+  assert.deepEqual(
+    calls.map((item) => [item.targetNamespaceCode, item.targetSlug, item.linkType]),
+    [
+      ['server', 'mine-server/규칙', 'link'],
+      ['mod', '공용_모드', 'link'],
+      ['template', '공지', 'include'],
+      ['server', 'mine-server/시작하기', 'include']
+    ]
   );
 });

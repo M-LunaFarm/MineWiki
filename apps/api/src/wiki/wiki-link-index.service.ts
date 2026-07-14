@@ -11,7 +11,8 @@ export class WikiLinkIndexService {
     pageId: bigint,
     revisionId: bigint,
     links: readonly string[],
-    categories: readonly string[] = []
+    categories: readonly string[] = [],
+    includes: readonly string[] = []
   ): Promise<void> {
     const page = await store.wikiPage.findUnique({
       where: { id: pageId },
@@ -26,6 +27,7 @@ export class WikiLinkIndexService {
 
     const normalized = new Map<string, { targetNamespaceCode: string; targetSlug: string; linkType: string }>();
     for (const target of links) {
+      if (containsIncludePlaceholder(target)) continue;
       const resolved = resolveTarget(namespace.code, page.localPath, target);
       if (!resolved.targetSlug || resolved.targetSlug.length > 255 || resolved.targetNamespaceCode.length > 32) {
         continue;
@@ -33,12 +35,23 @@ export class WikiLinkIndexService {
       normalized.set(`link:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, { ...resolved, linkType: 'link' });
     }
     for (const category of categories) {
+      if (containsIncludePlaceholder(category)) continue;
       const targetSlug = slugifyTitle(category);
       if (!targetSlug || targetSlug.length > 255) continue;
       normalized.set(`category:category:${targetSlug}`, {
         targetNamespaceCode: 'category',
         targetSlug,
         linkType: 'category'
+      });
+    }
+    for (const include of includes) {
+      const resolved = resolveTarget(namespace.code, page.localPath, include);
+      if (!resolved.targetSlug || resolved.targetSlug.length > 255 || resolved.targetNamespaceCode.length > 32) {
+        continue;
+      }
+      normalized.set(`include:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, {
+        ...resolved,
+        linkType: 'include'
       });
     }
     await store.wikiPageLink.deleteMany({ where: { sourcePageId: pageId } });
@@ -55,6 +68,10 @@ export class WikiLinkIndexService {
       skipDuplicates: true
     });
   }
+}
+
+function containsIncludePlaceholder(value: string) {
+  return /@[A-Za-z0-9가-힣_]+(?:=[^@\n]*)?@/u.test(value);
 }
 
 function resolveTarget(namespaceCode: string, localPath: string, target: string) {

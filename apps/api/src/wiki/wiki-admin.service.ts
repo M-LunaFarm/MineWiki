@@ -558,16 +558,18 @@ export class WikiAdminService {
         visibility: 'public'
       }
     });
-    await this.prisma.wikiPageRenderCache.create({
-      data: {
-        pageId: page.id,
-        revisionId: revision.id,
-        rendererVersion: WIKI_RENDERER_VERSION,
-        html: renderDocument(parsed.ast),
-        createdAt: now
-      }
-    });
-    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links, parsed.categories);
+    if (parsed.includes.length === 0) {
+      await this.prisma.wikiPageRenderCache.create({
+        data: {
+          pageId: page.id,
+          revisionId: revision.id,
+          rendererVersion: WIKI_RENDERER_VERSION,
+          html: renderDocument(parsed.ast),
+          createdAt: now
+        }
+      });
+    }
+    await this.wikiLinks?.replaceForRevision(this.prisma, page.id, revision.id, parsed.links, parsed.categories, parsed.includes);
     await this.prisma.wikiPage.update({
       where: { id: page.id },
       data: {
