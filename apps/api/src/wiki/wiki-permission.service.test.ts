@@ -359,6 +359,51 @@ test('owner-only section accepts linked server owner', async () => {
   assert.equal(allowed, true);
 });
 
+test('page ACL management defaults to page and space managers', async () => {
+  const service = createService();
+  const target = page({ createdBy: 100n });
+
+  assert.equal((await service.canManagePageAcl({ actor: actor({ profileId: 100n }), page: target })).allowed, true);
+  assert.equal((await service.canManagePageAcl({ actor: actor({ profileId: 200n }), page: target })).allowed, false);
+});
+
+test('explicit ACL rule can grant or deny page ACL management', async () => {
+  let allowed = true;
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        return input.action === 'acl'
+          ? { matched: true, allowed, reason: allowed ? 'delegated_acl_manager' : 'acl_manager_denied' }
+          : { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+  const manager = actor({ profileId: 100n });
+  const ordinary = actor({ profileId: 200n });
+  const target = page({ createdBy: 100n });
+
+  assert.equal((await service.canManagePageAcl({ actor: ordinary, page: target })).allowed, true);
+  allowed = false;
+  assert.equal((await service.canManagePageAcl({ actor: manager, page: target })).allowed, false);
+});
+
+test('elevated wiki admin cannot be locked out by a page ACL deny rule', async () => {
+  const service = createService({
+    acl: {
+      async evaluate() {
+        return { matched: true, allowed: false, reason: 'deny_everyone' };
+      }
+    } as WikiAclService
+  });
+
+  const decision = await service.canManagePageAcl({
+    actor: actor({ profileId: 200n, permissions: ['wiki.admin'] }),
+    page: page({ createdBy: 100n })
+  });
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.reason, 'admin_acl');
+});
+
 test('active user can create in a basic wiki space', async () => {
   const service = createService();
   const decision = await service.canCreatePage({

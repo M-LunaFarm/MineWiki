@@ -340,6 +340,65 @@ export class WikiAdminService {
     return { deleted: true, ruleId: id.toString() };
   }
 
+  async reorderPageAclRules(input: {
+    readonly pageId: string;
+    readonly action?: string;
+    readonly ruleIds?: readonly string[];
+    readonly actorProfileId: bigint;
+    readonly reason?: string | null;
+  }) {
+    const pageId = this.parseBigIntId(input.pageId, 'pageId');
+    const action = input.action?.trim() ?? '';
+    if (!ACL_ACTIONS.has(action)) throw new BadRequestException('Invalid ACL action.');
+    const requestedIds = input.ruleIds ?? [];
+    if (requestedIds.length === 0 || requestedIds.length > 500) {
+      throw new BadRequestException('ruleIds must contain between 1 and 500 rules.');
+    }
+    const ids = requestedIds.map((id) => this.parseBigIntId(id, 'ruleId'));
+    if (new Set(ids.map(String)).size !== ids.length) {
+      throw new BadRequestException('ruleIds must not contain duplicates.');
+    }
+    const current = await this.prisma.aclRule.findMany({
+      where: { targetType: 'page', targetId: pageId, action },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }]
+    });
+    const currentIds = new Set(current.map((rule) => rule.id.toString()));
+    if (current.length !== ids.length || ids.some((id) => !currentIds.has(id.toString()))) {
+      throw new BadRequestException('The ACL rule set changed. Refresh and try again.');
+    }
+    const oldRules = current.map(toAclRuleSummary);
+    const reason = input.reason?.trim().slice(0, 1000) || null;
+    const now = new Date();
+    const reordered = await this.prisma.$transaction(async (tx) => {
+      const rules = [];
+      for (let index = 0; index < ids.length; index += 1) {
+        rules.push(await tx.aclRule.update({
+          where: { id: ids[index] },
+          data: { sortOrder: (index + 1) * 10, updatedAt: now }
+        }));
+      }
+      await tx.aclChangeLog.create({
+        data: {
+          targetType: 'page',
+          targetId: pageId,
+          actionType: 'reorder',
+          oldRuleJson: oldRules,
+          newRuleJson: rules.map(toAclRuleSummary),
+          reason,
+          changedBy: input.actorProfileId,
+          createdAt: now
+        }
+      });
+      return rules;
+    });
+    await this.auditAdmin('wiki.acl_reorder', {
+      actorProfileId: input.actorProfileId,
+      pageId,
+      metadata: { action, ruleIds: ids.map(String), reason }
+    });
+    return reordered.map(toAclRuleSummary);
+  }
+
   async updateProtection(input: {
     readonly pageId: string;
     readonly protectionLevel?: string;

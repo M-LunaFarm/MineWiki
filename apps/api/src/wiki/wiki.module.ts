@@ -13,6 +13,8 @@ import { WikiDiscussionService } from './wiki-discussion.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiNotificationController } from './wiki-notification.controller';
 import { WikiNotificationService } from './wiki-notification.service';
+import { WikiPageAclController } from './wiki-page-acl.controller';
+import { WikiPageAclService } from './wiki-page-acl.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
@@ -21,8 +23,8 @@ import { WikiWatchService } from './wiki-watch.service';
 
 @Module({
   imports: [SessionModule, EventsModule],
-  controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiWatchController, WikiEditRequestController, WikiNotificationController],
-  providers: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiDiscussionService, WikiWatchService, WikiNotificationService, WikiReadService, WikiEditService, WikiEditRequestService],
+  controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPageAclController],
+  providers: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiDiscussionService, WikiWatchService, WikiNotificationService, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService],
   exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiPermissionService, WikiLinkIndexService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}

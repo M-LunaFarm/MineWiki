@@ -469,6 +469,49 @@ export class WikiPermissionService {
     return this.canManagePageArea(input.store ?? this.prisma, input.actor, input.page);
   }
 
+  async assertCanManagePageAcl(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const decision = await this.canManagePageAcl(input);
+    if (!decision.allowed) {
+      throw new ForbiddenException(`Wiki page ACL management is not allowed: ${decision.reason}`);
+    }
+  }
+
+  async canManagePageAcl(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPermissionDecision> {
+    const store = input.store ?? this.prisma;
+    const { actor, page } = input;
+    if (!actor) return deny('actor_required');
+    if (!ACTIVE_PROFILE_STATUSES.has(actor.status)) return deny('actor_not_active');
+    if (!page || !PUBLIC_PAGE_STATUSES.has(page.status)) return deny('page_not_manageable');
+    const space = await store.wikiSpace.findUnique({
+      where: { id: page.spaceId },
+      select: { id: true, status: true }
+    });
+    if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) return deny('space_not_active');
+    if (this.isAdminActor(actor)) return allow('admin_acl');
+
+    const acl = await this.evaluateAcl('acl', actor, {
+      pageId: page.id,
+      spaceId: page.spaceId,
+      namespaceId: page.namespaceId,
+      title: page.title,
+      createdBy: page.createdBy
+    }, store);
+    if (acl.matched) {
+      return acl.allowed ? allow(acl.reason) : deny(acl.reason);
+    }
+    return await this.canManagePageArea(store, actor, page)
+      ? allow('page_manager_acl')
+      : deny('page_manager_required');
+  }
+
   async canUsePageAction(input: {
     readonly accountId?: string | null;
     readonly action: WikiAclAction;
