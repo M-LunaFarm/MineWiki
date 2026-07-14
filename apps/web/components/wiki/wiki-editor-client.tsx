@@ -289,6 +289,9 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       const alt = normalizeAltText(file.name);
       setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${uploaded.filename}|섬네일|${alt}]]\n`);
       setBlockingErrors([]);
+      setFeedback(uploaded.wikiDocumentPath
+        ? `이미지를 삽입했습니다. 파일 문서: ${uploaded.wikiDocumentPath}`
+        : '이미지를 삽입했습니다.');
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : '이미지 업로드 중 오류가 발생했습니다.');
     } finally {

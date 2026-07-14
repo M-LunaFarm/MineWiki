@@ -561,6 +561,7 @@ export interface UploadedFileMetadata {
   readonly license: string | null;
   readonly sourceUrl: string | null;
   readonly sourceText: string | null;
+  readonly wikiDocumentPath: string | null;
   readonly status: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -1074,7 +1075,7 @@ export async function uploadWikiImage(input: {
   license: string;
   sourceUrl?: string;
   sourceText?: string;
-}): Promise<{ url: string; publicPath: string; id: string; filename: string }> {
+}): Promise<{ url: string; publicPath: string; id: string; filename: string; wikiDocumentPath: string | null }> {
   const response = await fetch(`${apiBaseUrl()}/v1/files/images`, {
     method: 'POST',
     credentials: 'include',
@@ -1100,6 +1101,7 @@ export async function uploadWikiImage(input: {
     filename: String(body.filename),
     url: String(body.url ?? body.publicPath),
     publicPath: String(body.publicPath ?? body.url),
+    wikiDocumentPath: typeof body.wikiDocumentPath === 'string' ? body.wikiDocumentPath : null,
   };
 }
 
