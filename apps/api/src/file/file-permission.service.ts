@@ -57,6 +57,11 @@ export class FilePermissionService {
     if (resource.type === 'wiki_page') {
       const page = await this.prisma.wikiPage.findUnique({ where: { id: BigInt(resource.id) } });
       await this.wikiPermissions.assertCanEditPage({ actor, page });
+      await this.wikiPermissions.assertCanUsePageAction({
+        accountId: session.userId,
+        action: 'upload_file',
+        page
+      });
       return;
     }
     const space = await this.prisma.wikiSpace.findUnique({ where: { id: BigInt(resource.id) } });
@@ -76,6 +81,11 @@ export class FilePermissionService {
       createdBy: space.createdBy
     };
     await this.wikiPermissions.assertCanEditPage({ actor, page: syntheticPage });
+    await this.wikiPermissions.assertCanUsePageAction({
+      accountId: session.userId,
+      action: 'upload_file',
+      page: syntheticPage
+    });
   }
 
   assertCanDelete(file: FilePermissionSubject | null, session: SessionPayload): asserts file is FilePermissionSubject {

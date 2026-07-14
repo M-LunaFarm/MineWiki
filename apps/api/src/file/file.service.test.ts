@@ -20,6 +20,9 @@ interface TestFile {
   publicPath: string;
   usageContext: string;
   visibility: string;
+  license: string | null;
+  sourceUrl: string | null;
+  sourceText: string | null;
   linkedResourceType: string | null;
   linkedResourceId: string | null;
   status: string;
@@ -54,8 +57,9 @@ function session(userId: string, isElevated = false, permissions: string[] = [])
   };
 }
 
-function createService() {
+function createService(options: { denyUploadFile?: boolean } = {}) {
   const files = new Map<string, TestFile>();
+  const actionCalls: string[] = [];
   const wikiPages = new Map<bigint, { id: bigint; status: string }>([
     [7n, { id: 7n, status: 'normal' }]
   ]);
@@ -84,6 +88,9 @@ function createService() {
           id: `file-${files.size + 1}`,
           status: 'active',
           visibility: 'public',
+          license: null,
+          sourceUrl: null,
+          sourceText: null,
           linkedResourceType: null,
           linkedResourceId: null,
           createdAt: now,
@@ -156,6 +163,10 @@ function createService() {
     async assertCanEditPage({ page }: { page: { status: string } | null }) {
       if (!page || page.status !== 'normal') throw new Error('Wiki page not found.');
     },
+    async assertCanUsePageAction({ action }: { action: string }) {
+      actionCalls.push(action);
+      if (options.denyUploadFile && action === 'upload_file') throw new Error('Wiki page not found.');
+    },
     async assertCanReadPage({ page }: { page: { status: string } | null }) {
       if (!page || page.status !== 'normal') throw new Error('Wiki page not found.');
     },
@@ -167,24 +178,31 @@ function createService() {
   return {
     service: new FileService(prisma as never, uploads as never, filePermissions),
     files,
-    wikiPages
+    wikiPages,
+    actionCalls
   };
 }
 
 test('file service stores canonical image metadata', async () => {
-  const { service } = createService();
+  const { service, actionCalls } = createService();
   const uploaded = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'wiki.png',
-    usageContext: 'wiki_editor'
-  });
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7'
+  }, session('account-1'));
 
   assert.equal(uploaded.id, 'file-1');
   assert.equal(uploaded.filename, 'stored.webp');
   assert.equal(uploaded.originalName, 'wiki.png');
   assert.equal(uploaded.ownerAccountId, 'account-1');
   assert.equal(uploaded.usageContext, 'wiki_editor');
-  assert.equal(uploaded.visibility, 'public');
+  assert.equal(uploaded.visibility, 'restricted');
+  assert.equal(uploaded.license, 'self-created');
+  assert.equal(uploaded.sourceText, '업로더 직접 제작');
+  assert.deepEqual(actionCalls, ['upload_file']);
   assert.equal(uploaded.url, 'upload://stored.webp');
 });
 
@@ -193,38 +211,38 @@ test('file service list hides private and unlisted files from non-owners', async
   const publicFile = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'public.png',
-    usageContext: 'wiki_editor'
+    usageContext: 'general'
   });
   await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'private.png',
-    usageContext: 'wiki_editor',
+    usageContext: 'general',
     visibility: 'private'
   });
   await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'shared-by-link.png',
-    usageContext: 'wiki_editor',
+    usageContext: 'general',
     visibility: 'unlisted'
   });
 
-  const anonymous = await service.listFiles({ usageContext: 'wiki_editor' });
+  const anonymous = await service.listFiles({ usageContext: 'general' });
   assert.deepEqual(anonymous.map((file) => file.filename), [publicFile.filename]);
 
   const otherMember = await service.listFiles({
-    usageContext: 'wiki_editor',
+    usageContext: 'general',
     session: session('account-2')
   });
   assert.deepEqual(otherMember.map((file) => file.filename), [publicFile.filename]);
 
-  const owner = await service.listFiles({ usageContext: 'wiki_editor', session: session('account-1') });
+  const owner = await service.listFiles({ usageContext: 'general', session: session('account-1') });
   assert.equal(owner.length, 3);
 
-  const elevated = await service.listFiles({ usageContext: 'wiki_editor', session: session('admin', true) });
+  const elevated = await service.listFiles({ usageContext: 'general', session: session('admin', true) });
   assert.equal(elevated.length, 3);
 
   const fileAdmin = await service.listFiles({
-    usageContext: 'wiki_editor',
+    usageContext: 'general',
     session: session('file-admin', false, ['file.admin'])
   });
   assert.equal(fileAdmin.length, 3);
@@ -299,6 +317,8 @@ test('restricted wiki file follows linked page read permission', async () => {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'restricted.png',
     usageContext: 'wiki_editor',
+    license: 'cc-by-sa-4.0',
+    sourceUrl: 'https://example.com/source.png',
     visibility: 'restricted',
     linkedResourceType: 'wiki_page',
     linkedResourceId: '7'
@@ -307,6 +327,8 @@ test('restricted wiki file follows linked page read permission', async () => {
   assert.equal(uploaded.visibility, 'restricted');
   assert.equal(uploaded.linkedResourceType, 'wiki_page');
   assert.equal(uploaded.linkedResourceId, '7');
+  assert.equal(uploaded.license, 'cc-by-sa-4.0');
+  assert.equal(uploaded.sourceUrl, 'https://example.com/source.png');
   await assert.doesNotReject(() => service.getFile(uploaded.id, null));
 
   wikiPages.set(7n, { id: 7n, status: 'hidden' });
@@ -324,4 +346,46 @@ test('restricted upload fails closed without a linked wiki resource', async () =
     }, session('account-1')),
     /require a linked wiki page or space/
   );
+});
+
+test('wiki uploads require supported license metadata before storage', async () => {
+  const { service, files } = createService();
+  await assert.rejects(
+    () => service.createImage('account-1', {
+      data: 'data:image/png;base64,aW1hZ2U=',
+      filename: 'missing-license.png',
+      usageContext: 'wiki_editor',
+      linkedResourceType: 'wiki_page',
+      linkedResourceId: '7'
+    }, session('account-1')),
+    /license is required/
+  );
+  await assert.rejects(
+    () => service.createImage('account-1', {
+      data: 'data:image/png;base64,aW1hZ2U=',
+      filename: 'missing-source.png',
+      usageContext: 'wiki_editor',
+      license: 'cc-by-4.0',
+      linkedResourceType: 'wiki_page',
+      linkedResourceId: '7'
+    }, session('account-1')),
+    /source URL is required/
+  );
+  assert.equal(files.size, 0);
+});
+
+test('wiki uploads enforce upload_file ACL separately from edit access', async () => {
+  const { service, files } = createService({ denyUploadFile: true });
+  await assert.rejects(
+    () => service.createImage('account-1', {
+      data: 'data:image/png;base64,aW1hZ2U=',
+      filename: 'denied.png',
+      usageContext: 'wiki_editor',
+      license: 'self-created',
+      linkedResourceType: 'wiki_page',
+      linkedResourceId: '7'
+    }, session('account-1')),
+    /Wiki page not found/
+  );
+  assert.equal(files.size, 0);
 });

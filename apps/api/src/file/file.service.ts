@@ -16,6 +16,9 @@ export interface FileImageUploadRequest {
   readonly filename?: string;
   readonly usageContext?: string;
   readonly visibility?: string;
+  readonly license?: string;
+  readonly sourceUrl?: string;
+  readonly sourceText?: string;
   readonly linkedResourceType?: string;
   readonly linkedResourceId?: string;
 }
@@ -25,6 +28,9 @@ export interface FileImageBufferUploadRequest {
   readonly filename?: string;
   readonly usageContext?: string;
   readonly visibility?: string;
+  readonly license?: string;
+  readonly sourceUrl?: string;
+  readonly sourceText?: string;
   readonly linkedResourceType?: string;
   readonly linkedResourceId?: string;
 }
@@ -42,6 +48,9 @@ export interface FileMetadataResponse {
   readonly publicPath: string;
   readonly usageContext: string;
   readonly visibility: string;
+  readonly license: string | null;
+  readonly sourceUrl: string | null;
+  readonly sourceText: string | null;
   readonly linkedResourceType: string | null;
   readonly linkedResourceId: string | null;
   readonly status: string;
@@ -104,21 +113,30 @@ export class FileService {
     request: FileImageUploadRequest | FileImageBufferUploadRequest,
     session?: SessionPayload | null
   ): Promise<{
+    usageContext: string;
     visibility: ImageVisibility;
+    license: string | null;
+    sourceUrl: string | null;
+    sourceText: string | null;
     linkedResource: { type: 'wiki_page' | 'wiki_space'; id: string } | null;
   }> {
-    const visibility = normalizeVisibility(request.visibility);
+    const usageContext = normalizeUsageContext(request.usageContext);
+    const visibility = usageContext === 'wiki_editor' ? 'restricted' : normalizeVisibility(request.visibility);
     const linkedResource = normalizeLinkedResource(
       request.linkedResourceType,
       request.linkedResourceId,
       visibility
     );
+    const metadata = normalizeWikiFileMetadata(request, usageContext);
+    if (usageContext === 'wiki_editor' && !linkedResource) {
+      throw new BadRequestException('Wiki file uploads require a linked wiki page or space.');
+    }
     if (linkedResource && session) {
       await this.permissions.assertCanLink(linkedResource, session);
     } else if (linkedResource) {
       throw new BadRequestException('Linked file uploads require an authenticated session.');
     }
-    return { visibility, linkedResource };
+    return { usageContext, visibility, ...metadata, linkedResource };
   }
 
   private async createImageRecord(
@@ -126,11 +144,15 @@ export class FileService {
     request: FileImageUploadRequest | FileImageBufferUploadRequest,
     stored: StoredImage,
     policy: {
+      usageContext: string;
       visibility: ImageVisibility;
+      license: string | null;
+      sourceUrl: string | null;
+      sourceText: string | null;
       linkedResource: { type: 'wiki_page' | 'wiki_space'; id: string } | null;
     }
   ): Promise<FileImageUploadResponse> {
-    const { visibility, linkedResource } = policy;
+    const { usageContext, visibility, license, sourceUrl, sourceText, linkedResource } = policy;
     const created = await this.prisma.uploadedFile.create({
       data: {
         ownerAccountId: accountId,
@@ -143,8 +165,11 @@ export class FileService {
         sha256: stored.hash,
         storagePath: stored.storagePath,
         publicPath: stored.publicPath,
-        usageContext: normalizeUsageContext(request.usageContext),
+        usageContext,
         visibility,
+        license,
+        sourceUrl,
+        sourceText,
         linkedResourceType: linkedResource?.type ?? null,
         linkedResourceId: linkedResource?.id ?? null
       }
@@ -331,6 +356,9 @@ function toFileMetadata(file: {
   publicPath: string;
   usageContext: string;
   visibility: string;
+  license: string | null;
+  sourceUrl: string | null;
+  sourceText: string | null;
   linkedResourceType: string | null;
   linkedResourceId: string | null;
   status: string;
@@ -350,10 +378,67 @@ function toFileMetadata(file: {
     publicPath: file.publicPath,
     usageContext: file.usageContext,
     visibility: file.visibility,
+    license: file.license,
+    sourceUrl: file.sourceUrl,
+    sourceText: file.sourceText,
     linkedResourceType: file.linkedResourceType,
     linkedResourceId: file.linkedResourceId,
     status: file.status,
     createdAt: file.createdAt.toISOString(),
     updatedAt: file.updatedAt.toISOString()
   };
+}
+
+const WIKI_FILE_LICENSES = new Set([
+  'self-created',
+  'cc-by-4.0',
+  'cc-by-sa-4.0',
+  'cc0-1.0',
+  'public-domain',
+  'fair-use',
+  'permission-granted'
+]);
+
+function normalizeWikiFileMetadata(
+  request: FileImageUploadRequest | FileImageBufferUploadRequest,
+  usageContext: string
+): { license: string | null; sourceUrl: string | null; sourceText: string | null } {
+  if (usageContext !== 'wiki_editor') {
+    return { license: null, sourceUrl: null, sourceText: null };
+  }
+  const license = request.license?.trim().toLowerCase() ?? '';
+  if (!WIKI_FILE_LICENSES.has(license)) {
+    throw new BadRequestException('A supported wiki file license is required.');
+  }
+  const sourceUrl = normalizeSourceUrl(request.sourceUrl);
+  if (license !== 'self-created' && !sourceUrl) {
+    throw new BadRequestException('A source URL is required for files not created by the uploader.');
+  }
+  const sourceText = request.sourceText?.trim();
+  if (sourceText && sourceText.length > 255) {
+    throw new BadRequestException('sourceText is too long.');
+  }
+  return {
+    license,
+    sourceUrl,
+    sourceText: sourceText || (license === 'self-created' ? '업로더 직접 제작' : null)
+  };
+}
+
+function normalizeSourceUrl(value?: string): string | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (normalized.length > 1024) throw new BadRequestException('sourceUrl is too long.');
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new BadRequestException('sourceUrl must be a valid HTTP(S) URL.');
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new BadRequestException('sourceUrl must be a valid HTTP(S) URL.');
+  }
+  parsed.username = '';
+  parsed.password = '';
+  return parsed.toString();
 }

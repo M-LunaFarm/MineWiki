@@ -37,6 +37,9 @@ export class FileController {
       filename?: string;
       usageContext?: string;
       visibility?: string;
+      license?: string;
+      sourceUrl?: string;
+      sourceText?: string;
       linkedResourceType?: string;
       linkedResourceId?: string;
     }
