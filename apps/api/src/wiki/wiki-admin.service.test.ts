@@ -81,11 +81,13 @@ function createService() {
   ]);
   const changes: TestRecentChange[] = [];
   const renderCaches: Array<Record<string, unknown>> = [];
+  const operations: string[] = [];
   const prisma = {
     async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) {
       return callback(prisma);
     },
     async $queryRaw() {
+      operations.push('page:lock');
       return [{ id: page.id }];
     },
     wikiRecentChange: {
@@ -93,6 +95,7 @@ function createService() {
         return changes;
       },
       async create(args: { data: Record<string, unknown> }) {
+        operations.push('recent:create');
         changes.push({ id: BigInt(changes.length + 1), ...args.data });
         return changes[changes.length - 1];
       }
@@ -105,6 +108,7 @@ function createService() {
         return args.where.id === page.id ? page : null;
       },
       async update(args: { where: { id: bigint }; data: Record<string, unknown> }) {
+        operations.push('page:update');
         assert.equal(args.where.id, page.id);
         Object.assign(page, args.data);
         return page;
@@ -134,6 +138,7 @@ function createService() {
         return list[0] ?? null;
       },
       async update(args: { where: { id: bigint }; data: Partial<TestRevision> }) {
+        operations.push('revision:update');
         const revision = revisions.get(args.where.id);
         assert.ok(revision);
         Object.assign(revision, args.data);
@@ -157,7 +162,8 @@ function createService() {
     page,
     revisions,
     changes,
-    renderCaches
+    renderCaches,
+    operations
   };
 }
 
@@ -260,7 +266,7 @@ test('wiki admin service updates page protection and records recent change', asy
 });
 
 test('wiki admin service hides current revision and falls back to previous public revision', async () => {
-  const { service, page, revisions, changes } = createService();
+  const { service, page, revisions, changes, operations } = createService();
 
   const result = await service.updateRevisionVisibility({
     revisionId: '101',
@@ -272,6 +278,24 @@ test('wiki admin service hides current revision and falls back to previous publi
   assert.equal(revisions.get(101n)?.visibility, 'hidden');
   assert.equal(page.currentRevisionId, 100n);
   assert.equal(changes.at(-1)?.changeType, 'revision_visibility');
+  assert.ok(operations.indexOf('page:lock') < operations.indexOf('revision:update'));
+  assert.ok(operations.indexOf('revision:update') < operations.indexOf('page:update'));
+  assert.ok(operations.indexOf('page:update') < operations.indexOf('recent:create'));
+});
+
+test('wiki admin visibility change never overwrites a newer current revision', async () => {
+  const { service, page, revisions, operations } = createService();
+  page.currentRevisionId = 999n;
+
+  await service.updateRevisionVisibility({
+    revisionId: '101',
+    visibility: 'hidden',
+    actorProfileId: 99n
+  });
+
+  assert.equal(revisions.get(101n)?.visibility, 'hidden');
+  assert.equal(page.currentRevisionId, 999n);
+  assert.equal(operations.includes('page:update'), false);
 });
 
 test('wiki admin service rollback creates new public revision and render cache', async () => {

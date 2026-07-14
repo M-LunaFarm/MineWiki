@@ -465,53 +465,62 @@ export class WikiAdminService {
     if (!visibility || !ALLOWED_REVISION_VISIBILITIES.has(visibility)) {
       throw new BadRequestException('Invalid wiki revision visibility.');
     }
-    const revision = await this.prisma.wikiPageRevision.findUnique({ where: { id: revisionId } });
-    if (!revision) {
-      throw new NotFoundException('Wiki revision not found.');
-    }
-    const updated = await this.prisma.wikiPageRevision.update({
+    const located = await this.prisma.wikiPageRevision.findUnique({
       where: { id: revisionId },
-      data: { visibility }
+      select: { pageId: true }
     });
-    const page = await this.prisma.wikiPage.findUnique({ where: { id: revision.pageId } });
-    if (page?.currentRevisionId === revisionId && visibility !== 'public') {
-      const fallback = await this.prisma.wikiPageRevision.findFirst({
-        where: {
-          pageId: revision.pageId,
-          visibility: 'public',
-          id: { not: revisionId }
-        },
-        orderBy: [{ revisionNo: 'desc' }]
+    if (!located) throw new NotFoundException('Wiki revision not found.');
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockPageForRevision(tx, located.pageId);
+      const [revision, page] = await Promise.all([
+        tx.wikiPageRevision.findUnique({ where: { id: revisionId } }),
+        tx.wikiPage.findUnique({ where: { id: located.pageId } })
+      ]);
+      if (!revision) throw new NotFoundException('Wiki revision not found.');
+      if (!page) throw new NotFoundException('Wiki page not found.');
+      const updated = await tx.wikiPageRevision.update({
+        where: { id: revisionId },
+        data: { visibility }
       });
-      await this.prisma.wikiPage.update({
-        where: { id: revision.pageId },
-        data: {
-          currentRevisionId: fallback?.id ?? null,
-          updatedAt: new Date()
-        }
-      });
-    }
-    if (page) {
+      if (page.currentRevisionId === revisionId && visibility !== 'public') {
+        const fallback = await tx.wikiPageRevision.findFirst({
+          where: {
+            pageId: revision.pageId,
+            visibility: 'public',
+            id: { not: revisionId }
+          },
+          orderBy: [{ revisionNo: 'desc' }]
+        });
+        await tx.wikiPage.update({
+          where: { id: revision.pageId },
+          data: {
+            currentRevisionId: fallback?.id ?? null,
+            updatedAt: new Date()
+          }
+        });
+      }
+      const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
       await this.insertRecentChange({
         pageId: page.id,
         revisionId: updated.id,
         actorId: input.actorProfileId,
         changeType: 'revision_visibility',
         title: page.title,
-        namespaceCode: await this.namespaceCode(page.namespaceId),
+        namespaceCode: namespace?.code ?? 'main',
         summary: input.reason?.trim() || `리비전 표시 상태 변경: ${visibility}`
-      });
-      await this.auditAdmin('wiki.revision_visibility', {
-        actorProfileId: input.actorProfileId,
-        pageId: page.id,
-        revisionId: updated.id,
-        metadata: {
-          visibility,
-          reason: input.reason?.trim() || null
-        }
-      });
-    }
-    return { revisionId: updated.id.toString(), visibility: updated.visibility };
+      }, tx);
+      return { updated, page };
+    });
+    await this.auditAdmin('wiki.revision_visibility', {
+      actorProfileId: input.actorProfileId,
+      pageId: result.page.id,
+      revisionId: result.updated.id,
+      metadata: {
+        visibility,
+        reason: input.reason?.trim() || null
+      }
+    });
+    return { revisionId: result.updated.id.toString(), visibility: result.updated.visibility };
   }
 
   async rollback(input: {
