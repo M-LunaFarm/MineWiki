@@ -30,6 +30,8 @@ export type WikiAclAction =
   | 'history'
   | 'raw'
   | 'discuss'
+  | 'create_thread'
+  | 'write_thread_comment'
   | 'upload_file'
   | 'acl';
 

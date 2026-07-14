@@ -27,6 +27,12 @@ export class WikiDiscussionController {
     return this.discussions.listThreads(pageId, request.sessionPayload?.userId ?? null);
   }
 
+  @Get('pages/:pageId/discussion-permissions')
+  @UseGuards(OptionalSessionGuard)
+  permissions(@Param('pageId') pageId: string, @Req() request: FastifyRequest): Promise<{ readonly canCreateThread: boolean }> {
+    return this.discussions.getPageDiscussionPermissions(pageId, request.sessionPayload ?? null);
+  }
+
   @Get('discussions/:threadId')
   @UseGuards(OptionalSessionGuard)
   get(

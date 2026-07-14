@@ -17,7 +17,7 @@ const ALLOWED_PROTECTION_LEVELS = new Set([
 ]);
 const ALLOWED_REVISION_VISIBILITIES = new Set(['public', 'hidden', 'deleted', 'private']);
 const ACL_TARGET_TYPES = new Set(['site', 'namespace', 'space', 'page']);
-const ACL_ACTIONS = new Set(['read', 'edit', 'create', 'move', 'delete', 'revert', 'history', 'raw', 'discuss', 'upload_file', 'acl']);
+const ACL_ACTIONS = new Set(['read', 'edit', 'create', 'move', 'delete', 'revert', 'history', 'raw', 'discuss', 'create_thread', 'write_thread_comment', 'upload_file', 'acl']);
 const ACL_EFFECTS = new Set(['allow', 'deny']);
 const ACL_SUBJECT_TYPES = new Set(['perm', 'user', 'group', 'aclgroup', 'role']);
 

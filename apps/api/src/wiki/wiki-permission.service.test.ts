@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { ForbiddenException } from '@nestjs/common';
 import type { PrismaService } from '../common/prisma.service';
 import type { WikiAclService } from './wiki-acl.service';
 import { WikiPermissionService, type WikiPermissionActor, type WikiPermissionPage } from './wiki-permission.service';
@@ -402,6 +403,80 @@ test('elevated wiki admin cannot be locked out by a page ACL deny rule', async (
   });
   assert.equal(decision.allowed, true);
   assert.equal(decision.reason, 'admin_acl');
+});
+
+test('legacy discuss deny blocks both new discussion actions when no specific rule exists', async () => {
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        return input.action === 'discuss'
+          ? { matched: true, allowed: false, reason: 'legacy_discussion_deny' }
+          : { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+
+  await assert.rejects(service.assertCanWriteThreadComment({ actor: actor(), page: page() }), ForbiddenException);
+  await assert.rejects(service.assertCanCreateThread({ actor: actor(), page: page() }), ForbiddenException);
+});
+
+test('specific discussion allows override a legacy discuss deny', async () => {
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        if (input.action === 'create_thread' || input.action === 'write_thread_comment') {
+          return { matched: true, allowed: true, reason: 'specific_allow' };
+        }
+        if (input.action === 'discuss') return { matched: true, allowed: false, reason: 'legacy_deny' };
+        return { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+
+  await service.assertCanWriteThreadComment({ actor: actor(), page: page() });
+  await service.assertCanCreateThread({ actor: actor(), page: page() });
+});
+
+test('new thread creation requires both comment and create-thread permission', async () => {
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        if (input.action === 'write_thread_comment') return { matched: true, allowed: false, reason: 'comments_disabled' };
+        if (input.action === 'create_thread') return { matched: true, allowed: true, reason: 'creation_enabled' };
+        return { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+
+  await assert.rejects(service.assertCanCreateThread({ actor: actor(), page: page() }), ForbiddenException);
+});
+
+test('create-thread deny still permits replies when comment permission allows them', async () => {
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        if (input.action === 'write_thread_comment') return { matched: true, allowed: true, reason: 'comments_enabled' };
+        if (input.action === 'create_thread') return { matched: true, allowed: false, reason: 'creation_disabled' };
+        return { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+
+  await service.assertCanWriteThreadComment({ actor: actor(), page: page() });
+  await assert.rejects(service.assertCanCreateThread({ actor: actor(), page: page() }), ForbiddenException);
+});
+
+test('blocked profile cannot use discussion actions even with explicit ACL allows', async () => {
+  const service = createService({
+    acl: {
+      async evaluate() {
+        return { matched: true, allowed: true, reason: 'allow_everyone' };
+      }
+    } as WikiAclService
+  });
+
+  await assert.rejects(service.assertCanWriteThreadComment({ actor: actor({ status: 'blocked' }), page: page() }), ForbiddenException);
+  await assert.rejects(service.assertCanCreateThread({ actor: actor({ status: 'blocked' }), page: page() }), ForbiddenException);
 });
 
 test('active user can create in a basic wiki space', async () => {

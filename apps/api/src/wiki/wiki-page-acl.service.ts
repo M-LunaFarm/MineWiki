@@ -5,7 +5,7 @@ import { WikiAdminService } from './wiki-admin.service';
 import { WikiPermissionService, type WikiPermissionActor, type WikiPermissionPage } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 
-const ACL_ACTIONS = ['read', 'edit', 'create', 'move', 'delete', 'revert', 'history', 'raw', 'discuss', 'upload_file', 'acl'] as const;
+const ACL_ACTIONS = ['read', 'edit', 'create', 'move', 'delete', 'revert', 'history', 'raw', 'discuss', 'create_thread', 'write_thread_comment', 'upload_file', 'acl'] as const;
 const ACL_EFFECTS = new Set(['allow', 'deny']);
 const ACL_SUBJECT_TYPES = new Set(['perm', 'user', 'group', 'aclgroup', 'role']);
 const ACL_ROLES = new Set([

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, Bell, BellOff, Code2, Eye, EyeOff, FileInput, Loader2, MessageSquarePlus, MessagesSquare, Pencil, Pin, Search, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { addWikiThreadComment, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, type WikiThreadDetail, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
+import { addWikiThreadComment, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, type WikiThreadDetail, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 
@@ -14,6 +14,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const requestedThreadId = searchParams.get('thread');
   const requestedCommentId = searchParams.get('comment');
   const [threads, setThreads] = useState<WikiThreadSummary[]>([]);
+  const [canCreateThread, setCanCreateThread] = useState(false);
   const [selected, setSelected] = useState<WikiThreadDetail | null>(null);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -44,10 +45,11 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
 
   useEffect(() => {
     let active = true;
-    void fetchWikiThreads(pageId)
-      .then(async (result) => {
+    void Promise.all([fetchWikiThreads(pageId), fetchWikiDiscussionPermissions(pageId)])
+      .then(async ([result, permissions]) => {
         if (!active) return;
         setThreads(result);
+        setCanCreateThread(permissions.canCreateThread);
         if (requestedThreadId) {
           const detail = await fetchWikiThread(requestedThreadId, undefined, requestedCommentId ?? undefined);
           if (!active) return;
@@ -379,7 +381,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       ) : null}
       <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <aside className={`space-y-4 ${selected ? 'hidden lg:block' : ''}`}>
-          {account ? (
+          {account && canCreateThread ? (
             <details className="border border-white/10 bg-[#111821] p-4">
               <summary className="cursor-pointer font-semibold text-white">새 토론</summary>
               <form onSubmit={create} className="mt-4 space-y-3">
@@ -390,6 +392,10 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                 </button>
               </form>
             </details>
+          ) : account ? (
+            <p className="border border-white/10 bg-[#111821] p-4 text-sm leading-6 text-slate-400">
+              이 문서에서는 새 토론을 만들 수 없습니다. 기존 토론의 댓글 작성 권한은 토론별로 별도 적용됩니다.
+            </p>
           ) : (
             <p className="text-sm text-slate-500">
               <Link href={`/login?returnTo=${encodeURIComponent(locationPath(pageId, returnTo))}`} className="text-emerald-300">

@@ -335,6 +335,10 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   }>;
 }
 
+export interface WikiDiscussionPermissions {
+  readonly canCreateThread: boolean;
+}
+
 export interface WikiWatchStatus {
   readonly watched: boolean;
   readonly unread: boolean;
@@ -616,6 +620,10 @@ export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]>
 
 export async function fetchWikiThreads(pageId: string): Promise<WikiThreadSummary[]> {
   return readWikiBrowser<WikiThreadSummary[]>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussions`);
+}
+
+export async function fetchWikiDiscussionPermissions(pageId: string): Promise<WikiDiscussionPermissions> {
+  return readWikiBrowser<WikiDiscussionPermissions>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussion-permissions`);
 }
 
 export async function fetchWikiThread(threadId: string, commentCursor?: string, focusCommentId?: string): Promise<WikiThreadDetail> {

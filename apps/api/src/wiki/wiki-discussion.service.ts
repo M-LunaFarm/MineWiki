@@ -82,6 +82,24 @@ export class WikiDiscussionService {
     return threads.map((thread) => this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0));
   }
 
+  async getPageDiscussionPermissions(pageId: string, session?: SessionPayload | null): Promise<{ readonly canCreateThread: boolean }> {
+    const page = await this.readablePage(pageId, session?.userId ?? null);
+    let canCreateThread = false;
+    if (session) {
+      const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+      try {
+        await this.wikiPermissions.assertCanCreateThread({
+          actor: this.wikiPermissions.actorFromSession(session, profile),
+          page
+        });
+        canCreateThread = true;
+      } catch {
+        canCreateThread = false;
+      }
+    }
+    return { canCreateThread };
+  }
+
   async listRecent(
     accountId: string | null,
     cursor?: string,
@@ -217,7 +235,7 @@ export class WikiDiscussionService {
     let canReply = false;
     if (viewer && session && thread.status === 'open') {
       try {
-        await this.wikiPermissions.assertCanDiscussPage({
+        await this.wikiPermissions.assertCanWriteThreadComment({
           actor: this.wikiPermissions.actorFromSession(session, viewer),
           page
         });
@@ -262,7 +280,7 @@ export class WikiDiscussionService {
     const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
     if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
-    await this.wikiPermissions.assertCanDiscussPage({
+    await this.wikiPermissions.assertCanCreateThread({
       actor: this.wikiPermissions.actorFromSession(session, profile),
       page
     });
@@ -298,7 +316,7 @@ export class WikiDiscussionService {
     const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
     if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
-    await this.wikiPermissions.assertCanDiscussPage({ actor: this.wikiPermissions.actorFromSession(session, profile), page });
+    await this.wikiPermissions.assertCanWriteThreadComment({ actor: this.wikiPermissions.actorFromSession(session, profile), page });
     const content = this.requiredText(input.content, 'content', 10_000);
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {

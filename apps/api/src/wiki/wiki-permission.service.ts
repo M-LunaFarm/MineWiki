@@ -442,19 +442,48 @@ export class WikiPermissionService {
     readonly page: WikiPermissionPage | null;
     readonly store?: WikiPermissionStore;
   }): Promise<void> {
+    return this.assertCanWriteThreadComment(input);
+  }
+
+  async assertCanCreateThread(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    await this.assertCanUseDiscussionAction(input, 'write_thread_comment');
+    return this.assertCanUseDiscussionAction(input, 'create_thread');
+  }
+
+  async assertCanWriteThreadComment(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    return this.assertCanUseDiscussionAction(input, 'write_thread_comment');
+  }
+
+  private async assertCanUseDiscussionAction(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }, action: Extract<WikiAclAction, 'create_thread' | 'write_thread_comment'>): Promise<void> {
     const store = input.store ?? this.prisma;
     const { actor, page } = input;
     if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status) || !page) {
       throw new ForbiddenException('Wiki discussion is not allowed.');
     }
     await this.assertCanReadPage({ accountId: actor.accountId, page, store });
-    const acl = await this.evaluateAcl('discuss', actor, {
+    const resource = {
       pageId: page.id,
       spaceId: page.spaceId,
       namespaceId: page.namespaceId,
       title: page.title,
       createdBy: page.createdBy
-    }, store);
+    };
+    let acl = await this.evaluateAcl(action, actor, resource, store);
+    if (!acl.matched) {
+      acl = await this.evaluateAcl('discuss', actor, resource, store);
+    }
     if (acl.matched && !acl.allowed) {
       throw new ForbiddenException(`Wiki discussion is not allowed: ${acl.reason}`);
     }

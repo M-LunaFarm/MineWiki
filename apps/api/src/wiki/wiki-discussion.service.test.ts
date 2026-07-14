@@ -39,7 +39,9 @@ function service(options: {
   thread?: typeof thread;
   comment?: { id: bigint; threadId: bigint; content: string; status: string; createdBy: bigint; createdAt: Date; updatedAt: Date | null };
   canManage?: boolean;
-  onDiscuss?: () => void;
+  canCreateThread?: boolean;
+  onCreateThread?: () => void;
+  onWriteThreadComment?: () => void;
   onThreadUpdate?: (args: unknown) => void;
   onCommentUpdate?: (args: unknown) => void;
   onModerationCreate?: (args: unknown) => void;
@@ -70,7 +72,12 @@ function service(options: {
   } as unknown as WikiProfileService;
   const permissions = {
     actorFromSession() { return { accountId: session.userId, profileId: 20n }; },
-    async assertCanDiscussPage() { options.onDiscuss?.(); },
+    async assertCanDiscussPage() { options.onWriteThreadComment?.(); },
+    async assertCanCreateThread() {
+      options.onCreateThread?.();
+      if (options.canCreateThread === false) throw new ForbiddenException('new threads disabled');
+    },
+    async assertCanWriteThreadComment() { options.onWriteThreadComment?.(); },
     async canManagePage() { return options.canManage ?? false; },
     async assertCanReadPage() {}
   } as unknown as WikiPermissionService;
@@ -85,15 +92,35 @@ test('closed discussion rejects new comments before writing', async () => {
   );
 });
 
-test('adding a comment checks the page discuss permission', async () => {
+test('adding a comment checks the write-thread-comment permission', async () => {
   let checked = false;
-  const discussions = service({ onDiscuss: () => { checked = true; } });
+  const discussions = service({ onWriteThreadComment: () => { checked = true; } });
 
   await assert.rejects(
     discussions.addComment(session, thread.id.toString(), { content: '' }),
     BadRequestException
   );
   assert.equal(checked, true);
+});
+
+test('creating a thread checks the create-thread permission', async () => {
+  let checked = false;
+  const discussions = service({ onCreateThread: () => { checked = true; } });
+
+  await assert.rejects(
+    discussions.createThread(session, page.id.toString(), { title: '', content: '' }),
+    BadRequestException
+  );
+  assert.equal(checked, true);
+});
+
+test('page discussion capabilities expose create-thread ACL without changing the thread list contract', async () => {
+  assert.deepEqual(await service({ canCreateThread: true }).getPageDiscussionPermissions(page.id.toString(), session), {
+    canCreateThread: true
+  });
+  assert.deepEqual(await service({ canCreateThread: false }).getPageDiscussionPermissions(page.id.toString(), session), {
+    canCreateThread: false
+  });
 });
 
 test('non-owner without page management cannot close a discussion', async () => {

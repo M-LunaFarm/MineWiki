@@ -58,6 +58,40 @@ test('page ACL creation always fixes the target to the authorized page', async (
   assert.equal(created?.actorProfileId, 3n);
 });
 
+test('page ACL accepts separate thread creation and comment actions', async () => {
+  const createdActions: string[] = [];
+  const prisma = {
+    wikiPage: { async findUnique() { return page(); } }
+  };
+  const profiles = {
+    async ensureWikiProfile() { return { id: 3n, status: 'active' }; }
+  };
+  const permissions = {
+    actorFromSession() { return { accountId: 'account-1', profileId: 3n, status: 'active' }; },
+    async assertCanManagePageAcl() {}
+  };
+  const admin = {
+    async createAclRule(input: { action?: string }) {
+      createdActions.push(input.action ?? '');
+      return { id: String(createdActions.length) };
+    }
+  };
+  const service = new WikiPageAclService(
+    prisma as unknown as PrismaService,
+    profiles as unknown as WikiProfileService,
+    permissions as unknown as WikiPermissionService,
+    admin as unknown as WikiAdminService
+  );
+
+  for (const action of ['create_thread', 'write_thread_comment']) {
+    await service.createRule('7', session, {
+      action, effect: 'allow', subjectType: 'perm', subjectValue: 'member'
+    });
+  }
+
+  assert.deepEqual(createdActions, ['create_thread', 'write_thread_comment']);
+});
+
 test('page ACL deletion cannot address a rule owned by another page', async () => {
   let deleted = false;
   const prisma = {
