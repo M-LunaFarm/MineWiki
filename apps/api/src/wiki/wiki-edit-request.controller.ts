@@ -58,7 +58,7 @@ export class WikiEditRequestController {
   @Throttle({ default: { limit: 8, ttl: 60 } })
   rebase(
     @Param('requestId') requestId: string,
-    @Body() body: { contentRaw?: string; currentRevisionId?: string },
+    @Body() body: { contentRaw?: string; currentRevisionId?: string; editSummary?: string; isMinor?: boolean },
     @CurrentSession() session: SessionPayload
   ) {
     return this.requests.rebase(session, requestId, body);

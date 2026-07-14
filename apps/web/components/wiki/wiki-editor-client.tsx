@@ -17,7 +17,9 @@ import {
   saveWikiSection,
   uploadWikiImage,
   type UploadedFileMetadata,
+  type WikiEditConflictDetails,
   type WikiDocumentTemplateSummary,
+  WikiApiError,
   type WikiPageResponse
 } from '../../lib/wiki-api';
 
@@ -53,10 +55,13 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [sectionAnchor, setSectionAnchor] = useState<string | null | undefined>(undefined);
   const [sectionTitle, setSectionTitle] = useState<string | null>(null);
   const [baseRevisionId, setBaseRevisionId] = useState<string | undefined>(page?.revision.id);
+  const [baseRevisionNo, setBaseRevisionNo] = useState<number | undefined>(page?.revision.revisionNo);
+  const [editConflict, setEditConflict] = useState<WikiEditConflictDetails | null>(null);
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
   const fileSourceRequired = Boolean(fileLicense && fileLicense !== 'self-created');
   const canUploadImage = Boolean(page && fileLicense && (!fileSourceRequired || fileSourceUrl.trim()));
+  const hasUnresolvedConflict = containsWikiConflictMarkers(contentRaw);
 
   const heading = page
     ? sectionAnchor
@@ -97,6 +102,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
             setContentRaw(section.contentRaw);
             setSectionTitle(section.title);
             setBaseRevisionId(section.baseRevisionId);
+            setBaseRevisionNo(page.revision.revisionNo);
+            setEditConflict(null);
           }
         } else {
           const revision = await fetchWikiRevision(page.revision.id);
@@ -104,6 +111,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
             setContentRaw(revision.contentRaw);
             setSectionTitle(null);
             setBaseRevisionId(revision.id);
+            setBaseRevisionNo(revision.revisionNo);
+            setEditConflict(null);
           }
         }
       } catch (error) {
@@ -142,8 +151,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   }, [account, page]);
 
   const canSubmit = useMemo(() => {
-    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0);
-  }, [account, contentRaw, editSummary, loadingRevision, blockingErrors.length]);
+    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict);
+  }, [account, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict]);
 
   function renderPreview() {
     setFeedback(null);
@@ -172,7 +181,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     setFeedback(null);
     startSaveTransition(async () => {
       try {
-        if (sectionAnchor && page && baseRevisionId) {
+        if (sectionAnchor && !editConflict && page && baseRevisionId) {
           const result = await saveWikiSection({
             pageId: page.id,
             anchor: sectionAnchor,
@@ -196,6 +205,16 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
         }
         router.refresh();
       } catch (error) {
+        const conflict = wikiEditConflict(error);
+        if (conflict) {
+          setContentRaw(conflict.mergedContentRaw);
+          setBaseRevisionId(conflict.currentRevisionId);
+          setBaseRevisionNo(conflict.currentRevisionNo);
+          setEditConflict(conflict);
+          setBlockingErrors([]);
+          setFeedback(null);
+          return;
+        }
         const message = error instanceof Error ? error.message : '저장하지 못했습니다.';
         setFeedback(`${message} 충돌이 발생했다면 최신 리비전을 다시 불러온 뒤 재시도하세요.`);
       }
@@ -351,6 +370,21 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="space-y-4">
+          {editConflict ? (
+            <div className="rounded-lg border border-amber-300/30 bg-amber-500/10 p-4 text-sm text-amber-50" role="alert">
+              <div className="flex gap-3">
+                <AlertTriangle className="mt-0.5 size-4 flex-none" />
+                <div className="min-w-0 space-y-2">
+                  <p className="font-semibold">동시 편집 충돌 {editConflict.conflictCount}개를 확인해야 합니다.</p>
+                  <p className="text-xs leading-5 text-amber-100/80">
+                    초안은 유지했고 최신 #{editConflict.currentRevisionNo} 판과 함께 편집기에 표시했습니다. <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; 내 편집</code>, <code>=======</code>, <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt; 최신 판</code> 범위를 직접 정리하면 저장이 다시 활성화됩니다.
+                  </p>
+                  {editConflict.scope === 'section' ? <p className="text-xs font-medium text-amber-200">섹션 충돌 복구는 안전한 병합을 위해 전체 문서 원문으로 전환됩니다.</p> : null}
+                  {!hasUnresolvedConflict ? <p className="text-xs font-semibold text-emerald-200">충돌 표시를 모두 정리했습니다. 편집 요약을 확인하고 저장하세요.</p> : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
           <textarea
             aria-label={sectionAnchor ? '위키 섹션 본문' : '위키 문서 본문'}
             value={contentRaw}
@@ -521,11 +555,11 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">리비전</dt>
-                <dd>{baseRevisionId ? `#${page?.revision.revisionNo}` : '새 문서'}</dd>
+                <dd>{baseRevisionId ? `#${baseRevisionNo ?? page?.revision.revisionNo}` : '새 문서'}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">충돌 처리</dt>
-                <dd>최신 판과 다르면 저장 차단</dd>
+                <dd>비중첩 수정은 자동 병합</dd>
               </div>
               {sectionAnchor ? <div className="flex justify-between gap-4"><dt className="text-slate-500">편집 범위</dt><dd className="text-right">{sectionTitle ?? sectionAnchor}</dd></div> : null}
             </dl>
@@ -585,6 +619,31 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 function normalizeAltText(filename: string): string {
   return filename.trim().replace(/\.[^.]+$/u, '').replace(/[|[\]]/g, '').slice(0, 80) || 'image';
+}
+
+function wikiEditConflict(error: unknown): WikiEditConflictDetails | null {
+  if (!(error instanceof WikiApiError) || error.code !== 'wiki_edit_conflict') return null;
+  const details = error.details;
+  if (!details || typeof details !== 'object') return null;
+  const candidate = details as Partial<WikiEditConflictDetails>;
+  if (
+    candidate.type !== 'wiki_edit_conflict' ||
+    (candidate.scope !== 'page' && candidate.scope !== 'section') ||
+    typeof candidate.baseRevisionId !== 'string' ||
+    typeof candidate.currentRevisionId !== 'string' ||
+    typeof candidate.currentRevisionNo !== 'number' ||
+    typeof candidate.mergedContentRaw !== 'string' ||
+    typeof candidate.conflictCount !== 'number'
+  ) {
+    return null;
+  }
+  return candidate as WikiEditConflictDetails;
+}
+
+function containsWikiConflictMarkers(contentRaw: string): boolean {
+  return /^(?:<<<<<<< 내 편집|\|\|\|\|\|\|\| 기준 판|=======|>>>>>>> 최신 판)$/m.test(
+    contentRaw.replace(/\r\n?/g, '\n')
+  );
 }
 
 const WIKI_FILE_LICENSES = [

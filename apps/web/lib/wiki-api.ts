@@ -5,6 +5,28 @@ function apiBaseUrl(): string {
   return normalizeApiBaseUrl();
 }
 
+export interface WikiEditConflictDetails {
+  readonly type: 'wiki_edit_conflict';
+  readonly scope: 'page' | 'section';
+  readonly baseRevisionId: string;
+  readonly currentRevisionId: string;
+  readonly currentRevisionNo: number;
+  readonly mergedContentRaw: string;
+  readonly conflictCount: number;
+}
+
+export class WikiApiError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+    readonly code: string | null,
+    readonly details: unknown
+  ) {
+    super(message);
+    this.name = 'WikiApiError';
+  }
+}
+
 export interface WikiPageResponse {
   readonly id: string;
   readonly namespace: string;
@@ -109,6 +131,7 @@ export interface WikiSectionMutationResponse {
   readonly title: string;
   readonly slug: string;
   readonly sectionAnchor: string;
+  readonly autoMerged?: boolean;
 }
 
 export interface WikiRevisionSummary {
@@ -538,6 +561,7 @@ export interface WikiMutationResponse {
   readonly namespace: string;
   readonly title: string;
   readonly slug: string;
+  readonly autoMerged?: boolean;
 }
 
 export interface WikiMoveResponse extends WikiMutationResponse {
@@ -799,6 +823,22 @@ export async function updateWikiEditRequest(input: { requestId: string; baseRevi
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(input.requestId)}`, 'PATCH', input);
 }
 
+export async function rebaseWikiEditRequest(
+  requestId: string,
+  resolution?: {
+    readonly contentRaw: string;
+    readonly currentRevisionId: string;
+    readonly editSummary: string;
+    readonly isMinor: boolean;
+  }
+): Promise<WikiEditRequestSummary> {
+  return mutateWikiBrowser<WikiEditRequestSummary>(
+    `/v1/wiki/edit-requests/${encodeURIComponent(requestId)}/rebase`,
+    'POST',
+    resolution ?? {}
+  );
+}
+
 export async function changeWikiEditRequestState(requestId: string, action: 'close' | 'reopen'): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}/${action}`, 'POST', {});
 }
@@ -824,7 +864,7 @@ async function mutateWikiBrowser<T>(path: string, method: string, payload: Recor
     body: JSON.stringify(payload),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.message ?? 'Wiki mutation failed.');
+  if (!response.ok) throw wikiApiError(response, body, 'Wiki mutation failed.');
   return body as T;
 }
 
@@ -995,7 +1035,7 @@ export async function saveWikiPage(input: { pageId?: string; namespace: string; 
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body?.message ?? 'Failed to save wiki page.');
+    throw wikiApiError(response, body, 'Failed to save wiki page.');
   }
   return response.json();
 }
@@ -1024,9 +1064,19 @@ export async function saveWikiSection(input: {
   );
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body?.message ?? 'Failed to save wiki section.');
+    throw wikiApiError(response, body, 'Failed to save wiki section.');
   }
   return response.json();
+}
+
+function wikiApiError(response: Response, body: unknown, fallback: string): WikiApiError {
+  const payload = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  return new WikiApiError(
+    typeof payload.message === 'string' ? payload.message : fallback,
+    response.status,
+    typeof payload.code === 'string' ? payload.code : null,
+    payload.details ?? null
+  );
 }
 
 export async function moveWikiPage(input: { pageId: string; title: string; displayTitle?: string; reason: string; leaveRedirect: boolean }): Promise<WikiMoveResponse> {

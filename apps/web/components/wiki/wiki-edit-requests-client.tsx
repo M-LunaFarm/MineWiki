@@ -1,20 +1,29 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, FilePenLine, GitCompare, Loader2, Pencil, RotateCcw, Save, X } from 'lucide-react';
+import { AlertTriangle, Check, FilePenLine, GitCompare, Loader2, Pencil, RotateCcw, Save, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   changeWikiEditRequestState,
   fetchWikiEditRequestDiff,
   fetchWikiEditRequests,
+  rebaseWikiEditRequest,
   reviewWikiEditRequest,
   updateWikiEditRequest,
+  WikiApiError,
+  type WikiEditConflictDetails,
   type WikiEditRequestDiffResponse,
   type WikiEditRequestListResponse,
   type WikiEditRequestSummary
 } from '../../lib/wiki-api';
 
 const EMPTY: WikiEditRequestListResponse = { items: [], canReview: false, viewerProfileId: null, nextCursor: null, currentRevisionId: null };
+
+interface RebaseConflictState {
+  readonly requestId: string;
+  readonly currentRevisionId: string;
+  readonly conflictCount: number;
+}
 
 export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
   const [data, setData] = useState<WikiEditRequestListResponse>(EMPTY);
@@ -23,6 +32,7 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
   const [error, setError] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, WikiEditRequestDiffResponse>>({});
   const [editing, setEditing] = useState<WikiEditRequestSummary | null>(null);
+  const [rebaseConflict, setRebaseConflict] = useState<RebaseConflictState | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -58,16 +68,60 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
 
   async function saveEdit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editing || !data.currentRevisionId) return;
-    const form = new FormData(event.currentTarget);
+    if (!editing || !data.currentRevisionId || containsWikiConflictMarkers(editing.proposedContent)) return;
     await run(`${editing.id}:update`, async () => {
-      const updated = await updateWikiEditRequest({
-        requestId: editing.id, baseRevisionId: data.currentRevisionId!,
-        contentRaw: String(form.get('contentRaw') ?? ''), editSummary: String(form.get('editSummary') ?? ''),
-        isMinor: form.get('isMinor') === 'on'
-      });
-      replace(updated); setEditing(null);
+      const updated = rebaseConflict?.requestId === editing.id
+        ? await rebaseWikiEditRequest(editing.id, {
+            contentRaw: editing.proposedContent,
+            currentRevisionId: rebaseConflict.currentRevisionId,
+            editSummary: editing.editSummary,
+            isMinor: editing.isMinor
+          })
+        : await updateWikiEditRequest({
+            requestId: editing.id,
+            baseRevisionId: editing.baseRevisionId,
+            contentRaw: editing.proposedContent,
+            editSummary: editing.editSummary,
+            isMinor: editing.isMinor
+          });
+      replace(updated);
+      setEditing(null);
+      setRebaseConflict(null);
     });
+  }
+
+  async function rebase(item: WikiEditRequestSummary) {
+    await run(`${item.id}:rebase`, async () => {
+      try {
+        const updated = await rebaseWikiEditRequest(item.id);
+        replace(updated);
+        setEditing(null);
+        setRebaseConflict(null);
+      } catch (caught) {
+        const conflict = wikiEditConflict(caught);
+        if (!conflict) throw caught;
+        setEditing({
+          ...item,
+          baseRevisionId: conflict.currentRevisionId,
+          proposedContent: conflict.mergedContentRaw
+        });
+        setRebaseConflict({
+          requestId: item.id,
+          currentRevisionId: conflict.currentRevisionId,
+          conflictCount: conflict.conflictCount
+        });
+      }
+    });
+  }
+
+  function startEditing(item: WikiEditRequestSummary) {
+    setEditing({ ...item });
+    setRebaseConflict(null);
+  }
+
+  function cancelEditing() {
+    setEditing(null);
+    setRebaseConflict(null);
   }
 
   async function loadMore() {
@@ -90,18 +144,34 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
     {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}
     <div className="space-y-4">{data.items.map((item) => {
       const isAuthor = data.viewerProfileId === item.createdBy;
-      const canEdit = isAuthor && ['pending', 'stale', 'closed'].includes(item.status) && Boolean(data.currentRevisionId);
+      const isMutable = ['pending', 'stale', 'closed'].includes(item.status);
+      const isStale = isMutable && (item.status === 'stale' || !data.currentRevisionId || item.baseRevisionId !== data.currentRevisionId);
+      const canEdit = isAuthor && ['pending', 'closed'].includes(item.status) && !isStale;
+      const canRebase = isAuthor && ['pending', 'stale', 'closed'].includes(item.status) && isStale && Boolean(data.currentRevisionId);
+      const resolvingConflict = rebaseConflict?.requestId === item.id;
+      const unresolvedMarkers = resolvingConflict && editing?.id === item.id
+        ? containsWikiConflictMarkers(editing.proposedContent)
+        : false;
       return <article key={item.id} className="border border-white/10 bg-[#111821] p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><h2 className="font-semibold text-white">{item.editSummary}</h2><p className="mt-2 text-xs text-slate-500">{item.createdByName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</p></div>
           <div className="flex flex-wrap gap-2">
-            {data.canReview && item.status === 'pending' ? <><Action disabled={Boolean(working)} onClick={() => void review(item.id, 'accept')} accent icon={<Check />}>승인</Action><Action disabled={Boolean(working)} onClick={() => void review(item.id, 'reject')} icon={<X />}>반려</Action></> : null}
-            {canEdit ? <Action disabled={Boolean(working)} onClick={() => setEditing(item)} icon={<Pencil />}>수정</Action> : null}
+            {data.canReview && item.status === 'pending' && !isStale ? <Action disabled={Boolean(working)} onClick={() => void review(item.id, 'accept')} accent icon={<Check />}>승인</Action> : null}
+            {data.canReview && item.status === 'pending' ? <Action disabled={Boolean(working)} onClick={() => void review(item.id, 'reject')} icon={<X />}>반려</Action> : null}
+            {canRebase ? <Action disabled={Boolean(working)} onClick={() => void rebase(item)} accent icon={<RotateCcw />}>최신 판으로 재배치</Action> : null}
+            {canEdit ? <Action disabled={Boolean(working)} onClick={() => startEditing(item)} icon={<Pencil />}>수정</Action> : null}
             {isAuthor && ['pending', 'stale'].includes(item.status) ? <Action disabled={Boolean(working)} onClick={() => void changeState(item.id, 'close')} icon={<X />}>닫기</Action> : null}
-            {isAuthor && item.status === 'closed' ? <Action disabled={Boolean(working)} onClick={() => void changeState(item.id, 'reopen')} icon={<RotateCcw />}>다시 열기</Action> : null}
+            {isAuthor && item.status === 'closed' && !isStale ? <Action disabled={Boolean(working)} onClick={() => void changeState(item.id, 'reopen')} icon={<RotateCcw />}>다시 열기</Action> : null}
           </div>
         </div>
-        {editing?.id === item.id ? <form onSubmit={(event) => void saveEdit(event)} className="mt-4 grid gap-3 border border-emerald-300/20 bg-black/20 p-4"><label className="grid gap-2 text-sm text-slate-300">요약<input name="editSummary" defaultValue={item.editSummary} maxLength={255} required className="input min-h-11" /></label><label className="grid gap-2 text-sm text-slate-300">제안 원문<textarea name="contentRaw" defaultValue={item.proposedContent} required rows={12} className="input min-h-64 resize-y font-mono text-xs" /></label><label className="flex min-h-11 items-center gap-2 text-sm text-slate-300"><input name="isMinor" type="checkbox" defaultChecked={item.isMinor} /> 사소한 편집</label><div className="flex flex-wrap gap-2"><button type="submit" disabled={Boolean(working)} className="chip chip-accent inline-flex min-h-11 items-center gap-1"><Save className="size-4" /> 저장</button><button type="button" onClick={() => setEditing(null)} className="chip chip-muted min-h-11">취소</button></div></form> : null}
+        {isStale ? <div className="mt-4 flex gap-3 border border-amber-300/25 bg-amber-400/10 p-3 text-sm text-amber-100" role="status"><AlertTriangle className="mt-0.5 size-4 flex-none" /><p>이 요청은 현재 문서보다 오래된 판을 기준으로 합니다. 승인하거나 수정하기 전에 작성자가 최신 판으로 재배치해야 합니다.</p></div> : null}
+        {editing?.id === item.id ? <form onSubmit={(event) => void saveEdit(event)} className="mt-4 grid gap-3 border border-emerald-300/20 bg-black/20 p-4">
+          {resolvingConflict ? <div role="alert" className="flex gap-3 border border-amber-300/30 bg-amber-400/10 p-3 text-sm text-amber-100"><AlertTriangle className="mt-0.5 size-4 flex-none" /><div className="space-y-1"><p className="font-semibold">겹치는 변경 {rebaseConflict.conflictCount}개를 직접 정리해 주세요.</p><p className="text-xs leading-5 text-amber-100/80"><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; 내 편집</code>, <code>=======</code>, <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt; 최신 판</code> 표시를 모두 제거하면 재배치 저장이 활성화됩니다.</p></div></div> : null}
+          <label className="grid gap-2 text-sm text-slate-300">요약<input name="editSummary" value={editing.editSummary} onChange={(event) => setEditing({ ...editing, editSummary: event.target.value })} maxLength={255} required className="input min-h-11" /></label>
+          <label className="grid gap-2 text-sm text-slate-300">제안 원문<textarea name="contentRaw" value={editing.proposedContent} onChange={(event) => setEditing({ ...editing, proposedContent: event.target.value })} required rows={12} className="input min-h-64 resize-y overflow-x-auto font-mono text-xs [overflow-wrap:anywhere]" /></label>
+          <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300"><input name="isMinor" type="checkbox" checked={editing.isMinor} onChange={(event) => setEditing({ ...editing, isMinor: event.target.checked })} /> 사소한 편집</label>
+          <div className="flex flex-wrap gap-2"><button type="submit" disabled={Boolean(working) || unresolvedMarkers} className="chip chip-accent inline-flex min-h-11 items-center gap-1"><Save className="size-4" /> {resolvingConflict ? '충돌 해결 후 재배치' : '저장'}</button><button type="button" onClick={cancelEditing} className="chip chip-muted min-h-11">취소</button></div>
+        </form> : null}
         <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={Boolean(working)} onClick={() => void loadDiff(item.id)} className="chip chip-muted inline-flex min-h-11 items-center gap-1"><GitCompare className="size-4" /> 기준판과 비교</button><details><summary className="chip chip-muted flex min-h-11 cursor-pointer items-center">제안 원문</summary><pre className="mt-3 max-h-[32rem] overflow-auto whitespace-pre-wrap break-words border border-white/10 bg-black/20 p-4 text-xs leading-6 text-slate-300">{item.proposedContent}</pre></details></div>
         {diffs[item.id] ? <DiffTable diff={diffs[item.id]} /> : null}
         {item.reviewNote ? <p className="mt-4 border-l-2 border-emerald-400/40 pl-3 text-sm text-slate-300">검토 메모: {item.reviewNote}</p> : null}
@@ -113,6 +183,25 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
 
 function Action({ disabled, onClick, accent = false, icon, children }: { readonly disabled: boolean; readonly onClick: () => void; readonly accent?: boolean; readonly icon: React.ReactElement; readonly children: React.ReactNode }) { return <button type="button" disabled={disabled} onClick={onClick} className={`chip min-h-11 ${accent ? 'chip-accent' : 'chip-muted'} inline-flex items-center gap-1 [&>svg]:size-3.5`}>{icon}{children}</button>; }
 function DiffTable({ diff }: { readonly diff: WikiEditRequestDiffResponse }) { return <div className="mt-4 overflow-x-auto border border-white/10"><table className="min-w-full font-mono text-xs"><tbody>{diff.hunks.map((hunk, index) => <tr key={`${index}-${hunk.type}`} className={hunk.type === 'added' ? 'bg-emerald-500/10 text-emerald-100' : hunk.type === 'removed' ? 'bg-red-500/10 text-red-100' : 'text-slate-400'}><td className="w-12 px-2 py-1 text-right">{hunk.leftLine ?? ''}</td><td className="w-12 px-2 py-1 text-right">{hunk.rightLine ?? ''}</td><td className="w-6 px-2 py-1">{hunk.type === 'added' ? '+' : hunk.type === 'removed' ? '-' : ' '}</td><td className="whitespace-pre-wrap break-all px-2 py-1">{hunk.line || ' '}</td></tr>)}</tbody></table></div>; }
+function wikiEditConflict(error: unknown): WikiEditConflictDetails | null {
+  if (!(error instanceof WikiApiError) || error.code !== 'wiki_edit_conflict') return null;
+  const details = error.details;
+  if (!details || typeof details !== 'object') return null;
+  const candidate = details as Partial<WikiEditConflictDetails>;
+  if (
+    candidate.type !== 'wiki_edit_conflict' ||
+    candidate.scope !== 'page' ||
+    typeof candidate.baseRevisionId !== 'string' ||
+    typeof candidate.currentRevisionId !== 'string' ||
+    typeof candidate.currentRevisionNo !== 'number' ||
+    typeof candidate.mergedContentRaw !== 'string' ||
+    typeof candidate.conflictCount !== 'number'
+  ) return null;
+  return candidate as WikiEditConflictDetails;
+}
+function containsWikiConflictMarkers(contentRaw: string): boolean {
+  return /^(?:<<<<<<< 내 편집|\|\|\|\|\|\|\| 기준 판|=======|>>>>>>> 최신 판)$/m.test(contentRaw.replace(/\r\n?/g, '\n'));
+}
 function message(error: unknown) { return error instanceof Error ? error.message : '편집 요청 처리에 실패했습니다.'; }
 function formatDate(value: string) { return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Seoul' }).format(new Date(value)); }
 function statusLabel(status: string) { return ({ pending: '검토 대기', reviewing: '처리 중', accepted: '승인됨', rejected: '반려됨', stale: '기준 판 만료', closed: '작성자가 닫음' } as Record<string, string>)[status] ?? status; }

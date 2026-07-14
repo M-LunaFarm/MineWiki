@@ -225,7 +225,12 @@ export class WikiEditRequestService {
   async rebase(
     session: SessionPayload,
     requestId: string,
-    input: { readonly contentRaw?: string; readonly currentRevisionId?: string } = {}
+    input: {
+      readonly contentRaw?: string;
+      readonly currentRevisionId?: string;
+      readonly editSummary?: string;
+      readonly isMinor?: boolean;
+    } = {}
   ): Promise<WikiEditRequestSummary> {
     const parsedRequestId = this.id(requestId, 'requestId');
     const initialRequest = await this.request(requestId);
@@ -236,6 +241,10 @@ export class WikiEditRequestService {
       if (hasWikiConflictMarkers(resolvedContent)) throw new BadRequestException('Resolve every wiki edit conflict marker before rebasing.');
       this.assertContentBounds(resolvedContent);
     }
+    const resolvedSummary = input.editSummary === undefined
+      ? null
+      : this.required(input.editSummary, 'editSummary');
+    if (resolvedSummary && resolvedSummary.length > 255) throw new BadRequestException('editSummary is too long.');
     const expectedCurrentId = resolvedContent === null
       ? null
       : this.id(this.required(input.currentRevisionId, 'currentRevisionId'), 'currentRevisionId');
@@ -295,7 +304,14 @@ export class WikiEditRequestService {
           id: request.id, createdBy: profile.id, status: request.status,
           baseRevisionId: request.baseRevisionId, updatedAt: request.updatedAt
         },
-        data: { baseRevisionId: current.id, proposedContent: nextContent, status: nextStatus, updatedAt: new Date() }
+        data: {
+          baseRevisionId: current.id,
+          proposedContent: nextContent,
+          editSummary: resolvedSummary ?? request.editSummary,
+          isMinor: input.isMinor ?? request.isMinor,
+          status: nextStatus,
+          updatedAt: new Date()
+        }
       });
       if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
       return {
