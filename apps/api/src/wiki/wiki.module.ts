@@ -29,11 +29,13 @@ import { WikiThreadAclController } from './wiki-thread-acl.controller';
 import { WikiThreadAclService } from './wiki-thread-acl.service';
 import { WikiDiscussionLiveController } from './wiki-discussion-live.controller';
 import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
+import { WikiPushSubscriptionController } from './wiki-push-subscription.controller';
+import { WikiPushSubscriptionService } from './wiki-push-subscription.service';
 
 @Module({
   imports: [SessionModule, EventsModule],
-  controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiDiscussionLiveController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPageAclController, WikiThreadAclController, WikiAclGroupAdminController, WikiAclGroupSelfController],
-  providers: [WikiProfileService, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiDiscussionLiveService, WikiWatchService, WikiNotificationService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService, WikiThreadAclService],
+  controllers: [WikiController, WikiAdminController, WikiDiscussionController, WikiDiscussionLiveController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPushSubscriptionController, WikiPageAclController, WikiThreadAclController, WikiAclGroupAdminController, WikiAclGroupSelfController],
+  providers: [WikiProfileService, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiDiscussionLiveService, WikiWatchService, WikiNotificationService, WikiPushSubscriptionService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService, WikiThreadAclService],
   exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}
