@@ -17,6 +17,17 @@ const GUILD_DETAIL_LEGACY_TABS = new Set([
   'servers'
 ]);
 
+const NAMESPACE_FRONT_PAGES = new Map([
+  ['/mod', '/mod/대문'],
+  ['/dev', '/dev/대문'],
+  ['/guide', '/guide/대문'],
+  ['/data', '/data/대문'],
+  ['/help', '/help/대문'],
+  ['/project', '/project/대문'],
+  ['/template', '/template/대문'],
+  ['/file', '/file/대문']
+]);
+
 export function resolveLegacyRedirect(urlLike) {
   const pathname = normalizePathname(urlLike.pathname);
   const search = urlLike.search ?? '';
@@ -59,11 +70,15 @@ export function resolveLegacyRedirect(urlLike) {
   }
 
   if (pathname === '/mods') {
-    return permanent('/mod', search);
+    return permanent('/mod/대문', search);
   }
 
   if (pathname === '/mods/new') {
     return temporary('/mod', search);
+  }
+
+  if (NAMESPACE_FRONT_PAGES.has(pathname)) {
+    return permanent(NAMESPACE_FRONT_PAGES.get(pathname), search);
   }
 
   if (pathname === '/modpack') {

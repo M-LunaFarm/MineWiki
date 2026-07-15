@@ -7,6 +7,18 @@ const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
 const webBaseUrl = normalizeBaseUrl(process.env.SMOKE_WEB_BASE_URL ?? 'http://127.0.0.1:4320');
 const apiBaseUrl = normalizeBaseUrl(process.env.SMOKE_API_BASE_URL ?? 'http://127.0.0.1:4321');
+const wikiFrontPages = [
+  ['/wiki/대문', 'main'],
+  ['/mod/대문', 'mod'],
+  ['/modpack/대문', 'modpack'],
+  ['/dev/대문', 'dev'],
+  ['/guide/대문', 'guide'],
+  ['/data/대문', 'data'],
+  ['/help/대문', 'help'],
+  ['/project/대문', 'project'],
+  ['/template/대문', 'template'],
+  ['/file/대문', 'file'],
+];
 
 const checks = [
   {
@@ -20,11 +32,11 @@ const checks = [
     expectedStatuses: [200],
     expectedJson: { status: 'ok', service: 'minewiki-web' },
   },
-  {
-    name: 'wiki page',
-    url: `${webBaseUrl}/wiki/대문`,
+  ...wikiFrontPages.map(([path, namespace]) => ({
+    name: `${namespace} wiki front page`,
+    url: `${webBaseUrl}${path}`,
     expectedStatuses: [200],
-  },
+  })),
   {
     name: 'servers page',
     url: `${webBaseUrl}/servers`,

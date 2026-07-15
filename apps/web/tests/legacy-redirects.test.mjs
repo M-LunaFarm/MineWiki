@@ -17,6 +17,22 @@ test('/server/* remains canonical and is not redirected', () => {
   assert.equal(redirectFor('/server/example'), null);
 });
 
+test('namespace roots and the legacy mods route resolve to seeded front pages', () => {
+  for (const [source, destination] of [
+    ['/mods', '/mod/대문'],
+    ['/mod', '/mod/대문'],
+    ['/dev', '/dev/대문'],
+    ['/guide', '/guide/대문'],
+    ['/data', '/data/대문'],
+    ['/help', '/help/대문'],
+    ['/project', '/project/대문'],
+    ['/template', '/template/대문'],
+    ['/file', '/file/대문'],
+  ]) {
+    assert.deepEqual(redirectFor(source), { destination, status: 301 });
+  }
+});
+
 test('legacy Korean wiki namespace paths redirect to canonical server wiki paths', () => {
   assert.deepEqual(redirectFor('/wiki/서버/example/규칙?redirect=0'), {
     destination: '/server/example/%EA%B7%9C%EC%B9%99?redirect=0',
