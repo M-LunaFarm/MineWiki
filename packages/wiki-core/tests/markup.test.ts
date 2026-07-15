@@ -409,6 +409,26 @@ test('renders explicit safe placeholders for unsupported macros', () => {
   assert.match(html, /href="https:\/\/example\.com"/);
 });
 
+test('renders safe static NamuMark macros without falling back to warnings', () => {
+  const parsed = parseMarkup('첫 줄[br]둘째 줄[clearfix][anchor(문단 1)][ruby(한자,ruby=漢字,color=#336699)]');
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.errors.filter((error) => error.startsWith('지원되지 않는 매크로입니다:')), []);
+  assert.match(html, /첫 줄<br \/>둘째 줄<span class="wiki-clearfix"><\/span>/);
+  assert.match(html, /<span class="wiki-anchor" id="문단_1"><\/span>/);
+  assert.match(html, /<ruby>한자<rp>\(<\/rp><rt><span style="color:#336699">漢字<\/span><\/rt><rp>\)<\/rp><\/ruby>/);
+});
+
+test('keeps malformed and unsafe static macros inert', () => {
+  const parsed = parseMarkup('[anchor(<script>)][ruby(본문,ruby=후리가나,color=url(javascript:alert(1)))]');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(html.includes('<script>'), false);
+  assert.equal(html.includes('javascript:'), false);
+  assert.match(html, /지원하지 않는 매크로: \[anchor\]/);
+  assert.match(html, /<ruby>본문<rp>\(<\/rp><rt>후리가나<\/rt>/);
+});
+
 test('interpolates include parameters through nested lists and advanced table cells as plain data', () => {
   const source = parseMarkup(' * @항목@\n  1. @하위@\n||<bgcolor=#fff>[[파일:@파일@|@설명@]]||');
   const expanded = applyIncludeParametersToAst(source.ast, {

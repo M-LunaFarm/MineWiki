@@ -11,7 +11,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.6.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.6.1';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -77,6 +77,9 @@ const allowedTags = [
   'mark',
   'small',
   'br',
+  'ruby',
+  'rp',
+  'rt',
   'img',
   'figure',
   'figcaption',
@@ -761,6 +764,9 @@ export function applyIncludeParametersToAst(
       caption: node.caption === null ? null : replace(node.caption)
     };
     if (node.type === 'unsupported_macro') return { ...node };
+    if (node.type === 'line_break' || node.type === 'clearfix') return { ...node };
+    if (node.type === 'anchor') return { ...node, id: normalizeMacroAnchor(replace(node.id)) };
+    if (node.type === 'ruby') return { ...node, text: replace(node.text), ruby: replace(node.ruby) };
     return { ...node, text: replace(node.text) };
   });
   const list = (node: WikiListNode): WikiListNode => ({
@@ -817,7 +823,7 @@ function parseInline(
   footnotes: string[]
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
-  const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXml><ref>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?\s*(?<refShortText>[^\]]+?)\])|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\([^\]\n]*\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
+  const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXml><ref>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?\s*(?<refShortText>[^\]]+?)\])|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
   let last = 0;
   for (const match of input.matchAll(pattern)) {
     if (match.index! > last) nodes.push({ type: 'text', text: input.slice(last, match.index) });
@@ -851,9 +857,8 @@ function parseInline(
       nodes.push({ type: 'external_link', href, label: group.externalLabel ?? href });
     } else if (group.macro !== undefined) {
       const name = (group.macroName ?? '').slice(0, 64);
-      const warning = `지원되지 않는 매크로입니다: ${name}`;
-      if (!errors.includes(warning)) errors.push(warning);
-      nodes.push({ type: 'unsupported_macro', name });
+      const macro = parseSafeInlineMacro(name, group.macroArgs, errors);
+      nodes.push(macro);
     } else if (group.bold !== undefined) {
       nodes.push({ type: 'bold', text: group.boldText ?? '' });
     } else if (group.italic !== undefined) {
@@ -871,6 +876,59 @@ function parseInline(
   }
   if (last < input.length) nodes.push({ type: 'text', text: input.slice(last) });
   return nodes;
+}
+
+function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors: string[]): InlineNode {
+  const normalizedName = name.toLowerCase();
+  if (normalizedName === 'br' && rawArgs === undefined) return { type: 'line_break' };
+  if (normalizedName === 'clearfix' && rawArgs === undefined) return { type: 'clearfix' };
+  if (normalizedName === 'anchor' && rawArgs !== undefined) {
+    const id = normalizeMacroAnchor(rawArgs);
+    if (id) return { type: 'anchor', id };
+  }
+  if (normalizedName === 'ruby' && rawArgs !== undefined) {
+    const [text = '', ...parameters] = splitMacroArguments(rawArgs);
+    let ruby = '';
+    let color: string | null = null;
+    for (const parameter of parameters) {
+      if (parameter.startsWith('ruby=')) ruby = parameter.slice('ruby='.length);
+      else if (parameter.startsWith('color=')) color = normalizeTableColor(parameter.slice('color='.length));
+    }
+    if (text && ruby) return { type: 'ruby', text, ruby, color };
+  }
+  const warning = `지원되지 않는 매크로입니다: ${name}`;
+  if (!errors.includes(warning)) errors.push(warning);
+  return { type: 'unsupported_macro', name };
+}
+
+function splitMacroArguments(value: string) {
+  const values: string[] = [];
+  let current = '';
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+    } else if (character === '\\') {
+      escaped = true;
+    } else if (character === ',') {
+      values.push(current.trim());
+      current = '';
+    } else {
+      current += character;
+    }
+  }
+  if (escaped) current += '\\';
+  values.push(current.trim());
+  return values;
+}
+
+function normalizeMacroAnchor(value: string) {
+  const trimmed = value.trim();
+  if (/[^A-Za-z0-9가-힣_.:\s-]/u.test(trimmed)) return '';
+  return trimmed
+    .replace(/\s+/gu, '_')
+    .slice(0, 128);
 }
 
 export interface RenderOptions {
@@ -939,7 +997,10 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       nav: ['class', 'aria-label'],
       blockquote: ['class'],
       caption: ['class'],
-      span: ['class', 'style', 'title'],
+      span: ['class', 'style', 'title', 'id'],
+      ruby: ['class'],
+      rt: ['class'],
+      rp: ['class'],
       s: ['class'],
       u: ['class'],
       sup: ['class'],
@@ -1023,6 +1084,15 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
   return nodes
     .map((node) => {
       if (node.type === 'text') return escapeHtml(node.text);
+      if (node.type === 'line_break') return '<br>';
+      if (node.type === 'clearfix') return '<span class="wiki-clearfix"></span>';
+      if (node.type === 'anchor') return node.id ? `<span class="wiki-anchor" id="${escapeAttr(node.id)}"></span>` : '';
+      if (node.type === 'ruby') {
+        const ruby = node.color
+          ? `<span style="color: ${escapeAttr(node.color)}">${escapeHtml(node.ruby)}</span>`
+          : escapeHtml(node.ruby);
+        return `<ruby>${escapeHtml(node.text)}<rp>(</rp><rt>${ruby}</rt><rp>)</rp></ruby>`;
+      }
       if (node.type === 'bold') return `<strong>${escapeHtml(node.text)}</strong>`;
       if (node.type === 'italic') return `<em>${escapeHtml(node.text)}</em>`;
       if (node.type === 'strike') return `<s>${escapeHtml(node.text)}</s>`;

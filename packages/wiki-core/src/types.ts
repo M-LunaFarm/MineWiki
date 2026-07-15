@@ -77,6 +77,10 @@ export type AstNode =
 
 export type InlineNode =
   | { type: 'text'; text: string }
+  | { type: 'line_break' }
+  | { type: 'clearfix' }
+  | { type: 'anchor'; id: string }
+  | { type: 'ruby'; text: string; ruby: string; color: string | null }
   | { type: 'bold'; text: string }
   | { type: 'italic'; text: string }
   | { type: 'strike'; text: string }
