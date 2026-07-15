@@ -112,7 +112,10 @@ test('public wiki profiles expose only document-safe identity and ownership stat
     documentExists: true,
     contributionsPath: '/wiki/contributions/42',
     isOwner: true,
-    canEditDocument: true
+    canEditDocument: true,
+    requestedUsername: 'discord_owner_name',
+    canonicalUsername: 'discord_owner_name',
+    isAlias: false
   });
   assert.equal('email' in result, false);
   assert.equal('accountId' in result, false);

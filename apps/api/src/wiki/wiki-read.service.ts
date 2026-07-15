@@ -819,10 +819,13 @@ export class WikiReadService {
       select: { id: true, username: true, displayName: true, status: true, mergedIntoProfileId: true }
     });
     if (!requestedProfile) throw new NotFoundException('Wiki profile not found.');
-    const alias = await this.prisma.wikiProfileAlias.findUnique({
-      where: { sourceProfileId: requestedProfile.id },
-      select: { targetProfileId: true }
-    });
+    const aliasDelegate = this.prisma.wikiProfileAlias;
+    const alias = aliasDelegate
+      ? await aliasDelegate.findUnique({
+          where: { sourceProfileId: requestedProfile.id },
+          select: { targetProfileId: true }
+        })
+      : null;
     const canonicalProfileId = alias?.targetProfileId ?? requestedProfile.mergedIntoProfileId ?? requestedProfile.id;
     const profile = canonicalProfileId === requestedProfile.id
       ? requestedProfile
@@ -831,11 +834,13 @@ export class WikiReadService {
           select: { id: true, username: true, displayName: true, status: true, mergedIntoProfileId: true }
         });
     if (!profile || !['active', 'blocked'].includes(profile.status)) throw new NotFoundException('Wiki profile not found.');
-    const aliases = await this.prisma.wikiProfileAlias.findMany({
-      where: { targetProfileId: profile.id },
-      select: { sourceProfileId: true },
-      orderBy: { sourceProfileId: 'asc' }
-    });
+    const aliases = aliasDelegate
+      ? await aliasDelegate.findMany({
+          where: { targetProfileId: profile.id },
+          select: { sourceProfileId: true },
+          orderBy: { sourceProfileId: 'asc' }
+        })
+      : [];
     const actorProfileIds = [...new Set([profile.id, ...aliases.map((item) => item.sourceProfileId)])];
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
@@ -1898,15 +1903,18 @@ export class WikiReadService {
     readonly username: string;
   }>> {
     if (profileIds.length === 0) return new Map();
+    const aliasDelegate = this.prisma.wikiProfileAlias;
     const [profiles, aliases] = await Promise.all([
       this.prisma.wikiProfile.findMany({
         where: { id: { in: profileIds } },
         select: { id: true, displayName: true, username: true }
       }),
-      this.prisma.wikiProfileAlias.findMany({
-        where: { sourceProfileId: { in: profileIds } },
-        select: { sourceProfileId: true, targetProfileId: true }
-      })
+      aliasDelegate
+        ? aliasDelegate.findMany({
+            where: { sourceProfileId: { in: profileIds } },
+            select: { sourceProfileId: true, targetProfileId: true }
+          })
+        : Promise.resolve([])
     ]);
     const targetIds = [...new Set(aliases.map((alias) => alias.targetProfileId))];
     const targets = targetIds.length > 0
