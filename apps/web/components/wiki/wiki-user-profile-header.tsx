@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookOpenText, History, PencilLine, ShieldAlert } from 'lucide-react';
+import { BookOpenText, GitMerge, History, PencilLine, ShieldAlert } from 'lucide-react';
 import type { WikiPublicProfileResponse } from '../../lib/wiki-api';
 import { buildStandardWikiToolPath } from '../../lib/wiki-routes.mjs';
 
@@ -36,6 +36,15 @@ export function WikiUserProfileHeader({
           </Link>
         ) : null}
       </div>
+      {profile.isAlias ? (
+        <div className="mx-5 mb-5 flex items-start gap-2 rounded-lg border border-blue-300/20 bg-blue-300/10 px-3 py-2.5 text-xs leading-5 text-blue-100 sm:mx-6 sm:mb-6">
+          <GitMerge className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <p>
+            이전 사용자명 <span className="font-semibold">@{profile.requestedUsername}</span>의 기록을
+            현재 프로필 <Link href={profile.documentPath} className="font-semibold underline underline-offset-2">@{profile.canonicalUsername}</Link>에 통합해 표시합니다.
+          </p>
+        </div>
+      ) : null}
       <nav aria-label="사용자 문서 메뉴" className="grid grid-cols-2 border-t border-white/10">
         <Link href={profile.documentPath} aria-current={current === 'document' ? 'page' : undefined} className={`flex min-h-12 items-center justify-center gap-2 px-3 text-sm font-semibold transition ${current === 'document' ? 'bg-emerald-300/10 text-emerald-200' : 'text-slate-400 hover:bg-white/[0.035] hover:text-white'}`}>
           <BookOpenText className="size-4" /> 사용자 문서

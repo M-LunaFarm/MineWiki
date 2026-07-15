@@ -158,6 +158,9 @@ export interface WikiPublicProfileResponse {
   readonly contributionsPath: string;
   readonly isOwner: boolean;
   readonly canEditDocument: boolean;
+  readonly requestedUsername: string;
+  readonly canonicalUsername: string;
+  readonly isAlias: boolean;
 }
 
 export interface WikiRevisionListResponse {
@@ -367,6 +370,8 @@ export interface WikiContributionResponse {
     readonly displayName: string;
     readonly status: string;
   };
+  readonly requestedProfileId: string;
+  readonly mergedProfileIds: string[];
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly kind: 'document' | 'discussion' | 'edit_request' | 'review';

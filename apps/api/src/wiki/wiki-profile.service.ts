@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { wikiUrl } from '@minewiki/wiki-core';
+import type { WikiProfile } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 
 export interface WikiMeResponse {
@@ -30,6 +31,9 @@ export interface WikiPublicProfileResponse {
   readonly contributionsPath: string;
   readonly isOwner: boolean;
   readonly canEditDocument: boolean;
+  readonly requestedUsername: string;
+  readonly canonicalUsername: string;
+  readonly isAlias: boolean;
 }
 
 @Injectable()
@@ -67,10 +71,12 @@ export class WikiProfileService {
     if (!canonicalUsername || canonicalUsername !== username || canonicalUsername.includes('/')) {
       throw new NotFoundException('Wiki user not found.');
     }
-    const profile = await this.prisma.wikiProfile.findUnique({ where: { username: canonicalUsername } });
-    if (!profile || !['active', 'blocked'].includes(profile.status)) {
+    const requestedProfile = await this.prisma.wikiProfile.findUnique({ where: { username: canonicalUsername } });
+    if (!requestedProfile) {
       throw new NotFoundException('Wiki user not found.');
     }
+    const profile = await this.resolveCanonicalProfile(requestedProfile);
+    if (!['active', 'blocked'].includes(profile.status)) throw new NotFoundException('Wiki user not found.');
     const namespace = await this.prisma.wikiNamespace.findUnique({
       where: { code: 'user' },
       select: { id: true }
@@ -92,7 +98,10 @@ export class WikiProfileService {
       documentExists: Boolean(rootPage && rootPage.status !== 'deleted' && rootPage.ownerProfileId === profile.id),
       contributionsPath: `/wiki/contributions/${profile.id}`,
       isOwner,
-      canEditDocument: isOwner && profile.status === 'active'
+      canEditDocument: isOwner && profile.status === 'active',
+      requestedUsername: canonicalUsername,
+      canonicalUsername: profile.username,
+      isAlias: requestedProfile.id !== profile.id
     };
   }
 
@@ -101,7 +110,7 @@ export class WikiProfileService {
       where: { accountId }
     });
     if (existing) {
-      return existing;
+      return this.resolveCanonicalProfile(existing);
     }
 
     const account = await this.prisma.account.findUnique({
@@ -142,6 +151,26 @@ export class WikiProfileService {
         updatedAt: now
       }
     });
+  }
+
+  private async resolveCanonicalProfile(profile: WikiProfile): Promise<WikiProfile> {
+    let current = profile;
+    const visited = new Set<string>();
+    for (let depth = 0; depth < 8 && (current.status === 'merged' || current.mergedIntoProfileId); depth += 1) {
+      const key = current.id.toString();
+      if (visited.has(key)) throw new NotFoundException('Wiki profile alias cycle detected.');
+      visited.add(key);
+      const alias = await this.prisma.wikiProfileAlias.findUnique({
+        where: { sourceProfileId: current.id },
+        select: { targetProfileId: true }
+      });
+      const targetId = alias?.targetProfileId ?? current.mergedIntoProfileId;
+      if (!targetId) throw new NotFoundException('Wiki profile alias target not found.');
+      const target = await this.prisma.wikiProfile.findUnique({ where: { id: targetId } });
+      if (!target) throw new NotFoundException('Wiki profile alias target not found.');
+      current = target;
+    }
+    return current;
   }
 
   private usernameFor(provider: string, accountId: string): string {

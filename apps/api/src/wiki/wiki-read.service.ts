@@ -170,6 +170,8 @@ export interface WikiContributionResponse {
     readonly displayName: string;
     readonly status: string;
   };
+  readonly requestedProfileId: string;
+  readonly mergedProfileIds: string[];
   readonly items: WikiContributionItem[];
   readonly nextCursor: string | null;
 }
@@ -404,13 +406,7 @@ export class WikiReadService {
     const hasMore = revisions.length > limit;
     const pageRows = revisions.slice(0, limit);
     const profileIds = [...new Set(pageRows.flatMap((revision) => revision.createdBy ? [revision.createdBy] : []))];
-    const profiles = profileIds.length > 0
-      ? await this.prisma.wikiProfile.findMany({
-          where: { id: { in: profileIds } },
-          select: { id: true, displayName: true, username: true }
-        })
-      : [];
-    const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+    const profileById = await this.canonicalProfileViews(profileIds);
     const items = pageRows.map((revision) => ({
       id: revision.id.toString(),
       revisionNo: revision.revisionNo,
@@ -818,22 +814,48 @@ export class WikiReadService {
     readonly activity?: string;
   }): Promise<WikiContributionResponse> {
     const profileId = this.parseBigIntId(input.profileId, 'profileId');
-    const profile = await this.prisma.wikiProfile.findUnique({
+    const requestedProfile = await this.prisma.wikiProfile.findUnique({
       where: { id: profileId },
-      select: { id: true, username: true, displayName: true, status: true }
+      select: { id: true, username: true, displayName: true, status: true, mergedIntoProfileId: true }
     });
+    if (!requestedProfile) throw new NotFoundException('Wiki profile not found.');
+    const alias = await this.prisma.wikiProfileAlias.findUnique({
+      where: { sourceProfileId: requestedProfile.id },
+      select: { targetProfileId: true }
+    });
+    const canonicalProfileId = alias?.targetProfileId ?? requestedProfile.mergedIntoProfileId ?? requestedProfile.id;
+    const profile = canonicalProfileId === requestedProfile.id
+      ? requestedProfile
+      : await this.prisma.wikiProfile.findUnique({
+          where: { id: canonicalProfileId },
+          select: { id: true, username: true, displayName: true, status: true, mergedIntoProfileId: true }
+        });
     if (!profile || !['active', 'blocked'].includes(profile.status)) throw new NotFoundException('Wiki profile not found.');
+    const aliases = await this.prisma.wikiProfileAlias.findMany({
+      where: { targetProfileId: profile.id },
+      select: { sourceProfileId: true },
+      orderBy: { sourceProfileId: 'asc' }
+    });
+    const actorProfileIds = [...new Set([profile.id, ...aliases.map((item) => item.sourceProfileId)])];
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
     const activity = input.activity ?? 'edits';
     if (!['edits', 'discussions', 'edit-requests', 'reviews'].includes(activity)) throw new BadRequestException('activity is invalid.');
-    const common = { profile, accountId: input.accountId ?? null, session: input.session ?? null, cursor, limit };
+    const common = {
+      profile,
+      actorProfileIds,
+      requestedProfileId: requestedProfile.id,
+      accountId: input.accountId ?? null,
+      session: input.session ?? null,
+      cursor,
+      limit
+    };
     if (activity === 'discussions') return this.getDiscussionContributions(common);
     if (activity === 'edit-requests') return this.getEditRequestContributions(common, false);
     if (activity === 'reviews') return this.getEditRequestContributions(common, true);
     const changes = await this.prisma.wikiRecentChange.findMany({
       where: {
-        actorId: profile.id,
+        actorId: { in: actorProfileIds },
         pageId: { not: null },
         ...(cursor ? { id: { lt: cursor } } : {})
       },
@@ -888,6 +910,8 @@ export class WikiReadService {
         displayName: profile.displayName,
         status: profile.status
       },
+      requestedProfileId: requestedProfile.id.toString(),
+      mergedProfileIds: actorProfileIds.map((id) => id.toString()),
       items,
       nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
     };
@@ -895,6 +919,8 @@ export class WikiReadService {
 
   private async getDiscussionContributions(input: {
     readonly profile: { readonly id: bigint; readonly username: string; readonly displayName: string; readonly status: string };
+    readonly actorProfileIds: bigint[];
+    readonly requestedProfileId: bigint;
     readonly accountId: string | null;
     readonly session: SessionPayload | null;
     readonly cursor: bigint | null;
@@ -902,7 +928,7 @@ export class WikiReadService {
   }): Promise<WikiContributionResponse> {
     const scanLimit = Math.min(input.limit * 4 + 1, 401);
     const comments = await this.prisma.wikiDiscussionComment.findMany({
-      where: { createdBy: input.profile.id, ...(input.cursor ? { id: { lt: input.cursor } } : {}) },
+      where: { createdBy: { in: input.actorProfileIds }, ...(input.cursor ? { id: { lt: input.cursor } } : {}) },
       orderBy: [{ id: 'desc' }],
       take: scanLimit
     });
@@ -956,7 +982,10 @@ export class WikiReadService {
       });
       if (items.length >= input.limit) break;
     }
-    return this.contributionResponse('discussions', input.profile, items, comments, lastScannedId, input.limit, scanLimit);
+    return this.contributionResponse(
+      'discussions', input.profile, items, comments, lastScannedId, input.limit, scanLimit,
+      input.requestedProfileId, input.actorProfileIds
+    );
   }
 
   private discussionEventSummary(type: string | null, before: string | null, after: string | null): string {
@@ -973,6 +1002,8 @@ export class WikiReadService {
 
   private async getEditRequestContributions(input: {
     readonly profile: { readonly id: bigint; readonly username: string; readonly displayName: string; readonly status: string };
+    readonly actorProfileIds: bigint[];
+    readonly requestedProfileId: bigint;
     readonly accountId: string | null;
     readonly cursor: bigint | null;
     readonly limit: number;
@@ -980,8 +1011,8 @@ export class WikiReadService {
     const scanLimit = Math.min(input.limit * 4 + 1, 401);
     const requests = await this.prisma.wikiEditRequest.findMany({
       where: reviews
-        ? { reviewedBy: input.profile.id, reviewedAt: { not: null }, ...(input.cursor ? { id: { lt: input.cursor } } : {}) }
-        : { createdBy: input.profile.id, ...(input.cursor ? { id: { lt: input.cursor } } : {}) },
+        ? { reviewedBy: { in: input.actorProfileIds }, reviewedAt: { not: null }, ...(input.cursor ? { id: { lt: input.cursor } } : {}) }
+        : { createdBy: { in: input.actorProfileIds }, ...(input.cursor ? { id: { lt: input.cursor } } : {}) },
       orderBy: [{ id: 'desc' }],
       take: scanLimit
     });
@@ -1013,7 +1044,10 @@ export class WikiReadService {
       });
       if (items.length >= input.limit) break;
     }
-    return this.contributionResponse(reviews ? 'reviews' : 'edit-requests', input.profile, items, requests, lastScannedId, input.limit, scanLimit);
+    return this.contributionResponse(
+      reviews ? 'reviews' : 'edit-requests', input.profile, items, requests, lastScannedId, input.limit, scanLimit,
+      input.requestedProfileId, input.actorProfileIds
+    );
   }
 
   private async canReadContributionPage(page: Parameters<WikiPermissionService['assertCanReadPage']>[0]['page'] & { id: bigint }, accountId: string | null, cache: Map<bigint, boolean>): Promise<boolean> {
@@ -1032,11 +1066,14 @@ export class WikiReadService {
   private contributionResponse(
     activity: WikiContributionResponse['activity'],
     profile: { readonly id: bigint; readonly username: string; readonly displayName: string; readonly status: string },
-    items: WikiContributionItem[], scanned: ReadonlyArray<unknown>, lastScannedId: bigint | null, limit: number, scanLimit: number
+    items: WikiContributionItem[], scanned: ReadonlyArray<unknown>, lastScannedId: bigint | null, limit: number, scanLimit: number,
+    requestedProfileId: bigint = profile.id, mergedProfileIds: bigint[] = [profile.id]
   ): WikiContributionResponse {
     return {
       activity,
       profile: { id: profile.id.toString(), username: profile.username, displayName: profile.displayName, status: profile.status },
+      requestedProfileId: requestedProfileId.toString(),
+      mergedProfileIds: mergedProfileIds.map((id) => id.toString()),
       items,
       nextCursor: scanned.length > 0 && (items.length >= limit || scanned.length >= scanLimit) ? lastScannedId?.toString() ?? null : null
     };
@@ -1348,10 +1385,8 @@ export class WikiReadService {
       lines = nextLines;
     }
     const profileIds = [...new Set(attribution.flatMap((item) => item.createdBy ? [item.createdBy] : []))];
-    const profiles = profileIds.length > 0
-      ? await this.prisma.wikiProfile.findMany({ where: { id: { in: profileIds } }, select: { id: true, displayName: true } })
-      : [];
-    const nameById = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
+    const profileById = await this.canonicalProfileViews(profileIds);
+    const nameById = new Map([...profileById.entries()].map(([id, profile]) => [id, profile.displayName]));
     return {
       pageId: page.id.toString(),
       revisionId: current.id.toString(),
@@ -1855,6 +1890,38 @@ export class WikiReadService {
         }
       ])
     );
+  }
+
+  private async canonicalProfileViews(profileIds: bigint[]): Promise<Map<bigint, {
+    readonly id: bigint;
+    readonly displayName: string;
+    readonly username: string;
+  }>> {
+    if (profileIds.length === 0) return new Map();
+    const [profiles, aliases] = await Promise.all([
+      this.prisma.wikiProfile.findMany({
+        where: { id: { in: profileIds } },
+        select: { id: true, displayName: true, username: true }
+      }),
+      this.prisma.wikiProfileAlias.findMany({
+        where: { sourceProfileId: { in: profileIds } },
+        select: { sourceProfileId: true, targetProfileId: true }
+      })
+    ]);
+    const targetIds = [...new Set(aliases.map((alias) => alias.targetProfileId))];
+    const targets = targetIds.length > 0
+      ? await this.prisma.wikiProfile.findMany({
+          where: { id: { in: targetIds } },
+          select: { id: true, displayName: true, username: true }
+        })
+      : [];
+    const direct = new Map(profiles.map((profile) => [profile.id, profile]));
+    const targetById = new Map(targets.map((profile) => [profile.id, profile]));
+    for (const alias of aliases) {
+      const target = targetById.get(alias.targetProfileId);
+      if (target) direct.set(alias.sourceProfileId, target);
+    }
+    return direct;
   }
 
   private parseBigIntId(value: string, label: string): bigint {

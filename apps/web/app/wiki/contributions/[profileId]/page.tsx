@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { fetchWikiContributions, fetchWikiPublicProfile } from '../../../../lib/wiki-server-api';
 import { WikiUserProfileHeader } from '../../../../components/wiki/wiki-user-profile-header';
+import { GitMerge } from 'lucide-react';
 
 interface PageProps {
   readonly params: Promise<{ profileId: string }>;
@@ -15,15 +16,23 @@ export default async function WikiContributionsPage({ params, searchParams }: Pa
   if (!result) notFound();
   const publicProfile = await fetchWikiPublicProfile(result.profile.username);
   if (!publicProfile) notFound();
+  const canonicalProfileId = result.profile.id;
+  const mergedView = result.requestedProfileId !== canonicalProfileId || result.mergedProfileIds.length > 1;
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
       <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
         <Link href="/recent" className="hover:text-emerald-200">최근 변경</Link><span>/</span><span className="text-slate-200">기여 내역</span>
       </nav>
       <WikiUserProfileHeader profile={publicProfile} current="contributions" />
+      {mergedView ? (
+        <p className="flex items-start gap-2 rounded-lg border border-blue-300/20 bg-blue-300/10 px-3 py-2.5 text-sm leading-6 text-blue-100">
+          <GitMerge className="mt-1 size-4 shrink-0" aria-hidden />
+          연결된 위키 프로필 {result.mergedProfileIds.length}개의 공개 기여를 시간순으로 함께 표시합니다. 과거 편집의 작성자 기록은 원본 그대로 보존됩니다.
+        </p>
+      ) : null}
       <p className="text-sm text-slate-400">읽을 권한이 있는 공개 활동만 표시됩니다.</p>
       <nav aria-label="기여 활동 유형" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        {CONTRIBUTION_TABS.map((tab) => <Link key={tab.value} href={`/wiki/contributions/${profileId}?activity=${tab.value}`} className={`chip min-h-11 justify-center ${activity === tab.value ? 'chip-accent' : 'chip-muted'}`} aria-current={activity === tab.value ? 'page' : undefined}>{tab.label}</Link>)}
+        {CONTRIBUTION_TABS.map((tab) => <Link key={tab.value} href={`/wiki/contributions/${canonicalProfileId}?activity=${tab.value}`} className={`chip min-h-11 justify-center ${activity === tab.value ? 'chip-accent' : 'chip-muted'}`} aria-current={activity === tab.value ? 'page' : undefined}>{tab.label}</Link>)}
       </nav>
       <section className="divide-y divide-white/10 border border-white/10 bg-[#111821]">
         {result.items.map((item) => (
@@ -40,7 +49,7 @@ export default async function WikiContributionsPage({ params, searchParams }: Pa
         ))}
         {result.items.length === 0 ? <p className="p-6 text-sm text-slate-400">표시할 공개 기여가 없습니다.</p> : null}
       </section>
-      {result.nextCursor ? <Link href={`/wiki/contributions/${profileId}?activity=${activity}&cursor=${result.nextCursor}`} className="btn-secondary min-h-11 self-start">이전 활동 더 보기</Link> : null}
+      {result.nextCursor ? <Link href={`/wiki/contributions/${canonicalProfileId}?activity=${activity}&cursor=${result.nextCursor}`} className="btn-secondary min-h-11 self-start">이전 활동 더 보기</Link> : null}
     </main>
   );
 }

@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiProfileMergeService } from './wiki-profile-merge.service';
+import { WikiReadService } from './wiki-read.service';
+import type { WikiPermissionService } from './wiki-permission.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -13,6 +15,9 @@ if (!hasDatabase) {
   const prisma = new PrismaService();
   const profiles = new WikiProfileService(prisma);
   const service = new WikiProfileMergeService(prisma, profiles);
+  const read = new WikiReadService(prisma, {
+    assertCanReadPage: async () => undefined
+  } as unknown as WikiPermissionService);
 
   before(async () => {
     await prisma.$connect();
@@ -201,6 +206,20 @@ if (!hasDatabase) {
       assert.equal(historicalChange?.actorId, source.id);
       assert.equal(movedNotification?.profileId, target.id);
       assert.equal(movedAcl?.subjectValue, target.id.toString());
+
+      const [publicAlias, ensuredAlias, contributions] = await Promise.all([
+        profiles.getPublicProfile(source.username, canonicalAccountId),
+        profiles.ensureWikiProfile(aliasAccountId),
+        read.getContributions({ profileId: source.id.toString(), activity: 'edits' })
+      ]);
+      assert.equal(publicAlias.id, target.id.toString());
+      assert.equal(publicAlias.isAlias, true);
+      assert.equal(publicAlias.requestedUsername, source.username);
+      assert.equal(publicAlias.canonicalUsername, target.username);
+      assert.equal(ensuredAlias.id, target.id);
+      assert.equal(contributions.profile.id, target.id.toString());
+      assert.equal(contributions.requestedProfileId, source.id.toString());
+      assert.deepEqual(new Set(contributions.mergedProfileIds), new Set([source.id.toString(), target.id.toString()]));
 
       const repeatedApproval = await service.approve(
         requested.id,
