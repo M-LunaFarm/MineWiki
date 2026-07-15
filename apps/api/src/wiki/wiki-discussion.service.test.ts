@@ -583,6 +583,42 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
   assert.deepEqual((queries[2]?.where as { status: unknown }).status, { not: 'deleted' });
 });
 
+test('discussion previews expose the first and latest comments without hidden or deleted content', async () => {
+  const previewRows = [
+    { id: 1n, threadId: 30n, contentPreview: 'first comment', contentLength: 13n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), firstRank: 1n, recentRank: 5n, commentCount: 5n },
+    { id: 3n, threadId: 30n, contentPreview: 'hidden secret', contentLength: 13n, status: 'hidden', createdBy: 21n, createdAt: new Date('2026-01-03T00:00:00Z'), firstRank: 3n, recentRank: 3n, commentCount: 5n },
+    { id: 4n, threadId: 30n, contentPreview: 'deleted secret', contentLength: 14n, status: 'deleted', createdBy: 21n, createdAt: new Date('2026-01-04T00:00:00Z'), firstRank: 4n, recentRank: 2n, commentCount: 5n },
+    { id: 5n, threadId: 30n, contentPreview: 'latest comment', contentLength: 14n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-05T00:00:00Z'), firstRank: 5n, recentRank: 1n, commentCount: 5n },
+  ];
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findMany() { return [thread]; } },
+    wikiDiscussionComment: { async groupBy() { throw new Error('preview must reuse window count'); } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }, { id: 21n, displayName: '숨김 사용자' }]; } },
+    async $queryRaw() { return previewRows; },
+  };
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async assertCanReadPage() {} } as unknown as WikiPermissionService,
+  );
+
+  const result = await discussions.listThreadsPage('10', null, undefined, 30, 'all', true);
+  assert.equal(result.items[0]?.commentCount, 5);
+  assert.deepEqual(result.items[0]?.preview, {
+    firstComment: {
+      id: '1', status: 'normal', contentPreview: 'first comment', truncated: false,
+      createdBy: '20', createdByName: '테스터', createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    recentComments: [
+      { id: '3', status: 'hidden', contentPreview: null, truncated: false, createdBy: '21', createdByName: '숨김 사용자', createdAt: '2026-01-03T00:00:00.000Z' },
+      { id: '4', status: 'deleted', contentPreview: null, truncated: false, createdBy: '21', createdByName: '숨김 사용자', createdAt: '2026-01-04T00:00:00.000Z' },
+      { id: '5', status: 'normal', contentPreview: 'latest comment', truncated: false, createdBy: '20', createdByName: '테스터', createdAt: '2026-01-05T00:00:00.000Z' },
+    ],
+    omittedCommentCount: 1,
+  });
+});
+
 test('active discussion filter includes open and paused but excludes closed threads', async () => {
   let where: unknown;
   const store = {

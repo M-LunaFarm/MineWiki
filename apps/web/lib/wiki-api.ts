@@ -369,8 +369,26 @@ export interface WikiThreadSummary {
   readonly createdBy: string;
   readonly createdByName: string;
   readonly commentCount: number;
+  /** Optional while API and web instances roll independently. */
+  readonly preview?: WikiThreadPreview;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface WikiThreadCommentPreview {
+  readonly id: string;
+  readonly status: string;
+  readonly contentPreview: string | null;
+  readonly truncated: boolean;
+  readonly createdBy: string;
+  readonly createdByName: string;
+  readonly createdAt: string;
+}
+
+export interface WikiThreadPreview {
+  readonly firstComment: WikiThreadCommentPreview | null;
+  readonly recentComments: readonly WikiThreadCommentPreview[];
+  readonly omittedCommentCount: number;
 }
 
 export interface WikiThreadListResponse {
@@ -947,7 +965,7 @@ export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]>
 }
 
 export async function fetchWikiThreads(pageId: string, cursor?: string, status: WikiDiscussionStatusFilter = 'all'): Promise<WikiThreadListResponse> {
-  const params = new URLSearchParams({ limit: '30' });
+  const params = new URLSearchParams({ limit: '30', preview: 'first-latest' });
   if (cursor) params.set('cursor', cursor);
   if (status !== 'all') params.set('status', status);
   return readWikiBrowser<WikiThreadListResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussion-threads?${params.toString()}`);

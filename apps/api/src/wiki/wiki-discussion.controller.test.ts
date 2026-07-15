@@ -25,16 +25,20 @@ test('discussion status endpoint accepts paused and forwards the authenticated a
 
 test('discussion list endpoint validates and forwards status filters', async () => {
   let receivedStatus: WikiDiscussionStatusFilter | undefined;
+  let receivedPreview: boolean | undefined;
   const service = {
-    async listThreadsPage(_pageId: string, _accountId: string | null, _cursor: string | undefined, _limit: number, status: WikiDiscussionStatusFilter) {
+    async listThreadsPage(_pageId: string, _accountId: string | null, _cursor: string | undefined, _limit: number, status: WikiDiscussionStatusFilter, includePreview: boolean) {
       receivedStatus = status;
+      receivedPreview = includePreview;
       return { items: [], nextCursor: null, statusCounts: { total: 0, open: 0, paused: 0, closed: 0 } };
     }
   } as unknown as WikiDiscussionService;
   const controller = new WikiDiscussionController(service);
   const request = { sessionPayload: session } as FastifyRequest;
 
-  await controller.listPage('10', request, undefined, 'active', 20);
+  await controller.listPage('10', request, undefined, 'active', 20, 'first-latest');
   assert.equal(receivedStatus, 'active');
+  assert.equal(receivedPreview, true);
   assert.throws(() => controller.listPage('10', request, undefined, 'deleted', 20), BadRequestException);
+  assert.throws(() => controller.listPage('10', request, undefined, 'all', 20, 'full'), BadRequestException);
 });

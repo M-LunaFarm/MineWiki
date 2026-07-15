@@ -18,8 +18,25 @@ export interface WikiThreadSummary {
   readonly createdBy: string;
   readonly createdByName: string;
   readonly commentCount: number;
+  readonly preview?: WikiThreadPreview;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface WikiThreadCommentPreview {
+  readonly id: string;
+  readonly status: string;
+  readonly contentPreview: string | null;
+  readonly truncated: boolean;
+  readonly createdBy: string;
+  readonly createdByName: string;
+  readonly createdAt: string;
+}
+
+export interface WikiThreadPreview {
+  readonly firstComment: WikiThreadCommentPreview | null;
+  readonly recentComments: readonly WikiThreadCommentPreview[];
+  readonly omittedCommentCount: number;
 }
 
 export interface WikiThreadListResponse {
@@ -125,6 +142,19 @@ export interface WikiDiscussionPollDetail {
 
 type WikiDiscussionViewer = string | SessionPayload | null | undefined;
 
+interface ThreadPreviewRow {
+  readonly id: bigint;
+  readonly threadId: bigint;
+  readonly contentPreview: string;
+  readonly contentLength: bigint | number;
+  readonly status: string;
+  readonly createdBy: bigint;
+  readonly createdAt: Date;
+  readonly firstRank: bigint | number;
+  readonly recentRank: bigint | number;
+  readonly commentCount: bigint | number;
+}
+
 @Injectable()
 export class WikiDiscussionService {
   constructor(
@@ -186,7 +216,8 @@ export class WikiDiscussionService {
     viewer?: WikiDiscussionViewer,
     cursor?: string,
     requestedLimit = 30,
-    statusFilter: WikiDiscussionStatusFilter = 'all'
+    statusFilter: WikiDiscussionStatusFilter = 'all',
+    includePreview = false
   ): Promise<WikiThreadListResponse> {
     const accountId = this.viewerAccountId(viewer);
     const page = await this.readablePage(pageId, accountId);
@@ -213,20 +244,41 @@ export class WikiDiscussionService {
     });
     const hasMore = filteredThreads.length > limit;
     const pageThreads = filteredThreads.slice(0, limit);
-    const profileById = await this.profileNames(pageThreads.map((thread) => thread.createdBy));
-    const countRows = pageThreads.length > 0
+    const canViewHidden = includePreview && Boolean(actor && await this.wikiPermissions.canManagePage({ actor, page }));
+    const previewData = includePreview
+      ? await this.loadThreadPreviews(pageThreads.map((thread) => thread.id))
+      : null;
+    const countRows = !previewData && pageThreads.length > 0
       ? await this.prisma.wikiDiscussionComment.groupBy({
           by: ['threadId'],
           where: { threadId: { in: pageThreads.map((thread) => thread.id) }, entryType: 'comment' },
           _count: { _all: true }
         })
       : [];
-    const countByThreadId = new Map(countRows.map((row) => [row.threadId, row._count._all]));
+    const countByThreadId = previewData?.countByThreadId
+      ?? new Map(countRows.map((row) => [row.threadId, row._count._all]));
+    const previewProfileIds = previewData
+      ? [...previewData.rowsByThreadId.values()].flat().map((row) => row.createdBy)
+      : [];
+    const profileById = await this.profileNames([
+      ...pageThreads.map((thread) => thread.createdBy),
+      ...previewProfileIds
+    ]);
     const last = pageThreads.at(-1);
     const statusCount = new Map<string, number>();
     for (const thread of visibleThreads) statusCount.set(thread.status, (statusCount.get(thread.status) ?? 0) + 1);
     return {
-      items: pageThreads.map((thread) => this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0)),
+      items: pageThreads.map((thread) => this.toThreadSummary(
+        thread,
+        profileById,
+        countByThreadId.get(thread.id) ?? 0,
+        previewData ? this.toThreadPreview(
+          previewData.rowsByThreadId.get(thread.id) ?? [],
+          countByThreadId.get(thread.id) ?? 0,
+          profileById,
+          canViewHidden
+        ) : undefined
+      )),
       nextCursor: hasMore && last ? this.encodeRecentCursor(snapshotAt, last.updatedAt, last.id) : null,
       statusCounts: {
         total: visibleThreads.length,
@@ -1283,12 +1335,102 @@ export class WikiDiscussionService {
   private toThreadSummary(
     thread: { id: bigint; pageId: bigint; title: string; status: string; createdBy: bigint; createdAt: Date; updatedAt: Date },
     profileById: ReadonlyMap<bigint, string>,
-    commentCount: number
+    commentCount: number,
+    preview?: WikiThreadPreview
   ): WikiThreadSummary {
     return {
       id: thread.id.toString(), pageId: thread.pageId.toString(), title: thread.title, status: thread.status,
       createdBy: thread.createdBy.toString(), createdByName: profileById.get(thread.createdBy) ?? '알 수 없는 사용자',
-      commentCount, createdAt: thread.createdAt.toISOString(), updatedAt: thread.updatedAt.toISOString()
+      commentCount, ...(preview ? { preview } : {}),
+      createdAt: thread.createdAt.toISOString(), updatedAt: thread.updatedAt.toISOString()
+    };
+  }
+
+  private async loadThreadPreviews(
+    threadIds: readonly bigint[]
+  ): Promise<{
+    readonly rowsByThreadId: ReadonlyMap<bigint, readonly ThreadPreviewRow[]>;
+    readonly countByThreadId: ReadonlyMap<bigint, number>;
+  }> {
+    if (threadIds.length === 0) {
+      return { rowsByThreadId: new Map(), countByThreadId: new Map() };
+    }
+    const rows = await this.prisma.$queryRaw<ThreadPreviewRow[]>(Prisma.sql`
+      WITH ranked AS (
+        SELECT
+          id,
+          thread_id,
+          LEFT(content, 600) AS content_preview,
+          CHAR_LENGTH(content) AS content_length,
+          status,
+          created_by,
+          created_at,
+          ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY id ASC) AS first_rank,
+          ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY id DESC) AS recent_rank,
+          COUNT(*) OVER (PARTITION BY thread_id) AS comment_count
+        FROM wiki_discussion_comments
+        WHERE entry_type = 'comment'
+          AND thread_id IN (${Prisma.join(threadIds)})
+      )
+      SELECT
+        id,
+        thread_id AS threadId,
+        content_preview AS contentPreview,
+        content_length AS contentLength,
+        status,
+        created_by AS createdBy,
+        created_at AS createdAt,
+        first_rank AS firstRank,
+        recent_rank AS recentRank,
+        comment_count AS commentCount
+      FROM ranked
+      WHERE first_rank = 1 OR recent_rank <= 3
+      ORDER BY thread_id ASC, id ASC
+    `);
+    const rowsByThreadId = new Map<bigint, ThreadPreviewRow[]>();
+    const countByThreadId = new Map<bigint, number>();
+    for (const row of rows) {
+      const group = rowsByThreadId.get(row.threadId) ?? [];
+      group.push(row);
+      rowsByThreadId.set(row.threadId, group);
+      countByThreadId.set(row.threadId, Number(row.commentCount));
+    }
+    return { rowsByThreadId, countByThreadId };
+  }
+
+  private toThreadPreview(
+    rows: readonly ThreadPreviewRow[],
+    commentCount: number,
+    profileById: ReadonlyMap<bigint, string>,
+    canViewHidden: boolean
+  ): WikiThreadPreview {
+    const firstRow = rows.find((row) => Number(row.firstRank) === 1) ?? null;
+    const recentRows = rows.filter((row) => Number(row.recentRank) <= 3 && row.id !== firstRow?.id);
+    const firstComment = firstRow ? this.toThreadCommentPreview(firstRow, profileById, canViewHidden) : null;
+    const recentComments = recentRows.map((row) => this.toThreadCommentPreview(row, profileById, canViewHidden));
+    return {
+      firstComment,
+      recentComments,
+      omittedCommentCount: Math.max(0, commentCount - recentComments.length - (firstComment ? 1 : 0))
+    };
+  }
+
+  private toThreadCommentPreview(
+    row: ThreadPreviewRow,
+    profileById: ReadonlyMap<bigint, string>,
+    canViewHidden: boolean
+  ): WikiThreadCommentPreview {
+    const readable = row.status === 'normal' || (row.status === 'hidden' && canViewHidden);
+    const normalized = readable ? row.contentPreview.replace(/\s+/gu, ' ').trim() : '';
+    const characters = [...normalized];
+    return {
+      id: row.id.toString(),
+      status: row.status,
+      contentPreview: readable ? characters.slice(0, 280).join('') : null,
+      truncated: readable && (Number(row.contentLength) > 600 || characters.length > 280),
+      createdBy: row.createdBy.toString(),
+      createdByName: profileById.get(row.createdBy) ?? '알 수 없는 사용자',
+      createdAt: row.createdAt.toISOString()
     };
   }
 

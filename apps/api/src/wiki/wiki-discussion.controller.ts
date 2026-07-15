@@ -34,17 +34,22 @@ export class WikiDiscussionController {
     @Req() request: FastifyRequest,
     @Query('cursor') cursor?: string,
     @Query('status') status?: string,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('preview') preview?: string
   ): Promise<WikiThreadListResponse> {
     if (status !== undefined && !['all', 'active', 'open', 'paused', 'closed'].includes(status)) {
       throw new BadRequestException('Invalid discussion status filter.');
+    }
+    if (preview !== undefined && preview !== 'first-latest') {
+      throw new BadRequestException('Invalid discussion preview mode.');
     }
     return this.discussions.listThreadsPage(
       pageId,
       request.sessionPayload ?? null,
       cursor,
       limit ?? 30,
-      (status ?? 'all') as WikiDiscussionStatusFilter
+      (status ?? 'all') as WikiDiscussionStatusFilter,
+      preview === 'first-latest'
     );
   }
 

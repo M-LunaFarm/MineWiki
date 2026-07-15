@@ -20,6 +20,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [nextThreadCursor, setNextThreadCursor] = useState<string | null>(null);
   const [canCreateThread, setCanCreateThread] = useState(false);
   const [selected, setSelected] = useState<WikiThreadDetail | null>(null);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(requestedCommentId);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [comment, setComment] = useState('');
@@ -83,6 +84,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
           if (!active) return;
           if (detail.pageId !== pageId) throw new Error('이 문서의 토론이 아닙니다.');
           setSelected(detail);
+          setActiveCommentId(requestedCommentId);
         }
       })
       .catch((caught) => {
@@ -166,14 +168,14 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   }, [applyThreadResult, pageId, selected?.id, statusFilter]);
 
   useEffect(() => {
-    if (!selected || !requestedCommentId) return;
+    if (!selected || !activeCommentId) return;
     const frame = requestAnimationFrame(() => {
-      const target = document.getElementById(`comment-${requestedCommentId}`);
+      const target = document.getElementById(`comment-${activeCommentId}`);
       target?.scrollIntoView({ block: 'center' });
       target?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [requestedCommentId, selected]);
+  }, [activeCommentId, selected]);
 
   useLayoutEffect(() => {
     const anchor = prependAnchor.current;
@@ -183,15 +185,16 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     if (target) window.scrollBy({ top: target.getBoundingClientRect().top - anchor.top });
   }, [selected?.comments]);
 
-  async function open(thread: WikiThreadSummary) {
+  async function open(thread: WikiThreadSummary, focusCommentId?: string) {
     setLoading(true);
     setError(null);
     setRawComment(null);
     setModeration(null);
     setModerationReason('');
     try {
-      setSelected(await fetchWikiThread(thread.id));
-      setThreadInUrl(thread.id);
+      setSelected(await fetchWikiThread(thread.id, undefined, focusCommentId));
+      setActiveCommentId(focusCommentId ?? null);
+      setThreadInUrl(thread.id, focusCommentId);
     } catch (caught) {
       setError(message(caught));
     } finally {
@@ -223,6 +226,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     setRawComment(null);
     setModeration(null);
     setModerationReason('');
+    setActiveCommentId(null);
     setThreadInUrl(null);
   }
 
@@ -614,13 +618,38 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
           </nav>
           <section className="divide-y divide-white/10 border border-white/10 bg-[#111821]">
             {threads.map((thread) => (
-              <button key={thread.id} type="button" onClick={() => void open(thread)} className={`block w-full p-4 text-left transition hover:bg-white/[0.03] ${selected?.id === thread.id ? 'bg-emerald-400/10' : ''}`}>
-                <span className="font-semibold text-white">{thread.title}</span>
-                <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span className={`chip ${wikiDiscussionStatusClass(thread.status)}`}>{wikiDiscussionStatusLabel(thread.status)}</span>
-                  <span>댓글 {thread.commentCount}</span>
-                </span>
-              </button>
+              <article key={thread.id} className={`transition hover:bg-white/[0.03] ${selected?.id === thread.id ? 'bg-emerald-400/10' : ''}`}>
+                <button type="button" onClick={() => void open(thread)} className="block min-h-16 w-full p-4 text-left">
+                  <span className="font-semibold text-white">{thread.title}</span>
+                  <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span className={`chip ${wikiDiscussionStatusClass(thread.status)}`}>{wikiDiscussionStatusLabel(thread.status)}</span>
+                    <span>댓글 {thread.commentCount}</span>
+                  </span>
+                </button>
+                {thread.preview && thread.preview.firstComment ? (
+                  <div className="mx-3 mb-3 border border-white/[0.08] bg-black/10 text-xs">
+                    {[thread.preview.firstComment].map((preview) => (
+                      <button key={preview.id} type="button" onClick={() => void open(thread, preview.id)} className="block w-full p-3 text-left hover:bg-white/[0.035]">
+                        <span className="font-semibold text-emerald-200">#{preview.id}</span>
+                        <span className="ml-2 text-slate-500">{preview.createdByName} · {formatDate(preview.createdAt)}</span>
+                        <span className="mt-1.5 line-clamp-3 break-words text-sm leading-5 text-slate-300">{previewText(preview.status, preview.contentPreview, preview.truncated)}</span>
+                      </button>
+                    ))}
+                    {thread.preview.omittedCommentCount > 0 ? (
+                      <button type="button" onClick={() => void open(thread)} className="block min-h-10 w-full border-y border-white/[0.08] px-3 text-left font-semibold text-slate-500 hover:bg-white/[0.035] hover:text-emerald-200">
+                        중간 {thread.preview.omittedCommentCount.toLocaleString('ko-KR')}개 댓글 더 보기
+                      </button>
+                    ) : null}
+                    {thread.preview.recentComments.map((preview) => (
+                      <button key={preview.id} type="button" onClick={() => void open(thread, preview.id)} className="block w-full border-t border-white/[0.06] p-3 text-left first:border-t-0 hover:bg-white/[0.035]">
+                        <span className="font-semibold text-emerald-200">#{preview.id}</span>
+                        <span className="ml-2 text-slate-500">{preview.createdByName} · {formatDate(preview.createdAt)}</span>
+                        <span className="mt-1.5 line-clamp-3 break-words text-sm leading-5 text-slate-300">{previewText(preview.status, preview.contentPreview, preview.truncated)}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </article>
             ))}
             {!loading && threads.length === 0 ? <p className="p-4 text-sm text-slate-500">{statusCounts.total > 0 ? '선택한 상태의 토론이 없습니다.' : '아직 토론이 없습니다.'}</p> : null}
             {nextThreadCursor ? (
@@ -1132,10 +1161,18 @@ function selectedThreadPath(pageId: string, returnTo: string, threadId: string) 
 function discussionHref(target: WikiSearchResult, threadId: string) {
   return target.routePath.startsWith('/server/') ? `${buildServerWikiToolPath(target.routePath, 'discuss')}?thread=${encodeURIComponent(threadId)}` : `/wiki/discuss/${encodeURIComponent(target.pageId)}?returnTo=${encodeURIComponent(target.routePath)}&thread=${encodeURIComponent(threadId)}`;
 }
-function setThreadInUrl(threadId: string | null) {
+function setThreadInUrl(threadId: string | null, commentId?: string) {
   const url = new URL(window.location.href);
   if (threadId) url.searchParams.set('thread', threadId);
   else url.searchParams.delete('thread');
-  url.searchParams.delete('comment');
+  if (threadId && commentId) url.searchParams.set('comment', commentId);
+  else url.searchParams.delete('comment');
   window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function previewText(status: string, content: string | null, truncated: boolean): string {
+  if (status === 'deleted') return '삭제된 댓글입니다.';
+  if (status === 'hidden' && content === null) return '숨겨진 댓글입니다.';
+  if (!content) return '내용이 없는 댓글입니다.';
+  return `${content}${truncated ? '…' : ''}`;
 }
