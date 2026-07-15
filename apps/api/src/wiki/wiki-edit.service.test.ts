@@ -19,9 +19,12 @@ import type { WikiNotificationService } from './wiki-notification.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
-test('file dependencies are detected inside nested folding blocks', () => {
+test('file dependencies are detected across block and inline containers', () => {
   assert.equal(astContainsFile(parseMarkup('일반 문서').ast), false);
   assert.equal(astContainsFile(parseMarkup('{{{#!folding 자세히\n[[파일:logo.png]]\n}}}').ast), true);
+  assert.equal(astContainsFile(parseMarkup('문장 [[파일:inline.png|아이콘]]').ast), true);
+  assert.equal(astContainsFile(parseMarkup(' * 목록 [[파일:list.png]]').ast), true);
+  assert.equal(astContainsFile(parseMarkup('||셀 [[파일:table.png]]||').ast), true);
 });
 
 test('category documents cannot list themselves as a parent', () => {

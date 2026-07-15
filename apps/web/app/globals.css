@@ -626,6 +626,21 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered ol {
     @apply list-decimal pl-6;
   }
+  .wiki-rendered .wiki-list-alpha {
+    list-style-type: lower-alpha;
+  }
+  .wiki-rendered .wiki-list-upper-alpha {
+    list-style-type: upper-alpha;
+  }
+  .wiki-rendered .wiki-list-roman {
+    list-style-type: lower-roman;
+  }
+  .wiki-rendered .wiki-list-upper-roman {
+    list-style-type: upper-roman;
+  }
+  .wiki-rendered .wiki-list .wiki-list {
+    @apply mt-1;
+  }
   .wiki-rendered blockquote {
     @apply border-l-2 border-emerald-300/40 pl-4 text-slate-300;
   }
@@ -644,6 +659,35 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   }
   .wiki-rendered th {
     @apply bg-white/[0.06] text-left text-white;
+  }
+  .wiki-rendered .table-scroll {
+    @apply my-4 max-w-full overflow-x-auto rounded-lg;
+  }
+  .wiki-rendered .table-scroll table {
+    @apply mt-0;
+  }
+  .wiki-rendered .wiki-file:not(.wiki-file-inline) {
+    @apply my-5 block max-w-full;
+  }
+  .wiki-rendered .wiki-file img {
+    @apply h-auto max-w-full rounded-lg;
+  }
+  .wiki-rendered .wiki-file-inline {
+    @apply mx-1 inline-flex max-w-full items-center gap-1.5 align-middle;
+  }
+  .wiki-rendered .wiki-file-inline img {
+    @apply max-h-16 w-auto max-w-40;
+  }
+  .wiki-rendered .wiki-file small,
+  .wiki-rendered .wiki-file figcaption,
+  .wiki-rendered .wiki-file-inline > span {
+    @apply text-xs text-slate-400;
+  }
+  .wiki-rendered .missing-file {
+    @apply rounded-md border border-dashed border-amber-300/30 bg-amber-300/[0.06] px-2 py-1 text-xs text-amber-200;
+  }
+  .wiki-rendered .wiki-macro-warning {
+    @apply inline-flex rounded-md border border-amber-300/30 bg-amber-300/[0.06] px-2 py-0.5 text-xs font-medium text-amber-200;
   }
 
   .server-wiki-rendered {

@@ -852,6 +852,18 @@ test('wiki read ignores persistent render caches for file-dependent revisions', 
   assert.equal(page.html.includes('파일 없음'), false);
 });
 
+test('wiki read resolves inline files inside prose, lists, and table cells', async () => {
+  const service = createReadService({
+    contentRaw: '본문 [[파일:logo.png|본문 아이콘]]\n * 목록 [[파일:logo.png|목록 아이콘]]\n||셀 [[파일:logo.png|표 아이콘]]||',
+    files: [{ filename: 'logo.png', publicPath: '/files/logo.png', mimeType: 'image/png', originalName: 'logo.png' }],
+  });
+
+  const page = await service.getPage('main', '대문');
+
+  assert.equal((page.html.match(/<img src="\/files\/logo\.png"/g) ?? []).length, 3);
+  assert.equal(page.html.includes('파일 없음'), false);
+});
+
 test('wiki read marks only readable missing links and bypasses shared render cache', async () => {
   let lookedUpCache = false;
   let createdCache = false;

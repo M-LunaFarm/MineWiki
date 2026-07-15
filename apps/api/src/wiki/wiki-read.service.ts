@@ -4,6 +4,7 @@ import type { WikiPage } from '@prisma/client';
 import {
   type AstNode,
   buildWikiSearchBooleanQuery,
+  collectWikiFileNames,
   parseLinkTarget,
   parseMarkup,
   renderDocument,
@@ -1554,7 +1555,7 @@ export class WikiReadService {
           sourceLocalPath: page.localPath
         })
       : { ast: parsed.ast, includedSourceBytes: 0 };
-    const hasFileDependencies = collectFileNames(expanded.ast).size > 0;
+    const hasFileDependencies = collectWikiFileNames(expanded.ast).size > 0;
     const hasIncludeDependencies = parsed.includes.length > 0;
     const hasLinkDependencies = parsed.links.length > 0;
     const cache = hasFileDependencies || hasIncludeDependencies || hasLinkDependencies
@@ -1682,7 +1683,7 @@ export class WikiReadService {
   }
 
   private async findRenderableFiles(ast: AstNode[], accountId: string | null) {
-    const fileNames = Array.from(collectFileNames(ast));
+    const fileNames = Array.from(collectWikiFileNames(ast));
     if (fileNames.length === 0) {
       return {};
     }
@@ -1881,17 +1882,6 @@ function monotonicLineMatches(oldLines: readonly string[], newLines: readonly st
     previousOldIndex = candidate;
   }
   return matches;
-}
-
-function collectFileNames(ast: AstNode[], output = new Set<string>()): Set<string> {
-  for (const node of ast) {
-    if (node.type === 'file') {
-      output.add(node.fileName);
-    } else if (node.type === 'folding' || (node.type === 'include' && node.children)) {
-      collectFileNames(node.children, output);
-    }
-  }
-  return output;
 }
 
 function categoryTitleFromSlug(slug: string): string {

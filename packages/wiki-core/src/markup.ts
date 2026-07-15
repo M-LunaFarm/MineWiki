@@ -1,11 +1,20 @@
 import sanitizeHtml from 'sanitize-html';
-import type { AstNode, InlineNode, ParsedDocument } from './types.js';
+import type {
+  AstNode,
+  InlineNode,
+  ParsedDocument,
+  WikiListKind,
+  WikiListNode,
+  WikiTableCell,
+  WikiTableOptions
+} from './types.js';
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.4.4';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.5.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
+const MAX_LIST_DEPTH = 32;
 const MAX_INCLUDE_OCCURRENCES = 20;
 const MAX_INCLUDE_PARAMS = 32;
 const MAX_INCLUDE_PARAM_KEY_LENGTH = 64;
@@ -168,7 +177,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
       nested.footnotes.forEach((note) => footnotes.push(note));
       nested.errors.forEach((error) => errors.push(error));
       nested.blockingErrors.forEach((error) => blockingErrors.push(error));
-      ast.push({ type: 'folding', title: parseInline(foldingBlock[1]?.trim() || '펼치기', links, errors, footnotes), children: nested.ast });
+      ast.push({ type: 'folding', title: parseInline(foldingBlock[1]?.trim() || '펼치기', links, errors, blockingErrors, footnotes), children: nested.ast });
       continue;
     }
 
@@ -273,43 +282,45 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
         i += 1;
       }
       i -= 1;
-      ast.push({ type: 'blockquote', children: parseInline(quoteLines.join('\n'), links, errors, footnotes) });
+      ast.push({ type: 'blockquote', children: parseInline(quoteLines.join('\n'), links, errors, blockingErrors, footnotes) });
       continue;
     }
 
     if (line.trim().startsWith('||')) {
-      const rows: InlineNode[][][] = [];
+      const rows: WikiTableCell[][] = [];
+      const tableOptions: WikiTableOptions = {};
       while (i < lines.length && lines[i]?.trim().startsWith('||')) {
-        const cells = splitWikiTableRow(lines[i] ?? '').map((cell) => parseInline(cleanWikiTableCell(cell), links, errors, footnotes));
+        const cells = parseWikiTableRow(lines[i] ?? '', tableOptions, links, errors, blockingErrors, footnotes);
         if (cells.length > 0) rows.push(cells);
         i += 1;
       }
       i -= 1;
-      ast.push({ type: 'wiki_table', rows });
+      ast.push({ type: 'wiki_table', rows, options: tableOptions });
       continue;
     }
 
     const file = line.match(/^\[\[파일:([^|\]]+)(?:\|([^|\]]+))?(?:\|([^|\]]+))?\]\]$/);
     if (file) {
       const fileName = file[1].trim();
-      if (!/^[^<>:"|?*\\\/]+$/.test(fileName)) blockingErrors.push(`파일명에 금지 문자가 포함되어 있습니다: ${fileName}`);
-      ast.push({ type: 'file', fileName, thumbnail: file[2] === '섬네일', caption: file[3]?.trim() ?? null });
+      validateWikiFileName(fileName, blockingErrors);
+      const thumbnail = file[2]?.trim() === '섬네일';
+      const caption = file[3]?.trim() || (!thumbnail ? file[2]?.trim() : '') || null;
+      ast.push({ type: 'file', fileName, thumbnail, caption });
       continue;
     }
 
-    if (line.startsWith('* ')) {
-      const items: InlineNode[][] = [];
-      while (i < lines.length && lines[i]?.startsWith('* ')) {
-        const parsed = parseInline(lines[i]!.slice(2), links, errors, footnotes);
-        items.push(parsed);
+    if (parseWikiListLine(line)) {
+      const listBlock: string[] = [];
+      while (i < lines.length && parseWikiListLine(lines[i] ?? '')) {
+        listBlock.push(lines[i] ?? '');
         i += 1;
       }
       i -= 1;
-      ast.push({ type: 'list', items });
+      ast.push(...parseWikiListBlock(listBlock, links, errors, blockingErrors, footnotes));
       continue;
     }
 
-    ast.push({ type: 'paragraph', children: parseInline(line, links, errors, footnotes) });
+    ast.push({ type: 'paragraph', children: parseInline(line, links, errors, blockingErrors, footnotes) });
   }
 
   const headings = ast.filter((node): node is Extract<AstNode, { type: 'heading' }> => node.type === 'heading');
@@ -445,6 +456,238 @@ function splitIncludeArguments(value: string): string[] {
   return parts;
 }
 
+interface ParsedWikiListLine {
+  indent: number;
+  kind: WikiListKind;
+  start: number;
+  content: string;
+}
+
+function parseWikiListLine(line: string): ParsedWikiListLine | null {
+  const match = line.match(/^([ \t]*)(\*|1\.|a\.|A\.|i\.|I\.)(?:#(\d+))?[ \t]+(.*)$/u);
+  if (!match) return null;
+  const marker = match[2] ?? '*';
+  let content = match[4] ?? '';
+  let start = Math.max(1, Math.min(1_000_000, Number(match[3]) || 1));
+  const legacyStart = content.match(/^#(\d+)(?:\s+|$)/);
+  if (legacyStart) {
+    start = Math.max(1, Math.min(1_000_000, Number(legacyStart[1]) || 1));
+    content = content.slice(legacyStart[0].length);
+  }
+  const kindMap: Record<string, WikiListKind> = {
+    '*': 'unordered',
+    '1.': 'decimal',
+    'a.': 'lower-alpha',
+    'A.': 'upper-alpha',
+    'i.': 'lower-roman',
+    'I.': 'upper-roman'
+  };
+  return {
+    indent: (match[1] ?? '').replace(/\t/g, '  ').length,
+    kind: kindMap[marker] ?? 'unordered',
+    start,
+    content
+  };
+}
+
+function parseWikiListBlock(
+  lines: readonly string[],
+  links: Set<string>,
+  errors: string[],
+  blockingErrors: string[],
+  footnotes: string[]
+): WikiListNode[] {
+  const entries = lines.map(parseWikiListLine).filter((entry): entry is ParsedWikiListLine => entry !== null);
+  if (entries.length === 0) return [];
+  const baseIndent = Math.min(...entries.map((entry) => entry.indent));
+  for (const entry of entries) {
+    entry.indent -= baseIndent;
+    if (entry.indent > MAX_LIST_DEPTH) {
+      const warning = `목록 중첩은 ${MAX_LIST_DEPTH}단계까지 사용할 수 있습니다.`;
+      if (!blockingErrors.includes(warning)) blockingErrors.push(warning);
+      entry.indent = MAX_LIST_DEPTH;
+    }
+  }
+
+  const parseLevel = (startIndex: number, indent: number): { lists: WikiListNode[]; nextIndex: number } => {
+    const lists: WikiListNode[] = [];
+    let index = startIndex;
+    while (index < entries.length) {
+      const entry = entries[index]!;
+      if (entry.indent < indent) break;
+      if (entry.indent > indent) {
+        const previousList = lists[lists.length - 1];
+        const previousItem = previousList?.items[previousList.items.length - 1];
+        if (!previousItem) break;
+        const nested = parseLevel(index, entry.indent);
+        previousItem.nested.push(...nested.lists);
+        index = nested.nextIndex;
+        continue;
+      }
+
+      const list: WikiListNode = { type: 'list', kind: entry.kind, start: entry.start, items: [] };
+      while (index < entries.length) {
+        const current = entries[index]!;
+        if (current.indent !== indent || current.kind !== list.kind) break;
+        const item = {
+          children: parseInline(current.content, links, errors, blockingErrors, footnotes),
+          nested: [] as WikiListNode[]
+        };
+        list.items.push(item);
+        index += 1;
+        while (index < entries.length && entries[index]!.indent > indent) {
+          const nested = parseLevel(index, entries[index]!.indent);
+          item.nested.push(...nested.lists);
+          index = nested.nextIndex;
+        }
+      }
+      lists.push(list);
+    }
+    return { lists, nextIndex: index };
+  };
+
+  return parseLevel(0, entries[0]!.indent).lists;
+}
+
+function parseWikiTableRow(
+  line: string,
+  tableOptions: WikiTableOptions,
+  links: Set<string>,
+  errors: string[],
+  blockingErrors: string[],
+  footnotes: string[]
+): WikiTableCell[] {
+  const cells: WikiTableCell[] = [];
+  let pendingColspan = 1;
+  for (const rawCell of splitWikiTableRow(line)) {
+    if (!rawCell.trim()) {
+      pendingColspan = Math.min(1000, pendingColspan + 1);
+      continue;
+    }
+    const cell: WikiTableCell = { children: [], colspan: pendingColspan, rowspan: 1 };
+    pendingColspan = 1;
+    let content = rawCell;
+    while (content.startsWith('<')) {
+      const end = content.indexOf('>');
+      if (end < 0) break;
+      const modifier = content.slice(1, end).trim();
+      if (!applyWikiTableModifier(modifier, cell, tableOptions, errors)) break;
+      content = content.slice(end + 1);
+    }
+    if (!cell.align) {
+      const startsWithSpace = /^\s/u.test(content);
+      const endsWithSpace = /\s$/u.test(content);
+      if (startsWithSpace && endsWithSpace) cell.align = 'center';
+      else if (startsWithSpace) cell.align = 'right';
+      else if (endsWithSpace) cell.align = 'left';
+    }
+    cell.children = parseInline(content.trim(), links, errors, blockingErrors, footnotes);
+    cells.push(cell);
+  }
+  return cells;
+}
+
+function applyWikiTableModifier(
+  modifier: string,
+  cell: WikiTableCell,
+  table: WikiTableOptions,
+  errors: string[]
+): boolean {
+  const colspan = modifier.match(/^-(\d+)$/);
+  if (colspan) {
+    cell.colspan = clampTableSpan(colspan[1]);
+    return true;
+  }
+  const rowspan = modifier.match(/^([v^])?\|(\d+)$/);
+  if (rowspan) {
+    cell.rowspan = clampTableSpan(rowspan[2]);
+    if (rowspan[1] === '^') cell.verticalAlign = 'top';
+    if (rowspan[1] === 'v') cell.verticalAlign = 'bottom';
+    return true;
+  }
+  if (modifier === '(' || modifier === ':' || modifier === ')') {
+    cell.align = modifier === '(' ? 'left' : modifier === ':' ? 'center' : 'right';
+    return true;
+  }
+
+  const tableModifier = modifier.match(/^table\s*(align|width|bgcolor|color|bordercolor)=(.+)$/i);
+  if (tableModifier) {
+    const name = tableModifier[1]!.toLowerCase();
+    const value = tableModifier[2]!.trim().replace(/^(['"])(.*)\1$/, '$2');
+    if (name === 'align') {
+      if (value === 'left' || value === 'center' || value === 'right') table.align ??= value;
+      else addTableModifierWarning(errors, modifier);
+    } else if (name === 'width') {
+      const size = normalizeTableSize(value);
+      if (size) table.width ??= size;
+      else addTableModifierWarning(errors, modifier);
+    } else {
+      const color = normalizeTableColor(value);
+      if (!color) addTableModifierWarning(errors, modifier);
+      else if (name === 'bgcolor') table.backgroundColor ??= color;
+      else if (name === 'color') table.color ??= color;
+      else table.borderColor ??= color;
+    }
+    return true;
+  }
+
+  const cellModifier = modifier.match(/^(width|height|bgcolor|color)=(.+)$/i);
+  if (cellModifier) {
+    const name = cellModifier[1]!.toLowerCase();
+    const value = cellModifier[2]!.trim();
+    if (name === 'width' || name === 'height') {
+      const size = normalizeTableSize(value);
+      if (!size) addTableModifierWarning(errors, modifier);
+      else if (name === 'width') cell.width ??= size;
+      else cell.height ??= size;
+    } else {
+      const color = normalizeTableColor(value);
+      if (!color) addTableModifierWarning(errors, modifier);
+      else if (name === 'bgcolor') cell.backgroundColor ??= color;
+      else cell.color ??= color;
+    }
+    return true;
+  }
+
+  const shorthandColor = normalizeTableColor(modifier);
+  if (shorthandColor) {
+    cell.backgroundColor ??= shorthandColor;
+    return true;
+  }
+  return false;
+}
+
+function addTableModifierWarning(errors: string[], modifier: string) {
+  const warning = `올바르지 않은 표 제어자를 무시했습니다: <${modifier.slice(0, 80)}>`;
+  if (!errors.includes(warning)) errors.push(warning);
+}
+
+function clampTableSpan(value: string | undefined) {
+  return Math.max(1, Math.min(1000, Number(value) || 1));
+}
+
+function normalizeTableSize(value: string) {
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)(px|%)?$/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount < 0 || amount > 100_000) return null;
+  return `${amount}${match[2]?.toLowerCase() ?? 'px'}`;
+}
+
+function normalizeTableColor(value: string) {
+  const color = value.split(',')[0]!.trim().toLowerCase();
+  if (/^#[0-9a-f]{3,8}$/i.test(color)) return color;
+  if (/^[a-z]{1,32}$/i.test(color)) return color;
+  return null;
+}
+
+function validateWikiFileName(fileName: string, blockingErrors: string[]) {
+  if (!fileName || !/^[^<>:"|?*\\/]+$/.test(fileName)) {
+    const warning = `파일명에 금지 문자가 포함되어 있습니다: ${fileName || '(빈 파일명)'}`;
+    if (!blockingErrors.includes(warning)) blockingErrors.push(warning);
+  }
+}
+
 /**
  * Applies include parameters to an already parsed AST. Values therefore remain
  * plain data and cannot inject new wiki syntax, HTML, or nested includes.
@@ -462,7 +705,20 @@ export function applyIncludeParametersToAst(
     if (node.type === 'internal_link') return { ...node, target: replace(node.target), label: replace(node.label) };
     if (node.type === 'external_link') return { ...node, href: replace(node.href), label: replace(node.label) };
     if (node.type === 'code') return { ...node, code: replace(node.code) };
+    if (node.type === 'file') return {
+      ...node,
+      fileName: replace(node.fileName),
+      caption: node.caption === null ? null : replace(node.caption)
+    };
+    if (node.type === 'unsupported_macro') return { ...node };
     return { ...node, text: replace(node.text) };
+  });
+  const list = (node: WikiListNode): WikiListNode => ({
+    ...node,
+    items: node.items.map((item) => ({
+      children: inline(item.children),
+      nested: item.nested.map(list)
+    }))
   });
   return ast.map((node): AstNode => {
     if (node.type === 'heading') {
@@ -470,8 +726,11 @@ export function applyIncludeParametersToAst(
       return { ...node, text, id: `${headingPrefix}${makeHeadingId(text)}` };
     }
     if (node.type === 'paragraph' || node.type === 'blockquote') return { ...node, children: inline(node.children) };
-    if (node.type === 'list') return { ...node, items: node.items.map(inline) };
-    if (node.type === 'wiki_table') return { ...node, rows: node.rows.map((row) => row.map(inline)) };
+    if (node.type === 'list') return list(node);
+    if (node.type === 'wiki_table') return {
+      ...node,
+      rows: node.rows.map((row) => row.map((cell) => ({ ...cell, children: inline(cell.children) })))
+    };
     if (node.type === 'folding') return {
       ...node,
       title: inline(node.title),
@@ -499,39 +758,64 @@ export function applyIncludeParametersToAst(
   });
 }
 
-function parseInline(input: string, links: Set<string>, errors: string[], footnotes: string[]): InlineNode[] {
+function parseInline(
+  input: string,
+  links: Set<string>,
+  errors: string[],
+  blockingErrors: string[],
+  footnotes: string[]
+): InlineNode[] {
   const nodes: InlineNode[] = [];
-  const pattern =
-    /(<ref>(.*?)<\/ref>)|(\[\*([^\s\]]+)?\s*([^\]]+?)\])|(<code>(.*?)<\/code>)|(\{\{\{#([A-Za-z0-9#(),._-]+)\s+(.+?)\}\}\})|(\{\{\{([+-]\d+)\s+(.+?)\}\}\})|(\[\[(https?:\/\/[^\]|]+)(?:\|(.+?))?\]\])|(\[\[(.+?)(?:\|(.+?))?\]\])|(\[(https?:\/\/[^\s\]]+)\s+(.+?)\])|'''(.+?)'''|''(.+?)''|~~(.+?)~~|--(.+?)--|__(.+?)__|\^\^(.+?)\^\^|,,(.+?),,/g;
+  const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXml><ref>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?\s*(?<refShortText>[^\]]+?)\])|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\([^\]\n]*\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
   let last = 0;
   for (const match of input.matchAll(pattern)) {
     if (match.index! > last) nodes.push({ type: 'text', text: input.slice(last, match.index) });
-    if (match[2] !== undefined) {
-      if (!match[2].trim()) errors.push('빈 각주가 있습니다.');
-      footnotes.push(match[2]);
-      nodes.push({ type: 'ref', text: match[2] });
-    }
-    else if (match[5] !== undefined) {
-      if (!match[5].trim()) errors.push('빈 각주가 있습니다.');
-      footnotes.push(match[5]);
-      nodes.push({ type: 'ref', text: match[5] });
-    }
-    else if (match[7]) nodes.push({ type: 'code', code: match[7] });
-    else if (match[9]) nodes.push({ type: 'color', color: normalizeInlineColor(match[9]), text: match[10] ?? '' });
-    else if (match[12]) nodes.push({ type: 'size', delta: normalizeInlineSize(match[12]), text: match[13] ?? '' });
-    else if (match[15]) nodes.push({ type: 'external_link', href: match[15], label: match[16] ?? match[15] });
-    else if (match[18]) {
-      const target = normalizeTitle(match[18]);
+    const group = match.groups ?? {};
+    if (group.file !== undefined) {
+      const fileName = group.fileName?.trim() ?? '';
+      validateWikiFileName(fileName, blockingErrors);
+      const thumbnail = group.fileOption?.trim() === '섬네일';
+      const caption = group.fileCaption?.trim() || (!thumbnail ? group.fileOption?.trim() : '') || null;
+      nodes.push({ type: 'file', fileName, thumbnail, caption });
+    } else if (group.refXml !== undefined || group.refShort !== undefined) {
+      const note = group.refXmlText ?? group.refShortText ?? '';
+      if (!note.trim()) errors.push('빈 각주가 있습니다.');
+      footnotes.push(note);
+      nodes.push({ type: 'ref', text: note });
+    } else if (group.code !== undefined) {
+      nodes.push({ type: 'code', code: group.codeText ?? '' });
+    } else if (group.color !== undefined) {
+      nodes.push({ type: 'color', color: normalizeInlineColor(group.colorValue ?? ''), text: group.colorText ?? '' });
+    } else if (group.size !== undefined) {
+      nodes.push({ type: 'size', delta: normalizeInlineSize(group.sizeValue ?? ''), text: group.sizeText ?? '' });
+    } else if (group.externalWiki !== undefined) {
+      const href = group.externalWikiHref ?? '';
+      nodes.push({ type: 'external_link', href, label: group.externalWikiLabel ?? href });
+    } else if (group.internal !== undefined) {
+      const target = normalizeTitle(group.internalTarget ?? '');
       links.add(target);
-      nodes.push({ type: 'internal_link', target, label: match[19] ?? target });
-    } else if (match[21]) nodes.push({ type: 'external_link', href: match[21], label: match[22] ?? match[21] });
-    else if (match[23]) nodes.push({ type: 'bold', text: match[23] });
-    else if (match[24]) nodes.push({ type: 'italic', text: match[24] });
-    else if (match[25]) nodes.push({ type: 'strike', text: match[25] });
-    else if (match[26]) nodes.push({ type: 'strike', text: match[26] });
-    else if (match[27]) nodes.push({ type: 'underline', text: match[27] });
-    else if (match[28]) nodes.push({ type: 'sup', text: match[28] });
-    else if (match[29]) nodes.push({ type: 'sub', text: match[29] });
+      nodes.push({ type: 'internal_link', target, label: group.internalLabel ?? target });
+    } else if (group.external !== undefined) {
+      const href = group.externalHref ?? '';
+      nodes.push({ type: 'external_link', href, label: group.externalLabel ?? href });
+    } else if (group.macro !== undefined) {
+      const name = (group.macroName ?? '').slice(0, 64);
+      const warning = `지원되지 않는 매크로입니다: ${name}`;
+      if (!errors.includes(warning)) errors.push(warning);
+      nodes.push({ type: 'unsupported_macro', name });
+    } else if (group.bold !== undefined) {
+      nodes.push({ type: 'bold', text: group.boldText ?? '' });
+    } else if (group.italic !== undefined) {
+      nodes.push({ type: 'italic', text: group.italicText ?? '' });
+    } else if (group.strikeTilde !== undefined || group.strikeDash !== undefined) {
+      nodes.push({ type: 'strike', text: group.strikeTildeText ?? group.strikeDashText ?? '' });
+    } else if (group.underline !== undefined) {
+      nodes.push({ type: 'underline', text: group.underlineText ?? '' });
+    } else if (group.sup !== undefined) {
+      nodes.push({ type: 'sup', text: group.supText ?? '' });
+    } else if (group.sub !== undefined) {
+      nodes.push({ type: 'sub', text: group.subText ?? '' });
+    }
     last = match.index! + match[0].length;
   }
   if (last < input.length) nodes.push({ type: 'text', text: input.slice(last) });
@@ -556,10 +840,10 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
     .map((node) => {
       if (node.type === 'heading') return `<h${node.level} id="${escapeAttr(node.id)}">${escapeHtml(node.text)}</h${node.level}>`;
       if (node.type === 'paragraph') return `<p>${renderInline(node.children, footnotes, options)}</p>`;
-      if (node.type === 'list') return `<ul>${node.items.map((item) => `<li>${renderInline(item, footnotes, options)}</li>`).join('')}</ul>`;
+      if (node.type === 'list') return renderWikiList(node, footnotes, options);
       if (node.type === 'blockquote') return `<blockquote class="wiki-quote">${renderInline(node.children, footnotes, options)}</blockquote>`;
       if (node.type === 'hr') return '<hr>';
-      if (node.type === 'wiki_table') return renderWikiTable(node.rows, footnotes, options);
+      if (node.type === 'wiki_table') return renderWikiTable(node.rows, node.options, footnotes, options);
       if (node.type === 'folding') return `<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, options)}</summary>${renderDocument(node.children, { ...options, tocHeadings })}</details>`;
       if (node.type === 'toc') return renderTableOfContents(tocHeadings, node.collapsed);
       if (node.type === 'include') {
@@ -572,7 +856,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         return `<aside class="wiki-include-notice">${message}</aside>`;
       }
       if (node.type === 'category') return '';
-      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options);
+      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options, true);
       if (node.type === 'redirect') return `<p class="notice">넘겨주기: ${renderInternalLink(node.target, node.target, options)}</p>`;
       if (node.type === 'codeblock') {
         return `<pre class="codeblock" data-lang="${escapeAttr(node.lang ?? '')}"><code>${escapeHtml(node.code)}</code></pre>`;
@@ -595,7 +879,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       h4: ['id'],
       pre: ['class', 'data-lang'],
       code: ['class'],
-      div: ['class', 'data-*'],
+      div: ['class', 'data-*', 'style'],
       aside: ['class'],
       figure: ['class'],
       img: ['src', 'alt', 'loading'],
@@ -604,15 +888,17 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       nav: ['class', 'aria-label'],
       blockquote: ['class'],
       caption: ['class'],
-      span: ['class', 'style'],
+      span: ['class', 'style', 'title'],
       s: ['class'],
       u: ['class'],
       sup: ['class'],
       sub: ['class'],
-      table: ['class', 'data-table-key'],
-      th: ['class'],
-      td: ['class'],
+      table: ['class', 'data-table-key', 'style'],
+      th: ['class', 'colspan', 'rowspan', 'style'],
+      td: ['class', 'colspan', 'rowspan', 'style'],
       details: ['class', 'open'],
+      ul: ['class'],
+      ol: ['class', 'start', 'type'],
       li: ['class'],
       summary: ['class']
     },
@@ -621,6 +907,33 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       span: {
         color: [/^#[0-9a-f]{3,8}$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/i, /^[a-z]+$/i],
         'font-size': [/^\d+(\.\d+)?em$/]
+      },
+      div: {
+        width: [/^\d+(?:\.\d+)?(?:px|%)$/],
+        'margin-left': [/^auto$/],
+        'margin-right': [/^auto$/]
+      },
+      table: {
+        width: [/^\d+(?:\.\d+)?(?:px|%)$/],
+        color: [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        border: [/^2px solid (?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
+      },
+      th: {
+        width: [/^\d+(?:\.\d+)?(?:px|%)$/],
+        height: [/^\d+(?:\.\d+)?(?:px|%)$/],
+        color: [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        'text-align': [/^(?:left|center|right)$/],
+        'vertical-align': [/^(?:top|middle|bottom)$/]
+      },
+      td: {
+        width: [/^\d+(?:\.\d+)?(?:px|%)$/],
+        height: [/^\d+(?:\.\d+)?(?:px|%)$/],
+        color: [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        'text-align': [/^(?:left|center|right)$/],
+        'vertical-align': [/^(?:top|middle|bottom)$/]
       }
     }
   });
@@ -672,10 +985,40 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
         return `<a href="${escapeAttr(node.href)}" rel="nofollow noopener" target="_blank">${escapeHtml(node.label)}</a>`;
       }
       if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options);
+      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options);
+      if (node.type === 'unsupported_macro') {
+        return `<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: [${escapeHtml(node.name)}]</span>`;
+      }
       const index = footnotes.push(node.text);
       return `<sup><a href="#fn-${index}">[${index}]</a></sup>`;
     })
     .join('');
+}
+
+export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<string>()): Set<string> {
+  const collectInline = (nodes: readonly InlineNode[]) => {
+    for (const node of nodes) {
+      if (node.type === 'file') output.add(node.fileName);
+    }
+  };
+  const collectList = (list: WikiListNode) => {
+    for (const item of list.items) {
+      collectInline(item.children);
+      for (const nested of item.nested) collectList(nested);
+    }
+  };
+
+  for (const node of ast) {
+    if (node.type === 'file') output.add(node.fileName);
+    else if (node.type === 'paragraph' || node.type === 'blockquote') collectInline(node.children);
+    else if (node.type === 'list') collectList(node);
+    else if (node.type === 'wiki_table') {
+      for (const row of node.rows) for (const cell of row) collectInline(cell.children);
+    } else if (node.type === 'folding' || (node.type === 'include' && node.children)) {
+      collectWikiFileNames(node.children, output);
+    }
+  }
+  return output;
 }
 
 function renderInternalLink(target: string, label: string, options: RenderOptions = {}) {
@@ -812,9 +1155,12 @@ function componentTitle(name: string, props: Record<string, string>) {
   return escapeHtml(`${props['이름'] ?? props['명령어'] ?? ''} ${label[name] ?? name}`.trim());
 }
 
-function renderFile(fileName: string, thumbnail: boolean, caption: string | null, options: RenderOptions) {
+function renderFile(fileName: string, thumbnail: boolean, caption: string | null, options: RenderOptions, inline = false) {
   const file = options.files?.[fileName];
   if (!file) {
+    if (inline) {
+      return `<span class="${thumbnail ? 'wiki-file wiki-file-inline thumb missing-file' : 'wiki-file wiki-file-inline missing-file'}">파일 없음: ${escapeHtml(fileName)}</span>`;
+    }
     return `<figure class="${thumbnail ? 'wiki-file thumb missing-file' : 'wiki-file missing-file'}"><figcaption>파일 없음: ${escapeHtml(fileName)}</figcaption></figure>`;
   }
   const license = file.license ? `라이선스: ${wikiFileLicenseLabel(file.license)}` : '';
@@ -825,6 +1171,9 @@ function renderFile(fileName: string, thumbnail: boolean, caption: string | null
       ? `출처: ${escapeHtml(file.sourceText)}`
       : '';
   const metaHtml = license || source ? `<small>${license ? escapeHtml(license) : ''}${license && source ? ' · ' : ''}${source}</small>` : '';
+  if (inline) {
+    return `<span class="${thumbnail ? 'wiki-file wiki-file-inline thumb' : 'wiki-file wiki-file-inline'}"><img src="${escapeAttr(file.url)}" alt="${escapeAttr(caption ?? file.originalName)}" loading="lazy">${caption ? `<span>${escapeHtml(caption)}</span>` : ''}${metaHtml}</span>`;
+  }
   return `<figure class="${thumbnail ? 'wiki-file thumb' : 'wiki-file'}"><img src="${escapeAttr(file.url)}" alt="${escapeAttr(caption ?? file.originalName)}" loading="lazy">${caption ? `<figcaption>${escapeHtml(caption)}${metaHtml}</figcaption>` : metaHtml}</figure>`;
 }
 
@@ -896,13 +1245,73 @@ function renderVersionHistory(props: Record<string, string>) {
     .join('')}</tbody></table>`);
 }
 
-function renderWikiTable(rows: InlineNode[][][], footnotes: string[], options: RenderOptions) {
-  const html = `<table class="component-table wiki-table"><tbody>${rows
+function renderWikiList(node: WikiListNode, footnotes: string[], options: RenderOptions): string {
+  const ordered = node.kind !== 'unordered';
+  const tag = ordered ? 'ol' : 'ul';
+  const className = {
+    unordered: 'wiki-list',
+    decimal: 'wiki-list',
+    'lower-alpha': 'wiki-list wiki-list-alpha',
+    'upper-alpha': 'wiki-list wiki-list-upper-alpha',
+    'lower-roman': 'wiki-list wiki-list-roman',
+    'upper-roman': 'wiki-list wiki-list-upper-roman'
+  }[node.kind];
+  const start = ordered && node.start !== 1 ? ` start="${node.start}"` : '';
+  const type = {
+    unordered: '',
+    decimal: '',
+    'lower-alpha': ' type="a"',
+    'upper-alpha': ' type="A"',
+    'lower-roman': ' type="i"',
+    'upper-roman': ' type="I"'
+  }[node.kind];
+  return `<${tag} class="${className}"${start}${type}>${node.items
+    .map((item) => `<li>${renderInline(item.children, footnotes, options)}${item.nested
+      .map((nested) => renderWikiList(nested, footnotes, options))
+      .join('')}</li>`)
+    .join('')}</${tag}>`;
+}
+
+function renderWikiTable(rows: WikiTableCell[][], tableOptions: WikiTableOptions, footnotes: string[], options: RenderOptions) {
+  const tableStyles = styleAttribute({
+    width: tableOptions.width ? '100%' : undefined,
+    color: tableOptions.color,
+    'background-color': tableOptions.backgroundColor,
+    border: tableOptions.borderColor ? `2px solid ${tableOptions.borderColor}` : undefined
+  });
+  const wrapperStyles = styleAttribute({
+    width: tableOptions.width,
+    'margin-left': tableOptions.align === 'center' || tableOptions.align === 'right' ? 'auto' : undefined,
+    'margin-right': tableOptions.align === 'center' ? 'auto' : undefined
+  });
+  const wrapperClass = tableOptions.align ? `table-scroll table-${tableOptions.align}` : 'table-scroll';
+  const html = `<table class="component-table wiki-table"${tableStyles}><tbody>${rows
     .map((row, rowIndex) => `<tr>${row
-      .map((cell) => `${rowIndex === 0 ? '<th>' : '<td>'}${renderInline(cell, footnotes, options)}${rowIndex === 0 ? '</th>' : '</td>'}`)
+      .map((cell) => {
+        const tag = rowIndex === 0 ? 'th' : 'td';
+        const colspan = cell.colspan > 1 ? ` colspan="${cell.colspan}"` : '';
+        const rowspan = cell.rowspan > 1 ? ` rowspan="${cell.rowspan}"` : '';
+        const styles = styleAttribute({
+          width: cell.width,
+          height: cell.height,
+          color: cell.color,
+          'background-color': cell.backgroundColor,
+          'text-align': cell.align,
+          'vertical-align': cell.verticalAlign
+        });
+        return `<${tag}${colspan}${rowspan}${styles}>${renderInline(cell.children, footnotes, options)}</${tag}>`;
+      })
       .join('')}</tr>`)
     .join('')}</tbody></table>`;
-  return wrapTable(html);
+  return `<div class="${wrapperClass}"${wrapperStyles}>${html}</div>`;
+}
+
+function styleAttribute(properties: Record<string, string | undefined>) {
+  const value = Object.entries(properties)
+    .filter((entry): entry is [string, string] => Boolean(entry[1]))
+    .map(([name, propertyValue]) => `${name}:${propertyValue}`)
+    .join(';');
+  return value ? ` style="${escapeAttr(value)}"` : '';
 }
 
 function wrapTable(html: string) {
@@ -910,16 +1319,9 @@ function wrapTable(html: string) {
 }
 
 function splitWikiTableRow(line: string) {
-  return line
-    .trim()
-    .replace(/^\|\|/, '')
-    .replace(/\|\|$/, '')
-    .split('||')
-    .map((cell) => cell.trim());
-}
-
-function cleanWikiTableCell(cell: string) {
-  return cell.replace(/^(?:<[^>]+>\s*)+/, '').trim();
+  const trimmedStart = line.trimStart();
+  const withoutStart = trimmedStart.startsWith('||') ? trimmedStart.slice(2) : trimmedStart;
+  return withoutStart.replace(/\|\|\s*$/, '').split('||');
 }
 
 function normalizeInlineColor(value: string) {

@@ -6,7 +6,7 @@ import {
   NotFoundException,
   Optional
 } from '@nestjs/common';
-import { hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION, type AstNode } from '@minewiki/wiki-core';
+import { collectWikiFileNames, hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION, type AstNode } from '@minewiki/wiki-core';
 import type { Prisma, WikiEditRequest } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
@@ -1476,7 +1476,7 @@ export class WikiEditService {
 }
 
 export function astContainsFile(ast: readonly AstNode[]): boolean {
-  return ast.some((node) => node.type === 'file' || (node.type === 'folding' && astContainsFile(node.children)));
+  return collectWikiFileNames(ast).size > 0;
 }
 
 export function isReservedWikiToolPath(namespaceCode: string, slug: string): boolean {

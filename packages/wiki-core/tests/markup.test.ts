@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyIncludeParametersToAst, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
+import { applyIncludeParametersToAst, collectWikiFileNames, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
 import { resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
@@ -207,4 +207,182 @@ test('parent table of contents excludes transcluded headings', () => {
   assert.match(toc, /부모 제목/);
   assert.equal(toc.includes('포함 제목'), false);
   assert.match(html, /id="inc-1-포함-제목"/);
+});
+
+test('parses and safely renders advanced NamuMark table controls', () => {
+  const parsed = parseMarkup([
+    '||<tablealign=center><tablewidth=80%><tablebgcolor=#f5f5f5><tablecolor=black><tablebordercolor=#336699><-2><^|2><:><width=120><height=40><bgcolor=#112233><color=white>[[파일:server.png|섬네일|서버 아이콘]]|| 오른쪽 ||',
+    '||아래||||빈 셀 기반 병합||'
+  ].join('\n'));
+  const table = parsed.ast[0];
+
+  assert.equal(table?.type, 'wiki_table');
+  if (table?.type !== 'wiki_table') return;
+  assert.deepEqual(table.options, {
+    align: 'center',
+    width: '80%',
+    backgroundColor: '#f5f5f5',
+    color: 'black',
+    borderColor: '#336699'
+  });
+  assert.deepEqual({
+    colspan: table.rows[0]?.[0]?.colspan,
+    rowspan: table.rows[0]?.[0]?.rowspan,
+    align: table.rows[0]?.[0]?.align,
+    verticalAlign: table.rows[0]?.[0]?.verticalAlign,
+    width: table.rows[0]?.[0]?.width,
+    height: table.rows[0]?.[0]?.height,
+    backgroundColor: table.rows[0]?.[0]?.backgroundColor,
+    color: table.rows[0]?.[0]?.color
+  }, {
+    colspan: 2,
+    rowspan: 2,
+    align: 'center',
+    verticalAlign: 'top',
+    width: '120px',
+    height: '40px',
+    backgroundColor: '#112233',
+    color: 'white'
+  });
+  assert.equal(table.rows[1]?.[1]?.colspan, 2);
+  assert.equal(table.rows[0]?.[0]?.children[0]?.type, 'file');
+
+  const html = renderDocument(parsed.ast, {
+    files: {
+      'server.png': {
+        url: '/v1/files/public/server.png/raw',
+        mimeType: 'image/png',
+        originalName: 'server.png'
+      }
+    }
+  });
+  assert.match(html, /class="table-scroll table-center"/);
+  assert.match(html, /class="table-scroll table-center" style="width:80%;margin-left:auto;margin-right:auto"/);
+  assert.match(html, /class="component-table wiki-table" style="width:100%;color:black;background-color:#f5f5f5;border:2px solid #336699"/);
+  assert.match(html, /colspan="2" rowspan="2"/);
+  assert.match(html, /style="width:120px;height:40px;color:white;background-color:#112233;text-align:center;vertical-align:top"/);
+  assert.match(html, /<span class="wiki-file wiki-file-inline thumb"><img src="\/v1\/files\/public\/server\.png\/raw"/);
+  assert.equal(html.includes('&lt;width=120&gt;'), false);
+});
+
+test('ignores unsafe table controls and reports a non-blocking warning', () => {
+  const parsed = parseMarkup('||<tablewidth=100%;position:fixed><bgcolor=url(javascript:alert(1))>안전||');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.blockingErrors.length, 0);
+  assert.equal(parsed.errors.some((error) => error.includes('표 제어자')), true);
+  assert.equal(html.includes('position:fixed'), false);
+  assert.equal(html.includes('javascript:'), false);
+  assert.match(html, />안전<\/th>/);
+});
+
+test('parses nested unordered and ordered NamuMark lists with start values', () => {
+  const parsed = parseMarkup([
+    ' * 첫 항목',
+    '  * 하위 항목',
+    '   1.#3 세 번째부터',
+    '   1. 네 번째',
+    '  * 하위 형제',
+    ' * 둘째 항목',
+    ' a.#2 알파벳 둘째',
+    ' a. 알파벳 셋째',
+    ' I. 로마 숫자'
+  ].join('\n'));
+
+  assert.equal(parsed.ast.length, 3);
+  const root = parsed.ast[0];
+  assert.equal(root?.type, 'list');
+  if (root?.type !== 'list') return;
+  assert.equal(root.kind, 'unordered');
+  assert.equal(root.items.length, 2);
+  assert.equal(root.items[0]?.nested[0]?.kind, 'unordered');
+  assert.equal(root.items[0]?.nested[0]?.items[0]?.nested[0]?.kind, 'decimal');
+  assert.equal(root.items[0]?.nested[0]?.items[0]?.nested[0]?.start, 3);
+
+  const html = renderDocument(parsed.ast);
+  assert.match(html, /<ul class="wiki-list"><li>첫 항목<ul class="wiki-list"><li>하위 항목<ol class="wiki-list" start="3">/);
+  assert.match(html, /<ol class="wiki-list wiki-list-alpha" start="2" type="a">/);
+  assert.match(html, /<ol class="wiki-list wiki-list-upper-roman" type="I">/);
+});
+
+test('bounds pathological list nesting before recursive rendering', () => {
+  const parsed = parseMarkup(Array.from({ length: 80 }, (_, index) => `${' '.repeat(index + 1)}* 단계 ${index + 1}`).join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.blockingErrors.some((error) => error.includes('32단계')), true);
+  assert.match(html, /단계 80/);
+});
+
+test('supports inline file markup in prose and table cells without creating document links', () => {
+  const parsed = parseMarkup('아이콘 [[파일:icon.webp|작은 아이콘]] 뒤 문장\n||이름||[[파일:icon.webp|섬네일|표 아이콘]]||');
+  const html = renderDocument(parsed.ast, {
+    files: {
+      'icon.webp': {
+        url: '/v1/files/public/icon.webp/raw',
+        mimeType: 'image/webp',
+        originalName: 'icon.webp'
+      }
+    }
+  });
+
+  assert.deepEqual(parsed.links, []);
+  assert.equal((html.match(/<img /g) ?? []).length, 2);
+  assert.match(html, /alt="작은 아이콘"/);
+  assert.match(html, /alt="표 아이콘"/);
+  assert.match(html, /<p>아이콘 <span class="wiki-file wiki-file-inline">/);
+});
+
+test('collects file dependencies from every block and inline container', () => {
+  const parsed = parseMarkup([
+    '[[파일:block.png]]',
+    '본문 [[파일:inline.png|아이콘]]',
+    ' * 목록 [[파일:list.png]]',
+    '||셀 [[파일:table.png]]||',
+    '{{{#!folding 접기',
+    '[[파일:fold.png]]',
+    '}}}',
+  ].join('\n'));
+
+  assert.deepEqual([...collectWikiFileNames(parsed.ast)].sort(), [
+    'block.png',
+    'fold.png',
+    'inline.png',
+    'list.png',
+    'table.png',
+  ]);
+});
+
+test('renders explicit safe placeholders for unsupported macros', () => {
+  const parsed = parseMarkup('오늘은 [date], 경과는 [age(2020-01-01)]이고 [[문서]]와 [https://example.com 외부]는 링크다.');
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(
+    parsed.errors.filter((error) => error.startsWith('지원되지 않는 매크로입니다:')),
+    ['지원되지 않는 매크로입니다: date', '지원되지 않는 매크로입니다: age']
+  );
+  assert.match(html, /<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: \[date\]<\/span>/);
+  assert.match(html, />지원하지 않는 매크로: \[age\]<\/span>/);
+  assert.equal(html.includes('2020-01-01'), false);
+  assert.match(html, /class="wiki-link"/);
+  assert.match(html, /href="https:\/\/example\.com"/);
+});
+
+test('interpolates include parameters through nested lists and advanced table cells as plain data', () => {
+  const source = parseMarkup(' * @항목@\n  1. @하위@\n||<bgcolor=#fff>[[파일:@파일@|@설명@]]||');
+  const expanded = applyIncludeParametersToAst(source.ast, {
+    항목: '<script>상위</script>',
+    하위: "'''문법 아님'''",
+    파일: 'safe.png',
+    설명: '<b>설명</b>'
+  }, 'inc-');
+  const html = renderDocument(expanded, {
+    files: {
+      'safe.png': { url: '/safe.png', mimeType: 'image/png', originalName: 'safe.png' }
+    }
+  });
+
+  assert.equal(html.includes('<script>'), false);
+  assert.match(html, /&lt;script&gt;상위&lt;\/script&gt;/);
+  assert.match(html, /'''문법 아님'''/);
+  assert.match(html, /alt="&lt;b&gt;설명&lt;\/b&gt;"/);
 });

@@ -12,13 +12,53 @@ export type NamespaceCode =
   | 'category'
   | 'file';
 
+export type WikiListKind =
+  | 'unordered'
+  | 'decimal'
+  | 'lower-alpha'
+  | 'upper-alpha'
+  | 'lower-roman'
+  | 'upper-roman';
+
+export interface WikiListItem {
+  children: InlineNode[];
+  nested: WikiListNode[];
+}
+
+export interface WikiListNode {
+  type: 'list';
+  kind: WikiListKind;
+  start: number;
+  items: WikiListItem[];
+}
+
+export interface WikiTableCell {
+  children: InlineNode[];
+  colspan: number;
+  rowspan: number;
+  align?: 'left' | 'center' | 'right';
+  verticalAlign?: 'top' | 'middle' | 'bottom';
+  width?: string;
+  height?: string;
+  backgroundColor?: string;
+  color?: string;
+}
+
+export interface WikiTableOptions {
+  align?: 'left' | 'center' | 'right';
+  width?: string;
+  backgroundColor?: string;
+  color?: string;
+  borderColor?: string;
+}
+
 export type AstNode =
   | { type: 'heading'; level: number; text: string; id: string; startLine?: number; endLine?: number }
   | { type: 'paragraph'; children: InlineNode[] }
-  | { type: 'list'; items: InlineNode[][] }
+  | WikiListNode
   | { type: 'blockquote'; children: InlineNode[] }
   | { type: 'hr' }
-  | { type: 'wiki_table'; rows: InlineNode[][][] }
+  | { type: 'wiki_table'; rows: WikiTableCell[][]; options: WikiTableOptions }
   | { type: 'folding'; title: InlineNode[]; children: AstNode[] }
   | { type: 'toc'; collapsed: boolean }
   | {
@@ -46,6 +86,8 @@ export type InlineNode =
   | { type: 'size'; delta: number; text: string }
   | { type: 'internal_link'; target: string; label: string }
   | { type: 'external_link'; href: string; label: string }
+  | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null }
+  | { type: 'unsupported_macro'; name: string }
   | { type: 'code'; code: string }
   | { type: 'ref'; text: string };
 
