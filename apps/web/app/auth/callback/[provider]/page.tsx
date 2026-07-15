@@ -4,7 +4,6 @@ import { createPageMetadata } from '../../../../lib/metadata';
 import {
   CallbackCard,
   CallbackShell,
-  CallbackSideStat,
 } from '../../../../components/auth/callback-shell';
 
 export const metadata = createPageMetadata({
@@ -38,13 +37,6 @@ function CallbackFallback() {
       title="계정 인증 응답을 확인하고 있습니다."
       subtitle="콜백 파라미터를 읽고 세션 처리를 준비하는 중입니다."
       status="pending"
-      aside={
-        <>
-          <CallbackSideStat label="공급자" value="확인 중" />
-          <CallbackSideStat label="모드" value="자동" />
-          <CallbackSideStat label="상태" value="처리 중" />
-        </>
-      }
     >
       <CallbackCard status="pending" progressWidth="66%" footerLabel="MineWiki OAuth">
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#6b7280]">

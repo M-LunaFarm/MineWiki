@@ -4,10 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   CheckCircle2,
-  Clock3,
   ExternalLink,
   Loader2,
-  LockKeyhole,
   RotateCcw,
   ShieldCheck,
   XCircle,
@@ -16,9 +14,7 @@ import { completeOAuthLogin, type OAuthProvider } from '../../../../lib/auth-cli
 import { useAuth } from '../../../../components/providers/auth-context';
 import {
   CallbackCard,
-  CallbackCheckRow,
   CallbackShell,
-  CallbackSideStat,
 } from '../../../../components/auth/callback-shell';
 
 interface OAuthCallbackClientProps {
@@ -186,97 +182,51 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         : flowMode === 'link'
           ? linkCompletionTarget === 'opener' ? '창 닫기' : '계정 페이지로 이동'
           : '계정 페이지로 이동';
-  const checks = [
-    {
-      label: '로그인 서비스',
-      value: providerLabel,
-      complete: Boolean(normalizedProvider),
-    },
-    {
-      label: '인증 코드',
-      value: searchParams.get('code') ? '확인됨' : '없음',
-      complete: Boolean(searchParams.get('code')),
-    },
-    {
-      label: '요청 무결성',
-      value: searchParams.get('state') ? '확인됨' : '없음',
-      complete: Boolean(searchParams.get('state')),
-    },
-  ];
-
   return (
     <CallbackShell
       eyebrow="계정 인증"
       title={title}
       subtitle={subtitle}
       status={shellStatus}
-      aside={
-        <>
-          <CallbackSideStat label="공급자" value={providerLabel} />
-          <CallbackSideStat label="모드" value={flowMode === 'link' ? '연동' : '로그인'} />
-          <CallbackSideStat
-            label="상태"
-            value={status === 'pending' ? '처리 중' : status === 'success' ? '완료' : '오류'}
-          />
-        </>
-      }
     >
       <div role={status === 'error' ? 'alert' : 'status'} aria-live={status === 'error' ? 'assertive' : 'polite'}>
       <CallbackCard status={shellStatus} progressWidth={progressWidth} footerLabel="MineWiki OAuth">
-        <div className="mb-6 flex items-start gap-4">
-          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg border border-[#30363d] bg-[#0b0d10]">
+        <div className="mb-5 flex items-start gap-3.5">
+          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/10">
             {status === 'pending' ? (
-              <Loader2 className={`h-7 w-7 animate-spin ${statusTone}`} />
+              <Loader2 className={`h-6 w-6 animate-spin ${statusTone}`} />
             ) : status === 'success' ? (
-              <CheckCircle2 className={`h-7 w-7 ${statusTone}`} />
+              <CheckCircle2 className={`h-6 w-6 ${statusTone}`} />
             ) : (
-              <XCircle className={`h-7 w-7 ${statusTone}`} />
+              <XCircle className={`h-6 w-6 ${statusTone}`} />
             )}
           </div>
           <div className="min-w-0 text-left">
-            <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#6b7280]">
-              간편 로그인
+            <p className="text-xs font-semibold text-slate-500">
+              {providerLabel} · {flowMode === 'link' ? '계정 연동' : '간편 로그인'}
             </p>
-            <h2 className="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl">
+            <h2 className="mt-1.5 text-lg font-bold tracking-tight text-white sm:text-xl">
               {detailTitle}
             </h2>
-            <p className="mt-3 text-sm leading-6 text-[#a9b0ba]">{detailBody}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{detailBody}</p>
           </div>
         </div>
 
-        <div className="mb-5 rounded-lg border border-[#30363d] bg-[#0b0d10] p-4 text-left">
-          <div className="flex items-start gap-3">
-            {status === 'pending' ? (
-              <Clock3 className="mt-0.5 h-4 w-4 text-blue-200" />
-            ) : status === 'success' ? (
-              <ShieldCheck className="mt-0.5 h-4 w-4 text-[#35e5b7]" />
-            ) : (
-              <LockKeyhole className="mt-0.5 h-4 w-4 text-[#f43f5e]" />
-            )}
-            <div>
-              <p className="text-sm font-medium text-[#e5e7eb]">{providerLabel} 응답 확인</p>
-              <p className="mt-1 text-xs leading-5 text-[#a9b0ba]">
-                인증 응답과 요청 안전성을 확인한 뒤 MineWiki 계정에 연결합니다.
-              </p>
-              {status === 'error' && message ? (
-                <p className="mt-2 text-xs text-rose-200/90">{message}</p>
-              ) : null}
-            </div>
-          </div>
+        <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/10 px-3.5 py-3 text-xs">
+          <span className="flex min-w-0 items-center gap-2 text-slate-400">
+            <ShieldCheck className="h-4 w-4 flex-shrink-0 text-[#35e5b7]" aria-hidden />
+            요청 무결성 보호
+          </span>
+          <span className={`flex-shrink-0 font-semibold ${statusTone}`}>
+            {status === 'pending' ? '확인 중' : status === 'success' ? '확인 완료' : '다시 시도 필요'}
+          </span>
         </div>
 
-        <div className="mb-6 space-y-2">
-          {checks.map((check) => (
-            <CallbackCheckRow
-              key={check.label}
-              label={check.label}
-              value={check.value}
-              complete={check.complete}
-              pending={status === 'pending'}
-              pendingIcon={<Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-blue-200" />}
-            />
-          ))}
-        </div>
+        {status === 'error' && message ? (
+          <p className="mb-5 rounded-lg border border-rose-400/25 bg-rose-500/10 px-3.5 py-3 text-xs leading-5 text-rose-300">
+            {message}
+          </p>
+        ) : null}
 
         <div className="space-y-3">
           <button

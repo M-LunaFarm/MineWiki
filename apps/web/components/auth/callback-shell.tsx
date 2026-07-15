@@ -65,16 +65,8 @@ export function CallbackShell({
         <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
         {eyebrow}
       </div>
-      <aside className="grid grid-cols-3 gap-2">
-        {aside ?? (
-          <>
-            <CallbackSideStat label="연결" value="암호화" />
-            <CallbackSideStat label="처리" value="자동" />
-            <CallbackSideStat label="보호" value="동일 출처" />
-          </>
-        )}
-      </aside>
-      <div className="mt-4">{children}</div>
+      <div>{children}</div>
+      {aside ? <aside className="mt-4 grid grid-cols-3 gap-2">{aside}</aside> : null}
     </AuthShellLayout>
   );
 }
@@ -83,7 +75,7 @@ export function CallbackCard({ status, progressWidth, children, footerLabel }: C
   const tone = statusStyles[status];
 
   return (
-    <div className="dark-fixed-surface overflow-hidden rounded-xl border border-white/10 bg-[#0d1416]">
+    <div className="auth-callback-card overflow-hidden rounded-xl border border-white/10 bg-white/[0.035]">
       <div className="h-1 w-full bg-white/[0.06]">
         <div className={`h-full animate-pulse ${tone.progress}`} style={{ width: progressWidth }} />
       </div>

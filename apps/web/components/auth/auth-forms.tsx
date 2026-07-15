@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, Eye, EyeOff, MessageCircle, Minus } from 'lucide-react';
+import { Check, Eye, EyeOff, Loader2, MessageCircle, Minus } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAuth } from '../providers/auth-context';
 import {
@@ -31,6 +31,7 @@ export function AuthForms() {
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [oauthPendingProvider, setOauthPendingProvider] = useState<OAuthProvider | null>(null);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [pendingVerification, setPendingVerification] = useState<{
@@ -199,6 +200,7 @@ export function AuthForms() {
     }
 
     try {
+      setOauthPendingProvider(provider);
       let returnTo: string | undefined;
       if (typeof window !== 'undefined') {
         const requestedReturnTo = new URLSearchParams(window.location.search).get('returnTo');
@@ -216,6 +218,7 @@ export function AuthForms() {
         agreePrivacy: mode === 'register',
       });
     } catch (oauthProblem) {
+      setOauthPendingProvider(null);
       const message =
         oauthProblem instanceof Error ? oauthProblem.message : '간편 로그인을 시작하지 못했습니다.';
       setOauthError(message);
@@ -306,25 +309,40 @@ export function AuthForms() {
           type="button"
           onClick={() => void handleOAuth('discord')}
           className="flex items-center justify-center gap-2 rounded-lg bg-[#5865F2] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#4752c4] disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={loading || !oauthAvailability.discord}
+          disabled={loading || oauthPendingProvider !== null || !oauthAvailability.discord}
         >
           <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-white/20">
-            <MessageCircle className="h-4 w-4 text-white" aria-hidden />
+            {oauthPendingProvider === 'discord' ? (
+              <Loader2 className="h-4 w-4 animate-spin text-white" aria-hidden />
+            ) : (
+              <MessageCircle className="h-4 w-4 text-white" aria-hidden />
+            )}
           </span>
-          Discord
+          {oauthPendingProvider === 'discord' ? '이동 중…' : 'Discord'}
         </button>
         <button
           type="button"
           onClick={() => void handleOAuth('naver')}
           className="flex items-center justify-center gap-2 rounded-lg bg-[#03C75A] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#02b350] disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={loading || !oauthAvailability.naver}
+          disabled={loading || oauthPendingProvider !== null || !oauthAvailability.naver}
         >
           <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-white text-sm font-extrabold text-[#03C75A]">
-            N
+            {oauthPendingProvider === 'naver' ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              'N'
+            )}
           </span>
-          NAVER
+          {oauthPendingProvider === 'naver' ? '이동 중…' : 'NAVER'}
         </button>
       </div>
+
+      {oauthPendingProvider ? (
+        <p role="status" aria-live="polite" className="-mt-3 flex items-center justify-center gap-2 text-xs text-slate-400">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#35e5b7]" aria-hidden />
+          {PROVIDER_LABEL[oauthPendingProvider]}의 안전한 로그인 화면으로 이동하고 있습니다.
+        </p>
+      ) : null}
 
       {!oauthAvailability.discord || !oauthAvailability.naver ? (
         <p className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
