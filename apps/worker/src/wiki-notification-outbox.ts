@@ -53,6 +53,51 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
           })),
           skipDuplicates: true
         });
+        const persistedNotifications = await tx.wikiNotification.findMany({
+          where: { dedupeKey: { in: deliveries.map((delivery) => delivery.dedupeKey) } },
+          select: { id: true, profileId: true },
+        });
+        if (persistedNotifications.length > 0) {
+          const profileIds = [...new Set(persistedNotifications.map((notification) => notification.profileId))];
+          const subscriptions = await tx.wikiPushSubscription.findMany({
+            where: {
+              profileId: { in: profileIds },
+              disabledAt: null,
+              OR: [{ expirationTime: null }, { expirationTime: { gt: new Date() } }],
+              session: { expiresAt: { gt: new Date() }, account: { lifecycleStatus: 'active' } },
+            },
+            select: {
+              id: true,
+              profileId: true,
+              session: { select: { accountId: true } },
+              profile: { select: { accountId: true, status: true } },
+            },
+          });
+          const subscriptionsByProfile = new Map<bigint, typeof subscriptions>();
+          for (const subscription of subscriptions) {
+            if (subscription.profile.status !== 'active' || subscription.profile.accountId !== subscription.session.accountId) continue;
+            const rows = subscriptionsByProfile.get(subscription.profileId) ?? [];
+            rows.push(subscription);
+            subscriptionsByProfile.set(subscription.profileId, rows);
+          }
+          await tx.wikiPushDelivery.createMany({
+            data: persistedNotifications.flatMap((notification) =>
+              (subscriptionsByProfile.get(notification.profileId) ?? []).map((subscription) => ({
+                notificationId: notification.id,
+                subscriptionId: subscription.id,
+                status: 'pending',
+                attempts: 0,
+                availableAt: new Date(),
+                lockedAt: null,
+                lockedBy: null,
+                deliveredAt: null,
+                lastError: null,
+                createdAt: new Date(),
+              })),
+            ),
+            skipDuplicates: true,
+          });
+        }
         await tx.wikiNotificationEvent.updateMany({
           where: { id: event.id, status: 'processing', lockedBy: workerId },
           data: { status: 'processed', processedAt: new Date(), lockedAt: null, lockedBy: null, lastError: null }
