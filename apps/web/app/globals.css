@@ -731,6 +731,12 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered .wiki-macro-warning {
     @apply inline-flex rounded-md border border-amber-300/30 bg-amber-300/[0.06] px-2 py-0.5 text-xs font-medium text-amber-200;
   }
+  .wiki-rendered .wiki-media-wrapper {
+    @apply my-5 block w-full max-w-full overflow-hidden rounded-xl border border-white/10 bg-black shadow-sm;
+  }
+  .wiki-rendered .wiki-media {
+    @apply block size-full border-0;
+  }
   .wiki-rendered .wiki-clearfix {
     @apply block clear-both;
   }

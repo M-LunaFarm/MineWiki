@@ -94,6 +94,7 @@ export type InlineNode =
   | { type: 'clearfix' }
   | { type: 'anchor'; id: string }
   | { type: 'ruby'; text: string; ruby: string; color: string | null }
+  | { type: 'video'; provider: 'youtube'; videoId: string; width: number; height: number; start: number | null; end: number | null }
   | { type: 'bold'; text: string }
   | { type: 'italic'; text: string }
   | { type: 'strike'; text: string }

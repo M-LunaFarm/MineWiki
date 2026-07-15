@@ -636,6 +636,38 @@ test('renders safe static NamuMark macros without falling back to warnings', () 
   assert.match(html, /<ruby>한자<rp>\(<\/rp><rt><span style="color:#336699">漢字<\/span><\/rt><rp>\)<\/rp><\/ruby>/);
 });
 
+test('renders privacy-enhanced responsive YouTube macros with bounded playback options', () => {
+  const parsed = parseMarkup('[youtube(dQw4w9WgXcQ,width=800,height=450,start=12,end=60)]');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.errors.some((error) => error.includes('YouTube') || error.includes('지원되지 않는 매크로')), false);
+  assert.match(html, /class="wiki-media-wrapper"/);
+  assert.match(html, /max-width:800px/);
+  assert.match(html, /aspect-ratio:800 \/ 450/);
+  assert.match(html, /src="https:\/\/www\.youtube-nocookie\.com\/embed\/dQw4w9WgXcQ\?start=12&amp;end=60"/);
+  assert.match(html, /loading="lazy"/);
+  assert.match(html, /sandbox="allow-scripts allow-same-origin allow-presentation"/);
+  assert.equal(html.includes('youtube.com/embed'), false);
+});
+
+test('keeps malformed or unsafe YouTube macros inert', () => {
+  const inputs = [
+    '[youtube(javascript:alert(1))]',
+    '[youtube(dQw4w9WgXcQ,width=99999)]',
+    '[youtube(dQw4w9WgXcQ,start=60,end=12)]',
+    '[youtube(dQw4w9WgXcQ,start=<script>)]'
+  ];
+  for (const input of inputs) {
+    const parsed = parseMarkup(input);
+    const html = renderDocument(parsed.ast);
+    assert.match(parsed.errors.join('\n'), /YouTube 매크로/u);
+    assert.match(html, /지원하지 않는 매크로: \[youtube\]/u);
+    assert.equal(html.includes('<iframe'), false);
+    assert.equal(html.includes('javascript:'), false);
+    assert.equal(html.includes('<script>'), false);
+  }
+});
+
 test('keeps malformed and unsafe static macros inert', () => {
   const parsed = parseMarkup('[anchor(<script>)][ruby(본문,ruby=후리가나,color=url(javascript:alert(1)))]');
   const html = renderDocument(parsed.ast);

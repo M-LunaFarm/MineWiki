@@ -12,7 +12,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.3';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.4';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -112,7 +112,8 @@ const allowedTags = [
   'nav',
   'aside',
   'details',
-  'summary'
+  'summary',
+  'iframe'
 ];
 
 export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
@@ -945,6 +946,7 @@ export function applyIncludeParametersToAst(
       caption: node.caption === null ? null : replace(node.caption)
     };
     if (node.type === 'unsupported_macro') return { ...node };
+    if (node.type === 'video') return { ...node };
     if (node.type === 'line_break' || node.type === 'clearfix') return { ...node };
     if (node.type === 'anchor') return { ...node, id: normalizeMacroAnchor(replace(node.id)) };
     if (node.type === 'ruby') return { ...node, text: replace(node.text), ruby: replace(node.ruby) };
@@ -1080,9 +1082,44 @@ function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors:
     }
     if (text && ruby) return { type: 'ruby', text, ruby, color };
   }
+  if (normalizedName === 'youtube' && rawArgs !== undefined) {
+    const [videoId = '', ...parameters] = splitMacroArguments(rawArgs);
+    if (!/^[A-Za-z0-9_-]{6,20}$/u.test(videoId)) return invalidYouTubeMacro(errors);
+    let width = 640;
+    let height = 360;
+    let start: number | null = null;
+    let end: number | null = null;
+    for (const parameter of parameters) {
+      const separator = parameter.indexOf('=');
+      if (separator < 1) continue;
+      const key = parameter.slice(0, separator).trim().toLowerCase();
+      const value = parameter.slice(separator + 1).trim();
+      if (!/^[0-9]+$/u.test(value)) return invalidYouTubeMacro(errors);
+      const parsed = Number(value);
+      if (key === 'width') {
+        if (parsed < 200 || parsed > 1200) return invalidYouTubeMacro(errors);
+        width = parsed;
+      } else if (key === 'height') {
+        if (parsed < 112 || parsed > 900) return invalidYouTubeMacro(errors);
+        height = parsed;
+      } else if (key === 'start' || key === 'end') {
+        if (parsed < 0 || parsed > 86_400) return invalidYouTubeMacro(errors);
+        if (key === 'start') start = parsed;
+        else end = parsed;
+      }
+    }
+    if (start !== null && end !== null && end <= start) return invalidYouTubeMacro(errors);
+    return { type: 'video', provider: 'youtube', videoId, width, height, start, end };
+  }
   const warning = `지원되지 않는 매크로입니다: ${name}`;
   if (!errors.includes(warning)) errors.push(warning);
   return { type: 'unsupported_macro', name };
+}
+
+function invalidYouTubeMacro(errors: string[]): InlineNode {
+  const warning = 'YouTube 매크로의 동영상 ID 또는 옵션이 올바르지 않습니다.';
+  if (!errors.includes(warning)) errors.push(warning);
+  return { type: 'unsupported_macro', name: 'youtube' };
 }
 
 function splitMacroArguments(value: string) {
@@ -1246,13 +1283,17 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       ul: ['class'],
       ol: ['class', 'start', 'type'],
       li: ['class'],
-      summary: ['class']
+      summary: ['class'],
+      iframe: ['class', 'src', 'title', 'loading', 'allow', 'allowfullscreen', 'referrerpolicy', 'sandbox']
     },
     allowedSchemes: ['http', 'https', 'mailto'],
+    allowedIframeHostnames: ['www.youtube-nocookie.com'],
     allowedStyles: {
       span: {
         color: [/^#[0-9a-f]{3,8}$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/i, /^[a-z]+$/i],
-        'font-size': [/^\d+(\.\d+)?em$/]
+        'font-size': [/^\d+(\.\d+)?em$/],
+        'max-width': [/^\d+px$/],
+        'aspect-ratio': [/^\d+ \/ \d+$/]
       },
       div: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
@@ -1355,6 +1396,13 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
       }
       if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options);
       if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options, true);
+      if (node.type === 'video') {
+        const query = new URLSearchParams();
+        if (node.start !== null) query.set('start', String(node.start));
+        if (node.end !== null) query.set('end', String(node.end));
+        const suffix = query.size > 0 ? `?${query.toString()}` : '';
+        return `<span class="wiki-media-wrapper" style="max-width:${node.width}px;aspect-ratio:${node.width} / ${node.height}"><iframe class="wiki-media" src="https://www.youtube-nocookie.com/embed/${escapeAttr(node.videoId)}${suffix}" title="YouTube 동영상" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></span>`;
+      }
       if (node.type === 'unsupported_macro') {
         return `<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: [${escapeHtml(node.name)}]</span>`;
       }
