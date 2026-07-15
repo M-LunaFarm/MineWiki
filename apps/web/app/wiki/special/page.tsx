@@ -16,7 +16,7 @@ const TYPES: ReadonlyArray<{ key: WikiSpecialDocumentType; label: string; descri
   { key: 'short', label: '짧은 문서', description: '원문 크기가 작은 문서부터 정렬' },
   { key: 'random', label: '임의 문서', description: '읽을 수 있는 문서 중 하나를 무작위 선택' }
 ];
-const NAMESPACES = ['', 'main', 'server', 'mod', 'modpack', 'guide', 'data', 'dev', 'help', 'project', 'template', 'category', 'file'];
+const NAMESPACES = ['', 'main', 'server', 'mod', 'modpack', 'guide', 'data', 'dev', 'help', 'project', 'template', 'user', 'category', 'file'];
 
 export const dynamic = 'force-dynamic';
 

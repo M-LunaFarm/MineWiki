@@ -832,7 +832,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                       <span className="[overflow-wrap:anywhere]">{discussionSystemEventLabel(item.systemEvent)}</span>
                     </p>
                     <p className="flex shrink-0 flex-wrap items-center gap-x-2 text-xs text-slate-500">
-                      <Link href={`/wiki/contributions/${item.createdBy}`} className="hover:text-emerald-200">{item.createdByName}</Link>
+                      <Link href={userDocumentHref(item.createdByUsername, item.createdBy)} className="hover:text-emerald-200">{item.createdByName}</Link>
                       <time>{formatDate(item.createdAt)}</time>
                     </p>
                   </div>
@@ -846,7 +846,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                           <Pin className="size-3.5" /> 고정됨
                         </span>
                       ) : null}
-                      <Link href={`/wiki/contributions/${item.createdBy}`} className="hover:text-emerald-200">
+                      <Link href={userDocumentHref(item.createdByUsername, item.createdBy)} className="hover:text-emerald-200">
                         {item.createdByName}
                       </Link>
                       {selected.canReply && item.createdByUsername ? (
@@ -998,7 +998,7 @@ function DiscussionCommentContent({
   for (const mention of valid) {
     if (mention.start > cursor) parts.push(content.slice(cursor, mention.start));
     parts.push(
-      <Link key={`${mention.start}:${mention.end}:${mention.profileId}`} href={`/wiki/contributions/${mention.profileId}`} className="font-semibold text-emerald-300 underline decoration-emerald-300/30 underline-offset-2 hover:text-emerald-200">
+      <Link key={`${mention.start}:${mention.end}:${mention.profileId}`} href={`/user/${encodeURIComponent(mention.username)}`} className="font-semibold text-emerald-300 underline decoration-emerald-300/30 underline-offset-2 hover:text-emerald-200">
         {content.slice(mention.start, mention.end)}
       </Link>
     );
@@ -1006,6 +1006,10 @@ function DiscussionCommentContent({
   }
   if (cursor < content.length) parts.push(content.slice(cursor));
   return parts;
+}
+
+function userDocumentHref(username: string | null, profileId: string): string {
+  return username ? `/user/${encodeURIComponent(username)}` : `/wiki/contributions/${profileId}`;
 }
 
 type PollDraft = {

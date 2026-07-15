@@ -25,6 +25,7 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
   const [working, setWorking] = useState<'move' | 'delete' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const isServerWiki = routePath === '/server' || routePath.startsWith('/server/');
+  const isUserRoot = /^\/user\/[^/]+$/u.test(routePath);
   const rawHref = isServerWiki ? buildServerWikiToolPath(routePath, 'raw') : `/wiki/raw/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
   const backlinksHref = isServerWiki ? buildServerWikiToolPath(routePath, 'backlinks') : `/wiki/backlinks/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
   const discussionHref = isServerWiki ? buildServerWikiToolPath(routePath, 'discuss') : `/wiki/discuss/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
@@ -102,7 +103,7 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
           이동·삭제 등 문서 관리 작업은 <Link href={`/login?returnTo=${encodeURIComponent(routePath)}`} className="text-emerald-300 hover:underline">로그인</Link> 후 사용할 수 있습니다.
         </p>
       ) : null}
-      {account ? <details className="mt-4 border-t border-white/10 pt-4">
+      {account && !isUserRoot ? <details className="mt-4 border-t border-white/10 pt-4">
         <summary className="cursor-pointer text-sm font-semibold text-slate-300 hover:text-white">이동·삭제</summary>
         <p className="mt-2 text-xs leading-5 text-slate-500">
           이동과 삭제는 문서 작성자, 공간 관리자 또는 명시적으로 허용된 ACL 사용자만 실행할 수 있습니다.
@@ -166,6 +167,7 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
         </form>
         {message ? <p role="alert" className="mt-3 text-xs leading-5 text-amber-200">{message}</p> : null}
       </details> : null}
+      {isUserRoot ? <p className="mt-4 border-t border-white/10 pt-4 text-xs leading-5 text-slate-500">사용자 루트 문서는 계정 식별자를 보호하기 위해 이동하거나 삭제할 수 없습니다.</p> : null}
     </section>
   );
 }

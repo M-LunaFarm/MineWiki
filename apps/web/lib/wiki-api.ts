@@ -141,9 +141,23 @@ export interface WikiRevisionSummary {
   readonly isMinor: boolean;
   readonly createdBy: string | null;
   readonly createdByName: string | null;
+  readonly createdByUsername: string | null;
   readonly createdAt: string;
   readonly contentHash: string;
   readonly contentSize: number;
+}
+
+export interface WikiPublicProfileResponse {
+  readonly id: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly status: 'active' | 'blocked';
+  readonly createdAt: string;
+  readonly documentPath: string;
+  readonly documentExists: boolean;
+  readonly contributionsPath: string;
+  readonly isOwner: boolean;
+  readonly canEditDocument: boolean;
 }
 
 export interface WikiRevisionListResponse {

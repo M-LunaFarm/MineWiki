@@ -36,7 +36,7 @@ export default async function WikiBlockHistoryPage({ searchParams }: PageProps) 
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`chip ${event.action === 'block' ? 'border-red-300/30 text-red-200' : 'border-emerald-300/30 text-emerald-200'}`}>{event.action === 'block' ? <Ban className="size-3.5" /> : <RotateCcw className="size-3.5" />}{event.action === 'block' ? '차단' : '해제'}</span>
-                  <Link href={`/wiki/contributions/${event.target.profileId}`} className="break-words font-semibold text-white hover:text-emerald-200">{event.target.displayName}</Link>
+                  <Link href={event.target.username ? `/user/${encodeURIComponent(event.target.username)}` : `/wiki/contributions/${event.target.profileId}`} className="break-words font-semibold text-white hover:text-emerald-200">{event.target.displayName}</Link>
                   {event.target.username ? <span className="break-all text-xs text-slate-500">@{event.target.username}</span> : null}
                 </div>
                 <p className="mt-3 break-words text-sm leading-6 text-slate-300">{event.publicReason ?? '운영 사유 비공개'}</p>

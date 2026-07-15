@@ -13,7 +13,7 @@ interface PageProps {
   readonly searchParams: Promise<{ namespace?: string; cursor?: string }>;
 }
 
-const NAMESPACES = ['', 'main', 'server', 'mod', 'modpack', 'guide', 'data', 'dev', 'help', 'project', 'template', 'file'];
+const NAMESPACES = ['', 'main', 'server', 'mod', 'modpack', 'guide', 'data', 'dev', 'help', 'project', 'template', 'user', 'file'];
 
 export const dynamic = 'force-dynamic';
 

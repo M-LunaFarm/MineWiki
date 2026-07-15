@@ -8,10 +8,11 @@ import { WikiPageTools } from './wiki-page-tools';
 interface WikiArticleViewProps {
   readonly page: WikiPageResponse;
   readonly routePath: string;
+  readonly beforeContent?: ReactNode;
   readonly afterContent?: ReactNode;
 }
 
-export function WikiArticleView({ page, routePath, afterContent }: WikiArticleViewProps) {
+export function WikiArticleView({ page, routePath, beforeContent, afterContent }: WikiArticleViewProps) {
   const isCategoryDocument = routePath.startsWith('/wiki/category/');
   const editPath = routePath.startsWith('/server/')
     ? buildServerWikiToolPath(routePath, 'edit')
@@ -40,6 +41,8 @@ export function WikiArticleView({ page, routePath, afterContent }: WikiArticleVi
         <span>/</span>
         <span className="text-slate-200">{page.displayTitle}</span>
       </nav>
+
+      {beforeContent}
 
       <header className="border-b border-white/10 pb-6">
         <div className="mb-4 flex flex-wrap gap-2">

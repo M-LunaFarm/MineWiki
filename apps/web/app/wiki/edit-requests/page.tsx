@@ -9,7 +9,7 @@ interface PageProps {
 }
 
 const STATUSES = new Set(['open', 'all', 'pending', 'reviewing', 'stale', 'accepted', 'rejected', 'closed']);
-const NAMESPACES = ['', 'main', 'server', 'mod', 'modpack', 'dev', 'guide', 'data', 'help', 'project', 'template', 'category', 'file'];
+const NAMESPACES = ['', 'main', 'server', 'mod', 'modpack', 'dev', 'guide', 'data', 'help', 'project', 'template', 'user', 'category', 'file'];
 
 export default async function WikiEditRequestQueuePage({ searchParams }: PageProps) {
   const query = await searchParams;

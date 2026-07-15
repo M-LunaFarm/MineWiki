@@ -37,7 +37,7 @@ import {
   type WikiSpecialDocumentResponse,
   type WikiPublicBlockHistoryResponse
 } from './wiki-read.service';
-import { WikiProfileService, type WikiMeResponse } from './wiki-profile.service';
+import { WikiProfileService, type WikiMeResponse, type WikiPublicProfileResponse } from './wiki-profile.service';
 
 @Controller('v1/wiki')
 export class WikiController {
@@ -148,6 +148,15 @@ export class WikiController {
       limit,
       activity
     });
+  }
+
+  @Get('profiles/:username')
+  @UseGuards(OptionalSessionGuard)
+  getPublicProfile(
+    @Param('username') username: string,
+    @Req() request: FastifyRequest
+  ): Promise<WikiPublicProfileResponse> {
+    return this.wikiProfiles.getPublicProfile(username, request.sessionPayload?.userId ?? null);
   }
 
   @Get('search')

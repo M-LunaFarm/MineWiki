@@ -48,6 +48,7 @@ test('preserves every namespace after a page move response', () => {
     ['help', '문법', '/help/문법'],
     ['project', 'MineWiki', '/project/MineWiki'],
     ['template', '서버', '/template/서버'],
+    ['user', 'discord_owner_name/작업실', '/user/discord_owner_name/작업실'],
     ['category', '게임플레이/몹', '/wiki/category/게임플레이/몹'],
     ['file', 'logo.png', '/file/logo.png'],
     ['server', 'minewiki/규칙', '/server/minewiki/규칙'],
@@ -89,6 +90,7 @@ test('builds explicit tool routes for every standard wiki namespace', () => {
     ['/help/문법', '/help/_tools/edit/문법'],
     ['/project/MineWiki', '/project/_tools/edit/MineWiki'],
     ['/template/서버', '/template/_tools/edit/서버'],
+    ['/user/discord_owner_name', '/user/_tools/edit/discord_owner_name'],
     ['/file/logo.png', '/file/_tools/edit/logo.png'],
   ];
   for (const [documentPath, editPath] of routes) {

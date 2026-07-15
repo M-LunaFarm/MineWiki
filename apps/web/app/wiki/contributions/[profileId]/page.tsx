@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { fetchWikiContributions } from '../../../../lib/wiki-server-api';
+import { fetchWikiContributions, fetchWikiPublicProfile } from '../../../../lib/wiki-server-api';
+import { WikiUserProfileHeader } from '../../../../components/wiki/wiki-user-profile-header';
 
 interface PageProps {
   readonly params: Promise<{ profileId: string }>;
@@ -12,15 +13,15 @@ export default async function WikiContributionsPage({ params, searchParams }: Pa
   const activity = contributionActivity(query.activity);
   const result = await fetchWikiContributions(profileId, query.cursor, activity).catch(() => null);
   if (!result) notFound();
+  const publicProfile = await fetchWikiPublicProfile(result.profile.username);
+  if (!publicProfile) notFound();
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
       <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
         <Link href="/recent" className="hover:text-emerald-200">최근 변경</Link><span>/</span><span className="text-slate-200">기여 내역</span>
       </nav>
-      <header className="border-b border-white/10 pb-6">
-        <h1 className="text-3xl font-bold text-white">{result.profile.displayName}의 기여</h1>
-        <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">@{result.profile.username}{result.profile.status === 'blocked' ? <Link href={`/wiki/block-history?q=${encodeURIComponent(result.profile.username)}`} className="chip border-red-300/30 text-red-200 hover:bg-red-300/10">기여 차단됨 · 기록 보기</Link> : null}<span>· 읽을 권한이 있는 공개 활동만 표시됩니다.</span></p>
-      </header>
+      <WikiUserProfileHeader profile={publicProfile} current="contributions" />
+      <p className="text-sm text-slate-400">읽을 권한이 있는 공개 활동만 표시됩니다.</p>
       <nav aria-label="기여 활동 유형" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         {CONTRIBUTION_TABS.map((tab) => <Link key={tab.value} href={`/wiki/contributions/${profileId}?activity=${tab.value}`} className={`chip min-h-11 justify-center ${activity === tab.value ? 'chip-accent' : 'chip-muted'}`} aria-current={activity === tab.value ? 'page' : undefined}>{tab.label}</Link>)}
       </nav>

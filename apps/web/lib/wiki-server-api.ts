@@ -12,7 +12,8 @@ import type {
   WikiSearchResponse,
   WikiSpecialDocumentResponse,
   WikiSpecialDocumentType,
-  WikiPublicBlockHistoryResponse
+  WikiPublicBlockHistoryResponse,
+  WikiPublicProfileResponse
 } from './wiki-api';
 
 const API_BASE = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL);
@@ -58,6 +59,12 @@ export async function fetchWikiContributions(profileId: string, cursor?: string,
     `/v1/wiki/contributions/${encodeURIComponent(profileId)}?${params.toString()}`
   );
   return readWikiResponse<WikiContributionResponse>(response, 'Failed to load wiki contributions.');
+}
+
+export async function fetchWikiPublicProfile(username: string): Promise<WikiPublicProfileResponse | null> {
+  const response = await wikiFetch(`/v1/wiki/profiles/${encodeURIComponent(username)}`);
+  if (response.status === 404) return null;
+  return readWikiResponse<WikiPublicProfileResponse>(response, 'Failed to load wiki user profile.');
 }
 
 export async function searchWiki(input: {

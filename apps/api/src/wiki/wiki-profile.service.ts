@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { wikiUrl } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 
 export interface WikiMeResponse {
@@ -16,6 +17,19 @@ export interface WikiMeResponse {
     readonly createdAt: string;
     readonly updatedAt: string;
   };
+}
+
+export interface WikiPublicProfileResponse {
+  readonly id: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly status: 'active' | 'blocked';
+  readonly createdAt: string;
+  readonly documentPath: string;
+  readonly documentExists: boolean;
+  readonly contributionsPath: string;
+  readonly isOwner: boolean;
+  readonly canEditDocument: boolean;
 }
 
 @Injectable()
@@ -45,6 +59,40 @@ export class WikiProfileService {
         createdAt: wikiProfile.createdAt.toISOString(),
         updatedAt: wikiProfile.updatedAt.toISOString()
       }
+    };
+  }
+
+  async getPublicProfile(username: string, viewerAccountId: string | null): Promise<WikiPublicProfileResponse> {
+    const canonicalUsername = username.normalize('NFKC');
+    if (!canonicalUsername || canonicalUsername !== username || canonicalUsername.includes('/')) {
+      throw new NotFoundException('Wiki user not found.');
+    }
+    const profile = await this.prisma.wikiProfile.findUnique({ where: { username: canonicalUsername } });
+    if (!profile || !['active', 'blocked'].includes(profile.status)) {
+      throw new NotFoundException('Wiki user not found.');
+    }
+    const namespace = await this.prisma.wikiNamespace.findUnique({
+      where: { code: 'user' },
+      select: { id: true }
+    });
+    const rootPage = namespace
+      ? await this.prisma.wikiPage.findUnique({
+          where: { namespaceId_slug: { namespaceId: namespace.id, slug: profile.username } },
+          select: { status: true, ownerProfileId: true }
+        })
+      : null;
+    const isOwner = viewerAccountId !== null && profile.accountId === viewerAccountId;
+    return {
+      id: profile.id.toString(),
+      username: profile.username,
+      displayName: profile.displayName,
+      status: profile.status as 'active' | 'blocked',
+      createdAt: profile.createdAt.toISOString(),
+      documentPath: wikiUrl('user', profile.username),
+      documentExists: Boolean(rootPage && rootPage.status !== 'deleted' && rootPage.ownerProfileId === profile.id),
+      contributionsPath: `/wiki/contributions/${profile.id}`,
+      isOwner,
+      canEditDocument: isOwner && profile.status === 'active'
     };
   }
 

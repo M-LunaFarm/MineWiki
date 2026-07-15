@@ -84,6 +84,7 @@ export interface WikiRevisionSummary {
   readonly isMinor: boolean;
   readonly createdBy: string | null;
   readonly createdByName: string | null;
+  readonly createdByUsername: string | null;
   readonly createdAt: string;
   readonly contentHash: string;
   readonly contentSize: number;
@@ -406,17 +407,18 @@ export class WikiReadService {
     const profiles = profileIds.length > 0
       ? await this.prisma.wikiProfile.findMany({
           where: { id: { in: profileIds } },
-          select: { id: true, displayName: true }
+          select: { id: true, displayName: true, username: true }
         })
       : [];
-    const profileById = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
+    const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
     const items = pageRows.map((revision) => ({
       id: revision.id.toString(),
       revisionNo: revision.revisionNo,
       editSummary: revision.editSummary,
       isMinor: revision.isMinor,
       createdBy: revision.createdBy?.toString() ?? null,
-      createdByName: revision.createdBy ? profileById.get(revision.createdBy) ?? null : null,
+      createdByName: revision.createdBy ? profileById.get(revision.createdBy)?.displayName ?? null : null,
+      createdByUsername: revision.createdBy ? profileById.get(revision.createdBy)?.username ?? null : null,
       createdAt: revision.createdAt.toISOString(),
       contentHash: revision.contentHash,
       contentSize: revision.contentSize

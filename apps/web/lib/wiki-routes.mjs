@@ -29,6 +29,7 @@ export const STANDARD_WIKI_PREFIXES = Object.freeze([
   'help',
   'project',
   'template',
+  'user',
   'file',
 ]);
 
@@ -52,7 +53,7 @@ export function buildStandardWikiToolPath(routePath, tool) {
   if (!STANDARD_WIKI_TOOLS.includes(tool)) {
     throw new TypeError(`Unknown standard wiki tool: ${tool}`);
   }
-  const match = /^\/(wiki|mod|modpack|dev|guide|data|help|project|template|file)\/(.+)$/.exec(routePath);
+  const match = /^\/(wiki|mod|modpack|dev|guide|data|help|project|template|user|file)\/(.+)$/.exec(routePath);
   if (!match || !STANDARD_WIKI_PREFIXES.includes(match[1])) {
     throw new TypeError(`Not a standard wiki route: ${routePath}`);
   }

@@ -95,5 +95,5 @@ function QueueCard({ item, viewerProfileId }: { readonly item: WikiEditRequestQu
 
 function message(error: unknown) { return error instanceof Error ? error.message : '편집 요청 목록을 불러오지 못했습니다.'; }
 function formatDate(value: string) { return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Seoul' }).format(new Date(value)); }
-function namespaceLabel(namespace: string) { return ({ main: '일반', server: '서버', mod: '모드', modpack: '모드팩', dev: '개발', guide: '가이드', data: '데이터', help: '도움말', project: '프로젝트', template: '틀', category: '분류', file: '파일' } as Record<string, string>)[namespace] ?? namespace; }
+function namespaceLabel(namespace: string) { return ({ main: '일반', server: '서버', mod: '모드', modpack: '모드팩', dev: '개발', guide: '가이드', data: '데이터', help: '도움말', project: '프로젝트', template: '틀', user: '사용자', category: '분류', file: '파일' } as Record<string, string>)[namespace] ?? namespace; }
 function statusLabel(status: string) { return ({ pending: '검토 대기', reviewing: '처리 중', accepted: '승인됨', rejected: '반려됨', stale: '기준 판 만료', closed: '작성자가 닫음' } as Record<string, string>)[status] ?? status; }
