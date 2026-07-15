@@ -37,6 +37,10 @@ if (!hasDatabase) {
     let sourceProfileId: bigint | null = null;
     let foreignProfileId: bigint | null = null;
     let requestId: string | null = null;
+    let testSpaceId: bigint | null = null;
+    let testPageId: bigint | null = null;
+    let aclGroupId: bigint | null = null;
+    let wikiGroupId: number | null = null;
 
     try {
       await prisma.account.createMany({
@@ -134,6 +138,94 @@ if (!hasDatabase) {
           updatedAt: now
         }
       });
+      const mainNamespace = await prisma.wikiNamespace.findUniqueOrThrow({ where: { code: 'main' } });
+      const testSpace = await prisma.wikiSpace.create({
+        data: {
+          code: `merge-test-${suffix}`,
+          name: 'Merge integration space',
+          rootNamespaceCode: 'main',
+          rootPath: `/merge-test-${suffix}`,
+          status: 'active',
+          createdBy: source.id,
+          ownerUserId: source.id,
+          createdAt: now,
+          updatedAt: now
+        }
+      });
+      testSpaceId = testSpace.id;
+      const testPage = await prisma.wikiPage.create({
+        data: {
+          namespaceId: mainNamespace.id,
+          spaceId: testSpace.id,
+          localPath: `merge-test-${suffix}`,
+          slug: `merge-test-${suffix}`,
+          title: `Merge test ${suffix}`,
+          displayTitle: `Merge test ${suffix}`,
+          status: 'normal',
+          createdBy: source.id,
+          ownerProfileId: source.id,
+          createdAt: now,
+          updatedAt: now
+        }
+      });
+      testPageId = testPage.id;
+      await prisma.wikiPageWatch.createMany({
+        data: [
+          { profileId: source.id, pageId: testPage.id, lastSeenRevisionId: null, createdAt: now, updatedAt: now },
+          { profileId: target.id, pageId: testPage.id, lastSeenRevisionId: null, createdAt: now, updatedAt: now }
+        ]
+      });
+      await prisma.wikiEditRequest.create({
+        data: {
+          requestKind: 'create',
+          targetNamespaceId: mainNamespace.id,
+          targetNamespaceCode: 'main',
+          targetSpaceId: testSpace.id,
+          targetTitle: `Pending merge document ${suffix}`,
+          targetSlug: `pending-merge-${suffix}`,
+          targetDisplayTitle: `Pending merge document ${suffix}`,
+          targetPageType: 'article',
+          targetOwnerProfileId: source.id,
+          proposedContent: 'pending user document',
+          editSummary: 'profile merge integration test',
+          status: 'pending',
+          createdBy: source.id,
+          createdAt: now,
+          updatedAt: now
+        }
+      });
+      await prisma.subwikiRole.createMany({
+        data: [
+          { spaceId: testSpace.id, userId: source.id, role: 'maintainer', status: 'active', grantedAt: now },
+          { spaceId: testSpace.id, userId: target.id, role: 'maintainer', status: 'revoked', grantedAt: now, revokedAt: now }
+        ]
+      });
+      const aclGroup = await prisma.aclGroup.create({
+        data: {
+          groupKey: `merge_test_${suffix}`,
+          title: 'Merge integration ACL group',
+          status: 'active',
+          createdAt: now,
+          updatedAt: now
+        }
+      });
+      aclGroupId = aclGroup.id;
+      await prisma.aclGroupMember.createMany({
+        data: [
+          { groupId: aclGroup.id, memberType: 'user', userId: source.id, reason: 'profile merge integration test', addedAt: now },
+          { groupId: aclGroup.id, memberType: 'user', userId: target.id, reason: 'profile merge integration test', addedAt: now }
+        ]
+      });
+      const wikiGroup = await prisma.wikiGroup.create({
+        data: { code: `merge_${suffix}`, displayName: 'Merge integration group' }
+      });
+      wikiGroupId = wikiGroup.id;
+      await prisma.wikiUserGroup.createMany({
+        data: [
+          { userId: source.id, groupId: wikiGroup.id },
+          { userId: target.id, groupId: wikiGroup.id }
+        ]
+      });
 
       const preview = await service.preview(canonicalAccountId);
       assert.equal(preview.target.id, target.id.toString());
@@ -143,6 +235,13 @@ if (!hasDatabase) {
       assert.equal(preview.candidates[0]?.counts.historical.recentChanges, 1);
       assert.equal(preview.candidates[0]?.counts.current.notifications, 1);
       assert.equal(preview.candidates[0]?.counts.current.directAclRules, 1);
+      assert.equal(preview.candidates[0]?.counts.current.ownedPages, 1);
+      assert.equal(preview.candidates[0]?.counts.current.ownedSpaces, 1);
+      assert.equal(preview.candidates[0]?.counts.current.pendingUserDocuments, 1);
+      assert.equal(preview.candidates[0]?.counts.current.watches, 1);
+      assert.equal(preview.candidates[0]?.counts.current.subwikiRoles, 1);
+      assert.equal(preview.candidates[0]?.counts.current.aclMemberships, 1);
+      assert.equal(preview.candidates[0]?.counts.current.wikiGroups, 1);
 
       await assert.rejects(
         service.request(canonicalAccountId, {
@@ -168,6 +267,11 @@ if (!hasDatabase) {
         reason: 'duplicate request should be idempotent'
       });
       assert.equal(repeated.id, requested.id);
+      const pendingPreview = await service.preview(canonicalAccountId);
+      assert.equal(pendingPreview.candidates.length, 0);
+      assert.equal(pendingPreview.pendingRequests.length, 1);
+      assert.equal(pendingPreview.pendingRequests[0]?.request.id, requested.id);
+      assert.equal(pendingPreview.pendingRequests[0]?.source.id, source.id.toString());
 
       await assert.rejects(
         service.approve(
@@ -177,6 +281,8 @@ if (!hasDatabase) {
         ),
         /확인 사용자명이 병합 요청과 일치하지 않습니다/u
       );
+      assert.equal((await prisma.wikiProfileMergeRequest.findUnique({ where: { id: requested.id } }))?.status, 'pending');
+      assert.equal(await prisma.wikiProfileAlias.count({ where: { sourceProfileId: source.id } }), 0);
 
       const completed = await service.approve(
         requested.id,
@@ -190,6 +296,13 @@ if (!hasDatabase) {
       assert.equal(completed.status, 'completed');
       assert.equal(completed.transferred.notifications, 1);
       assert.equal(completed.transferred.directAclRules, 1);
+      assert.equal(completed.transferred.ownedPages, 1);
+      assert.equal(completed.transferred.ownedSpaces, 1);
+      assert.equal(completed.transferred.pendingUserDocuments, 1);
+      assert.equal(completed.transferred.watches, 1);
+      assert.equal(completed.transferred.subwikiRoles, 1);
+      assert.equal(completed.transferred.aclMemberships, 1);
+      assert.equal(completed.transferred.wikiGroups, 1);
 
       const [mergedSource, blockedTarget, alias, historicalChange, movedNotification, movedAcl] = await Promise.all([
         prisma.wikiProfile.findUnique({ where: { id: source.id } }),
@@ -206,6 +319,25 @@ if (!hasDatabase) {
       assert.equal(historicalChange?.actorId, source.id);
       assert.equal(movedNotification?.profileId, target.id);
       assert.equal(movedAcl?.subjectValue, target.id.toString());
+      const inheritedBlock = await prisma.wikiUserBlockEvent.findFirst({
+        where: { targetProfileId: target.id, actorProfileId: target.id, action: 'block' },
+        orderBy: { id: 'desc' }
+      });
+      assert.equal(inheritedBlock?.previousStatus, 'active');
+      assert.equal(inheritedBlock?.newStatus, 'blocked');
+      assert.equal((await prisma.wikiPage.findUnique({ where: { id: testPage.id } }))?.ownerProfileId, target.id);
+      assert.equal((await prisma.wikiSpace.findUnique({ where: { id: testSpace.id } }))?.ownerUserId, target.id);
+      const pendingDocument = await prisma.wikiEditRequest.findFirst({ where: { targetSpaceId: testSpace.id, editSummary: 'profile merge integration test' } });
+      assert.equal(pendingDocument?.targetOwnerProfileId, target.id);
+      assert.equal(pendingDocument?.createdBy, source.id);
+      assert.equal(await prisma.wikiPageWatch.count({ where: { profileId: target.id, pageId: testPage.id } }), 1);
+      assert.equal(await prisma.wikiPageWatch.count({ where: { profileId: source.id, pageId: testPage.id } }), 0);
+      assert.equal((await prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: target.id, role: 'maintainer' } } }))?.status, 'active');
+      assert.equal((await prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: source.id, role: 'maintainer' } } }))?.status, 'revoked');
+      assert.equal(await prisma.aclGroupMember.count({ where: { groupId: aclGroup.id, userId: target.id, removedAt: null } }), 1);
+      assert.equal(await prisma.aclGroupMember.count({ where: { groupId: aclGroup.id, userId: source.id, removedAt: null } }), 0);
+      assert.equal(await prisma.wikiUserGroup.count({ where: { userId: target.id, groupId: wikiGroup.id } }), 1);
+      assert.equal(await prisma.wikiUserGroup.count({ where: { userId: source.id, groupId: wikiGroup.id } }), 0);
 
       const [publicAlias, ensuredAlias, contributions] = await Promise.all([
         profiles.getPublicProfile(source.username, canonicalAccountId),
@@ -242,6 +374,12 @@ if (!hasDatabase) {
         await prisma.wikiNotification.deleteMany({ where: { profileId: { in: ids } } });
         await prisma.wikiRecentChange.deleteMany({ where: { actorId: { in: ids }, title: `Merge history ${suffix}` } });
         await prisma.aclRule.deleteMany({ where: { reason: 'profile merge integration test' } });
+        await prisma.wikiUserBlockEvent.deleteMany({ where: { targetProfileId: { in: ids } } });
+        await prisma.wikiPageWatch.deleteMany({ where: { profileId: { in: ids } } });
+        await prisma.wikiEditRequest.deleteMany({ where: { editSummary: 'profile merge integration test' } });
+        await prisma.subwikiRole.deleteMany({ where: { userId: { in: ids } } });
+        await prisma.aclGroupMember.deleteMany({ where: { userId: { in: ids } } });
+        await prisma.wikiUserGroup.deleteMany({ where: { userId: { in: ids } } });
         if (sourceProfileId) {
           await prisma.wikiProfile.update({
             where: { id: sourceProfileId },
@@ -249,6 +387,10 @@ if (!hasDatabase) {
           }).catch(() => undefined);
         }
       }
+      if (testPageId) await prisma.wikiPage.deleteMany({ where: { id: testPageId } });
+      if (testSpaceId) await prisma.wikiSpace.deleteMany({ where: { id: testSpaceId } });
+      if (aclGroupId) await prisma.aclGroup.deleteMany({ where: { id: aclGroupId } });
+      if (wikiGroupId) await prisma.wikiGroup.deleteMany({ where: { id: wikiGroupId } });
       const profileIds = [sourceProfileId, targetProfileId, foreignProfileId].filter((id): id is bigint => id !== null);
       if (profileIds.length > 0) {
         await prisma.wikiProfile.deleteMany({ where: { id: { in: profileIds } } });

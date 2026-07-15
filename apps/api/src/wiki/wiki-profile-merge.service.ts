@@ -48,9 +48,28 @@ export interface WikiProfileMergeCandidate {
   readonly requiresBlockedStatus: boolean;
 }
 
+export interface WikiProfileMergeRequestSummary {
+  readonly id: string;
+  readonly sourceProfileId: string;
+  readonly targetProfileId: string;
+  readonly status: string;
+  readonly reason: string | null;
+  readonly preview: Prisma.JsonValue;
+  readonly errorCode: string | null;
+  readonly requestedAt: string;
+  readonly approvedAt: string | null;
+  readonly completedAt: string | null;
+  readonly rejectedAt: string | null;
+  readonly version: number;
+}
+
 export interface WikiProfileMergePreview {
   readonly target: WikiProfileMergeProfileSummary;
   readonly candidates: WikiProfileMergeCandidate[];
+  readonly pendingRequests: Array<{
+    readonly request: WikiProfileMergeRequestSummary;
+    readonly source: WikiProfileMergeProfileSummary;
+  }>;
   readonly policy: {
     readonly historicalActorsPreserved: true;
     readonly currentStateTransferred: true;
@@ -255,6 +274,18 @@ export class WikiProfileMergeService {
           where: { id: target.id },
           data: { status: 'blocked', updatedAt: now }
         });
+        await tx.wikiUserBlockEvent.create({
+          data: {
+            targetProfileId: target.id,
+            actorProfileId: actor.profileId,
+            action: 'block',
+            previousStatus: target.status,
+            newStatus: 'blocked',
+            reason: `Blocked status inherited from merged profile ${source.id.toString()}: ${approvalReason}`,
+            publicReason: '병합된 프로필의 차단 상태가 승계되었습니다.',
+            createdAt: now
+          }
+        });
       }
       const completed = await tx.wikiProfileMergeRequest.update({
         where: { id },
@@ -351,13 +382,15 @@ export class WikiProfileMergeService {
     });
     const pending = await tx.wikiProfileMergeRequest.findMany({
       where: {
+        canonicalAccountId: group.canonicalAccountId,
+        targetProfileId: target.id,
         sourceProfileId: { in: candidates.map((profile) => profile.id) },
         status: { in: [...ACTIVE_REQUEST_STATUSES] }
-      },
-      select: { sourceProfileId: true }
+      }
     });
     const pendingIds = new Set(pending.map((item) => item.sourceProfileId.toString()));
     const available = candidates.filter((profile) => !pendingIds.has(profile.id.toString()));
+    const candidatesById = new Map(candidates.map((profile) => [profile.id.toString(), profile]));
     const candidateViews = await Promise.all(available.map(async (profile) => ({
       profile: this.profileSummary(profile),
       counts: await this.countProfileState(tx, profile.id),
@@ -366,6 +399,10 @@ export class WikiProfileMergeService {
     return {
       target: this.profileSummary(target),
       candidates: candidateViews,
+      pendingRequests: pending.flatMap((request) => {
+        const source = candidatesById.get(request.sourceProfileId.toString());
+        return source ? [{ request: this.serializeRequest(request), source: this.profileSummary(source) }] : [];
+      }),
       policy: {
         historicalActorsPreserved: true,
         currentStateTransferred: true,
@@ -647,7 +684,7 @@ export class WikiProfileMergeService {
     completedAt: Date | null;
     rejectedAt: Date | null;
     version: number;
-  }) {
+  }): WikiProfileMergeRequestSummary {
     return {
       id: request.id,
       sourceProfileId: request.sourceProfileId.toString(),

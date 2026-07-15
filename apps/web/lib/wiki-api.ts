@@ -421,6 +421,10 @@ export interface WikiProfileMergePreview {
     readonly counts: WikiProfileMergeCounts;
     readonly requiresBlockedStatus: boolean;
   }>;
+  readonly pendingRequests: ReadonlyArray<{
+    readonly request: WikiProfileMergeRequestResponse;
+    readonly source: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string };
+  }>;
   readonly policy: {
     readonly historicalActorsPreserved: true;
     readonly currentStateTransferred: true;

@@ -40,7 +40,10 @@ export function WikiProfileMergePanel() {
     [preview, selectedId]
   );
 
-  if (!loading && !error && !request && preview?.candidates.length === 0) return null;
+  const pendingRequest = request ?? preview?.pendingRequests[0]?.request ?? null;
+  const pendingSource = preview?.pendingRequests.find((item) => item.request.id === pendingRequest?.id)?.source ?? null;
+
+  if (!loading && !error && !pendingRequest && preview?.candidates.length === 0) return null;
 
   const submit = async () => {
     if (!preview || !selected) {
@@ -88,15 +91,16 @@ export function WikiProfileMergePanel() {
         </p>
       ) : null}
 
-      {request ? (
+      {pendingRequest ? (
         <div className="mt-5 rounded-lg border border-emerald-300/25 bg-emerald-300/10 p-4" role="status">
           <p className="flex items-center gap-2 font-semibold text-emerald-100"><CheckCircle2 className="size-4" /> 관리자 검토 요청이 접수되었습니다.</p>
-          <p className="mt-2 break-all text-xs leading-5 text-emerald-100/75">요청 ID {request.id} · 현재 상태 {request.status}</p>
+          {pendingSource ? <p className="mt-2 break-all text-sm font-medium text-emerald-100/90">@{pendingSource.username} → @{preview?.target.username}</p> : null}
+          <p className="mt-1 break-all text-xs leading-5 text-emerald-100/75">요청 ID {pendingRequest.id} · 현재 상태 {pendingRequest.status}</p>
           <p className="mt-1 text-xs leading-5 text-emerald-100/75">승인 전에는 기여 기록이나 권한이 변경되지 않습니다.</p>
         </div>
       ) : null}
 
-      {!loading && preview && !request ? (
+      {!loading && preview && !pendingRequest ? (
         <div className="mt-5 space-y-5">
           <div className="rounded-lg border border-white/10 bg-[#111315] px-4 py-3">
             <p className="text-xs font-semibold text-[#8f98a3]">통합 대상 현재 프로필</p>
