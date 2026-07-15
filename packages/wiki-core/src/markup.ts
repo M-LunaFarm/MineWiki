@@ -11,7 +11,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.6.2';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -675,11 +675,18 @@ function applyWikiTableModifier(
       if (size) table.width ??= size;
       else addTableModifierWarning(errors, modifier);
     } else {
-      const color = normalizeTableColor(value);
-      if (!color) addTableModifierWarning(errors, modifier);
-      else if (name === 'bgcolor') table.backgroundColor ??= color;
-      else if (name === 'color') table.color ??= color;
-      else table.borderColor ??= color;
+      const colors = normalizeTableColorPair(value);
+      if (!colors) addTableModifierWarning(errors, modifier);
+      else if (name === 'bgcolor') {
+        table.backgroundColor ??= colors.light;
+        if (colors.dark) table.darkBackgroundColor ??= colors.dark;
+      } else if (name === 'color') {
+        table.color ??= colors.light;
+        if (colors.dark) table.darkColor ??= colors.dark;
+      } else {
+        table.borderColor ??= colors.light;
+        if (colors.dark) table.darkBorderColor ??= colors.dark;
+      }
     }
     return true;
   }
@@ -694,17 +701,23 @@ function applyWikiTableModifier(
       else if (name === 'width') cell.width ??= size;
       else cell.height ??= size;
     } else {
-      const color = normalizeTableColor(value);
-      if (!color) addTableModifierWarning(errors, modifier);
-      else if (name === 'bgcolor') cell.backgroundColor ??= color;
-      else cell.color ??= color;
+      const colors = normalizeTableColorPair(value);
+      if (!colors) addTableModifierWarning(errors, modifier);
+      else if (name === 'bgcolor') {
+        cell.backgroundColor ??= colors.light;
+        if (colors.dark) cell.darkBackgroundColor ??= colors.dark;
+      } else {
+        cell.color ??= colors.light;
+        if (colors.dark) cell.darkColor ??= colors.dark;
+      }
     }
     return true;
   }
 
-  const shorthandColor = normalizeTableColor(modifier);
-  if (shorthandColor) {
-    cell.backgroundColor ??= shorthandColor;
+  const shorthandColors = normalizeTableColorPair(modifier);
+  if (shorthandColors) {
+    cell.backgroundColor ??= shorthandColors.light;
+    if (shorthandColors.dark) cell.darkBackgroundColor ??= shorthandColors.dark;
     return true;
   }
   return false;
@@ -728,10 +741,19 @@ function normalizeTableSize(value: string) {
 }
 
 function normalizeTableColor(value: string) {
-  const color = value.split(',')[0]!.trim().toLowerCase();
+  const color = value.trim().toLowerCase();
   if (/^#[0-9a-f]{3,8}$/i.test(color)) return color;
   if (/^[a-z]{1,32}$/i.test(color)) return color;
   return null;
+}
+
+function normalizeTableColorPair(value: string): { light: string; dark?: string } | null {
+  const parts = value.split(',').map((part) => part.trim());
+  if (parts.length < 1 || parts.length > 2) return null;
+  const light = normalizeTableColor(parts[0] ?? '');
+  const dark = parts.length === 2 ? normalizeTableColor(parts[1] ?? '') : null;
+  if (!light || (parts.length === 2 && !dark)) return null;
+  return { light, ...(dark ? { dark } : {}) };
 }
 
 function validateWikiFileName(fileName: string, blockingErrors: string[]) {
@@ -1029,7 +1051,10 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
         color: [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
-        border: [/^2px solid (?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
+        border: [/^2px solid (?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
+        '--wiki-dark-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
+        '--wiki-dark-background-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
+        '--wiki-dark-border-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
       },
       th: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
@@ -1037,7 +1062,9 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         color: [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'text-align': [/^(?:left|center|right)$/],
-        'vertical-align': [/^(?:top|middle|bottom)$/]
+        'vertical-align': [/^(?:top|middle|bottom)$/],
+        '--wiki-dark-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
+        '--wiki-dark-background-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
       },
       td: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
@@ -1045,7 +1072,9 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         color: [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'text-align': [/^(?:left|center|right)$/],
-        'vertical-align': [/^(?:top|middle|bottom)$/]
+        'vertical-align': [/^(?:top|middle|bottom)$/],
+        '--wiki-dark-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
+        '--wiki-dark-background-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
       }
     }
   });
@@ -1405,7 +1434,10 @@ function renderWikiTable(
     width: tableOptions.width ? '100%' : undefined,
     color: tableOptions.color,
     'background-color': tableOptions.backgroundColor,
-    border: tableOptions.borderColor ? `2px solid ${tableOptions.borderColor}` : undefined
+    border: tableOptions.borderColor ? `2px solid ${tableOptions.borderColor}` : undefined,
+    '--wiki-dark-color': tableOptions.darkColor,
+    '--wiki-dark-background-color': tableOptions.darkBackgroundColor,
+    '--wiki-dark-border-color': tableOptions.darkBorderColor
   });
   const wrapperStyles = styleAttribute({
     width: tableOptions.width,
@@ -1431,6 +1463,8 @@ function renderWikiTable(
           height: cell.height,
           color: cell.color,
           'background-color': cell.backgroundColor,
+          '--wiki-dark-color': cell.darkColor,
+          '--wiki-dark-background-color': cell.darkBackgroundColor,
           'text-align': cell.align,
           'vertical-align': cell.verticalAlign
         });

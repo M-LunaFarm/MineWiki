@@ -42,15 +42,20 @@ export interface WikiTableCell {
   width?: string;
   height?: string;
   backgroundColor?: string;
+  darkBackgroundColor?: string;
   color?: string;
+  darkColor?: string;
 }
 
 export interface WikiTableOptions {
   align?: 'left' | 'center' | 'right';
   width?: string;
   backgroundColor?: string;
+  darkBackgroundColor?: string;
   color?: string;
+  darkColor?: string;
   borderColor?: string;
+  darkBorderColor?: string;
 }
 
 export type AstNode =

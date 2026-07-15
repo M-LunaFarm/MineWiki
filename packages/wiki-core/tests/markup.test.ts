@@ -303,6 +303,37 @@ test('renders NamuMark table captions and explicit header rows semantically', ()
   assert.match(html, /<tbody><tr><td>MineWiki<\/td><td>온라인<\/td><\/tr><\/tbody>/);
 });
 
+test('preserves validated light and dark NamuMark table colors for theme switching', () => {
+  const parsed = parseMarkup('||<tablebgcolor=#ffffff,#101418><tablecolor=black,white><tablebordercolor=#336699,#88aadd><bgcolor=#eeeeee,#202830><color=#112233,#ddeeff>테마 셀||');
+  const table = parsed.ast[0];
+
+  assert.equal(table?.type, 'wiki_table');
+  if (table?.type !== 'wiki_table') return;
+  assert.deepEqual(table.options, {
+    backgroundColor: '#ffffff', darkBackgroundColor: '#101418',
+    color: 'black', darkColor: 'white',
+    borderColor: '#336699', darkBorderColor: '#88aadd'
+  });
+  assert.equal(table.rows[0]?.[0]?.darkBackgroundColor, '#202830');
+  assert.equal(table.rows[0]?.[0]?.darkColor, '#ddeeff');
+
+  const html = renderDocument(parsed.ast);
+  assert.match(html, /--wiki-dark-color:white/);
+  assert.match(html, /--wiki-dark-background-color:#101418/);
+  assert.match(html, /--wiki-dark-border-color:#88aadd/);
+  assert.match(html, /--wiki-dark-color:#ddeeff/);
+  assert.match(html, /--wiki-dark-background-color:#202830/);
+});
+
+test('rejects malformed light and dark color pairs without leaking CSS', () => {
+  const parsed = parseMarkup('||<tablebgcolor=#fff,url(javascript:alert(1))><bgcolor=#fff,#000,red>안전||');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.errors.some((error) => error.includes('표 제어자')), true);
+  assert.equal(html.includes('javascript:'), false);
+  assert.equal(html.includes('--wiki-dark'), false);
+});
+
 test('accepts compact NamuMark table captions and interpolates include parameters safely', () => {
   const parsed = parseMarkup('|@제목@|||<thead>열||\n||@값@||');
   const table = parsed.ast[0];
