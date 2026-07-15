@@ -478,6 +478,12 @@ export function AccountClientPage() {
         returnTo: '/me',
       });
 
+      const useSameWindow = window.matchMedia('(max-width: 767px)').matches;
+      if (useSameWindow) {
+        window.location.assign(result.authorizationUrl);
+        return;
+      }
+
       const popup = window.open(
         result.authorizationUrl,
         `oauth-link-${provider}`,
@@ -485,7 +491,8 @@ export function AccountClientPage() {
       );
 
       if (!popup) {
-        throw new Error('새 창을 열 수 없습니다. 팝업 차단 설정을 확인해 주세요.');
+        window.location.assign(result.authorizationUrl);
+        return;
       }
       popup.focus();
       const closeTimer = window.setInterval(() => {
@@ -699,7 +706,7 @@ export function AccountClientPage() {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-white">{displayIdentity}</h2>
-                  <p className="text-sm text-[#a0a0a0]">
+                  <p className="break-all text-sm text-[#a0a0a0]">
                     {emailAddress ?? '이메일이 등록되지 않았습니다.'}
                   </p>
                 </div>
@@ -744,7 +751,7 @@ export function AccountClientPage() {
               <form className="space-y-4" onSubmit={handleDisplayNameSubmit}>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-[#a0a0a0]">표시 이름</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     <input
                       type="text"
                       value={displayName}
@@ -752,7 +759,7 @@ export function AccountClientPage() {
                         setDisplayName(event.target.value);
                         setDisplayNameFeedback(null);
                       }}
-                      className="flex-1 rounded-md border border-[#30363d] bg-[#111315] px-3 py-2 text-sm text-white outline-none transition focus:border-[#13ec80]"
+                      className="min-w-0 flex-1 rounded-md border border-[#30363d] bg-[#111315] px-3 py-2 text-sm text-white outline-none transition focus:border-[#13ec80]"
                       maxLength={32}
                       required
                     />
@@ -770,8 +777,8 @@ export function AccountClientPage() {
 
               <div className="mt-4">
                 <label className="mb-1 block text-xs font-medium text-[#a0a0a0]">계정 ID</label>
-                <div className="flex items-center gap-2 rounded-md border border-[#30363d] bg-[#111315] px-3 py-2">
-                  <code className="flex-1 truncate font-mono text-xs text-[#c3cbd4]">
+                <div className="flex min-w-0 items-center gap-2 rounded-md border border-[#30363d] bg-[#111315] px-3 py-2">
+                  <code className="min-w-0 flex-1 truncate font-mono text-xs text-[#c3cbd4]">
                     {account.id}
                   </code>
                   <button
@@ -825,7 +832,7 @@ export function AccountClientPage() {
                       return (
                         <div
                           key={service.provider}
-                          className="flex items-center justify-between gap-2"
+                          className="flex flex-col items-start justify-between gap-2 min-[430px]:flex-row min-[430px]:items-center"
                         >
                           <div>
                             <div className="flex items-center gap-2">
@@ -1159,8 +1166,9 @@ function AccountConflictPanel({
             계정 및 기존 위키 연결
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-[#a0a0a0]">
-            Discord·Minecraft 연동 충돌이나 기존 위키 기록이 발견되면 자동 병합하지 않고
-            지원팀의 소유권 확인을 거칩니다.
+            동일한 인증 이메일, Discord·Minecraft 연동 또는 기존 위키 기록이 다른 계정에서
+            발견되었습니다. 보안을 위해 자동 병합하지 않으며, 먼저 아래 연결 서비스에서 본인
+            계정을 직접 연결하거나 지원팀의 소유권 확인을 요청할 수 있습니다.
           </p>
         </div>
         {ticketId ? (
@@ -1189,11 +1197,13 @@ function AccountConflictPanel({
                 className="rounded-md border border-amber-400/25 bg-amber-400/[.08] px-4 py-3"
               >
                 <p className="text-sm font-semibold text-amber-100">{conflict.message}</p>
-                <p className="mt-1 break-all text-xs text-amber-100/75">
-                  {conflict.minecraftUuid ? `Minecraft: ${conflict.minecraftUuid}` : null}
-                  {conflict.minecraftUuid && conflict.discordUserId ? ' · ' : null}
-                  {conflict.discordUserId ? `Discord: ${conflict.discordUserId}` : null}
-                </p>
+                {conflict.minecraftUuid || conflict.discordUserId ? (
+                  <p className="mt-1 break-all text-xs text-amber-100/75">
+                    {conflict.minecraftUuid ? `Minecraft: ${conflict.minecraftUuid}` : null}
+                    {conflict.minecraftUuid && conflict.discordUserId ? ' · ' : null}
+                    {conflict.discordUserId ? `Discord: ${conflict.discordUserId}` : null}
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>

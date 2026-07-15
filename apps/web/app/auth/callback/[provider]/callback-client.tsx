@@ -45,6 +45,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
   );
   const [message, setMessage] = useState<string>('');
   const [flowMode, setFlowMode] = useState<'login' | 'link'>('login');
+  const [linkCompletionTarget, setLinkCompletionTarget] = useState<'opener' | 'redirect'>('opener');
 
   useEffect(() => {
     if (!normalizedProvider) {
@@ -89,19 +90,22 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         await refresh();
         if (result.mode === 'link') {
           setStatus('success');
-          setMessage('계정 연동이 완료되었습니다. 원래 창으로 결과를 전달했습니다.');
           if (typeof window !== 'undefined') {
-            window.opener?.postMessage(
-              { type: 'oauth-link-complete', provider: normalizedProvider },
-              window.location.origin,
-            );
-            setTimeout(() => {
-              try {
-                window.close();
-              } catch {
-                // ignore
-              }
-            }, 1500);
+            const hasOpener = Boolean(window.opener && !window.opener.closed);
+            if (hasOpener) {
+              setLinkCompletionTarget('opener');
+              setMessage('계정 연동이 완료되었습니다. 원래 창으로 결과를 전달했습니다.');
+              window.opener.postMessage(
+                { type: 'oauth-link-complete', provider: normalizedProvider },
+                window.location.origin,
+              );
+              setTimeout(() => window.close(), 1500);
+            } else {
+              const returnTo = isSafeReturnPath(result.returnTo) ? result.returnTo : '/me';
+              setLinkCompletionTarget('redirect');
+              setMessage('계정 연동이 완료되었습니다. 계정 및 보안 화면으로 돌아갑니다.');
+              setTimeout(() => router.replace(returnTo), 900);
+            }
           }
           return;
         }
@@ -130,7 +134,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
     status === 'pending'
       ? 'text-blue-200'
       : status === 'success'
-        ? 'text-[#13ec80]'
+        ? 'text-[#35e5b7]'
         : 'text-[#f43f5e]';
   const progressWidth = status === 'pending' ? '66%' : '100%';
   const title =
@@ -158,31 +162,33 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
       ? '사용자 권한, state 무결성, 리디렉션 URI 일치 여부를 확인하고 있습니다.'
       : status === 'success'
         ? flowMode === 'link'
-          ? '원래 창으로 결과를 전달한 뒤 자동으로 닫힙니다.'
+          ? linkCompletionTarget === 'opener'
+            ? '원래 창으로 결과를 전달한 뒤 자동으로 닫힙니다.'
+            : '연결된 로그인 수단을 반영한 계정 및 보안 화면으로 이동합니다.'
           : '잠시 후 계정 페이지로 자동 이동합니다.'
         : '로그인 화면으로 돌아가 OAuth 인증을 다시 시작해 주세요.';
   const actionLabel =
     status === 'pending'
       ? '처리 중'
       : flowMode === 'link'
-        ? '창 닫기'
+        ? linkCompletionTarget === 'opener' ? '창 닫기' : '계정 페이지로 이동'
         : status === 'error'
           ? '로그인 페이지로 이동'
           : '계정 페이지로 이동';
   const checks = [
     {
-      label: 'Provider',
+      label: '로그인 서비스',
       value: providerLabel,
       complete: Boolean(normalizedProvider),
     },
     {
-      label: 'Authorization code',
-      value: searchParams.get('code') ? 'Received' : 'Missing',
+      label: '인증 코드',
+      value: searchParams.get('code') ? '확인됨' : '없음',
       complete: Boolean(searchParams.get('code')),
     },
     {
-      label: 'State parameter',
-      value: searchParams.get('state') ? 'Received' : 'Missing',
+      label: '요청 무결성',
+      value: searchParams.get('state') ? '확인됨' : '없음',
       complete: Boolean(searchParams.get('state')),
     },
   ];
@@ -217,7 +223,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           </div>
           <div className="min-w-0 text-left">
             <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#6b7280]">
-              OAuth Callback
+              간편 로그인
             </p>
             <h2 className="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl">
               {detailTitle}
@@ -231,7 +237,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
             {status === 'pending' ? (
               <Clock3 className="mt-0.5 h-4 w-4 text-blue-200" />
             ) : status === 'success' ? (
-              <ShieldCheck className="mt-0.5 h-4 w-4 text-[#13ec80]" />
+              <ShieldCheck className="mt-0.5 h-4 w-4 text-[#35e5b7]" />
             ) : (
               <LockKeyhole className="mt-0.5 h-4 w-4 text-[#f43f5e]" />
             )}
@@ -264,9 +270,13 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           <button
             type="button"
             disabled={status === 'pending'}
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-[#13ec80] px-6 py-3.5 text-sm font-bold text-[#0b0d10] transition hover:bg-[#35f29a] disabled:cursor-not-allowed disabled:border disabled:border-[#30363d] disabled:bg-[#15191f] disabled:text-[#6b7280]"
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#35e5b7] px-6 py-3.5 text-sm font-bold text-[#07100e] transition hover:bg-[#5bedc8] disabled:cursor-not-allowed disabled:border disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-slate-500"
             onClick={() => {
               if (flowMode === 'link' && status === 'success') {
+                if (linkCompletionTarget === 'redirect') {
+                  router.replace('/me');
+                  return;
+                }
                 try {
                   window.close();
                   return;

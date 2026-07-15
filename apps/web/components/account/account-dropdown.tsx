@@ -130,12 +130,12 @@ export function AccountDropdown() {
             )}
           </span>
         ) : null}
-        <span>{account ? (account.displayName ?? account.email ?? '내 계정') : '로그인'}</span>
+        <span className="max-w-[7rem] truncate max-[420px]:max-w-[4.5rem]">{account ? (account.displayName ?? account.email ?? '내 계정') : '로그인'}</span>
         <ChevronDown aria-hidden="true" className={`hidden h-4 w-4 transition-transform min-[360px]:block ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open ? (
-        <div className="account-menu absolute right-0 z-40 mt-2.5 w-[21rem] overflow-hidden rounded-lg border border-[#30363d] bg-[#181a1d] p-3 text-sm text-[#e6e6e6] shadow-xl">
+        <div className="account-menu absolute right-0 z-40 mt-2.5 w-[min(21rem,calc(100vw-1rem))] overflow-hidden rounded-lg border border-[#30363d] bg-[#181a1d] p-3 text-sm text-[#e6e6e6] shadow-xl">
           {account ? (
             <div className="space-y-3">
               <div className="rounded-md border border-[#30363d] bg-[#111315] p-3 text-xs text-[#9ca3af]">

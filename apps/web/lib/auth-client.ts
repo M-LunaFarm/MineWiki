@@ -34,6 +34,7 @@ interface PasswordResetConfirmResponse {
 export interface AccountLinkConflict {
   readonly id: string;
   readonly kind:
+    | 'verified_email_duplicate'
     | 'minecraft_identity_duplicate'
     | 'discord_identity_duplicate'
     | 'discord_minecraft_mismatch'

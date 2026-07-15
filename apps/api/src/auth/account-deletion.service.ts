@@ -436,7 +436,10 @@ export class AccountDeletionService {
     accountIds: string[],
   ): Promise<{ discordRevocationsQueued: number }> {
     const [accountRows, minecraftRows, credentialRows] = await Promise.all([
-      tx.account.findMany({ where: { id: { in: accountIds } }, select: { provider: true, providerUserId: true } }),
+      tx.account.findMany({
+        where: { id: { in: accountIds } },
+        select: { provider: true, providerUserId: true, email: true, emailVerified: true },
+      }),
       tx.minecraftIdentity.findMany({ where: { accountId: { in: accountIds } }, select: { uuid: true } }),
       tx.oAuthCredential.findMany({ where: { accountId: { in: accountIds }, provider: 'discord' }, select: { providerUserId: true } }),
     ]);
@@ -534,6 +537,10 @@ export class AccountDeletionService {
       ...accountIds.map((id) => `acct:${id}`),
       ...[...minecraftUuids].map((uuid) => `uuid:${uuid}`),
       ...relatedVotes.map((vote) => `user:${vote.usernameNormalized}`),
+      ...accountRows.flatMap((account) => {
+        const email = account.emailVerified ? account.email?.trim().toLowerCase() : null;
+        return email ? [createHash('sha256').update(email).digest('hex')] : [];
+      }),
     ];
     if (cooldownKeys.length > 0) await tx.voteCooldownClaim.deleteMany({ where: { identityKey: { in: cooldownKeys } } });
 

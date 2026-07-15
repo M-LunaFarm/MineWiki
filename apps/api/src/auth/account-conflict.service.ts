@@ -14,6 +14,7 @@ const mergeRequestSchema = z.object({
 });
 
 type LinkConflictKind =
+  | 'verified_email_duplicate'
   | 'minecraft_identity_duplicate'
   | 'discord_identity_duplicate'
   | 'discord_minecraft_mismatch'
@@ -145,7 +146,16 @@ export class AccountConflictService {
       .filter((account) => account.emailVerified && account.email)
       .map((account) => account.email!.trim().toLowerCase());
     if (verifiedEmails.length > 0) {
-      const [linkedWikiProfile, legacyWikiProfile] = await Promise.all([
+      const [duplicateEmailAccount, linkedWikiProfile, legacyWikiProfile] = await Promise.all([
+        this.prisma.account.findFirst({
+          where: {
+            id: { notIn: accountIds },
+            email: { in: verifiedEmails },
+            emailVerified: true,
+            lifecycleStatus: 'active',
+          },
+          select: { id: true },
+        }),
         this.prisma.wikiProfile.findFirst({
           where: { accountId: { in: accountIds } },
           select: { id: true },
@@ -159,6 +169,18 @@ export class AccountConflictService {
           select: { id: true },
         }),
       ]);
+      if (duplicateEmailAccount) {
+        conflicts.push({
+          id: `verified-email:${duplicateEmailAccount.id}`,
+          kind: 'verified_email_duplicate',
+          message:
+            '같은 인증 이메일을 사용하는 별도 MineWiki 계정이 있습니다. 자동 병합하지 않고 로그인 수단 소유권 확인 후 연결해야 합니다.',
+          minecraftUuid: null,
+          discordUserId: null,
+          conflictingAccountId: duplicateEmailAccount.id,
+          legacyWikiProfileId: null,
+        });
+      }
       if (!linkedWikiProfile && legacyWikiProfile) {
         conflicts.push({
           id: `legacy-wiki:${legacyWikiProfile.id.toString()}`,

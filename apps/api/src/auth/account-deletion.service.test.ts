@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Algorithm, hash } from '@node-rs/argon2';
 import { PrismaService } from '../common/prisma.service';
 import { AccountDeletionService } from './account-deletion.service';
@@ -189,6 +189,17 @@ if (!hasDatabase) {
       supportedVersions: ['1.21'], tags: ['test'], shortDescription: 'public', longDescription: 'public server',
     } });
     const vote = await prisma.vote.create({ data: { serverId: server.id, accountId: group.secondId, minecraftUuid, username: 'Player', usernameNormalized: 'player', ipAddress: '192.0.2.1', votedAt: new Date() } });
+    const verifiedEmailKey = createHash('sha256')
+      .update(`delete-${group.firstId}@example.com`)
+      .digest('hex');
+    await prisma.voteCooldownClaim.create({
+      data: {
+        identityType: 'verified_email',
+        identityKey: verifiedEmailKey,
+        kstDay: new Date(new Date().toISOString().slice(0, 10)),
+        voteId: vote.id,
+      },
+    });
     const review = await prisma.serverReview.create({ data: { serverId: server.id, authorAccountId: group.firstId, authorDisplayName: 'Player', rating: 5, body: '보존할 리뷰', tags: [], evidenceMinecraftUuid: minecraftUuid, evidenceVoteId: vote.id, evidenceVerifiedAt: new Date(), evidencePolicyVersion: 'v1' } });
     try {
       const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
@@ -206,6 +217,7 @@ if (!hasDatabase) {
       assert.equal(storedVote?.accountId, null);
       assert.equal(storedVote?.minecraftUuid, null);
       assert.equal(storedVote?.ipAddress, null);
+      assert.equal(await prisma.voteCooldownClaim.count({ where: { identityKey: verifiedEmailKey } }), 0);
       const storedSession = await prisma.discordVerificationSession.findUnique({ where: { id: verificationSessionId } });
       assert.equal(storedSession?.accountId, null);
       assert.equal(storedSession?.minecraftUuid, null);

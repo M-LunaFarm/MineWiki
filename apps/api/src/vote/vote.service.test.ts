@@ -112,6 +112,50 @@ test('atomic cooldown claim rejects a concurrent duplicate before dispatch and c
   assert.equal(queuedJobs.length, 0);
 });
 
+test('linked aliases vote as the canonical account and share a verified-email cooldown', async () => {
+  const createdAttempts: unknown[] = [];
+  const createdClaims: Array<{ identityType: string; identityKey: string }> = [];
+  const createdVotes: Array<{ accountId?: string | null }> = [];
+  const canonicalAccountId = 'canonical-account';
+  const prisma = createPrismaMock(createdAttempts, false, createdClaims, createdVotes) as ReturnType<typeof createPrismaMock> & {
+    account: unknown;
+  };
+  prisma.account = {
+    findUnique: async () => ({ id: 'alias-account', canonicalAccountId, lifecycleStatus: 'active' }),
+    findMany: async () => [
+      { email: 'Same.User@example.com', emailVerified: true },
+      { email: 'same.user@example.com', emailVerified: true },
+    ],
+  };
+  const service = new VoteService(
+    { ensureExists: async () => ({ id: serverId, voteRequiresOwnership: false, votesMonthly: 10 }) } as never,
+    { enqueue: async () => undefined } as never,
+    { isCaptchaRequired: () => false } as never,
+    { track: async () => undefined } as never,
+    {
+      getLastVoteForAccountGlobal: async () => null,
+      getLastVoteForMinecraftGlobal: async () => null,
+      getLastVoteForUsernameGlobal: async () => null,
+      getLastVoteForIpGlobal: async () => null,
+      getDailyCount: async () => 1,
+    } as never,
+    prisma as never,
+  );
+
+  await service.submitVote(
+    serverId,
+    { username: 'DemoPlayer', agreeTerms: true, agreePrivacy: true },
+    { accountId: 'alias-account' },
+  );
+
+  assert.equal(createdVotes[0]?.accountId, canonicalAccountId);
+  assert.equal(createdClaims.filter((claim) => claim.identityType === 'account')[0]?.identityKey, `acct:${canonicalAccountId}`);
+  const emailClaims = createdClaims.filter((claim) => claim.identityType === 'verified_email');
+  assert.equal(emailClaims.length, 1);
+  assert.match(emailClaims[0]?.identityKey ?? '', /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(createdClaims).includes('same.user@example.com'), false);
+});
+
 test('manual dispatch replay acquires failed state exactly once before queueing', async () => {
   let acquired = true;
   const queued: unknown[] = [];
@@ -304,11 +348,18 @@ test('moderation feed exposes bounded private evidence only to the admin service
   assert.equal(findInputs.length, 1);
 });
 
-function createPrismaMock(createdAttempts: unknown[], rejectCooldownClaim = false) {
-  const createdClaims: unknown[] = [];
+function createPrismaMock(
+  createdAttempts: unknown[],
+  rejectCooldownClaim = false,
+  createdClaims: unknown[] = [],
+  createdVotes: unknown[] = [],
+) {
   const tx = {
     vote: {
-      create: async () => ({ id: voteId })
+      create: async (args: { data: unknown }) => {
+        createdVotes.push(args.data);
+        return { id: voteId };
+      }
     },
     voteDispatchAttempt: {
       create: async (args: { data: unknown }) => {

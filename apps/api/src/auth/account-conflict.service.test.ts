@@ -9,6 +9,7 @@ function createHarness(options: {
   readonly duplicateMinecraftAccountId?: string | null;
   readonly discordUserId?: string | null;
   readonly duplicateDiscordAccountId?: string | null;
+  readonly duplicateEmailAccountId?: string | null;
   readonly linkedAccountId?: string | null;
   readonly accountEmail?: string | null;
   readonly emailVerified?: boolean;
@@ -64,7 +65,10 @@ function createHarness(options: {
             : []),
         ];
       },
-      async findFirst() {
+      async findFirst(input: { where?: { provider?: string; email?: unknown } }) {
+        if (input.where?.email) {
+          return options.duplicateEmailAccountId ? { id: options.duplicateEmailAccountId } : null;
+        }
         return options.duplicateDiscordAccountId ? { id: options.duplicateDiscordAccountId } : null;
       },
     },
@@ -149,6 +153,23 @@ test('detects duplicate Discord identity conflict', async () => {
 
   assert.equal(response.conflicts.length, 1);
   assert.equal(response.conflicts[0]?.kind, 'discord_identity_duplicate');
+  assert.equal(response.conflicts[0]?.conflictingAccountId, duplicateAccountId);
+});
+
+test('reports a separate active account with the same verified email without auto-merging', async () => {
+  const duplicateAccountId = randomUUID();
+  const harness = createHarness({
+    minecraftUuid: null,
+    discordUserId: null,
+    accountEmail: 'same-person@example.com',
+    emailVerified: true,
+    duplicateEmailAccountId: duplicateAccountId,
+  });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.equal(response.conflicts.length, 1);
+  assert.equal(response.conflicts[0]?.kind, 'verified_email_duplicate');
   assert.equal(response.conflicts[0]?.conflictingAccountId, duplicateAccountId);
 });
 

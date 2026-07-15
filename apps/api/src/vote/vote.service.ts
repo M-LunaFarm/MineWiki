@@ -8,6 +8,7 @@
 } from '@nestjs/common';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { ServerService } from '../server/server.service';
 import { VoteQueueService } from './vote.queue';
 import {
@@ -30,6 +31,7 @@ export interface VoteRequestContext {
   readonly accountId?: string;
   readonly minecraftUuid?: string;
   readonly ipAddress?: string;
+  readonly verifiedEmailKeys?: readonly string[];
 }
 
 export interface VoteModerationQuery {
@@ -76,6 +78,7 @@ export class VoteService {
       throw new BadRequestException('이용약관과 개인정보 처리방침에 동의해 주세요.');
     }
     await this.verifyCaptchaToken(payload.captchaToken, context.ipAddress);
+    context = await this.resolveVoteIdentity(context);
     const normalizedUsername = payload.username;
 
     if (server.voteRequiresOwnership && !context.minecraftUuid) {
@@ -135,6 +138,16 @@ export class VoteService {
             voteId: createdVote.id
           }
         });
+        for (const verifiedEmailKey of context.verifiedEmailKeys ?? []) {
+          await tx.voteCooldownClaim.create({
+            data: {
+              identityType: 'verified_email',
+              identityKey: verifiedEmailKey,
+              kstDay,
+              voteId: createdVote.id
+            }
+          });
+        }
         if (context.ipAddress) {
           await tx.voteCooldownClaim.create({
             data: {
@@ -250,6 +263,30 @@ export class VoteService {
       nextEligibleAt: nextKstResetAt.toISOString(),
       votesToday: await this.voteStore.getDailyCount(serverId, now)
     };
+  }
+
+  private async resolveVoteIdentity(context: VoteRequestContext): Promise<VoteRequestContext> {
+    if (!context.accountId) return context;
+    const seed = await this.prisma.account.findUnique({
+      where: { id: context.accountId },
+      select: { id: true, canonicalAccountId: true, lifecycleStatus: true }
+    });
+    if (!seed || seed.lifecycleStatus !== 'active') {
+      throw new ForbiddenException('활성 상태의 로그인 계정만 투표할 수 있습니다.');
+    }
+    const canonicalAccountId = seed.canonicalAccountId ?? seed.id;
+    const group = await this.prisma.account.findMany({
+      where: {
+        OR: [{ id: canonicalAccountId }, { canonicalAccountId }],
+        lifecycleStatus: 'active'
+      },
+      select: { email: true, emailVerified: true }
+    });
+    const verifiedEmailKeys = [...new Set(group.flatMap((account) => {
+      const email = account.emailVerified ? account.email?.trim().toLowerCase() : null;
+      return email ? [createHash('sha256').update(email).digest('hex')] : [];
+    }))];
+    return { ...context, accountId: canonicalAccountId, verifiedEmailKeys };
   }
 
   async listDispatchAttempts(

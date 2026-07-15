@@ -48,7 +48,7 @@ function CallbackFallback() {
     >
       <CallbackCard status="pending" progressWidth="66%" footerLabel="MineWiki OAuth">
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#6b7280]">
-          OAuth Callback
+          간편 로그인
         </p>
         <p className="mt-3 text-lg font-semibold text-white">계정 인증 응답을 확인하고 있습니다.</p>
         <p className="mt-2 text-sm leading-6 text-[#a9b0ba]">
