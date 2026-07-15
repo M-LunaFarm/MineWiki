@@ -1090,12 +1090,53 @@ model WikiProfile {
   emailVerificationSentAt DateTime?              @map("email_verification_sent_at")
   passwordHash            String?                @map("password_hash") @db.VarChar(255)
   status                  String                 @default("active") @db.VarChar(32)
+  mergedIntoProfileId     BigInt?                @map("merged_into_profile_id") @db.UnsignedBigInt
+  mergedAt                DateTime?              @map("merged_at") @db.DateTime(3)
   createdAt               DateTime               @map("created_at")
   updatedAt               DateTime               @map("updated_at")
   pushSubscriptions       WikiPushSubscription[]
 
   @@index([createdAt])
+  @@index([mergedIntoProfileId], map: "idx_users_merged_into")
   @@map("users")
+}
+
+model WikiProfileAlias {
+  sourceProfileId BigInt   @id @map("source_profile_id") @db.UnsignedBigInt
+  targetProfileId BigInt   @map("target_profile_id") @db.UnsignedBigInt
+  mergeRequestId  String   @unique @map("merge_request_id") @db.Char(36)
+  createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([targetProfileId, sourceProfileId], map: "idx_wiki_profile_aliases_target")
+  @@map("wiki_profile_aliases")
+}
+
+model WikiProfileMergeRequest {
+  id                   String    @id @default(uuid()) @db.Char(36)
+  canonicalAccountId   String    @map("canonical_account_id") @db.Char(36)
+  sourceProfileId      BigInt    @map("source_profile_id") @db.UnsignedBigInt
+  targetProfileId      BigInt    @map("target_profile_id") @db.UnsignedBigInt
+  status               String    @default("pending") @db.VarChar(32)
+  requestedByAccountId String    @map("requested_by_account_id") @db.Char(36)
+  requestedByProfileId BigInt    @map("requested_by_profile_id") @db.UnsignedBigInt
+  approvedByProfileId  BigInt?   @map("approved_by_profile_id") @db.UnsignedBigInt
+  reason               String?   @db.VarChar(1000)
+  previewJson          Json      @map("preview_json")
+  activeKey            String?   @unique @map("active_key") @db.VarChar(191)
+  errorCode            String?   @map("error_code") @db.VarChar(64)
+  requestedAt          DateTime  @default(now()) @map("requested_at") @db.DateTime(3)
+  approvedAt           DateTime? @map("approved_at") @db.DateTime(3)
+  completedAt          DateTime? @map("completed_at") @db.DateTime(3)
+  rejectedAt           DateTime? @map("rejected_at") @db.DateTime(3)
+  version              Int       @default(1)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([canonicalAccountId, status, requestedAt], map: "idx_wiki_profile_merges_account")
+  @@index([status, requestedAt], map: "idx_wiki_profile_merges_admin")
+  @@index([sourceProfileId, status], map: "idx_wiki_profile_merges_source")
+  @@index([targetProfileId, status], map: "idx_wiki_profile_merges_target")
+  @@map("wiki_profile_merge_requests")
 }
 
 model WikiUserBlockEvent {
