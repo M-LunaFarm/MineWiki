@@ -31,7 +31,7 @@ interface AuthContextValue {
   }) => Promise<EmailRegistrationResult>;
   readonly verifyEmail: (token: string) => Promise<void>;
   readonly resendVerification: (email: string) => Promise<ResendVerificationResult>;
-  readonly loginOAuth: (provider: OAuthProvider, options: { returnTo?: string; agreeTerms?: boolean; agreePrivacy?: boolean }) => Promise<void>;
+  readonly loginOAuth: (provider: OAuthProvider, options: { returnTo?: string; agreeTerms?: boolean; agreePrivacy?: boolean; handoffDelayMs?: number }) => Promise<void>;
   readonly logout: () => Promise<void>;
 }
 
@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loginOAuth = useCallback(
-    async (provider: OAuthProvider, options: { returnTo?: string; agreeTerms?: boolean; agreePrivacy?: boolean }) => {
+    async (provider: OAuthProvider, options: { returnTo?: string; agreeTerms?: boolean; agreePrivacy?: boolean; handoffDelayMs?: number }) => {
       if (typeof window === 'undefined') {
         throw new Error('OAuth 로그인이 클라이언트 환경에서만 지원됩니다.');
       }
@@ -144,6 +144,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           agreeTerms: options.agreeTerms === true,
           agreePrivacy: options.agreePrivacy === true,
         });
+        const handoffDelayMs = Math.min(Math.max(options.handoffDelayMs ?? 0, 0), 1200);
+        if (handoffDelayMs > 0) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, handoffDelayMs));
+        }
         setLoading(false);
         window.location.assign(result.authorizationUrl);
       } catch (error) {

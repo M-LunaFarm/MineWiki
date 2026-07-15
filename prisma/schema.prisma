@@ -421,6 +421,19 @@ model OAuthState {
   linkAccount Account? @relation(fields: [linkAccountId], references: [id], onDelete: Cascade)
 }
 
+model OAuthPendingSignup {
+  id                 String        @id @db.Char(64)
+  provider           OAuthProvider
+  payloadEncrypted   String        @map("payload_encrypted") @db.Text
+  returnTo           String?       @map("return_to") @db.VarChar(2048)
+  browserBindingHash String        @map("browser_binding_hash") @db.Char(64)
+  createdAt          DateTime      @default(now()) @map("created_at") @db.DateTime(3)
+  expiresAt          DateTime      @map("expires_at") @db.DateTime(3)
+
+  @@index([expiresAt], map: "idx_oauth_pending_signups_expires")
+  @@map("oauth_pending_signups")
+}
+
 model OAuthCredential {
   id             String        @id @default(uuid())
   accountId      String

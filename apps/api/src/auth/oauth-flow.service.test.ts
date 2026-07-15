@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { OAuthFlowService } from './oauth-flow.service';
 import { hashOAuthBrowserBinding } from './oauth-browser-binding';
+import { hashOAuthSignupTicket } from './oauth-signup-ticket';
 
 const binding = 'a'.repeat(43);
 const state = 'state-value-123456';
@@ -93,4 +94,61 @@ test('legacy OAuth state without a browser binding fails closed', async () => {
     service.complete('discord', 'code', state, redirectUri, binding),
     /유효하지 않은 OAuth 상태/
   );
+});
+
+test('pending OAuth signup is encrypted, browser-bound, and consumed once', async () => {
+  const previousKey = process.env.APP_ENCRYPTION_KEY;
+  process.env.APP_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
+  const token = 'c'.repeat(43);
+  let stored: Record<string, unknown> | null = null;
+  let consumed = false;
+  const transaction = {
+    oAuthPendingSignup: {
+      findUnique: async () => consumed ? null : stored,
+      deleteMany: async () => {
+        if (consumed || !stored) return { count: 0 };
+        consumed = true;
+        return { count: 1 };
+      }
+    }
+  };
+  const service = new OAuthFlowService({} as never, {
+    oAuthPendingSignup: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        stored = data;
+        return data;
+      }
+    },
+    $transaction: async (callback: (tx: typeof transaction) => Promise<unknown>) => callback(transaction)
+  } as never);
+
+  await service.createPendingSignup({
+    provider: 'discord',
+    providerUserId: 'new-user',
+    email: 'new@example.com',
+    displayName: 'New user',
+    returnTo: '/servers',
+    mode: 'login',
+    agreeTerms: false,
+    agreePrivacy: false,
+    credential: { accessToken: 'secret-access-token', expiresAt: new Date('2030-01-01T00:00:00.000Z') }
+  }, hashOAuthSignupTicket(token), binding);
+
+  assert.equal(stored?.id, hashOAuthSignupTicket(token));
+  assert.equal(stored?.browserBindingHash, hashOAuthBrowserBinding(binding));
+  assert.doesNotMatch(String(stored?.payloadEncrypted), /secret-access-token/u);
+  await assert.rejects(
+    service.consumePendingSignup(token, 'b'.repeat(43)),
+    /현재 브라우저와 일치하지 않습니다/u
+  );
+  assert.equal(consumed, false);
+
+  const result = await service.consumePendingSignup(token, binding);
+  assert.equal(result.providerUserId, 'new-user');
+  assert.equal(result.agreeTerms, true);
+  assert.equal(result.credential?.accessToken, 'secret-access-token');
+  assert.equal(result.credential?.expiresAt?.toISOString(), '2030-01-01T00:00:00.000Z');
+  await assert.rejects(service.consumePendingSignup(token, binding), /만료되었거나/u);
+  if (previousKey === undefined) delete process.env.APP_ENCRYPTION_KEY;
+  else process.env.APP_ENCRYPTION_KEY = previousKey;
 });

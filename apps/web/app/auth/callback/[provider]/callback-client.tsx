@@ -18,6 +18,7 @@ import {
 import { useAuth } from '../../../../components/providers/auth-context';
 import {
   CallbackShell,
+  OAuthJourney,
 } from '../../../../components/auth/callback-shell';
 
 interface OAuthCallbackClientProps {
@@ -99,6 +100,15 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           state,
           redirectUri,
         });
+        if (result.consentRequired) {
+          setStatus('success');
+          setMessage('처음 만드는 계정입니다. MineWiki에서 필수 정책을 확인합니다.');
+          router.replace('/auth/signup-consent');
+          return;
+        }
+        if (!('mode' in result) || !result.mode || !('account' in result) || !result.account) {
+          throw new Error('로그인 응답을 확인할 수 없습니다. 다시 시도해 주세요.');
+        }
         setFlowMode(result.mode);
         await refresh();
         if (result.mode === 'link') {
@@ -128,7 +138,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           return;
         }
         setStatus('success');
-        setMessage('로그인이 완료되었습니다. 계정 페이지로 이동합니다.');
+        setMessage('로그인이 완료되었습니다. 이전 화면으로 이동합니다.');
         const returnTo = isSafeReturnPath(result.returnTo) ? result.returnTo : '/me';
         router.replace(
           result.account.policyConsent?.required
@@ -183,7 +193,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           ? linkCompletionTarget === 'opener'
             ? '원래 창으로 결과를 전달한 뒤 자동으로 닫힙니다.'
             : '연결된 로그인 수단을 반영한 계정 및 보안 화면으로 이동합니다.'
-          : '잠시 후 계정 페이지로 자동 이동합니다.'
+          : '잠시 후 이전 화면으로 자동 이동합니다.'
         : flowMode === 'link'
           ? '계정 페이지로 돌아가 로그인 수단 연결을 다시 시작해 주세요.'
           : '로그인 화면으로 돌아가 간편 로그인을 다시 시작해 주세요.';
@@ -194,7 +204,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         ? flowMode === 'link' ? '계정 페이지로 돌아가기' : '로그인 페이지로 이동'
         : flowMode === 'link'
           ? linkCompletionTarget === 'opener' ? '창 닫기' : '계정 페이지로 이동'
-          : '계정 페이지로 이동';
+          : '이전 화면으로 이동';
   return (
     <CallbackShell
       eyebrow={flowMode === 'link' ? '계정 연결' : '간편 로그인'}
@@ -213,6 +223,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         aria-live={status === 'error' ? 'assertive' : 'polite'}
         className="space-y-5"
       >
+        <OAuthJourney providerLabel={providerLabel} currentStep={3} />
         <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-4 py-3">
           <div className="min-w-0">
             <p

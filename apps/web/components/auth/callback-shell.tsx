@@ -136,3 +136,38 @@ export function CallbackSideStat({
     </div>
   );
 }
+
+export function OAuthJourney({
+  providerLabel,
+  currentStep,
+}: {
+  readonly providerLabel: string;
+  readonly currentStep: 1 | 2 | 3;
+}) {
+  const steps = ['MineWiki 요청', `${providerLabel} 인증`, 'MineWiki 복귀'];
+  return (
+    <ol className="grid grid-cols-3 gap-2" aria-label="간편 로그인 진행 단계">
+      {steps.map((label, index) => {
+        const step = (index + 1) as 1 | 2 | 3;
+        const complete = step < currentStep;
+        const current = step === currentStep;
+        return (
+          <li
+            key={label}
+            aria-current={current ? 'step' : undefined}
+            className={`min-w-0 rounded-lg border px-2 py-2.5 text-center ${
+              current
+                ? 'border-[#35e5b7]/40 bg-[#35e5b7]/10 text-[#35e5b7]'
+                : complete
+                  ? 'border-white/10 bg-white/[0.035] text-slate-300'
+                  : 'border-white/[0.07] bg-black/10 text-slate-600'
+            }`}
+          >
+            <span className="block text-[9px] font-bold uppercase tracking-[.12em]">{step}단계</span>
+            <span className="mt-1 block truncate text-[10px] font-semibold sm:text-[11px]">{label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}

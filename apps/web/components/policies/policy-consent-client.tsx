@@ -55,17 +55,17 @@ export function PolicyConsentClient({ returnTo }: { readonly returnTo: string })
 
   if (loading || !account) {
     return (
-      <main className="mx-auto flex min-h-[65vh] max-w-2xl items-center justify-center px-4">
+      <div className="flex min-h-[320px] items-center justify-center">
         <Loader2 className="size-6 animate-spin text-emerald-300" aria-label="계정 확인 중" />
-      </main>
+      </div>
     );
   }
 
   const status = account.policyConsent;
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-12 sm:py-20">
-      <section className="overflow-hidden rounded-3xl border border-border bg-[#11161e] shadow-2xl shadow-black/10">
-        <div className="border-b border-border bg-[#11161e] px-6 py-7 sm:px-9">
+    <div className="w-full">
+      <section className="overflow-hidden rounded-xl border border-white/10 bg-[#0d1416]">
+        <div className="border-b border-white/10 px-5 py-5 sm:px-7">
           <div className="flex size-11 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-300">
             <ShieldCheck className="size-6" />
           </div>
@@ -75,7 +75,7 @@ export function PolicyConsentClient({ returnTo }: { readonly returnTo: string })
           </p>
         </div>
 
-        <div className="space-y-4 px-6 py-7 sm:px-9">
+        <div className="space-y-4 px-5 py-5 sm:px-7">
           <PolicyCheck
             checked={termsAccepted}
             disabled={Boolean(status?.terms.accepted)}
@@ -118,7 +118,7 @@ export function PolicyConsentClient({ returnTo }: { readonly returnTo: string })
           </button>
         </div>
       </section>
-    </main>
+    </div>
   );
 }
 
@@ -138,7 +138,7 @@ function PolicyCheck({
   readonly href: string;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-[#11161e] p-4">
+    <label className="flex cursor-pointer flex-col gap-3 rounded-lg border border-white/10 bg-black/15 p-4 min-[380px]:flex-row min-[380px]:items-start">
       <input
         type="checkbox"
         checked={checked}
@@ -150,7 +150,7 @@ function PolicyCheck({
         <span className="block text-sm font-bold text-foreground">{title}</span>
         <span className="mt-1 block text-xs text-muted-foreground">필수 · {version}</span>
       </span>
-      <Link href={href} target="_blank" className="text-xs font-bold text-emerald-300 hover:underline">
+      <Link href={href} target="_blank" className="shrink-0 text-xs font-bold text-emerald-300 hover:underline">
         전문 보기
       </Link>
     </label>

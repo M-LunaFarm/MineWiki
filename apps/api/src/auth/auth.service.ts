@@ -680,6 +680,13 @@ export class AuthService {
     );
   }
 
+  async hasOAuthAccount(
+    provider: Extract<AuthProvider, 'discord' | 'naver'>,
+    providerUserId: string,
+  ): Promise<boolean> {
+    return Boolean(await this.accounts.findByProvider(provider, providerUserId));
+  }
+
   private async resolveSessionAccount(accountId: string): Promise<AccountRecord> {
     const connectedAccountIds = await this.collectConnectedAccountIds(accountId);
     if (connectedAccountIds.size === 0) {

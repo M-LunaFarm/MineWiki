@@ -15,9 +15,10 @@ import {
   matchesOAuthBrowserBinding
 } from './oauth-browser-binding';
 import { PrismaService } from '../common/prisma.service';
-import { encryptAppSecret } from '../common/secret-codec';
+import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
 import { fetchWithTimeout } from '../common/http/external-fetch';
 import { withActiveCanonicalAccountGroup } from './account-lifecycle-fence';
+import { hashOAuthSignupTicket } from './oauth-signup-ticket';
 
 interface PendingOAuthState {
   readonly provider: OAuthProvider;
@@ -39,6 +40,7 @@ interface OAuthStartResult {
 }
 
 interface OAuthCompleteResult {
+  readonly provider: OAuthProvider;
   readonly providerUserId: string;
   readonly email?: string;
   readonly displayName?: string;
@@ -61,6 +63,7 @@ interface OAuthCredentialSnapshot {
 }
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const SIGNUP_TTL_MS = 10 * 60 * 1000;
 export type { OAuthStartResult, OAuthCompleteResult };
 
 @Injectable()
@@ -153,6 +156,7 @@ export class OAuthFlowService {
     if (provider === 'discord') {
       const profile = await this.exchangeDiscordCode(code, effectiveRedirect);
       return {
+        provider,
         ...profile,
         returnTo: pending.returnTo,
         mode: pending.mode,
@@ -163,6 +167,7 @@ export class OAuthFlowService {
     }
     const profile = await this.exchangeNaverCode(code, state, effectiveRedirect);
     return {
+      provider,
       ...profile,
       returnTo: pending.returnTo,
       mode: pending.mode,
@@ -170,6 +175,65 @@ export class OAuthFlowService {
       ,agreeTerms: pending.agreeTerms
       ,agreePrivacy: pending.agreePrivacy
     };
+  }
+
+  async createPendingSignup(profile: OAuthCompleteResult, ticketHash: string, browserBinding: string): Promise<void> {
+    if (profile.mode !== 'login' || !profile.credential) {
+      throw new BadRequestException('신규 OAuth 가입 정보를 준비할 수 없습니다.');
+    }
+    const encrypted = encryptAppSecret(JSON.stringify({
+      providerUserId: profile.providerUserId,
+      email: profile.email,
+      displayName: profile.displayName,
+      credential: profile.credential
+    }));
+    if (!encrypted) throw new InternalServerErrorException('신규 OAuth 가입 정보를 보호할 수 없습니다.');
+    const now = new Date();
+    await this.prisma.oAuthPendingSignup.create({
+      data: {
+        id: ticketHash,
+        provider: profile.provider,
+        payloadEncrypted: encrypted,
+        returnTo: profile.returnTo ?? null,
+        browserBindingHash: hashOAuthBrowserBinding(browserBinding),
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + SIGNUP_TTL_MS)
+      }
+    });
+  }
+
+  async consumePendingSignup(token: string, browserBinding: string): Promise<OAuthCompleteResult> {
+    const id = hashOAuthSignupTicket(token);
+    return this.prisma.$transaction(async (tx) => {
+      const pending = await tx.oAuthPendingSignup.findUnique({ where: { id } });
+      if (
+        !pending ||
+        pending.expiresAt.getTime() <= Date.now() ||
+        !matchesOAuthBrowserBinding(browserBinding, pending.browserBindingHash)
+      ) {
+        throw new BadRequestException('신규 가입 확인이 만료되었거나 현재 브라우저와 일치하지 않습니다.');
+      }
+      const consumed = await tx.oAuthPendingSignup.deleteMany({
+        where: { id, expiresAt: { gt: new Date() } }
+      });
+      if (consumed.count !== 1) {
+        throw new BadRequestException('신규 가입 확인이 이미 사용되었거나 만료되었습니다.');
+      }
+      const decrypted = decryptAppSecret(pending.payloadEncrypted);
+      if (!decrypted) throw new BadRequestException('신규 가입 정보를 확인할 수 없습니다.');
+      const payload = parsePendingSignupPayload(decrypted);
+      return {
+        provider: pending.provider,
+        providerUserId: payload.providerUserId,
+        email: payload.email,
+        displayName: payload.displayName,
+        returnTo: pending.returnTo ?? undefined,
+        mode: 'login',
+        agreeTerms: true,
+        agreePrivacy: true,
+        credential: payload.credential
+      };
+    });
   }
 
   private createDiscordAuthorizationUrl(state: string, redirectUri: string): string {
@@ -445,9 +509,12 @@ export class OAuthFlowService {
   }
 
   private async evictExpiredStates(): Promise<void> {
-    await this.prisma.oAuthState.deleteMany({
-      where: { expiresAt: { lt: new Date() } }
-    });
+    const now = new Date();
+    const pendingSignupDelegate = this.prisma.oAuthPendingSignup;
+    await Promise.all([
+      this.prisma.oAuthState.deleteMany({ where: { expiresAt: { lt: now } } }),
+      pendingSignupDelegate?.deleteMany({ where: { expiresAt: { lt: now } } }) ?? Promise.resolve()
+    ]);
   }
 
   private generateState(): string {
@@ -486,4 +553,47 @@ export class OAuthFlowService {
       return undefined;
     }
   }
+}
+
+function parsePendingSignupPayload(value: string): {
+  readonly providerUserId: string;
+  readonly email?: string;
+  readonly displayName?: string;
+  readonly credential: OAuthCredentialSnapshot;
+} {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(value);
+  } catch {
+    throw new BadRequestException('신규 가입 정보를 확인할 수 없습니다.');
+  }
+  if (!payload || typeof payload !== 'object') throw new BadRequestException('신규 가입 정보를 확인할 수 없습니다.');
+  const record = payload as Record<string, unknown>;
+  const credential = record.credential;
+  if (
+    typeof record.providerUserId !== 'string' || !record.providerUserId ||
+    !credential || typeof credential !== 'object' ||
+    typeof (credential as Record<string, unknown>).accessToken !== 'string'
+  ) {
+    throw new BadRequestException('신규 가입 정보를 확인할 수 없습니다.');
+  }
+  const credentialRecord = credential as Record<string, unknown>;
+  const expiresAt = typeof credentialRecord.expiresAt === 'string'
+    ? new Date(credentialRecord.expiresAt)
+    : undefined;
+  if (expiresAt && Number.isNaN(expiresAt.getTime())) {
+    throw new BadRequestException('신규 가입 정보를 확인할 수 없습니다.');
+  }
+  return {
+    providerUserId: record.providerUserId,
+    email: typeof record.email === 'string' ? record.email : undefined,
+    displayName: typeof record.displayName === 'string' ? record.displayName : undefined,
+    credential: {
+      accessToken: credentialRecord.accessToken as string,
+      refreshToken: typeof credentialRecord.refreshToken === 'string' ? credentialRecord.refreshToken : undefined,
+      tokenType: typeof credentialRecord.tokenType === 'string' ? credentialRecord.tokenType : undefined,
+      scope: typeof credentialRecord.scope === 'string' ? credentialRecord.scope : undefined,
+      expiresAt
+    }
+  };
 }

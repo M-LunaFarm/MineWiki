@@ -322,6 +322,13 @@ export async function completeOAuthLogin(payload: {
   return postJson<OAuthCompleteResponse>('/v1/auth/oauth/complete', payload);
 }
 
+export async function acceptOAuthSignupConsent(): Promise<Exclude<OAuthCompleteResponse, { consentRequired: true }>> {
+  return postJson<Exclude<OAuthCompleteResponse, { consentRequired: true }>>('/v1/auth/oauth/signup/consent', {
+    agreeTerms: true,
+    agreePrivacy: true,
+  });
+}
+
 export async function fetchOAuthProviderAvailability(): Promise<OAuthProviderAvailability> {
   const response = await fetch(`${API_BASE}/v1/auth/providers`);
   if (!response.ok) {

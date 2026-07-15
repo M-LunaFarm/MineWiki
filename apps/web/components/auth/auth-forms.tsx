@@ -9,6 +9,7 @@ import {
   type OAuthProviderAvailability,
 } from '../../lib/auth-client';
 import type { OAuthProvider } from '@minewiki/schemas';
+import { OAuthJourney } from './callback-shell';
 
 export function AuthForms() {
   const {
@@ -189,11 +190,6 @@ export function AuthForms() {
   const handleOAuth = async (provider: OAuthProvider) => {
     setOauthError(null);
 
-    if (mode === 'register' && (!termsAccepted || !privacyAccepted)) {
-      setOauthError('처음 가입할 때는 이용약관과 개인정보 처리방침 동의가 필요합니다.');
-      return;
-    }
-
     if (!oauthAvailability[provider]) {
       setOauthError(`${PROVIDER_LABEL[provider]} 로그인이 현재 비활성화되어 있습니다.`);
       return;
@@ -214,8 +210,9 @@ export function AuthForms() {
       }
       await loginOAuth(provider, {
         returnTo,
-        agreeTerms: mode === 'register',
-        agreePrivacy: mode === 'register',
+        agreeTerms: false,
+        agreePrivacy: false,
+        handoffDelayMs: 650,
       });
     } catch (oauthProblem) {
       setOauthPendingProvider(null);
@@ -265,47 +262,36 @@ export function AuthForms() {
     );
   }
 
+  if (oauthPendingProvider) {
+    const providerLabel = PROVIDER_LABEL[oauthPendingProvider];
+    const providerTone = oauthPendingProvider === 'discord' ? 'text-[#7c87ff]' : 'text-[#18d86b]';
+    return (
+      <div className="flex min-h-[420px] flex-col justify-center space-y-5" role="status" aria-live="polite">
+        <OAuthJourney providerLabel={providerLabel} currentStep={2} />
+        <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d1416]">
+          <div className="h-1 w-full bg-white/[0.06]">
+            <div className="h-full w-2/3 animate-pulse bg-[#35e5b7]" />
+          </div>
+          <div className="p-5 text-center sm:p-7">
+            <span className={`text-xs font-black tracking-[.04em] ${providerTone}`}>{providerLabel}</span>
+            <h3 className="mt-3 text-lg font-bold text-white">공식 로그인 화면으로 이동합니다.</h3>
+            <p className="mx-auto mt-2 max-w-sm text-xs leading-6 text-slate-400">
+              다음 화면은 {providerLabel}에서 제공하므로 모양이 달라집니다. 인증을 마치면 같은 MineWiki 화면으로 자동 복귀합니다.
+            </p>
+            <Loader2 className="mx-auto mt-5 h-5 w-5 animate-spin text-[#35e5b7]" aria-hidden />
+          </div>
+        </div>
+        <p className="text-center text-[11px] leading-5 text-slate-500">
+          외부 계정 비밀번호는 MineWiki에 전달되거나 저장되지 않습니다.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {mode !== 'verify' ? (
-        <div className="grid grid-cols-2 rounded-lg border border-white/10 bg-white/[0.04] p-1">
-          <button
-            type="button"
-            className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
-              mode === 'login'
-                ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-            onClick={() => {
-              setMode('login');
-              clearTransientMessages();
-              setOauthError(null);
-              setPendingVerification(null);
-            }}
-          >
-            로그인
-          </button>
-          <button
-            type="button"
-            className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${
-              mode === 'register'
-                ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm'
-                : 'text-slate-400 hover:text-white'
-            }`}
-            onClick={() => {
-              setMode('register');
-              clearTransientMessages();
-              setOauthError(null);
-              setPendingVerification(null);
-            }}
-          >
-            회원가입
-          </button>
-        </div>
-      ) : null}
-
-      <div>
-        <p className="mb-2 text-xs font-semibold text-slate-400">간편 로그인</p>
+      {mode !== 'verify' ? <div>
+        <p className="mb-2 text-xs font-semibold text-slate-400">간편 로그인·가입</p>
         <div className="grid grid-cols-2 gap-3">
           <OAuthProviderButton
             provider="discord"
@@ -322,14 +308,8 @@ export function AuthForms() {
             onClick={() => void handleOAuth('naver')}
           />
         </div>
-      </div>
-
-      {oauthPendingProvider ? (
-        <p role="status" aria-live="polite" className="-mt-3 flex items-center justify-center gap-2 text-xs text-slate-400">
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#35e5b7]" aria-hidden />
-          {PROVIDER_LABEL[oauthPendingProvider]}의 안전한 로그인 화면으로 이동하고 있습니다.
-        </p>
-      ) : null}
+        <p className="mt-2 text-[11px] leading-5 text-slate-500">기존 계정은 바로 로그인합니다. 처음 만드는 계정만 외부 인증 후 MineWiki에서 약관을 확인합니다.</p>
+      </div> : null}
 
       {!oauthAvailability.discord || !oauthAvailability.naver ? (
         <p className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
@@ -342,28 +322,21 @@ export function AuthForms() {
         </p>
       ) : null}
 
-      {mode === 'register' ? (
-        <>
-          <PolicyAgreements
-            termsAccepted={termsAccepted}
-            privacyAccepted={privacyAccepted}
-            onTermsChange={setTermsAccepted}
-            onPrivacyChange={setPrivacyAccepted}
-          />
-          <p className="-mt-4 text-[11px] leading-5 text-slate-500">
-            최초 회원가입에만 적용됩니다. 기존 계정 로그인에는 다시 동의를 요구하지 않습니다.
-          </p>
-        </>
-      ) : null}
-
-      <div className="relative">
+      {mode !== 'verify' ? <div className="relative">
         <div className="absolute inset-0 flex items-center">
           <div className="w-full border-t border-white/10" />
         </div>
         <div className="relative flex justify-center text-xs">
-          <span className="bg-[#09100f] px-2 text-slate-500">이메일로 계속하기</span>
+          <span className="bg-[#09100f] px-2 text-slate-500">또는 이메일로 계속</span>
         </div>
-      </div>
+      </div> : null}
+
+      {mode !== 'verify' ? (
+        <div className="grid grid-cols-2 rounded-lg border border-white/10 bg-white/[0.04] p-1" role="tablist" aria-label="이메일 계정 방식">
+          <button type="button" role="tab" aria-selected={mode === 'login'} className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${mode === 'login' ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm' : 'text-slate-400 hover:text-white'}`} onClick={() => { setMode('login'); clearTransientMessages(); setOauthError(null); setPendingVerification(null); }}>이메일 로그인</button>
+          <button type="button" role="tab" aria-selected={mode === 'register'} className={`rounded-md py-2.5 text-sm font-semibold transition-colors ${mode === 'register' ? 'bg-[#35e5b7]/10 text-[#35e5b7] shadow-sm' : 'text-slate-400 hover:text-white'}`} onClick={() => { setMode('register'); clearTransientMessages(); setOauthError(null); setPendingVerification(null); }}>이메일 가입</button>
+        </div>
+      ) : null}
 
       {mode !== 'verify' ? (
         <>
@@ -473,8 +446,15 @@ export function AuthForms() {
                   />
                 </div>
 
+                <PolicyAgreements
+                  termsAccepted={termsAccepted}
+                  privacyAccepted={privacyAccepted}
+                  onTermsChange={setTermsAccepted}
+                  onPrivacyChange={setPrivacyAccepted}
+                />
+
                 <p className="text-xs leading-5 text-slate-400">
-                  위 필수 정책 동의는 이메일 회원가입과 간편 로그인에 공통으로 적용됩니다.
+                  필수 정책 동의는 이 이메일 계정을 처음 만들 때만 적용됩니다.
                 </p>
               </>
             ) : (

@@ -36,6 +36,7 @@ import {
   emailVerificationRequestSchema,
   oauthStartRequestSchema,
   oauthCompleteRequestSchema,
+  oauthSignupConsentRequestSchema,
   passwordChangeRequestSchema,
   policyConsentAcceptRequestSchema,
   passwordResetConfirmRequestSchema,
@@ -49,6 +50,11 @@ import {
   issueOAuthBrowserBinding,
   readOAuthBrowserBinding
 } from './oauth-browser-binding';
+import {
+  clearOAuthSignupTicketCookie,
+  issueOAuthSignupTicket,
+  readOAuthSignupTicket
+} from './oauth-signup-ticket';
 
 @Controller('v1/auth')
 export class AuthController {
@@ -140,11 +146,24 @@ export class AuthController {
         profile.credential,
       );
       return {
+        consentRequired: false,
         account,
         sessionId: sessionRecord.sessionId,
         expiresAt: sessionRecord.expiresAt.toISOString(),
         returnTo: profile.returnTo ?? null,
         mode: 'link',
+      };
+    }
+
+    const existingAccount = await this.auth.hasOAuthAccount(payload.provider, profile.providerUserId);
+    if (!existingAccount && (!profile.agreeTerms || !profile.agreePrivacy)) {
+      const signup = issueOAuthSignupTicket();
+      await this.oauthFlow.createPendingSignup(profile, signup.hash, browserBinding);
+      reply.header('Set-Cookie', signup.cookie);
+      return {
+        consentRequired: true,
+        provider: payload.provider,
+        returnTo: profile.returnTo ?? null
       };
     }
 
@@ -156,11 +175,44 @@ export class AuthController {
       profile.credential,
     );
     return {
+      consentRequired: false,
       account: session.account,
       sessionId: session.sessionId,
       expiresAt: session.expiresAt,
       returnTo: profile.returnTo ?? null,
       mode: 'login',
+    };
+  }
+
+  @Post('oauth/signup/consent')
+  @Throttle({ default: { limit: 5, ttl: 300 } })
+  async acceptOAuthSignupConsent(
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @Req() request: FastifyRequest,
+  ) {
+    oauthSignupConsentRequestSchema.parse(body);
+    const browserBinding = readOAuthBrowserBinding(request.headers.cookie);
+    const signupTicket = readOAuthSignupTicket(request.headers.cookie);
+    if (!browserBinding || !signupTicket) {
+      throw new BadRequestException('신규 가입 확인이 없거나 만료되었습니다. 간편 로그인을 다시 시작해 주세요.');
+    }
+    const profile = await this.oauthFlow.consumePendingSignup(signupTicket, browserBinding);
+    const session = await this.finalizeOAuth(profile.provider, profile, reply, request);
+    await this.oauthFlow.storeCredential(
+      session.account.id,
+      profile.provider,
+      profile.providerUserId,
+      profile.credential,
+    );
+    reply.header('Set-Cookie', [session.cookie, clearOAuthSignupTicketCookie()]);
+    return {
+      consentRequired: false,
+      account: session.account,
+      sessionId: session.sessionId,
+      expiresAt: session.expiresAt,
+      returnTo: profile.returnTo ?? null,
+      mode: 'login' as const,
     };
   }
 

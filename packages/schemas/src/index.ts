@@ -84,13 +84,23 @@ export const oauthCompleteRequestSchema = z.object({
   redirectUri: z.string().url().optional(),
 });
 
-export const oauthCompleteResponseSchema = z.object({
+export const oauthCompleteResponseSchema = z.discriminatedUnion('consentRequired', [z.object({
+  consentRequired: z.literal(false),
   account: authAccountSchema,
   sessionId: z.string().min(1),
   expiresAt: z.string().datetime(),
   returnTo: z.string().min(1).nullable(),
   mode: z.enum(['login', 'link']),
-});
+}), z.object({
+  consentRequired: z.literal(true),
+  provider: oauthProviderSchema,
+  returnTo: z.string().min(1).nullable(),
+})]);
+
+export const oauthSignupConsentRequestSchema = z.object({
+  agreeTerms: z.literal(true),
+  agreePrivacy: z.literal(true),
+}).strict();
 
 const emailAddressSchema = z.string().trim().email().max(254);
 const authPasswordSchema = z.string().min(1).max(128);

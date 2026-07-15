@@ -276,6 +276,88 @@ test('OAuth completion rejects a browser without its binding cookie before provi
   assert.equal(completeCalls, 0);
 });
 
+test('new OAuth identity continues to first-signup consent without repeating provider auth', async () => {
+  const browserBinding = 'a'.repeat(43);
+  let pendingCreated = false;
+  let setCookie = '';
+  const controller = new AuthController(
+    {
+      async hasOAuthAccount() { return false; },
+    } as never,
+    {} as never,
+    {
+      async complete() {
+        return {
+          provider: 'discord', providerUserId: 'new-discord-user', email: 'new@example.com',
+          displayName: 'New user', returnTo: '/servers', mode: 'login', agreeTerms: false,
+          agreePrivacy: false, credential: { accessToken: 'provider-token' }
+        };
+      },
+      async createPendingSignup(_profile: unknown, ticketHash: string, receivedBinding: string) {
+        assert.match(ticketHash, /^[a-f0-9]{64}$/u);
+        assert.equal(receivedBinding, browserBinding);
+        pendingCreated = true;
+      }
+    } as never,
+  );
+
+  const result = await controller.completeOAuth(
+    { provider: 'discord', code: 'oauth-code', state: 'oauth-state-value', redirectUri: 'https://minewiki.kr/auth/callback/discord' },
+    { header(_name: string, value: string) { setCookie = value; } } as never,
+    { headers: { cookie: `__Host-mw_oauth_browser=${browserBinding}` } } as never,
+  );
+
+  assert.deepEqual(result, { consentRequired: true, provider: 'discord', returnTo: '/servers' });
+  assert.equal(pendingCreated, true);
+  assert.match(setCookie, /^__Host-mw_oauth_signup=/u);
+  assert.match(setCookie, /HttpOnly/u);
+  assert.match(setCookie, /SameSite=Strict/u);
+});
+
+test('first-signup consent consumes the browser-bound ticket and issues a session', async () => {
+  const browserBinding = 'a'.repeat(43);
+  const signupToken = 'c'.repeat(43);
+  let credentialStored = false;
+  let setCookies: string[] = [];
+  const controller = new AuthController(
+    {
+      async handleDiscordCallback() {
+        return {
+          account: { id: '11111111-1111-4111-8111-111111111111' },
+          cookie: 'mw_session=session-value; Path=/; HttpOnly',
+          sessionId: 'session-id',
+          expiresAt: '2030-01-01T00:00:00.000Z'
+        };
+      }
+    } as never,
+    {} as never,
+    {
+      async consumePendingSignup(receivedToken: string, receivedBinding: string) {
+        assert.equal(receivedToken, signupToken);
+        assert.equal(receivedBinding, browserBinding);
+        return {
+          provider: 'discord', providerUserId: 'new-discord-user', email: 'new@example.com',
+          displayName: 'New user', returnTo: '/servers', mode: 'login', agreeTerms: true,
+          agreePrivacy: true, credential: { accessToken: 'provider-token' }
+        };
+      },
+      async storeCredential() { credentialStored = true; }
+    } as never,
+  );
+
+  const result = await controller.acceptOAuthSignupConsent(
+    { agreeTerms: true, agreePrivacy: true },
+    { header(_name: string, value: string[]) { setCookies = value; } } as never,
+    { headers: { cookie: `__Host-mw_oauth_browser=${browserBinding}; __Host-mw_oauth_signup=${signupToken}` } } as never,
+  );
+
+  assert.equal(result.consentRequired, false);
+  assert.equal(result.returnTo, '/servers');
+  assert.equal(credentialStored, true);
+  assert.equal(setCookies.length, 2);
+  assert.match(setCookies[1] ?? '', /Max-Age=0/u);
+});
+
 test('changing a password revokes every other active session', async () => {
   const calls: string[] = [];
   const controller = new AuthController(
