@@ -9,6 +9,7 @@ import {
   renderDocument,
   resolveWikiPath,
   slugifyTitle,
+  wikiLinkKey,
   wikiUrl,
   WIKI_RENDERER_VERSION
 } from '@minewiki/wiki-core';
@@ -1425,6 +1426,57 @@ export class WikiReadService {
     return { items, exactMatch };
   }
 
+  private async findMissingLinks(
+    sourceNamespace: string,
+    sourceLocalPath: string,
+    targets: readonly string[],
+    accountId: string | null
+  ): Promise<Set<string>> {
+    const resolvedByLinkKey = new Map<string, { namespace: string; slug: string }>();
+    for (const target of targets) {
+      const resolved = resolveContextualLinkTarget(sourceNamespace, sourceLocalPath, target);
+      const slug = slugifyTitle(resolved.title);
+      if (slug) resolvedByLinkKey.set(wikiLinkKey(target), { namespace: resolved.namespace, slug });
+    }
+    if (resolvedByLinkKey.size === 0) return new Set();
+
+    const namespaceRows = await this.prisma.wikiNamespace.findMany({
+      where: { code: { in: [...new Set([...resolvedByLinkKey.values()].map((item) => item.namespace))] } },
+      select: { id: true, code: true }
+    });
+    const namespaceIdByCode = new Map(namespaceRows.map((item) => [item.code, item.id]));
+    const readableTargets = new Set<string>();
+    for (const namespace of namespaceRows) {
+      const slugs = [...new Set([...resolvedByLinkKey.values()]
+        .filter((item) => item.namespace === namespace.code)
+        .map((item) => item.slug))];
+      if (slugs.length === 0) continue;
+      const pages = await this.prisma.wikiPage.findMany({
+        where: {
+          namespaceId: namespace.id,
+          slug: { in: slugs },
+          status: { not: 'deleted' }
+        }
+      });
+      for (const targetPage of pages) {
+        try {
+          await this.wikiPermissions.assertCanReadPage({ accountId, page: targetPage });
+          readableTargets.add(`${namespace.code}:${targetPage.slug}`);
+        } catch {
+          // Restricted targets must be indistinguishable from missing pages.
+        }
+      }
+    }
+
+    const missing = new Set<string>();
+    for (const [linkKey, target] of resolvedByLinkKey) {
+      if (!namespaceIdByCode.has(target.namespace) || !readableTargets.has(`${target.namespace}:${target.slug}`)) {
+        missing.add(linkKey);
+      }
+    }
+    return missing;
+  }
+
   private async renderPage(namespace: string, page: {
     namespaceId?: number;
     id: bigint;
@@ -1504,7 +1556,8 @@ export class WikiReadService {
       : { ast: parsed.ast, includedSourceBytes: 0 };
     const hasFileDependencies = collectFileNames(expanded.ast).size > 0;
     const hasIncludeDependencies = parsed.includes.length > 0;
-    const cache = hasFileDependencies || hasIncludeDependencies
+    const hasLinkDependencies = parsed.links.length > 0;
+    const cache = hasFileDependencies || hasIncludeDependencies || hasLinkDependencies
       ? null
       : await this.prisma.wikiPageRenderCache.findUnique({
           where: {
@@ -1515,14 +1568,18 @@ export class WikiReadService {
           }
         });
     const files = cache ? {} : await this.findRenderableFiles(expanded.ast, accountId);
+    const missingLinks = hasLinkDependencies
+      ? await this.findMissingLinks(namespace, page.localPath, parsed.links, accountId)
+      : new Set<string>();
     const html = cache?.html ?? renderDocument(expanded.ast, {
       files,
+      missingLinks,
       internalLinkBasePath: serverWiki ? `/server/${encodeURIComponent(serverWiki.context.slug)}` : undefined,
     });
     if (Buffer.byteLength(html, 'utf8') > 2 * 1024 * 1024) {
       throw new BadRequestException('Rendered wiki document exceeds the size limit.');
     }
-    if (!cache && !hasFileDependencies && !hasIncludeDependencies) {
+    if (!cache && !hasFileDependencies && !hasIncludeDependencies && !hasLinkDependencies) {
       await this.prisma.wikiPageRenderCache
         .create({
           data: {

@@ -661,12 +661,16 @@ function createReadService(options: {
   }>;
   readonly includeService?: WikiIncludeService;
   readonly denyLinkedPage?: boolean;
+  readonly existingLinkSlugs?: readonly string[];
 }) {
   const now = new Date('2026-07-05T00:00:00.000Z');
   const prisma = {
     wikiNamespace: {
       async findUnique() {
         return { id: 1, code: 'main' };
+      },
+      async findMany() {
+        return [{ id: 1, code: 'main' }];
       }
     },
     wikiPage: {
@@ -683,6 +687,23 @@ function createReadService(options: {
           status: 'normal',
           updatedAt: now
         };
+      },
+      async findMany() {
+        return (options.existingLinkSlugs ?? []).map((slug, index) => ({
+          id: BigInt(100 + index),
+          namespaceId: 1,
+          spaceId: 20n,
+          localPath: slug,
+          slug,
+          title: slug,
+          displayTitle: slug,
+          currentRevisionId: BigInt(200 + index),
+          pageType: 'article',
+          protectionLevel: 'open',
+          status: 'normal',
+          createdBy: null,
+          updatedAt: now
+        }));
       }
     },
     wikiPageRevision: {
@@ -818,6 +839,25 @@ test('wiki read ignores persistent render caches for file-dependent revisions', 
   assert.equal(createdCache, false);
   assert.match(page.html, /<img src="\/files\/logo\.png"/);
   assert.equal(page.html.includes('파일 없음'), false);
+});
+
+test('wiki read marks only readable missing links and bypasses shared render cache', async () => {
+  let lookedUpCache = false;
+  let createdCache = false;
+  const service = createReadService({
+    cacheHtml: '<p>stale link cache</p>',
+    contentRaw: '[[있는 문서]] · [[없는 문서]]',
+    existingLinkSlugs: ['있는_문서'],
+    onCacheLookup() { lookedUpCache = true; },
+    onCacheCreate() { createdCache = true; }
+  });
+
+  const page = await service.getPage('main', '대문');
+
+  assert.equal(lookedUpCache, false);
+  assert.equal(createdCache, false);
+  assert.match(page.html, /class="wiki-link" href="\/wiki\/%EC%9E%88%EB%8A%94_%EB%AC%B8%EC%84%9C"/);
+  assert.match(page.html, /class="wiki-link missing" href="\/wiki\/%EC%97%86%EB%8A%94_%EB%AC%B8%EC%84%9C" title="문서 없음"/);
 });
 
 test('wiki read exposes attribution only for files readable through their linked resource', async () => {
