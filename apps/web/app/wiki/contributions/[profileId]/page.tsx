@@ -62,7 +62,7 @@ function activityLabel(value: string): string {
 }
 
 function statusLabel(value: string): string {
-  return ({ open: '열림', closed: '닫힘', pending: '대기', reviewing: '검토 중', accepted: '승인', rejected: '거절', stale: '기준판 변경' } as Record<string, string>)[value] ?? value;
+  return ({ open: '열림', paused: '일시 중지', closed: '닫힘', pending: '대기', reviewing: '검토 중', accepted: '승인', rejected: '거절', stale: '기준판 변경' } as Record<string, string>)[value] ?? value;
 }
 
 function formatDate(value: string): string {

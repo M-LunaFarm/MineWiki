@@ -109,6 +109,28 @@ test('vote rechecks the locked thread and cannot commit after the discussion clo
   assert.equal(upserted, false);
 });
 
+test('vote rechecks the locked thread and cannot commit while the discussion is paused', async () => {
+  let threadReads = 0;
+  let upserted = false;
+  const store = {
+    wikiDiscussionPoll: { async findUnique() { return poll; } },
+    wikiDiscussionComment: { async findUnique() { return comment; } },
+    wikiDiscussionThread: { async findUnique() { threadReads += 1; return threadReads === 1 ? thread : { ...thread, status: 'paused' }; } },
+    wikiDiscussionPollOption: { async findFirst() { return { id: 51n, pollId: poll.id }; } },
+    wikiDiscussionPollVote: { async upsert() { upserted = true; return {}; } },
+    wikiPage: { async findUnique() { return page; } },
+    async $queryRaw() { return []; },
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) { return callback(store); }
+  };
+  const service = new WikiDiscussionService(store as unknown as PrismaService, profiles(), permissions());
+
+  await assert.rejects(
+    service.votePoll(session, '30', '50', '51'),
+    (error: unknown) => error instanceof ConflictException && error.message === 'Wiki discussion thread is paused.'
+  );
+  assert.equal(upserted, false);
+});
+
 test('comment creation rechecks the locked thread and cannot cross a concurrent close', async () => {
   let threadReads = 0;
   let commentCreated = false;

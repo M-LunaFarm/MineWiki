@@ -24,6 +24,17 @@ export interface WikiThreadSummary {
 export interface WikiThreadListResponse {
   readonly items: WikiThreadSummary[];
   readonly nextCursor: string | null;
+  readonly statusCounts: WikiDiscussionStatusCounts;
+}
+
+export type WikiDiscussionStatus = 'open' | 'paused' | 'closed';
+export type WikiDiscussionStatusFilter = 'all' | 'active' | WikiDiscussionStatus;
+
+export interface WikiDiscussionStatusCounts {
+  readonly total: number;
+  readonly open: number;
+  readonly paused: number;
+  readonly closed: number;
 }
 
 export interface WikiRecentThreadSummary extends WikiThreadSummary {
@@ -134,27 +145,35 @@ export class WikiDiscussionService {
     pageId: string,
     accountId?: string | null,
     cursor?: string,
-    requestedLimit = 30
+    requestedLimit = 30,
+    statusFilter: WikiDiscussionStatusFilter = 'all'
   ): Promise<WikiThreadListResponse> {
     const page = await this.readablePage(pageId, accountId ?? null);
     const limit = Math.min(Math.max(requestedLimit, 1), 50);
     const decoded = cursor ? this.decodeRecentCursor(cursor) : null;
     const snapshotAt = decoded?.snapshotAt ?? new Date();
-    const threads = await this.prisma.wikiDiscussionThread.findMany({
-      where: {
-        pageId: page.id,
-        status: { not: 'deleted' },
-        updatedAt: { lte: snapshotAt },
-        ...(decoded ? {
-          OR: [
-            { updatedAt: { lt: decoded.updatedAt } },
-            { updatedAt: decoded.updatedAt, id: { lt: decoded.id } }
-          ]
-        } : {})
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: limit + 1
-    });
+    const [threads, statusRows] = await Promise.all([
+      this.prisma.wikiDiscussionThread.findMany({
+        where: {
+          pageId: page.id,
+          status: this.threadStatusFilter(statusFilter),
+          updatedAt: { lte: snapshotAt },
+          ...(decoded ? {
+            OR: [
+              { updatedAt: { lt: decoded.updatedAt } },
+              { updatedAt: decoded.updatedAt, id: { lt: decoded.id } }
+            ]
+          } : {})
+        },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1
+      }),
+      this.prisma.wikiDiscussionThread.groupBy({
+        by: ['status'],
+        where: { pageId: page.id, status: { not: 'deleted' } },
+        _count: { _all: true }
+      })
+    ]);
     const hasMore = threads.length > limit;
     const pageThreads = threads.slice(0, limit);
     const profileById = await this.profileNames(pageThreads.map((thread) => thread.createdBy));
@@ -167,9 +186,16 @@ export class WikiDiscussionService {
       : [];
     const countByThreadId = new Map(countRows.map((row) => [row.threadId, row._count._all]));
     const last = pageThreads.at(-1);
+    const statusCount = new Map(statusRows.map((row) => [row.status, row._count._all]));
     return {
       items: pageThreads.map((thread) => this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0)),
-      nextCursor: hasMore && last ? this.encodeRecentCursor(snapshotAt, last.updatedAt, last.id) : null
+      nextCursor: hasMore && last ? this.encodeRecentCursor(snapshotAt, last.updatedAt, last.id) : null,
+      statusCounts: {
+        total: statusRows.reduce((sum, row) => sum + row._count._all, 0),
+        open: statusCount.get('open') ?? 0,
+        paused: statusCount.get('paused') ?? 0,
+        closed: statusCount.get('closed') ?? 0
+      }
     };
   }
 
@@ -484,7 +510,7 @@ export class WikiDiscussionService {
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
     if (!thread) throw new NotFoundException('Wiki discussion thread not found.');
     if (thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-    if (thread.status !== 'open') throw new BadRequestException('Wiki discussion thread is closed.');
+    if (thread.status !== 'open') throw new BadRequestException(this.threadWriteBlockedMessage(thread.status));
     const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
     if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
@@ -495,7 +521,7 @@ export class WikiDiscussionService {
       await this.lockDiscussionRows(tx, thread.id);
       const currentThread = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
       if (!currentThread || currentThread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-      if (currentThread.status !== 'open') throw new BadRequestException('Wiki discussion thread is closed.');
+      if (currentThread.status !== 'open') throw new BadRequestException(this.threadWriteBlockedMessage(currentThread.status));
       const comment = await tx.wikiDiscussionComment.create({
         data: { threadId: thread.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
       });
@@ -551,7 +577,9 @@ export class WikiDiscussionService {
         tx.wikiDiscussionPoll.findUnique({ where: { id: poll.id } }),
         tx.wikiDiscussionPollOption.findFirst({ where: { id: optionId, pollId: poll.id } })
       ]);
-      if (!currentThread || currentThread.status !== 'open') throw new ConflictException('Wiki discussion thread is closed.');
+      if (!currentThread || currentThread.status !== 'open') {
+        throw new ConflictException(this.threadWriteBlockedMessage(currentThread?.status ?? 'deleted'));
+      }
       if (!currentComment || currentComment.status !== 'normal') throw new ConflictException('Wiki discussion poll is not available.');
       if (!currentPoll || currentPoll.status !== 'open' || (currentPoll.closesAt && currentPoll.closesAt <= now)) {
         throw new ConflictException('Wiki discussion poll is closed.');
@@ -612,7 +640,7 @@ export class WikiDiscussionService {
   async setThreadStatus(
     session: SessionPayload,
     threadId: string,
-    status: 'open' | 'closed'
+    status: WikiDiscussionStatus
   ): Promise<WikiThreadDetail> {
     const id = this.parseId(threadId, 'threadId');
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
@@ -621,10 +649,19 @@ export class WikiDiscussionService {
     if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const actor = this.wikiPermissions.actorFromSession(session, profile);
-    if (thread.createdBy !== profile.id && !(await this.wikiPermissions.canManagePage({ actor, page }))) {
-      throw new ForbiddenException('Wiki discussion moderation is not allowed.');
-    }
-    await this.prisma.wikiDiscussionThread.update({ where: { id }, data: { status, updatedAt: new Date() } });
+    const canManagePage = await this.wikiPermissions.canManagePage({ actor, page });
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, thread.id);
+      const currentThread = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
+      if (!currentThread || currentThread.status === 'deleted') {
+        throw new NotFoundException('Wiki discussion thread not found.');
+      }
+      const requiresPageManager = status === 'paused' || currentThread.status === 'paused';
+      if ((requiresPageManager && !canManagePage) || (!requiresPageManager && currentThread.createdBy !== profile.id && !canManagePage)) {
+        throw new ForbiddenException('Wiki discussion moderation is not allowed.');
+      }
+      await tx.wikiDiscussionThread.update({ where: { id }, data: { status, updatedAt: new Date() } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.audit(`wiki.discussion.${status}`, session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -953,6 +990,18 @@ export class WikiDiscussionService {
       ? await this.prisma.wikiProfile.findMany({ where: { id: { in: unique } }, select: { id: true, displayName: true } })
       : [];
     return new Map(profiles.map((profile) => [profile.id, profile.displayName]));
+  }
+
+  private threadStatusFilter(status: WikiDiscussionStatusFilter): Prisma.WikiDiscussionThreadWhereInput['status'] {
+    if (status === 'all') return { not: 'deleted' };
+    if (status === 'active') return { in: ['open', 'paused'] };
+    return status;
+  }
+
+  private threadWriteBlockedMessage(status: string): string {
+    if (status === 'paused') return 'Wiki discussion thread is paused.';
+    if (status === 'closed') return 'Wiki discussion thread is closed.';
+    return 'Wiki discussion thread is not open.';
   }
 
   private toThreadSummary(

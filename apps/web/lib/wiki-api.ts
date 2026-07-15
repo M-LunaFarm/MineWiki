@@ -376,6 +376,18 @@ export interface WikiThreadSummary {
 export interface WikiThreadListResponse {
   readonly items: WikiThreadSummary[];
   readonly nextCursor: string | null;
+  /** Optional during rolling API deployments. */
+  readonly statusCounts?: WikiDiscussionStatusCounts;
+}
+
+export type WikiDiscussionStatus = 'open' | 'paused' | 'closed';
+export type WikiDiscussionStatusFilter = 'all' | 'active' | WikiDiscussionStatus;
+
+export interface WikiDiscussionStatusCounts {
+  readonly total: number;
+  readonly open: number;
+  readonly paused: number;
+  readonly closed: number;
 }
 
 export interface WikiRecentThreadSummary extends WikiThreadSummary {
@@ -861,9 +873,10 @@ export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]>
   return response.json();
 }
 
-export async function fetchWikiThreads(pageId: string, cursor?: string): Promise<WikiThreadListResponse> {
+export async function fetchWikiThreads(pageId: string, cursor?: string, status: WikiDiscussionStatusFilter = 'all'): Promise<WikiThreadListResponse> {
   const params = new URLSearchParams({ limit: '30' });
   if (cursor) params.set('cursor', cursor);
+  if (status !== 'all') params.set('status', status);
   return readWikiBrowser<WikiThreadListResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/discussion-threads?${params.toString()}`);
 }
 
@@ -915,7 +928,7 @@ export async function closeWikiDiscussionPoll(input: { threadId: string; pollId:
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/polls/${encodeURIComponent(input.pollId)}/close`, 'POST', {});
 }
 
-export async function setWikiThreadStatus(input: { threadId: string; status: 'open' | 'closed' }): Promise<WikiThreadDetail> {
+export async function setWikiThreadStatus(input: { threadId: string; status: WikiDiscussionStatus }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/status`, 'PATCH', {
     status: input.status,
   });

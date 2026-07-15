@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pencil, Pin, Plus, Search, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pause, Pencil, Pin, Plus, Search, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiThreadDetail, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
+import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiDiscussionStatus, type WikiDiscussionStatusCounts, type WikiDiscussionStatusFilter, type WikiThreadDetail, type WikiThreadListResponse, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { countWikiDiscussionStatuses, WIKI_DISCUSSION_STATUS_FILTERS, wikiDiscussionFilterCount, wikiDiscussionMatchesStatusFilter, wikiDiscussionStatusClass, wikiDiscussionStatusLabel } from '../../lib/wiki-discussion-status.mjs';
 
 export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
   const { account } = useAuth();
@@ -14,6 +15,8 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const requestedThreadId = searchParams.get('thread');
   const requestedCommentId = searchParams.get('comment');
   const [threads, setThreads] = useState<WikiThreadSummary[]>([]);
+  const [statusFilter, setStatusFilter] = useState<WikiDiscussionStatusFilter>('all');
+  const [statusCounts, setStatusCounts] = useState<WikiDiscussionStatusCounts>({ total: 0, open: 0, paused: 0, closed: 0 });
   const [nextThreadCursor, setNextThreadCursor] = useState<string | null>(null);
   const [canCreateThread, setCanCreateThread] = useState(false);
   const [selected, setSelected] = useState<WikiThreadDetail | null>(null);
@@ -52,13 +55,27 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [moderationReason, setModerationReason] = useState('');
   const prependAnchor = useRef<{ id: string; top: number } | null>(null);
 
+  const applyThreadResult = useCallback((result: WikiThreadListResponse) => {
+    const compatibleItems = result.statusCounts
+      ? result.items
+      : result.items.filter((thread) => wikiDiscussionMatchesStatusFilter(thread.status, statusFilter));
+    setThreads(compatibleItems);
+    setNextThreadCursor(result.nextCursor);
+    setStatusCounts(result.statusCounts ?? countWikiDiscussionStatuses(result.items));
+  }, [statusFilter]);
+
+  async function refreshThreadList() {
+    applyThreadResult(await fetchWikiThreads(pageId, undefined, statusFilter));
+  }
+
   useEffect(() => {
     let active = true;
-    void Promise.all([fetchWikiThreads(pageId), fetchWikiDiscussionPermissions(pageId)])
+    setLoading(true);
+    setError(null);
+    void Promise.all([fetchWikiThreads(pageId, undefined, statusFilter), fetchWikiDiscussionPermissions(pageId)])
       .then(async ([result, permissions]) => {
         if (!active) return;
-        setThreads(result.items);
-        setNextThreadCursor(result.nextCursor);
+        applyThreadResult(result);
         setCanCreateThread(permissions.canCreateThread);
         if (requestedThreadId) {
           const detail = await fetchWikiThread(requestedThreadId, undefined, requestedCommentId ?? undefined);
@@ -76,7 +93,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     return () => {
       active = false;
     };
-  }, [pageId, requestedCommentId, requestedThreadId]);
+  }, [applyThreadResult, pageId, requestedCommentId, requestedThreadId, statusFilter]);
 
   useEffect(() => {
     if (!selected || !requestedCommentId) return;
@@ -117,9 +134,13 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     setLoadingMoreThreads(true);
     setError(null);
     try {
-      const result = await fetchWikiThreads(pageId, nextThreadCursor);
-      setThreads((current) => [...current, ...result.items.filter((thread) => !current.some((item) => item.id === thread.id))]);
+      const result = await fetchWikiThreads(pageId, nextThreadCursor, statusFilter);
+      const compatibleItems = result.statusCounts
+        ? result.items
+        : result.items.filter((thread) => wikiDiscussionMatchesStatusFilter(thread.status, statusFilter));
+      setThreads((current) => [...current, ...compatibleItems.filter((thread) => !current.some((item) => item.id === thread.id))]);
       setNextThreadCursor(result.nextCursor);
+      if (result.statusCounts) setStatusCounts(result.statusCounts);
     } catch (caught) {
       setError(message(caught));
     } finally {
@@ -146,8 +167,8 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
         content,
         poll: createPollEnabled ? toPollInput(createPollDraft) : undefined,
       });
-      setThreads((current) => [thread, ...current]);
       setSelected(thread);
+      await refreshThreadList();
       setTitle('');
       setContent('');
       setCreatePollEnabled(false);
@@ -219,17 +240,17 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     }
   }
 
-  async function toggleStatus() {
+  async function changeStatus(status: WikiDiscussionStatus) {
     if (!selected) return;
     setWorking(true);
     setError(null);
     try {
       const thread = await setWikiThreadStatus({
         threadId: selected.id,
-        status: selected.status === 'open' ? 'closed' : 'open',
+        status,
       });
       setSelected(thread);
-      setThreads((current) => current.map((item) => (item.id === thread.id ? thread : item)));
+      await refreshThreadList();
     } catch (caught) {
       setError(message(caught));
     } finally {
@@ -390,11 +411,11 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     setError(null);
     try {
       await deleteWikiThread(selected.id, deleteReason);
-      setThreads((current) => current.filter((item) => item.id !== selected.id));
       setSelected(null);
       setThreadInUrl(null);
       setDeleteReason('');
       setDeleteConfirmation('');
+      await refreshThreadList();
     } catch (caught) {
       setError(message(caught));
     } finally {
@@ -502,16 +523,36 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
               하면 토론에 참여할 수 있습니다.
             </p>
           )}
+          <nav aria-label="토론 상태 필터" className="overflow-x-auto border border-white/10 bg-[#111821] p-2">
+            <div className="flex min-w-max gap-2">
+              {WIKI_DISCUSSION_STATUS_FILTERS.map((filter) => (
+                <button
+                  key={filter.value}
+                  type="button"
+                  aria-pressed={statusFilter === filter.value}
+                  disabled={loading}
+                  onClick={() => setStatusFilter(filter.value as WikiDiscussionStatusFilter)}
+                  className={`chip min-h-11 gap-1.5 ${statusFilter === filter.value ? 'chip-accent' : 'chip-muted'}`}
+                >
+                  {filter.label}
+                  <span aria-label={`${wikiDiscussionFilterCount(statusCounts, filter.value).toLocaleString('ko-KR')}개`}>
+                    {wikiDiscussionFilterCount(statusCounts, filter.value).toLocaleString('ko-KR')}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </nav>
           <section className="divide-y divide-white/10 border border-white/10 bg-[#111821]">
             {threads.map((thread) => (
               <button key={thread.id} type="button" onClick={() => void open(thread)} className={`block w-full p-4 text-left transition hover:bg-white/[0.03] ${selected?.id === thread.id ? 'bg-emerald-400/10' : ''}`}>
                 <span className="font-semibold text-white">{thread.title}</span>
-                <span className="mt-2 block text-xs text-slate-500">
-                  {thread.status} · 댓글 {thread.commentCount}
+                <span className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span className={`chip ${wikiDiscussionStatusClass(thread.status)}`}>{wikiDiscussionStatusLabel(thread.status)}</span>
+                  <span>댓글 {thread.commentCount}</span>
                 </span>
               </button>
             ))}
-            {!loading && threads.length === 0 ? <p className="p-4 text-sm text-slate-500">아직 토론이 없습니다.</p> : null}
+            {!loading && threads.length === 0 ? <p className="p-4 text-sm text-slate-500">{statusCounts.total > 0 ? '선택한 상태의 토론이 없습니다.' : '아직 토론이 없습니다.'}</p> : null}
             {nextThreadCursor ? (
               <button type="button" disabled={loadingMoreThreads} onClick={() => void loadMoreThreads()} className="flex min-h-12 w-full items-center justify-center gap-2 p-3 text-sm font-semibold text-emerald-200 hover:bg-white/[0.03]">
                 {loadingMoreThreads ? <Loader2 className="size-4 animate-spin" /> : null} 더 오래된 토론 보기
@@ -546,7 +587,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                     <h2 className="break-words text-2xl font-bold text-white">{selected.title}</h2>
                   )}
                   <p className="mt-2 text-xs text-slate-500">
-                    {selected.createdByName} · {selected.status} · 댓글 {selected.commentCount.toLocaleString('ko-KR')}개
+                    {selected.createdByName} · {wikiDiscussionStatusLabel(selected.status)} · 댓글 {selected.commentCount.toLocaleString('ko-KR')}개
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -568,13 +609,27 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                       <Pencil className="size-4" /> 제목 변경
                     </button>
                   ) : null}
-                  {selected.canModerate ? (
-                    <button type="button" disabled={working} onClick={() => void toggleStatus()} className="chip chip-muted min-h-11">
+                  {selected.canManagePage ? (
+                    <>
+                      {selected.status !== 'open' ? <button type="button" disabled={working} onClick={() => void changeStatus('open')} className="chip chip-muted min-h-11">다시 열기</button> : null}
+                      {selected.status !== 'paused' ? <button type="button" disabled={working} onClick={() => void changeStatus('paused')} className="chip min-h-11 border-amber-300/30 bg-amber-300/10 text-amber-100"><Pause className="size-3.5" /> 일시 중지</button> : null}
+                      {selected.status !== 'closed' ? <button type="button" disabled={working} onClick={() => void changeStatus('closed')} className="chip chip-muted min-h-11">토론 닫기</button> : null}
+                    </>
+                  ) : selected.canModerate && (selected.status === 'open' || selected.status === 'closed') ? (
+                    <button type="button" disabled={working} onClick={() => void changeStatus(selected.status === 'open' ? 'closed' : 'open')} className="chip chip-muted min-h-11">
                       {selected.status === 'open' ? '토론 닫기' : '다시 열기'}
                     </button>
                   ) : null}
                 </div>
               </div>
+              {selected.status === 'paused' ? (
+                <div role="status" className="flex items-start gap-3 border border-amber-300/25 bg-amber-300/[0.06] p-4 text-sm leading-6 text-amber-100">
+                  <Pause className="mt-1 size-4 shrink-0" />
+                  <p>문서 관리자가 토론을 일시 중지했습니다. 기존 댓글과 설문 결과는 읽을 수 있지만 새 댓글과 투표는 재개될 때까지 받지 않습니다.</p>
+                </div>
+              ) : selected.status === 'closed' ? (
+                <p role="status" className="border border-white/10 bg-white/[0.025] p-4 text-sm leading-6 text-slate-400">닫힌 토론입니다. 기존 내용은 계속 읽을 수 있습니다.</p>
+              ) : null}
               {selected.canManagePage ? (
                 <details className="surface-flat p-4">
                   <summary className="cursor-pointer text-sm font-semibold text-slate-200">토론 관리</summary>

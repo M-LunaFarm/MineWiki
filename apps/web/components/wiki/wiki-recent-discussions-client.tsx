@@ -4,6 +4,7 @@ import { Loader2, MessageSquareText, MessagesSquare } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { fetchRecentWikiThreads, type WikiRecentThreadSummary } from '../../lib/wiki-api';
+import { wikiDiscussionStatusClass, wikiDiscussionStatusLabel } from '../../lib/wiki-discussion-status.mjs';
 
 export function WikiRecentDiscussionsClient() {
   const [items, setItems] = useState<WikiRecentThreadSummary[]>([]);
@@ -39,7 +40,7 @@ export function WikiRecentDiscussionsClient() {
         <Link href={item.discussionHref} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 p-4 transition hover:bg-white/[0.035] sm:p-5">
           <span className="mt-0.5 flex size-9 items-center justify-center rounded-full bg-emerald-300/10 text-emerald-300"><MessageSquareText className="size-4" /></span>
           <span className="min-w-0">
-            <span className="flex flex-wrap items-center gap-2"><strong className="truncate text-sm text-white">{item.title}</strong><span className={`chip ${item.status === 'open' ? 'chip-accent' : 'chip-muted'}`}>{item.status === 'open' ? '열림' : '닫힘'}</span></span>
+            <span className="flex flex-wrap items-center gap-2"><strong className="truncate text-sm text-white">{item.title}</strong><span className={`chip ${wikiDiscussionStatusClass(item.status)}`}>{wikiDiscussionStatusLabel(item.status)}</span></span>
             <span className="mt-1 block truncate text-sm text-slate-400">{item.pageTitle} · {item.createdByName}</span>
             <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600"><span>댓글 {item.commentCount.toLocaleString('ko-KR')}</span><time>{formatDate(item.updatedAt)}</time><span>{item.namespace}</span></span>
           </span>

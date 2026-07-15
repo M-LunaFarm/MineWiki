@@ -93,6 +93,14 @@ test('closed discussion rejects new comments before writing', async () => {
   );
 });
 
+test('paused discussion rejects new comments with a distinct state error', async () => {
+  const discussions = service({ thread: { ...thread, status: 'paused' } });
+  await assert.rejects(
+    discussions.addComment(session, thread.id.toString(), { content: 'reply' }),
+    (error: unknown) => error instanceof BadRequestException && error.message === 'Wiki discussion thread is paused.'
+  );
+});
+
 test('adding a comment checks the write-thread-comment permission', async () => {
   let checked = false;
   const discussions = service({ onWriteThreadComment: () => { checked = true; } });
@@ -130,6 +138,63 @@ test('non-owner without page management cannot close a discussion', async () => 
     discussions.setThreadStatus(session, thread.id.toString(), 'closed'),
     ForbiddenException
   );
+});
+
+test('only page managers can pause or resume a paused discussion', async () => {
+  await assert.rejects(
+    service({ canManage: false }).setThreadStatus(session, thread.id.toString(), 'paused'),
+    ForbiddenException
+  );
+  await assert.rejects(
+    service({ thread: { ...thread, status: 'paused' }, canManage: false }).setThreadStatus(session, thread.id.toString(), 'open'),
+    ForbiddenException
+  );
+
+  let update: unknown;
+  await service({ canManage: true, onThreadUpdate: (args) => { update = args; } })
+    .setThreadStatus(session, thread.id.toString(), 'paused');
+  assert.equal((update as { data: { status: string } }).data.status, 'paused');
+});
+
+test('thread author cannot overwrite a concurrent manager pause', async () => {
+  let threadReads = 0;
+  let updated = false;
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: {
+      async findUnique() {
+        threadReads += 1;
+        return threadReads === 1 ? thread : { ...thread, status: 'paused' };
+      },
+      async update() { updated = true; return thread; }
+    },
+    async $queryRaw() { return []; },
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) { return callback(store); }
+  };
+  const profiles = { async ensureWikiProfile() { return { id: 20n }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: session.userId, profileId: 20n }; },
+    async canManagePage() { return false; }
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(store as unknown as PrismaService, profiles, permissions);
+
+  await assert.rejects(
+    discussions.setThreadStatus(session, thread.id.toString(), 'closed'),
+    ForbiddenException
+  );
+  assert.equal(updated, false);
+  assert.equal(threadReads, 2);
+});
+
+test('thread authors retain the existing close and reopen permission', async () => {
+  let update: unknown;
+  await service({ canManage: false, onThreadUpdate: (args) => { update = args; } })
+    .setThreadStatus(session, thread.id.toString(), 'closed');
+  assert.equal((update as { data: { status: string } }).data.status, 'closed');
+
+  await service({ thread: { ...thread, status: 'closed' }, canManage: false, onThreadUpdate: (args) => { update = args; } })
+    .setThreadStatus(session, thread.id.toString(), 'open');
+  assert.equal((update as { data: { status: string } }).data.status, 'open');
 });
 
 test('non-author without page management cannot delete another comment', async () => {
@@ -398,6 +463,14 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
       async findMany(args: { where: unknown; orderBy: unknown; take: number }) {
         queries.push(args);
         return queries.length === 1 ? rows : [];
+      },
+      async groupBy() {
+        return [
+          { status: 'open', _count: { _all: 1 } },
+          { status: 'paused', _count: { _all: 2 } },
+          { status: 'closed', _count: { _all: 3 } },
+          { status: 'legacy', _count: { _all: 4 } }
+        ];
       }
     },
     wikiDiscussionComment: { async groupBy() { return []; } },
@@ -414,7 +487,11 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
   assert.ok(first.nextCursor);
 
   const second = await discussions.listThreadsPage(page.id.toString(), null, first.nextCursor ?? undefined, 30);
-  assert.deepEqual(second, { items: [], nextCursor: null });
+  assert.deepEqual(second, {
+    items: [],
+    nextCursor: null,
+    statusCounts: { total: 10, open: 1, paused: 2, closed: 3 }
+  });
   assert.deepEqual(queries[1]?.orderBy, [{ updatedAt: 'desc' }, { id: 'desc' }]);
   assert.equal(queries[1]?.take, 31);
   const secondWhere = queries[1]?.where as { pageId: bigint; status: unknown; updatedAt: { lte: Date }; OR: unknown };
@@ -425,6 +502,31 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
       { updatedAt: { lt: updatedAt } },
       { updatedAt, id: { lt: 71n } }
   ]);
+
+  await discussions.listThreadsPage(page.id.toString(), null, undefined, 30, 'paused');
+  assert.equal((queries[2]?.where as { status: unknown }).status, 'paused');
+});
+
+test('active discussion filter includes open and paused but excludes closed threads', async () => {
+  let where: unknown;
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: {
+      async findMany(args: { where: unknown }) { where = args.where; return []; },
+      async groupBy() { return []; }
+    },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return []; } }
+  };
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async assertCanReadPage() {} } as unknown as WikiPermissionService
+  );
+
+  const result = await discussions.listThreadsPage(page.id.toString(), null, undefined, 30, 'active');
+  assert.deepEqual((where as { status: unknown }).status, { in: ['open', 'paused'] });
+  assert.deepEqual(result.statusCounts, { total: 0, open: 0, paused: 0, closed: 0 });
 });
 
 test('recent server discussions deep-link through the canonical tool route', async () => {
