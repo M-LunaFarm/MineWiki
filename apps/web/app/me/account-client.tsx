@@ -39,6 +39,7 @@ import {
   AccountDeletionBlockedError,
   type AccountDeletionBlocker,
 } from '../../lib/auth-client';
+import { storeOAuthLinkIntent } from '../../lib/oauth-link-intent.mjs';
 import { getApiBaseUrl } from '../../lib/runtime-config';
 
 const API_BASE_URL = getApiBaseUrl();
@@ -493,6 +494,11 @@ export function AccountClientPage() {
 
       const useSameWindow = window.matchMedia('(max-width: 767px)').matches;
       if (useSameWindow) {
+        storeOAuthLinkIntent(window.sessionStorage, {
+          provider,
+          state: result.state,
+          expiresAt: result.expiresAt,
+        });
         window.location.assign(result.authorizationUrl);
         return;
       }
@@ -504,6 +510,11 @@ export function AccountClientPage() {
       );
 
       if (!popup) {
+        storeOAuthLinkIntent(window.sessionStorage, {
+          provider,
+          state: result.state,
+          expiresAt: result.expiresAt,
+        });
         window.location.assign(result.authorizationUrl);
         return;
       }

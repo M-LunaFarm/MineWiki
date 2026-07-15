@@ -11,6 +11,10 @@ import {
   XCircle,
 } from 'lucide-react';
 import { completeOAuthLogin, type OAuthProvider } from '../../../../lib/auth-client';
+import {
+  closeOAuthWindowOrNavigate,
+  consumeOAuthLinkIntent,
+} from '../../../../lib/oauth-link-intent.mjs';
 import { useAuth } from '../../../../components/providers/auth-context';
 import {
   CallbackCard,
@@ -29,7 +33,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
     normalizedProvider === 'discord'
       ? 'Discord'
       : normalizedProvider === 'naver'
-        ? 'Naver'
+        ? 'NAVER'
         : provider;
 
   const searchParams = useSearchParams();
@@ -50,10 +54,18 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
       return;
     }
 
+    const callbackState = searchParams.get('state');
     const openedForLink = typeof window !== 'undefined' && Boolean(window.opener && !window.opener.closed);
-    if (openedForLink) {
+    const continuedLink = typeof window !== 'undefined' && Boolean(
+      callbackState
+      && consumeOAuthLinkIntent(
+        window.sessionStorage,
+        { provider: normalizedProvider, state: callbackState },
+      )
+    );
+    if (openedForLink || continuedLink) {
       setFlowMode('link');
-      setLinkCompletionTarget('opener');
+      setLinkCompletionTarget(openedForLink ? 'opener' : 'redirect');
     }
 
     const errorParam = searchParams.get('error');
@@ -65,7 +77,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
     }
 
     const code = searchParams.get('code');
-    const state = searchParams.get('state');
+    const state = callbackState;
     if (!code || !state) {
       setStatus('error');
       setMessage('OAuth 응답에 필요한 code 또는 state 값이 없습니다.');
@@ -239,20 +251,12 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
                   router.replace('/me');
                   return;
                 }
-                try {
-                  window.close();
-                  return;
-                } catch {
-                  router.replace('/me');
-                  return;
-                }
+                closeOAuthWindowOrNavigate(window, (path) => router.replace(path));
+                return;
               }
               if (status === 'error') {
                 if (flowMode === 'link') {
-                  window.close();
-                  setTimeout(() => {
-                    if (!window.closed) router.replace('/me');
-                  }, 100);
+                  closeOAuthWindowOrNavigate(window, (path) => router.replace(path));
                   return;
                 }
                 router.replace('/login');
