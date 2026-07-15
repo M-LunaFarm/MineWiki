@@ -967,7 +967,16 @@ export async function fetchWikiThread(
   if (commentCursor) params.set('commentCursor', commentCursor);
   if (focusCommentId) params.set('focusCommentId', focusCommentId);
   if (commentCursor && commentDirection === 'newer') params.set('commentDirection', commentDirection);
-  return readWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(threadId)}?${params.toString()}`);
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/discussions/${encodeURIComponent(threadId)}?${params.toString()}`, {
+    credentials: 'include',
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw wikiApiError(response, body, 'Failed to load wiki discussion.');
+  return body as WikiThreadDetail;
+}
+
+export function wikiDiscussionEventsUrl(threadId: string): string {
+  return `${apiBaseUrl()}/v1/wiki/discussions/${encodeURIComponent(threadId)}/events`;
 }
 
 export async function fetchRecentWikiThreads(cursor?: string): Promise<WikiRecentThreadListResponse> {

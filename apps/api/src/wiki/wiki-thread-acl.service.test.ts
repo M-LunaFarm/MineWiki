@@ -7,6 +7,7 @@ import type { SessionPayload } from '../session/session.service';
 import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiProfileService } from './wiki-profile.service';
 import { WikiThreadAclService } from './wiki-thread-acl.service';
+import type { WikiDiscussionLiveService } from './wiki-discussion-live.service';
 
 const session = { userId: 'account-1', permissions: ['wiki.admin'] } as SessionPayload;
 const now = new Date('2026-07-15T00:00:00.000Z');
@@ -71,6 +72,8 @@ test('thread ACL create locks the thread and writes both ACL and business audit 
   let locked = false;
   let changeLogged = false;
   let audited = false;
+  let committed = false;
+  let published = false;
   const rule = {
     id: 1n, targetType: 'thread', targetId: 30n, action: 'read', effect: 'allow', subjectType: 'perm',
     subjectValue: 'member', sortOrder: 10, reason: '운영 정책', expiresAt: null, createdBy: 20n, createdAt: now, updatedAt: now
@@ -89,10 +92,21 @@ test('thread ACL create locks the thread and writes both ACL and business audit 
   const prisma = {
     wikiDiscussionThread: { async findUnique() { return thread; } },
     wikiPage: { async findUnique() { return page; } },
-    async $transaction(callback: (store: typeof tx) => Promise<unknown>) { return callback(tx); }
+    async $transaction(callback: (store: typeof tx) => Promise<unknown>) {
+      const result = await callback(tx);
+      committed = true;
+      return result;
+    }
   } as unknown as PrismaService;
   const events = { async audit() { audited = true; } } as unknown as BusinessEventService;
-  const service = new WikiThreadAclService(prisma, profileService(), permissionService(), events);
+  const live = {
+    publish(id: bigint) {
+      assert.equal(committed, true);
+      assert.equal(id, thread.id);
+      published = true;
+    }
+  } as unknown as WikiDiscussionLiveService;
+  const service = new WikiThreadAclService(prisma, profileService(), permissionService(), events, live);
   const result = await service.createRule('30', session, {
     action: 'read', effect: 'allow', subjectType: 'perm', subjectValue: 'member', reason: '운영 정책'
   });
@@ -100,6 +114,7 @@ test('thread ACL create locks the thread and writes both ACL and business audit 
   assert.equal(locked, true);
   assert.equal(changeLogged, true);
   assert.equal(audited, true);
+  assert.equal(published, true);
 });
 
 test('thread ACL reorder rejects a stale hash after taking the thread lock', async () => {

@@ -8,6 +8,7 @@ import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
 import { buildServerWikiPagePath, buildServerWikiToolPath } from './wiki-read.service';
+import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
 
 export interface WikiThreadSummary {
   readonly id: string;
@@ -131,7 +132,8 @@ export class WikiDiscussionService {
     private readonly wikiProfiles: WikiProfileService,
     private readonly wikiPermissions: WikiPermissionService,
     @Optional() private readonly events?: BusinessEventService,
-    @Optional() private readonly notifications?: WikiNotificationService
+    @Optional() private readonly notifications?: WikiNotificationService,
+    @Optional() private readonly live?: WikiDiscussionLiveService
   ) {
     // Keep isolated service tests and rolling deployments compatible with the
     // pre-thread-ACL permission surface. The concrete WikiPermissionService
@@ -542,6 +544,7 @@ export class WikiDiscussionService {
       });
       return created;
     });
+    this.live?.publish(thread.id);
     await this.audit('wiki.discussion.create', session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -589,6 +592,7 @@ export class WikiDiscussionService {
         title: thread.title
       });
     });
+    this.live?.publish(thread.id);
     await this.audit('wiki.discussion.comment', session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -640,6 +644,7 @@ export class WikiDiscussionService {
         update: { optionId: option.id, updatedAt: now }
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit('wiki.discussion.poll_vote', session, profile.id, page.id, thread.id, { pollId: poll.id.toString() });
     return this.getThread(thread.id.toString(), session);
   }
@@ -675,6 +680,7 @@ export class WikiDiscussionService {
       });
       if (changed.count !== 1) throw new ConflictException('Wiki discussion poll is already closed.');
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit('wiki.discussion.poll_close', session, profile.id, page.id, thread.id, { pollId: poll.id.toString() });
     return this.getThread(thread.id.toString(), session);
   }
@@ -737,6 +743,7 @@ export class WikiDiscussionService {
         before: currentThread.status, after: status, now
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit(`wiki.discussion.${status}`, session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -757,6 +764,7 @@ export class WikiDiscussionService {
         before: current.title, after: title, now
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit('wiki.discussion.topic', session, thread.profileId, thread.pageId, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -787,6 +795,7 @@ export class WikiDiscussionService {
         before: current.pageId.toString(), after: targetPage.id.toString(), now
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit('wiki.discussion.move', session, thread.profileId, thread.pageId, thread.id, {
       targetPageId: targetPage.id.toString(), reason
     });
@@ -804,6 +813,7 @@ export class WikiDiscussionService {
       where: { id: thread.id },
       data: { status: 'deleted', pinnedCommentId: null, updatedAt: new Date() }
     });
+    this.live?.publish(thread.id);
     await this.audit('wiki.discussion.delete', session, thread.profileId, thread.pageId, thread.id, { reason });
     return { deleted: true, threadId: thread.id.toString() };
   }
@@ -855,6 +865,7 @@ export class WikiDiscussionService {
         before: current.pinnedCommentId?.toString() ?? null, after: parsedCommentId?.toString() ?? null, now
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit(parsedCommentId ? 'wiki.discussion.pin' : 'wiki.discussion.unpin', session, thread.profileId, thread.pageId, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -892,6 +903,7 @@ export class WikiDiscussionService {
         });
       }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit('wiki.discussion.comment_delete', session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -947,6 +959,7 @@ export class WikiDiscussionService {
         }
       });
     });
+    this.live?.publish(thread.id);
     await this.audit(`wiki.discussion.comment_${status === 'hidden' ? 'hide' : 'restore'}`, session, thread.profileId, thread.pageId, thread.id, {
       commentId: comment.id.toString(), reason
     });

@@ -6,6 +6,7 @@ import type { SessionPayload } from '../session/session.service';
 import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiProfileService } from './wiki-profile.service';
 import { WikiDiscussionService } from './wiki-discussion.service';
+import type { WikiDiscussionLiveService } from './wiki-discussion-live.service';
 
 const session = { userId: 'account-1' } as SessionPayload;
 const page = {
@@ -770,4 +771,33 @@ test('read-only thread members can subscribe without write-thread-comment permis
   assert.equal(readChecks, 2);
   assert.equal(writeChecks, 0);
   assert.equal(subscribed, true);
+});
+
+test('discussion invalidation is published only after the database mutation resolves', async () => {
+  let committed = false;
+  let published = false;
+  const store = {
+    wikiDiscussionThread: {
+      async findUnique() { return thread; },
+      async update() { committed = true; return { ...thread, status: 'deleted' }; }
+    },
+    wikiPage: { async findUnique() { return page; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
+    async assertCanReadThread() {},
+    async canManagePage() { return true; }
+  } as unknown as WikiPermissionService;
+  const live = {
+    publish(id: bigint) {
+      assert.equal(committed, true);
+      assert.equal(id, thread.id);
+      published = true;
+    }
+  } as unknown as WikiDiscussionLiveService;
+  const discussions = new WikiDiscussionService(store, profiles, permissions, undefined, undefined, live);
+
+  await discussions.deleteThread(session, '30', '정리');
+  assert.equal(published, true);
 });

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pause, Pencil, Pin, Plus, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiDiscussionStatus, type WikiDiscussionStatusCounts, type WikiDiscussionStatusFilter, type WikiThreadDetail, type WikiThreadListResponse, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
+import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, wikiDiscussionEventsUrl, WikiApiError, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiDiscussionStatus, type WikiDiscussionStatusCounts, type WikiDiscussionStatusFilter, type WikiThreadDetail, type WikiThreadListResponse, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { countWikiDiscussionStatuses, WIKI_DISCUSSION_STATUS_FILTERS, wikiDiscussionFilterCount, wikiDiscussionMatchesStatusFilter, wikiDiscussionStatusClass, wikiDiscussionStatusLabel } from '../../lib/wiki-discussion-status.mjs';
@@ -34,6 +34,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [loadingNewer, setLoadingNewer] = useState(false);
   const [loadingMoreThreads, setLoadingMoreThreads] = useState(false);
+  const [liveState, setLiveState] = useState<'idle' | 'connecting' | 'connected' | 'reconnecting'>('idle');
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +95,75 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       active = false;
     };
   }, [applyThreadResult, pageId, requestedCommentId, requestedThreadId, statusFilter]);
+
+  useEffect(() => {
+    const threadId = selected?.id;
+    if (!threadId || typeof EventSource === 'undefined') {
+      setLiveState('idle');
+      return;
+    }
+    let active = true;
+    let refreshRunning = false;
+    let refreshPending = false;
+    setLiveState('connecting');
+
+    const refreshFromLiveEvent = async () => {
+      if (refreshRunning) {
+        refreshPending = true;
+        return;
+      }
+      refreshRunning = true;
+      try {
+        do {
+          refreshPending = false;
+          const [detail, list] = await Promise.all([
+            fetchWikiThread(threadId),
+            fetchWikiThreads(pageId, undefined, statusFilter),
+          ]);
+          if (!active) return;
+          applyThreadResult(list);
+          if (detail.pageId !== pageId) {
+            setSelected(null);
+            setThreadInUrl(null);
+            setError('토론이 다른 문서로 이동되어 목록을 새로 불러왔습니다.');
+            return;
+          }
+          setSelected((current) => (current?.id === threadId ? detail : current));
+        } while (active && refreshPending);
+      } catch (caught) {
+        if (!active) return;
+        if (caught instanceof WikiApiError && caught.statusCode === 404) {
+          setSelected(null);
+          setThreads((current) => current.filter((thread) => thread.id !== threadId));
+          setThreadInUrl(null);
+          setError('이 토론을 더 이상 열람할 수 없거나 삭제되었습니다.');
+        } else {
+          setError(message(caught));
+        }
+      } finally {
+        refreshRunning = false;
+      }
+    };
+
+    const source = new EventSource(wikiDiscussionEventsUrl(threadId), { withCredentials: true });
+    const invalidate = () => void refreshFromLiveEvent();
+    source.addEventListener('sync', invalidate);
+    source.addEventListener('invalidate', invalidate);
+    source.onopen = () => {
+      if (active) setLiveState('connected');
+    };
+    source.onerror = () => {
+      if (!active) return;
+      setLiveState('reconnecting');
+      void refreshFromLiveEvent();
+    };
+    return () => {
+      active = false;
+      refreshPending = false;
+      source.close();
+      setLiveState('idle');
+    };
+  }, [applyThreadResult, pageId, selected?.id, statusFilter]);
 
   useEffect(() => {
     if (!selected || !requestedCommentId) return;
@@ -588,6 +658,10 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                   )}
                   <p className="mt-2 text-xs text-slate-500">
                     {selected.createdByName} · {wikiDiscussionStatusLabel(selected.status)} · 댓글 {selected.commentCount.toLocaleString('ko-KR')}개
+                    <span className="ml-2 inline-flex items-center gap-1.5" role="status">
+                      <span aria-hidden="true" className={`size-1.5 rounded-full ${liveState === 'connected' ? 'bg-emerald-300' : 'bg-amber-300'}`} />
+                      {liveState === 'connected' ? '실시간 연결됨' : liveState === 'reconnecting' ? '실시간 재연결 중' : '실시간 연결 중'}
+                    </span>
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">

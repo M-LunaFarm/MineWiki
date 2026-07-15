@@ -6,6 +6,7 @@ import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService, type WikiPermissionActor } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
+import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
 
 const THREAD_ACL_ACTIONS = ['read', 'write_thread_comment'] as const;
 const THREAD_ACL_EFFECTS = new Set(['allow', 'deny']);
@@ -27,7 +28,8 @@ export class WikiThreadAclService {
     private readonly prisma: PrismaService,
     private readonly profiles: WikiProfileService,
     private readonly permissions: WikiPermissionService,
-    @Optional() private readonly events?: BusinessEventService
+    @Optional() private readonly events?: BusinessEventService,
+    @Optional() private readonly live?: WikiDiscussionLiveService
   ) {}
 
   async getThreadAcl(threadIdValue: string, session?: SessionPayload | null) {
@@ -128,6 +130,7 @@ export class WikiThreadAclService {
       });
       return { rule, rules };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit('wiki.thread_acl.create', session, actor.profileId, thread.id, page.id, {
       ruleId: result.rule.id.toString(), action, effect, subjectType, subjectValue, reason
     });
@@ -165,6 +168,7 @@ export class WikiThreadAclService {
         orderBy: [{ action: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }]
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit('wiki.thread_acl.delete', session, actor.profileId, thread.id, page.id, {
       ruleId: ruleId.toString(), reason
     });
@@ -226,6 +230,7 @@ export class WikiThreadAclService {
       });
       return { rules, updatedAll };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.live?.publish(thread.id);
     await this.audit('wiki.thread_acl.reorder', session, actor.profileId, thread.id, page.id, {
       action, ruleIds: ids.map(String), reason
     });
