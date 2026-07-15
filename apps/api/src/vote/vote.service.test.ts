@@ -31,10 +31,10 @@ test('vote accepted creates dispatch attempts and queues vote id', async () => {
       track: async () => undefined
     } as never,
     {
-      getLastVoteForUsernameGlobal: async () => null,
-      getLastVoteForAccountGlobal: async () => null,
-      getLastVoteForMinecraftGlobal: async () => null,
-      getLastVoteForIpGlobal: async () => null,
+      getLastVoteForUsername: async () => null,
+      getLastVoteForAccount: async () => null,
+      getLastVoteForMinecraft: async () => null,
+      getLastVoteForIp: async () => null,
       getDailyCount: async () => 1
     } as never,
     createPrismaMock(createdAttempts) as never
@@ -47,7 +47,7 @@ test('vote accepted creates dispatch attempts and queues vote id', async () => {
       agreeTerms: true,
       agreePrivacy: true
     },
-    { ipAddress: '192.0.2.10' }
+    { accountId: 'canonical-account', ipAddress: '192.0.2.10' }
   );
 
   assert.equal(result.acknowledged, true);
@@ -92,10 +92,10 @@ test('atomic cooldown claim rejects a concurrent duplicate before dispatch and c
     { isCaptchaRequired: () => false } as never,
     { track: async () => undefined } as never,
     {
-      getLastVoteForUsernameGlobal: async () => null,
-      getLastVoteForAccountGlobal: async () => null,
-      getLastVoteForMinecraftGlobal: async () => null,
-      getLastVoteForIpGlobal: async () => null
+      getLastVoteForUsername: async () => null,
+      getLastVoteForAccount: async () => null,
+      getLastVoteForMinecraft: async () => null,
+      getLastVoteForIp: async () => null
     } as never,
     prisma as never
   );
@@ -104,7 +104,7 @@ test('atomic cooldown claim rejects a concurrent duplicate before dispatch and c
     service.submitVote(
       serverId,
       { username: 'DemoPlayer', agreeTerms: true, agreePrivacy: true },
-      { ipAddress: '192.0.2.10' }
+      { accountId: 'canonical-account', ipAddress: '192.0.2.10' }
     ),
     /이미 오늘 투표가 등록되었습니다/
   );
@@ -133,10 +133,10 @@ test('linked aliases vote as the canonical account and share a verified-email co
     { isCaptchaRequired: () => false } as never,
     { track: async () => undefined } as never,
     {
-      getLastVoteForAccountGlobal: async () => null,
-      getLastVoteForMinecraftGlobal: async () => null,
-      getLastVoteForUsernameGlobal: async () => null,
-      getLastVoteForIpGlobal: async () => null,
+      getLastVoteForAccount: async () => null,
+      getLastVoteForMinecraft: async () => null,
+      getLastVoteForUsername: async () => null,
+      getLastVoteForIp: async () => null,
       getDailyCount: async () => 1,
     } as never,
     prisma as never,
@@ -173,9 +173,9 @@ test('verified Minecraft voters cannot redirect rewards to a typed nickname', as
     { isCaptchaRequired: () => false } as never,
     { track: async () => undefined } as never,
     {
-      getLastVoteForMinecraftGlobal: async () => null,
-      getLastVoteForAccountGlobal: async () => null,
-      getLastVoteForIpGlobal: async () => null,
+      getLastVoteForMinecraft: async () => null,
+      getLastVoteForAccount: async () => null,
+      getLastVoteForIp: async () => null,
       getDailyCount: async () => 1,
     } as never,
     prisma as never,
@@ -198,20 +198,24 @@ test('verified Minecraft voters cannot redirect rewards to a typed nickname', as
 });
 
 test('verified Minecraft votes fail closed when the canonical player name is unavailable', async () => {
+  const prisma = createPrismaMock([]);
   const service = new VoteService(
     { ensureExists: async () => ({ id: serverId, voteRequiresOwnership: true, votesMonthly: 10 }) } as never,
     {} as never,
     { isCaptchaRequired: () => false } as never,
     {} as never,
     {} as never,
-    {} as never,
+    prisma as never,
   );
 
   await assert.rejects(
     service.submitVote(
       serverId,
       { username: 'TypedPlayer', agreeTerms: true, agreePrivacy: true },
-      { minecraftUuid: '3f0df999-1ab4-48cf-9c96-c5a834d0d1ee' },
+      {
+        accountId: 'canonical-account',
+        minecraftUuid: '3f0df999-1ab4-48cf-9c96-c5a834d0d1ee',
+      },
     ),
     /인증된 Minecraft 닉네임을 확인할 수 없습니다/,
   );
@@ -234,6 +238,54 @@ test('vote API rejects nicknames outside the Minecraft username character set', 
     ),
     /닉네임을 3~16자 사이로 입력해 주세요/,
   );
+});
+
+test('vote service rejects calls without a logged-in MineWiki account', async () => {
+  const service = new VoteService(
+    { ensureExists: async () => ({ id: serverId, voteRequiresOwnership: false, votesMonthly: 10 }) } as never,
+    {} as never,
+    { isCaptchaRequired: () => false } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    service.submitVote(serverId, {
+      username: 'DemoPlayer',
+      agreeTerms: true,
+      agreePrivacy: true,
+    }),
+    /로그인한 MineWiki 계정만 투표할 수 있습니다/,
+  );
+});
+
+test('eligibility checks the selected server instead of a global vote cooldown', async () => {
+  const calls: Array<[string, string]> = [];
+  const now = new Date();
+  const prisma = createPrismaMock([]) as ReturnType<typeof createPrismaMock> & { account: unknown };
+  const service = new VoteService(
+    { ensureExists: async () => ({ id: serverId, voteRequiresOwnership: false, votesMonthly: 10 }) } as never,
+    {} as never,
+    { isCaptchaRequired: () => false } as never,
+    {} as never,
+    {
+      getLastVoteForAccount: async (selectedServerId: string, accountId: string) => {
+        calls.push([selectedServerId, accountId]);
+        return { serverId: selectedServerId, username: 'DemoPlayer', votedAt: now };
+      },
+      getLastVoteForMinecraft: async () => null,
+      getLastVoteForIp: async () => null,
+    } as never,
+    prisma as never,
+  );
+
+  const result = await service.getEligibility(serverId, { accountId: 'canonical-account' });
+
+  assert.deepEqual(calls, [[serverId, 'canonical-account']]);
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, 'cooldown');
+  assert.ok(result.nextEligibleAt);
 });
 
 test('manual dispatch replay acquires failed state exactly once before queueing', async () => {
@@ -467,6 +519,14 @@ function createPrismaMock(
     }
   };
   return {
+    account: {
+      findUnique: async () => ({
+        id: 'canonical-account',
+        canonicalAccountId: 'canonical-account',
+        lifecycleStatus: 'active',
+      }),
+      findMany: async () => [],
+    },
     votifierTarget: {
       findMany: async () => [
         {

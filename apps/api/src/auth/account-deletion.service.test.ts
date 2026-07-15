@@ -321,6 +321,7 @@ if (!hasDatabase) {
       data: {
         identityType: 'verified_email',
         identityKey: verifiedEmailKey,
+        serverId: server.id,
         kstDay: new Date(new Date().toISOString().slice(0, 10)),
         voteId: vote.id,
       },

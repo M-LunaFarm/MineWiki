@@ -98,8 +98,6 @@ export function VoteModalModern({
   const [success, setSuccess] = useState<VoteResponse | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaKey, setCaptchaKey] = useState(0);
-  const [agreeTerms, setAgreeTerms] = useState(false);
-  const [agreePrivacy, setAgreePrivacy] = useState(false);
 
   const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
   const turnstileSiteKey = normalizeSiteKey(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
@@ -107,7 +105,7 @@ export function VoteModalModern({
 
   const captchaMode = turnstileSiteKey ? 'turnstile' : hcaptchaSiteKey ? 'hcaptcha' : 'none';
   const captchaRequired = captchaMode !== 'none';
-  const { identity, status: identityStatus } = useVoteMinecraftIdentity(isOpen, apiBaseUrl);
+  const { identity, eligibility, status: identityStatus } = useVoteMinecraftIdentity(isOpen, serverId, apiBaseUrl);
 
   useEffect(() => {
     if (identity?.playerName) setUsername(identity.playerName);
@@ -133,10 +131,6 @@ export function VoteModalModern({
       setError('닉네임은 영문/숫자/_ 조합으로 3~16자여야 합니다.');
       return;
     }
-    if (!agreeTerms || !agreePrivacy) {
-      setError('이용약관과 개인정보 처리방침에 동의해 주세요.');
-      return;
-    }
     if (captchaRequired && !captchaToken) {
       setError('CAPTCHA 확인을 완료해 주세요.');
       return;
@@ -154,8 +148,6 @@ export function VoteModalModern({
         body: JSON.stringify({
           username: normalizedUsername,
           captchaToken,
-          agreeTerms,
-          agreePrivacy,
         }),
       });
 
@@ -176,8 +168,6 @@ export function VoteModalModern({
           setUsername('');
           setCaptchaToken(null);
           setCaptchaKey((value) => value + 1);
-          setAgreeTerms(false);
-          setAgreePrivacy(false);
           setSuccess(null);
         }, 300);
       }, 3000);
@@ -207,8 +197,6 @@ export function VoteModalModern({
           setSuccess(null);
           setCaptchaToken(null);
           setCaptchaKey((value) => value + 1);
-          setAgreeTerms(false);
-          setAgreePrivacy(false);
         }}
         whileHover={{ y: -2 }}
         whileTap={{ scale: 0.98 }}
@@ -298,6 +286,31 @@ export function VoteModalModern({
                           <p className="text-sm font-medium text-blue-100">로그인 필요</p>
                           <p className="mt-1 text-xs leading-5 text-blue-100/70">투표 기록과 보상을 한 계정에 안전하게 연결하려면 먼저 로그인해 주세요.</p>
                           <a className="mt-2 inline-flex text-xs font-semibold text-blue-100 underline underline-offset-4" href="/login">로그인하고 투표하기</a>
+                        </div>
+                      ) : null}
+
+                      {identityStatus === 'error' ? (
+                        <div className="rounded-xl border border-red-400/25 bg-red-400/10 p-4">
+                          <p className="text-sm font-medium text-red-100">투표 상태를 확인하지 못했어요</p>
+                          <p className="mt-1 text-xs leading-5 text-red-100/70">창을 닫았다가 다시 열어 주세요. 상태가 확인되기 전에는 중복 투표 방지를 위해 전송하지 않습니다.</p>
+                        </div>
+                      ) : null}
+
+                      {eligibility?.reason === 'cooldown' ? (
+                        <div className="rounded-xl border border-emerald-400/25 bg-emerald-400/10 p-4">
+                          <p className="text-sm font-medium text-emerald-100">오늘 이 서버에 투표했어요</p>
+                          <p className="mt-1 text-xs leading-5 text-emerald-100/70">
+                            {eligibility.nextEligibleAt
+                              ? `${formatKstDateTime(eligibility.nextEligibleAt)} (KST)부터 다시 투표할 수 있습니다.`
+                              : '다음 날 자정부터 다시 투표할 수 있습니다.'}
+                          </p>
+                        </div>
+                      ) : null}
+
+                      {identityStatus === 'conflict' ? (
+                        <div className="rounded-xl border border-red-400/25 bg-red-400/10 p-4">
+                          <p className="text-sm font-medium text-red-100">계정 인증 확인 필요</p>
+                          <p className="mt-1 text-xs leading-5 text-red-100/70">연결된 계정에 서로 다른 Minecraft 인증이 있습니다. support@minewiki.kr로 병합을 요청해 주세요.</p>
                         </div>
                       ) : null}
 
@@ -391,47 +404,9 @@ export function VoteModalModern({
                         </div>
                       )}
 
-                      {/* Terms */}
-                      <div className="space-y-3 rounded-xl border border-[#30343b] bg-[#101216] p-4">
-                        <label className="flex items-start gap-3 cursor-pointer group">
-                          <input
-                            type="checkbox"
-                            checked={agreeTerms}
-                            onChange={(e) => setAgreeTerms(e.target.checked)}
-                            className="mt-1 w-4 h-4 rounded border-white/20 bg-white/5 text-brand-500 focus:ring-brand-500 focus:ring-offset-0"
-                          />
-                          <span className="text-sm text-muted-foreground">
-                            <a
-                              href="/policies/terms"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-100 underline decoration-dotted underline-offset-2 hover:text-blue-50"
-                            >
-                              이용약관
-                            </a>
-                            에 동의합니다
-                          </span>
-                        </label>
-                        <label className="flex items-start gap-3 cursor-pointer group">
-                          <input
-                            type="checkbox"
-                            checked={agreePrivacy}
-                            onChange={(e) => setAgreePrivacy(e.target.checked)}
-                            className="mt-1 w-4 h-4 rounded border-white/20 bg-white/5 text-brand-500 focus:ring-brand-500 focus:ring-offset-0"
-                          />
-                          <span className="text-sm text-muted-foreground">
-                            <a
-                              href="/policies/privacy"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-blue-100 underline decoration-dotted underline-offset-2 hover:text-blue-50"
-                            >
-                              개인정보 처리방침
-                            </a>
-                            에 동의합니다
-                          </span>
-                        </label>
-                      </div>
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        투표에는 <a href="/policies/voting" target="_blank" rel="noopener noreferrer" className="text-blue-100 underline decoration-dotted underline-offset-2 hover:text-blue-50">투표 무결성 정책</a>이 적용됩니다.
+                      </p>
 
                       {/* Error message */}
                       {error && (
@@ -461,10 +436,9 @@ export function VoteModalModern({
                           disabled={
                             isSubmitting ||
                             (captchaRequired && !captchaToken) ||
-                            !agreeTerms ||
-                            !agreePrivacy
-                            || (requiresOwnership && identityStatus !== 'verified')
-                            || identityStatus === 'guest'
+                            (requiresOwnership && identityStatus !== 'verified')
+                            || ['idle', 'loading', 'guest', 'error', 'conflict'].includes(identityStatus)
+                            || eligibility?.eligible === false
                           }
                           className="flex-1 rounded-lg bg-[#f5f7fb] px-4 py-3 font-medium text-[#111827] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                         >

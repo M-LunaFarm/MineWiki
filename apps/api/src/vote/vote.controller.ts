@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, ParseIntPipe, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, ConflictException, Controller, Get, NotFoundException, Param, ParseIntPipe, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { VoteService } from './vote.service';
 import { type SessionPayload } from '../session/session.service';
@@ -37,6 +37,38 @@ export class VoteController {
       minecraftUuid,
       minecraftUsername
     });
+  }
+
+  @Get('eligibility')
+  @UseGuards(SessionGuard)
+  async eligibility(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    try {
+      const identity = await this.minecraft.getIdentity(session.userId);
+      return this.voteService.getEligibility(serverId, {
+        accountId: session.userId,
+        ipAddress: session.requestIp ?? undefined,
+        minecraftUuid: identity.uuid,
+        minecraftUsername: identity.playerName,
+      });
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        return this.voteService.getEligibility(serverId, {
+          accountId: session.userId,
+          ipAddress: session.requestIp ?? undefined,
+        });
+      }
+      if (error instanceof ConflictException) {
+        return this.voteService.getEligibility(serverId, {
+          accountId: session.userId,
+          ipAddress: session.requestIp ?? undefined,
+          minecraftIdentityConflict: true,
+        });
+      }
+      throw error;
+    }
   }
 
   @Get('recent')

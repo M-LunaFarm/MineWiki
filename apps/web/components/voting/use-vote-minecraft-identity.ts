@@ -4,16 +4,24 @@ import { useEffect, useState } from 'react';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 
 export interface VoteMinecraftIdentity {
-  readonly uuid: string;
-  readonly playerName?: string;
-  readonly msOwned: boolean;
+  readonly playerName: string | null;
 }
 
-export type VoteIdentityStatus = 'idle' | 'loading' | 'verified' | 'unverified' | 'guest' | 'error';
+export interface VoteEligibility {
+  readonly eligible: boolean;
+  readonly reason: 'eligible' | 'cooldown' | 'ownership_required' | 'identity_conflict';
+  readonly requiresOwnership: boolean;
+  readonly identityStatus: 'verified' | 'unverified' | 'conflict';
+  readonly playerName: string | null;
+  readonly nextEligibleAt: string | null;
+}
 
-export function useVoteMinecraftIdentity(open: boolean, apiBaseUrl?: string) {
+export type VoteIdentityStatus = 'idle' | 'loading' | 'verified' | 'unverified' | 'conflict' | 'guest' | 'error';
+
+export function useVoteMinecraftIdentity(open: boolean, serverId: string, apiBaseUrl?: string) {
   const [status, setStatus] = useState<VoteIdentityStatus>('idle');
   const [identity, setIdentity] = useState<VoteMinecraftIdentity | null>(null);
+  const [eligibility, setEligibility] = useState<VoteEligibility | null>(null);
   const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
 
   useEffect(() => {
@@ -21,19 +29,17 @@ export function useVoteMinecraftIdentity(open: boolean, apiBaseUrl?: string) {
     const controller = new AbortController();
     setStatus('loading');
     setIdentity(null);
+    setEligibility(null);
 
-    void fetch(`${baseUrl}/v1/minecraft/identity`, {
+    void fetch(`${baseUrl}/v1/servers/${serverId}/votes/eligibility`, {
       credentials: 'include',
       signal: controller.signal,
     }).then(async (response) => {
       if (response.ok) {
-        const nextIdentity = (await response.json()) as VoteMinecraftIdentity;
-        if (!nextIdentity.msOwned || !nextIdentity.playerName) {
-          setStatus('unverified');
-          return;
-        }
-        setIdentity(nextIdentity);
-        setStatus('verified');
+        const nextEligibility = (await response.json()) as VoteEligibility;
+        setEligibility(nextEligibility);
+        setIdentity({ playerName: nextEligibility.playerName });
+        setStatus(nextEligibility.identityStatus === 'conflict' ? 'conflict' : nextEligibility.identityStatus);
         return;
       }
       setStatus(response.status === 401 ? 'guest' : response.status === 404 ? 'unverified' : 'error');
@@ -43,7 +49,7 @@ export function useVoteMinecraftIdentity(open: boolean, apiBaseUrl?: string) {
     });
 
     return () => controller.abort();
-  }, [baseUrl, open]);
+  }, [baseUrl, open, serverId]);
 
-  return { identity, status } as const;
+  return { identity, eligibility, status } as const;
 }

@@ -14,6 +14,15 @@ test('submitting a server vote requires an authenticated session', () => {
   assert.ok(guards?.includes(SessionGuard));
 });
 
+test('reading vote eligibility requires an authenticated session', () => {
+  const guards = Reflect.getMetadata(
+    GUARDS_METADATA,
+    VoteController.prototype.eligibility,
+  ) as unknown[] | undefined;
+
+  assert.ok(guards?.includes(SessionGuard));
+});
+
 test('vote submission binds the canonical Minecraft identity and request IP', async () => {
   const calls: unknown[] = [];
   const controller = new VoteController(

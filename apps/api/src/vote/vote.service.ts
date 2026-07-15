@@ -22,9 +22,7 @@ import { PrismaService } from '../common/prisma.service';
 
 const votePayloadSchema = z.object({
   username: z.string().trim().regex(/^[A-Za-z0-9_]{3,16}$/),
-  captchaToken: z.string().trim().min(1).optional(),
-  agreeTerms: z.boolean().optional(),
-  agreePrivacy: z.boolean().optional()
+  captchaToken: z.string().trim().min(1).optional()
 });
 const minecraftUsernamePattern = /^[A-Za-z0-9_]{3,16}$/;
 
@@ -41,6 +39,15 @@ export interface VoteModerationQuery {
   readonly status?: 'valid' | 'invalid';
   readonly search?: string;
   readonly limit: number;
+}
+
+export interface VoteEligibility {
+  readonly eligible: boolean;
+  readonly reason: 'eligible' | 'cooldown' | 'ownership_required' | 'identity_conflict';
+  readonly requiresOwnership: boolean;
+  readonly identityStatus: 'verified' | 'unverified' | 'conflict';
+  readonly playerName: string | null;
+  readonly nextEligibleAt: string | null;
 }
 
 interface StoredVotifierTargetReference {
@@ -76,9 +83,6 @@ export class VoteService {
       throw new BadRequestException('닉네임을 3~16자 사이로 입력해 주세요.');
     }
     const payload = parsedPayload.data;
-    if (!payload.agreeTerms || !payload.agreePrivacy) {
-      throw new BadRequestException('이용약관과 개인정보 처리방침에 동의해 주세요.');
-    }
     await this.verifyCaptchaToken(payload.captchaToken, context.ipAddress);
     context = await this.resolveVoteIdentity(context);
     const verifiedMinecraftUsername = context.minecraftUsername?.trim();
@@ -103,13 +107,13 @@ export class VoteService {
 
     const previousVotes = await Promise.all([
       context.minecraftUuid
-        ? this.voteStore.getLastVoteForMinecraftGlobal(context.minecraftUuid)
+        ? this.voteStore.getLastVoteForMinecraft(serverId, context.minecraftUuid)
         : undefined,
       context.accountId
-        ? this.voteStore.getLastVoteForAccountGlobal(context.accountId)
+        ? this.voteStore.getLastVoteForAccount(serverId, context.accountId)
         : undefined,
       !context.minecraftUuid && !context.accountId
-        ? this.voteStore.getLastVoteForUsernameGlobal(normalizedUsername)
+        ? this.voteStore.getLastVoteForUsername(serverId, normalizedUsername)
         : undefined,
     ]);
 
@@ -120,7 +124,7 @@ export class VoteService {
     }
 
     if (context.ipAddress) {
-      const lastIpVote = await this.voteStore.getLastVoteForIpGlobal(context.ipAddress);
+      const lastIpVote = await this.voteStore.getLastVoteForIp(serverId, context.ipAddress);
       if (lastIpVote && isSameKstDay(lastIpVote.votedAt, now)) {
         throw new ForbiddenException(
           `같은 네트워크에서 오늘 이미 투표가 진행되었습니다. 다음 가능 시간: ${nextKstResetAt.toISOString()}`
@@ -150,6 +154,7 @@ export class VoteService {
           data: {
             identityType: derivePlayerIdentityType(context),
             identityKey: playerKey,
+            serverId,
             kstDay,
             voteId: createdVote.id
           }
@@ -159,6 +164,7 @@ export class VoteService {
             data: {
               identityType: 'account',
               identityKey: `acct:${context.accountId}`,
+              serverId,
               kstDay,
               voteId: createdVote.id
             }
@@ -169,6 +175,7 @@ export class VoteService {
             data: {
               identityType: 'verified_email',
               identityKey: verifiedEmailKey,
+              serverId,
               kstDay,
               voteId: createdVote.id
             }
@@ -179,6 +186,7 @@ export class VoteService {
             data: {
               identityType: 'ip',
               identityKey: context.ipAddress,
+              serverId,
               kstDay,
               voteId: createdVote.id
             }
@@ -291,8 +299,65 @@ export class VoteService {
     };
   }
 
+  async getEligibility(
+    serverId: string,
+    context: VoteRequestContext & { readonly minecraftIdentityConflict?: boolean },
+  ): Promise<VoteEligibility> {
+    const server = await this.serverService.ensureExists(serverId);
+    const resolved = await this.resolveVoteIdentity(context);
+    const requiresOwnership = server.voteRequiresOwnership;
+
+    if (context.minecraftIdentityConflict) {
+      return {
+        eligible: false,
+        reason: 'identity_conflict',
+        requiresOwnership,
+        identityStatus: 'conflict',
+        playerName: null,
+        nextEligibleAt: null,
+      };
+    }
+
+    const identityStatus = resolved.minecraftUuid ? 'verified' : 'unverified';
+    if (requiresOwnership && identityStatus !== 'verified') {
+      return {
+        eligible: false,
+        reason: 'ownership_required',
+        requiresOwnership,
+        identityStatus,
+        playerName: null,
+        nextEligibleAt: null,
+      };
+    }
+
+    const previousVotes = await Promise.all([
+      resolved.minecraftUuid
+        ? this.voteStore.getLastVoteForMinecraft(serverId, resolved.minecraftUuid)
+        : undefined,
+      resolved.accountId
+        ? this.voteStore.getLastVoteForAccount(serverId, resolved.accountId)
+        : undefined,
+      resolved.ipAddress
+        ? this.voteStore.getLastVoteForIp(serverId, resolved.ipAddress)
+        : undefined,
+    ]);
+    const now = new Date();
+    const coolingDown = previousVotes.some((vote) => vote && isSameKstDay(vote.votedAt, now));
+
+    return {
+      eligible: !coolingDown,
+      reason: coolingDown ? 'cooldown' : 'eligible',
+      requiresOwnership,
+      identityStatus,
+      playerName: resolved.minecraftUsername?.trim() || null,
+      nextEligibleAt: coolingDown ? getNextKstResetAt(now).toISOString() : null,
+    };
+  }
+
   private async resolveVoteIdentity(context: VoteRequestContext): Promise<VoteRequestContext> {
-    if (!context.accountId) return context;
+    if (!context.accountId) {
+      throw new ForbiddenException('로그인한 MineWiki 계정만 투표할 수 있습니다.');
+    }
     const seed = await this.prisma.account.findUnique({
       where: { id: context.accountId },
       select: { id: true, canonicalAccountId: true, lifecycleStatus: true }
