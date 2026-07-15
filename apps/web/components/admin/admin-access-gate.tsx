@@ -15,7 +15,7 @@ export function AdminAccessGate({ children }: { readonly children: ReactNode }) 
     const roles = account.access?.roles ?? [];
     const permissions = account.access?.permissions ?? [];
     const isGlobalAdmin = Boolean(
-      account.access?.isElevated || roles.includes('owner') || roles.includes('admin'),
+      roles.includes('owner') || roles.includes('admin'),
     );
     if (isGlobalAdmin || pathname === '/admin') return isGlobalAdmin || permissions.some((permission) => permission.endsWith('.admin'));
     if (pathname.startsWith('/admin/support')) return roles.includes('support_agent') || permissions.includes('support.admin');

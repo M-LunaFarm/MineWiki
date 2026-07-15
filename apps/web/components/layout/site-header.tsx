@@ -83,8 +83,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
   }, [pathname]);
 
   const hasAdminAccess = Boolean(
-    account?.access?.isElevated ||
-      account?.access?.roles.some((role) => role === 'admin' || role === 'owner') ||
+    account?.access?.roles.some((role) => role === 'admin' || role === 'owner') ||
       account?.access?.permissions.some((permission) => permission.endsWith('.admin')),
   );
 
