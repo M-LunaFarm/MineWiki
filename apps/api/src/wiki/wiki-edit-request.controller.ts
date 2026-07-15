@@ -11,6 +11,19 @@ import { WikiEditRequestService } from './wiki-edit-request.service';
 export class WikiEditRequestController {
   constructor(private readonly requests: WikiEditRequestService) {}
 
+  @Get('edit-requests')
+  @UseGuards(OptionalSessionGuard)
+  queue(
+    @Req() request: FastifyRequest,
+    @Query('status') status?: string,
+    @Query('scope') scope?: string,
+    @Query('namespace') namespace?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ) {
+    return this.requests.listGlobal(request.sessionPayload ?? null, { status, scope, namespace, cursor, limit });
+  }
+
   @Get('pages/:pageId/edit-requests')
   @UseGuards(OptionalSessionGuard)
   list(@Param('pageId') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string) {

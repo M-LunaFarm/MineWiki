@@ -487,6 +487,22 @@ export interface WikiEditRequestListResponse {
   readonly currentRevisionId: string | null;
 }
 
+export interface WikiEditRequestQueueItem extends WikiEditRequestSummary {
+  readonly pageTitle: string;
+  readonly pageDisplayTitle: string;
+  readonly namespace: string;
+  readonly routePath: string;
+  readonly currentRevisionId: string | null;
+  readonly canReview: boolean;
+  readonly isStale: boolean;
+}
+
+export interface WikiEditRequestQueueResponse {
+  readonly items: WikiEditRequestQueueItem[];
+  readonly viewerProfileId: string | null;
+  readonly nextCursor: string | null;
+}
+
 export interface WikiEditRequestDiffResponse {
   readonly requestId: string;
   readonly baseRevisionId: string;
@@ -959,6 +975,20 @@ export async function fetchWikiEditRequests(pageId: string, cursor?: string): Pr
   const params = new URLSearchParams({ limit: '30' });
   if (cursor) params.set('cursor', cursor);
   return readWikiBrowser<WikiEditRequestListResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/edit-requests?${params.toString()}`);
+}
+
+export async function fetchWikiEditRequestQueue(input: {
+  readonly status?: string;
+  readonly scope?: string;
+  readonly namespace?: string;
+  readonly cursor?: string;
+} = {}): Promise<WikiEditRequestQueueResponse> {
+  const params = new URLSearchParams({ limit: '30' });
+  if (input.status) params.set('status', input.status);
+  if (input.scope) params.set('scope', input.scope);
+  if (input.namespace) params.set('namespace', input.namespace);
+  if (input.cursor) params.set('cursor', input.cursor);
+  return readWikiBrowser<WikiEditRequestQueueResponse>(`/v1/wiki/edit-requests?${params.toString()}`);
 }
 
 export async function fetchWikiEditRequest(requestId: string): Promise<WikiEditRequestSummary> {

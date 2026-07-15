@@ -7,6 +7,7 @@ import type { WikiEditService } from './wiki-edit.service';
 import { WikiEditRequestService } from './wiki-edit-request.service';
 import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiProfileService } from './wiki-profile.service';
+import type { WikiRoutePathResolver } from './wiki-route-path.resolver';
 
 const session = { userId: 'account-1' } as SessionPayload;
 const page = {
@@ -73,6 +74,44 @@ test('edit request detail enforces page visibility and returns the exact request
   assert.equal(result.createdByName, '작성자');
   assert.equal(readChecked, true);
   assert.equal(rawChecked, true);
+});
+
+test('global edit request queue resolves readable pages and reviewer capability', async () => {
+  const prisma = {
+    wikiEditRequest: { async findMany() { return [request]; } },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'guide' }]; } },
+    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }]; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
+  const actions: string[] = [];
+  const permissions = {
+    async assertCanReadPage() { actions.push('read'); },
+    async assertCanUsePageAction(input: { action: string }) { actions.push(input.action); },
+    actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
+    async canManagePage() { return true; }
+  } as unknown as WikiPermissionService;
+  const routes = {
+    async preload() { return { routePath() { return '/guide/guide'; } }; }
+  } as unknown as WikiRoutePathResolver;
+  const service = new WikiEditRequestService(
+    prisma,
+    profiles,
+    permissions,
+    {} as WikiEditService,
+    undefined,
+    undefined,
+    routes
+  );
+
+  const result = await service.listGlobal(session, { status: 'open', namespace: 'guide' });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.routePath, '/guide/guide');
+  assert.equal(result.items[0]?.canReview, true);
+  assert.equal(result.items[0]?.namespace, 'guide');
+  assert.equal(result.viewerProfileId, '20');
+  assert.deepEqual(actions, ['read', 'raw']);
 });
 
 test('only a page manager can reject an edit request', async () => {
