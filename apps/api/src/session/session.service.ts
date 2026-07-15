@@ -120,10 +120,19 @@ export class SessionService {
     const expiresAt = new Date(
       issuedAt.getTime() + (options.ttlSeconds ?? DEFAULT_SESSION_TTL_SECONDS) * 1000
     );
-    const policyConsent = await withActiveCanonicalAccountGroup(
+    const sessionIdentity = await withActiveCanonicalAccountGroup(
       this.prisma,
       [options.userId],
       async (tx, group) => {
+        const seedAccount = await tx.account.findUnique({
+          where: { id: options.userId },
+          select: { id: true, canonicalAccountId: true },
+        });
+        if (!seedAccount) throw new UnauthorizedException('계정이 존재하지 않습니다.');
+        const canonicalAccountId = seedAccount.canonicalAccountId ?? seedAccount.id;
+        if (!group.accountIds.includes(canonicalAccountId)) {
+          throw new UnauthorizedException('대표 계정 연결 상태를 확인할 수 없습니다.');
+        }
         const consents = await tx.accountConsent.findMany({
           where: {
             accountId: { in: [...group.accountIds] },
@@ -139,7 +148,7 @@ export class SessionService {
         await tx.session.create({
           data: {
             id: sessionId,
-            accountId: options.userId,
+            accountId: canonicalAccountId,
             issuedAt,
             expiresAt,
             token: hashSessionToken(token),
@@ -153,7 +162,7 @@ export class SessionService {
             privacyPolicyVersion: status.privacy.acceptedVersion,
           },
         });
-        return status;
+        return { policyConsent: status, canonicalAccountId };
       },
       { inactiveError: () => new UnauthorizedException('계정이 활성 상태가 아닙니다.') },
     );
@@ -162,7 +171,7 @@ export class SessionService {
       sessionId,
       cookie: this.serializeCookie({
         sessionId,
-        userId: options.userId,
+        userId: sessionIdentity.canonicalAccountId,
         issuedAt,
         expiresAt,
         token,
@@ -178,11 +187,11 @@ export class SessionService {
         ipAddress: options.ipAddress ?? null,
         userAgent: options.userAgent ?? null,
         lastActiveAt: issuedAt,
-        termsPolicyVersion: policyConsent.terms.acceptedVersion,
-        privacyPolicyVersion: policyConsent.privacy.acceptedVersion,
+        termsPolicyVersion: sessionIdentity.policyConsent.terms.acceptedVersion,
+        privacyPolicyVersion: sessionIdentity.policyConsent.privacy.acceptedVersion,
       }),
       expiresAt: expiresAt.toISOString(),
-      policyConsent,
+      policyConsent: sessionIdentity.policyConsent,
     };
   }
 
@@ -277,19 +286,21 @@ export class SessionService {
   }
 
   async revokeUserSession(userId: string, sessionId: string): Promise<void> {
+    const accountIds = await this.getCanonicalAccountIds(userId);
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId }
     });
-    if (!session || session.accountId !== userId) {
+    if (!session || !accountIds.includes(session.accountId)) {
       return;
     }
     await this.revokeSession(sessionId);
   }
 
   async revokeAllSessions(userId: string, exceptSessionId?: string): Promise<void> {
+    const accountIds = await this.getCanonicalAccountIds(userId);
     await this.prisma.session.deleteMany({
       where: {
-        accountId: userId,
+        accountId: { in: accountIds },
         id: exceptSessionId ? { not: exceptSessionId } : undefined
       }
     });
@@ -301,7 +312,7 @@ export class SessionService {
   ): Promise<SessionRecord | undefined> {
     const record = await this.prisma.session.findUnique({
       where: { id: sessionId },
-      include: { account: { select: { lifecycleStatus: true } } }
+      include: { account: { select: { lifecycleStatus: true, canonicalAccountId: true } } }
     });
     if (!record || (record.account && record.account.lifecycleStatus !== 'active')) {
       return undefined;
@@ -310,10 +321,22 @@ export class SessionService {
       await this.revokeSession(sessionId);
       return undefined;
     }
-    const access = await this.roles?.getAccountAccess(record.accountId).catch(() => undefined);
+    const canonicalAccountId = record.account.canonicalAccountId ?? record.accountId;
+    if (canonicalAccountId !== record.accountId) {
+      const canonical = await this.prisma.account.findUnique({
+        where: { id: canonicalAccountId },
+        select: { lifecycleStatus: true },
+      });
+      if (!canonical || canonical.lifecycleStatus !== 'active') return undefined;
+      await this.prisma.session.updateMany({
+        where: { id: record.id, accountId: record.accountId },
+        data: { accountId: canonicalAccountId },
+      });
+    }
+    const access = await this.roles?.getAccountAccess(canonicalAccountId).catch(() => undefined);
     return {
       sessionId: record.id,
-      userId: record.accountId,
+      userId: canonicalAccountId,
       issuedAt: record.issuedAt,
       expiresAt: record.expiresAt,
       token: presentedToken ?? record.token,
@@ -455,8 +478,9 @@ export class SessionService {
     userId: string,
     currentSessionId?: string
   ): Promise<SessionSummary[]> {
+    const accountIds = await this.getCanonicalAccountIds(userId);
     const sessions = await this.prisma.session.findMany({
-      where: { accountId: userId },
+      where: { accountId: { in: accountIds } },
       orderBy: { lastActiveAt: 'desc' }
     });
     return sessions.map((session) => ({

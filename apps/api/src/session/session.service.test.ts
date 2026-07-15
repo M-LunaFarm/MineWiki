@@ -65,6 +65,56 @@ if (!hasDatabase) {
     }
   });
 
+  test('linked aliases issue and lazily migrate sessions to the canonical account', async () => {
+    const canonicalAccountId = await createTestAccount();
+    const aliasAccountId = await createTestAccount();
+    const legacySessionId = randomUUID();
+    const now = new Date();
+    try {
+      await prisma.account.update({
+        where: { id: canonicalAccountId },
+        data: { canonicalAccountId },
+      });
+      await prisma.account.update({
+        where: { id: aliasAccountId },
+        data: { canonicalAccountId },
+      });
+
+      const issued = await service.issueSession({ userId: aliasAccountId });
+      const issuedRow = await prisma.session.findUnique({ where: { id: issued.sessionId } });
+      assert.equal(issuedRow?.accountId, canonicalAccountId);
+
+      await prisma.session.create({
+        data: {
+          id: legacySessionId,
+          accountId: aliasAccountId,
+          token: hashSessionToken(randomBytes(32).toString('base64url')),
+          issuedAt: now,
+          expiresAt: new Date(now.getTime() + 60_000),
+          tokenVersion: 1,
+          isElevated: false,
+          lastActiveAt: now,
+        },
+      });
+
+      const resolved = await service.getSession(legacySessionId);
+      assert.equal(resolved?.userId, canonicalAccountId);
+      assert.equal(
+        (await prisma.session.findUnique({ where: { id: legacySessionId } }))?.accountId,
+        canonicalAccountId,
+      );
+      const listed = await service.listSessionsForUser(aliasAccountId, legacySessionId);
+      assert.equal(listed.some((session) => session.sessionId === legacySessionId), true);
+      assert.equal(listed.some((session) => session.sessionId === issued.sessionId), true);
+    } finally {
+      await prisma.session.deleteMany({
+        where: { accountId: { in: [canonicalAccountId, aliasAccountId] } },
+      });
+      await prisma.account.delete({ where: { id: aliasAccountId } }).catch(() => undefined);
+      await prisma.account.delete({ where: { id: canonicalAccountId } }).catch(() => undefined);
+    }
+  });
+
   test('policy acceptance is immutable and unlocks every active canonical session', async () => {
     const userId = await createTestAccount();
     try {
