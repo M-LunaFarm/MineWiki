@@ -72,6 +72,44 @@ export interface AccountDeletionStatus {
   readonly adminNote: string | null;
 }
 
+export type MfaStepUpPurpose =
+  | 'wiki_admin'
+  | 'role_admin'
+  | 'server_admin'
+  | 'review_moderation'
+  | 'vote_admin'
+  | 'guild_admin'
+  | 'file_admin'
+  | 'audit_read'
+  | 'account_delete_admin'
+  | 'mfa_manage';
+
+export interface MfaStatus {
+  readonly totpEnabled: boolean;
+  readonly pendingEnrollment: boolean;
+  readonly pendingExpiresAt: string | null;
+  readonly recoveryCodesRemaining: number;
+  readonly lockedUntil: string | null;
+}
+
+export interface TotpEnrollment {
+  readonly secret: string;
+  readonly otpauthUri: string;
+  readonly expiresAt: string;
+}
+
+export class ApiClientError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly status: number,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'ApiClientError';
+  }
+}
+
 export class AccountDeletionBlockedError extends Error {
   constructor(message: string, readonly blockers: AccountDeletionBlocker[]) { super(message); }
 }
@@ -88,6 +126,66 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     throw new Error(payload?.message ?? 'Request failed.');
   }
   return (await response.json()) as T;
+}
+
+async function mfaRequest<T>(
+  path: string,
+  options: { readonly method?: 'GET' | 'POST' | 'DELETE'; readonly body?: unknown } = {},
+): Promise<T> {
+  const method = options.method ?? 'GET';
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    credentials: 'include',
+    headers: method === 'GET'
+      ? undefined
+      : { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new ApiClientError(
+      typeof payload?.message === 'string' ? payload.message : '다중 인증 요청을 처리하지 못했습니다.',
+      typeof payload?.code === 'string' ? payload.code : 'mfa_request_failed',
+      response.status,
+      payload?.details,
+    );
+  }
+  if (method !== 'GET') clearCsrfToken();
+  return payload as T;
+}
+
+export function fetchMfaStatus(): Promise<MfaStatus> {
+  return mfaRequest<MfaStatus>('/v1/auth/mfa');
+}
+
+export function beginTotpEnrollment(): Promise<TotpEnrollment> {
+  return mfaRequest<TotpEnrollment>('/v1/auth/mfa/totp/enrollment', { method: 'POST', body: {} });
+}
+
+export function confirmTotpEnrollment(code: string): Promise<{
+  readonly enabled: true;
+  readonly recoveryCodes: readonly string[];
+}> {
+  return mfaRequest('/v1/auth/mfa/totp/enrollment/confirm', {
+    method: 'POST',
+    body: { code },
+  });
+}
+
+export function performMfaStepUp(input: {
+  readonly method: 'totp' | 'recovery_code';
+  readonly purpose: MfaStepUpPurpose;
+  readonly code: string;
+}): Promise<{ readonly authLevel: 'aal2'; readonly purpose: MfaStepUpPurpose; readonly expiresAt: string }> {
+  return mfaRequest('/v1/auth/mfa/step-up', { method: 'POST', body: input });
+}
+
+export function regenerateMfaRecoveryCodes(): Promise<{ readonly recoveryCodes: readonly string[] }> {
+  return mfaRequest('/v1/auth/mfa/recovery-codes/regenerate', { method: 'POST', body: {} });
+}
+
+export function disableTotp(): Promise<{ readonly enabled: false }> {
+  return mfaRequest('/v1/auth/mfa/totp', { method: 'DELETE' });
 }
 
 export async function registerEmail(payload: {

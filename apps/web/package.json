@@ -12,11 +12,11 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@hcaptcha/react-hcaptcha": "^1.12.2",
+    "@marsidev/react-turnstile": "^1.3.1",
     "@minewiki/clients": "workspace:*",
     "@minewiki/schemas": "workspace:*",
     "@minewiki/ui": "workspace:*",
-    "@hcaptcha/react-hcaptcha": "^1.12.2",
-    "@marsidev/react-turnstile": "^1.3.1",
     "@radix-ui/react-tabs": "^1.1.13",
     "@tanstack/react-query": "^5.29.0",
     "autoprefixer": "^10.4.17",
@@ -25,6 +25,7 @@
     "marked": "^12.0.2",
     "next": "^15.5.4",
     "postcss": "^8.4.35",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sanitize-html": "^2.13.0",
@@ -34,6 +35,7 @@
   "devDependencies": {
     "@playwright/test": "^1.56.1",
     "@types/node": "^22.7.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.13.0",

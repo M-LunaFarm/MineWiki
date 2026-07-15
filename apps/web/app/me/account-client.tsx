@@ -19,6 +19,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { MinecraftIdentity, OAuthProvider } from '@minewiki/schemas';
 import { SessionList } from '../../components/account/session-list';
+import { MfaSecurityPanel } from '../../components/account/mfa-security-panel';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
 import { useAuth } from '../../components/providers/auth-context';
 import { SiteHeader } from '../../components/layout/site-header';
@@ -976,6 +977,8 @@ export function AccountClientPage() {
             onMessageChange={setMergeRequestMessage}
             onCreateRequest={() => void handleCreateMergeRequest()}
           />
+
+          <MfaSecurityPanel />
 
           <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
             <section className="rounded-lg border border-[#30363d] bg-[#181a1d] p-6 shadow-sm">

@@ -54,6 +54,9 @@ export const authAccountSchema = z.object({
   access: z
     .object({
       isElevated: z.boolean(),
+      authLevel: z.enum(['aal1', 'aal2']).optional(),
+      stepUpExpiresAt: z.string().datetime().nullable().optional(),
+      stepUpPurpose: z.string().nullable().optional(),
       roles: z.array(z.string()),
       permissions: z.array(z.string()),
     })
@@ -173,6 +176,8 @@ export const sessionSummarySchema = z.object({
   isCurrent: z.boolean(),
   tokenVersion: z.number().int().positive(),
   isElevated: z.boolean(),
+  authLevel: z.enum(['aal1', 'aal2']).optional(),
+  stepUpExpiresAt: z.string().datetime().nullable().optional(),
 });
 
 export const sessionListResponseSchema = z.object({
