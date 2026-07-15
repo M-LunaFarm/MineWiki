@@ -5,6 +5,7 @@ import {
   buildServerWikiToolPath,
   buildStandardWikiToolPath,
   buildWikiDiffPath,
+  buildWikiPagePath,
   buildWikiRevisionPath,
   buildWikiRoutePath,
   decodeWikiRouteSegment,
@@ -34,6 +35,26 @@ test('builds nested category document paths inside the category namespace', () =
     buildWikiRoutePath('category', ['%EA%B2%8C%EC%9E%84%ED%94%8C%EB%A0%88%EC%9D%B4', '%EB%AA%B9']),
     '/wiki/category/게임플레이/몹',
   );
+});
+
+test('preserves every namespace after a page move response', () => {
+  const routes = [
+    ['main', '설치', '/wiki/설치'],
+    ['mod', 'Sodium', '/mod/Sodium'],
+    ['modpack', 'All_the_Mods', '/modpack/All_the_Mods'],
+    ['dev', 'API/역사', '/dev/API/역사'],
+    ['guide', '시작/설치', '/guide/시작/설치'],
+    ['data', '블록', '/data/블록'],
+    ['help', '문법', '/help/문법'],
+    ['project', 'MineWiki', '/project/MineWiki'],
+    ['template', '서버', '/template/서버'],
+    ['category', '게임플레이/몹', '/wiki/category/게임플레이/몹'],
+    ['file', 'logo.png', '/file/logo.png'],
+    ['server', 'minewiki/규칙', '/server/minewiki/규칙'],
+  ];
+  for (const [namespace, slug, expected] of routes) {
+    assert.equal(buildWikiPagePath(namespace, slug), expected);
+  }
 });
 
 test('keeps category edit and history tools outside document title space', () => {

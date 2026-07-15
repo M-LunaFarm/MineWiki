@@ -6,7 +6,7 @@ import { ArchiveRestore, Code2, Compass, FilePenLine, FolderPen, GitCommitHorizo
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { WikiWatchButton } from './wiki-watch-button';
-import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { buildServerWikiToolPath, buildWikiPagePath } from '../../lib/wiki-routes.mjs';
 
 interface WikiPageToolsProps {
   readonly pageId: string;
@@ -171,9 +171,5 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
 }
 
 function pageHref(namespace: string, slug: string): string {
-  const encoded = slug.split('/').map(encodeURIComponent).join('/');
-  if (['server', 'mod', 'modpack', 'dev', 'help', 'project', 'file'].includes(namespace)) {
-    return `/${namespace}/${encoded}`;
-  }
-  return `/wiki/${encoded}`;
+  return buildWikiPagePath(namespace, slug);
 }

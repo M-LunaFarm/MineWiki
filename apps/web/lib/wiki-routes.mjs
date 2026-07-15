@@ -12,6 +12,11 @@ export function buildWikiRoutePath(prefix, segments = []) {
   return `${base}${suffix ? `/${suffix}` : '/대문'}`;
 }
 
+export function buildWikiPagePath(namespace, slug) {
+  const prefix = namespace === 'main' ? 'wiki' : namespace;
+  return buildWikiRoutePath(prefix, String(slug).split('/'));
+}
+
 export const CATEGORY_WIKI_TOOLS = Object.freeze(['edit', 'history']);
 
 export const STANDARD_WIKI_PREFIXES = Object.freeze([
