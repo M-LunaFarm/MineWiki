@@ -37,7 +37,10 @@ export type WikiAclAction =
   | 'upload_file'
   | 'acl';
 
+export type WikiThreadAclAction = 'read' | 'write_thread_comment';
+
 export interface WikiAclResource {
+  readonly threadId?: bigint | null;
   readonly pageId?: bigint | null;
   readonly spaceId?: bigint | null;
   readonly namespaceId?: number | null;
@@ -62,6 +65,70 @@ const ROLE_GROUPS = {
 @Injectable()
 export class WikiAclService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async evaluateThreadBatch(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly action: WikiThreadAclAction;
+    readonly resources: ReadonlyArray<WikiAclResource & { readonly threadId: bigint }>;
+    readonly store?: WikiAclStore;
+    readonly requestIp?: string | null;
+  }): Promise<ReadonlyMap<bigint, WikiAclDecision>> {
+    const store = input.store ?? this.prisma;
+    const threadIds = [...new Set(input.resources.map((resource) => resource.threadId))];
+    if (threadIds.length === 0) return new Map();
+    const now = new Date();
+    const rules = await store.aclRule.findMany({
+      where: {
+        targetType: 'thread',
+        targetId: { in: threadIds },
+        action: input.action,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+      },
+      orderBy: [{ targetId: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }]
+    });
+    const actor = input.actor ? await this.hydrateBatchActor(store, input.actor) : null;
+    const activeRules = rules.filter((rule) =>
+      rule.targetType === 'thread' && rule.targetId !== null && threadIds.includes(rule.targetId) &&
+      rule.action === input.action && (!rule.expiresAt || rule.expiresAt.getTime() > now.getTime())
+    ).sort((left, right) =>
+      left.targetId === right.targetId
+        ? left.sortOrder - right.sortOrder || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+        : (left.targetId ?? 0n) < (right.targetId ?? 0n) ? -1 : 1
+    );
+    const rulesByThread = new Map<bigint, typeof activeRules>();
+    for (const rule of activeRules) {
+      if (rule.targetId === null) continue;
+      const bucket = rulesByThread.get(rule.targetId) ?? [];
+      bucket.push(rule);
+      rulesByThread.set(rule.targetId, bucket);
+    }
+    const matches = new Map<string, Promise<boolean>>();
+    const decisions = new Map<bigint, WikiAclDecision>();
+    const requestIp = input.requestIp ?? actor?.requestIp ?? getCurrentRequestIp();
+    for (const resource of input.resources) {
+      const threadRules = rulesByThread.get(resource.threadId) ?? [];
+      if (threadRules.length === 0) {
+        decisions.set(resource.threadId, { matched: false, allowed: false, reason: 'thread_acl_inherit' });
+        continue;
+      }
+      let decision: WikiAclDecision = { matched: true, allowed: false, reason: 'thread_acl_closed' };
+      for (const rule of threadRules) {
+        const cacheKey = batchSubjectCacheKey(rule, resource);
+        let matched = matches.get(cacheKey);
+        if (!matched) {
+          matched = this.subjectMatches(store, rule, actor, resource, requestIp);
+          matches.set(cacheKey, matched);
+        }
+        if (!(await matched)) continue;
+        decision = rule.effect === 'allow'
+          ? { matched: true, allowed: true, reason: rule.reason ?? 'thread_acl_allow' }
+          : { matched: true, allowed: false, reason: rule.reason ?? 'thread_acl_deny' };
+        break;
+      }
+      decisions.set(resource.threadId, decision);
+    }
+    return decisions;
+  }
 
   async evaluateReadBatch(input: {
     readonly actor: WikiPermissionActor | null;

@@ -538,13 +538,13 @@ test('recent discussion cursors fail closed when tampered', async () => {
 test('page discussion lists paginate beyond the legacy one-hundred thread window', async () => {
   const updatedAt = new Date('2026-07-13T00:00:00Z');
   const rows = Array.from({ length: 31 }, (_, index) => ({ ...thread, id: BigInt(100 - index), updatedAt }));
-  const queries: Array<{ where: unknown; orderBy: unknown; take: number }> = [];
+  const queries: Array<{ where: unknown; orderBy: unknown; take?: number }> = [];
   const store = {
     wikiPage: { async findUnique() { return page; } },
     wikiDiscussionThread: {
-      async findMany(args: { where: unknown; orderBy: unknown; take: number }) {
+      async findMany(args: { where: unknown; orderBy: unknown; take?: number }) {
         queries.push(args);
-        return queries.length === 1 ? rows : [];
+        return rows;
       },
       async groupBy() {
         return [
@@ -569,24 +569,17 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
   assert.ok(first.nextCursor);
 
   const second = await discussions.listThreadsPage(page.id.toString(), null, first.nextCursor ?? undefined, 30);
-  assert.deepEqual(second, {
-    items: [],
-    nextCursor: null,
-    statusCounts: { total: 10, open: 1, paused: 2, closed: 3 }
-  });
+  assert.deepEqual(second.items.map((item) => item.id), ['70']);
+  assert.equal(second.nextCursor, null);
+  assert.deepEqual(second.statusCounts, { total: 31, open: 31, paused: 0, closed: 0 });
   assert.deepEqual(queries[1]?.orderBy, [{ updatedAt: 'desc' }, { id: 'desc' }]);
-  assert.equal(queries[1]?.take, 31);
-  const secondWhere = queries[1]?.where as { pageId: bigint; status: unknown; updatedAt: { lte: Date }; OR: unknown };
+  assert.equal(queries[1]?.take, undefined);
+  const secondWhere = queries[1]?.where as { pageId: bigint; status: unknown };
   assert.equal(secondWhere.pageId, page.id);
   assert.deepEqual(secondWhere.status, { not: 'deleted' });
-  assert.ok(secondWhere.updatedAt.lte instanceof Date);
-  assert.deepEqual(secondWhere.OR, [
-      { updatedAt: { lt: updatedAt } },
-      { updatedAt, id: { lt: 71n } }
-  ]);
 
   await discussions.listThreadsPage(page.id.toString(), null, undefined, 30, 'paused');
-  assert.equal((queries[2]?.where as { status: unknown }).status, 'paused');
+  assert.deepEqual((queries[2]?.where as { status: unknown }).status, { not: 'deleted' });
 });
 
 test('active discussion filter includes open and paused but excludes closed threads', async () => {
@@ -607,7 +600,7 @@ test('active discussion filter includes open and paused but excludes closed thre
   );
 
   const result = await discussions.listThreadsPage(page.id.toString(), null, undefined, 30, 'active');
-  assert.deepEqual((where as { status: unknown }).status, { in: ['open', 'paused'] });
+  assert.deepEqual((where as { status: unknown }).status, { not: 'deleted' });
   assert.deepEqual(result.statusCounts, { total: 0, open: 0, paused: 0, closed: 0 });
 });
 
@@ -715,4 +708,66 @@ test('pinned discussion comment is included ahead of the current comment window'
   const result = await discussions.getThread(thread.id.toString());
   assert.deepEqual(result.comments.map((comment) => comment.id), ['41', '50']);
   assert.equal(result.comments[0]?.pinned, true);
+});
+
+test('direct thread detail fails with 404 before comments are loaded when thread read ACL denies', async () => {
+  let commentsLoaded = false;
+  const store = {
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionComment: { async findMany() { commentsLoaded = true; return []; } }
+  };
+  const permissions = {
+    async assertCanReadPage() {},
+    async assertCanReadThread() { throw new NotFoundException('hidden'); }
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(store as unknown as PrismaService, {} as WikiProfileService, permissions);
+  await assert.rejects(discussions.getThread('30'), NotFoundException);
+  assert.equal(commentsLoaded, false);
+});
+
+test('thread ACL filtering removes hidden rows from page lists and status counts together', async () => {
+  const open = { ...thread, id: 31n, status: 'open' };
+  const closed = { ...thread, id: 32n, status: 'closed' };
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findMany() { return [open, closed]; } },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const permissions = {
+    async assertCanReadPage() {},
+    async filterReadableThreads(input: { items: Array<{ thread: typeof thread }> }) {
+      return input.items.filter((item) => item.thread.id === open.id);
+    }
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(store as unknown as PrismaService, {} as WikiProfileService, permissions);
+  const result = await discussions.listThreadsPage('10', null);
+  assert.deepEqual(result.items.map((item) => item.id), ['31']);
+  assert.deepEqual(result.statusCounts, { total: 1, open: 1, paused: 0, closed: 0 });
+});
+
+test('read-only thread members can subscribe without write-thread-comment permission', async () => {
+  let readChecks = 0;
+  let writeChecks = 0;
+  let subscribed = false;
+  const store = {
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionSubscription: { async upsert() { subscribed = true; return {}; } },
+    async $queryRaw() { return []; },
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) { return callback(store); }
+  };
+  const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
+    async assertCanReadPage() {},
+    async assertCanReadThread() { readChecks += 1; },
+    async assertCanWriteThreadComment() { writeChecks += 1; throw new ForbiddenException('write denied'); }
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(store as unknown as PrismaService, profiles, permissions);
+  await discussions.setSubscription(session, '30', true);
+  assert.equal(readChecks, 2);
+  assert.equal(writeChecks, 0);
+  assert.equal(subscribed, true);
 });

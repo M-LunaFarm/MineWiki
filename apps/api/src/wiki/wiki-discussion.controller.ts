@@ -18,13 +18,13 @@ export class WikiDiscussionController {
     @Query('cursor') cursor?: string,
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number
   ): Promise<WikiRecentThreadListResponse> {
-    return this.discussions.listRecent(request.sessionPayload?.userId ?? null, cursor, limit ?? 30);
+    return this.discussions.listRecent(request.sessionPayload ?? null, cursor, limit ?? 30);
   }
 
   @Get('pages/:pageId/discussions')
   @UseGuards(OptionalSessionGuard)
   list(@Param('pageId') pageId: string, @Req() request: FastifyRequest): Promise<WikiThreadSummary[]> {
-    return this.discussions.listThreads(pageId, request.sessionPayload?.userId ?? null);
+    return this.discussions.listThreads(pageId, request.sessionPayload ?? null);
   }
 
   @Get('pages/:pageId/discussion-threads')
@@ -41,7 +41,7 @@ export class WikiDiscussionController {
     }
     return this.discussions.listThreadsPage(
       pageId,
-      request.sessionPayload?.userId ?? null,
+      request.sessionPayload ?? null,
       cursor,
       limit ?? 30,
       (status ?? 'all') as WikiDiscussionStatusFilter

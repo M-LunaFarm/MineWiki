@@ -168,7 +168,10 @@ test('wiki suggestions rank exact and prefix title matches without reading docum
     wikiPage: { async findMany(args: unknown) { pageQuery = args; return pages; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }, { id: 2, code: 'help' }]; } }
   } as unknown as PrismaService;
-  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const permissions = {
+    async assertCanReadPage() {},
+    async filterReadableThreads({ items }: { items: unknown[] }) { return items; }
+  } as unknown as WikiPermissionService;
 
   const result = await new WikiReadService(prisma, permissions).suggest({ q: '대문', limit: 8 });
 
@@ -483,7 +486,10 @@ test('category hierarchy exposes its document, parents, and current readable sub
       }
     }
   } as unknown as PrismaService;
-  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const permissions = {
+    async assertCanReadPage() {},
+    async filterReadableThreads({ items }: { items: unknown[] }) { return items; }
+  } as unknown as WikiPermissionService;
 
   const response = await new WikiReadService(prisma, permissions).getCategoryMembers({ category: '몹' });
 
@@ -605,7 +611,10 @@ test('contribution tabs expose discussion, edit-request, and reviewer ledgers', 
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
   } as unknown as PrismaService;
-  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const permissions = {
+    async assertCanReadPage() {},
+    async filterReadableThreads({ items }: { items: unknown[] }) { return items; }
+  } as unknown as WikiPermissionService;
   const service = new WikiReadService(prisma, permissions);
 
   const discussions = await service.getContributions({ profileId: '5', activity: 'discussions' });
@@ -640,7 +649,10 @@ test('server wiki discussion contributions keep the canonical workspace route', 
     wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
     serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna' }]; } }
   } as unknown as PrismaService;
-  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+  const permissions = {
+    async assertCanReadPage() {},
+    async filterReadableThreads({ items }: { items: unknown[] }) { return items; }
+  } as unknown as WikiPermissionService;
 
   const result = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5', activity: 'discussions' });
 
@@ -650,6 +662,31 @@ test('server wiki discussion contributions keep the canonical workspace route', 
   const requests = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5', activity: 'edit-requests' });
   assert.equal(requests.items[0]?.routePath, '/server/luna/API/requests');
   assert.equal(requests.items[0]?.href, '/server/luna/_tools/requests/API/requests?request=31');
+});
+
+test('discussion contributions omit threads hidden by thread ACL in one batch', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const page = {
+    id: 20n, namespaceId: 1, spaceId: 1n, slug: 'private', title: 'private', displayTitle: 'Private',
+    currentRevisionId: 200n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 5n, createdAt: now, updatedAt: now, localPath: 'private'
+  };
+  let batches = 0;
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; } },
+    wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '비공개 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
+    wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '비공개 토론', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+  } as unknown as PrismaService;
+  const permissions = {
+    async filterReadableThreads() { batches += 1; return []; }
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5', activity: 'discussions' });
+
+  assert.equal(batches, 1);
+  assert.deepEqual(result.items, []);
 });
 
 function createReadService(options: {

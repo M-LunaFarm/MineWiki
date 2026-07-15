@@ -1621,6 +1621,7 @@ model AclRule {
   updatedAt    DateTime  @map("updated_at")
 
   @@index([targetType, targetId], map: "idx_acl_target")
+  @@index([targetType, targetId, action, sortOrder, id], map: "idx_acl_thread_action_eval")
   @@index([action], map: "idx_acl_action")
   @@index([expiresAt], map: "idx_acl_expires")
   @@map("acl_rules")

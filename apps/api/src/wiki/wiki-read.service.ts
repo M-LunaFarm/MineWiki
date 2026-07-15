@@ -15,6 +15,7 @@ import {
   WIKI_RENDERER_VERSION
 } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
+import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiIncludeService } from './wiki-include.service';
@@ -787,6 +788,7 @@ export class WikiReadService {
   async getContributions(input: {
     readonly profileId: string;
     readonly accountId?: string | null;
+    readonly session?: SessionPayload | null;
     readonly cursor?: string;
     readonly limit?: string | number;
     readonly activity?: string;
@@ -801,7 +803,7 @@ export class WikiReadService {
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
     const activity = input.activity ?? 'edits';
     if (!['edits', 'discussions', 'edit-requests', 'reviews'].includes(activity)) throw new BadRequestException('activity is invalid.');
-    const common = { profile, accountId: input.accountId ?? null, cursor, limit };
+    const common = { profile, accountId: input.accountId ?? null, session: input.session ?? null, cursor, limit };
     if (activity === 'discussions') return this.getDiscussionContributions(common);
     if (activity === 'edit-requests') return this.getEditRequestContributions(common, false);
     if (activity === 'reviews') return this.getEditRequestContributions(common, true);
@@ -870,6 +872,7 @@ export class WikiReadService {
   private async getDiscussionContributions(input: {
     readonly profile: { readonly id: bigint; readonly username: string; readonly displayName: string; readonly status: string };
     readonly accountId: string | null;
+    readonly session: SessionPayload | null;
     readonly cursor: bigint | null;
     readonly limit: number;
   }): Promise<WikiContributionResponse> {
@@ -888,15 +891,31 @@ export class WikiReadService {
     const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
     const routePaths = await this.routePaths.preload(pages, namespaceById);
-    const readable = new Map<bigint, boolean>();
+    const viewerProfile = input.session
+      ? await this.prisma.wikiProfile.findUnique({
+          where: { accountId: input.session.userId },
+          select: { id: true, status: true }
+        })
+      : null;
+    const actor = input.session && viewerProfile
+      ? this.wikiPermissions.actorFromSession(input.session, viewerProfile)
+      : undefined;
+    const readableThreadIds = new Set((await this.wikiPermissions.filterReadableThreads({
+      accountId: input.accountId,
+      actor,
+      items: threads.flatMap((thread) => {
+        const page = pageById.get(thread.pageId);
+        return page ? [{ thread, page }] : [];
+      })
+    })).map((item) => item.thread.id));
     const items: WikiContributionItem[] = [];
     let lastScannedId: bigint | null = null;
     for (const comment of comments) {
       lastScannedId = comment.id;
       const thread = threadById.get(comment.threadId);
-      if (!thread || thread.status === 'deleted') continue;
+      if (!thread || !readableThreadIds.has(thread.id)) continue;
       const page = pageById.get(thread.pageId);
-      if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
+      if (!page) continue;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
       const serverSlug = namespace === 'server' ? routePaths.serverSlug(page) : undefined;
       const routePath = routePaths.routePath(page, namespace);

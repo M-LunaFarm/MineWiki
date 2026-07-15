@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 const migrationUrl = new URL('../../../../prisma/migrations/20260715235000_wiki_discussion_system_events/migration.sql', import.meta.url);
+const threadAclMigrationUrl = new URL('../../../../prisma/migrations/20260716000000_wiki_thread_acl_index/migration.sql', import.meta.url);
 
 test('discussion system event migration enforces every immutable event shape', async () => {
   const sql = await readFile(migrationUrl, 'utf8');
@@ -11,4 +12,10 @@ test('discussion system event migration enforces every immutable event shape', a
   assert.match(sql, /event_type` = 'topic_change'.*CHAR_LENGTH\(`event_before`\) BETWEEN 1 AND 255.*CHAR_LENGTH\(`event_after`\) BETWEEN 1 AND 255.*event_before` <> `event_after/s);
   assert.match(sql, /event_type` = 'page_move'.*event_before` REGEXP '\^\[0-9\]\+\$'.*event_after` REGEXP '\^\[0-9\]\+\$'.*event_before` <> `event_after/s);
   assert.match(sql, /event_type` = 'pin_change'.*event_before` IS NOT NULL OR `event_after` IS NOT NULL.*NOT \(`event_before` <=> `event_after`\)/s);
+});
+
+test('thread ACL migration adds the composite policy evaluation index', async () => {
+  const sql = await readFile(threadAclMigrationUrl, 'utf8');
+  assert.match(sql, /idx_acl_thread_action_eval/);
+  assert.match(sql, /`target_type`, `target_id`, `action`, `sort_order`, `id`/);
 });

@@ -40,6 +40,9 @@ interface PendingNotificationDelivery {
   readonly createdAt: Date;
 }
 
+const MAX_DISCUSSION_NOTIFICATION_RECIPIENTS = 500;
+const DISCUSSION_ACL_RECIPIENT_CHUNK = 20;
+
 @Injectable()
 export class WikiNotificationService {
   constructor(
@@ -50,6 +53,7 @@ export class WikiNotificationService {
 
   async list(session: SessionPayload, cursor?: string, requestedLimit = 30): Promise<WikiNotificationListResponse> {
     const profile = await this.profiles.ensureWikiProfile(session.userId);
+    await this.purgeUnreadDiscussionNotifications(session, profile.id);
     const limit = Math.min(Math.max(requestedLimit, 1), 50);
     const cursorId = cursor ? this.id(cursor, 'cursor') : null;
     const rows = await this.prisma.wikiNotification.findMany({
@@ -79,18 +83,58 @@ export class WikiNotificationService {
         })
       : [];
     const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
+    const permissionActor = typeof (this.permissions as Partial<WikiPermissionService>).actorFromSession === 'function'
+      ? this.permissions.actorFromSession(session, profile)
+      : null;
+    const readablePages = typeof (this.permissions as Partial<WikiPermissionService>).filterReadablePages === 'function'
+      ? await this.permissions.filterReadablePages({ accountId: session.userId, actor: permissionActor, pages })
+      : await this.legacyReadablePages(session.userId, pages);
+    const readablePageIds = new Set(readablePages.map((page) => page.id));
+    const discussionCommentIds = rows.flatMap((row) =>
+      row.sourceType === 'discussion_comment' && /^\d+$/.test(row.sourceId) ? [BigInt(row.sourceId)] : []
+    );
+    const discussionSurface = this.prisma as unknown as { wikiDiscussionComment?: unknown; wikiDiscussionThread?: unknown };
+    const canFilterDiscussions = Boolean(
+      discussionSurface.wikiDiscussionComment && discussionSurface.wikiDiscussionThread &&
+      typeof (this.permissions as Partial<WikiPermissionService>).filterReadableThreads === 'function'
+    );
+    const discussionComments = canFilterDiscussions && discussionCommentIds.length > 0
+      ? await this.prisma.wikiDiscussionComment.findMany({
+          where: { id: { in: [...new Set(discussionCommentIds)] } },
+          select: { id: true, threadId: true }
+        })
+      : [];
+    const commentById = new Map(discussionComments.map((comment) => [comment.id, comment]));
+    const discussionThreads = canFilterDiscussions && discussionComments.length > 0
+      ? await this.prisma.wikiDiscussionThread.findMany({
+          where: { id: { in: [...new Set(discussionComments.map((comment) => comment.threadId))] } }
+        })
+      : [];
+    const actor = canFilterDiscussions ? permissionActor : null;
+    const visibleDiscussionRows = canFilterDiscussions
+      ? await this.permissions.filterReadableThreads({
+          accountId: session.userId,
+          actor,
+          items: discussionThreads.flatMap((thread) => {
+            const page = pageById.get(thread.pageId);
+            return page ? [{ thread, page }] : [];
+          })
+        })
+      : [];
+    const visibleThreadIds = new Set(visibleDiscussionRows.map((item) => item.thread.id));
     const visible = [];
     const hiddenIds: bigint[] = [];
     for (const row of rows) {
       if (row.pageId) {
         const page = pageById.get(row.pageId);
-        if (!page || page.status === 'deleted') {
+        if (!page || page.status === 'deleted' || !readablePageIds.has(page.id)) {
           hiddenIds.push(row.id);
           continue;
         }
-        try {
-          await this.permissions.assertCanReadPage({ accountId: session.userId, page });
-        } catch {
+      }
+      if (canFilterDiscussions && row.sourceType === 'discussion_comment') {
+        const comment = /^\d+$/.test(row.sourceId) ? commentById.get(BigInt(row.sourceId)) : undefined;
+        if (!comment || !visibleThreadIds.has(comment.threadId)) {
           hiddenIds.push(row.id);
           continue;
         }
@@ -178,15 +222,20 @@ export class WikiNotificationService {
     tx: Prisma.TransactionClient,
     input: { readonly pageId: bigint; readonly threadId: bigint; readonly commentId: bigint; readonly actorProfileId: bigint; readonly title: string }
   ): Promise<void> {
-    const [thread, comments, subscriptions] = await Promise.all([
-      tx.wikiDiscussionThread.findUnique({ where: { id: input.threadId }, select: { createdBy: true } }),
+    const [thread, page, comments, subscriptions] = await Promise.all([
+      tx.wikiDiscussionThread.findUnique({ where: { id: input.threadId } }),
+      tx.wikiPage.findUnique({ where: { id: input.pageId } }),
       tx.wikiDiscussionComment.findMany({ where: { threadId: input.threadId }, select: { createdBy: true } }),
       tx.wikiDiscussionSubscription.findMany({ where: { threadId: input.threadId }, select: { profileId: true, muted: true } })
     ]);
     const muted = new Set(subscriptions.filter((subscription) => subscription.muted).map((subscription) => subscription.profileId));
     const recipients = [...new Set([thread?.createdBy, ...comments.map((comment) => comment.createdBy), ...subscriptions.filter((subscription) => !subscription.muted).map((subscription) => subscription.profileId)])]
       .filter((profileId): profileId is bigint => typeof profileId === 'bigint' && profileId !== input.actorProfileId);
-    const activeRecipients = recipients.filter((profileId) => !muted.has(profileId));
+    const candidateRecipients = recipients
+      .filter((profileId) => !muted.has(profileId))
+      .slice(0, MAX_DISCUSSION_NOTIFICATION_RECIPIENTS);
+    if (!thread || !page || thread.pageId !== page.id) return;
+    const activeRecipients = await this.filterReadableRecipientIds(tx, candidateRecipients, thread, page);
     if (activeRecipients.length === 0) return;
     const now = new Date();
     const href = await this.discussionReplyHref(tx, input);
@@ -331,6 +380,126 @@ export class WikiNotificationService {
       }],
       skipDuplicates: true
     });
+  }
+
+  private async purgeUnreadDiscussionNotifications(session: SessionPayload, profileId: bigint): Promise<void> {
+    const surface = this.prisma as unknown as { wikiDiscussionComment?: unknown; wikiDiscussionThread?: unknown };
+    if (!surface.wikiDiscussionComment || !surface.wikiDiscussionThread) return;
+    const rows = await this.prisma.wikiNotification.findMany({
+      where: { profileId, readAt: null, sourceType: 'discussion_comment' },
+      select: { id: true, sourceId: true, pageId: true }
+    });
+    if (rows.length === 0) return;
+    const commentIds = rows.flatMap((row) => /^\d+$/.test(row.sourceId) ? [BigInt(row.sourceId)] : []);
+    const comments = commentIds.length > 0
+      ? await this.prisma.wikiDiscussionComment.findMany({
+          where: { id: { in: [...new Set(commentIds)] } }, select: { id: true, threadId: true }
+        })
+      : [];
+    const commentById = new Map(comments.map((comment) => [comment.id, comment]));
+    const threads = comments.length > 0
+      ? await this.prisma.wikiDiscussionThread.findMany({
+          where: { id: { in: [...new Set(comments.map((comment) => comment.threadId))] } }
+        })
+      : [];
+    const pages = threads.length > 0
+      ? await this.prisma.wikiPage.findMany({ where: { id: { in: [...new Set(threads.map((thread) => thread.pageId))] } } })
+      : [];
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const profile = await this.prisma.wikiProfile.findUnique({ where: { id: profileId } });
+    if (!profile?.accountId) {
+      await this.prisma.wikiNotification.deleteMany({ where: { id: { in: rows.map((row) => row.id) }, profileId } });
+      return;
+    }
+    const actor = this.permissions.actorFromSession(session, profile);
+    const visible = await this.permissions.filterReadableThreads({
+      accountId: session.userId,
+      actor,
+      items: threads.flatMap((thread) => {
+        const page = pageById.get(thread.pageId);
+        return page ? [{ thread, page }] : [];
+      })
+    });
+    const visibleThreadIds = new Set(visible.map((item) => item.thread.id));
+    const hiddenIds = rows.flatMap((row) => {
+      const comment = /^\d+$/.test(row.sourceId) ? commentById.get(BigInt(row.sourceId)) : undefined;
+      return comment && visibleThreadIds.has(comment.threadId) ? [] : [row.id];
+    });
+    if (hiddenIds.length > 0) {
+      await this.prisma.wikiNotification.deleteMany({ where: { id: { in: hiddenIds }, profileId } });
+    }
+  }
+
+  private async filterReadableRecipientIds(
+    tx: Prisma.TransactionClient,
+    profileIds: readonly bigint[],
+    thread: { readonly id: bigint; readonly pageId: bigint; readonly status: string },
+    page: {
+      readonly id: bigint; readonly spaceId: bigint; readonly namespaceId: number;
+      readonly title: string; readonly protectionLevel: string; readonly status: string; readonly createdBy: bigint | null;
+    }
+  ): Promise<bigint[]> {
+    if (profileIds.length === 0) return [];
+    const surface = tx as unknown as { wikiProfile?: unknown; accountRole?: unknown };
+    if (!surface.wikiProfile || !surface.accountRole || typeof (this.permissions as Partial<WikiPermissionService>).filterReadableThreads !== 'function') {
+      return [...profileIds];
+    }
+    const profiles = await tx.wikiProfile.findMany({
+      where: { id: { in: [...profileIds] }, accountId: { not: null }, status: 'active' },
+      select: { id: true, accountId: true, status: true }
+    });
+    const accountIds = profiles.flatMap((profile) => profile.accountId ? [profile.accountId] : []);
+    const accessRows = accountIds.length > 0
+      ? await tx.accountRole.findMany({
+          where: { accountId: { in: accountIds } },
+          include: { role: { include: { rolePermissions: { include: { permission: true } } } } }
+        })
+      : [];
+    const groupsByAccount = new Map<string, Set<string>>();
+    const permissionsByAccount = new Map<string, Set<string>>();
+    for (const row of accessRows) {
+      const groups = groupsByAccount.get(row.accountId) ?? new Set<string>();
+      groups.add(row.role.code);
+      groupsByAccount.set(row.accountId, groups);
+      const permissions = permissionsByAccount.get(row.accountId) ?? new Set<string>();
+      for (const entry of row.role.rolePermissions) permissions.add(entry.permission.code);
+      permissionsByAccount.set(row.accountId, permissions);
+    }
+    const decisions: Array<bigint | null> = [];
+    for (let offset = 0; offset < profiles.length; offset += DISCUSSION_ACL_RECIPIENT_CHUNK) {
+      const chunk = profiles.slice(offset, offset + DISCUSSION_ACL_RECIPIENT_CHUNK);
+      decisions.push(...await Promise.all(chunk.map(async (profile) => {
+        if (!profile.accountId) return null;
+        const actor = {
+          accountId: profile.accountId,
+          profileId: profile.id,
+          status: profile.status,
+          groups: [...(groupsByAccount.get(profile.accountId) ?? [])],
+          permissions: [...(permissionsByAccount.get(profile.accountId) ?? [])]
+        };
+        const visible = await this.permissions.filterReadableThreads({
+          accountId: profile.accountId,
+          actor,
+          items: [{ thread, page }],
+          store: tx
+        });
+        return visible.length === 1 ? profile.id : null;
+      })));
+    }
+    return decisions.filter((profileId): profileId is bigint => profileId !== null);
+  }
+
+  private async legacyReadablePages<T extends { readonly id: bigint }>(accountId: string, pages: readonly T[]): Promise<T[]> {
+    const readable: T[] = [];
+    for (const page of pages) {
+      try {
+        await this.permissions.assertCanReadPage({ accountId, page: page as never });
+        readable.push(page);
+      } catch {
+        // The legacy permission surface exposes only single-page checks.
+      }
+    }
+    return readable;
   }
 
   private id(value: string, label: string): bigint {

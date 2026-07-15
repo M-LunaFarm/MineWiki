@@ -142,6 +142,7 @@ export class WikiController {
     return this.wikiRead.getContributions({
       profileId,
       accountId: request.sessionPayload?.userId ?? null,
+      session: request.sessionPayload ?? null,
       cursor,
       limit,
       activity

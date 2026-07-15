@@ -170,3 +170,80 @@ test('muted discussion subscribers are excluded from reply delivery', async () =
   await service.notifyDiscussionReply(tx as never, { pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide' });
   assert.deepEqual(deliveries.map((delivery) => delivery.profileId), ['9']);
 });
+
+test('discussion delivery persists notifications only for recipients who can currently read the thread', async () => {
+  let deliveries: Array<{ profileId: string }> = [];
+  const fullPage = { ...({ id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'Guide', title: 'Guide', protectionLevel: 'open', status: 'normal', createdBy: 8n }) };
+  const fullThread = { id: 3n, pageId: 2n, title: 'Guide', status: 'open', createdBy: 8n };
+  const tx = {
+    wikiDiscussionThread: { async findUnique() { return fullThread; } },
+    wikiDiscussionComment: { async findMany() { return [{ createdBy: 9n }]; } },
+    wikiDiscussionSubscription: { async findMany() { return []; } },
+    wikiPage: { async findUnique() { return fullPage; } },
+    wikiProfile: { async findMany() { return [
+      { id: 8n, accountId: 'account-8', status: 'active' },
+      { id: 9n, accountId: 'account-9', status: 'active' }
+    ]; } },
+    accountRole: { async findMany() { return []; } },
+    wikiNamespace: { async findUnique() { return { code: 'main' }; } },
+    wikiNotificationEvent: {
+      async createMany(args: { data: Array<{ payloadJson: { deliveries: typeof deliveries } }> }) {
+        deliveries = args.data[0]?.payloadJson.deliveries ?? [];
+        return { count: 1 };
+      }
+    }
+  };
+  const permissions = {
+    async filterReadableThreads(input: { actor: { profileId: bigint }; items: unknown[] }) {
+      return input.actor.profileId === 8n ? input.items : [];
+    }
+  } as unknown as WikiPermissionService;
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, permissions);
+  await service.notifyDiscussionReply(tx as never, {
+    pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide'
+  });
+  assert.deepEqual(deliveries.map((delivery) => delivery.profileId), ['8']);
+});
+
+test('discussion recipient ACL evaluation is capped and runs in bounded chunks', async () => {
+  let active = 0;
+  let maximumActive = 0;
+  let deliveryCount = 0;
+  const recipientIds = Array.from({ length: 600 }, (_, index) => BigInt(index + 8));
+  const fullPage = { id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'Guide', title: 'Guide', protectionLevel: 'open', status: 'normal', createdBy: 8n };
+  const fullThread = { id: 3n, pageId: 2n, title: 'Guide', status: 'open', createdBy: 8n };
+  const tx = {
+    wikiDiscussionThread: { async findUnique() { return fullThread; } },
+    wikiDiscussionComment: { async findMany() { return recipientIds.slice(1).map((createdBy) => ({ createdBy })); } },
+    wikiDiscussionSubscription: { async findMany() { return []; } },
+    wikiPage: { async findUnique() { return fullPage; } },
+    wikiProfile: {
+      async findMany(args: { where: { id: { in: bigint[] } } }) {
+        return args.where.id.in.map((id) => ({ id, accountId: `account-${id.toString()}`, status: 'active' }));
+      }
+    },
+    accountRole: { async findMany() { return []; } },
+    wikiNamespace: { async findUnique() { return { code: 'main' }; } },
+    wikiNotificationEvent: {
+      async createMany(args: { data: Array<{ payloadJson: { deliveries: unknown[] } }> }) {
+        deliveryCount = args.data[0]?.payloadJson.deliveries.length ?? 0;
+        return { count: 1 };
+      }
+    }
+  };
+  const permissions = {
+    async filterReadableThreads(input: { items: unknown[] }) {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      active -= 1;
+      return input.items;
+    }
+  } as unknown as WikiPermissionService;
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, permissions);
+  await service.notifyDiscussionReply(tx as never, {
+    pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide'
+  });
+  assert.equal(deliveryCount, 500);
+  assert.ok(maximumActive <= 20);
+});

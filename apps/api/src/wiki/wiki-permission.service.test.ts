@@ -94,6 +94,81 @@ test('anonymous public read is allowed', async () => {
   assert.equal(decision.allowed, true);
 });
 
+test('page read denial remains an absolute boundary even for a wiki admin thread reader', async () => {
+  const acl = {
+    async evaluateReadBatch() {
+      return new Map([[1n, { matched: true, allowed: false, reason: 'page_private' }]]);
+    },
+    async evaluateThreadBatch() {
+      return new Map([[30n, { matched: true, allowed: true, reason: 'thread_allow' }]]);
+    }
+  } as unknown as WikiAclService;
+  const service = createService({ acl });
+  const rows = await service.filterReadableThreads({
+    accountId: 'account-1',
+    actor: actor({ permissions: ['wiki.admin'] }),
+    items: [{ thread: { id: 30n, pageId: 1n, status: 'open' }, page: page() }]
+  });
+  assert.deepEqual(rows, []);
+});
+
+test('actual space owner recovers thread read and comment write without bypassing page read', async () => {
+  const store = {
+    wikiProfile: { async findUnique() { return null; } },
+    wikiSpace: {
+      async findUnique() { return { id: 10n, status: 'active' }; },
+      async findMany() { return [{ id: 10n, status: 'active', ownerUserId: 100n, createdBy: null }]; }
+    },
+    subwikiRole: { async findMany() { return []; } },
+    serverWiki: { async findMany() { return []; } },
+    server: { async findMany() { return []; } },
+    modWiki: { async findMany() { return []; } }
+  };
+  const acl = {
+    async evaluate() { return { matched: false, allowed: false, reason: 'acl_no_match' }; },
+    async evaluateReadBatch() { return new Map([[1n, { matched: false, allowed: false, reason: 'acl_no_match' }]]); },
+    async evaluateThreadBatch() { return new Map([[30n, { matched: true, allowed: false, reason: 'closed' }]]); }
+  } as unknown as WikiAclService;
+  const service = new WikiPermissionService(store as unknown as PrismaService, acl);
+  const owner = actor();
+  const targetPage = page();
+  const visible = await service.filterReadableThreads({
+    accountId: owner.accountId, actor: owner,
+    items: [{ thread: { id: 30n, pageId: targetPage.id, status: 'open' }, page: targetPage }]
+  });
+  assert.equal(visible.length, 1);
+  await assert.doesNotReject(service.assertCanWriteThreadComment({ actor: owner, page: targetPage, threadId: 30n }));
+});
+
+test('delegated page ACL manager can manage thread ACL without being the thread author', async () => {
+  const store = {
+    wikiProfile: { async findUnique() { return null; } },
+    wikiSpace: {
+      async findUnique() { return { id: 10n, status: 'active' }; },
+      async findMany() { return [{ id: 10n, status: 'active', ownerUserId: null, createdBy: null }]; }
+    },
+    subwikiRole: { async findMany() { return []; } },
+    serverWiki: { async findMany() { return []; } },
+    server: { async findMany() { return []; } },
+    modWiki: { async findMany() { return []; } }
+  };
+  const acl = {
+    async evaluate(input: { action: string }) {
+      return input.action === 'acl'
+        ? { matched: true, allowed: true, reason: 'delegated_acl' }
+        : { matched: false, allowed: false, reason: 'acl_no_match' };
+    }
+  } as unknown as WikiAclService;
+  const service = new WikiPermissionService(store as unknown as PrismaService, acl);
+  const decision = await service.canManageThreadAcl({
+    actor: actor({ profileId: 999n }),
+    thread: { id: 30n, pageId: 1n, status: 'open' },
+    page: page()
+  });
+  assert.equal(decision.allowed, true);
+  assert.match(decision.reason, /delegated_acl/);
+});
+
 test('batch page visibility loads ACL decisions once and preserves candidate order', async () => {
   let batchCalls = 0;
   const service = createService({

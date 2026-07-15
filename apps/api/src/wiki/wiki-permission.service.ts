@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
-import { WikiAclService, type WikiAclAction, type WikiAclDecision } from './wiki-acl.service';
+import { WikiAclService, type WikiAclAction, type WikiAclDecision, type WikiThreadAclAction } from './wiki-acl.service';
 
 type WikiPermissionStore = Pick<
   PrismaService,
@@ -50,6 +50,12 @@ export interface WikiPermissionPage {
 
 export interface WikiPermissionRevision {
   readonly visibility: string;
+}
+
+export interface WikiPermissionThread {
+  readonly id: bigint;
+  readonly pageId: bigint;
+  readonly status: string;
 }
 
 export interface WikiPermissionDecision {
@@ -109,6 +115,7 @@ export class WikiPermissionService {
 
   async assertCanReadPage(input: {
     readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
     readonly page: WikiPermissionPage | null;
     readonly revision?: WikiPermissionRevision | null;
     readonly store?: WikiPermissionStore;
@@ -121,6 +128,7 @@ export class WikiPermissionService {
 
   async filterReadablePages<T extends WikiPermissionPage>(input: {
     readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
     readonly pages: readonly T[];
     readonly store?: WikiPermissionStore;
   }): Promise<T[]> {
@@ -134,7 +142,7 @@ export class WikiPermissionService {
     const activeSpaceIds = new Set(spaces
       .filter((space) => ACTIVE_SPACE_STATUSES.has(space.status))
       .map((space) => space.id));
-    const actor = await this.resolveActor(input.accountId, store);
+    const actor = input.actor === undefined ? await this.resolveActor(input.accountId, store) : input.actor;
     const normalCandidates = input.pages.filter((page) =>
       activeSpaceIds.has(page.spaceId) &&
       PUBLIC_PAGE_STATUSES.has(page.status) &&
@@ -219,6 +227,7 @@ export class WikiPermissionService {
 
   async canReadPage(input: {
     readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
     readonly page: WikiPermissionPage | null;
     readonly revision?: WikiPermissionRevision | null;
     readonly store?: WikiPermissionStore;
@@ -241,7 +250,7 @@ export class WikiPermissionService {
     if (input.revision && !PUBLIC_REVISION_VISIBILITIES.has(input.revision.visibility)) {
       return deny('revision_not_public');
     }
-    const actor = await this.resolveActor(input.accountId, store);
+    const actor = input.actor === undefined ? await this.resolveActor(input.accountId, store) : input.actor;
     if (!PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)) {
       if (!actor || !(await this.canManagePageArea(store, actor, page))) {
         return deny('protection_not_readable');
@@ -536,14 +545,104 @@ export class WikiPermissionService {
   async assertCanWriteThreadComment(input: {
     readonly actor: WikiPermissionActor | null;
     readonly page: WikiPermissionPage | null;
+    readonly threadId?: bigint | null;
     readonly store?: WikiPermissionStore;
   }): Promise<void> {
     return this.assertCanUseDiscussionAction(input, 'write_thread_comment');
   }
 
+  async assertCanReadThread(input: {
+    readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
+    readonly thread: WikiPermissionThread | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const decision = await this.canReadThread(input);
+    if (!decision.allowed) throw new NotFoundException('Wiki discussion thread not found.');
+  }
+
+  async canReadThread(input: {
+    readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
+    readonly thread: WikiPermissionThread | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPermissionDecision> {
+    if (!input.thread || !input.page || input.thread.pageId !== input.page.id || input.thread.status === 'deleted') {
+      return deny('thread_missing');
+    }
+    const rows = await this.filterReadableThreads({
+      accountId: input.accountId,
+      actor: input.actor,
+      items: [{ thread: input.thread, page: input.page }],
+      store: input.store
+    });
+    return rows.length === 1 ? allow('thread_read') : deny('thread_not_readable');
+  }
+
+  async filterReadableThreads<T extends { readonly thread: WikiPermissionThread; readonly page: WikiPermissionPage }>(input: {
+    readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
+    readonly items: readonly T[];
+    readonly store?: WikiPermissionStore;
+  }): Promise<T[]> {
+    if (input.items.length === 0) return [];
+    const store = input.store ?? this.prisma;
+    const pages = [...new Map(input.items.map((item) => [item.page.id, item.page])).values()];
+    const readablePages = await this.filterReadablePages({ accountId: input.accountId, actor: input.actor, pages, store });
+    const readablePageIds = new Set(readablePages.map((page) => page.id));
+    const candidates = input.items.filter((item) =>
+      item.thread.status !== 'deleted' && item.thread.pageId === item.page.id && readablePageIds.has(item.page.id)
+    );
+    if (candidates.length === 0) return [];
+    const actor = input.actor === undefined
+      ? await this.resolveActor(input.accountId, store)
+      : input.actor;
+    const recoverySpaceIds = actor
+      ? await this.threadAclRecoverySpaceIds(store, actor, candidates.map((item) => item.page.spaceId))
+      : new Set<bigint>();
+    const decisions = await this.evaluateThreadAclBatch('read', actor ?? null, candidates, store);
+    return candidates.filter((item) => {
+      if (recoverySpaceIds.has(item.page.spaceId)) return true;
+      const decision = decisions.get(item.thread.id);
+      return !decision?.matched || decision.allowed;
+    });
+  }
+
+  async canManageThreadAcl(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly thread: WikiPermissionThread | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPermissionDecision> {
+    const store = input.store ?? this.prisma;
+    const { actor, thread, page } = input;
+    if (!actor) return deny('actor_required');
+    if (!ACTIVE_PROFILE_STATUSES.has(actor.status)) return deny('actor_not_active');
+    if (!thread || thread.status === 'deleted' || !page || thread.pageId !== page.id) return deny('thread_missing');
+    const pageRead = await this.canReadPage({ accountId: actor.accountId, actor, page, store });
+    if (!pageRead.allowed) return deny(pageRead.reason);
+    const recoverable = await this.threadAclRecoverySpaceIds(store, actor, [page.spaceId]);
+    if (recoverable.has(page.spaceId)) return allow('thread_acl_recovery_owner');
+    const pageAcl = await this.canManagePageAcl({ actor, page, store });
+    return pageAcl.allowed ? allow(`thread_acl_${pageAcl.reason}`) : deny(pageAcl.reason);
+  }
+
+  async assertCanManageThreadAcl(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly thread: WikiPermissionThread | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const decision = await this.canManageThreadAcl(input);
+    if (!decision.allowed) throw new ForbiddenException(`Wiki discussion ACL management is not allowed: ${decision.reason}`);
+  }
+
   private async assertCanUseDiscussionAction(input: {
     readonly actor: WikiPermissionActor | null;
     readonly page: WikiPermissionPage | null;
+    readonly threadId?: bigint | null;
     readonly store?: WikiPermissionStore;
   }, action: Extract<WikiAclAction, 'create_thread' | 'write_thread_comment'>): Promise<void> {
     const store = input.store ?? this.prisma;
@@ -551,7 +650,7 @@ export class WikiPermissionService {
     if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status) || !page) {
       throw new ForbiddenException('Wiki discussion is not allowed.');
     }
-    await this.assertCanReadPage({ accountId: actor.accountId, page, store });
+    await this.assertCanReadPage({ accountId: actor.accountId, actor, page, store });
     const resource = {
       pageId: page.id,
       spaceId: page.spaceId,
@@ -559,6 +658,19 @@ export class WikiPermissionService {
       title: page.title,
       createdBy: page.createdBy
     };
+    if (action === 'write_thread_comment' && input.threadId) {
+      const recoverySpaceIds = await this.threadAclRecoverySpaceIds(store, actor, [page.spaceId]);
+      if (recoverySpaceIds.has(page.spaceId)) return;
+      const decisions = await this.evaluateThreadAclBatch(action, actor, [{
+        thread: { id: input.threadId, pageId: page.id, status: 'open' },
+        page
+      }], store);
+      const threadAcl = decisions.get(input.threadId);
+      if (threadAcl?.matched) {
+        if (!threadAcl.allowed) throw new ForbiddenException(`Wiki discussion is not allowed: ${threadAcl.reason}`);
+        return;
+      }
+    }
     let acl = await this.evaluateAcl(action, actor, resource, store);
     if (!acl.matched) {
       acl = await this.evaluateAcl('discuss', actor, resource, store);
@@ -770,6 +882,77 @@ export class WikiPermissionService {
       select: { role: true }
     });
     return roles.some((role) => allowedRoles.has(role.role));
+  }
+
+  private async threadAclRecoverySpaceIds(
+    store: WikiPermissionStore,
+    actor: WikiPermissionActor,
+    requestedSpaceIds: readonly bigint[]
+  ): Promise<Set<bigint>> {
+    const spaceIds = [...new Set(requestedSpaceIds)];
+    if (spaceIds.length === 0) return new Set();
+    if (this.isAdminActor(actor)) return new Set(spaceIds);
+    const [spaces, ownerRoles, serverWikis, modWikis] = await Promise.all([
+      store.wikiSpace.findMany({
+        where: { id: { in: spaceIds }, status: 'active' },
+        select: { id: true, ownerUserId: true, createdBy: true }
+      }),
+      store.subwikiRole.findMany({
+        where: { spaceId: { in: spaceIds }, userId: actor.profileId, status: 'active', role: 'owner' },
+        select: { spaceId: true }
+      }),
+      store.serverWiki.findMany({
+        where: { spaceId: { in: spaceIds }, status: { not: 'deleted' } },
+        select: { spaceId: true, voteServerId: true, createdBy: true }
+      }),
+      store.modWiki.findMany({
+        where: { spaceId: { in: spaceIds }, status: { not: 'deleted' } },
+        select: { spaceId: true, verifiedBy: true }
+      })
+    ]);
+    const recoverable = new Set<bigint>();
+    for (const space of spaces) {
+      if (space.ownerUserId === actor.profileId || space.createdBy === actor.profileId) recoverable.add(space.id);
+    }
+    for (const role of ownerRoles) recoverable.add(role.spaceId);
+    const serverIds = [...new Set(serverWikis.flatMap((wiki) => wiki.voteServerId ? [wiki.voteServerId] : []))];
+    const servers = serverIds.length > 0
+      ? await store.server.findMany({
+          where: { id: { in: serverIds }, ownerAccountId: actor.accountId },
+          select: { id: true }
+        })
+      : [];
+    const ownedServerIds = new Set(servers.map((server) => server.id));
+    for (const wiki of serverWikis) {
+      if (wiki.createdBy === actor.profileId || (wiki.voteServerId && ownedServerIds.has(wiki.voteServerId))) {
+        recoverable.add(wiki.spaceId);
+      }
+    }
+    for (const wiki of modWikis) {
+      if (wiki.verifiedBy === actor.profileId) recoverable.add(wiki.spaceId);
+    }
+    return recoverable;
+  }
+
+  private evaluateThreadAclBatch<T extends { readonly thread: WikiPermissionThread; readonly page: WikiPermissionPage }>(
+    action: WikiThreadAclAction,
+    actor: WikiPermissionActor | null,
+    items: readonly T[],
+    store: WikiPermissionStore
+  ): Promise<ReadonlyMap<bigint, WikiAclDecision>> {
+    return this.wikiAcl?.evaluateThreadBatch({
+      actor,
+      action,
+      resources: items.map((item) => ({
+        threadId: item.thread.id,
+        pageId: item.page.id,
+        spaceId: item.page.spaceId,
+        namespaceId: item.page.namespaceId,
+        title: item.page.title,
+        createdBy: item.page.createdBy
+      })),
+      store
+    }) ?? Promise.resolve(new Map());
   }
 
   private isAdminActor(actor: WikiPermissionActor): boolean {

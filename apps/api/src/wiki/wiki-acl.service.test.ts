@@ -470,3 +470,42 @@ test('general wiki groups are distinct ACL subjects', async () => {
   assert.equal(decision.allowed, true);
   assert.equal(decision.reason, 'trusted_group');
 });
+
+test('thread ACL is a closed allow-list and uses the first matching ordered rule', async () => {
+  const { service, store } = createService({
+    rules: [
+      { targetType: 'thread', targetId: 30n, action: 'read', effect: 'deny', subjectType: 'perm', subjectValue: 'guest', sortOrder: 10, reason: 'guest_denied' },
+      { targetType: 'thread', targetId: 30n, action: 'read', effect: 'allow', subjectType: 'perm', subjectValue: 'any', sortOrder: 20, reason: 'fallback_allow' },
+      { targetType: 'thread', targetId: 31n, action: 'read', effect: 'allow', subjectType: 'perm', subjectValue: 'member', sortOrder: 10, reason: 'members_only' }
+    ]
+  });
+
+  const decisions = await service.evaluateThreadBatch({
+    actor: null,
+    action: 'read',
+    resources: [
+      { threadId: 30n, pageId: 1n, spaceId: 10n },
+      { threadId: 31n, pageId: 1n, spaceId: 10n }
+    ],
+    store: store as unknown as PrismaService
+  });
+
+  assert.deepEqual(decisions.get(30n), { matched: true, allowed: false, reason: 'guest_denied' });
+  assert.deepEqual(decisions.get(31n), { matched: true, allowed: false, reason: 'thread_acl_closed' });
+});
+
+test('expired thread rules are ignored and preserve page inheritance', async () => {
+  const { service, store } = createService({
+    rules: [{
+      targetType: 'thread', targetId: 30n, action: 'write_thread_comment', effect: 'deny',
+      subjectType: 'perm', subjectValue: 'any', expiresAt: new Date('2000-01-01T00:00:00Z')
+    }]
+  });
+  const decisions = await service.evaluateThreadBatch({
+    actor: null,
+    action: 'write_thread_comment',
+    resources: [{ threadId: 30n, pageId: 1n, spaceId: 10n }],
+    store: store as unknown as PrismaService
+  });
+  assert.deepEqual(decisions.get(30n), { matched: false, allowed: false, reason: 'thread_acl_inherit' });
+});
