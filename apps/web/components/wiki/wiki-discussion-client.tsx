@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pause, Pencil, Pin, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pause, Pencil, Pin, Plus, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiDiscussionStatus, type WikiDiscussionStatusCounts, type WikiDiscussionStatusFilter, type WikiThreadDetail, type WikiThreadListResponse, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
@@ -513,7 +513,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
             </details>
           ) : account ? (
             <p className="border border-white/10 bg-[#111821] p-4 text-sm leading-6 text-slate-400">
-              이 문서에서는 새 토론을 만들 수 없습니다. 기존 토론의 댓글 작성 권한은 토론별로 별도 적용됩니다.
+              이 문서에서는 새 토론을 만들 수 없습니다. 기존 토론의 참여 권한은 각 토론의 ACL과 현재 상태에 따라 결정됩니다.
             </p>
           ) : (
             <p className="text-sm text-slate-500">
@@ -609,6 +609,9 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                       <Pencil className="size-4" /> 제목 변경
                     </button>
                   ) : null}
+                  {selected.canManageAcl ? <Link href={`/wiki/discussions/${encodeURIComponent(selected.id)}/acl?returnTo=${encodeURIComponent(selectedThreadPath(pageId, returnTo, selected.id))}`} className="chip chip-muted inline-flex min-h-11 items-center gap-2">
+                    <ShieldCheck className="size-3.5" /> 토론 ACL
+                  </Link> : null}
                   {selected.canManagePage ? (
                     <>
                       {selected.status !== 'open' ? <button type="button" disabled={working} onClick={() => void changeStatus('open')} className="chip chip-muted min-h-11">다시 열기</button> : null}
@@ -1048,6 +1051,9 @@ function formatDate(value: string) {
 }
 function locationPath(pageId: string, returnTo: string) {
   return `/wiki/discuss/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(returnTo)}`;
+}
+function selectedThreadPath(pageId: string, returnTo: string, threadId: string) {
+  return `${locationPath(pageId, returnTo)}&thread=${encodeURIComponent(threadId)}`;
 }
 function discussionHref(target: WikiSearchResult, threadId: string) {
   return target.routePath.startsWith('/server/') ? `${buildServerWikiToolPath(target.routePath, 'discuss')}?thread=${encodeURIComponent(threadId)}` : `/wiki/discuss/${encodeURIComponent(target.pageId)}?returnTo=${encodeURIComponent(target.routePath)}&thread=${encodeURIComponent(threadId)}`;

@@ -405,6 +405,7 @@ export interface WikiRecentThreadListResponse {
 export interface WikiThreadDetail extends WikiThreadSummary {
   readonly canModerate: boolean;
   readonly canManagePage: boolean;
+  readonly canManageAcl: boolean;
   readonly canReply: boolean;
   readonly subscribed: boolean;
   readonly pinnedCommentId: string | null;
@@ -654,7 +655,7 @@ export interface WikiBatchRollbackExecution {
 
 export interface WikiAclRuleSummary {
   readonly id: string;
-  readonly targetType: 'site' | 'namespace' | 'space' | 'page';
+  readonly targetType: 'site' | 'namespace' | 'space' | 'page' | 'thread';
   readonly targetId: string | null;
   readonly action: string;
   readonly effect: 'allow' | 'deny';
@@ -732,6 +733,32 @@ export interface WikiPageAclResponse {
     readonly aclGroups: ReadonlyArray<{ key: string; name: string }>;
     readonly roles: readonly string[];
   };
+}
+
+export interface WikiThreadAclResponse {
+  readonly thread: {
+    readonly id: string;
+    readonly pageId: string;
+    readonly title: string;
+    readonly status: string;
+  };
+  readonly page: {
+    readonly id: string;
+    readonly spaceId: string;
+    readonly namespaceId: number;
+    readonly title: string;
+    readonly displayTitle: string;
+  };
+  readonly actions: readonly ['read', 'write_thread_comment'];
+  readonly rules: readonly WikiAclRuleSummary[];
+  readonly ruleSetHash: string;
+  readonly canManage: boolean;
+  readonly manageReason: string;
+  readonly inheritance: {
+    readonly read: 'page-boundary';
+    readonly writeThreadComment: 'page' | 'thread-closed';
+  };
+  readonly catalog: WikiPageAclResponse['catalog'];
 }
 
 export interface WikiMutationResponse {
@@ -854,6 +881,44 @@ export async function reorderWikiPageAclRules(
   },
 ): Promise<WikiAclRuleSummary[]> {
   return mutateWikiBrowser<WikiAclRuleSummary[]>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl/order`, 'PATCH', input);
+}
+
+export async function fetchWikiThreadAcl(threadId: string): Promise<WikiThreadAclResponse> {
+  return readWikiBrowser<WikiThreadAclResponse>(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/acl`);
+}
+
+export async function createWikiThreadAclRule(
+  threadId: string,
+  input: {
+    readonly action: 'read' | 'write_thread_comment';
+    readonly effect: WikiAclRuleSummary['effect'];
+    readonly subjectType: WikiAclRuleSummary['subjectType'];
+    readonly subjectValue: string;
+    readonly reason?: string;
+    readonly expiresAt?: string | null;
+  },
+): Promise<{ readonly rule: WikiAclRuleSummary; readonly ruleSetHash: string }> {
+  return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/acl`, 'POST', input);
+}
+
+export async function deleteWikiThreadAclRule(threadId: string, ruleId: string, reason?: string): Promise<{
+  readonly deleted: true;
+  readonly ruleId: string;
+  readonly ruleSetHash: string;
+}> {
+  return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/acl/${encodeURIComponent(ruleId)}`, 'DELETE', { reason });
+}
+
+export async function reorderWikiThreadAclRules(
+  threadId: string,
+  input: {
+    readonly action: 'read' | 'write_thread_comment';
+    readonly ruleIds: readonly string[];
+    readonly expectedRuleSetHash: string;
+    readonly reason?: string;
+  },
+): Promise<{ readonly rules: WikiAclRuleSummary[]; readonly ruleSetHash: string }> {
+  return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/acl/order`, 'PATCH', input);
 }
 
 export async function fetchWikiNotifications(cursor?: string): Promise<WikiNotificationListResponse> {
