@@ -51,6 +51,118 @@ test('edit request creation rejects a stale base revision before persistence', a
   );
 });
 
+test('new-page edit requests persist an immutable target under a namespace lock', async () => {
+  let namespaceLocks = 0;
+  let storedData: Record<string, unknown> | null = null;
+  let readableSpace: bigint | null = null;
+  const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    async $queryRaw() { namespaceLocks += 1; return [{ id: 7 }]; },
+    wikiPage: { async findUnique() { return null; } },
+    wikiEditRequest: {
+      async findFirst() { return null; },
+      async create(args: { data: Record<string, unknown> }) {
+        storedData = args.data;
+        return { id: 71n, reviewedBy: null, reviewNote: null, acceptedRevisionId: null, reviewedAt: null, ...args.data };
+      }
+    },
+    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }]; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 99n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: session.userId, profileId: 99n, status: 'active' }; },
+    async assertCanReadCreateTarget(input: { spaceId: bigint }) { readableSpace = input.spaceId; }
+  } as unknown as WikiPermissionService;
+  const edits = {
+    async resolveCreatePageTarget() {
+      return {
+        namespaceId: 7, namespaceCode: 'server', spaceId: 8n, title: 'sample/규칙', slug: 'sample/규칙',
+        displayTitle: '규칙', pageType: 'server'
+      };
+    }
+  } as unknown as WikiEditService;
+  const service = new WikiEditRequestService(prisma, profiles, permissions, edits);
+
+  const result = await service.createForNewPage(session, {
+    namespace: 'server', title: 'sample/규칙', contentRaw: '규칙 초안', editSummary: '규칙 문서 제안'
+  });
+
+  assert.equal(namespaceLocks, 1);
+  assert.equal(readableSpace, 8n);
+  assert.equal(storedData?.requestKind, 'create');
+  assert.equal(storedData?.pageId, null);
+  assert.equal(storedData?.baseRevisionId, null);
+  assert.equal(storedData?.targetNamespaceId, 7);
+  assert.equal(storedData?.targetSpaceId, 8n);
+  assert.equal(storedData?.targetSlug, 'sample/규칙');
+  assert.equal(result.requestKind, 'create');
+  assert.equal(result.pageId, null);
+  assert.equal(result.targetDisplayTitle, '규칙');
+  assert.equal(Number.isNaN(Date.parse(result.createdAt)), false);
+});
+
+test('new-page edit requests reject a title that appeared before the namespace lock was acquired', async () => {
+  const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    async $queryRaw() { return [{ id: 7 }]; },
+    wikiPage: { async findUnique() { return { id: 123n }; } },
+    wikiEditRequest: { async create() { throw new Error('create should not run'); } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 99n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: session.userId, profileId: 99n, status: 'active' }; },
+    async assertCanReadCreateTarget() {}
+  } as unknown as WikiPermissionService;
+  const edits = {
+    async resolveCreatePageTarget() {
+      return { namespaceId: 7, namespaceCode: 'guide', spaceId: 8n, title: 'Guide', slug: 'guide', displayTitle: 'Guide', pageType: 'article' };
+    }
+  } as unknown as WikiEditService;
+
+  await assert.rejects(
+    new WikiEditRequestService(prisma, profiles, permissions, edits).createForNewPage(session, {
+      namespace: 'guide', title: 'Guide', contentRaw: '초안', editSummary: '새 문서'
+    }),
+    ConflictException
+  );
+});
+
+test('accepting a new-page request delegates atomic page creation and preserves request attribution', async () => {
+  const createRequest = {
+    ...request,
+    requestKind: 'create',
+    pageId: null,
+    baseRevisionId: null,
+    targetNamespaceId: 7,
+    targetNamespaceCode: 'guide',
+    targetSpaceId: 8n,
+    targetTitle: '새 문서',
+    targetSlug: '새_문서',
+    targetDisplayTitle: '새 문서',
+    targetPageType: 'article'
+  };
+  const accepted = { ...createRequest, pageId: 55n, status: 'accepted', reviewedBy: 20n, acceptedRevisionId: 66n };
+  let acceptedId: bigint | null = null;
+  const prisma = {
+    wikiEditRequest: { async findUnique() { return createRequest; } },
+    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }, { id: 20n, displayName: '검토자' }]; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
+  const edits = {
+    async acceptCreateEditRequest(_session: SessionPayload, input: { requestId: bigint }) {
+      acceptedId = input.requestId;
+      return { request: accepted, mutation: { pageId: '55', revisionId: '66', revisionNo: 1, namespace: 'guide', title: '새 문서', slug: '새_문서' } };
+    }
+  } as unknown as WikiEditService;
+
+  const result = await new WikiEditRequestService(prisma, profiles, {} as WikiPermissionService, edits).accept(session, '40');
+
+  assert.equal(acceptedId, 40n);
+  assert.equal(result.pageId, '55');
+  assert.equal(result.createdBy, '99');
+  assert.equal(result.reviewedBy, '20');
+});
+
 test('edit request detail enforces page visibility and returns the exact request', async () => {
   let readChecked = false;
   let rawChecked = false;

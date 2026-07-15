@@ -36,6 +36,12 @@ export class WikiEditRequestController {
     return this.requests.get(requestId, request.sessionPayload?.userId ?? null);
   }
 
+  @Get('edit-requests/:requestId/context')
+  @UseGuards(OptionalSessionGuard)
+  context(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {
+    return this.requests.context(requestId, request.sessionPayload ?? null);
+  }
+
   @Get('edit-requests/:requestId/diff')
   @UseGuards(OptionalSessionGuard)
   diff(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {
@@ -50,6 +56,14 @@ export class WikiEditRequestController {
     @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean },
     @CurrentSession() session: SessionPayload
   ) { return this.requests.create(session, pageId, body); }
+
+  @Post('edit-requests')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  createForNewPage(
+    @Body() body: { namespace?: string; title?: string; spaceId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean },
+    @CurrentSession() session: SessionPayload
+  ) { return this.requests.createForNewPage(session, body); }
 
   @Post('edit-requests/:requestId/accept')
   @UseGuards(SessionGuard)

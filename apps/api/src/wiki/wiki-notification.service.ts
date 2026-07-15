@@ -254,7 +254,7 @@ export class WikiNotificationService {
 
   async notifyEditRequestReviewed(tx: Prisma.TransactionClient, input: {
     readonly profileId: bigint;
-    readonly pageId: bigint;
+    readonly pageId: bigint | null;
     readonly requestId: bigint;
     readonly reviewerProfileId: bigint;
     readonly status: 'accepted' | 'rejected';
@@ -280,8 +280,9 @@ export class WikiNotificationService {
 
   private async editRequestHref(
     tx: Prisma.TransactionClient,
-    input: { readonly pageId: bigint; readonly requestId: bigint }
+    input: { readonly pageId: bigint | null; readonly requestId: bigint }
   ): Promise<string> {
+    if (input.pageId === null) return `/wiki/edit-requests/request/${input.requestId.toString()}`;
     const fallback = `/wiki/edit-requests/${input.pageId.toString()}?request=${input.requestId.toString()}`;
     const page = await tx.wikiPage.findUnique({
       where: { id: input.pageId },

@@ -471,8 +471,13 @@ export interface WikiWatchlistItem extends WikiWatchStatus {
 
 export interface WikiEditRequestSummary {
   readonly id: string;
-  readonly pageId: string;
-  readonly baseRevisionId: string;
+  readonly requestKind: 'edit' | 'create';
+  readonly pageId: string | null;
+  readonly baseRevisionId: string | null;
+  readonly targetNamespace: string | null;
+  readonly targetSpaceId: string | null;
+  readonly targetTitle: string | null;
+  readonly targetDisplayTitle: string | null;
   readonly proposedContent: string;
   readonly editSummary: string | null;
   readonly isMinor: boolean;
@@ -514,7 +519,7 @@ export interface WikiEditRequestQueueResponse {
 
 export interface WikiEditRequestDiffResponse {
   readonly requestId: string;
-  readonly baseRevisionId: string;
+  readonly baseRevisionId: string | null;
   readonly hunks: ReadonlyArray<{
     readonly type: 'context' | 'added' | 'removed';
     readonly line: string;
@@ -1004,15 +1009,23 @@ export async function fetchWikiEditRequest(requestId: string): Promise<WikiEditR
   return readWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}`);
 }
 
+export async function fetchWikiEditRequestContext(requestId: string): Promise<WikiEditRequestListResponse> {
+  return readWikiBrowser<WikiEditRequestListResponse>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}/context`);
+}
+
 export async function createWikiEditRequest(input: { pageId: string; baseRevisionId: string; contentRaw: string; editSummary: string; isMinor: boolean }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/edit-requests`, 'POST', input);
+}
+
+export async function createWikiPageRequest(input: { namespace: string; title: string; spaceId?: string; contentRaw: string; editSummary: string; isMinor: boolean }): Promise<WikiEditRequestSummary> {
+  return mutateWikiBrowser<WikiEditRequestSummary>('/v1/wiki/edit-requests', 'POST', input);
 }
 
 export async function reviewWikiEditRequest(input: { requestId: string; action: 'accept' | 'reject'; reviewNote?: string }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(input.requestId)}/${input.action}`, 'POST', { reviewNote: input.reviewNote });
 }
 
-export async function updateWikiEditRequest(input: { requestId: string; baseRevisionId: string; contentRaw: string; editSummary: string; isMinor: boolean }): Promise<WikiEditRequestSummary> {
+export async function updateWikiEditRequest(input: { requestId: string; baseRevisionId?: string; contentRaw: string; editSummary: string; isMinor: boolean }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(input.requestId)}`, 'PATCH', input);
 }
 

@@ -1430,8 +1430,16 @@ model WikiDiscussionSubscription {
 
 model WikiEditRequest {
   id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  pageId             BigInt    @map("page_id") @db.UnsignedBigInt
-  baseRevisionId     BigInt    @map("base_revision_id") @db.UnsignedBigInt
+  requestKind        String    @default("edit") @map("request_kind") @db.VarChar(16)
+  pageId             BigInt?   @map("page_id") @db.UnsignedBigInt
+  baseRevisionId     BigInt?   @map("base_revision_id") @db.UnsignedBigInt
+  targetNamespaceId  Int?      @map("target_namespace_id") @db.UnsignedInt
+  targetNamespaceCode String?  @map("target_namespace_code") @db.VarChar(32)
+  targetSpaceId      BigInt?   @map("target_space_id") @db.UnsignedBigInt
+  targetTitle        String?   @map("target_title") @db.VarChar(255)
+  targetSlug         String?   @map("target_slug") @db.VarChar(255)
+  targetDisplayTitle String?   @map("target_display_title") @db.VarChar(255)
+  targetPageType     String?   @map("target_page_type") @db.VarChar(32)
   proposedContent    String    @map("proposed_content") @db.MediumText
   editSummary        String    @map("edit_summary") @db.VarChar(255)
   isMinor            Boolean   @default(false) @map("is_minor")
@@ -1445,6 +1453,8 @@ model WikiEditRequest {
   reviewedAt         DateTime? @map("reviewed_at")
 
   @@index([pageId, status, createdAt], map: "idx_wiki_edit_requests_page")
+  @@index([targetNamespaceId, targetSlug, status, createdAt], map: "idx_wiki_edit_requests_target")
+  @@index([targetSpaceId, status, createdAt], map: "idx_wiki_edit_requests_target_space")
   @@index([createdBy, status, createdAt], map: "idx_wiki_edit_requests_creator")
   @@index([reviewedBy, reviewedAt], map: "idx_wiki_edit_requests_reviewer")
   @@map("wiki_edit_requests")

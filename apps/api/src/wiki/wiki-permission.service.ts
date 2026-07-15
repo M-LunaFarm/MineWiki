@@ -193,6 +193,30 @@ export class WikiPermissionService {
     }
   }
 
+  async assertCanReadCreateTarget(input: {
+    readonly accountId?: string | null;
+    readonly namespaceId: number;
+    readonly namespaceCode: string;
+    readonly spaceId: bigint;
+    readonly title: string;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const store = input.store ?? this.prisma;
+    const space = await store.wikiSpace.findUnique({
+      where: { id: input.spaceId },
+      select: { id: true, status: true }
+    });
+    if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) throw new NotFoundException('Wiki space not found.');
+    const actor = await this.resolveActor(input.accountId, store);
+    const acl = await this.evaluateAcl('read', actor, {
+      namespaceId: input.namespaceId,
+      namespaceCode: input.namespaceCode,
+      spaceId: input.spaceId,
+      title: input.title
+    }, store);
+    if (acl.matched && !acl.allowed) throw new NotFoundException('Wiki page not found.');
+  }
+
   async canReadPage(input: {
     readonly accountId?: string | null;
     readonly page: WikiPermissionPage | null;
@@ -551,6 +575,34 @@ export class WikiPermissionService {
   }): Promise<boolean> {
     if (!input.actor || !input.page || !ACTIVE_PROFILE_STATUSES.has(input.actor.status)) return false;
     return this.canManagePageArea(input.store ?? this.prisma, input.actor, input.page);
+  }
+
+  async canManageCreateTarget(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly namespaceId: number;
+    readonly namespaceCode: string;
+    readonly spaceId: bigint;
+    readonly title: string;
+    readonly store?: WikiPermissionStore;
+  }): Promise<boolean> {
+    const store = input.store ?? this.prisma;
+    if (!input.actor || !ACTIVE_PROFILE_STATUSES.has(input.actor.status)) return false;
+    if (this.isAdminActor(input.actor)) return true;
+    const space = await store.wikiSpace.findUnique({
+      where: { id: input.spaceId },
+      select: { id: true, status: true, ownerUserId: true, createdBy: true }
+    });
+    if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) return false;
+    if (space.ownerUserId === input.actor.profileId || space.createdBy === input.actor.profileId) return true;
+    return this.canManagePageArea(store, input.actor, {
+      id: 0n,
+      namespaceId: input.namespaceId,
+      spaceId: input.spaceId,
+      title: input.title,
+      protectionLevel: 'open',
+      status: 'normal',
+      createdBy: null
+    });
   }
 
   async assertCanManagePageAcl(input: {

@@ -628,3 +628,36 @@ test('blocked wiki profile cannot create a page', async () => {
 
   assert.equal(decision.allowed, false);
 });
+
+test('space ownership grants review authority for a new-page edit request target', async () => {
+  const ownerService = createService({
+    space: { id: 10n, status: 'active', ownerUserId: 200n, createdBy: 300n, spaceType: 'basic' }
+  });
+  const unrelatedService = createService({
+    space: { id: 10n, status: 'active', ownerUserId: 300n, createdBy: 300n, spaceType: 'basic' }
+  });
+  const input = { namespaceId: 1, namespaceCode: 'main', spaceId: 10n, title: '제안 문서' };
+
+  assert.equal(await ownerService.canManageCreateTarget({ actor: actor({ profileId: 200n }), ...input }), true);
+  assert.equal(await unrelatedService.canManageCreateTarget({ actor: actor({ profileId: 200n }), ...input }), false);
+});
+
+test('target-specific read ACL hides a new-page request before the page exists', async () => {
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        return input.action === 'read' && input.resource.title === '비공개 제안'
+          ? { matched: true, allowed: false, reason: 'private_target' }
+          : { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+
+  await assert.rejects(service.assertCanReadCreateTarget({
+    accountId: null,
+    namespaceId: 1,
+    namespaceCode: 'main',
+    spaceId: 10n,
+    title: '비공개 제안'
+  }), /Wiki page not found/);
+});

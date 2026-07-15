@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import {
   changeWikiEditRequestState,
   fetchWikiEditRequest,
+  fetchWikiEditRequestContext,
   fetchWikiEditRequestDiff,
   fetchWikiEditRequests,
   rebaseWikiEditRequest,
@@ -27,8 +28,9 @@ interface RebaseConflictState {
   readonly conflictCount: number;
 }
 
-export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
-  const requestedRequestId = useSearchParams().get('request');
+export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readonly pageId?: string; readonly requestId?: string; readonly returnTo: string }) {
+  const searchParams = useSearchParams();
+  const requestedRequestId = requestId ?? searchParams.get('request');
   const [data, setData] = useState<WikiEditRequestListResponse>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
@@ -41,10 +43,13 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
     let active = true;
     setLoading(true);
     setError(null);
-    void Promise.all([
-      fetchWikiEditRequests(pageId),
-      requestedRequestId ? fetchWikiEditRequest(requestedRequestId) : Promise.resolve(null),
-    ])
+    const load = requestId
+      ? Promise.all([fetchWikiEditRequestContext(requestId), Promise.resolve(null)])
+      : Promise.all([
+          fetchWikiEditRequests(pageId!),
+          requestedRequestId ? fetchWikiEditRequest(requestedRequestId) : Promise.resolve(null),
+        ]);
+    void load
       .then(([result, requested]) => {
         if (!active) return;
         if (requested && requested.pageId !== pageId) throw new Error('이 문서의 편집 요청이 아닙니다.');
@@ -55,7 +60,7 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
       .catch((caught) => { if (active) setError(message(caught)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [pageId, requestedRequestId]);
+  }, [pageId, requestId, requestedRequestId]);
 
   useEffect(() => {
     if (loading || !requestedRequestId) return;
@@ -92,7 +97,7 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
 
   async function saveEdit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editing || !data.currentRevisionId || containsWikiConflictMarkers(editing.proposedContent)) return;
+    if (!editing || (editing.requestKind === 'edit' && !data.currentRevisionId) || containsWikiConflictMarkers(editing.proposedContent)) return;
     await run(`${editing.id}:update`, async () => {
       const updated = rebaseConflict?.requestId === editing.id
         ? await rebaseWikiEditRequest(editing.id, {
@@ -103,7 +108,7 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
           })
         : await updateWikiEditRequest({
             requestId: editing.id,
-            baseRevisionId: editing.baseRevisionId,
+            baseRevisionId: editing.baseRevisionId ?? undefined,
             contentRaw: editing.proposedContent,
             editSummary: editing.editSummary,
             isMinor: editing.isMinor
@@ -151,6 +156,7 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
   async function loadMore() {
     if (!data.nextCursor) return;
     await run('more', async () => {
+      if (!pageId) return;
       const next = await fetchWikiEditRequests(pageId, data.nextCursor ?? undefined);
       setData((current) => ({ ...current, items: [...current.items, ...next.items.filter((item) => !current.items.some((existing) => existing.id === item.id))], nextCursor: next.nextCursor, currentRevisionId: next.currentRevisionId }));
     });
@@ -169,16 +175,16 @@ export function WikiEditRequestsClient({ pageId, returnTo }: { readonly pageId: 
     <div className="space-y-4">{data.items.map((item) => {
       const isAuthor = data.viewerProfileId === item.createdBy;
       const isMutable = ['pending', 'stale', 'closed'].includes(item.status);
-      const isStale = isMutable && (item.status === 'stale' || !data.currentRevisionId || item.baseRevisionId !== data.currentRevisionId);
+      const isStale = item.requestKind === 'edit' && isMutable && (item.status === 'stale' || !data.currentRevisionId || item.baseRevisionId !== data.currentRevisionId);
       const canEdit = isAuthor && ['pending', 'closed'].includes(item.status) && !isStale;
-      const canRebase = isAuthor && ['pending', 'stale', 'closed'].includes(item.status) && isStale && Boolean(data.currentRevisionId);
+      const canRebase = item.requestKind === 'edit' && isAuthor && ['pending', 'stale', 'closed'].includes(item.status) && isStale && Boolean(data.currentRevisionId);
       const resolvingConflict = rebaseConflict?.requestId === item.id;
       const unresolvedMarkers = resolvingConflict && editing?.id === item.id
         ? containsWikiConflictMarkers(editing.proposedContent)
         : false;
       return <article id={`edit-request-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedRequestId || undefined} key={item.id} className="border border-white/10 bg-[#111821] p-4 outline-none data-[highlighted=true]:border-emerald-300/60 data-[highlighted=true]:bg-emerald-300/[0.06] sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="font-semibold text-white">{item.editSummary}</h2><p className="mt-2 text-xs text-slate-500">{item.createdByName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</p></div>
+          <div><h2 className="font-semibold text-white">{item.editSummary}</h2><p className="mt-2 text-xs text-slate-500">{item.requestKind === 'create' ? '새 문서 요청 · ' : ''}{item.createdByName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</p></div>
           <div className="flex flex-wrap gap-2">
             {data.canReview && item.status === 'pending' && !isStale ? <Action disabled={Boolean(working)} onClick={() => void review(item.id, 'accept')} accent icon={<Check />}>승인</Action> : null}
             {data.canReview && item.status === 'pending' ? <Action disabled={Boolean(working)} onClick={() => void review(item.id, 'reject')} icon={<X />}>반려</Action> : null}

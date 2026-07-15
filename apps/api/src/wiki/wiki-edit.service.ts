@@ -78,6 +78,16 @@ export interface WikiMutationResponse {
   readonly autoMerged?: boolean;
 }
 
+export interface ResolvedWikiCreateTarget {
+  readonly namespaceId: number;
+  readonly namespaceCode: string;
+  readonly spaceId: bigint;
+  readonly title: string;
+  readonly slug: string;
+  readonly displayTitle: string;
+  readonly pageType: string;
+}
+
 export interface WikiEditConflictDetails {
   readonly type: 'wiki_edit_conflict';
   readonly scope: 'page' | 'section';
@@ -188,23 +198,17 @@ export class WikiEditService {
     request: WikiPageMutationRequest,
     authorizedFileUpload: boolean
   ): Promise<WikiMutationResponse> {
-    const namespaceCode = this.cleanNamespace(request.namespace);
-    const title = this.requiredString(request.title, 'title');
     const contentRaw = this.requiredString(request.contentRaw, 'contentRaw');
-    const namespace = await this.prisma.wikiNamespace.findUnique({
-      where: { code: namespaceCode }
-    });
-    if (!namespace) {
-      throw new NotFoundException('Wiki namespace not found.');
-    }
-    const createTarget = await this.resolveCreateTarget(namespaceCode, title, request.spaceId);
+    const createTarget = await this.resolveCreatePageTarget(request);
+    const namespaceCode = createTarget.namespaceCode;
+    const title = createTarget.title;
     const spaceId = createTarget.spaceId;
     const requestedPageType = this.cleanOptional(request.pageType);
     if (requestedPageType && requestedPageType !== createTarget.pageType) {
       throw new BadRequestException(`Page type must be ${createTarget.pageType} in this wiki space.`);
     }
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
-    const slug = slugifyTitle(title);
+    const slug = createTarget.slug;
     const now = new Date();
     if (!authorizedFileUpload) {
       await this.wikiPermissions.assertCanCreatePage({
@@ -217,15 +221,12 @@ export class WikiEditService {
     } else if (namespaceCode !== 'file') {
       throw new ForbiddenException('Authorized file uploads can only create file documents.');
     }
-    if (isReservedWikiToolPath(namespaceCode, slug)) {
-      throw new BadRequestException('Wiki document paths cannot use the reserved _tools segment.');
-    }
-
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockNamespaceForCreate(tx, createTarget.namespaceId);
       const existing = await tx.wikiPage.findUnique({
         where: {
           namespaceId_slug: {
-            namespaceId: namespace.id,
+            namespaceId: createTarget.namespaceId,
             slug
           }
         }
@@ -235,7 +236,7 @@ export class WikiEditService {
       }
       const page = await tx.wikiPage.create({
         data: {
-          namespaceId: namespace.id,
+          namespaceId: createTarget.namespaceId,
           spaceId,
           localPath: slug,
           slug,
@@ -288,7 +289,7 @@ export class WikiEditService {
         title: page.title,
         slug: page.slug
       };
-    });
+    }).catch((error: unknown) => this.throwCreateCollision(error));
     await this.events?.audit('wiki.create', {
       category: 'wiki',
       actorAccountId: session.userId,
@@ -303,6 +304,27 @@ export class WikiEditService {
       }
     });
     return result;
+  }
+
+  async resolveCreatePageTarget(request: Pick<WikiPageMutationRequest, 'namespace' | 'title' | 'spaceId'>): Promise<ResolvedWikiCreateTarget> {
+    const namespaceCode = this.cleanNamespace(request.namespace);
+    const title = this.requiredString(request.title, 'title');
+    const namespace = await this.prisma.wikiNamespace.findUnique({ where: { code: namespaceCode } });
+    if (!namespace) throw new NotFoundException('Wiki namespace not found.');
+    const target = await this.resolveCreateTarget(namespaceCode, title, request.spaceId);
+    const slug = slugifyTitle(title);
+    if (isReservedWikiToolPath(namespaceCode, slug)) {
+      throw new BadRequestException('Wiki document paths cannot use the reserved _tools segment.');
+    }
+    return {
+      namespaceId: namespace.id,
+      namespaceCode,
+      spaceId: target.spaceId,
+      title,
+      slug,
+      displayTitle: target.displayTitle,
+      pageType: target.pageType
+    };
   }
 
   private async resolveCreateTarget(namespaceCode: string, title: string, requestedSpaceId?: string) {
@@ -532,9 +554,12 @@ export class WikiEditService {
     const result = await this.prisma.$transaction(async (tx) => {
       const initialRequest = await tx.wikiEditRequest.findUnique({ where: { id: input.requestId } });
       if (!initialRequest) throw new NotFoundException('Wiki edit request not found.');
+      if (initialRequest.requestKind !== 'edit' || initialRequest.pageId === null || initialRequest.baseRevisionId === null) {
+        throw new BadRequestException('This is not an existing-document edit request.');
+      }
       await this.lockPageForRevision(tx, initialRequest.pageId);
       const editRequest = await tx.wikiEditRequest.findUnique({ where: { id: input.requestId } });
-      if (!editRequest || editRequest.pageId !== initialRequest.pageId) {
+      if (!editRequest || editRequest.requestKind !== 'edit' || editRequest.pageId !== initialRequest.pageId || editRequest.baseRevisionId === null) {
         throw new NotFoundException('Wiki edit request not found.');
       }
       const page = await tx.wikiPage.findUnique({ where: { id: editRequest.pageId } });
@@ -611,6 +636,157 @@ export class WikiEditService {
       category: 'wiki', actorAccountId: session.userId, actorProfileId: reviewer.id,
       subjectType: 'wiki_page', subjectId: result.mutation.pageId,
       metadata: { namespace: result.mutation.namespace, title: result.mutation.title, revisionId: result.mutation.revisionId, revisionNo: result.mutation.revisionNo, attributionProfileId: result.request.createdBy.toString(), editRequestId: result.request.id.toString() }
+    });
+    return result;
+  }
+
+  async acceptCreateEditRequest(
+    session: SessionPayload,
+    input: { readonly requestId: bigint; readonly reviewNote: string | null }
+  ): Promise<{ readonly mutation: WikiMutationResponse; readonly request: WikiEditRequest }> {
+    const reviewer = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const reviewerActor = this.wikiPermissions.actorFromSession(session, reviewer);
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const initial = await tx.wikiEditRequest.findUnique({ where: { id: input.requestId } });
+      if (!initial || initial.requestKind !== 'create' || initial.targetNamespaceId === null) {
+        throw new NotFoundException('Wiki create request not found.');
+      }
+      await this.lockNamespaceForCreate(tx, initial.targetNamespaceId);
+      const request = await tx.wikiEditRequest.findUnique({ where: { id: input.requestId } });
+      if (!request || !this.hasCreateTarget(request) || request.targetNamespaceId !== initial.targetNamespaceId) {
+        throw new NotFoundException('Wiki create request not found.');
+      }
+      const [namespace, space, existing] = await Promise.all([
+        tx.wikiNamespace.findUnique({ where: { id: request.targetNamespaceId } }),
+        tx.wikiSpace.findUnique({ where: { id: request.targetSpaceId } }),
+        tx.wikiPage.findUnique({
+          where: { namespaceId_slug: { namespaceId: request.targetNamespaceId, slug: request.targetSlug } }
+        })
+      ]);
+      if (!namespace || namespace.code !== request.targetNamespaceCode || !space || space.status !== 'active' || space.id !== request.targetSpaceId) {
+        throw new ConflictException('The requested wiki target is no longer available.');
+      }
+      if (existing) {
+        throw new ConflictException({
+          code: 'wiki_create_target_exists',
+          message: 'A document now exists at the requested title.'
+        });
+      }
+      if (!(await this.wikiPermissions.canManageCreateTarget({
+        actor: reviewerActor,
+        namespaceId: request.targetNamespaceId,
+        namespaceCode: request.targetNamespaceCode,
+        spaceId: request.targetSpaceId,
+        title: request.targetTitle,
+        store: tx
+      }))) {
+        throw new ForbiddenException('Edit request review is not allowed.');
+      }
+      const claimed = await tx.wikiEditRequest.updateMany({
+        where: {
+          id: request.id,
+          requestKind: 'create',
+          status: 'pending',
+          pageId: null,
+          targetNamespaceId: request.targetNamespaceId,
+          targetSpaceId: request.targetSpaceId,
+          targetSlug: request.targetSlug,
+          proposedContent: request.proposedContent,
+          editSummary: request.editSummary,
+          isMinor: request.isMinor,
+          updatedAt: request.updatedAt
+        },
+        data: { status: 'reviewing', reviewedBy: reviewer.id, updatedAt: now }
+      });
+      if (claimed.count !== 1) throw new ConflictException('This edit request is no longer pending.');
+      const page = await tx.wikiPage.create({
+        data: {
+          namespaceId: request.targetNamespaceId,
+          spaceId: request.targetSpaceId,
+          localPath: request.targetSlug,
+          slug: request.targetSlug,
+          title: request.targetTitle,
+          displayTitle: request.targetDisplayTitle,
+          pageType: request.targetPageType,
+          protectionLevel: 'open',
+          status: 'normal',
+          createdBy: request.createdBy,
+          createdAt: now,
+          updatedAt: now
+        }
+      });
+      const revision = await this.createRevision(tx, {
+        pageId: page.id,
+        revisionNo: 1,
+        parentRevisionId: null,
+        contentRaw: request.proposedContent,
+        editSummary: request.editSummary,
+        isMinor: request.isMinor,
+        actorId: request.createdBy,
+        title: page.displayTitle,
+        namespaceCode: namespace.code,
+        pageTitle: page.title,
+        createdAt: now
+      });
+      await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
+      await this.insertRecentChange(tx, {
+        pageId: page.id,
+        revisionId: revision.id,
+        actorId: request.createdBy,
+        changeType: 'create',
+        title: page.title,
+        namespaceCode: namespace.code,
+        summary: revision.editSummary,
+        isMinor: revision.isMinor,
+        createdAt: now
+      });
+      const completed = await tx.wikiEditRequest.updateMany({
+        where: { id: request.id, status: 'reviewing', reviewedBy: reviewer.id, pageId: null },
+        data: {
+          pageId: page.id,
+          status: 'accepted',
+          acceptedRevisionId: revision.id,
+          reviewNote: input.reviewNote,
+          reviewedAt: now,
+          updatedAt: now
+        }
+      });
+      if (completed.count !== 1) throw new ConflictException('This edit request is no longer being reviewed.');
+      await this.notifications?.notifyEditRequestReviewed(tx, {
+        profileId: request.createdBy,
+        pageId: page.id,
+        requestId: request.id,
+        reviewerProfileId: reviewer.id,
+        status: 'accepted',
+        title: page.displayTitle
+      });
+      return {
+        mutation: {
+          pageId: page.id.toString(),
+          revisionId: revision.id.toString(),
+          revisionNo: revision.revisionNo,
+          namespace: namespace.code,
+          title: page.title,
+          slug: page.slug
+        },
+        request: await tx.wikiEditRequest.findUniqueOrThrow({ where: { id: request.id } })
+      };
+    }).catch((error: unknown) => this.throwCreateCollision(error));
+    await this.events?.audit('wiki.create', {
+      category: 'wiki',
+      actorAccountId: session.userId,
+      actorProfileId: reviewer.id,
+      subjectType: 'wiki_page',
+      subjectId: result.mutation.pageId,
+      metadata: {
+        namespace: result.mutation.namespace,
+        title: result.mutation.title,
+        revisionId: result.mutation.revisionId,
+        revisionNo: result.mutation.revisionNo,
+        attributionProfileId: result.request.createdBy.toString(),
+        editRequestId: result.request.id.toString()
+      }
     });
     return result;
   }
@@ -1285,6 +1461,44 @@ export class WikiEditService {
       WHERE id = ${pageId}
       FOR UPDATE
     `;
+  }
+
+  private async lockNamespaceForCreate(tx: Prisma.TransactionClient, namespaceId: number): Promise<void> {
+    await tx.$queryRaw<Array<{ id: number }>>`
+      SELECT id
+      FROM namespaces
+      WHERE id = ${namespaceId}
+      FOR UPDATE
+    `;
+  }
+
+  private throwCreateCollision(error: unknown): never {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+      throw new ConflictException({
+        code: 'wiki_create_target_exists',
+        message: 'A document now exists at the requested title.'
+      });
+    }
+    throw error;
+  }
+
+  private hasCreateTarget(request: WikiEditRequest): request is WikiEditRequest & {
+    targetNamespaceId: number;
+    targetNamespaceCode: string;
+    targetSpaceId: bigint;
+    targetTitle: string;
+    targetSlug: string;
+    targetDisplayTitle: string;
+    targetPageType: string;
+  } {
+    return request.requestKind === 'create' &&
+      request.targetNamespaceId !== null &&
+      request.targetNamespaceCode !== null &&
+      request.targetSpaceId !== null &&
+      request.targetTitle !== null &&
+      request.targetSlug !== null &&
+      request.targetDisplayTitle !== null &&
+      request.targetPageType !== null;
   }
 
   private async createRevision(

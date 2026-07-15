@@ -66,7 +66,9 @@ export function WikiEditRequestQueueClient({
 }
 
 function QueueCard({ item, viewerProfileId }: { readonly item: WikiEditRequestQueueItem; readonly viewerProfileId: string | null }) {
-  const detailPath = item.routePath.startsWith('/server/')
+  const detailPath = item.pageId === null
+    ? `/wiki/edit-requests/request/${encodeURIComponent(item.id)}?returnTo=${encodeURIComponent(item.routePath)}`
+    : item.routePath.startsWith('/server/')
     ? `${buildServerWikiToolPath(item.routePath, 'requests')}?request=${encodeURIComponent(item.id)}`
     : `/wiki/edit-requests/${encodeURIComponent(item.pageId)}?returnTo=${encodeURIComponent(item.routePath)}&request=${encodeURIComponent(item.id)}`;
   return (

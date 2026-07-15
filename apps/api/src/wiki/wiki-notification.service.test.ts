@@ -134,6 +134,26 @@ test('server wiki edit request review notifications keep the canonical detail ro
   assert.equal(href, '/server/luna/_tools/requests/API/requests?request=44');
 });
 
+test('rejected new-page requests notify the author through the request identity route', async () => {
+  let delivery: { pageId: string | null; href: string } | null = null;
+  const tx = {
+    wikiNotificationEvent: {
+      async createMany(args: { data: Array<{ payloadJson: { deliveries: Array<{ pageId: string | null; href: string }> } }> }) {
+        const item = args.data[0]?.payloadJson.deliveries[0];
+        delivery = item ? { pageId: item.pageId, href: item.href } : null;
+        return { count: 1 };
+      }
+    }
+  };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+
+  await service.notifyEditRequestReviewed(tx as never, {
+    profileId: 8n, pageId: null, requestId: 45n, reviewerProfileId: 7n, status: 'rejected', title: '새 문서'
+  });
+
+  assert.deepEqual(delivery, { pageId: null, href: '/wiki/edit-requests/request/45' });
+});
+
 test('muted discussion subscribers are excluded from reply delivery', async () => {
   let deliveries: Array<{ profileId: string }> = [];
   const tx = {

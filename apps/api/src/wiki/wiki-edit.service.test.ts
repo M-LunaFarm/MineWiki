@@ -143,6 +143,73 @@ test('server wiki paths must stay inside the selected server slug', async () => 
   );
 });
 
+test('new-page request acceptance creates the page and first revision atomically under the requester identity', async () => {
+  const now = new Date('2026-07-15T00:00:00Z');
+  const request = {
+    id: 71n, requestKind: 'create', pageId: null, baseRevisionId: null,
+    targetNamespaceId: 2, targetNamespaceCode: 'guide', targetSpaceId: 9n,
+    targetTitle: '새 문서', targetSlug: '새_문서', targetDisplayTitle: '새 문서', targetPageType: 'article',
+    proposedContent: '== 소개 ==\n새 문서', editSummary: '새 문서 제안', isMinor: false,
+    status: 'pending', createdBy: 13n, reviewedBy: null, reviewNote: null, acceptedRevisionId: null,
+    createdAt: now, updatedAt: now, reviewedAt: null
+  };
+  let namespaceLocks = 0;
+  let pageCreatedBy: bigint | null = null;
+  let revisionCreatedBy: bigint | null = null;
+  let recentActor: bigint | null = null;
+  const stored = { ...request };
+  const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    async $queryRaw() { namespaceLocks += 1; return [{ id: 2 }]; },
+    wikiEditRequest: {
+      async findUnique() { return { ...stored }; },
+      async findUniqueOrThrow() { return { ...stored }; },
+      async updateMany(args: { where: { status: string }; data: Record<string, unknown> }) {
+        if (stored.status !== args.where.status) return { count: 0 };
+        Object.assign(stored, args.data);
+        return { count: 1 };
+      }
+    },
+    wikiNamespace: { async findUnique() { return { id: 2, code: 'guide' }; } },
+    wikiSpace: { async findUnique() { return { id: 9n, status: 'active' }; } },
+    wikiPage: {
+      async findUnique() { return null; },
+      async create(args: { data: { createdBy: bigint } }) {
+        pageCreatedBy = args.data.createdBy;
+        return { id: 80n, namespaceId: 2, spaceId: 9n, localPath: '새_문서', slug: '새_문서', title: '새 문서', displayTitle: '새 문서', currentRevisionId: null };
+      },
+      async update() { return {}; }
+    },
+    wikiPageRevision: {
+      async create(args: { data: { createdBy: bigint } }) {
+        revisionCreatedBy = args.data.createdBy;
+        return { id: 81n, pageId: 80n, revisionNo: 1, contentSize: 25, editSummary: '새 문서 제안', isMinor: false };
+      }
+    },
+    wikiPageRenderCache: { async create() { return {}; } },
+    wikiRecentChange: {
+      async create(args: { data: { actorId: bigint } }) { recentActor = args.data.actorId; return {}; }
+    }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: 'reviewer', profileId: 20n, status: 'active' }; },
+    async canManageCreateTarget() { return true; }
+  } as unknown as WikiPermissionService;
+  const service = new WikiEditService(prisma, profiles, permissions);
+
+  const accepted = await service.acceptCreateEditRequest(session('reviewer'), { requestId: 71n, reviewNote: '승인' });
+
+  assert.equal(namespaceLocks, 1);
+  assert.equal(pageCreatedBy, 13n);
+  assert.equal(revisionCreatedBy, 13n);
+  assert.equal(recentActor, 13n);
+  assert.equal(accepted.mutation.pageId, '80');
+  assert.equal(accepted.request.status, 'accepted');
+  assert.equal(accepted.request.reviewedBy, 20n);
+  assert.equal(accepted.request.pageId, 80n);
+});
+
 test('request page types cannot override the space invariant', async () => {
   const prisma = {
     wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },

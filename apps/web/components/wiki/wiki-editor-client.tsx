@@ -10,6 +10,7 @@ import {
   fetchWikiRevision,
   fetchWikiSection,
   createWikiEditRequest,
+  createWikiPageRequest,
   listWikiFiles,
   listWikiDocumentTemplates,
   previewWikiMarkup,
@@ -236,15 +237,21 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   }
 
   function submitForReview() {
-    if (!account || !page || !baseRevisionId || !contentRaw.trim() || !editSummary.trim()) {
-      setFeedback('기존 문서의 본문과 편집 요약을 입력해야 편집 요청을 보낼 수 있습니다.');
+    if (!account || !contentRaw.trim() || !editSummary.trim() || (page && !baseRevisionId)) {
+      setFeedback('본문과 편집 요약을 입력해야 편집 요청을 보낼 수 있습니다.');
       return;
     }
     setFeedback(null);
     startSaveTransition(async () => {
       try {
-        await createWikiEditRequest({ pageId: page.id, baseRevisionId, contentRaw, editSummary, isMinor });
-        setFeedback('편집 요청을 제출했습니다. 문서 관리자가 검토하면 실제 리비전으로 반영됩니다.');
+        if (page && baseRevisionId) {
+          await createWikiEditRequest({ pageId: page.id, baseRevisionId, contentRaw, editSummary, isMinor });
+        } else {
+          await createWikiPageRequest({ namespace, title, contentRaw, editSummary, isMinor });
+        }
+        setFeedback(page
+          ? '편집 요청을 제출했습니다. 문서 관리자가 검토하면 실제 리비전으로 반영됩니다.'
+          : '새 문서 작성 요청을 제출했습니다. 관리자가 승인하기 전까지 문서는 공개되지 않습니다.');
       } catch (error) {
         setFeedback(error instanceof Error ? error.message : '편집 요청을 제출하지 못했습니다.');
       }
@@ -423,10 +430,10 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
               저장
             </button>
           </div>
-          {page && !sectionAnchor ? (
+          {!sectionAnchor ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
-              <p className="max-w-2xl text-xs leading-5 text-slate-400">직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.</p>
-              <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim()} className="btn-secondary h-10 disabled:opacity-50">검토 요청</button>
+              <p className="max-w-2xl text-xs leading-5 text-slate-400">{page ? '직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.' : '직접 생성할 수 없는 문서도 관리자가 검토하는 새 문서 요청으로 제출할 수 있습니다.'}</p>
+              <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim()} className="btn-secondary h-10 disabled:opacity-50">{page ? '검토 요청' : '새 문서 검토 요청'}</button>
             </div>
           ) : null}
           <section className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
