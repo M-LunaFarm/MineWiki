@@ -65,6 +65,34 @@ test('notification inbox upgrades legacy server edit request links to canonical 
   assert.equal(result.items[0]?.href, '/server/luna/_tools/requests/API/requests?request=44');
 });
 
+test('notification inbox removes notifications whose source comment is hidden', async () => {
+  let deletedIds: bigint[] = [];
+  const row = { id: 4n, profileId: 8n, type: 'discussion_mention', pageId: 2n, actorProfileId: null, sourceType: 'discussion_comment', sourceId: '4', title: 'Guide', message: null, href: '/wiki/discuss/2?thread=3&comment=4', dedupeKey: 'key', readAt: now, createdAt: now };
+  const prisma = {
+    wikiNotification: {
+      async findMany(args: { select?: unknown }) { return args.select ? [] : [row]; },
+      async count() { return 0; },
+      async deleteMany(args: { where: { id: { in: bigint[] } } }) { deletedIds = args.where.id.in; return { count: deletedIds.length }; }
+    },
+    wikiPage: { async findMany() { return [{ id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'Guide', status: 'normal' }]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiDiscussionComment: { async findMany() { return [{ id: 4n, threadId: 3n, status: 'hidden' }]; } },
+    wikiDiscussionThread: { async findMany() { return [{ id: 3n, pageId: 2n, status: 'open' }]; } },
+    wikiProfile: { async findMany() { return []; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 8n }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return null; },
+    async filterReadablePages(input: { pages: unknown[] }) { return input.pages; },
+    async filterReadableThreads(input: { items: unknown[] }) { return input.items; }
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiNotificationService(prisma, profiles, permissions).list(session);
+
+  assert.deepEqual(result.items, []);
+  assert.deepEqual(deletedIds, [4n]);
+});
+
 test('watched revision notifications exclude the editor and deduplicate per recipient', async () => {
   let deliveries: Array<{ profileId: string; dedupeKey: string }> = [];
   const tx = {
