@@ -360,7 +360,6 @@ export class ServerController {
     return { isOwner: await this.claimService.isOwner(id, session.userId) };
   }
 
-  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Post(':id/banner')
   @Throttle({ default: { limit: 10, ttl: 300 } })

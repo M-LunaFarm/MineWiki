@@ -22,7 +22,7 @@ export class VoteDispatchController {
     private readonly claimService: ClaimService
   ) {}
 
-  @RequireStepUp('vote_admin')
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Get()
   async list(
@@ -33,7 +33,7 @@ export class VoteDispatchController {
     return this.voteService.listDispatchAttempts(serverId);
   }
 
-  @RequireStepUp('vote_admin')
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Post(':attemptId/replay')
   @Throttle({ default: { limit: 10, ttl: 300 } })
