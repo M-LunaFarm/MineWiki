@@ -29,7 +29,12 @@ export function ServerWikiNavigation({
   const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(storageKey);
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem(storageKey);
+    } catch {
+      // Storage can be unavailable in hardened/private browser contexts.
+    }
     const next = parseCollapsedServerWikiNavigation(stored, items);
     const currentId = items.find((item) => item.current)?.id;
     if (currentId) {
@@ -52,7 +57,11 @@ export function ServerWikiNavigation({
       const next = new Set(current);
       if (next.has(item.id)) next.delete(item.id);
       else next.add(item.id);
-      window.localStorage.setItem(storageKey, JSON.stringify([...next]));
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify([...next]));
+      } catch {
+        // Keep the in-memory navigation usable when persistence is unavailable.
+      }
       return next;
     });
   }
