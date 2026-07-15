@@ -332,7 +332,7 @@ export function AuthForms() {
         </p>
       ) : null}
       {oauthError ? (
-        <p className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
+        <p role="alert" className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
           {oauthError}
         </p>
       ) : null}
@@ -400,7 +400,9 @@ export function AuthForms() {
                 />
                 <button
                   type="button"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-white"
+                  className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-slate-500 transition-colors hover:text-white"
+                  aria-label={showPassword ? '비밀번호 숨기기' : '비밀번호 보기'}
+                  aria-pressed={showPassword}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => setShowPassword((value) => !value)}
                 >
@@ -482,12 +484,12 @@ export function AuthForms() {
             )}
 
             {error ? (
-              <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+              <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
                 {error}
               </p>
             ) : null}
             {notice ? (
-              <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+              <p role="status" className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
                 {notice}
               </p>
             ) : null}
@@ -554,12 +556,12 @@ export function AuthForms() {
           </div>
 
           {error ? (
-            <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+            <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
               {error}
             </p>
           ) : null}
           {notice ? (
-            <p className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+            <p role="status" className="rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
               {notice}
             </p>
           ) : null}

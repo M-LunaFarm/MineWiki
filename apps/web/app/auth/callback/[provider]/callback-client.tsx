@@ -54,6 +54,12 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
       return;
     }
 
+    const openedForLink = typeof window !== 'undefined' && Boolean(window.opener && !window.opener.closed);
+    if (openedForLink) {
+      setFlowMode('link');
+      setLinkCompletionTarget('opener');
+    }
+
     const errorParam = searchParams.get('error');
     if (errorParam) {
       setStatus('error');
@@ -99,7 +105,12 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
                 { type: 'oauth-link-complete', provider: normalizedProvider },
                 window.location.origin,
               );
-              setTimeout(() => window.close(), 1500);
+              setTimeout(() => {
+                window.close();
+                setTimeout(() => {
+                  if (!window.closed) router.replace('/me');
+                }, 100);
+              }, 1500);
             } else {
               const returnTo = isSafeReturnPath(result.returnTo) ? result.returnTo : '/me';
               setLinkCompletionTarget('redirect');
@@ -147,7 +158,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         : '인증 처리를 완료하지 못했습니다.';
   const subtitle =
     status === 'pending'
-      ? '공급자에서 전달한 code와 state 값을 검증하고 세션을 발급하는 중입니다. 창을 닫지 말아 주세요.'
+      ? '로그인 서비스에서 받은 인증 응답과 요청 안전성을 확인하고 있습니다. 창을 닫지 말아 주세요.'
       : message;
   const detailTitle =
     status === 'pending'
@@ -159,7 +170,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         : 'OAuth 처리 중 오류가 발생했습니다.';
   const detailBody =
     status === 'pending'
-      ? '사용자 권한, state 무결성, 리디렉션 URI 일치 여부를 확인하고 있습니다.'
+      ? '로그인 요청이 이 브라우저에서 시작되었는지 안전하게 확인하고 있습니다.'
       : status === 'success'
         ? flowMode === 'link'
           ? linkCompletionTarget === 'opener'
@@ -170,10 +181,10 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
   const actionLabel =
     status === 'pending'
       ? '처리 중'
-      : flowMode === 'link'
-        ? linkCompletionTarget === 'opener' ? '창 닫기' : '계정 페이지로 이동'
-        : status === 'error'
-          ? '로그인 페이지로 이동'
+      : status === 'error'
+        ? flowMode === 'link' ? '계정 페이지로 돌아가기' : '로그인 페이지로 이동'
+        : flowMode === 'link'
+          ? linkCompletionTarget === 'opener' ? '창 닫기' : '계정 페이지로 이동'
           : '계정 페이지로 이동';
   const checks = [
     {
@@ -210,6 +221,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         </>
       }
     >
+      <div role={status === 'error' ? 'alert' : 'status'} aria-live={status === 'error' ? 'assertive' : 'polite'}>
       <CallbackCard status={shellStatus} progressWidth={progressWidth} footerLabel="MineWiki OAuth">
         <div className="mb-6 flex items-start gap-4">
           <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg border border-[#30363d] bg-[#0b0d10]">
@@ -244,7 +256,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
             <div>
               <p className="text-sm font-medium text-[#e5e7eb]">{providerLabel} 응답 확인</p>
               <p className="mt-1 text-xs leading-5 text-[#a9b0ba]">
-                code, state, redirect URI를 확인한 뒤 MineWiki 세션에 연결합니다.
+                인증 응답과 요청 안전성을 확인한 뒤 MineWiki 계정에 연결합니다.
               </p>
               {status === 'error' && message ? (
                 <p className="mt-2 text-xs text-rose-200/90">{message}</p>
@@ -286,6 +298,13 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
                 }
               }
               if (status === 'error') {
+                if (flowMode === 'link') {
+                  window.close();
+                  setTimeout(() => {
+                    if (!window.closed) router.replace('/me');
+                  }, 100);
+                  return;
+                }
                 router.replace('/login');
                 return;
               }
@@ -305,6 +324,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           </button>
         </div>
       </CallbackCard>
+      </div>
     </CallbackShell>
   );
 }

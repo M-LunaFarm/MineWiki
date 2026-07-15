@@ -83,7 +83,7 @@ export function CallbackCard({ status, progressWidth, children, footerLabel }: C
   const tone = statusStyles[status];
 
   return (
-    <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d1416]">
+    <div className="dark-fixed-surface overflow-hidden rounded-xl border border-white/10 bg-[#0d1416]">
       <div className="h-1 w-full bg-white/[0.06]">
         <div className={`h-full animate-pulse ${tone.progress}`} style={{ width: progressWidth }} />
       </div>

@@ -118,6 +118,8 @@ export function AccountClientPage() {
 
   const [linkingProvider, setLinkingProvider] = useState<OAuthProvider | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const oauthLinkPopupRef = useRef<Window | null>(null);
+  const oauthLinkProviderRef = useRef<OAuthProvider | null>(null);
 
   const [resending, setResending] = useState(false);
   const [resendFeedback, setResendFeedback] = useState<FeedbackState | null>(null);
@@ -247,12 +249,23 @@ export function AccountClientPage() {
       if (event.origin !== window.location.origin) {
         return;
       }
+      if (
+        !oauthLinkPopupRef.current ||
+        event.source !== oauthLinkPopupRef.current ||
+        event.data?.provider !== oauthLinkProviderRef.current
+      ) {
+        return;
+      }
       if (event.data?.type === 'oauth-link-complete') {
+        oauthLinkPopupRef.current = null;
+        oauthLinkProviderRef.current = null;
         setLinkingProvider(null);
         setLinkError(null);
         void refresh();
       }
       if (event.data?.type === 'oauth-link-error') {
+        oauthLinkPopupRef.current = null;
+        oauthLinkProviderRef.current = null;
         setLinkingProvider(null);
         setLinkError(
           typeof event.data.message === 'string'
@@ -495,11 +508,15 @@ export function AccountClientPage() {
         return;
       }
       popup.focus();
+      oauthLinkPopupRef.current = popup;
+      oauthLinkProviderRef.current = provider;
       const closeTimer = window.setInterval(() => {
         if (!popup.closed) {
           return;
         }
         window.clearInterval(closeTimer);
+        oauthLinkPopupRef.current = null;
+        oauthLinkProviderRef.current = null;
         setLinkingProvider((current) => {
           if (current === provider) {
             setLinkError('계정 연동 창이 닫혔습니다. 연동을 완료하지 못했습니다.');
@@ -871,7 +888,7 @@ export function AccountClientPage() {
                   </div>
 
                   {linkError ? (
-                    <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                    <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
                       {linkError}
                     </p>
                   ) : null}
