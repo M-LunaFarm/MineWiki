@@ -1,4 +1,5 @@
 import { config as loadEnv } from 'dotenv';
+import { createECDH } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
@@ -258,6 +259,7 @@ function validateWebPushConfiguration(env: EnvSchema, failures: string[]): void 
   if (!['1', 'true', 'yes', 'on'].includes(env.WEB_PUSH_ENABLED?.trim().toLowerCase() ?? '')) return;
   if (env.MINEWIKI_SERVICE === 'api') {
     validateRequiredGroup(env, ['VAPID_PUBLIC_KEY'], 'Web Push API', failures);
+    validateVapidPublicKey(env.VAPID_PUBLIC_KEY, failures);
     return;
   }
   if (env.MINEWIKI_SERVICE === 'worker' || env.MINEWIKI_SERVICE === 'all') {
@@ -267,6 +269,57 @@ function validateWebPushConfiguration(env: EnvSchema, failures: string[]): void 
       'Web Push worker',
       failures,
     );
+    validateVapidKeyPair(env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY, failures);
+    validateVapidSubject(env.VAPID_SUBJECT, failures);
+  }
+}
+
+function validateVapidPublicKey(value: string | undefined, failures: string[]): Buffer | null {
+  if (isBlank(value)) return null;
+  const decoded = decodeBase64Url(value!);
+  if (!decoded || decoded.length !== 65 || decoded[0] !== 4) {
+    failures.push('VAPID_PUBLIC_KEY must be an uncompressed P-256 public key');
+    return null;
+  }
+  return decoded;
+}
+
+function validateVapidKeyPair(publicValue: string | undefined, privateValue: string | undefined, failures: string[]): void {
+  const publicKey = validateVapidPublicKey(publicValue, failures);
+  if (isBlank(privateValue)) return;
+  const privateKey = decodeBase64Url(privateValue!);
+  if (!privateKey || privateKey.length !== 32) {
+    failures.push('VAPID_PRIVATE_KEY must be a 32-byte P-256 private key');
+    return;
+  }
+  if (!publicKey) return;
+  try {
+    const ecdh = createECDH('prime256v1');
+    ecdh.setPrivateKey(privateKey);
+    if (!ecdh.getPublicKey().equals(publicKey)) failures.push('VAPID public and private keys do not match');
+  } catch {
+    failures.push('VAPID_PRIVATE_KEY is not a valid P-256 private key');
+  }
+}
+
+function validateVapidSubject(value: string | undefined, failures: string[]): void {
+  if (isBlank(value)) return;
+  try {
+    const subject = new URL(value!);
+    if (subject.protocol !== 'mailto:' && subject.protocol !== 'https:') throw new Error('unsupported protocol');
+    if (subject.protocol === 'mailto:' && !subject.pathname.includes('@')) throw new Error('invalid mail address');
+  } catch {
+    failures.push('VAPID_SUBJECT must be a mailto: address or HTTPS URL');
+  }
+}
+
+function decodeBase64Url(value: string): Buffer | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  try {
+    const decoded = Buffer.from(value, 'base64url');
+    return decoded.toString('base64url') === value ? decoded : null;
+  } catch {
+    return null;
   }
 }
 

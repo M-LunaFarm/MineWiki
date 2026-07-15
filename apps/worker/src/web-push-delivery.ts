@@ -59,8 +59,12 @@ export async function processWebPushDeliveries(
   const send = options.send ?? createWebPushSender(config);
 
   await prisma.wikiPushDelivery.updateMany({
-    where: { status: 'processing', lockedAt: { lt: new Date(now.getTime() - LEASE_MS) } },
+    where: { status: 'processing', lockedAt: { lt: new Date(now.getTime() - LEASE_MS) }, attempts: { lt: MAX_ATTEMPTS } },
     data: { status: 'pending', lockedAt: null, lockedBy: null, availableAt: now },
+  });
+  await prisma.wikiPushDelivery.updateMany({
+    where: { status: 'processing', lockedAt: { lt: new Date(now.getTime() - LEASE_MS) }, attempts: { gte: MAX_ATTEMPTS } },
+    data: { status: 'failed', lockedAt: null, lockedBy: null, lastError: 'lease_exhausted' },
   });
   const candidates = await prisma.wikiPushDelivery.findMany({
     where: { status: 'pending', availableAt: { lte: now }, attempts: { lt: MAX_ATTEMPTS } },

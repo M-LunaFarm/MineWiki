@@ -33,14 +33,14 @@ function fixture(overrides: Record<string, unknown> = {}) {
   };
   const updates: Array<Record<string, unknown>> = [];
   let deleted = 0;
-  let claimCalls = 0;
   const prisma = {
     wikiPushDelivery: {
       async updateMany(input: Record<string, unknown>) {
         updates.push(input);
-        claimCalls += 1;
-        if (claimCalls === 1) return { count: 0 };
-        if (claimCalls === 2) {
+        const data = input.data as { status?: string; lockedBy?: string };
+        const where = input.where as { status?: string };
+        if (where.status === 'processing' && (data.status === 'pending' || data.status === 'failed')) return { count: 0 };
+        if (where.status === 'pending' && data.status === 'processing') {
           delivery.lockedBy = String((input.data as { lockedBy: string }).lockedBy);
           return { count: 1 };
         }
@@ -70,6 +70,7 @@ test('sends only a generic payload and completes the claimed delivery', async ()
   assert.deepEqual(JSON.parse(payload), { notificationId: '20', tag: 'minewiki-notification-20' });
   assert.equal(/title|message|href|endpoint/i.test(payload), false);
   assert.equal(result.delivered, 1);
+  assert.ok(state.updates.some((entry) => JSON.stringify(entry, (_key, value) => typeof value === 'bigint' ? value.toString() : value).includes('lease_exhausted')));
 });
 
 test('removes a subscription on an expired endpoint response', async () => {

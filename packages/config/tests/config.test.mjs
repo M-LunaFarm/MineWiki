@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createECDH } from 'node:crypto';
 import { ConfigService, assertSupportedQueueServer } from '../dist/index.js';
+
+const vapidEcdh = createECDH('prime256v1');
+vapidEcdh.generateKeys();
+const TEST_VAPID_PUBLIC_KEY = vapidEcdh.getPublicKey().toString('base64url');
+const TEST_VAPID_PRIVATE_KEY = vapidEcdh.getPrivateKey().toString('base64url');
 
 test('queue backend validation accepts Redis 7 and rejects incompatible servers', () => {
   assert.doesNotThrow(() =>
@@ -161,8 +167,10 @@ test('API Web Push requires only the public VAPID key', () => {
   delete source.VAPID_PUBLIC_KEY;
   assert.throws(() => new ConfigService(source), /VAPID_PUBLIC_KEY is required/);
 
-  source.VAPID_PUBLIC_KEY = 'public-vapid-key';
+  source.VAPID_PUBLIC_KEY = TEST_VAPID_PUBLIC_KEY;
   assert.doesNotThrow(() => new ConfigService(source));
+  source.VAPID_PUBLIC_KEY = 'not-a-public-key';
+  assert.throws(() => new ConfigService(source), /uncompressed P-256 public key/);
 });
 
 test('worker Web Push requires the complete private VAPID configuration', () => {
@@ -174,14 +182,26 @@ test('worker Web Push requires the complete private VAPID configuration', () => 
     INTERNAL_API_BASE_URL: 'http://api:3000',
     APP_ENCRYPTION_KEY: 'worker-encryption-key',
     WEB_PUSH_ENABLED: 'true',
-    VAPID_PUBLIC_KEY: 'public-vapid-key',
+    VAPID_PUBLIC_KEY: TEST_VAPID_PUBLIC_KEY,
   };
   assert.throws(() => new ConfigService(source), /VAPID_PRIVATE_KEY is required/);
   assert.doesNotThrow(() => new ConfigService({
     ...source,
-    VAPID_PRIVATE_KEY: 'private-vapid-key',
+    VAPID_PRIVATE_KEY: TEST_VAPID_PRIVATE_KEY,
     VAPID_SUBJECT: 'mailto:support@minewiki.kr',
   }));
+  const otherKey = createECDH('prime256v1');
+  otherKey.generateKeys();
+  assert.throws(() => new ConfigService({
+    ...source,
+    VAPID_PRIVATE_KEY: otherKey.getPrivateKey().toString('base64url'),
+    VAPID_SUBJECT: 'mailto:support@minewiki.kr',
+  }), /VAPID public and private keys do not match/);
+  assert.throws(() => new ConfigService({
+    ...source,
+    VAPID_PRIVATE_KEY: TEST_VAPID_PRIVATE_KEY,
+    VAPID_SUBJECT: 'javascript:alert(1)',
+  }), /VAPID_SUBJECT must be/);
 });
 
 function validProductionEnv() {
