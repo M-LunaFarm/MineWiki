@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowUpRight, Compass, Shuffle } from 'lucide-react';
+import { ArrowUpRight, Compass, ShieldCheck, Shuffle } from 'lucide-react';
 import { fetchWikiSpecial } from '../../../lib/wiki-server-api';
 import type { WikiSpecialDocumentType } from '../../../lib/wiki-api';
 
@@ -37,6 +37,7 @@ export default async function WikiSpecialPage({ searchParams }: PageProps) {
 
       <nav className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" aria-label="특수 문서 유형">
         {TYPES.map((item) => <Link key={item.key} href={href(item.key, namespace)} className={`rounded-xl border p-4 transition ${item.key === type ? 'border-emerald-400/40 bg-emerald-400/10' : 'border-white/10 bg-white/[0.025] hover:border-white/20'}`}><strong className={item.key === type ? 'text-emerald-200' : 'text-white'}>{item.label}</strong><span className="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span></Link>)}
+        <Link href="/wiki/block-history" className="rounded-xl border border-white/10 bg-white/[0.025] p-4 transition hover:border-white/20"><strong className="flex items-center gap-2 text-white"><ShieldCheck className="size-4 text-emerald-300" />차단 기록</strong><span className="mt-1 block text-xs leading-5 text-slate-500">위키 사용자 차단과 해제의 공개 운영 기록</span></Link>
       </nav>
 
       <form action="/wiki/special" className="flex flex-wrap items-end gap-3 border border-white/10 bg-[#111821] p-4">

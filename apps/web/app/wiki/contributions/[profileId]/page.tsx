@@ -19,7 +19,7 @@ export default async function WikiContributionsPage({ params, searchParams }: Pa
       </nav>
       <header className="border-b border-white/10 pb-6">
         <h1 className="text-3xl font-bold text-white">{result.profile.displayName}의 기여</h1>
-        <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">@{result.profile.username}{result.profile.status === 'blocked' ? <span className="chip border-red-300/30 text-red-200">기여 차단됨</span> : null}<span>· 읽을 권한이 있는 공개 활동만 표시됩니다.</span></p>
+        <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">@{result.profile.username}{result.profile.status === 'blocked' ? <Link href={`/wiki/block-history?q=${encodeURIComponent(result.profile.username)}`} className="chip border-red-300/30 text-red-200 hover:bg-red-300/10">기여 차단됨 · 기록 보기</Link> : null}<span>· 읽을 권한이 있는 공개 활동만 표시됩니다.</span></p>
       </header>
       <nav aria-label="기여 활동 유형" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         {CONTRIBUTION_TABS.map((tab) => <Link key={tab.value} href={`/wiki/contributions/${profileId}?activity=${tab.value}`} className={`chip min-h-11 justify-center ${activity === tab.value ? 'chip-accent' : 'chip-muted'}`} aria-current={activity === tab.value ? 'page' : undefined}>{tab.label}</Link>)}

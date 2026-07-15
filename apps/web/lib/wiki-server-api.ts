@@ -11,7 +11,8 @@ import type {
   WikiSearchResult,
   WikiSearchResponse,
   WikiSpecialDocumentResponse,
-  WikiSpecialDocumentType
+  WikiSpecialDocumentType,
+  WikiPublicBlockHistoryResponse
 } from './wiki-api';
 
 const API_BASE = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL);
@@ -81,6 +82,20 @@ export async function fetchWikiSpecial(input: {
   if (input.namespace) params.set('namespace', input.namespace);
   const response = await wikiFetch(`/v1/wiki/special?${params.toString()}`);
   return readWikiResponse<WikiSpecialDocumentResponse>(response, 'Failed to load special wiki documents.');
+}
+
+export async function fetchWikiBlockHistory(input: {
+  readonly cursor?: string;
+  readonly action?: 'block' | 'unblock';
+  readonly query?: string;
+  readonly limit?: number;
+} = {}): Promise<WikiPublicBlockHistoryResponse> {
+  const params = new URLSearchParams({ limit: String(input.limit ?? 50) });
+  if (input.cursor) params.set('cursor', input.cursor);
+  if (input.action) params.set('action', input.action);
+  if (input.query) params.set('q', input.query);
+  const response = await wikiFetch(`/v1/wiki/block-history?${params.toString()}`);
+  return readWikiResponse<WikiPublicBlockHistoryResponse>(response, 'Failed to load wiki block history.');
 }
 
 export async function fetchWikiCategory(input: {

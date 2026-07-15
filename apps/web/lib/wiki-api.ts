@@ -641,7 +641,22 @@ export interface WikiUserBlockEventSummary {
   readonly previousStatus: string;
   readonly newStatus: string;
   readonly reason: string;
+  readonly publicReason: string | null;
   readonly createdAt: string;
+}
+
+export interface WikiPublicBlockEvent {
+  readonly id: string;
+  readonly target: { readonly profileId: string; readonly username: string | null; readonly displayName: string };
+  readonly actor: { readonly profileId: string; readonly username: string | null; readonly displayName: string };
+  readonly action: 'block' | 'unblock';
+  readonly publicReason: string | null;
+  readonly createdAt: string;
+}
+
+export interface WikiPublicBlockHistoryResponse {
+  readonly items: WikiPublicBlockEvent[];
+  readonly nextCursor: string | null;
 }
 
 export interface WikiBatchRollbackCandidate {
@@ -1296,10 +1311,10 @@ export async function fetchWikiUserBlockEvents(targetProfileId?: string): Promis
   return fetchWikiAdminJson(`/user-block-events${targetProfileId ? `?targetProfileId=${encodeURIComponent(targetProfileId)}` : ''}`);
 }
 
-export async function setWikiAdminUserBlocked(input: { profileId: string; blocked: boolean; reason: string }): Promise<WikiAdminUserSummary> {
+export async function setWikiAdminUserBlocked(input: { profileId: string; blocked: boolean; reason: string; publicReason?: string }): Promise<WikiAdminUserSummary> {
   return fetchWikiAdminJson(`/users/${encodeURIComponent(input.profileId)}/${input.blocked ? 'block' : 'unblock'}`, {
     method: 'POST',
-    body: JSON.stringify({ reason: input.reason }),
+    body: JSON.stringify({ reason: input.reason, publicReason: input.publicReason }),
   });
 }
 
