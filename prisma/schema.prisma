@@ -1124,6 +1124,7 @@ model WikiPage {
   createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
   createdAt         DateTime @map("created_at")
   updatedAt         DateTime @map("updated_at")
+  searchDocument    WikiSearchDocument?
 
   @@unique([namespaceId, slug])
   @@unique([spaceId, localPath])
@@ -1214,6 +1215,7 @@ model WikiSearchDocument {
   revisionId   BigInt   @unique @map("revision_id") @db.UnsignedBigInt
   searchVector String   @map("search_vector") @db.LongText
   updatedAt    DateTime @map("updated_at") @db.DateTime(3)
+  page         WikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
 
   @@map("wiki_search_documents")
 }
