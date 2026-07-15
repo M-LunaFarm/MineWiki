@@ -33,7 +33,9 @@ export class SessionController {
         userAgent: item.userAgent,
         isCurrent: item.isCurrent,
         tokenVersion: item.tokenVersion,
-        isElevated: item.isElevated
+        isElevated: false,
+        authLevel: item.authLevel,
+        stepUpExpiresAt: item.stepUpExpiresAt
       }))
     };
   }

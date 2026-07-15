@@ -1,7 +1,11 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { SessionService, hashSessionToken } from './session.service';
+import {
+  SessionService,
+  assertFreshStepUp,
+  hashSessionToken,
+} from './session.service';
 import { PrismaService } from '../common/prisma.service';
 import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
 
@@ -126,17 +130,35 @@ if (!hasDatabase) {
     }
   });
 
-  test('rotates session and increments version while keeping expiry', async () => {
+  test('rotates session for a purpose-bound five-minute step-up without extending expiry', async () => {
     const userId = await createTestAccount();
     try {
       const initial = await service.issueSession({ userId, ttlSeconds: 60 });
-      const rotated = await service.rotateSession(initial.sessionId, true);
+      const before = await service.getSession(initial.sessionId);
+      const initialToken = tokenFromCookie(initial.cookie)!;
+      const rotated = await service.rotateSession(initial.sessionId, {
+        expectedTokenVersion: before!.tokenVersion,
+        stepUp: { method: 'totp', purpose: 'wiki_admin' },
+      });
       assert.notEqual(rotated.cookie, initial.cookie);
       assert.ok(rotated.cookie.includes('HttpOnly'));
       const session = await service.getSession(initial.sessionId);
-      assert.ok(session?.isElevated);
+      const payload = service.toPayload(session!);
+      assert.equal(session?.isElevated, false);
       assert.equal(session?.tokenVersion, 2);
       assert.equal(session?.lastActiveAt instanceof Date, true);
+      assert.equal(session?.expiresAt.toISOString(), before?.expiresAt.toISOString());
+      assert.equal(session?.primaryAuthenticatedAt.toISOString(), before?.primaryAuthenticatedAt.toISOString());
+      assert.equal(payload.authLevel, 'aal2');
+      assert.equal(payload.stepUpPurpose, 'wiki_admin');
+      assert.equal(payload.stepUpMethod, 'totp');
+      assert.doesNotThrow(() => assertFreshStepUp(payload, 'wiki_admin'));
+      assert.throws(() => assertFreshStepUp(payload, 'role_admin'));
+      assert.equal(await service.getSessionByToken(initialToken), undefined);
+      assert.equal(
+        (await service.getSessionByToken(tokenFromCookie(rotated.cookie)))?.sessionId,
+        initial.sessionId,
+      );
     } finally {
       await cleanupTestAccount(userId);
     }

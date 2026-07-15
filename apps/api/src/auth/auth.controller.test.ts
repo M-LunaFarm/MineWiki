@@ -28,7 +28,10 @@ test('me endpoint returns session-derived access without probing an admin resour
   const session = {
     sessionId: 'session-1',
     userId: '11111111-1111-4111-8111-111111111111',
+    tokenVersion: 1,
     isElevated: true,
+    authenticatedAt: new Date().toISOString(),
+    authLevel: 'aal1',
     groups: ['owner'],
     permissions: ['admin.audit.read'],
   } satisfies SessionPayload;
@@ -37,7 +40,10 @@ test('me endpoint returns session-derived access without probing an admin resour
     id: session.userId,
     displayName: 'Operator',
     access: {
-      isElevated: true,
+      isElevated: false,
+      authLevel: 'aal1',
+      stepUpExpiresAt: null,
+      stepUpPurpose: null,
       roles: ['owner'],
       permissions: ['admin.audit.read'],
     },

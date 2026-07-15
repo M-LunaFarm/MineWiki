@@ -293,7 +293,10 @@ export class AuthController {
     return {
       ...account,
       access: {
-        isElevated: session.isElevated,
+        isElevated: false,
+        authLevel: session.authLevel ?? 'aal1',
+        stepUpExpiresAt: session.stepUpExpiresAt ?? null,
+        stepUpPurpose: session.stepUpPurpose ?? null,
         roles: [...(session.groups ?? [])],
         permissions: [...(session.permissions ?? [])],
       },

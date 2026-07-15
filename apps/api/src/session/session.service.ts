@@ -1,4 +1,5 @@
-﻿import { Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { serialize } from 'cookie';
 import { DEFAULT_SESSION_TTL_SECONDS, MINEWIKI_SESSION_COOKIE } from '@minewiki/auth';
@@ -19,6 +20,11 @@ interface SessionRecord {
   readonly token: string;
   tokenVersion: number;
   isElevated: boolean;
+  primaryAuthenticatedAt: Date;
+  stepUpAt: Date | null;
+  stepUpExpiresAt: Date | null;
+  stepUpMethod: string | null;
+  stepUpPurpose: string | null;
   permissions: string[];
   groups: string[];
   ipAddress: string | null;
@@ -31,7 +37,6 @@ interface SessionRecord {
 export interface IssueSessionOptions {
   readonly userId: string;
   readonly ttlSeconds?: number;
-  readonly elevated?: boolean;
   readonly ipAddress?: string | null;
   readonly userAgent?: string | null;
 }
@@ -41,13 +46,46 @@ export interface RotatedSession {
   readonly cookie: string;
   readonly expiresAt: string;
   readonly policyConsent: PolicyConsentStatus;
+  readonly stepUpExpiresAt?: string | null;
+}
+
+export const STEP_UP_TTL_SECONDS = 5 * 60;
+export const STEP_UP_PURPOSES = [
+  'wiki_admin',
+  'role_admin',
+  'server_admin',
+  'review_moderation',
+  'vote_admin',
+  'guild_admin',
+  'file_admin',
+  'audit_read',
+  'account_delete_admin',
+  'mfa_manage',
+] as const;
+export type StepUpPurpose = (typeof STEP_UP_PURPOSES)[number];
+export type StepUpMethod = 'totp' | 'recovery_code' | 'webauthn';
+
+export interface RotateSessionOptions {
+  readonly expectedTokenVersion: number;
+  readonly clearStepUp?: boolean;
+  readonly stepUp?: {
+    readonly method: StepUpMethod;
+    readonly purpose: StepUpPurpose;
+    readonly ttlSeconds?: number;
+  };
 }
 
 export interface SessionPayload {
   readonly sessionId: string;
   readonly userId: string;
+  readonly tokenVersion: number;
   readonly isElevated: boolean;
   readonly authenticatedAt: string;
+  readonly authLevel?: 'aal1' | 'aal2';
+  readonly stepUpAt?: string | null;
+  readonly stepUpExpiresAt?: string | null;
+  readonly stepUpMethod?: StepUpMethod | null;
+  readonly stepUpPurpose?: StepUpPurpose | null;
   readonly permissions?: readonly string[];
   readonly groups?: readonly string[];
   readonly policyConsent?: PolicyConsentStatus;
@@ -64,6 +102,8 @@ export interface SessionSummary {
   readonly isCurrent: boolean;
   readonly tokenVersion: number;
   readonly isElevated: boolean;
+  readonly authLevel: 'aal1' | 'aal2';
+  readonly stepUpExpiresAt: string | null;
 }
 
 @Injectable()
@@ -104,7 +144,8 @@ export class SessionService {
             expiresAt,
             token: hashSessionToken(token),
             tokenVersion: 1,
-            isElevated: Boolean(options.elevated),
+            isElevated: false,
+            primaryAuthenticatedAt: issuedAt,
             ipAddress: options.ipAddress ?? null,
             userAgent: options.userAgent ?? null,
             lastActiveAt: issuedAt,
@@ -126,7 +167,12 @@ export class SessionService {
         expiresAt,
         token,
         tokenVersion: 1,
-        isElevated: Boolean(options.elevated),
+        isElevated: false,
+        primaryAuthenticatedAt: issuedAt,
+        stepUpAt: null,
+        stepUpExpiresAt: null,
+        stepUpMethod: null,
+        stepUpPurpose: null,
         permissions: [],
         groups: [],
         ipAddress: options.ipAddress ?? null,
@@ -140,9 +186,13 @@ export class SessionService {
     };
   }
 
-  async rotateSession(sessionId: string, elevated = false): Promise<RotatedSession> {
-    const current = await this.prisma.session.findUnique({
-      where: { id: sessionId }
+  async rotateSession(
+    sessionId: string,
+    options: RotateSessionOptions,
+    store: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<RotatedSession> {
+    const current = await store.session.findFirst({
+      where: { id: sessionId, tokenVersion: options.expectedTokenVersion }
     });
     if (!current) {
       throw new UnauthorizedException('세션이 존재하지 않습니다.');
@@ -150,20 +200,43 @@ export class SessionService {
 
     const token = this.generateToken();
     const issuedAt = new Date();
-    const expirationMs = current.expiresAt.getTime() - current.issuedAt.getTime();
-    const expiresAt = new Date(issuedAt.getTime() + expirationMs);
+    const expiresAt = current.expiresAt;
+    if (expiresAt.getTime() <= issuedAt.getTime()) {
+      throw new UnauthorizedException('세션이 만료되었습니다.');
+    }
+    const stepUpTtl = Math.min(
+      Math.max(Math.trunc(options.stepUp?.ttlSeconds ?? STEP_UP_TTL_SECONDS), 60),
+      STEP_UP_TTL_SECONDS,
+    );
+    const stepUpAt = options.stepUp ? issuedAt : options.clearStepUp ? null : current.stepUpAt;
+    const stepUpExpiresAt = options.stepUp
+      ? new Date(Math.min(expiresAt.getTime(), issuedAt.getTime() + stepUpTtl * 1000))
+      : options.clearStepUp
+        ? null
+        : current.stepUpExpiresAt;
 
-    const updated = await this.prisma.session.update({
-      where: { id: sessionId },
+    const rotated = await store.session.updateMany({
+      where: { id: sessionId, tokenVersion: options.expectedTokenVersion },
       data: {
         token: hashSessionToken(token),
         issuedAt,
         expiresAt,
         tokenVersion: current.tokenVersion + 1,
-        isElevated: elevated ? true : current.isElevated,
+        isElevated: false,
+        stepUpAt,
+        stepUpExpiresAt,
+        stepUpMethod: options.stepUp?.method ?? (options.clearStepUp ? null : current.stepUpMethod),
+        stepUpPurpose: options.stepUp?.purpose ?? (options.clearStepUp ? null : current.stepUpPurpose),
         lastActiveAt: issuedAt
       }
     });
+    if (rotated.count !== 1) {
+      throw new UnauthorizedException('세션이 이미 갱신되었습니다. 다시 로그인해 주세요.');
+    }
+    const updated = await store.session.findUnique({ where: { id: sessionId } });
+    if (!updated) {
+      throw new UnauthorizedException('세션이 존재하지 않습니다.');
+    }
 
     return {
       sessionId,
@@ -174,7 +247,12 @@ export class SessionService {
         expiresAt: updated.expiresAt,
         token,
         tokenVersion: updated.tokenVersion,
-        isElevated: updated.isElevated,
+        isElevated: false,
+        primaryAuthenticatedAt: updated.primaryAuthenticatedAt,
+        stepUpAt: updated.stepUpAt,
+        stepUpExpiresAt: updated.stepUpExpiresAt,
+        stepUpMethod: updated.stepUpMethod,
+        stepUpPurpose: updated.stepUpPurpose,
         permissions: [],
         groups: [],
         ipAddress: updated.ipAddress,
@@ -188,6 +266,7 @@ export class SessionService {
         updated.termsPolicyVersion,
         updated.privacyPolicyVersion,
       ),
+      stepUpExpiresAt: updated.stepUpExpiresAt?.toISOString() ?? null,
     };
   }
 
@@ -239,7 +318,12 @@ export class SessionService {
       expiresAt: record.expiresAt,
       token: presentedToken ?? record.token,
       tokenVersion: record.tokenVersion,
-      isElevated: record.isElevated,
+      isElevated: false,
+      primaryAuthenticatedAt: record.primaryAuthenticatedAt,
+      stepUpAt: record.stepUpAt,
+      stepUpExpiresAt: record.stepUpExpiresAt,
+      stepUpMethod: record.stepUpMethod,
+      stepUpPurpose: record.stepUpPurpose,
       permissions: access?.permissions ?? [],
       groups: access?.roles ?? [],
       ipAddress: record.ipAddress,
@@ -268,11 +352,24 @@ export class SessionService {
   }
 
   toPayload(record: SessionRecord): SessionPayload {
+    const hasFreshStepUp = Boolean(
+      record.stepUpAt &&
+      record.stepUpExpiresAt &&
+      record.stepUpExpiresAt.getTime() > Date.now() &&
+      record.stepUpMethod &&
+      record.stepUpPurpose
+    );
     return {
       sessionId: record.sessionId,
       userId: record.userId,
-      isElevated: record.isElevated,
-      authenticatedAt: record.issuedAt.toISOString(),
+      tokenVersion: record.tokenVersion,
+      isElevated: false,
+      authenticatedAt: record.primaryAuthenticatedAt.toISOString(),
+      authLevel: hasFreshStepUp ? 'aal2' : 'aal1',
+      stepUpAt: hasFreshStepUp ? record.stepUpAt!.toISOString() : null,
+      stepUpExpiresAt: hasFreshStepUp ? record.stepUpExpiresAt!.toISOString() : null,
+      stepUpMethod: hasFreshStepUp ? record.stepUpMethod as StepUpMethod : null,
+      stepUpPurpose: hasFreshStepUp ? record.stepUpPurpose as StepUpPurpose : null,
       permissions: record.permissions,
       groups: record.groups,
       policyConsent: policyConsentStatus(
@@ -364,13 +461,15 @@ export class SessionService {
     });
     return sessions.map((session) => ({
       sessionId: session.id,
-      createdAt: session.issuedAt.toISOString(),
+      createdAt: session.createdAt.toISOString(),
       lastActiveAt: session.lastActiveAt.toISOString(),
       ipAddress: session.ipAddress,
       userAgent: session.userAgent,
       isCurrent: currentSessionId ? currentSessionId === session.id : false,
       tokenVersion: session.tokenVersion,
-      isElevated: session.isElevated
+      isElevated: false,
+      authLevel: session.stepUpExpiresAt && session.stepUpExpiresAt.getTime() > Date.now() ? 'aal2' : 'aal1',
+      stepUpExpiresAt: session.stepUpExpiresAt?.toISOString() ?? null,
     }));
   }
 
@@ -435,6 +534,28 @@ export class SessionService {
       select: { id: true },
     });
     return [...new Set(accounts.map((item) => item.id))];
+  }
+}
+
+export function assertFreshStepUp(
+  session: SessionPayload,
+  purpose: StepUpPurpose,
+  nowMs = Date.now(),
+): void {
+  const expiresAt = session.stepUpExpiresAt
+    ? Date.parse(session.stepUpExpiresAt)
+    : Number.NaN;
+  if (
+    session.authLevel !== 'aal2' ||
+    session.stepUpPurpose !== purpose ||
+    !Number.isFinite(expiresAt) ||
+    expiresAt <= nowMs
+  ) {
+    throw new ForbiddenException({
+      code: 'STEP_UP_REQUIRED',
+      message: '이 작업을 계속하려면 다중 인증을 다시 확인해 주세요.',
+      purpose,
+    });
   }
 }
 

@@ -131,6 +131,8 @@ model Account {
   claimMethods            ServerClaimMethod[]
   accountRoles            AccountRole[]
   consents                AccountConsent[]
+  mfaTotpCredential       MfaTotpCredential?
+  mfaRecoveryCodes        MfaRecoveryCode[]
 
   @@unique([provider, providerUserId])
   @@index([email])
@@ -351,6 +353,11 @@ model Session {
   expiresAt    DateTime
   tokenVersion Int
   isElevated   Boolean  @default(false)
+  primaryAuthenticatedAt DateTime @default(now()) @map("primary_authenticated_at") @db.DateTime(3)
+  stepUpAt       DateTime? @map("step_up_at") @db.DateTime(3)
+  stepUpExpiresAt DateTime? @map("step_up_expires_at") @db.DateTime(3)
+  stepUpMethod   String? @map("step_up_method") @db.VarChar(32)
+  stepUpPurpose  String? @map("step_up_purpose") @db.VarChar(64)
   ipAddress    String?
   userAgent    String?
   lastActiveAt DateTime
@@ -363,6 +370,38 @@ model Session {
   @@index([accountId])
   @@index([expiresAt])
   @@index([termsPolicyVersion, privacyPolicyVersion])
+  @@index([stepUpExpiresAt])
+}
+
+model MfaTotpCredential {
+  id               String    @id @default(uuid()) @db.Char(36)
+  accountId        String    @unique @map("account_id")
+  secretCiphertext String    @map("secret_ciphertext") @db.Text
+  pendingExpiresAt DateTime? @map("pending_expires_at") @db.DateTime(3)
+  enabledAt        DateTime? @map("enabled_at") @db.DateTime(3)
+  lastUsedStep     BigInt?   @map("last_used_step") @db.UnsignedBigInt
+  failedAttempts   Int       @default(0) @map("failed_attempts") @db.UnsignedInt
+  lockedUntil      DateTime? @map("locked_until") @db.DateTime(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("mfa_totp_credentials")
+}
+
+model MfaRecoveryCode {
+  id        String    @id @default(uuid()) @db.Char(36)
+  accountId String    @map("account_id")
+  codeHash  String    @map("code_hash") @db.Char(64)
+  usedAt    DateTime? @map("used_at") @db.DateTime(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, codeHash])
+  @@index([accountId, usedAt])
+  @@map("mfa_recovery_codes")
 }
 
 model OAuthState {
