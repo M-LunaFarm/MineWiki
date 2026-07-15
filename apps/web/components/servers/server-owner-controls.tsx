@@ -8,6 +8,7 @@ import { AlertCircle, BookOpen, CheckCircle2, Clock3, ExternalLink, Rocket, Rota
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { useAuth } from '../providers/auth-context';
 import { csrfHeaders } from '../../lib/csrf';
+import { PrivilegedActionGate } from '../auth/privileged-action-gate';
 
 interface ServerOwnerControlsProps {
   readonly serverId: string;
@@ -207,6 +208,10 @@ export function ServerOwnerControls({
     }
   }, [baseUrl, serverId]);
 
+  const hydrateProtectedControls = useCallback(async () => {
+    await Promise.all([fetchVotifierTargets(), fetchDispatchAttempts()]);
+  }, [fetchDispatchAttempts, fetchVotifierTargets]);
+
   useEffect(() => {
     setRequiresOwnership(initialPolicy);
   }, [initialPolicy]);
@@ -237,9 +242,7 @@ export function ServerOwnerControls({
         const payload = (await response.json()) as { isOwner: boolean };
         const owner = Boolean(payload?.isOwner);
         setIsOwner(owner);
-        if (owner) {
-          await Promise.all([fetchVotifierTargets(), fetchDispatchAttempts()]);
-        } else {
+        if (!owner) {
           setVotifierTargets(createDefaultTargets());
           setVotifierFeedback(null);
           setDispatchSummary({ recent: [], failed: [] });
@@ -255,7 +258,7 @@ export function ServerOwnerControls({
       }
     };
     void check();
-  }, [account, baseUrl, serverId, fetchVotifierTargets, fetchDispatchAttempts]);
+  }, [account, baseUrl, serverId]);
 
   const handleCreateWiki = useCallback(async () => {
     if (!isOwner || creatingWiki) {
@@ -489,9 +492,16 @@ export function ServerOwnerControls({
   }
 
   return (
-    <section
-      className={`rounded-lg border border-[#2a2a2d] bg-[#141416] p-5 shadow-lg md:p-6 ${className ?? ''}`}
+    <PrivilegedActionGate
+      purpose="server_admin"
+      title="서버 관리 잠금 해제"
+      description="서버 위키, 투표 정책, Votifier 자격 증명과 전달 재시도는 서버 소유자 확인 후 다중 인증으로 보호됩니다."
+      className={className}
+      onUnlocked={hydrateProtectedControls}
     >
+      <section
+        className={`rounded-lg border border-[#2a2a2d] bg-[#141416] p-5 shadow-lg md:p-6 ${className ?? ''}`}
+      >
       <div className="flex flex-col gap-4 border-b border-[#2a2a2d] pb-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
@@ -803,6 +813,7 @@ export function ServerOwnerControls({
           </div>
         </div>
       </div>
-    </section>
+      </section>
+    </PrivilegedActionGate>
   );
 }

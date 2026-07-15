@@ -7,6 +7,7 @@ import { Check, Crown, Loader2, LockKeyhole } from 'lucide-react';
 
 import { csrfHeaders } from '../../lib/csrf';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
+import { PrivilegedActionGate } from '../auth/privileged-action-gate';
 
 interface LayoutSettings {
   readonly selected: 'docs' | 'handbook' | 'brand';
@@ -22,6 +23,18 @@ interface LayoutSettings {
 }
 
 export function ServerWikiLayoutPlans({ serverId }: { readonly serverId: string }) {
+  return (
+    <PrivilegedActionGate
+      purpose="server_admin"
+      title="서버 위키 레이아웃 관리 잠금 해제"
+      description="유료 레이아웃 권한과 서버 위키 표시 설정을 변경하려면 다중 인증으로 서버 관리 권한을 다시 확인해 주세요."
+    >
+      <ServerWikiLayoutPlansContent serverId={serverId} />
+    </PrivilegedActionGate>
+  );
+}
+
+function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: string }) {
   const [settings, setSettings] = useState<LayoutSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);

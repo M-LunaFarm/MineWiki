@@ -38,3 +38,23 @@ test('privileged confirmation binds the submitted code to an explicit purpose', 
   assert.match(source, /role="dialog"/u);
   assert.match(source, /aria-modal="true"/u);
 });
+
+test('privileged UI gates bind session expiry and sensitive surfaces to the matching purpose', async () => {
+  const gate = await readFile(
+    new URL('../components/auth/privileged-action-gate.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.match(gate, /stepUpPurpose === purpose/u);
+  assert.match(gate, /expiryMs > now/u);
+  assert.match(gate, /purpose=\{purpose\}/u);
+
+  const protectedSurfaces = [
+    ['../components/servers/server-owner-controls.tsx', 'server_admin'],
+    ['../components/wiki/server-wiki-layout-plans.tsx', 'server_admin'],
+    ['../app/guilds/[guildId]/settings/page.tsx', 'guild_admin'],
+  ];
+  for (const [path, purpose] of protectedSurfaces) {
+    const source = await readFile(new URL(path, import.meta.url), 'utf8');
+    assert.match(source, new RegExp(`PrivilegedActionGate[\\s\\S]*purpose="${purpose}"`));
+  }
+});

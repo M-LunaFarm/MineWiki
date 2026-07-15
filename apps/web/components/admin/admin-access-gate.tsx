@@ -5,11 +5,14 @@ import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
 import { useAuth } from '../providers/auth-context';
+import { PrivilegedActionGate } from '../auth/privileged-action-gate';
+import type { MfaStepUpPurpose } from '../../lib/auth-client';
 
 export function AdminAccessGate({ children }: { readonly children: ReactNode }) {
   const { account, loading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+  const purpose = useMemo(() => adminStepUpPurpose(pathname), [pathname]);
   const hasAccess = useMemo(() => {
     if (!account) return false;
     const roles = account.access?.roles ?? [];
@@ -57,5 +60,26 @@ export function AdminAccessGate({ children }: { readonly children: ReactNode }) 
     );
   }
 
+  if (purpose) {
+    return (
+      <PrivilegedActionGate
+        purpose={purpose}
+        title="관리 작업 잠금 해제"
+        description="권한은 확인되었습니다. 민감한 정보와 변경 작업을 보호하기 위해 등록된 인증 앱 또는 복구 코드로 한 번 더 확인해 주세요."
+      >
+        {children}
+      </PrivilegedActionGate>
+    );
+  }
+
   return children;
+}
+
+function adminStepUpPurpose(pathname: string): MfaStepUpPurpose | null {
+  if (pathname.startsWith('/admin/wiki')) return 'wiki_admin';
+  if (pathname.startsWith('/admin/users')) return 'role_admin';
+  if (pathname.startsWith('/admin/reviews')) return 'review_moderation';
+  if (pathname.startsWith('/admin/account-deletions')) return 'account_delete_admin';
+  if (pathname.startsWith('/admin/audit')) return 'audit_read';
+  return null;
 }

@@ -9,6 +9,7 @@ import {
   type GuildSettingsPayload,
 } from '../../../../lib/guild-api';
 import { createPageMetadata } from '../../../../lib/metadata';
+import { PrivilegedActionGate } from '../../../../components/auth/privileged-action-gate';
 
 interface PageProps {
   readonly params: Promise<{ guildId: string }>;
@@ -128,7 +129,12 @@ export default async function GuildSettingsPage({ params, searchParams }: PagePr
             </p>
           ) : null}
 
-          <form action={saveSettings} className="surface-card space-y-6 p-5 md:p-6">
+          <PrivilegedActionGate
+            purpose="guild_admin"
+            title="길드 설정 잠금 해제"
+            description="인증 역할, 로그 채널과 봇 메시지 정책을 변경하려면 다중 인증으로 길드 관리 권한을 다시 확인해 주세요."
+          >
+            <form action={saveSettings} className="surface-card space-y-6 p-5 md:p-6">
             <div className="grid gap-4 md:grid-cols-2">
               <Field
                 name="channelId"
@@ -190,7 +196,8 @@ export default async function GuildSettingsPage({ params, searchParams }: PagePr
                 저장
               </button>
             </div>
-          </form>
+            </form>
+          </PrivilegedActionGate>
 
           <section className="space-y-3">
             <h2 className="text-xl font-semibold text-white">현재 채널 오버라이드</h2>
