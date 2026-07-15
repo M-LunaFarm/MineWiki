@@ -156,6 +156,86 @@ test('linked aliases vote as the canonical account and share a verified-email co
   assert.equal(JSON.stringify(createdClaims).includes('same.user@example.com'), false);
 });
 
+test('verified Minecraft voters cannot redirect rewards to a typed nickname', async () => {
+  const createdAttempts: unknown[] = [];
+  const createdClaims: Array<{ identityType?: string; identityKey?: string }> = [];
+  const createdVotes: Array<{ username?: string; usernameNormalized?: string }> = [];
+  const prisma = createPrismaMock(createdAttempts, false, createdClaims, createdVotes) as ReturnType<typeof createPrismaMock> & {
+    account: unknown;
+  };
+  prisma.account = {
+    findUnique: async () => ({ id: 'canonical-account', canonicalAccountId: 'canonical-account', lifecycleStatus: 'active' }),
+    findMany: async () => [],
+  };
+  const service = new VoteService(
+    { ensureExists: async () => ({ id: serverId, voteRequiresOwnership: true, votesMonthly: 10 }) } as never,
+    { enqueue: async () => undefined } as never,
+    { isCaptchaRequired: () => false } as never,
+    { track: async () => undefined } as never,
+    {
+      getLastVoteForMinecraftGlobal: async () => null,
+      getLastVoteForAccountGlobal: async () => null,
+      getLastVoteForIpGlobal: async () => null,
+      getDailyCount: async () => 1,
+    } as never,
+    prisma as never,
+  );
+
+  await service.submitVote(
+    serverId,
+    { username: 'RewardThief', agreeTerms: true, agreePrivacy: true },
+    {
+      minecraftUuid: '3f0df999-1ab4-48cf-9c96-c5a834d0d1ee',
+      minecraftUsername: 'OwnedPlayer',
+      accountId: 'canonical-account',
+    },
+  );
+
+  assert.equal(createdVotes[0]?.username, 'OwnedPlayer');
+  assert.equal(createdVotes[0]?.usernameNormalized, 'ownedplayer');
+  assert.ok(createdClaims.some((claim) => claim.identityKey === 'uuid:3f0df999-1ab4-48cf-9c96-c5a834d0d1ee'));
+  assert.ok(createdClaims.some((claim) => claim.identityKey === 'acct:canonical-account'));
+});
+
+test('verified Minecraft votes fail closed when the canonical player name is unavailable', async () => {
+  const service = new VoteService(
+    { ensureExists: async () => ({ id: serverId, voteRequiresOwnership: true, votesMonthly: 10 }) } as never,
+    {} as never,
+    { isCaptchaRequired: () => false } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    service.submitVote(
+      serverId,
+      { username: 'TypedPlayer', agreeTerms: true, agreePrivacy: true },
+      { minecraftUuid: '3f0df999-1ab4-48cf-9c96-c5a834d0d1ee' },
+    ),
+    /인증된 Minecraft 닉네임을 확인할 수 없습니다/,
+  );
+});
+
+test('vote API rejects nicknames outside the Minecraft username character set', async () => {
+  const service = new VoteService(
+    { ensureExists: async () => ({ id: serverId, voteRequiresOwnership: false, votesMonthly: 10 }) } as never,
+    {} as never,
+    { isCaptchaRequired: () => false } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    service.submitVote(
+      serverId,
+      { username: '보상탈취', agreeTerms: true, agreePrivacy: true },
+    ),
+    /닉네임을 3~16자 사이로 입력해 주세요/,
+  );
+});
+
 test('manual dispatch replay acquires failed state exactly once before queueing', async () => {
   let acquired = true;
   const queued: unknown[] = [];

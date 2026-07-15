@@ -21,15 +21,17 @@ import { VoteStore } from './vote.store';
 import { PrismaService } from '../common/prisma.service';
 
 const votePayloadSchema = z.object({
-  username: z.string().trim().min(3).max(16),
+  username: z.string().trim().regex(/^[A-Za-z0-9_]{3,16}$/),
   captchaToken: z.string().trim().min(1).optional(),
   agreeTerms: z.boolean().optional(),
   agreePrivacy: z.boolean().optional()
 });
+const minecraftUsernamePattern = /^[A-Za-z0-9_]{3,16}$/;
 
 export interface VoteRequestContext {
   readonly accountId?: string;
   readonly minecraftUuid?: string;
+  readonly minecraftUsername?: string;
   readonly ipAddress?: string;
   readonly verifiedEmailKeys?: readonly string[];
 }
@@ -79,7 +81,15 @@ export class VoteService {
     }
     await this.verifyCaptchaToken(payload.captchaToken, context.ipAddress);
     context = await this.resolveVoteIdentity(context);
-    const normalizedUsername = payload.username;
+    const verifiedMinecraftUsername = context.minecraftUsername?.trim();
+    if (context.minecraftUuid && !minecraftUsernamePattern.test(verifiedMinecraftUsername ?? '')) {
+      throw new ForbiddenException(
+        '인증된 Minecraft 닉네임을 확인할 수 없습니다. /me에서 소유권 인증을 다시 확인해 주세요.'
+      );
+    }
+    const normalizedUsername = context.minecraftUuid
+      ? verifiedMinecraftUsername!
+      : payload.username;
 
     if (server.voteRequiresOwnership && !context.minecraftUuid) {
       throw new ForbiddenException(
@@ -91,13 +101,19 @@ export class VoteService {
     const nextKstResetAt = getNextKstResetAt(now);
     const playerKey = derivePlayerKey(normalizedUsername, context);
 
-    const previousVote = context.minecraftUuid
-      ? await this.voteStore.getLastVoteForMinecraftGlobal(context.minecraftUuid)
-      : context.accountId
-        ? await this.voteStore.getLastVoteForAccountGlobal(context.accountId)
-        : await this.voteStore.getLastVoteForUsernameGlobal(normalizedUsername);
+    const previousVotes = await Promise.all([
+      context.minecraftUuid
+        ? this.voteStore.getLastVoteForMinecraftGlobal(context.minecraftUuid)
+        : undefined,
+      context.accountId
+        ? this.voteStore.getLastVoteForAccountGlobal(context.accountId)
+        : undefined,
+      !context.minecraftUuid && !context.accountId
+        ? this.voteStore.getLastVoteForUsernameGlobal(normalizedUsername)
+        : undefined,
+    ]);
 
-    if (previousVote && isSameKstDay(previousVote.votedAt, now)) {
+    if (previousVotes.some((vote) => vote && isSameKstDay(vote.votedAt, now))) {
       throw new ForbiddenException(
         `이미 투표가 등록되었습니다. 다음 투표 가능 시간: ${nextKstResetAt.toISOString()}`
       );
@@ -138,6 +154,16 @@ export class VoteService {
             voteId: createdVote.id
           }
         });
+        if (context.minecraftUuid && context.accountId) {
+          await tx.voteCooldownClaim.create({
+            data: {
+              identityType: 'account',
+              identityKey: `acct:${context.accountId}`,
+              kstDay,
+              voteId: createdVote.id
+            }
+          });
+        }
         for (const verifiedEmailKey of context.verifiedEmailKeys ?? []) {
           await tx.voteCooldownClaim.create({
             data: {

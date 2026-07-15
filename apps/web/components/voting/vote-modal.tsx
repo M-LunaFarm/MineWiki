@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { X, Shield, ChevronRight, Vote } from 'lucide-react';
 import { csrfHeaders } from '../../lib/csrf';
+import { useVoteMinecraftIdentity } from './use-vote-minecraft-identity';
 
 interface VoteResponse {
   acknowledged: boolean;
@@ -102,6 +103,11 @@ export function VoteModal({
 
   const captchaMode = turnstileSiteKey ? 'turnstile' : hcaptchaSiteKey ? 'hcaptcha' : 'none';
   const captchaRequired = captchaMode !== 'none';
+  const { identity, status: identityStatus } = useVoteMinecraftIdentity(isOpen, apiBaseUrl);
+
+  useEffect(() => {
+    if (identity?.playerName) setUsername(identity.playerName);
+  }, [identity]);
 
   useEffect(() => {
     if (initialOpen) {
@@ -222,7 +228,7 @@ export function VoteModal({
 
           {/* Modal */}
           <div className="relative w-full max-w-md animate-scale-in">
-            <div className="rounded-xl border border-[#30343b] bg-[#151922] p-6 shadow-2xl shadow-black/40">
+            <div className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-[#30343b] bg-[#151922] p-6 shadow-2xl shadow-black/40">
               <div className="relative">
                 {/* Header */}
                 <div className="flex items-start justify-between mb-6">
@@ -245,16 +251,32 @@ export function VoteModal({
                   </button>
                 </div>
 
-                {requiresOwnership && !success && (
+                {identityStatus === 'guest' && !success ? (
+                  <div className="mb-6 rounded-xl border border-blue-400/25 bg-blue-400/10 p-4">
+                    <p className="text-sm font-medium text-blue-100">로그인 필요</p>
+                    <p className="mt-1 text-xs leading-5 text-blue-100/70">투표 기록과 보상을 한 계정에 안전하게 연결하려면 먼저 로그인해 주세요.</p>
+                    <a className="mt-2 inline-flex text-xs font-semibold text-blue-100 underline underline-offset-4" href="/login">로그인하고 투표하기</a>
+                  </div>
+                ) : null}
+
+                {requiresOwnership && identityStatus !== 'guest' && !success && (
                   <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 animate-fade-up">
                     <div className="flex gap-3">
                       <Shield className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
                       <div className="space-y-1">
-                        <p className="text-sm font-medium text-amber-200">인증 필요</p>
-                        <p className="text-xs text-amber-200/70">
-                          이 서버는 인증된 유저만 투표할 수 있습니다. /me에서 계정 인증을 완료했는지
-                          확인해주세요.
+                        <p className="text-sm font-medium text-amber-200">
+                          {identityStatus === 'verified' ? '인증된 플레이어' : '인증 필요'}
                         </p>
+                        <p className="text-xs text-amber-200/70">
+                          {identityStatus === 'verified'
+                            ? `${identity?.playerName} 계정으로 안전하게 투표합니다.`
+                            : '이 서버는 로그인 후 Microsoft로 Minecraft 소유권을 인증한 사용자만 투표할 수 있습니다.'}
+                        </p>
+                        {identityStatus !== 'verified' && identityStatus !== 'loading' ? (
+                          <a className="mt-2 inline-flex text-xs font-semibold text-amber-100 underline underline-offset-4" href="/me">
+                            계정 및 보안에서 인증하기
+                          </a>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -272,9 +294,13 @@ export function VoteModal({
                       minLength={3}
                       maxLength={16}
                       placeholder="닉네임을 입력하세요"
+                      readOnly={identityStatus === 'verified'}
+                      aria-describedby={identityStatus === 'verified' ? `vote-identity-${serverId}` : undefined}
                     />
-                    <span className="text-[10px] font-medium text-slate-500">
-                      영문, 숫자, 밑줄(_)만 사용 가능 (3~16자)
+                    <span id={`vote-identity-${serverId}`} className="text-[10px] font-medium text-slate-500">
+                      {identityStatus === 'verified'
+                        ? 'Microsoft에서 확인된 닉네임이며 변경할 수 없습니다.'
+                        : '영문, 숫자, 밑줄(_)만 사용 가능 (3~16자)'}
                     </span>
                   </label>
 
@@ -372,6 +398,8 @@ export function VoteModal({
                         (captchaRequired && !captchaToken) ||
                         !agreeTerms ||
                         !agreePrivacy
+                        || (requiresOwnership && identityStatus !== 'verified')
+                        || identityStatus === 'guest'
                       }
                     >
                       {isSubmitting ? '전송 중…' : '투표 전송'}

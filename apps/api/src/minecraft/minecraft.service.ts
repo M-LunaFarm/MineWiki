@@ -305,14 +305,19 @@ export class MinecraftService {
   }
 
   private async resolveCanonicalAccountIds(userId: string): Promise<string[]> {
+    const seed = await this.prisma.account.findUnique({
+      where: { id: userId },
+      select: { id: true, canonicalAccountId: true }
+    });
+    const canonicalAccountId = seed?.canonicalAccountId ?? seed?.id ?? userId;
     const accounts = await this.prisma.account.findMany({
       where: {
-        OR: [{ id: userId }, { canonicalAccountId: userId }]
+        OR: [{ id: canonicalAccountId }, { canonicalAccountId }]
       },
       select: { id: true }
     });
     const ids = accounts.map((account) => account.id);
-    return ids.includes(userId) ? ids : [userId, ...ids];
+    return ids.includes(canonicalAccountId) ? ids : [canonicalAccountId, ...ids];
   }
 
   private async exchangeAuthorizationCode(

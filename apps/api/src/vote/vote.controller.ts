@@ -1,45 +1,41 @@
-import { Body, Controller, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, ParseIntPipe, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { FastifyRequest } from 'fastify';
 import { VoteService } from './vote.service';
-import { SessionService } from '../session/session.service';
+import { type SessionPayload } from '../session/session.service';
+import { CurrentSession } from '../session/session.decorator';
+import { SessionGuard } from '../session/session.guard';
 import { MinecraftService } from '../minecraft/minecraft.service';
-import { extractClientIp } from '../common/http/client-ip';
 
 @Controller('v1/servers/:serverId/votes')
 export class VoteController {
   constructor(
     private readonly voteService: VoteService,
-    private readonly sessions: SessionService,
     private readonly minecraft: MinecraftService
   ) {}
 
   @Post()
+  @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 5, ttl: 60 } })
   async submit(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Body() body: unknown,
-    @Req() request: FastifyRequest
+    @CurrentSession() session: SessionPayload
   ) {
-    const ipAddress = extractClientIp(request);
-    const sessionToken = extractSessionToken(request);
-    const session = sessionToken
-      ? await this.sessions.getSessionByToken(sessionToken)
-      : undefined;
     let minecraftUuid: string | undefined;
-    if (session) {
-      try {
-        const identity = await this.minecraft.getIdentity(session.userId);
-        minecraftUuid = identity.uuid;
-      } catch {
-        minecraftUuid = undefined;
-      }
+    let minecraftUsername: string | undefined;
+    try {
+      const identity = await this.minecraft.getIdentity(session.userId);
+      minecraftUuid = identity.uuid;
+      minecraftUsername = identity.playerName;
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
     }
 
     return this.voteService.submitVote(serverId, body, {
-      ipAddress,
-      accountId: session?.userId,
-      minecraftUuid
+      ipAddress: session.requestIp ?? undefined,
+      accountId: session.userId,
+      minecraftUuid,
+      minecraftUsername
     });
   }
 
@@ -54,18 +50,4 @@ export class VoteController {
       search: search?.trim() ? search.trim() : undefined
     });
   }
-}
-
-function extractSessionToken(request: FastifyRequest): string | undefined {
-  const cookieHeader = request.headers.cookie;
-  if (!cookieHeader) {
-    return undefined;
-  }
-  for (const part of cookieHeader.split(';')) {
-    const [key, value] = part.trim().split('=');
-    if (key === 'mw_session') {
-      return decodeURIComponent(value ?? '');
-    }
-  }
-  return undefined;
 }

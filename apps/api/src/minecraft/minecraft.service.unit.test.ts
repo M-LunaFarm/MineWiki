@@ -69,6 +69,7 @@ test('canonical account reads Minecraft identity stored on a linked account', as
     {} as never,
     {
       account: {
+        findUnique: async () => ({ id: canonicalAccountId, canonicalAccountId }),
         findMany: async () => [{ id: canonicalAccountId }, { id: linkedAccountId }],
       },
       minecraftIdentity: {
@@ -93,13 +94,48 @@ test('canonical account reads Minecraft identity stored on a linked account', as
   assert.equal(identity.playerName, 'LinkedPlayer');
 });
 
+test('a linked alias session reads the Minecraft identity on its canonical account', async () => {
+  const canonicalAccountId = randomUUID();
+  const linkedAccountId = randomUUID();
+  const minecraftUuid = randomUUID();
+  const service = new MinecraftService(
+    {} as never,
+    {} as never,
+    {
+      account: {
+        findUnique: async () => ({ id: linkedAccountId, canonicalAccountId }),
+        findMany: async (input: { where: { OR: unknown[] } }) => {
+          assert.deepEqual(input.where.OR, [{ id: canonicalAccountId }, { canonicalAccountId }]);
+          return [{ id: canonicalAccountId }, { id: linkedAccountId }];
+        },
+      },
+      minecraftIdentity: {
+        findMany: async () => [{
+          accountId: canonicalAccountId,
+          uuid: minecraftUuid,
+          playerName: 'CanonicalPlayer',
+          msOwned: true,
+          lastVerifiedAt: new Date('2026-07-12T00:00:00.000Z'),
+        }],
+      },
+    } as never,
+  );
+
+  const identity = await service.getStoredIdentity(linkedAccountId);
+  assert.equal(identity.uuid, minecraftUuid);
+  assert.equal(identity.playerName, 'CanonicalPlayer');
+});
+
 test('canonical account fails closed when linked accounts contain multiple identities', async () => {
   const canonicalAccountId = randomUUID();
   const service = new MinecraftService(
     {} as never,
     {} as never,
     {
-      account: { findMany: async () => [{ id: canonicalAccountId }, { id: randomUUID() }] },
+      account: {
+        findUnique: async () => ({ id: canonicalAccountId, canonicalAccountId }),
+        findMany: async () => [{ id: canonicalAccountId }, { id: randomUUID() }],
+      },
       minecraftIdentity: {
         findMany: async () => [
           { accountId: canonicalAccountId },
@@ -126,6 +162,7 @@ test('revoking ownership clears identity and pending OAuth state across linked a
     {} as never,
     {
       account: {
+        findUnique: async () => ({ id: canonicalAccountId, canonicalAccountId }),
         findMany: async () => [{ id: canonicalAccountId }, { id: linkedAccountId }],
       },
       minecraftIdentity: {
