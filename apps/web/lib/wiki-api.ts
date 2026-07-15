@@ -445,6 +445,13 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly status: string;
     readonly createdBy: string;
     readonly createdByName: string;
+    readonly createdByUsername: string | null;
+    readonly mentions: ReadonlyArray<{
+      readonly username: string;
+      readonly profileId: string;
+      readonly start: number;
+      readonly end: number;
+    }>;
     readonly createdAt: string;
     readonly canDelete: boolean;
     readonly canChangeVisibility: boolean;

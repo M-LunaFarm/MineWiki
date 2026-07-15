@@ -100,13 +100,14 @@ export function WikiNotificationsClient() {
 
 function notificationIcon(type: string) {
   if (type === 'page_revision') return <GitCommitHorizontal className="size-4" />;
-  if (type === 'discussion_reply') return <MessageSquareText className="size-4" />;
+  if (type === 'discussion_reply' || type === 'discussion_mention') return <MessageSquareText className="size-4" />;
   return <PenLine className="size-4" />;
 }
 
 function notificationLabel(type: string) {
   if (type === 'page_revision') return '관심 문서가 변경되었습니다.';
   if (type === 'discussion_reply') return '참여한 토론에 새 댓글이 있습니다.';
+  if (type === 'discussion_mention') return '토론 댓글에서 회원님을 언급했습니다.';
   return type === 'edit_request_accepted' ? '편집 요청이 승인되었습니다.' : '편집 요청이 반려되었습니다.';
 }
 

@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pause, Pencil, Pin, Plus, Search, ShieldCheck, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pause, Pencil, Pin, Plus, Reply, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, wikiDiscussionEventsUrl, WikiApiError, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiDiscussionStatus, type WikiDiscussionStatusCounts, type WikiDiscussionStatusFilter, type WikiThreadDetail, type WikiThreadListResponse, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
@@ -56,6 +56,16 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   } | null>(null);
   const [moderationReason, setModerationReason] = useState('');
   const prependAnchor = useRef<{ id: string; top: number } | null>(null);
+  const replyTextarea = useRef<HTMLTextAreaElement | null>(null);
+
+  function mentionAuthor(username: string) {
+    const mention = `@${username} `;
+    setComment((current) => current.length === 0 ? mention : `${current.replace(/\s*$/u, '')}\n${mention}`);
+    requestAnimationFrame(() => {
+      replyTextarea.current?.focus();
+      replyTextarea.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }
 
   const applyThreadResult = useCallback((result: WikiThreadListResponse) => {
     const compatibleItems = result.statusCounts
@@ -839,6 +849,11 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                       <Link href={`/wiki/contributions/${item.createdBy}`} className="hover:text-emerald-200">
                         {item.createdByName}
                       </Link>
+                      {selected.canReply && item.createdByUsername ? (
+                        <button type="button" onClick={() => mentionAuthor(item.createdByUsername!)} className="inline-flex min-h-11 items-center gap-1 hover:text-emerald-200" aria-label={`${item.createdByName}님에게 답글`}>
+                          <Reply className="size-3.5" /> 답글
+                        </button>
+                      ) : null}
                     </span>
                     <span className="flex flex-wrap items-center gap-3">
                       <time>{formatDate(item.createdAt)}</time>
@@ -877,7 +892,9 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                       ) : null}
                     </span>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-200">{item.content ?? (item.status === 'hidden' ? '관리자에 의해 숨겨진 댓글입니다.' : '삭제된 댓글입니다.')}</p>
+                  <p className="mt-3 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-200">
+                    {item.content ? <DiscussionCommentContent content={item.content} mentions={item.mentions ?? []} /> : (item.status === 'hidden' ? '관리자에 의해 숨겨진 댓글입니다.' : '삭제된 댓글입니다.')}
+                  </p>
                   {item.poll ? (
                     <DiscussionPollCard
                       poll={item.poll}
@@ -947,7 +964,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
               ) : null}
               {selected.canReply ? (
                 <form onSubmit={reply} className="space-y-3">
-                  <textarea value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
+                  <textarea ref={replyTextarea} value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성 · @사용자명으로 멘션" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
                   <PollComposer enabled={replyPollEnabled} onEnabledChange={setReplyPollEnabled} draft={replyPollDraft} onDraftChange={setReplyPollDraft} />
                   <button disabled={working} className="btn-primary w-full sm:w-auto">
                     댓글 등록
@@ -962,6 +979,33 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       </div>
     </div>
   );
+}
+
+function DiscussionCommentContent({
+  content,
+  mentions,
+}: {
+  readonly content: string;
+  readonly mentions: WikiThreadDetail['comments'][number]['mentions'];
+}) {
+  const valid = [...mentions]
+    .filter((mention) => Number.isInteger(mention.start) && Number.isInteger(mention.end) && mention.start >= 0 && mention.end <= content.length && mention.start < mention.end && content.slice(mention.start, mention.end).toLocaleLowerCase('en-US') === `@${mention.username}`.toLocaleLowerCase('en-US'))
+    .sort((left, right) => left.start - right.start || left.end - right.end)
+    .filter((mention, index, all) => index === 0 || mention.start >= all[index - 1]!.end);
+  if (valid.length === 0) return content;
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const mention of valid) {
+    if (mention.start > cursor) parts.push(content.slice(cursor, mention.start));
+    parts.push(
+      <Link key={`${mention.start}:${mention.end}:${mention.profileId}`} href={`/wiki/contributions/${mention.profileId}`} className="font-semibold text-emerald-300 underline decoration-emerald-300/30 underline-offset-2 hover:text-emerald-200">
+        {content.slice(mention.start, mention.end)}
+      </Link>
+    );
+    cursor = mention.end;
+  }
+  if (cursor < content.length) parts.push(content.slice(cursor));
+  return parts;
 }
 
 type PollDraft = {
