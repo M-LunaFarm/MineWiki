@@ -35,6 +35,7 @@ export function WikiPushControl() {
   async function enable() {
     if (!supportsWebPush()) { setState('unsupported'); return; }
     setWorking(true); setError(null);
+    let subscriptionForRollback: PushSubscription | null = null;
     try {
       const status = await fetchWikiPushStatus();
       if (!status.enabled || !status.publicKey) { setState('disabled'); return; }
@@ -54,6 +55,7 @@ export function WikiPushControl() {
         userVisibleOnly: true,
         applicationServerKey: decodeVapidPublicKey(status.publicKey),
       });
+      subscriptionForRollback = subscription;
       const value = subscription.toJSON();
       if (!value.endpoint || !value.keys?.p256dh || !value.keys.auth) {
         throw new Error('브라우저가 완전한 알림 구독 정보를 제공하지 않았습니다.');
@@ -63,8 +65,10 @@ export function WikiPushControl() {
         expirationTime: value.expirationTime ?? null,
         keys: { p256dh: value.keys.p256dh, auth: value.keys.auth },
       });
+      subscriptionForRollback = null;
       setState('on');
     } catch (caught) {
+      await subscriptionForRollback?.unsubscribe().catch(() => false);
       setError(caught instanceof Error ? caught.message : '브라우저 알림을 활성화하지 못했습니다.');
       setState('off');
     } finally { setWorking(false); }

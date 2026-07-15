@@ -115,6 +115,20 @@ test('deletes subscriptions whose session or profile is no longer valid', async 
   assert.equal(result.removedSubscriptions, 1);
 });
 
+test('removes an unreadable encrypted subscription instead of retrying secret material', async () => {
+  process.env.APP_ENCRYPTION_KEY = KEY;
+  const baseline = fixture().delivery.subscription;
+  const state = fixture({ subscription: { ...baseline, endpointCiphertext: 'enc:v1:invalid' } });
+  let sent = false;
+  const result = await processWebPushDeliveries(state.prisma as never, CONFIG, {
+    now: state.now,
+    send: async () => { sent = true; return { statusCode: 201 }; },
+  });
+  assert.equal(sent, false);
+  assert.equal(result.removedSubscriptions, 1);
+  assert.equal(result.retried, 0);
+});
+
 test('does nothing while web push is disabled', async () => {
   const state = fixture();
   const result = await processWebPushDeliveries(state.prisma as never, { ...CONFIG, enabled: false });

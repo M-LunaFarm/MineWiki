@@ -9,6 +9,8 @@ const MAX_ATTEMPTS = 8;
 const MAX_RETRY_MS = 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
+class StoredPushSecretError extends Error {}
+
 export interface WebPushDeliveryConfig {
   enabled: boolean;
   publicKey: string;
@@ -163,9 +165,14 @@ export async function processWebPushDeliveries(
 }
 
 function requireDecryptedSecret(value: string): string {
-  const decrypted = decryptStoredSecret(value);
-  if (!decrypted) throw new Error('stored_secret_invalid');
-  return decrypted;
+  try {
+    const decrypted = decryptStoredSecret(value);
+    if (!decrypted) throw new StoredPushSecretError();
+    return decrypted;
+  } catch (error) {
+    if (error instanceof StoredPushSecretError) throw error;
+    throw new StoredPushSecretError();
+  }
 }
 
 function getStatusCode(error: unknown): number | null {
@@ -175,11 +182,7 @@ function getStatusCode(error: unknown): number | null {
 }
 
 function isStoredSecretError(error: unknown): boolean {
-  return error instanceof Error && (
-    error.message === 'stored_secret_invalid'
-    || error.message.includes('encrypted secret')
-    || error.message.includes('Unsupported encrypted')
-  );
+  return error instanceof StoredPushSecretError;
 }
 
 function getRetryAfterMs(error: unknown, now: Date): number | null {
