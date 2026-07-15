@@ -410,10 +410,6 @@ export class WikiNotificationService {
     deliveries: PendingNotificationDelivery[]
   ): Promise<void> {
     if (deliveries.length === 0) return;
-    if (process.env.WIKI_NOTIFICATION_DELIVERY_MODE === 'direct') {
-      await tx.wikiNotification.createMany({ data: deliveries, skipDuplicates: true });
-      return;
-    }
     await tx.wikiNotificationEvent.createMany({
       data: [{
         eventKey,
