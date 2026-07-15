@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createECDH, createHash } from 'node:crypto';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { decryptAppSecret } from '../common/secret-codec';
 import {
@@ -17,7 +18,9 @@ const session = {
 };
 
 const endpoint = 'https://fcm.googleapis.com/fcm/send/private-capability-token';
-const p256dh = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url');
+const browserKey = createECDH('prime256v1');
+browserKey.generateKeys();
+const p256dh = browserKey.getPublicKey().toString('base64url');
 const auth = Buffer.alloc(16, 9).toString('base64url');
 
 test('push endpoint validation accepts known providers and rejects SSRF-shaped URLs', () => {
@@ -37,6 +40,7 @@ test('push endpoint validation accepts known providers and rejects SSRF-shaped U
 test('subscription key validation requires an uncompressed P-256 key and 16-byte auth secret', () => {
   assert.doesNotThrow(() => validateSubscriptionKeys(p256dh, auth));
   assert.throws(() => validateSubscriptionKeys(Buffer.alloc(65).toString('base64url'), auth), BadRequestException);
+  assert.throws(() => validateSubscriptionKeys(Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 7)]).toString('base64url'), auth), BadRequestException);
   assert.throws(() => validateSubscriptionKeys(p256dh, Buffer.alloc(15).toString('base64url')), BadRequestException);
   assert.throws(() => validateSubscriptionKeys('not+base64', auth), BadRequestException);
 });
@@ -56,7 +60,7 @@ test('registration binds the session profile and stores no push capability plain
   };
   const service = new WikiPushSubscriptionService(
     {
-      wikiPushSubscription: { findUnique: async () => ({ disabledAt: null, expirationTime: null }) },
+      wikiPushSubscription: { findUnique: async () => ({ disabledAt: null, expirationTime: null, endpointHash: createEndpointHash(endpoint) }) },
       $transaction: async (callback: (tx: typeof transaction) => Promise<void>) => callback(transaction),
     } as never,
     { ensureWikiProfile: async () => ({ id: 42n, status: 'active' }) } as never,
@@ -86,7 +90,11 @@ test('registration never transfers an endpoint to a different wiki profile', asy
   const transaction = {
     wikiPushSubscription: {
       findUnique: async ({ where }: { where: Record<string, unknown> }) =>
-        'endpointHash' in where ? { id: 'existing', profileId: 99n } : null,
+        'endpointHash' in where ? {
+          id: 'existing', profileId: 99n, disabledAt: null, expirationTime: null,
+          session: { accountId: 'other', expiresAt: new Date(Date.now() + 60_000), account: { lifecycleStatus: 'active' } },
+          profile: { accountId: 'other', status: 'active' },
+        } : null,
     },
   };
   const service = new WikiPushSubscriptionService(
@@ -104,3 +112,42 @@ test('registration never transfers an endpoint to a different wiki profile', asy
     else process.env.APP_ENCRYPTION_KEY = previousKey;
   }
 });
+
+test('registration replaces an endpoint held only by an expired session', async () => {
+  const previousKey = process.env.APP_ENCRYPTION_KEY;
+  process.env.APP_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString('base64');
+  let deleted = false;
+  let created = false;
+  const transaction = {
+    wikiPushSubscription: {
+      findUnique: async ({ where }: { where: Record<string, unknown> }) => 'endpointHash' in where ? {
+        id: 'expired', profileId: 99n, disabledAt: null, expirationTime: null,
+        session: { accountId: 'other', expiresAt: new Date(Date.now() - 60_000), account: { lifecycleStatus: 'active' } },
+        profile: { accountId: 'other', status: 'active' },
+      } : null,
+      deleteMany: async () => { deleted = true; return { count: 1 }; },
+      count: async () => 0,
+      upsert: async () => { created = true; },
+    },
+  };
+  const service = new WikiPushSubscriptionService(
+    {
+      wikiPushSubscription: { findUnique: async () => ({ disabledAt: null, expirationTime: null, endpointHash: createEndpointHash(endpoint) }) },
+      $transaction: async (callback: (tx: typeof transaction) => Promise<void>) => callback(transaction),
+    } as never,
+    { ensureWikiProfile: async () => ({ id: 42n, status: 'active' }) } as never,
+    { getOptional: (key: string) => key === 'WEB_PUSH_ENABLED' ? 'true' : key === 'VAPID_PUBLIC_KEY' ? 'public-key' : undefined } as never,
+  );
+  try {
+    await service.register(session, { endpoint, keys: { p256dh, auth } });
+    assert.equal(deleted, true);
+    assert.equal(created, true);
+  } finally {
+    if (previousKey === undefined) delete process.env.APP_ENCRYPTION_KEY;
+    else process.env.APP_ENCRYPTION_KEY = previousKey;
+  }
+});
+
+function createEndpointHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}

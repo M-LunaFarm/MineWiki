@@ -1451,6 +1451,7 @@ model WikiPushDelivery {
 
   @@unique([notificationId, subscriptionId], map: "uk_wiki_push_deliveries_notification_subscription")
   @@index([status, availableAt, id], map: "idx_wiki_push_deliveries_pending")
+  @@index([status, createdAt, id], map: "idx_wiki_push_deliveries_retention")
   @@index([lockedAt], map: "idx_wiki_push_deliveries_locked")
   @@index([subscriptionId, status], map: "idx_wiki_push_deliveries_subscription")
   @@map("wiki_push_deliveries")
@@ -1471,6 +1472,7 @@ model WikiNotificationEvent {
   createdAt   DateTime  @map("created_at") @db.DateTime(3)
 
   @@index([status, availableAt, id], map: "idx_wiki_notification_events_pending")
+  @@index([status, createdAt, id], map: "idx_wiki_notification_events_retention")
   @@index([lockedAt], map: "idx_wiki_notification_events_locked")
   @@map("wiki_notification_events")
 }

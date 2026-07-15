@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 
 const MAX_ATTEMPTS = 10;
 const LEASE_MS = 5 * 60 * 1000;
+const PUSH_FRESHNESS_MS = 15 * 60 * 1000;
 
 interface DeliveryPayload {
   profileId: string;
@@ -55,7 +56,7 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
         });
         const persistedNotifications = await tx.wikiNotification.findMany({
           where: { dedupeKey: { in: deliveries.map((delivery) => delivery.dedupeKey) } },
-          select: { id: true, profileId: true },
+          select: { id: true, profileId: true, createdAt: true },
         });
         if (persistedNotifications.length > 0) {
           const profileIds = [...new Set(persistedNotifications.map((notification) => notification.profileId))];
@@ -69,6 +70,7 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
             select: {
               id: true,
               profileId: true,
+              createdAt: true,
               session: { select: { accountId: true } },
               profile: { select: { accountId: true, status: true } },
             },
@@ -82,7 +84,11 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
           }
           await tx.wikiPushDelivery.createMany({
             data: persistedNotifications.flatMap((notification) =>
-              (subscriptionsByProfile.get(notification.profileId) ?? []).map((subscription) => ({
+              (notification.createdAt >= new Date(now.getTime() - PUSH_FRESHNESS_MS)
+                ? subscriptionsByProfile.get(notification.profileId) ?? []
+                : [])
+                .filter((subscription) => subscription.createdAt <= notification.createdAt)
+                .map((subscription) => ({
                 notificationId: notification.id,
                 subscriptionId: subscription.id,
                 status: 'pending',

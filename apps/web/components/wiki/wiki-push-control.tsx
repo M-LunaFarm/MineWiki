@@ -6,11 +6,11 @@ import {
   fetchWikiPushStatus,
   registerWikiPushSubscription,
   unregisterWikiPushSubscription,
-  type WikiPushStatus,
 } from '../../lib/wiki-api';
 import {
   decodeVapidPublicKey,
   isIosWithoutStandaloneInstall,
+  pushEndpointFingerprint,
   pushSubscriptionMatchesKey,
   supportsWebPush,
 } from '../../lib/web-push';
@@ -120,6 +120,7 @@ async function inspectPushState(): Promise<PushUiState> {
   const subscription = await registration?.pushManager.getSubscription();
   if (!subscription) return status.subscribed ? 'stale' : 'off';
   if (!pushSubscriptionMatchesKey(subscription, status.publicKey)) return 'stale';
+  if (status.endpointFingerprint !== await pushEndpointFingerprint(subscription.endpoint)) return 'stale';
   return status.subscribed ? 'on' : 'stale';
 }
 

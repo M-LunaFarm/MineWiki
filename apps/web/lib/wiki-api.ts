@@ -328,6 +328,7 @@ export interface WikiPushStatus {
   readonly subscribed: boolean;
   readonly publicKey: string | null;
   readonly publicKeyFingerprint: string | null;
+  readonly endpointFingerprint: string | null;
   readonly expirationTime: string | null;
   readonly maxDevices: number;
 }

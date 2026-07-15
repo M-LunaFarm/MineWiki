@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
 import { Prisma } from '@prisma/client';
-import { createHash } from 'node:crypto';
+import { createHash, ECDH } from 'node:crypto';
 import { z } from 'zod';
 import { PrismaService } from '../common/prisma.service';
 import { encryptAppSecret } from '../common/secret-codec';
@@ -37,13 +37,14 @@ export class WikiPushSubscriptionService {
     const publicKey = this.publicKey();
     const subscription = await this.prisma.wikiPushSubscription.findUnique({
       where: { sessionId: session.sessionId },
-      select: { disabledAt: true, expirationTime: true },
+      select: { disabledAt: true, expirationTime: true, endpointHash: true },
     });
     return {
       enabled: Boolean(publicKey),
       subscribed: Boolean(subscription && !subscription.disabledAt),
       publicKey,
       publicKeyFingerprint: publicKey ? createHash('sha256').update(publicKey).digest('hex').slice(0, 16) : null,
+      endpointFingerprint: subscription?.endpointHash.slice(0, 16) ?? null,
       expirationTime: subscription?.expirationTime?.toISOString() ?? null,
       maxDevices: MAX_ACTIVE_DEVICES,
     };
@@ -71,12 +72,36 @@ export class WikiPushSubscriptionService {
       p256dhCiphertext: requireEncrypted(parsed.data.keys.p256dh),
       authCiphertext: requireEncrypted(parsed.data.keys.auth),
     };
+    const now = new Date();
     try {
       await this.prisma.$transaction(async (tx) => {
-        const [current, existingEndpoint] = await Promise.all([
+        const [current, foundEndpoint] = await Promise.all([
           tx.wikiPushSubscription.findUnique({ where: { sessionId: session.sessionId }, select: { id: true } }),
-          tx.wikiPushSubscription.findUnique({ where: { endpointHash }, select: { id: true, profileId: true } }),
+          tx.wikiPushSubscription.findUnique({
+            where: { endpointHash },
+            select: {
+              id: true,
+              profileId: true,
+              disabledAt: true,
+              expirationTime: true,
+              session: { select: { accountId: true, expiresAt: true, account: { select: { lifecycleStatus: true } } } },
+              profile: { select: { accountId: true, status: true } },
+            },
+          }),
         ]);
+        let existingEndpoint = foundEndpoint;
+        const existingEndpointIsStale = existingEndpoint && (
+          existingEndpoint.disabledAt !== null
+          || (existingEndpoint.expirationTime !== null && existingEndpoint.expirationTime <= now)
+          || existingEndpoint.session.expiresAt <= now
+          || existingEndpoint.session.account.lifecycleStatus !== 'active'
+          || existingEndpoint.profile.status !== 'active'
+          || existingEndpoint.profile.accountId !== existingEndpoint.session.accountId
+        );
+        if (existingEndpointIsStale) {
+          await tx.wikiPushSubscription.deleteMany({ where: { id: existingEndpoint.id } });
+          existingEndpoint = null;
+        }
         if (existingEndpoint && existingEndpoint.profileId !== profile.id) {
           throw new ConflictException('이 브라우저 알림 구독은 다른 계정에 연결되어 있습니다. 해당 계정에서 먼저 로그아웃해 주세요.');
         }
@@ -156,6 +181,11 @@ export function validateSubscriptionKeys(p256dh: string, auth: string): void {
   const authSecret = decodeBase64Url(auth);
   if (publicKey.length !== 65 || publicKey[0] !== 4 || authSecret.length !== 16) {
     throw new BadRequestException('브라우저 알림 암호화 키가 올바르지 않습니다.');
+  }
+  try {
+    ECDH.convertKey(publicKey, 'prime256v1');
+  } catch {
+    throw new BadRequestException('브라우저 알림 공개키가 P-256 곡선에 속하지 않습니다.');
   }
 }
 

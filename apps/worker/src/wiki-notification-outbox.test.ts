@@ -24,12 +24,12 @@ test('wiki notification outbox claims, delivers, and completes an event', async 
   const tx = {
     wikiNotification: {
       async createMany(args: { data: typeof delivered }) { delivered = args.data; return { count: args.data.length }; },
-      async findMany() { return [{ id: 20n, profileId: 8n }]; },
+      async findMany() { return [{ id: 20n, profileId: 8n, createdAt: new Date() }]; },
     },
     wikiPushSubscription: {
       async findMany() {
         return [{
-          id: 'subscription-1', profileId: 8n,
+          id: 'subscription-1', profileId: 8n, createdAt: new Date(Date.now() - 60_000),
           session: { accountId: 'account-1' },
           profile: { accountId: 'account-1', status: 'active' },
         }];

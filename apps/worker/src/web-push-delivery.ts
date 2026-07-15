@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { ECDH, randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import webPush, { type PushSubscription } from 'web-push';
 import { decryptStoredSecret } from './stored-secret';
@@ -8,8 +8,10 @@ const LEASE_MS = 5 * 60 * 1000;
 const MAX_ATTEMPTS = 8;
 const MAX_RETRY_MS = 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const PUSH_TTL_SECONDS = 300;
 
 class StoredPushSecretError extends Error {}
+class InvalidStoredPushSubscriptionError extends Error {}
 
 export interface WebPushDeliveryConfig {
   enabled: boolean;
@@ -27,7 +29,7 @@ interface WebPushDeliveryOptions {
   now?: Date;
   workerId?: string;
   random?: () => number;
-  send?: (subscription: PushSubscription, payload: string, options: { timeout: number; topic: string }) => Promise<PushResponse>;
+  send?: (subscription: PushSubscription, payload: string, options: { timeout: number; topic: string; TTL: number; urgency: 'normal' }) => Promise<PushResponse>;
 }
 
 export interface WebPushDeliveryResult {
@@ -41,7 +43,7 @@ export function createWebPushSender(config: WebPushDeliveryConfig) {
   if (config.enabled) {
     webPush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
   }
-  return (subscription: PushSubscription, payload: string, options: { timeout: number; topic: string }) =>
+  return (subscription: PushSubscription, payload: string, options: { timeout: number; topic: string; TTL: number; urgency: 'normal' }) =>
     webPush.sendNotification(subscription, payload, options);
 }
 
@@ -111,6 +113,7 @@ export async function processWebPushDeliveries(
       const endpoint = requireDecryptedSecret(subscription.endpointCiphertext);
       const p256dh = requireDecryptedSecret(subscription.p256dhCiphertext);
       const auth = requireDecryptedSecret(subscription.authCiphertext);
+      validateStoredPushSubscriptionKeys(p256dh, auth);
       const payload = JSON.stringify({
         notificationId: delivery.notificationId.toString(),
         tag: `minewiki-notification-${delivery.notificationId.toString()}`,
@@ -118,7 +121,7 @@ export async function processWebPushDeliveries(
       await send(
         { endpoint, expirationTime: subscription.expirationTime?.getTime() ?? null, keys: { p256dh, auth } },
         payload,
-        { timeout: REQUEST_TIMEOUT_MS, topic: 'minewiki-notification' },
+        { timeout: REQUEST_TIMEOUT_MS, topic: 'minewiki-notification', TTL: PUSH_TTL_SECONDS, urgency: 'normal' },
       );
       const completed = await prisma.wikiPushDelivery.updateMany({
         where: { id: delivery.id, status: 'processing', lockedBy: claimToken },
@@ -133,7 +136,7 @@ export async function processWebPushDeliveries(
       }
     } catch (error) {
       const statusCode = getStatusCode(error);
-      if (statusCode === 400 || statusCode === 404 || statusCode === 410 || isStoredSecretError(error)) {
+      if (statusCode === 400 || statusCode === 404 || statusCode === 410 || isStoredSecretError(error) || error instanceof InvalidStoredPushSubscriptionError) {
         await prisma.wikiPushSubscription.deleteMany({ where: { id: subscription.id } });
         result.removedSubscriptions += 1;
         continue;
@@ -176,6 +179,18 @@ function requireDecryptedSecret(value: string): string {
   } catch (error) {
     if (error instanceof StoredPushSecretError) throw error;
     throw new StoredPushSecretError();
+  }
+}
+
+function validateStoredPushSubscriptionKeys(p256dh: string, auth: string): void {
+  try {
+    if (!/^[A-Za-z0-9_-]+$/.test(p256dh) || !/^[A-Za-z0-9_-]+$/.test(auth)) throw new Error();
+    const publicKey = Buffer.from(p256dh, 'base64url');
+    const authSecret = Buffer.from(auth, 'base64url');
+    if (publicKey.length !== 65 || publicKey[0] !== 4 || authSecret.length !== 16) throw new Error();
+    ECDH.convertKey(publicKey, 'prime256v1');
+  } catch {
+    throw new InvalidStoredPushSubscriptionError();
   }
 }
 

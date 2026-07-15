@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createECDH } from 'node:crypto';
 import { encryptSecret } from '@minewiki/security';
 import { processWebPushDeliveries, type WebPushDeliveryConfig } from './web-push-delivery';
 
@@ -10,6 +11,10 @@ const CONFIG: WebPushDeliveryConfig = {
   privateKey: 'private',
   subject: 'mailto:support@minewiki.kr',
 };
+const browserKey = createECDH('prime256v1');
+browserKey.generateKeys();
+const P256DH = browserKey.getPublicKey().toString('base64url');
+const AUTH = Buffer.alloc(16, 9).toString('base64url');
 
 function fixture(overrides: Record<string, unknown> = {}) {
   const now = new Date('2026-07-16T12:00:00.000Z');
@@ -24,8 +29,8 @@ function fixture(overrides: Record<string, unknown> = {}) {
       disabledAt: null,
       expirationTime: null,
       endpointCiphertext: encryptSecret('https://fcm.googleapis.com/fcm/send/example', KEY),
-      p256dhCiphertext: encryptSecret('p256dh', KEY),
-      authCiphertext: encryptSecret('auth', KEY),
+      p256dhCiphertext: encryptSecret(P256DH, KEY),
+      authCiphertext: encryptSecret(AUTH, KEY),
       session: { accountId: 'account-1', expiresAt: new Date('2026-07-17T00:00:00.000Z'), account: { lifecycleStatus: 'active' } },
       profile: { accountId: 'account-1', status: 'active' },
     },
@@ -62,14 +67,17 @@ test('sends only a generic payload and completes the claimed delivery', async ()
   process.env.APP_ENCRYPTION_KEY = KEY;
   const state = fixture();
   let payload = '';
+  let sendOptions: Record<string, unknown> = {};
   const result = await processWebPushDeliveries(state.prisma as never, CONFIG, {
     now: state.now,
     workerId: 'worker',
-    send: async (_subscription, value) => { payload = value; return { statusCode: 201 }; },
+    send: async (_subscription, value, options) => { payload = value; sendOptions = options; return { statusCode: 201 }; },
   });
   assert.deepEqual(JSON.parse(payload), { notificationId: '20', tag: 'minewiki-notification-20' });
   assert.equal(/title|message|href|endpoint/i.test(payload), false);
   assert.equal(result.delivered, 1);
+  assert.equal(sendOptions.TTL, 300);
+  assert.equal(sendOptions.urgency, 'normal');
   assert.ok(state.updates.some((entry) => JSON.stringify(entry, (_key, value) => typeof value === 'bigint' ? value.toString() : value).includes('lease_exhausted')));
 });
 

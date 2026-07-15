@@ -23,6 +23,11 @@ export function pushSubscriptionMatchesKey(subscription: PushSubscription, publi
   return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 }
 
+export async function pushEndpointFingerprint(endpoint: string): Promise<string> {
+  const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(endpoint));
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('').slice(0, 16);
+}
+
 export function isIosWithoutStandaloneInstall(): boolean {
   if (typeof window === 'undefined') return false;
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent)

@@ -30,6 +30,7 @@ import { loadDiscordVerifyExecutionJob } from './discord-sync-job-loader';
 import { DiscordVerificationRepository } from './discord-verification.repository';
 import { processWikiNotificationOutbox } from './wiki-notification-outbox';
 import { processWebPushDeliveries, type WebPushDeliveryConfig } from './web-push-delivery';
+import { sweepWikiPushRetention } from './wiki-push-retention';
 import { rebuildWikiSpecialSnapshots } from './wiki-special-snapshots';
 import { loadDiscordDigestExecutionJob } from './discord-digest-job-loader';
 import type {
@@ -50,6 +51,7 @@ const RANK_INTERVAL_MS = 60 * 60 * 1000;
 const CLAIM_SCAN_INTERVAL_MS = 60 * 60 * 1000;
 const WIKI_NOTIFICATION_INTERVAL_MS = 5 * 1000;
 const WIKI_PUSH_DELIVERY_INTERVAL_MS = 5 * 1000;
+const WIKI_PUSH_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000;
 const ACCOUNT_DELETION_INTERVAL_MS = 60 * 60 * 1000;
 const ACCOUNT_DELETION_DISCORD_REVOCATION_INTERVAL_MS = 60 * 1000;
@@ -610,6 +612,12 @@ async function bootstrapWorker(): Promise<void> {
     const result = await processWebPushDeliveries(prisma, webPushConfig);
     if (result.delivered > 0 || result.retried > 0 || result.failed > 0 || result.removedSubscriptions > 0) {
       Logger.info(result, 'Processed wiki Web Push deliveries');
+    }
+  });
+  scheduleInterval('wiki-push-retention', WIKI_PUSH_RETENTION_INTERVAL_MS, async () => {
+    const result = await sweepWikiPushRetention(prisma);
+    if (result.subscriptions > 0 || result.deliveries > 0 || result.events > 0) {
+      Logger.info(result, 'Cleaned up wiki Web Push retention data');
     }
   });
   scheduleInterval('wiki-special-snapshots', WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS, async () => {
