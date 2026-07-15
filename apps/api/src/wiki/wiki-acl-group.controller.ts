@@ -3,10 +3,12 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import { WikiAclGroupService } from './wiki-acl-group.service';
 import { WikiProfileService } from './wiki-profile.service';
 
 @Controller('v1/admin/wiki/acl-groups')
+@RequireStepUp('wiki_admin')
 @UseGuards(SessionGuard)
 export class WikiAclGroupAdminController {
   constructor(

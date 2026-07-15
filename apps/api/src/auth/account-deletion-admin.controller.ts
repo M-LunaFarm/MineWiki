@@ -4,9 +4,11 @@ import { accountDeletionAdminActionSchema } from '@minewiki/schemas';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import { AccountDeletionService } from './account-deletion.service';
 
 @Controller('v1/admin/account-deletions')
+@RequireStepUp('account_delete_admin')
 @UseGuards(SessionGuard)
 export class AccountDeletionAdminController {
   constructor(private readonly deletions: AccountDeletionService) {}

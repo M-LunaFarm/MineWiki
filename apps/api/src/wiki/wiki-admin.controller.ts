@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import {
   WikiAdminService,
   type WikiAdminPageSummary,
@@ -14,6 +15,7 @@ import { WikiModerationService } from './wiki-moderation.service';
 import { WikiProfileService } from './wiki-profile.service';
 
 @Controller('v1/admin/wiki')
+@RequireStepUp('wiki_admin')
 @UseGuards(SessionGuard)
 export class WikiAdminController {
   constructor(

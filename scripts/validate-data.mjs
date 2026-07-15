@@ -410,6 +410,18 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'role assignments belong to canonical Accounts',
+    `
+      SELECT assignment.id
+      FROM account_roles assignment
+      JOIN Account account_record ON account_record.id = assignment.account_id
+      WHERE account_record.canonicalAccountId IS NOT NULL
+        AND assignment.account_id <> account_record.canonicalAccountId
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'canonical Account group has at most one Minecraft identity',
     `
       SELECT COALESCE(a.canonicalAccountId, a.id) AS id

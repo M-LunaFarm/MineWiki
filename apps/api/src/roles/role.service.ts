@@ -1,6 +1,14 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import { PrismaService } from '../common/prisma.service';
+import { isProtectedRoleCode } from './role-policy';
 
 export const BUILT_IN_ROLE_CODES = [
   'owner',
@@ -54,8 +62,9 @@ export class RoleService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getAccountAccess(accountId: string): Promise<AccountAccess> {
+    const canonicalId = await this.resolveCanonicalAccountId(accountId);
     const rows = await this.prisma.accountRole.findMany({
-      where: { accountId },
+      where: { accountId: canonicalId },
       include: {
         role: {
           include: {
@@ -130,7 +139,48 @@ export class RoleService {
     }));
   }
 
-  async assignRole(accountId: string, roleCode: string): Promise<AccountAccess> {
+  async assignRole(
+    accountId: string,
+    roleCode: string,
+    options: { readonly actorAccountId?: string } = {},
+  ): Promise<AccountAccess> {
+    if (isProtectedRoleCode(roleCode)) {
+      if (!options.actorAccountId) {
+        throw new ForbiddenException('보호된 관리자 역할은 인증된 관리 작업으로만 부여할 수 있습니다.');
+      }
+      const canonicalId = await withActiveCanonicalAccountGroup(
+        this.prisma,
+        [accountId, options.actorAccountId],
+        async (transaction) => {
+          const [targetCanonicalId, actorCanonicalId] = await Promise.all([
+            resolveCanonicalAccountId(transaction, accountId),
+            resolveCanonicalAccountId(transaction, options.actorAccountId!),
+          ]);
+          if (targetCanonicalId === actorCanonicalId) {
+            throw new ForbiddenException('자기 계정 그룹에는 보호된 관리자 역할을 부여할 수 없습니다.');
+          }
+          const role = await transaction.globalRole.findUnique({ where: { code: roleCode } });
+          if (!role) throw new NotFoundException('Role was not found.');
+          await lockRole(transaction, role.id);
+          const credential = await transaction.mfaTotpCredential.findUnique({
+            where: { accountId: targetCanonicalId },
+            select: { enabledAt: true },
+          });
+          if (!credential?.enabledAt) {
+            throw new BadRequestException(
+              '보호된 관리자 역할을 받으려면 대상 계정에 다중 인증이 활성화되어 있어야 합니다.',
+            );
+          }
+          await transaction.accountRole.upsert({
+            where: { accountId_roleId: { accountId: targetCanonicalId, roleId: role.id } },
+            update: {},
+            create: { accountId: targetCanonicalId, roleId: role.id },
+          });
+          return targetCanonicalId;
+        },
+      );
+      return this.getAccountAccess(canonicalId);
+    }
     const role = await this.prisma.globalRole.findUnique({ where: { code: roleCode } });
     if (!role) {
       throw new NotFoundException('Role was not found.');
@@ -148,35 +198,65 @@ export class RoleService {
   }
 
   async removeRole(accountId: string, roleCode: string): Promise<AccountAccess> {
-    await this.prisma.$transaction(
-      async (transaction) => {
+    const canonicalId = await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [accountId],
+      async (transaction, group) => {
         const role = await transaction.globalRole.findUnique({ where: { code: roleCode } });
         if (!role) {
           throw new NotFoundException('Role was not found.');
         }
-        const account = await transaction.account.findUnique({
-          where: { id: accountId },
-          select: { id: true },
-        });
-        if (!account) {
-          throw new NotFoundException('Account was not found.');
-        }
+        await lockRole(transaction, role.id);
+        const targetCanonicalId = await resolveCanonicalAccountId(transaction, accountId);
         if (role.code === 'owner') {
-          const assignment = await transaction.accountRole.findUnique({
-            where: { accountId_roleId: { accountId, roleId: role.id } },
-            select: { id: true },
+          const assignments = await transaction.accountRole.findMany({
+            where: { roleId: role.id },
+            select: {
+              accountId: true,
+              account: { select: { id: true, canonicalAccountId: true } },
+            },
           });
-          if (assignment) {
-            const ownerCount = await transaction.accountRole.count({ where: { roleId: role.id } });
-            if (ownerCount <= 1) {
-              throw new ConflictException('The last owner role cannot be removed.');
-            }
+          const canonicalOwners = new Set(
+            assignments.map(({ account }) => account.canonicalAccountId ?? account.id),
+          );
+          if (canonicalOwners.has(targetCanonicalId) && canonicalOwners.size <= 1) {
+            throw new ConflictException('The last owner role cannot be removed.');
           }
         }
-        await transaction.accountRole.deleteMany({ where: { accountId, roleId: role.id } });
+        await transaction.accountRole.deleteMany({
+          where: { accountId: { in: [...group.accountIds] }, roleId: role.id },
+        });
+        return targetCanonicalId;
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
-    return this.getAccountAccess(accountId);
+    return this.getAccountAccess(canonicalId);
   }
+
+  private async resolveCanonicalAccountId(accountId: string): Promise<string> {
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      select: { id: true, canonicalAccountId: true },
+    });
+    if (!account) throw new NotFoundException('Account was not found.');
+    return account.canonicalAccountId ?? account.id;
+  }
+}
+
+async function resolveCanonicalAccountId(
+  transaction: Prisma.TransactionClient,
+  accountId: string,
+): Promise<string> {
+  const account = await transaction.account.findUnique({
+    where: { id: accountId },
+    select: { id: true, canonicalAccountId: true },
+  });
+  if (!account) throw new NotFoundException('Account was not found.');
+  return account.canonicalAccountId ?? account.id;
+}
+
+async function lockRole(transaction: Prisma.TransactionClient, roleId: string): Promise<void> {
+  const rows = await transaction.$queryRaw<Array<{ id: string }>>(
+    Prisma.sql`SELECT id FROM \`global_roles\` WHERE id = ${roleId} FOR UPDATE`,
+  );
+  if (rows.length !== 1) throw new NotFoundException('Role was not found.');
 }

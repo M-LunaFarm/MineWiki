@@ -21,6 +21,7 @@ import {
   type StepUpPurpose,
 } from '../session/session.service';
 import { withActiveCanonicalAccountGroup } from './account-lifecycle-fence';
+import { PROTECTED_ROLE_CODES } from '../roles/role-policy';
 import {
   generateRecoveryCodes,
   generateTotpSecret,
@@ -361,6 +362,15 @@ export class MfaService {
         const canonical = await canonicalAccount(tx, session.userId);
         const credential = await tx.mfaTotpCredential.findUnique({ where: { accountId: canonical.id } });
         if (!credential?.enabledAt) throw new NotFoundException('활성화된 다중 인증이 없습니다.');
+        const privilegedRoleCount = await tx.accountRole.count({
+          where: {
+            accountId: { in: [...group.accountIds] },
+            role: { code: { in: [...PROTECTED_ROLE_CODES] } },
+          },
+        });
+        if (privilegedRoleCount > 0) {
+          throw new ConflictException('보호된 관리자 역할을 보유한 동안에는 다중 인증을 해제할 수 없습니다.');
+        }
         await tx.mfaRecoveryCode.deleteMany({ where: { accountId: canonical.id } });
         await tx.mfaTotpCredential.delete({ where: { id: credential.id } });
         await tx.session.deleteMany({

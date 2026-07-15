@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import { ReviewModerationService } from './review-moderation.service';
 
 const listQuerySchema = z.object({
@@ -34,6 +35,7 @@ const resolutionSchema = z
   .strict();
 
 @Controller('v1/admin/review-reports')
+@RequireStepUp('review_moderation')
 @UseGuards(SessionGuard)
 export class ReviewModerationController {
   constructor(private readonly moderation: ReviewModerationService) {}

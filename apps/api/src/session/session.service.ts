@@ -542,13 +542,26 @@ export function assertFreshStepUp(
   purpose: StepUpPurpose,
   nowMs = Date.now(),
 ): void {
+  const authenticatedAt = Date.parse(session.authenticatedAt);
+  const stepUpAt = session.stepUpAt ? Date.parse(session.stepUpAt) : Number.NaN;
   const expiresAt = session.stepUpExpiresAt
     ? Date.parse(session.stepUpExpiresAt)
     : Number.NaN;
+  const recognizedMethod =
+    session.stepUpMethod === 'totp' ||
+    session.stepUpMethod === 'recovery_code' ||
+    session.stepUpMethod === 'webauthn';
   if (
     session.authLevel !== 'aal2' ||
     session.stepUpPurpose !== purpose ||
+    !recognizedMethod ||
+    !Number.isFinite(authenticatedAt) ||
+    !Number.isFinite(stepUpAt) ||
     !Number.isFinite(expiresAt) ||
+    authenticatedAt > stepUpAt ||
+    stepUpAt > nowMs ||
+    expiresAt <= stepUpAt ||
+    expiresAt > stepUpAt + STEP_UP_TTL_SECONDS * 1000 ||
     expiresAt <= nowMs
   ) {
     throw new ForbiddenException({

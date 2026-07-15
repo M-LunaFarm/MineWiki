@@ -12,6 +12,7 @@ import { VoteDiagnosticsService, type DiagnosticsResult } from './vote-diagnosti
 import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import { ClaimService } from '../claim/claim.service';
 
 @Controller('v1/servers/:serverId/votifier')
@@ -21,6 +22,7 @@ export class VoteDiagnosticsController {
     private readonly claims: ClaimService
   ) {}
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Post('test')
   @Throttle({ default: { limit: 5, ttl: 300 } })

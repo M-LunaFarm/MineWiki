@@ -5,6 +5,7 @@ import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import { WikiPageAclService } from './wiki-page-acl.service';
 
 @Controller('v1/wiki/pages/:pageId/acl')
@@ -18,6 +19,7 @@ export class WikiPageAclController {
   }
 
   @Post()
+  @RequireStepUp('wiki_admin')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   createRule(
@@ -29,6 +31,7 @@ export class WikiPageAclController {
   }
 
   @Delete(':ruleId')
+  @RequireStepUp('wiki_admin')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   deleteRule(
@@ -41,6 +44,7 @@ export class WikiPageAclController {
   }
 
   @Patch('order')
+  @RequireStepUp('wiki_admin')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 20, ttl: 60 } })
   reorderRules(

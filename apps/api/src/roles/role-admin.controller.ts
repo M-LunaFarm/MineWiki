@@ -1,6 +1,6 @@
 import {
-  Body,
   BadRequestException,
+  Body,
   Controller,
   Delete,
   ForbiddenException,
@@ -15,16 +15,17 @@ import { BusinessEventService } from '../events/business-event.service';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import {
   RoleService,
   type AccountAccess,
   type AccountRoleSummary,
   type RoleSummary,
 } from './role.service';
-
-const PROTECTED_ROLE_CODES = new Set(['owner', 'admin']);
+import { isProtectedRoleCode } from './role-policy';
 
 @Controller('v1/admin/roles')
+@RequireStepUp('role_admin')
 @UseGuards(SessionGuard)
 export class RoleAdminController {
   constructor(
@@ -56,7 +57,9 @@ export class RoleAdminController {
     @CurrentSession() session: SessionPayload,
   ): Promise<AccountAccess> {
     const roleCode = this.assertRoleMutation(session, body.roleCode);
-    const access = await this.roles.assignRole(accountId, roleCode);
+    const access = await this.roles.assignRole(accountId, roleCode, {
+      actorAccountId: session.userId,
+    });
     await this.events.audit('admin.role.assigned', {
       category: 'admin',
       actorAccountId: session.userId,
@@ -102,7 +105,7 @@ export class RoleAdminController {
       throw new BadRequestException('A role code is required.');
     }
     if (
-      PROTECTED_ROLE_CODES.has(roleCode) &&
+      isProtectedRoleCode(roleCode) &&
       session.groups?.includes('owner') !== true
     ) {
       throw new ForbiddenException('Only an owner can manage owner or admin roles.');

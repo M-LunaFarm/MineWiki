@@ -32,6 +32,7 @@ import {
 import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import { ClaimService } from '../claim/claim.service';
 import { FileService } from '../file/file.service';
 import { serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schemas';
@@ -158,6 +159,7 @@ export class ServerController {
     return this.serverService.getWikiLayoutSettings(id);
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Patch(':id/wiki-layout')
   @Throttle({ default: { limit: 12, ttl: 60 } })
@@ -199,6 +201,7 @@ export class ServerController {
     });
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Get(':id/plugin-credentials')
   async listPluginCredentials(
@@ -209,6 +212,7 @@ export class ServerController {
     return this.pluginCredentials.list(id);
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Get(':id/plugin-credentials/:credentialId/events')
   async listPluginCredentialEvents(
@@ -223,6 +227,7 @@ export class ServerController {
     return this.pluginCredentials.listEvents(id, credentialId, limit);
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Post(':id/plugin-credentials')
   @Throttle({ default: { limit: 5, ttl: 300 } })
@@ -241,6 +246,7 @@ export class ServerController {
     );
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Post(':id/plugin-credentials/:credentialId/rotate')
   @Throttle({ default: { limit: 5, ttl: 300 } })
@@ -255,6 +261,7 @@ export class ServerController {
     return this.pluginCredentials.rotate(id, credentialId, session.userId);
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Patch(':id/plugin-credentials/:credentialId')
   @Throttle({ default: { limit: 10, ttl: 300 } })
@@ -273,6 +280,7 @@ export class ServerController {
     return this.pluginCredentials.setEnabled(id, credentialId, payload.enabled, session.userId);
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Post(':id/wiki')
   @Throttle({ default: { limit: 5, ttl: 300 } })
@@ -284,6 +292,7 @@ export class ServerController {
     return this.serverService.createServerWiki(id, session.userId);
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Patch(':id/wiki-link')
   @Throttle({ default: { limit: 10, ttl: 300 } })
@@ -297,6 +306,7 @@ export class ServerController {
     return this.serverService.linkServerWiki(id, payload, session.userId);
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Delete(':id')
   @Throttle({ default: { limit: 5, ttl: 300 } })
@@ -350,6 +360,7 @@ export class ServerController {
     return { isOwner: await this.claimService.isOwner(id, session.userId) };
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Post(':id/banner')
   @Throttle({ default: { limit: 10, ttl: 300 } })
@@ -371,6 +382,7 @@ export class ServerController {
     return stored;
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Patch(':id/vote-policy')
   @Throttle({ default: { limit: 20, ttl: 60 } })
@@ -385,6 +397,7 @@ export class ServerController {
     return this.serverService.updateVotePolicy(id, Boolean(requiresOwnership));
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Get(':id/votifier')
   async votifierTargets(
@@ -398,6 +411,7 @@ export class ServerController {
     return { targets };
   }
 
+  @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Patch(':id/votifier')
   @Throttle({ default: { limit: 10, ttl: 300 } })

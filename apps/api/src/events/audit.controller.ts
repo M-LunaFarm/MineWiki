@@ -2,9 +2,11 @@ import { Controller, ForbiddenException, Get, Query, UseGuards } from '@nestjs/c
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import { BusinessEventService, type AuditEventResponse } from './business-event.service';
 
 @Controller('v1/admin/audit')
+@RequireStepUp('audit_read')
 @UseGuards(SessionGuard)
 export class AuditController {
   constructor(private readonly events: BusinessEventService) {}

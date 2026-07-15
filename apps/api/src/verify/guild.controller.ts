@@ -22,7 +22,7 @@ import { GuildAccessService } from './guild-access.service';
 import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
-import type { SessionPayload } from '../session/session.service';
+import { assertFreshStepUp, type SessionPayload } from '../session/session.service';
 
 const guildSettingsSchema = z.object({
   channelId: z.string().trim().min(1).optional(),
@@ -84,6 +84,7 @@ export class GuildController {
   ) {
     if (!this.verifyService.isInternalBotToken(authorization)) {
       const session = requireSession(request);
+      assertFreshStepUp(session, 'guild_admin');
       await this.guildAccess.assertCanManageGuild(session, guildId);
       await this.verifyService.claimGuildOwnership(guildId, session.userId);
     }

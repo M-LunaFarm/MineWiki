@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
 import { VoteService } from './vote.service';
 
 const invalidateVoteSchema = z
@@ -21,6 +22,7 @@ const invalidateVoteSchema = z
   .strict();
 
 @Controller('v1/admin/votes')
+@RequireStepUp('vote_admin')
 @UseGuards(SessionGuard)
 export class VoteAdminController {
   constructor(private readonly votes: VoteService) {}
