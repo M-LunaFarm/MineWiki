@@ -583,6 +583,12 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
               <p className="text-xs font-semibold text-slate-300">본문 목차</p>
               <code className="mt-2 block rounded-md border border-white/10 bg-[#0d1219] px-3 py-2 text-xs text-emerald-200">{'[목차]  또는  [목차(hide)]'}</code>
             </div>
+            <div className="mt-4 border-t border-white/10 pt-4">
+              <p className="text-xs font-semibold text-slate-300">수식</p>
+              <code className="mt-2 block overflow-x-auto rounded-md border border-white/10 bg-[#0d1219] px-3 py-2 text-xs text-emerald-200">{'인라인: [math(x^2 + y^2)]'}</code>
+              <code className="mt-2 block overflow-x-auto whitespace-pre rounded-md border border-white/10 bg-[#0d1219] px-3 py-2 text-xs text-emerald-200">{'블록: {{{#!latex\n\\frac{a}{b}\n}}}'}</code>
+              <p className="mt-2 text-xs leading-5 text-slate-500">긴 블록 수식은 문서 폭을 늘리지 않고 수식 안에서만 가로로 스크롤됩니다.</p>
+            </div>
           </section>
 
           <section className="surface-flat p-4">

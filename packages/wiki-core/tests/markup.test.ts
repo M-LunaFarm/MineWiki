@@ -51,6 +51,54 @@ test('parses links, categories, components, and safe HTML', () => {
   assert.equal(html.includes('class="wiki-link missing"'), true);
 });
 
+test('renders inline, block, and legacy math with accessible KaTeX output', () => {
+  const parsed = parseMarkup([
+    '피타고라스 [math(x^2 + y^2 = z^2)]',
+    '<math>\\sqrt{x}</math>',
+    '{{{#!latex',
+    '\\frac{a}{b}',
+    '}}}'
+  ].join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.blockingErrors.length, 0);
+  assert.match(html, /wiki-math-inline/);
+  assert.match(html, /wiki-math-block/);
+  assert.match(html, /<math[^>]*>/);
+  assert.match(html, /<annotation encoding="application\/x-tex">/);
+  assert.match(html, /aria-hidden="true"/);
+  assert.equal((html.match(/class="katex"/g) ?? []).length, 3);
+});
+
+test('math rendering fails locally and rejects trusted HTML or dangerous URLs', () => {
+  const invalid = renderDocument(parseMarkup('[math(\\frac{)] 뒤의 본문').ast);
+  const dangerous = renderDocument(parseMarkup('[math(\\href{javascript:alert(1)}{click})] <script>alert(1)</script>').ast);
+
+  assert.match(invalid, /수식 문법 오류/);
+  assert.match(invalid, /뒤의 본문/);
+  assert.equal(dangerous.includes('javascript:'), false);
+  assert.equal(dangerous.includes('<script>'), false);
+  assert.match(dangerous, /수식 문법 오류/);
+});
+
+test('math parsing enforces per-formula and per-document resource bounds', () => {
+  const oversized = parseMarkup(`[math(${'x'.repeat(4097)})]`);
+  const excessive = parseMarkup(Array.from({ length: 51 }, () => '[math(x)]').join('\n'));
+  const transcluded = renderDocument([{
+    type: 'include',
+    target: '수식 모음',
+    params: {},
+    state: 'resolved',
+    children: excessive.ast
+  }]);
+
+  assert.equal(oversized.errors.some((error) => error.includes('4096 bytes')), true);
+  assert.match(renderDocument(oversized.ast), /수식 문법 오류/);
+  assert.equal(excessive.blockingErrors.includes('수식은 문서당 50개까지 사용할 수 있습니다.'), true);
+  assert.equal(transcluded.includes('class="katex"'), false);
+  assert.match(transcluded, /수식 문법 오류/);
+});
+
 test('extracts inline categories without rendering them as document links', () => {
   const parsed = parseMarkup('본문 끝 [[분류:가이드|정렬 키]] [[분류:초보자]]');
 

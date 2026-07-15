@@ -1,4 +1,5 @@
 import sanitizeHtml from 'sanitize-html';
+import katex from 'katex';
 import type {
   AstNode,
   InlineNode,
@@ -12,7 +13,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.4';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.8.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -21,6 +22,8 @@ const MAX_INCLUDE_PARAMS = 32;
 const MAX_INCLUDE_PARAM_KEY_LENGTH = 64;
 const MAX_INCLUDE_PARAM_VALUE_BYTES = 4096;
 const MAX_INCLUDE_PARAM_BYTES = 32 * 1024;
+const MAX_MATH_SOURCE_BYTES = 4096;
+const MAX_MATH_NODES = 50;
 const INCLUDE_PARAM_KEY = /^[A-Za-z0-9가-힣_]+$/u;
 
 const componentNameMap: Record<string, string> = {
@@ -113,7 +116,34 @@ const allowedTags = [
   'aside',
   'details',
   'summary',
-  'iframe'
+  'iframe',
+  'math',
+  'semantics',
+  'annotation',
+  'mrow',
+  'mi',
+  'mo',
+  'mn',
+  'mtext',
+  'mspace',
+  'msup',
+  'msub',
+  'msubsup',
+  'mfrac',
+  'msqrt',
+  'mroot',
+  'mtable',
+  'mtr',
+  'mtd',
+  'mover',
+  'munder',
+  'munderover',
+  'mpadded',
+  'mstyle',
+  'mphantom',
+  'menclose',
+  'svg',
+  'path'
 ];
 
 export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
@@ -145,6 +175,21 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
     let line = lines[i] ?? '';
     if (!line.trim()) continue;
     if (i === 0 && redirectTarget) continue;
+
+    const mathBlock = line.match(/^\{\{\{#!latex\s*$/i);
+    if (mathBlock) {
+      const sourceLines: string[] = [];
+      i += 1;
+      while (i < lines.length && lines[i]?.trim() !== '}}}') {
+        sourceLines.push(lines[i] ?? '');
+        i += 1;
+      }
+      const source = sourceLines.join('\n').trim();
+      const error = validateMathSource(source);
+      if (error) errors.push(error);
+      ast.push({ type: 'math_block', source, error });
+      continue;
+    }
 
     const syntaxBlock = line.match(/^\{\{\{#!(?:syntax|highlight)\s+([A-Za-z0-9_+-]+)\s*$/);
     if (syntaxBlock) {
@@ -368,6 +413,9 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
   }
   if (/<\s*(script|style|iframe|object|embed|img)\b/i.test(raw) || /\son[a-z]+\s*=/i.test(raw)) {
     blockingErrors.push('허용되지 않은 HTML이 포함되어 있습니다.');
+  }
+  if (countMathNodes(ast) > MAX_MATH_NODES) {
+    blockingErrors.push(`수식은 문서당 ${MAX_MATH_NODES}개까지 사용할 수 있습니다.`);
   }
 
   return {
@@ -947,6 +995,10 @@ export function applyIncludeParametersToAst(
     };
     if (node.type === 'unsupported_macro') return { ...node };
     if (node.type === 'video') return { ...node };
+    if (node.type === 'math') {
+      const source = replace(node.source);
+      return { ...node, source, error: validateMathSource(source) };
+    }
     if (node.type === 'line_break' || node.type === 'clearfix') return { ...node };
     if (node.type === 'anchor') return { ...node, id: normalizeMacroAnchor(replace(node.id)) };
     if (node.type === 'ruby') return { ...node, text: replace(node.text), ruby: replace(node.ruby) };
@@ -990,6 +1042,10 @@ export function applyIncludeParametersToAst(
       caption: node.caption === null ? null : replace(node.caption)
     };
     if (node.type === 'redirect') return { ...node, target: replace(node.target) };
+    if (node.type === 'math_block') {
+      const source = replace(node.source);
+      return { ...node, source, error: validateMathSource(source) };
+    }
     if (node.type === 'include') return {
       ...node,
       target: replace(node.target),
@@ -1009,7 +1065,7 @@ function parseInline(
   footnotes: string[]
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
-  const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXml><ref>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?\s*(?<refShortText>[^\]]+?)\])|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
+  const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXml><ref>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?\s*(?<refShortText>[^\]]+?)\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
   let last = 0;
   for (const match of input.matchAll(pattern)) {
     if (match.index! > last) nodes.push({ type: 'text', text: input.slice(last, match.index) });
@@ -1025,6 +1081,11 @@ function parseInline(
       if (!note.trim()) errors.push('빈 각주가 있습니다.');
       footnotes.push(note);
       nodes.push({ type: 'ref', text: note });
+    } else if (group.legacyMath !== undefined) {
+      const source = (group.legacyMathText ?? '').trim();
+      const error = validateMathSource(source);
+      if (error && !errors.includes(error)) errors.push(error);
+      nodes.push({ type: 'math', source, error });
     } else if (group.code !== undefined) {
       nodes.push({ type: 'code', code: group.codeText ?? '' });
     } else if (group.color !== undefined) {
@@ -1081,6 +1142,12 @@ function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors:
       else if (parameter.startsWith('color=')) color = normalizeTableColor(parameter.slice('color='.length));
     }
     if (text && ruby) return { type: 'ruby', text, ruby, color };
+  }
+  if (normalizedName === 'math' && rawArgs !== undefined) {
+    const source = rawArgs.trim();
+    const error = validateMathSource(source);
+    if (error && !errors.includes(error)) errors.push(error);
+    return { type: 'math', source, error };
   }
   if (normalizedName === 'youtube' && rawArgs !== undefined) {
     const [videoId = '', ...parameters] = splitMacroArguments(rawArgs);
@@ -1161,11 +1228,17 @@ export interface RenderOptions {
   dataTables?: Record<string, { caption: string; headers: string[]; rows: string[][] }>;
   /** Internal heading scope shared by folding blocks, but not transclusions. */
   tocHeadings?: ReadonlyArray<{ level: number; text: string; id: string }>;
+  /** Internal guard propagated through folding blocks and transclusions. */
+  disableMathRendering?: boolean;
 }
 
 export function renderDocument(ast: AstNode[], options: RenderOptions = {}): string {
   const footnotes: string[] = [];
   const tocHeadings = options.tocHeadings ?? collectTocHeadings(ast);
+  const renderOptions: RenderOptions = {
+    ...options,
+    disableMathRendering: options.disableMathRendering ?? countMathNodes(ast) > MAX_MATH_NODES
+  };
   const renderNodes = (nodes: readonly AstNode[]): string => {
     const output: string[] = [];
     for (let index = 0; index < nodes.length; index += 1) {
@@ -1184,15 +1257,15 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         continue;
       }
       if (node.type === 'paragraph') {
-        output.push(`<p>${renderInline(node.children, footnotes, options)}</p>`);
+        output.push(`<p>${renderInline(node.children, footnotes, renderOptions)}</p>`);
         continue;
       }
       if (node.type === 'list') {
-        output.push(renderWikiList(node, footnotes, options));
+        output.push(renderWikiList(node, footnotes, renderOptions));
         continue;
       }
       if (node.type === 'blockquote') {
-        output.push(`<blockquote class="wiki-quote">${renderInline(node.children, footnotes, options)}</blockquote>`);
+        output.push(`<blockquote class="wiki-quote">${renderInline(node.children, footnotes, renderOptions)}</blockquote>`);
         continue;
       }
       if (node.type === 'hr') {
@@ -1200,11 +1273,11 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         continue;
       }
       if (node.type === 'wiki_table') {
-        output.push(renderWikiTable(node.caption, node.rows, node.options, footnotes, options));
+        output.push(renderWikiTable(node.caption, node.rows, node.options, footnotes, renderOptions));
         continue;
       }
       if (node.type === 'folding') {
-        output.push(`<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, options)}</summary>${renderDocument(node.children, { ...options, tocHeadings })}</details>`);
+        output.push(`<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, renderOptions)}</summary>${renderDocument(node.children, { ...renderOptions, tocHeadings })}</details>`);
         continue;
       }
       if (node.type === 'toc') {
@@ -1213,7 +1286,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       }
       if (node.type === 'include') {
         if (node.state === 'resolved' && node.children) {
-          output.push(`<section class="wiki-transclusion">${renderDocument(node.children, options)}</section>`);
+          output.push(`<section class="wiki-transclusion">${renderDocument(node.children, renderOptions)}</section>`);
           continue;
         }
         const message = node.state === 'unavailable'
@@ -1224,18 +1297,26 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       }
       if (node.type === 'category') continue;
       if (node.type === 'file') {
-        output.push(renderFile(node.fileName, node.thumbnail, node.caption, options));
+        output.push(renderFile(node.fileName, node.thumbnail, node.caption, renderOptions));
         continue;
       }
       if (node.type === 'redirect') {
-        output.push(`<p class="notice">넘겨주기: ${renderInternalLink(node.target, node.target, options)}</p>`);
+        output.push(`<p class="notice">넘겨주기: ${renderInternalLink(node.target, node.target, renderOptions)}</p>`);
+        continue;
+      }
+      if (node.type === 'math_block') {
+        output.push(renderMath(
+          node.source,
+          true,
+          renderOptions.disableMathRendering ? `수식은 문서당 ${MAX_MATH_NODES}개까지 표시할 수 있습니다.` : node.error
+        ));
         continue;
       }
       if (node.type === 'codeblock') {
         output.push(`<pre class="codeblock" data-lang="${escapeAttr(node.lang ?? '')}"><code>${escapeHtml(node.code)}</code></pre>`);
         continue;
       }
-      output.push(renderComponent(node.name, node.props, options));
+      output.push(renderComponent(node.name, node.props, renderOptions));
     }
     return output.join('\n');
   };
@@ -1267,7 +1348,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       nav: ['class', 'aria-label'],
       blockquote: ['class'],
       caption: ['class'],
-      span: ['class', 'style', 'title', 'id'],
+      span: ['class', 'style', 'title', 'id', 'aria-hidden'],
       ruby: ['class'],
       rt: ['class'],
       rp: ['class'],
@@ -1284,7 +1365,11 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       ol: ['class', 'start', 'type'],
       li: ['class'],
       summary: ['class'],
-      iframe: ['class', 'src', 'title', 'loading', 'allow', 'allowfullscreen', 'referrerpolicy', 'sandbox']
+      iframe: ['class', 'src', 'title', 'loading', 'allow', 'allowfullscreen', 'referrerpolicy', 'sandbox'],
+      math: ['xmlns', 'display'],
+      annotation: ['encoding'],
+      svg: ['xmlns', 'width', 'height', 'viewBox', 'preserveAspectRatio'],
+      path: ['d']
     },
     allowedSchemes: ['http', 'https', 'mailto'],
     allowedIframeHostnames: ['www.youtube-nocookie.com'],
@@ -1293,7 +1378,16 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         color: [/^#[0-9a-f]{3,8}$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/i, /^[a-z]+$/i],
         'font-size': [/^\d+(\.\d+)?em$/],
         'max-width': [/^\d+px$/],
-        'aspect-ratio': [/^\d+ \/ \d+$/]
+        'aspect-ratio': [/^\d+ \/ \d+$/],
+        height: [/^-?\d+(?:\.\d+)?em$/],
+        width: [/^-?\d+(?:\.\d+)?em$/],
+        top: [/^-?\d+(?:\.\d+)?em$/],
+        'vertical-align': [/^-?\d+(?:\.\d+)?em$/],
+        'margin-left': [/^-?\d+(?:\.\d+)?em$/],
+        'margin-right': [/^-?\d+(?:\.\d+)?em$/],
+        'padding-left': [/^-?\d+(?:\.\d+)?em$/],
+        'min-width': [/^-?\d+(?:\.\d+)?em$/],
+        'border-bottom-width': [/^-?\d+(?:\.\d+)?em$/]
       },
       div: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
@@ -1370,6 +1464,8 @@ function renderTableOfContents(
 }
 
 export function renderInline(nodes: InlineNode[], footnotes: string[], options: RenderOptions = {}) {
+  const disableMathRendering = options.disableMathRendering
+    ?? nodes.filter((node) => node.type === 'math').length > MAX_MATH_NODES;
   return nodes
     .map((node) => {
       if (node.type === 'text') return escapeHtml(node.text);
@@ -1403,6 +1499,13 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
         const suffix = query.size > 0 ? `?${query.toString()}` : '';
         return `<span class="wiki-media-wrapper" style="max-width:${node.width}px;aspect-ratio:${node.width} / ${node.height}"><iframe class="wiki-media" src="https://www.youtube-nocookie.com/embed/${escapeAttr(node.videoId)}${suffix}" title="YouTube 동영상" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></span>`;
       }
+      if (node.type === 'math') {
+        return renderMath(
+          node.source,
+          false,
+          disableMathRendering ? `수식은 문서당 ${MAX_MATH_NODES}개까지 표시할 수 있습니다.` : node.error
+        );
+      }
       if (node.type === 'unsupported_macro') {
         return `<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: [${escapeHtml(node.name)}]</span>`;
       }
@@ -1410,6 +1513,64 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
       return `<sup><a href="#fn-${index}">[${index}]</a></sup>`;
     })
     .join('');
+}
+
+function validateMathSource(source: string): string | null {
+  if (!source) return '빈 수식은 표시할 수 없습니다.';
+  if (Buffer.byteLength(source, 'utf8') > MAX_MATH_SOURCE_BYTES) {
+    return `수식은 ${MAX_MATH_SOURCE_BYTES} bytes를 초과할 수 없습니다.`;
+  }
+  if (/\\(?:href|url|includegraphics|html[A-Za-z]*)\b/u.test(source)) {
+    return '외부 링크 또는 HTML을 만드는 수식 명령은 사용할 수 없습니다.';
+  }
+  return null;
+}
+
+function renderMath(source: string, displayMode: boolean, validationError: string | null): string {
+  const wrapper = displayMode ? 'div' : 'span';
+  const modeClass = displayMode ? 'wiki-math-block' : 'wiki-math-inline';
+  if (validationError) {
+    return `<${wrapper} class="wiki-math-error" title="${escapeAttr(validationError)}">수식 문법 오류</${wrapper}>`;
+  }
+  try {
+    const html = katex.renderToString(source, {
+      displayMode,
+      throwOnError: true,
+      trust: false,
+      strict: 'error',
+      maxExpand: 100,
+      maxSize: 10,
+      output: 'htmlAndMathml'
+    });
+    return `<${wrapper} class="wiki-math ${modeClass}">${html}</${wrapper}>`;
+  } catch {
+    return `<${wrapper} class="wiki-math-error" title="수식 문법을 확인해 주세요.">수식 문법 오류</${wrapper}>`;
+  }
+}
+
+function countMathNodes(ast: readonly AstNode[]): number {
+  const countInline = (nodes: readonly InlineNode[]) => nodes.reduce(
+    (count, node) => count + (node.type === 'math' ? 1 : 0),
+    0
+  );
+  const countList = (list: WikiListNode): number => list.items.reduce(
+    (count, item) => count + countInline(item.children) + item.nested.reduce((nestedCount, nested) => nestedCount + countList(nested), 0),
+    0
+  );
+  return ast.reduce((count, node) => {
+    if (node.type === 'math_block') return count + 1;
+    if (node.type === 'paragraph' || node.type === 'blockquote') return count + countInline(node.children);
+    if (node.type === 'list') return count + countList(node);
+    if (node.type === 'wiki_table') {
+      return count + countInline(node.caption) + node.rows.reduce(
+        (rowCount, row) => rowCount + row.cells.reduce((cellCount, cell) => cellCount + countInline(cell.children), 0),
+        0
+      );
+    }
+    if (node.type === 'folding') return count + countInline(node.title) + countMathNodes(node.children);
+    if (node.type === 'include' && node.children) return count + countMathNodes(node.children);
+    return count;
+  }, 0);
 }
 
 export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<string>()): Set<string> {

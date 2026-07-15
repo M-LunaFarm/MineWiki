@@ -731,6 +731,22 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered .wiki-macro-warning {
     @apply inline-flex rounded-md border border-amber-300/30 bg-amber-300/[0.06] px-2 py-0.5 text-xs font-medium text-amber-200;
   }
+  .wiki-rendered .wiki-math-inline {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: middle;
+  }
+  .wiki-rendered .wiki-math-block {
+    @apply my-4 max-w-full overflow-x-auto rounded-lg border border-white/10 bg-black/10 px-4 py-3;
+    overscroll-behavior-inline: contain;
+  }
+  .wiki-rendered .wiki-math-block > .katex-display {
+    margin: 0;
+    min-width: max-content;
+  }
+  .wiki-rendered .wiki-math-error {
+    @apply inline-flex rounded-md border border-red-300/30 bg-red-300/[0.06] px-2 py-0.5 text-xs font-medium text-red-200;
+  }
   .wiki-rendered .wiki-media-wrapper {
     @apply my-5 block w-full max-w-full overflow-hidden rounded-xl border border-white/10 bg-black shadow-sm;
   }

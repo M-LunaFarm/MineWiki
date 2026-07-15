@@ -86,6 +86,7 @@ export type AstNode =
   | { type: 'category'; title: string }
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null }
   | { type: 'redirect'; target: string }
+  | { type: 'math_block'; source: string; error: string | null }
   | { type: 'codeblock'; lang: string | null; code: string };
 
 export type InlineNode =
@@ -95,6 +96,7 @@ export type InlineNode =
   | { type: 'anchor'; id: string }
   | { type: 'ruby'; text: string; ruby: string; color: string | null }
   | { type: 'video'; provider: 'youtube'; videoId: string; width: number; height: number; start: number | null; end: number | null }
+  | { type: 'math'; source: string; error: string | null }
   | { type: 'bold'; text: string }
   | { type: 'italic'; text: string }
   | { type: 'strike'; text: string }

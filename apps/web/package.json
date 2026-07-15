@@ -21,6 +21,7 @@
     "@tanstack/react-query": "^5.29.0",
     "autoprefixer": "^10.4.17",
     "framer-motion": "^12.23.24",
+    "katex": "^0.16.21",
     "lucide-react": "^0.552.0",
     "marked": "^12.0.2",
     "next": "^15.5.4",
