@@ -29,6 +29,7 @@ import { loadVoteDispatchExecutionJob } from './vote-job-loader';
 import { loadDiscordVerifyExecutionJob } from './discord-sync-job-loader';
 import { DiscordVerificationRepository } from './discord-verification.repository';
 import { processWikiNotificationOutbox } from './wiki-notification-outbox';
+import { processWebPushDeliveries, type WebPushDeliveryConfig } from './web-push-delivery';
 import { rebuildWikiSpecialSnapshots } from './wiki-special-snapshots';
 import { loadDiscordDigestExecutionJob } from './discord-digest-job-loader';
 import type {
@@ -48,6 +49,7 @@ const PING_INTERVAL_MS = 5 * 60 * 1000;
 const RANK_INTERVAL_MS = 60 * 60 * 1000;
 const CLAIM_SCAN_INTERVAL_MS = 60 * 60 * 1000;
 const WIKI_NOTIFICATION_INTERVAL_MS = 5 * 1000;
+const WIKI_PUSH_DELIVERY_INTERVAL_MS = 5 * 1000;
 const WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000;
 const ACCOUNT_DELETION_INTERVAL_MS = 60 * 60 * 1000;
 const ACCOUNT_DELETION_DISCORD_REVOCATION_INTERVAL_MS = 60 * 1000;
@@ -57,6 +59,12 @@ const MAX_PING_BATCH = 200;
 const MAX_CLAIM_BATCH = 200;
 
 const config = new ConfigService();
+const webPushConfig: WebPushDeliveryConfig = {
+  enabled: ['1', 'true', 'yes', 'on'].includes((config.getOptional('WEB_PUSH_ENABLED') ?? '').trim().toLowerCase()),
+  publicKey: config.getOptional('VAPID_PUBLIC_KEY') ?? '',
+  privateKey: config.getOptional('VAPID_PRIVATE_KEY') ?? '',
+  subject: config.getOptional('VAPID_SUBJECT') ?? '',
+};
 const redisUrl = config.get('REDIS_URL', 'redis://localhost:6379');
 const connection = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
@@ -597,6 +605,12 @@ async function bootstrapWorker(): Promise<void> {
   scheduleInterval('wiki-notification-outbox', WIKI_NOTIFICATION_INTERVAL_MS, async () => {
     const count = await processWikiNotificationOutbox(prisma);
     if (count > 0) Logger.info({ count }, 'Delivered wiki notification outbox events');
+  });
+  scheduleInterval('wiki-push-delivery', WIKI_PUSH_DELIVERY_INTERVAL_MS, async () => {
+    const result = await processWebPushDeliveries(prisma, webPushConfig);
+    if (result.delivered > 0 || result.retried > 0 || result.failed > 0 || result.removedSubscriptions > 0) {
+      Logger.info(result, 'Processed wiki Web Push deliveries');
+    }
   });
   scheduleInterval('wiki-special-snapshots', WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS, async () => {
     const result = await rebuildWikiSpecialSnapshots(prisma);
