@@ -46,6 +46,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   readonly pinnedCommentId: string | null;
   readonly olderCommentCursor: string | null;
   readonly newerCommentCursor: string | null;
+  readonly moderationHistoryTruncated: boolean;
   /** @deprecated Use olderCommentCursor. */
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
@@ -59,6 +60,14 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
     readonly poll: WikiDiscussionPollDetail | null;
+    readonly moderationHistory: ReadonlyArray<{
+      readonly id: string;
+      readonly action: 'hide' | 'restore';
+      readonly reason: string;
+      readonly actorProfileId: string;
+      readonly actorProfileName: string;
+      readonly createdAt: string;
+    }>;
   }>;
 }
 
@@ -366,6 +375,26 @@ export class WikiDiscussionService {
       }
     }
     const canModerate = Boolean(viewer && (thread.createdBy === viewer.id || canManage));
+    const moderationRows = canManage && displayComments.length > 0
+      ? await this.prisma.wikiDiscussionModerationEvent.findMany({
+          where: {
+            commentId: { in: displayComments.map((comment) => comment.id) },
+            action: { in: ['hide', 'restore'] }
+          },
+          orderBy: [{ id: 'desc' }],
+          take: 501
+        })
+      : [];
+    const moderationHistoryTruncated = moderationRows.length > 500;
+    const visibleModerationRows = moderationRows.slice(0, 500);
+    const moderationActorNames = await this.profileNames(visibleModerationRows.map((event) => event.actorProfileId));
+    for (const [profileId, profileName] of moderationActorNames) profileById.set(profileId, profileName);
+    const moderationByCommentId = new Map<bigint, typeof visibleModerationRows>();
+    for (const event of visibleModerationRows) {
+      const history = moderationByCommentId.get(event.commentId) ?? [];
+      history.push(event);
+      moderationByCommentId.set(event.commentId, history);
+    }
     const pollByCommentId = await this.hydratePolls({
       comments: displayComments,
       viewerProfileId: viewer?.id ?? null,
@@ -382,6 +411,7 @@ export class WikiDiscussionService {
       pinnedCommentId: thread.pinnedCommentId?.toString() ?? null,
       olderCommentCursor,
       newerCommentCursor,
+      moderationHistoryTruncated,
       nextCommentCursor: olderCommentCursor,
       comments: displayComments.sort((left, right) => {
         if (left.id === thread.pinnedCommentId) return -1;
@@ -399,7 +429,15 @@ export class WikiDiscussionService {
         pinned: comment.id === thread.pinnedCommentId,
         poll: comment.status === 'deleted' || (comment.status === 'hidden' && !canManage)
           ? null
-          : pollByCommentId.get(comment.id) ?? null
+          : pollByCommentId.get(comment.id) ?? null,
+        moderationHistory: (moderationByCommentId.get(comment.id) ?? []).map((event) => ({
+          id: event.id.toString(),
+          action: event.action === 'restore' ? 'restore' as const : 'hide' as const,
+          reason: event.reason,
+          actorProfileId: event.actorProfileId.toString(),
+          actorProfileName: profileById.get(event.actorProfileId) ?? '알 수 없는 사용자',
+          createdAt: event.createdAt.toISOString()
+        }))
       }))
     };
   }

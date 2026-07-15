@@ -59,6 +59,7 @@ function service(options: {
       async update(args: unknown) { options.onCommentUpdate?.(args); return options.comment; }
     },
     wikiDiscussionModerationEvent: {
+      async findMany() { return []; },
       async create(args: unknown) { options.onModerationCreate?.(args); return args; }
     },
     wikiDiscussionSubscription: { async findUnique() { return null; } },
@@ -233,6 +234,7 @@ test('hidden discussion comments mask content for readers but remain visible to 
     wikiPage: { async findUnique() { return page; } },
     wikiDiscussionThread: { async findUnique() { return thread; } },
     wikiDiscussionComment: { async count() { return 1; }, async findMany() { return [hiddenComment]; } },
+    wikiDiscussionModerationEvent: { async findMany() { return []; } },
     wikiDiscussionSubscription: { async findUnique() { return null; } },
     wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
   };
@@ -251,6 +253,87 @@ test('hidden discussion comments mask content for readers but remain visible to 
   assert.equal(reader.comments[0]?.canChangeVisibility, false);
   assert.equal(manager.comments[0]?.content, 'moderation evidence');
   assert.equal(manager.comments[0]?.canChangeVisibility, true);
+});
+
+test('comment moderation history is bounded and visible only to page managers', async () => {
+  const moderatedComment = {
+    id: 40n, threadId: thread.id, content: '복구된 댓글', status: 'normal', createdBy: 20n,
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: new Date('2026-01-03T00:00:00Z')
+  };
+  const moderationEvents = [
+    {
+      id: 1552n, threadId: thread.id, commentId: moderatedComment.id, actorProfileId: 21n,
+      action: 'restore', reason: '개인정보를 제거한 뒤 복구', createdAt: new Date('2026-01-03T00:00:00Z')
+    },
+    {
+      id: 1551n, threadId: thread.id, commentId: moderatedComment.id, actorProfileId: 21n,
+      action: 'hide', reason: '개인정보 노출', createdAt: new Date('2026-01-02T00:00:00Z')
+    },
+    ...Array.from({ length: 499 }, (_, index) => ({
+      id: BigInt(1550 - index), threadId: thread.id, commentId: moderatedComment.id, actorProfileId: 21n,
+      action: index % 2 === 0 ? 'restore' : 'hide', reason: `이전 조정 ${index + 1}`,
+      createdAt: new Date('2026-01-01T00:00:00Z')
+    }))
+  ];
+  let moderationQueries = 0;
+  let moderationQuery: unknown;
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiDiscussionComment: { async count() { return 1; }, async findMany() { return [moderatedComment]; } },
+    wikiDiscussionModerationEvent: {
+      async findMany(args: unknown) {
+        moderationQueries += 1;
+        moderationQuery = args;
+        return moderationEvents;
+      }
+    },
+    wikiDiscussionSubscription: { async findUnique() { return null; } },
+    wikiProfile: {
+      async findMany() {
+        return [
+          { id: 20n, displayName: '작성자' },
+          { id: 21n, displayName: '조정자' }
+        ];
+      }
+    }
+  };
+  const profiles = { async ensureWikiProfile() { return { id: 20n }; } } as unknown as WikiProfileService;
+  const readerPermissions = {
+    async assertCanReadPage() {},
+    actorFromSession() { return { accountId: session.userId, profileId: 20n }; },
+    async canManagePage() { return false; }
+  } as unknown as WikiPermissionService;
+  const managerPermissions = {
+    async assertCanReadPage() {},
+    actorFromSession() { return { accountId: session.userId, profileId: 20n }; },
+    async canManagePage() { return true; }
+  } as unknown as WikiPermissionService;
+
+  const reader = await new WikiDiscussionService(store as unknown as PrismaService, profiles, readerPermissions).getThread('30', session);
+  assert.equal(moderationQueries, 0);
+  assert.deepEqual(reader.comments[0]?.moderationHistory, []);
+  assert.equal(reader.moderationHistoryTruncated, false);
+
+  const manager = await new WikiDiscussionService(store as unknown as PrismaService, profiles, managerPermissions).getThread('30', session);
+  assert.equal(moderationQueries, 1);
+  assert.deepEqual(moderationQuery, {
+    where: { commentId: { in: [40n] }, action: { in: ['hide', 'restore'] } },
+    orderBy: [{ id: 'desc' }],
+    take: 501
+  });
+  assert.equal(manager.comments[0]?.moderationHistory.length, 500);
+  assert.deepEqual(manager.comments[0]?.moderationHistory.slice(0, 2), [
+    {
+      id: '1552', action: 'restore', reason: '개인정보를 제거한 뒤 복구', actorProfileId: '21',
+      actorProfileName: '조정자', createdAt: '2026-01-03T00:00:00.000Z'
+    },
+    {
+      id: '1551', action: 'hide', reason: '개인정보 노출', actorProfileId: '21',
+      actorProfileName: '조정자', createdAt: '2026-01-02T00:00:00.000Z'
+    }
+  ]);
+  assert.equal(manager.moderationHistoryTruncated, true);
 });
 
 test('page manager hides a pinned comment and appends moderation history atomically', async () => {

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, Loader2, MessageSquarePlus, MessagesSquare, Pencil, Pin, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pencil, Pin, Plus, Search, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiThreadDetail, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
@@ -648,6 +648,11 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                   {loadingOlder ? <Loader2 className="size-4 animate-spin" /> : null} 이전 댓글 더 보기
                 </button>
               ) : null}
+              {selected.moderationHistoryTruncated ? (
+                <p role="status" className="border border-amber-300/20 bg-amber-300/[0.04] px-4 py-3 text-xs leading-5 text-amber-100">
+                  최근 조정 기록 500건만 표시합니다. 전체 감사 기록은 서버에 계속 보존됩니다.
+                </p>
+              ) : null}
               {selected.comments.map((item) => (
                 <article id={`comment-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedCommentId || undefined} key={item.id} className={`border p-4 outline-none data-[highlighted=true]:border-emerald-300/60 data-[highlighted=true]:bg-emerald-300/10 ${item.status === 'hidden' ? 'border-amber-300/30 bg-amber-300/[0.04]' : item.pinned ? 'border-amber-300/50 bg-[#111821]' : 'border-white/10 bg-[#111821]'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
@@ -710,6 +715,29 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                     />
                   ) : null}
                   {rawComment?.id === item.id ? <pre className="mt-3 overflow-x-auto whitespace-pre-wrap border-t border-white/10 pt-3 text-xs leading-5 text-slate-400">{rawComment.content}</pre> : null}
+                  {(item.moderationHistory?.length ?? 0) > 0 ? (
+                    <details className="mt-4 border-t border-amber-300/20 pt-4">
+                      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-xs font-semibold text-amber-100 marker:content-none">
+                        <History className="size-4" /> 조정 기록 {item.moderationHistory?.length ?? 0}건
+                      </summary>
+                      <ol className="mt-2 space-y-2" aria-label={`댓글 ${item.id} 조정 기록`}>
+                        {item.moderationHistory?.map((entry) => (
+                          <li key={entry.id} className="border-l-2 border-amber-300/25 pl-3 text-xs leading-5 text-slate-400">
+                            <div className="flex flex-wrap items-center gap-x-2">
+                              <span className={entry.action === 'hide' ? 'font-semibold text-amber-200' : 'font-semibold text-emerald-200'}>
+                                {entry.action === 'hide' ? '숨김' : '복구'}
+                              </span>
+                              <Link href={`/wiki/contributions/${entry.actorProfileId}`} className="hover:text-emerald-200">
+                                {entry.actorProfileName}
+                              </Link>
+                              <time>{formatDate(entry.createdAt)}</time>
+                            </div>
+                            <p className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-slate-300">{entry.reason}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    </details>
+                  ) : null}
                   {moderation?.commentId === item.id ? (
                     <form onSubmit={changeCommentVisibility} className="mt-4 border-t border-amber-300/20 pt-4">
                       <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-100">

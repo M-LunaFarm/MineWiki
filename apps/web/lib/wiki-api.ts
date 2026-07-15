@@ -398,6 +398,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   readonly pinnedCommentId: string | null;
   readonly olderCommentCursor: string | null;
   readonly newerCommentCursor: string | null;
+  readonly moderationHistoryTruncated: boolean;
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
@@ -410,6 +411,14 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
     readonly poll: WikiDiscussionPollDetail | null;
+    readonly moderationHistory: ReadonlyArray<{
+      readonly id: string;
+      readonly action: 'hide' | 'restore';
+      readonly reason: string;
+      readonly actorProfileId: string;
+      readonly actorProfileName: string;
+      readonly createdAt: string;
+    }>;
   }>;
 }
 
