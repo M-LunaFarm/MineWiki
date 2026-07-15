@@ -666,6 +666,9 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered .table-scroll table {
     @apply mt-0;
   }
+  .wiki-rendered .wiki-table-caption {
+    @apply caption-top px-3 pb-2 text-left text-sm font-semibold text-slate-300;
+  }
   .wiki-rendered .wiki-file:not(.wiki-file-inline) {
     @apply my-5 block max-w-full;
   }

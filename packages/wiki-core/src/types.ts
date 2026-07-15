@@ -36,6 +36,7 @@ export interface WikiTableCell {
   children: InlineNode[];
   colspan: number;
   rowspan: number;
+  header?: boolean;
   align?: 'left' | 'center' | 'right';
   verticalAlign?: 'top' | 'middle' | 'bottom';
   width?: string;
@@ -58,7 +59,7 @@ export type AstNode =
   | WikiListNode
   | { type: 'blockquote'; children: InlineNode[] }
   | { type: 'hr' }
-  | { type: 'wiki_table'; rows: WikiTableCell[][]; options: WikiTableOptions }
+  | { type: 'wiki_table'; caption: InlineNode[]; rows: WikiTableCell[][]; options: WikiTableOptions }
   | { type: 'folding'; title: InlineNode[]; children: AstNode[] }
   | { type: 'toc'; collapsed: boolean }
   | {

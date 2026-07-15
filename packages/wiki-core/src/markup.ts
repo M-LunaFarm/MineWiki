@@ -11,7 +11,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.5.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.6.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -286,16 +286,25 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
       continue;
     }
 
-    if (line.trim().startsWith('||')) {
+    const tableStart = parseWikiTableStart(line, lines[i + 1]);
+    if (tableStart) {
       const rows: WikiTableCell[][] = [];
       const tableOptions: WikiTableOptions = {};
+      const caption = tableStart.caption === null
+        ? []
+        : parseInline(tableStart.caption, links, errors, blockingErrors, footnotes);
+      if (tableStart.firstRow !== null) {
+        const cells = parseWikiTableRow(tableStart.firstRow, tableOptions, links, errors, blockingErrors, footnotes);
+        if (cells.length > 0) rows.push(cells);
+      }
+      if (tableStart.consumeNextLine) i += 1;
       while (i < lines.length && lines[i]?.trim().startsWith('||')) {
         const cells = parseWikiTableRow(lines[i] ?? '', tableOptions, links, errors, blockingErrors, footnotes);
         if (cells.length > 0) rows.push(cells);
         i += 1;
       }
       i -= 1;
-      ast.push({ type: 'wiki_table', rows, options: tableOptions });
+      ast.push({ type: 'wiki_table', caption, rows, options: tableOptions });
       continue;
     }
 
@@ -587,6 +596,43 @@ function parseWikiTableRow(
   return cells;
 }
 
+interface WikiTableStart {
+  caption: string | null;
+  firstRow: string | null;
+  consumeNextLine: boolean;
+}
+
+function parseWikiTableStart(line: string, nextLine: string | undefined): WikiTableStart | null {
+  const trimmed = line.trim();
+  if (trimmed.startsWith('||')) {
+    return { caption: null, firstRow: null, consumeNextLine: false };
+  }
+
+  // NamuMark captions are written as `|caption|` immediately before the
+  // first `||...||` row. thetree also accepts the compact `|caption|||...||`
+  // form, so retain the first row when it is present on the same line.
+  const compactSeparator = trimmed.indexOf('|||', 1);
+  if (compactSeparator > 0 && trimmed.endsWith('||')) {
+    return {
+      caption: unescapeWikiTableCaption(trimmed.slice(1, compactSeparator)),
+      firstRow: trimmed.slice(compactSeparator + 1),
+      consumeNextLine: true
+    };
+  }
+  if (trimmed.startsWith('|') && !trimmed.startsWith('||') && trimmed.endsWith('|') && nextLine?.trim().startsWith('||')) {
+    return {
+      caption: unescapeWikiTableCaption(trimmed.slice(1, -1)),
+      firstRow: null,
+      consumeNextLine: true
+    };
+  }
+  return null;
+}
+
+function unescapeWikiTableCaption(value: string) {
+  return value.replace(/\\\|/g, '|').trim();
+}
+
 function applyWikiTableModifier(
   modifier: string,
   cell: WikiTableCell,
@@ -607,6 +653,10 @@ function applyWikiTableModifier(
   }
   if (modifier === '(' || modifier === ':' || modifier === ')') {
     cell.align = modifier === '(' ? 'left' : modifier === ':' ? 'center' : 'right';
+    return true;
+  }
+  if (modifier.toLowerCase() === 'thead') {
+    cell.header = true;
     return true;
   }
 
@@ -729,6 +779,7 @@ export function applyIncludeParametersToAst(
     if (node.type === 'list') return list(node);
     if (node.type === 'wiki_table') return {
       ...node,
+      caption: inline(node.caption),
       rows: node.rows.map((row) => row.map((cell) => ({ ...cell, children: inline(cell.children) })))
     };
     if (node.type === 'folding') return {
@@ -843,7 +894,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       if (node.type === 'list') return renderWikiList(node, footnotes, options);
       if (node.type === 'blockquote') return `<blockquote class="wiki-quote">${renderInline(node.children, footnotes, options)}</blockquote>`;
       if (node.type === 'hr') return '<hr>';
-      if (node.type === 'wiki_table') return renderWikiTable(node.rows, node.options, footnotes, options);
+      if (node.type === 'wiki_table') return renderWikiTable(node.caption, node.rows, node.options, footnotes, options);
       if (node.type === 'folding') return `<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, options)}</summary>${renderDocument(node.children, { ...options, tocHeadings })}</details>`;
       if (node.type === 'toc') return renderTableOfContents(tocHeadings, node.collapsed);
       if (node.type === 'include') {
@@ -985,7 +1036,7 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
         return `<a href="${escapeAttr(node.href)}" rel="nofollow noopener" target="_blank">${escapeHtml(node.label)}</a>`;
       }
       if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options);
-      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options);
+      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options, true);
       if (node.type === 'unsupported_macro') {
         return `<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: [${escapeHtml(node.name)}]</span>`;
       }
@@ -1013,6 +1064,7 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
     else if (node.type === 'paragraph' || node.type === 'blockquote') collectInline(node.children);
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
+      collectInline(node.caption);
       for (const row of node.rows) for (const cell of row) collectInline(cell.children);
     } else if (node.type === 'folding' || (node.type === 'include' && node.children)) {
       collectWikiFileNames(node.children, output);
@@ -1272,7 +1324,13 @@ function renderWikiList(node: WikiListNode, footnotes: string[], options: Render
     .join('')}</${tag}>`;
 }
 
-function renderWikiTable(rows: WikiTableCell[][], tableOptions: WikiTableOptions, footnotes: string[], options: RenderOptions) {
+function renderWikiTable(
+  caption: InlineNode[],
+  rows: WikiTableCell[][],
+  tableOptions: WikiTableOptions,
+  footnotes: string[],
+  options: RenderOptions
+) {
   const tableStyles = styleAttribute({
     width: tableOptions.width ? '100%' : undefined,
     color: tableOptions.color,
@@ -1285,10 +1343,17 @@ function renderWikiTable(rows: WikiTableCell[][], tableOptions: WikiTableOptions
     'margin-right': tableOptions.align === 'center' ? 'auto' : undefined
   });
   const wrapperClass = tableOptions.align ? `table-scroll table-${tableOptions.align}` : 'table-scroll';
-  const html = `<table class="component-table wiki-table"${tableStyles}><tbody>${rows
-    .map((row, rowIndex) => `<tr>${row
+  const hasExplicitHeaders = rows.some((row) => row.some((cell) => cell.header));
+  let bodyStarted = false;
+  const renderedRows = rows.map((row, rowIndex) => {
+    const requestedHeader = row.some((cell) => cell.header);
+    const isHeader = hasExplicitHeaders ? requestedHeader && !bodyStarted : rowIndex === 0;
+    if (!isHeader) bodyStarted = true;
+    return {
+      isHeader,
+      html: `<tr>${row
       .map((cell) => {
-        const tag = rowIndex === 0 ? 'th' : 'td';
+        const tag = isHeader ? 'th' : 'td';
         const colspan = cell.colspan > 1 ? ` colspan="${cell.colspan}"` : '';
         const rowspan = cell.rowspan > 1 ? ` rowspan="${cell.rowspan}"` : '';
         const styles = styleAttribute({
@@ -1301,8 +1366,15 @@ function renderWikiTable(rows: WikiTableCell[][], tableOptions: WikiTableOptions
         });
         return `<${tag}${colspan}${rowspan}${styles}>${renderInline(cell.children, footnotes, options)}</${tag}>`;
       })
-      .join('')}</tr>`)
-    .join('')}</tbody></table>`;
+      .join('')}</tr>`
+    };
+  });
+  const headRows = renderedRows.filter((row) => row.isHeader).map((row) => row.html).join('');
+  const bodyRows = renderedRows.filter((row) => !row.isHeader).map((row) => row.html).join('');
+  const captionHtml = caption.length > 0
+    ? `<caption class="wiki-table-caption">${renderInline(caption, footnotes, options)}</caption>`
+    : '';
+  const html = `<table class="component-table wiki-table"${tableStyles}>${captionHtml}${headRows ? `<thead>${headRows}</thead>` : ''}${bodyRows ? `<tbody>${bodyRows}</tbody>` : ''}</table>`;
   return `<div class="${wrapperClass}"${wrapperStyles}>${html}</div>`;
 }
 

@@ -276,6 +276,48 @@ test('ignores unsafe table controls and reports a non-blocking warning', () => {
   assert.match(html, />안전<\/th>/);
 });
 
+test('renders NamuMark table captions and explicit header rows semantically', () => {
+  const parsed = parseMarkup([
+    '|[[서버 목록]]과 [[파일:table-icon.png|아이콘]]|',
+    '||<thead>서버||<thead>상태||',
+    '||MineWiki||온라인||'
+  ].join('\n'));
+  const table = parsed.ast[0];
+
+  assert.equal(table?.type, 'wiki_table');
+  if (table?.type !== 'wiki_table') return;
+  assert.equal(table.caption.length, 3);
+  assert.equal(table.rows[0]?.every((cell) => cell.header), true);
+  assert.deepEqual(parsed.links, ['서버 목록']);
+  assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['table-icon.png']);
+
+  const html = renderDocument(parsed.ast, {
+    files: {
+      'table-icon.png': { url: '/table-icon.png', mimeType: 'image/png', originalName: 'table-icon.png' }
+    }
+  });
+  assert.match(html, /<caption class="wiki-table-caption"><a class="wiki-link"/);
+  assert.match(html, /<thead><tr><th>서버<\/th><th>상태<\/th><\/tr><\/thead>/);
+  assert.match(html, /<tbody><tr><td>MineWiki<\/td><td>온라인<\/td><\/tr><\/tbody>/);
+});
+
+test('accepts compact NamuMark table captions and interpolates include parameters safely', () => {
+  const parsed = parseMarkup('|@제목@|||<thead>열||\n||@값@||');
+  const table = parsed.ast[0];
+  assert.equal(table?.type, 'wiki_table');
+  if (table?.type !== 'wiki_table') return;
+
+  const expanded = applyIncludeParametersToAst(parsed.ast, {
+    제목: '<script>표</script>',
+    값: "'''문법 아님'''"
+  }, 'inc-');
+  const html = renderDocument(expanded);
+
+  assert.equal(html.includes('<script>'), false);
+  assert.match(html, /<caption class="wiki-table-caption">&lt;script&gt;표&lt;\/script&gt;<\/caption>/);
+  assert.match(html, /<tbody><tr><td>'''문법 아님'''<\/td><\/tr><\/tbody>/);
+});
+
 test('parses nested unordered and ordered NamuMark lists with start values', () => {
   const parsed = parseMarkup([
     ' * 첫 항목',
