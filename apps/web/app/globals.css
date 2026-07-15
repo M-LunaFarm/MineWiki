@@ -362,6 +362,14 @@ html[data-theme='light'] .wiki-rendered .wiki-toc-empty {
   color: #37443b;
 }
 
+html[data-theme='light'] .wiki-rendered .wiki-heading-section {
+  border-color: rgba(37, 49, 41, 0.14);
+}
+
+html[data-theme='light'] .wiki-rendered .wiki-heading-summary:hover {
+  background: rgba(37, 49, 41, 0.035);
+}
+
 html[data-theme='light'] .support-surface {
   background: #f4f5f2;
   color: #202820;
@@ -879,6 +887,26 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   }
   .wiki-rendered .wiki-toc-empty {
     @apply my-4 block rounded-lg border border-white/10 bg-white/[0.025] px-4 py-3 text-sm text-slate-500;
+  }
+  .wiki-rendered .wiki-heading-section {
+    @apply my-5 border-b border-white/10;
+  }
+  .wiki-rendered .wiki-heading-summary {
+    @apply cursor-pointer rounded-md px-1 transition hover:bg-white/[0.035];
+  }
+  .wiki-rendered .wiki-heading-summary > h1,
+  .wiki-rendered .wiki-heading-summary > h2,
+  .wiki-rendered .wiki-heading-summary > h3,
+  .wiki-rendered .wiki-heading-summary > h4,
+  .wiki-rendered .wiki-heading-summary > h5,
+  .wiki-rendered .wiki-heading-summary > h6 {
+    @apply my-0 inline;
+  }
+  .wiki-rendered .wiki-heading-content {
+    @apply pb-1 pl-1;
+  }
+  .wiki-rendered .wiki-heading-content > :first-child {
+    @apply mt-3;
   }
   .wiki-rendered .front-wiki-component {
     @apply border-t border-white/[0.07] py-6 first:border-t-0 first:pt-0 last:pb-0;

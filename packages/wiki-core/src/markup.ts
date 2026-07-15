@@ -12,7 +12,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.2';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.3';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -276,6 +276,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
         level: heading.level,
         text: heading.text,
         id: makeHeadingId(heading.text),
+        ...(heading.folded ? { folded: true } : {}),
         startLine: i + 1
       });
       continue;
@@ -396,27 +397,28 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
   };
 }
 
-function parseWikiHeadingLine(line: string): { level: number; text: string } | null {
+function parseWikiHeadingLine(line: string): { level: number; text: string; folded: boolean } | null {
   const opening = line.match(/^=+/)?.[0] ?? '';
   const closing = line.match(/=+$/)?.[0] ?? '';
   if (!opening || opening.length !== closing.length || opening.length > 6) return null;
 
-  const rawText = line.slice(opening.length, -closing.length);
+  let rawText = line.slice(opening.length, -closing.length);
   const level = opening.length;
+  const startsFold = rawText.startsWith('#');
+  const endsFold = rawText.endsWith('#');
+  if (startsFold !== endsFold) return null;
+  const folded = startsFold && endsFold;
+  if (folded) rawText = rawText.slice(1, -1);
   // thetree's canonical form requires spaces around the title. MineWiki
   // historically accepted compact level 2-4 headings, so keep only that
-  // established compatibility surface while requiring canonical syntax for
-  // the newly supported levels.
-  if ((level < 2 || level > 4) && !(rawText.startsWith(' ') && rawText.endsWith(' '))) {
+  // established compatibility surface for normal headings. Folded headings
+  // are new here and always require their canonical spaces.
+  if ((folded || level < 2 || level > 4) && !(rawText.startsWith(' ') && rawText.endsWith(' '))) {
     return null;
   }
-  // `=# title #=` is the separate folded-heading form in NamuMark. Folding is
-  // not silently downgraded to a normal heading until its section semantics are
-  // implemented.
-  if (rawText.startsWith('#') || rawText.endsWith('#')) return null;
 
   const text = rawText.trim();
-  return text ? { level, text } : null;
+  return text ? { level, text, folded } : null;
 }
 
 function rejectedDocument(message: string): ParsedDocument {
@@ -1127,34 +1129,80 @@ export interface RenderOptions {
 export function renderDocument(ast: AstNode[], options: RenderOptions = {}): string {
   const footnotes: string[] = [];
   const tocHeadings = options.tocHeadings ?? collectTocHeadings(ast);
-  const html = ast
-    .map((node) => {
-      if (node.type === 'heading') return `<h${node.level} id="${escapeAttr(node.id)}">${escapeHtml(node.text)}</h${node.level}>`;
-      if (node.type === 'paragraph') return `<p>${renderInline(node.children, footnotes, options)}</p>`;
-      if (node.type === 'list') return renderWikiList(node, footnotes, options);
-      if (node.type === 'blockquote') return `<blockquote class="wiki-quote">${renderInline(node.children, footnotes, options)}</blockquote>`;
-      if (node.type === 'hr') return '<hr>';
-      if (node.type === 'wiki_table') return renderWikiTable(node.caption, node.rows, node.options, footnotes, options);
-      if (node.type === 'folding') return `<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, options)}</summary>${renderDocument(node.children, { ...options, tocHeadings })}</details>`;
-      if (node.type === 'toc') return renderTableOfContents(tocHeadings, node.collapsed);
+  const renderNodes = (nodes: readonly AstNode[]): string => {
+    const output: string[] = [];
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      if (!node) continue;
+      if (node.type === 'heading' && node.folded) {
+        let sectionEnd = index + 1;
+        while (sectionEnd < nodes.length && nodes[sectionEnd]?.type !== 'heading') sectionEnd += 1;
+        const heading = `<h${node.level} id="${escapeAttr(node.id)}">${escapeHtml(node.text)}</h${node.level}>`;
+        output.push(`<details class="wiki-heading-section"><summary class="wiki-heading-summary">${heading}</summary><div class="wiki-heading-content">${renderNodes(nodes.slice(index + 1, sectionEnd))}</div></details>`);
+        index = sectionEnd - 1;
+        continue;
+      }
+      if (node.type === 'heading') {
+        output.push(`<h${node.level} id="${escapeAttr(node.id)}">${escapeHtml(node.text)}</h${node.level}>`);
+        continue;
+      }
+      if (node.type === 'paragraph') {
+        output.push(`<p>${renderInline(node.children, footnotes, options)}</p>`);
+        continue;
+      }
+      if (node.type === 'list') {
+        output.push(renderWikiList(node, footnotes, options));
+        continue;
+      }
+      if (node.type === 'blockquote') {
+        output.push(`<blockquote class="wiki-quote">${renderInline(node.children, footnotes, options)}</blockquote>`);
+        continue;
+      }
+      if (node.type === 'hr') {
+        output.push('<hr>');
+        continue;
+      }
+      if (node.type === 'wiki_table') {
+        output.push(renderWikiTable(node.caption, node.rows, node.options, footnotes, options));
+        continue;
+      }
+      if (node.type === 'folding') {
+        output.push(`<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, options)}</summary>${renderDocument(node.children, { ...options, tocHeadings })}</details>`);
+        continue;
+      }
+      if (node.type === 'toc') {
+        output.push(renderTableOfContents(tocHeadings, node.collapsed));
+        continue;
+      }
       if (node.type === 'include') {
         if (node.state === 'resolved' && node.children) {
-          return `<section class="wiki-transclusion">${renderDocument(node.children, options)}</section>`;
+          output.push(`<section class="wiki-transclusion">${renderDocument(node.children, options)}</section>`);
+          continue;
         }
         const message = node.state === 'unavailable'
           ? '포함 문서를 불러올 수 없습니다.'
           : '포함 문서는 저장한 뒤 표시됩니다.';
-        return `<aside class="wiki-include-notice">${message}</aside>`;
+        output.push(`<aside class="wiki-include-notice">${message}</aside>`);
+        continue;
       }
-      if (node.type === 'category') return '';
-      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options);
-      if (node.type === 'redirect') return `<p class="notice">넘겨주기: ${renderInternalLink(node.target, node.target, options)}</p>`;
+      if (node.type === 'category') continue;
+      if (node.type === 'file') {
+        output.push(renderFile(node.fileName, node.thumbnail, node.caption, options));
+        continue;
+      }
+      if (node.type === 'redirect') {
+        output.push(`<p class="notice">넘겨주기: ${renderInternalLink(node.target, node.target, options)}</p>`);
+        continue;
+      }
       if (node.type === 'codeblock') {
-        return `<pre class="codeblock" data-lang="${escapeAttr(node.lang ?? '')}"><code>${escapeHtml(node.code)}</code></pre>`;
+        output.push(`<pre class="codeblock" data-lang="${escapeAttr(node.lang ?? '')}"><code>${escapeHtml(node.code)}</code></pre>`);
+        continue;
       }
-      return renderComponent(node.name, node.props, options);
-    })
-    .join('\n');
+      output.push(renderComponent(node.name, node.props, options));
+    }
+    return output.join('\n');
+  };
+  const html = renderNodes(ast);
   const footnoteHtml =
     footnotes.length > 0
       ? `<section class="footnotes"><h2>각주</h2><ol>${footnotes

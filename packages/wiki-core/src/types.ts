@@ -67,7 +67,7 @@ export interface WikiTableOptions {
 }
 
 export type AstNode =
-  | { type: 'heading'; level: number; text: string; id: string; startLine?: number; endLine?: number }
+  | { type: 'heading'; level: number; text: string; id: string; folded?: boolean; startLine?: number; endLine?: number }
   | { type: 'paragraph'; children: InlineNode[] }
   | WikiListNode
   | { type: 'blockquote'; children: InlineNode[] }

@@ -160,6 +160,30 @@ test('keeps compact level 2-4 headings compatible', () => {
   ]);
 });
 
+test('renders canonical folded headings as closed content sections', () => {
+  const parsed = parseMarkup('==# 접힌 제목 #==\n숨겨진 본문\n=== 하위 제목 ===\n하위 본문');
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.headings.map((heading) => [heading.level, heading.title]), [
+    [2, '접힌 제목'],
+    [3, '하위 제목']
+  ]);
+  assert.equal(parsed.ast[0]?.type, 'heading');
+  if (parsed.ast[0]?.type === 'heading') assert.equal(parsed.ast[0].folded, true);
+  assert.match(html, /<details class="wiki-heading-section"><summary class="wiki-heading-summary"><h2 id="접힌-제목">접힌 제목<\/h2><\/summary><div class="wiki-heading-content"><p>숨겨진 본문<\/p><\/div><\/details>/);
+  assert.match(html, /<\/details>\n<h3 id="하위-제목">하위 제목<\/h3>\n<p>하위 본문<\/p>/);
+});
+
+test('folded headings remain in the table of contents and reject malformed markers', () => {
+  const parsed = parseMarkup('[목차]\n=# 최상위 접기 #=\n본문\n==# 한쪽만 ==');
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.headings.map((heading) => heading.title), ['최상위 접기']);
+  assert.match(html, /wiki-toc-level-1[^]*?최상위 접기/);
+  assert.equal(html.includes('<h2 id="한쪽만">'), false);
+  assert.match(html, /<p>==# 한쪽만 ==<\/p>/);
+});
+
 test('does not promote malformed or unsupported heading delimiters', () => {
   const sources = [
     '== 둘째 ===',
@@ -168,7 +192,8 @@ test('does not promote malformed or unsupported heading delimiters', () => {
     '===== 다섯째 ======',
     '======= 일곱째 =======',
     '=====무공백 다섯째=====',
-    '==# 접힌 제목 #==',
+    '==#무공백 접힌 제목#==',
+    '==# 한쪽만 ==',
     '====== ======'
   ];
   const parsed = parseMarkup(sources.join('\n'));
