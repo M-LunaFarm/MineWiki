@@ -148,6 +148,42 @@ test('worker production config requires the account lifecycle API address', () =
   assert.throws(() => new ConfigService(source), /INTERNAL_API_BASE_URL is required/);
 });
 
+test('Web Push remains optional until explicitly enabled', () => {
+  const source = validProductionEnv();
+  source.WEB_PUSH_ENABLED = 'false';
+  assert.doesNotThrow(() => new ConfigService(source));
+});
+
+test('API Web Push requires only the public VAPID key', () => {
+  const source = validProductionEnv();
+  source.MINEWIKI_SERVICE = 'api';
+  source.WEB_PUSH_ENABLED = 'true';
+  delete source.VAPID_PUBLIC_KEY;
+  assert.throws(() => new ConfigService(source), /VAPID_PUBLIC_KEY is required/);
+
+  source.VAPID_PUBLIC_KEY = 'public-vapid-key';
+  assert.doesNotThrow(() => new ConfigService(source));
+});
+
+test('worker Web Push requires the complete private VAPID configuration', () => {
+  const source = {
+    NODE_ENV: 'production',
+    MINEWIKI_SERVICE: 'worker',
+    DATABASE_URL: 'mysql://minewiki:strong@mysql:3306/minewiki',
+    REDIS_URL: 'redis://redis:6379',
+    INTERNAL_API_BASE_URL: 'http://api:3000',
+    APP_ENCRYPTION_KEY: 'worker-encryption-key',
+    WEB_PUSH_ENABLED: 'true',
+    VAPID_PUBLIC_KEY: 'public-vapid-key',
+  };
+  assert.throws(() => new ConfigService(source), /VAPID_PRIVATE_KEY is required/);
+  assert.doesNotThrow(() => new ConfigService({
+    ...source,
+    VAPID_PRIVATE_KEY: 'private-vapid-key',
+    VAPID_SUBJECT: 'mailto:support@minewiki.kr',
+  }));
+});
+
 function validProductionEnv() {
   return {
     NODE_ENV: 'production',

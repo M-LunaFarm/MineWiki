@@ -365,7 +365,8 @@ model Session {
   privacyPolicyVersion   String?   @map("privacy_policy_version") @db.VarChar(32)
   createdAt              DateTime  @default(now())
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account              Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  wikiPushSubscription WikiPushSubscription?
 
   @@index([accountId])
   @@index([expiresAt])
@@ -1080,17 +1081,18 @@ model LunaPrivacyConsent {
 }
 
 model WikiProfile {
-  id                      BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  accountId               String?   @unique @map("account_id") @db.Char(36)
-  username                String    @unique @db.VarChar(64)
-  displayName             String    @map("display_name") @db.VarChar(64)
-  email                   String?   @unique @db.VarChar(255)
-  emailVerifiedAt         DateTime? @map("email_verified_at")
-  emailVerificationSentAt DateTime? @map("email_verification_sent_at")
-  passwordHash            String?   @map("password_hash") @db.VarChar(255)
-  status                  String    @default("active") @db.VarChar(32)
-  createdAt               DateTime  @map("created_at")
-  updatedAt               DateTime  @map("updated_at")
+  id                      BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  accountId               String?                @unique @map("account_id") @db.Char(36)
+  username                String                 @unique @db.VarChar(64)
+  displayName             String                 @map("display_name") @db.VarChar(64)
+  email                   String?                @unique @db.VarChar(255)
+  emailVerifiedAt         DateTime?              @map("email_verified_at")
+  emailVerificationSentAt DateTime?              @map("email_verification_sent_at")
+  passwordHash            String?                @map("password_hash") @db.VarChar(255)
+  status                  String                 @default("active") @db.VarChar(32)
+  createdAt               DateTime               @map("created_at")
+  updatedAt               DateTime               @map("updated_at")
+  pushSubscriptions       WikiPushSubscription[]
 
   @@index([createdAt])
   @@map("users")
@@ -1384,24 +1386,74 @@ model WikiPageWatch {
 }
 
 model WikiNotification {
-  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  profileId      BigInt    @map("profile_id") @db.UnsignedBigInt
-  type           String    @db.VarChar(32)
-  pageId         BigInt?   @map("page_id") @db.UnsignedBigInt
-  actorProfileId BigInt?   @map("actor_profile_id") @db.UnsignedBigInt
-  sourceType     String    @map("source_type") @db.VarChar(32)
-  sourceId       String    @map("source_id") @db.VarChar(64)
-  title          String    @db.VarChar(255)
-  message        String?   @db.VarChar(500)
-  href           String    @db.VarChar(1000)
-  dedupeKey      String    @unique(map: "uk_wiki_notifications_dedupe") @map("dedupe_key") @db.VarChar(191)
-  readAt         DateTime? @map("read_at")
-  createdAt      DateTime  @map("created_at")
+  id             BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  profileId      BigInt             @map("profile_id") @db.UnsignedBigInt
+  type           String             @db.VarChar(32)
+  pageId         BigInt?            @map("page_id") @db.UnsignedBigInt
+  actorProfileId BigInt?            @map("actor_profile_id") @db.UnsignedBigInt
+  sourceType     String             @map("source_type") @db.VarChar(32)
+  sourceId       String             @map("source_id") @db.VarChar(64)
+  title          String             @db.VarChar(255)
+  message        String?            @db.VarChar(500)
+  href           String             @db.VarChar(1000)
+  dedupeKey      String             @unique(map: "uk_wiki_notifications_dedupe") @map("dedupe_key") @db.VarChar(191)
+  readAt         DateTime?          @map("read_at")
+  createdAt      DateTime           @map("created_at")
+  pushDeliveries WikiPushDelivery[]
 
   @@index([profileId, readAt, id], map: "idx_wiki_notifications_inbox")
   @@index([profileId, id], map: "idx_wiki_notifications_profile")
   @@index([pageId, id], map: "idx_wiki_notifications_page")
   @@map("wiki_notifications")
+}
+
+model WikiPushSubscription {
+  id                 String    @id @default(uuid()) @db.Char(36)
+  sessionId          String    @unique(map: "uk_wiki_push_subscriptions_session") @map("session_id") @db.Char(36)
+  profileId          BigInt    @map("profile_id") @db.UnsignedBigInt
+  endpointHash       String    @unique(map: "uk_wiki_push_subscriptions_endpoint") @map("endpoint_hash") @db.Char(64)
+  endpointCiphertext String    @map("endpoint_ciphertext") @db.Text
+  p256dhCiphertext   String    @map("p256dh_ciphertext") @db.Text
+  authCiphertext     String    @map("auth_ciphertext") @db.Text
+  contentEncoding    String    @default("aes128gcm") @map("content_encoding") @db.VarChar(16)
+  expirationTime     DateTime? @map("expiration_time") @db.DateTime(3)
+  disabledAt         DateTime? @map("disabled_at") @db.DateTime(3)
+  lastSuccessAt      DateTime? @map("last_success_at") @db.DateTime(3)
+  lastFailureAt      DateTime? @map("last_failure_at") @db.DateTime(3)
+  failureCount       Int       @default(0) @map("failure_count") @db.UnsignedInt
+  createdAt          DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  session    Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  profile    WikiProfile        @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  deliveries WikiPushDelivery[]
+
+  @@index([profileId, disabledAt], map: "idx_wiki_push_subscriptions_profile")
+  @@index([expirationTime], map: "idx_wiki_push_subscriptions_expiration")
+  @@map("wiki_push_subscriptions")
+}
+
+model WikiPushDelivery {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  notificationId BigInt    @map("notification_id") @db.UnsignedBigInt
+  subscriptionId String    @map("subscription_id") @db.Char(36)
+  status         String    @default("pending") @db.VarChar(16)
+  attempts       Int       @default(0) @db.UnsignedInt
+  availableAt    DateTime  @default(now()) @map("available_at") @db.DateTime(3)
+  lockedAt       DateTime? @map("locked_at") @db.DateTime(3)
+  lockedBy       String?   @map("locked_by") @db.VarChar(128)
+  deliveredAt    DateTime? @map("delivered_at") @db.DateTime(3)
+  lastError      String?   @map("last_error") @db.VarChar(500)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  notification WikiNotification     @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  subscription WikiPushSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, subscriptionId], map: "uk_wiki_push_deliveries_notification_subscription")
+  @@index([status, availableAt, id], map: "idx_wiki_push_deliveries_pending")
+  @@index([lockedAt], map: "idx_wiki_push_deliveries_locked")
+  @@index([subscriptionId, status], map: "idx_wiki_push_deliveries_subscription")
+  @@map("wiki_push_deliveries")
 }
 
 model WikiNotificationEvent {

@@ -64,6 +64,10 @@ const envSchema = z.object({
   UPLOAD_STORAGE_ROOT: z.string().optional(),
   ACCOUNT_LINKING_ENABLED: z.string().optional(),
   APP_ENCRYPTION_KEY: z.string().optional(),
+  WEB_PUSH_ENABLED: z.string().optional(),
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().optional(),
   SENTRY_DSN: optionalUrl,
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
@@ -231,6 +235,8 @@ function validateProductionEnvironment(env: EnvSchema): void {
     validateOptionalGroup(env, ['SMTP_USER', 'SMTP_PASS'], 'SMTP authentication', failures);
   }
 
+  validateWebPushConfiguration(env, failures);
+
   if (env.MINEWIKI_SERVICE === 'api' || env.MINEWIKI_SERVICE === 'all') {
     if (!isBlank(env.STORAGE_BUCKET)) {
       for (const key of productionStorageKeys) {
@@ -245,6 +251,22 @@ function validateProductionEnvironment(env: EnvSchema): void {
 
   if (failures.length > 0) {
     throw new Error(`Production configuration is incomplete: ${failures.join('; ')}`);
+  }
+}
+
+function validateWebPushConfiguration(env: EnvSchema, failures: string[]): void {
+  if (!['1', 'true', 'yes', 'on'].includes(env.WEB_PUSH_ENABLED?.trim().toLowerCase() ?? '')) return;
+  if (env.MINEWIKI_SERVICE === 'api') {
+    validateRequiredGroup(env, ['VAPID_PUBLIC_KEY'], 'Web Push API', failures);
+    return;
+  }
+  if (env.MINEWIKI_SERVICE === 'worker' || env.MINEWIKI_SERVICE === 'all') {
+    validateRequiredGroup(
+      env,
+      ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT'],
+      'Web Push worker',
+      failures,
+    );
   }
 }
 
