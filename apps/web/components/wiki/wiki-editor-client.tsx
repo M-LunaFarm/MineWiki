@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { buildCategoryWikiToolPath, buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { AlertTriangle, Eye, FileImage, ImagePlus, LayoutTemplate, Loader2, Save } from 'lucide-react';
 import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
@@ -72,7 +72,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     ? buildServerWikiToolPath(routePath, 'edit')
     : routePath.startsWith('/wiki/category/')
       ? buildCategoryWikiToolPath(routePath, 'edit')
-      : `${routePath}/edit`;
+      : buildStandardWikiToolPath(routePath, 'edit');
   const loginReturnTo = sectionAnchor ? `${editorPath}?section=${encodeURIComponent(sectionAnchor)}` : editorPath;
   const loginHref = `/login?returnTo=${encodeURIComponent(loginReturnTo)}`;
 

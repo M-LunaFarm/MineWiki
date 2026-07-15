@@ -14,6 +14,46 @@ export function buildWikiRoutePath(prefix, segments = []) {
 
 export const CATEGORY_WIKI_TOOLS = Object.freeze(['edit', 'history']);
 
+export const STANDARD_WIKI_PREFIXES = Object.freeze([
+  'wiki',
+  'mod',
+  'modpack',
+  'dev',
+  'guide',
+  'data',
+  'help',
+  'project',
+  'template',
+  'file',
+]);
+
+export const STANDARD_WIKI_TOOLS = Object.freeze(['edit', 'history']);
+
+export function parseStandardWikiToolRoute(segments = []) {
+  if (
+    segments.length < 3 ||
+    segments[0] !== '_tools' ||
+    !STANDARD_WIKI_TOOLS.includes(segments[1])
+  ) {
+    return null;
+  }
+  return {
+    tool: segments[1],
+    documentSegments: segments.slice(2),
+  };
+}
+
+export function buildStandardWikiToolPath(routePath, tool) {
+  if (!STANDARD_WIKI_TOOLS.includes(tool)) {
+    throw new TypeError(`Unknown standard wiki tool: ${tool}`);
+  }
+  const match = /^\/(wiki|mod|modpack|dev|guide|data|help|project|template|file)\/(.+)$/.exec(routePath);
+  if (!match || !STANDARD_WIKI_PREFIXES.includes(match[1])) {
+    throw new TypeError(`Not a standard wiki route: ${routePath}`);
+  }
+  return `/${match[1]}/_tools/${tool}/${match[2]}`;
+}
+
 export function buildCategoryWikiToolPath(routePath, tool) {
   if (!CATEGORY_WIKI_TOOLS.includes(tool)) {
     throw new Error(`Unsupported category wiki tool: ${tool}`);

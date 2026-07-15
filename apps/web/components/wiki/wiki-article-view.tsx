@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Pencil, PencilLine, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
-import { buildCategoryWikiToolPath, buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
 
 interface WikiArticleViewProps {
@@ -17,12 +17,12 @@ export function WikiArticleView({ page, routePath, afterContent }: WikiArticleVi
     ? buildServerWikiToolPath(routePath, 'edit')
     : isCategoryDocument
       ? buildCategoryWikiToolPath(routePath, 'edit')
-      : `${routePath}/edit`;
+      : buildStandardWikiToolPath(routePath, 'edit');
   const historyPath = routePath.startsWith('/server/')
     ? buildServerWikiToolPath(routePath, 'history')
     : isCategoryDocument
       ? buildCategoryWikiToolPath(routePath, 'history')
-      : `${routePath}/history`;
+      : buildStandardWikiToolPath(routePath, 'history');
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
     timeStyle: 'short',

@@ -3,11 +3,13 @@ import test from 'node:test';
 import {
   buildCategoryWikiToolPath,
   buildServerWikiToolPath,
+  buildStandardWikiToolPath,
   buildWikiDiffPath,
   buildWikiRevisionPath,
   buildWikiRoutePath,
   decodeWikiRouteSegment,
   parseServerWikiToolRoute,
+  parseStandardWikiToolRoute,
   safeWikiReturnTo,
 } from '../lib/wiki-routes.mjs';
 
@@ -53,6 +55,42 @@ test('keeps reserved-looking document names separate from canonical server tools
     tool: 'history',
     documentSegments: ['luna', 'API', 'requests'],
   });
+});
+
+test('builds explicit tool routes for every standard wiki namespace', () => {
+  const routes = [
+    ['/wiki/대문', '/wiki/_tools/edit/대문'],
+    ['/mod/Sodium', '/mod/_tools/edit/Sodium'],
+    ['/modpack/All%20the%20Mods', '/modpack/_tools/edit/All%20the%20Mods'],
+    ['/dev/API/history', '/dev/_tools/edit/API/history'],
+    ['/guide/history', '/guide/_tools/edit/history'],
+    ['/data/blocks/edit', '/data/_tools/edit/blocks/edit'],
+    ['/help/문법', '/help/_tools/edit/문법'],
+    ['/project/MineWiki', '/project/_tools/edit/MineWiki'],
+    ['/template/서버', '/template/_tools/edit/서버'],
+    ['/file/logo.png', '/file/_tools/edit/logo.png'],
+  ];
+  for (const [documentPath, editPath] of routes) {
+    assert.equal(buildStandardWikiToolPath(documentPath, 'edit'), editPath);
+    assert.equal(
+      buildStandardWikiToolPath(documentPath, 'history'),
+      editPath.replace('/_tools/edit/', '/_tools/history/'),
+    );
+  }
+});
+
+test('parses only the explicit standard tool prefix and leaves suffix names as documents', () => {
+  assert.deepEqual(parseStandardWikiToolRoute(['_tools', 'edit', 'API', 'history']), {
+    tool: 'edit',
+    documentSegments: ['API', 'history'],
+  });
+  assert.deepEqual(parseStandardWikiToolRoute(['_tools', 'history', 'edit']), {
+    tool: 'history',
+    documentSegments: ['edit'],
+  });
+  for (const documentSegments of [['edit'], ['history'], ['API', 'edit'], ['API', 'history']]) {
+    assert.equal(parseStandardWikiToolRoute(documentSegments), null);
+  }
 });
 
 test('builds canonical server tool paths for root and nested documents', () => {
