@@ -391,6 +391,7 @@ export class WikiEditRequestService {
           targetSlug: target.slug,
           targetDisplayTitle: target.displayTitle,
           targetPageType: target.pageType,
+          targetOwnerProfileId: target.ownerProfileId,
           proposedContent: content,
           editSummary: summary,
           isMinor: Boolean(input.isMinor),

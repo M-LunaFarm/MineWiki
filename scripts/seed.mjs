@@ -29,6 +29,7 @@ const namespaces = [
   { code: 'help', displayName: '도움말', pathPrefix: '/wiki/도움말', isContent: false },
   { code: 'project', displayName: '프로젝트', pathPrefix: '/wiki/프로젝트', isContent: false },
   { code: 'template', displayName: '틀', pathPrefix: '/wiki/틀', isContent: false },
+  { code: 'user', displayName: '사용자', pathPrefix: '/user', isContent: false },
   { code: 'category', displayName: '분류', pathPrefix: '/wiki/category', isContent: false },
   { code: 'file', displayName: '파일', pathPrefix: '/file', isContent: false },
 ];
@@ -480,6 +481,20 @@ async function seedNamespaces() {
       }),
     );
   }
+  await write('user wiki space', () => prisma.wikiSpace.upsert({
+    where: { code: 'user' },
+    update: {
+      spaceKey: 'user', name: '사용자', title: '사용자', slug: 'user',
+      spaceType: 'basic', rootNamespaceCode: 'user', rootPath: '/user',
+      description: 'MineWiki 사용자 문서 공간', status: 'active', updatedAt: now(),
+    },
+    create: {
+      code: 'user', spaceKey: 'user', name: '사용자', title: '사용자', slug: 'user',
+      spaceType: 'basic', rootNamespaceCode: 'user', rootPath: '/user',
+      description: 'MineWiki 사용자 문서 공간', status: 'active',
+      createdAt: now(), updatedAt: now(),
+    },
+  }));
 }
 
 async function seedRootSpacesAndPages() {

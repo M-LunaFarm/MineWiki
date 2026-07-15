@@ -18,11 +18,12 @@ function createService(options: {
   readonly server?: { ownerAccountId: string | null } | null;
   readonly modWiki?: { verifiedBy: bigint | null } | null;
   readonly acl?: WikiAclService;
+  readonly profile?: { id: bigint; username: string; status: string } | null;
 } = {}) {
   const store = {
     wikiProfile: {
       async findUnique() {
-        return null;
+        return options.profile ?? null;
       }
     },
     wikiSpace: {
@@ -92,6 +93,112 @@ test('anonymous public read is allowed', async () => {
   });
 
   assert.equal(decision.allowed, true);
+});
+
+test('user documents bind creation and edits to immutable profile ownership', async () => {
+  const service = createService({ profile: { id: 100n, username: 'owner_name', status: 'active' } });
+  const owner = actor({ profileId: 100n });
+  const stranger = actor({ profileId: 200n });
+  const ownedPage = page({ title: 'owner_name/작업실', ownerProfileId: 100n, createdBy: 200n });
+
+  assert.deepEqual(
+    await service.canCreatePage({ actor: owner, namespaceCode: 'user', spaceId: 10n, title: 'owner_name/작업실' }),
+    { allowed: true, reason: 'user_document_owner_create' }
+  );
+  assert.deepEqual(
+    await service.canCreatePage({ actor: stranger, namespaceCode: 'user', spaceId: 10n, title: 'owner_name/작업실' }),
+    { allowed: false, reason: 'user_document_owner_required' }
+  );
+  assert.deepEqual(
+    await service.canEditPage({ actor: stranger, page: ownedPage }),
+    { allowed: false, reason: 'user_document_owner_required' }
+  );
+  assert.equal((await service.canEditPage({ actor: owner, page: ownedPage })).allowed, true);
+
+  const admin = actor({ profileId: 999n, permissions: ['wiki.admin'] });
+  assert.deepEqual(
+    await service.canCreatePage({ actor: admin, namespaceCode: 'user', spaceId: 10n, title: 'owner_name/관리' }),
+    { allowed: true, reason: 'admin_user_document_create' }
+  );
+  assert.deepEqual(
+    await service.canEditPage({ actor: admin, page: ownedPage }),
+    { allowed: true, reason: 'admin_edit' }
+  );
+});
+
+test('a user document ACL allow cannot grant a stranger edit ownership', async () => {
+  const service = createService({
+    acl: {
+      async evaluate() {
+        return { matched: true, allowed: true, reason: 'acl_trusted_editor' };
+      }
+    } as WikiAclService
+  });
+  const decision = await service.canEditPage({
+    actor: actor({ profileId: 200n }),
+    page: page({ ownerProfileId: 100n, createdBy: 200n })
+  });
+  assert.deepEqual(decision, { allowed: false, reason: 'user_document_owner_required' });
+});
+
+test('user document ownership remains subject to explicit ACL denies', async () => {
+  const service = createService({
+    profile: { id: 100n, username: 'owner_name', status: 'active' },
+    acl: {
+      async evaluate() {
+        return { matched: true, allowed: false, reason: 'acl_user_document_locked' };
+      }
+    } as WikiAclService
+  });
+  const owner = actor({ profileId: 100n });
+  const ownedPage = page({ title: 'owner_name/작업실', ownerProfileId: 100n });
+
+  assert.deepEqual(
+    await service.canEditPage({ actor: owner, page: ownedPage }),
+    { allowed: false, reason: 'acl_user_document_locked' }
+  );
+  assert.deepEqual(
+    await service.canCreatePage({
+      actor: owner, namespaceCode: 'user', spaceId: 10n, title: 'owner_name/새_문서'
+    }),
+    { allowed: false, reason: 'acl_user_document_locked' }
+  );
+});
+
+test('a user document owner can review a create request only inside the active user space', async () => {
+  const service = createService({ profile: { id: 100n, username: 'owner_name', status: 'active' } });
+  assert.equal(await service.canManageCreateTarget({
+    actor: actor({ profileId: 100n }),
+    namespaceId: 7,
+    namespaceCode: 'user',
+    spaceId: 10n,
+    title: 'owner_name/제안'
+  }), true);
+  assert.equal(await service.canManageCreateTarget({
+    actor: actor({ profileId: 200n }),
+    namespaceId: 7,
+    namespaceCode: 'user',
+    spaceId: 10n,
+    title: 'owner_name/제안'
+  }), false);
+});
+
+test('closed profile roots cannot receive new user documents', async () => {
+  const service = createService({ profile: { id: 100n, username: 'closed_user', status: 'closed' } });
+  assert.deepEqual(
+    await service.canCreatePage({
+      actor: actor({ profileId: 100n }), namespaceCode: 'user', spaceId: 10n, title: 'closed_user/문서'
+    }),
+    { allowed: false, reason: 'user_document_owner_missing' }
+  );
+});
+
+test('user document owner lookup rejects Unicode aliases that do not match the canonical username', async () => {
+  const service = createService({ profile: { id: 100n, username: 'owner_name', status: 'active' } });
+  const decision = await service.canCreatePage({
+    actor: actor(), namespaceCode: 'user', spaceId: 10n, title: 'ｏｗｎｅｒ＿ｎａｍｅ/위조'
+  });
+  assert.deepEqual(decision, { allowed: false, reason: 'user_document_owner_missing' });
 });
 
 test('page read denial remains an absolute boundary even for a wiki admin thread reader', async () => {

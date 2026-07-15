@@ -9,6 +9,7 @@ export type NamespaceCode =
   | 'help'
   | 'project'
   | 'template'
+  | 'user'
   | 'category'
   | 'file';
 

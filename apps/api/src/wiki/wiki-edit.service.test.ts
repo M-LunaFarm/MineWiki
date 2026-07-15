@@ -6,9 +6,11 @@ import { parseMarkup } from '@minewiki/wiki-core';
 import {
   astContainsFile,
   categoryDocumentReferencesSelf,
+  isUserDocumentRoot,
   isReservedWikiToolPath,
   replaceSectionByAnchor,
   sectionByAnchor,
+  userDocumentTreeHasSingleOwner,
   WikiEditService,
   type WikiPageMutationRequest
 } from './wiki-edit.service';
@@ -42,6 +44,23 @@ test('explicit tool routes are reserved without rejecting similarly named docume
   }
   assert.equal(isReservedWikiToolPath('server', 'minewiki/_tools/edit/규칙'), true);
   assert.equal(isReservedWikiToolPath('server', 'minewiki/API/_tools'), false);
+});
+
+test('user root documents and cross-owner trees are rejected by immutable ownership invariants', () => {
+  assert.equal(isUserDocumentRoot({ ownerProfileId: 10n, localPath: 'owner_name' }), true);
+  assert.equal(isUserDocumentRoot({ ownerProfileId: 10n, localPath: 'owner_name/작업실' }), false);
+  assert.equal(isUserDocumentRoot({ ownerProfileId: null, localPath: 'owner_name' }), false);
+
+  assert.equal(userDocumentTreeHasSingleOwner(10n, 10n, [
+    { ownerProfileId: 10n },
+    { ownerProfileId: 10n }
+  ]), true);
+  assert.equal(userDocumentTreeHasSingleOwner(10n, 20n, [{ ownerProfileId: 10n }]), false);
+  assert.equal(userDocumentTreeHasSingleOwner(10n, 10n, [
+    { ownerProfileId: 10n },
+    { ownerProfileId: 20n }
+  ]), false);
+  assert.equal(userDocumentTreeHasSingleOwner(null, null, []), false);
 });
 
 test('section ranges are derived from server-parsed heading anchors', () => {

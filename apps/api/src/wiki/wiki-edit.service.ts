@@ -86,6 +86,7 @@ export interface ResolvedWikiCreateTarget {
   readonly slug: string;
   readonly displayTitle: string;
   readonly pageType: string;
+  readonly ownerProfileId: bigint | null;
 }
 
 export interface WikiEditConflictDetails {
@@ -96,6 +97,26 @@ export interface WikiEditConflictDetails {
   readonly currentRevisionNo: number;
   readonly mergedContentRaw: string;
   readonly conflictCount: number;
+}
+
+export function isUserDocumentRoot(page: {
+  readonly ownerProfileId?: bigint | null;
+  readonly localPath: string;
+}): boolean {
+  return page.ownerProfileId !== null
+    && page.ownerProfileId !== undefined
+    && !page.localPath.includes('/');
+}
+
+export function userDocumentTreeHasSingleOwner(
+  ownerProfileId: bigint | null | undefined,
+  destinationOwnerProfileId: bigint | null | undefined,
+  subtree: ReadonlyArray<{ readonly ownerProfileId?: bigint | null }>
+): boolean {
+  return ownerProfileId !== null
+    && ownerProfileId !== undefined
+    && destinationOwnerProfileId === ownerProfileId
+    && subtree.every((page) => page.ownerProfileId === ownerProfileId);
 }
 
 export interface AuthorizedWikiFileDocumentRequest {
@@ -223,6 +244,16 @@ export class WikiEditService {
     }
     const result = await this.prisma.$transaction(async (tx) => {
       await this.lockNamespaceForCreate(tx, createTarget.namespaceId);
+      if (namespaceCode === 'user') {
+        const currentOwner = await this.wikiPermissions.resolveUserDocumentOwner(tx, title);
+        if (!currentOwner || currentOwner.id !== createTarget.ownerProfileId) {
+          throw new ConflictException('The user document owner changed. Reload and try again.');
+        }
+        await this.wikiPermissions.assertCanCreatePage({
+          actor: this.wikiPermissions.actorFromSession(session, actor),
+          namespaceCode, spaceId, title, pageType: createTarget.pageType, store: tx
+        });
+      }
       const existing = await tx.wikiPage.findUnique({
         where: {
           namespaceId_slug: {
@@ -246,6 +277,7 @@ export class WikiEditService {
           protectionLevel: 'open',
           status: 'normal',
           createdBy: actor.id,
+          ownerProfileId: createTarget.ownerProfileId,
           createdAt: now,
           updatedAt: now
         }
@@ -312,6 +344,12 @@ export class WikiEditService {
     const namespace = await this.prisma.wikiNamespace.findUnique({ where: { code: namespaceCode } });
     if (!namespace) throw new NotFoundException('Wiki namespace not found.');
     const target = await this.resolveCreateTarget(namespaceCode, title, request.spaceId);
+    const owner = namespaceCode === 'user'
+      ? await this.wikiPermissions.resolveUserDocumentOwner(this.prisma, title)
+      : null;
+    if (namespaceCode === 'user' && !owner) {
+      throw new BadRequestException('User document paths must start with an active canonical username.');
+    }
     const slug = slugifyTitle(title);
     if (isReservedWikiToolPath(namespaceCode, slug)) {
       throw new BadRequestException('Wiki document paths cannot use the reserved _tools segment.');
@@ -323,7 +361,8 @@ export class WikiEditService {
       title,
       slug,
       displayTitle: target.displayTitle,
-      pageType: target.pageType
+      pageType: target.pageType,
+      ownerProfileId: owner?.id ?? null
     };
   }
 
@@ -667,6 +706,12 @@ export class WikiEditService {
       if (!namespace || namespace.code !== request.targetNamespaceCode || !space || space.status !== 'active' || space.id !== request.targetSpaceId) {
         throw new ConflictException('The requested wiki target is no longer available.');
       }
+      const currentOwner = namespace.code === 'user'
+        ? await this.wikiPermissions.resolveUserDocumentOwner(tx, request.targetTitle)
+        : null;
+      if (namespace.code === 'user' && (!currentOwner || request.targetOwnerProfileId !== currentOwner.id)) {
+        throw new ConflictException('The requested user document owner is no longer valid.');
+      }
       if (existing) {
         throw new ConflictException({
           code: 'wiki_create_target_exists',
@@ -692,6 +737,7 @@ export class WikiEditService {
           targetNamespaceId: request.targetNamespaceId,
           targetSpaceId: request.targetSpaceId,
           targetSlug: request.targetSlug,
+          targetOwnerProfileId: request.targetOwnerProfileId,
           proposedContent: request.proposedContent,
           editSummary: request.editSummary,
           isMinor: request.isMinor,
@@ -712,6 +758,7 @@ export class WikiEditService {
           protectionLevel: 'open',
           status: 'normal',
           createdBy: request.createdBy,
+          ownerProfileId: request.targetOwnerProfileId,
           createdAt: now,
           updatedAt: now
         }
@@ -815,6 +862,16 @@ export class WikiEditService {
         store: tx
       });
       await this.assertPageIsNotSpaceRoot(tx, page, 'move');
+      const destinationOwner = namespace.code === 'user'
+        ? await this.wikiPermissions.resolveUserDocumentOwner(tx, nextTitle)
+        : null;
+      if (namespace.code === 'user' && !userDocumentTreeHasSingleOwner(
+        page.ownerProfileId,
+        destinationOwner?.id,
+        [page]
+      )) {
+        throw new BadRequestException('User documents can only move inside their owner namespace.');
+      }
       await this.wikiPermissions.assertCanCreatePage({
         actor: this.wikiPermissions.actorFromSession(session, actor),
         namespaceCode: namespace.code,
@@ -847,6 +904,13 @@ export class WikiEditService {
         const suffix = item.localPath === page.localPath ? '' : item.localPath.slice(page.localPath.length);
         return { source: item, slug: `${nextSlug}${suffix}` };
       });
+      if (namespace.code === 'user' && !userDocumentTreeHasSingleOwner(
+        page.ownerProfileId,
+        destinationOwner?.id,
+        moves.map((move) => move.source)
+      )) {
+        throw new ConflictException('The user document tree contains inconsistent ownership.');
+      }
       for (const move of moves) {
         if (move.source.id === page.id) continue;
         await this.wikiPermissions.assertCanMutatePageAction({ actor: permissionActor, action: 'move', page: move.source, store: tx });
@@ -897,6 +961,7 @@ export class WikiEditService {
             protectionLevel: move.source.protectionLevel,
             status: 'normal',
             createdBy: actor.id,
+            ownerProfileId: move.source.ownerProfileId,
             createdAt: now,
             updatedAt: now
           }
@@ -1110,6 +1175,7 @@ export class WikiEditService {
           throw new ConflictException('A wiki page with child documents cannot be deleted. Move or delete its children first.');
         }
       } else {
+        await this.assertPageIsNotSpaceRoot(tx, page, 'restore');
         await this.wikiPermissions.assertCanRestorePage({ actor: permissionActor, page, store: tx });
       }
       const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
@@ -1149,15 +1215,28 @@ export class WikiEditService {
 
   private async assertPageIsNotSpaceRoot(
     tx: Prisma.TransactionClient,
-    page: { readonly id: bigint; readonly spaceId: bigint; readonly slug: string },
-    action: 'move' | 'delete'
+    page: {
+      readonly id: bigint;
+      readonly spaceId: bigint;
+      readonly slug: string;
+      readonly localPath: string;
+      readonly ownerProfileId?: bigint | null;
+    },
+    action: 'move' | 'delete' | 'restore'
   ): Promise<void> {
+    if (isUserDocumentRoot(page)) {
+      throw new ForbiddenException(
+        `A user root document cannot be ${action === 'move' ? 'moved' : action === 'delete' ? 'deleted' : 'restored'}.`
+      );
+    }
     const [space, serverWiki] = await Promise.all([
       tx.wikiSpace.findUnique({ where: { id: page.spaceId }, select: { rootPageId: true } }),
       tx.serverWiki.findFirst({ where: { spaceId: page.spaceId }, select: { slug: true } })
     ]);
     if (space?.rootPageId === page.id || (serverWiki && slugifyTitle(serverWiki.slug) === page.slug)) {
-      throw new ForbiddenException(`A wiki space root page cannot be ${action === 'move' ? 'moved' : 'deleted'}.`);
+      throw new ForbiddenException(
+        `A wiki space root page cannot be ${action === 'move' ? 'moved' : action === 'delete' ? 'deleted' : 'restored'}.`
+      );
     }
   }
 

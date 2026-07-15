@@ -91,20 +91,20 @@ enum SupportMessageAuthorRole {
 }
 
 model Account {
-  id                 String       @id @default(uuid())
-  canonicalAccountId String?
-  provider           AuthProvider
-  providerUserId     String
-  email              String?
-  displayName        String?
-  avatarUrl          String?
-  emailVerified      Boolean      @default(false)
-  passwordHash       String?
-  createdAt          DateTime     @default(now())
-  lastLoginAt        DateTime?
-  lifecycleStatus    String       @default("active") @map("lifecycle_status") @db.VarChar(32)
-  deletionRequestedAt DateTime?   @map("deletion_requested_at") @db.DateTime(3)
-  anonymizedAt       DateTime?    @map("anonymized_at") @db.DateTime(3)
+  id                  String       @id @default(uuid())
+  canonicalAccountId  String?
+  provider            AuthProvider
+  providerUserId      String
+  email               String?
+  displayName         String?
+  avatarUrl           String?
+  emailVerified       Boolean      @default(false)
+  passwordHash        String?
+  createdAt           DateTime     @default(now())
+  lastLoginAt         DateTime?
+  lifecycleStatus     String       @default("active") @map("lifecycle_status") @db.VarChar(32)
+  deletionRequestedAt DateTime?    @map("deletion_requested_at") @db.DateTime(3)
+  anonymizedAt        DateTime?    @map("anonymized_at") @db.DateTime(3)
 
   sessions                Session[]
   emailVerifications      EmailVerification[]
@@ -122,8 +122,8 @@ model Account {
   reviews                 ServerReview[]
   votes                   Vote[]
   reviewHelpfulVotes      ReviewHelpfulVote[]
-  reviewReports           ReviewReport[]          @relation("ReviewReportReporter")
-  assignedReviewReports   ReviewReport[]          @relation("ReviewReportAssignee")
+  reviewReports           ReviewReport[]           @relation("ReviewReportReporter")
+  assignedReviewReports   ReviewReport[]           @relation("ReviewReportAssignee")
   supportAgentProfile     SupportAgent?
   requestedSupportTickets SupportTicket[]          @relation("SupportTicketRequester")
   assignedSupportTickets  SupportTicket[]          @relation("SupportTicketAssignee")
@@ -346,24 +346,24 @@ model PasswordReset {
 }
 
 model Session {
-  id           String   @id @default(uuid())
-  accountId    String
-  token        String   @unique
-  issuedAt     DateTime
-  expiresAt    DateTime
-  tokenVersion Int
-  isElevated   Boolean  @default(false)
-  primaryAuthenticatedAt DateTime @default(now()) @map("primary_authenticated_at") @db.DateTime(3)
-  stepUpAt       DateTime? @map("step_up_at") @db.DateTime(3)
-  stepUpExpiresAt DateTime? @map("step_up_expires_at") @db.DateTime(3)
-  stepUpMethod   String? @map("step_up_method") @db.VarChar(32)
-  stepUpPurpose  String? @map("step_up_purpose") @db.VarChar(64)
-  ipAddress    String?
-  userAgent    String?
-  lastActiveAt DateTime
-  termsPolicyVersion   String?  @map("terms_policy_version") @db.VarChar(32)
-  privacyPolicyVersion String?  @map("privacy_policy_version") @db.VarChar(32)
-  createdAt    DateTime @default(now())
+  id                     String    @id @default(uuid())
+  accountId              String
+  token                  String    @unique
+  issuedAt               DateTime
+  expiresAt              DateTime
+  tokenVersion           Int
+  isElevated             Boolean   @default(false)
+  primaryAuthenticatedAt DateTime  @default(now()) @map("primary_authenticated_at") @db.DateTime(3)
+  stepUpAt               DateTime? @map("step_up_at") @db.DateTime(3)
+  stepUpExpiresAt        DateTime? @map("step_up_expires_at") @db.DateTime(3)
+  stepUpMethod           String?   @map("step_up_method") @db.VarChar(32)
+  stepUpPurpose          String?   @map("step_up_purpose") @db.VarChar(64)
+  ipAddress              String?
+  userAgent              String?
+  lastActiveAt           DateTime
+  termsPolicyVersion     String?   @map("terms_policy_version") @db.VarChar(32)
+  privacyPolicyVersion   String?   @map("privacy_policy_version") @db.VarChar(32)
+  createdAt              DateTime  @default(now())
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
@@ -955,8 +955,8 @@ model LunaGuild {
   createdAt          DateTime @map("created_at")
   updatedAt          DateTime @map("updated_at")
 
-  @@map("guilds")
   @@index([ownerAccountId])
+  @@map("guilds")
 }
 
 model LunaGuildChannelSetting {
@@ -1148,29 +1148,31 @@ model WikiNamespace {
 }
 
 model WikiPage {
-  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  namespaceId       Int      @map("namespace_id") @db.UnsignedInt
-  spaceId           BigInt   @map("space_id") @db.UnsignedBigInt
-  localPath         String   @map("local_path") @db.VarChar(500)
-  slug              String   @db.VarChar(255)
-  title             String   @db.VarChar(255)
-  displayTitle      String   @map("display_title") @db.VarChar(255)
-  currentRevisionId BigInt?  @map("current_revision_id") @db.UnsignedBigInt
-  pageType          String   @default("article") @map("page_type") @db.VarChar(32)
-  protectionLevel   String   @default("open") @map("protection_level") @db.VarChar(32)
-  status            String   @default("normal") @db.VarChar(32)
-  currentContentSize Int     @default(0) @map("current_content_size") @db.UnsignedInt
-  currentCategoryCount Int   @default(0) @map("current_category_count") @db.UnsignedInt
-  createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
-  createdAt         DateTime @map("created_at")
-  updatedAt         DateTime @map("updated_at")
-  searchDocument    WikiSearchDocument?
+  id                   BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  namespaceId          Int                 @map("namespace_id") @db.UnsignedInt
+  spaceId              BigInt              @map("space_id") @db.UnsignedBigInt
+  localPath            String              @map("local_path") @db.VarChar(500)
+  slug                 String              @db.VarChar(255)
+  title                String              @db.VarChar(255)
+  displayTitle         String              @map("display_title") @db.VarChar(255)
+  currentRevisionId    BigInt?             @map("current_revision_id") @db.UnsignedBigInt
+  pageType             String              @default("article") @map("page_type") @db.VarChar(32)
+  protectionLevel      String              @default("open") @map("protection_level") @db.VarChar(32)
+  status               String              @default("normal") @db.VarChar(32)
+  currentContentSize   Int                 @default(0) @map("current_content_size") @db.UnsignedInt
+  currentCategoryCount Int                 @default(0) @map("current_category_count") @db.UnsignedInt
+  createdBy            BigInt?             @map("created_by") @db.UnsignedBigInt
+  ownerProfileId       BigInt?             @map("owner_profile_id") @db.UnsignedBigInt
+  createdAt            DateTime            @map("created_at")
+  updatedAt            DateTime            @map("updated_at")
+  searchDocument       WikiSearchDocument?
 
   @@unique([namespaceId, slug])
   @@unique([spaceId, localPath])
   @@index([spaceId])
   @@index([title])
   @@index([pageType])
+  @@index([ownerProfileId, localPath], map: "idx_pages_user_owner_path")
   @@index([updatedAt])
   @@index([updatedAt, id], map: "idx_pages_special_old")
   @@index([namespaceId, updatedAt, id], map: "idx_pages_special_old_namespace")
@@ -1275,14 +1277,14 @@ model WikiSpecialSnapshot {
 }
 
 model WikiDiscussionThread {
-  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  pageId    BigInt   @map("page_id") @db.UnsignedBigInt
-  title     String   @db.VarChar(255)
-  status    String   @default("open") @db.VarChar(32)
-  createdBy BigInt   @map("created_by") @db.UnsignedBigInt
-  createdAt DateTime @map("created_at")
-  updatedAt DateTime @map("updated_at")
-  pinnedCommentId BigInt? @map("pinned_comment_id") @db.UnsignedBigInt
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId          BigInt   @map("page_id") @db.UnsignedBigInt
+  title           String   @db.VarChar(255)
+  status          String   @default("open") @db.VarChar(32)
+  createdBy       BigInt   @map("created_by") @db.UnsignedBigInt
+  createdAt       DateTime @map("created_at")
+  updatedAt       DateTime @map("updated_at")
+  pinnedCommentId BigInt?  @map("pinned_comment_id") @db.UnsignedBigInt
 
   @@index([pageId, status, updatedAt], map: "idx_wiki_threads_page_status")
   @@index([updatedAt, id], map: "idx_wiki_threads_recent")
@@ -1292,13 +1294,13 @@ model WikiDiscussionThread {
 }
 
 model WikiDiscussionComment {
-  id        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  threadId  BigInt    @map("thread_id") @db.UnsignedBigInt
-  content   String    @db.Text
-  status    String    @default("normal") @db.VarChar(32)
-  createdBy BigInt    @map("created_by") @db.UnsignedBigInt
-  createdAt DateTime  @map("created_at")
-  updatedAt DateTime? @map("updated_at")
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  threadId    BigInt    @map("thread_id") @db.UnsignedBigInt
+  content     String    @db.Text
+  status      String    @default("normal") @db.VarChar(32)
+  createdBy   BigInt    @map("created_by") @db.UnsignedBigInt
+  createdAt   DateTime  @map("created_at")
+  updatedAt   DateTime? @map("updated_at")
   entryType   String    @default("comment") @map("entry_type") @db.VarChar(16)
   eventType   String?   @map("event_type") @db.VarChar(32)
   eventBefore String?   @map("event_before") @db.Text
@@ -1368,12 +1370,12 @@ model WikiDiscussionModerationEvent {
 }
 
 model WikiPageWatch {
-  id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  profileId          BigInt    @map("profile_id") @db.UnsignedBigInt
-  pageId             BigInt    @map("page_id") @db.UnsignedBigInt
-  lastSeenRevisionId BigInt?   @map("last_seen_revision_id") @db.UnsignedBigInt
-  createdAt          DateTime  @map("created_at")
-  updatedAt          DateTime  @map("updated_at")
+  id                 BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  profileId          BigInt   @map("profile_id") @db.UnsignedBigInt
+  pageId             BigInt   @map("page_id") @db.UnsignedBigInt
+  lastSeenRevisionId BigInt?  @map("last_seen_revision_id") @db.UnsignedBigInt
+  createdAt          DateTime @map("created_at")
+  updatedAt          DateTime @map("updated_at")
 
   @@unique([profileId, pageId], map: "uk_wiki_page_watches_profile_page")
   @@index([profileId, updatedAt], map: "idx_wiki_page_watches_profile")
@@ -1435,32 +1437,34 @@ model WikiDiscussionSubscription {
 }
 
 model WikiEditRequest {
-  id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  requestKind        String    @default("edit") @map("request_kind") @db.VarChar(16)
-  pageId             BigInt?   @map("page_id") @db.UnsignedBigInt
-  baseRevisionId     BigInt?   @map("base_revision_id") @db.UnsignedBigInt
-  targetNamespaceId  Int?      @map("target_namespace_id") @db.UnsignedInt
-  targetNamespaceCode String?  @map("target_namespace_code") @db.VarChar(32)
-  targetSpaceId      BigInt?   @map("target_space_id") @db.UnsignedBigInt
-  targetTitle        String?   @map("target_title") @db.VarChar(255)
-  targetSlug         String?   @map("target_slug") @db.VarChar(255)
-  targetDisplayTitle String?   @map("target_display_title") @db.VarChar(255)
-  targetPageType     String?   @map("target_page_type") @db.VarChar(32)
-  proposedContent    String    @map("proposed_content") @db.MediumText
-  editSummary        String    @map("edit_summary") @db.VarChar(255)
-  isMinor            Boolean   @default(false) @map("is_minor")
-  status             String    @default("pending") @db.VarChar(32)
-  createdBy          BigInt    @map("created_by") @db.UnsignedBigInt
-  reviewedBy         BigInt?   @map("reviewed_by") @db.UnsignedBigInt
-  reviewNote         String?   @map("review_note") @db.VarChar(1000)
-  acceptedRevisionId BigInt?   @map("accepted_revision_id") @db.UnsignedBigInt
-  createdAt          DateTime  @map("created_at")
-  updatedAt          DateTime  @map("updated_at")
-  reviewedAt         DateTime? @map("reviewed_at")
+  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  requestKind          String    @default("edit") @map("request_kind") @db.VarChar(16)
+  pageId               BigInt?   @map("page_id") @db.UnsignedBigInt
+  baseRevisionId       BigInt?   @map("base_revision_id") @db.UnsignedBigInt
+  targetNamespaceId    Int?      @map("target_namespace_id") @db.UnsignedInt
+  targetNamespaceCode  String?   @map("target_namespace_code") @db.VarChar(32)
+  targetSpaceId        BigInt?   @map("target_space_id") @db.UnsignedBigInt
+  targetTitle          String?   @map("target_title") @db.VarChar(255)
+  targetSlug           String?   @map("target_slug") @db.VarChar(255)
+  targetDisplayTitle   String?   @map("target_display_title") @db.VarChar(255)
+  targetPageType       String?   @map("target_page_type") @db.VarChar(32)
+  targetOwnerProfileId BigInt?   @map("target_owner_profile_id") @db.UnsignedBigInt
+  proposedContent      String    @map("proposed_content") @db.MediumText
+  editSummary          String    @map("edit_summary") @db.VarChar(255)
+  isMinor              Boolean   @default(false) @map("is_minor")
+  status               String    @default("pending") @db.VarChar(32)
+  createdBy            BigInt    @map("created_by") @db.UnsignedBigInt
+  reviewedBy           BigInt?   @map("reviewed_by") @db.UnsignedBigInt
+  reviewNote           String?   @map("review_note") @db.VarChar(1000)
+  acceptedRevisionId   BigInt?   @map("accepted_revision_id") @db.UnsignedBigInt
+  createdAt            DateTime  @map("created_at")
+  updatedAt            DateTime  @map("updated_at")
+  reviewedAt           DateTime? @map("reviewed_at")
 
   @@index([pageId, status, createdAt], map: "idx_wiki_edit_requests_page")
   @@index([targetNamespaceId, targetSlug, status, createdAt], map: "idx_wiki_edit_requests_target")
   @@index([targetSpaceId, status, createdAt], map: "idx_wiki_edit_requests_target_space")
+  @@index([targetNamespaceId, targetOwnerProfileId, targetSlug, status], map: "idx_wiki_edit_requests_user_owner")
   @@index([createdBy, status, createdAt], map: "idx_wiki_edit_requests_creator")
   @@index([reviewedBy, reviewedAt], map: "idx_wiki_edit_requests_reviewer")
   @@map("wiki_edit_requests")
@@ -1487,24 +1491,24 @@ model WikiRecentChange {
 }
 
 model ServerWiki {
-  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  spaceId           BigInt   @map("space_id") @db.UnsignedBigInt
-  voteServerId      String?  @unique @map("vote_server_id") @db.Char(36)
-  serverName        String   @map("server_name") @db.VarChar(255)
-  slug              String   @unique @db.VarChar(255)
-  host              String?  @db.VarChar(255)
-  port              Int?     @db.UnsignedInt
-  edition           String   @default("unknown") @db.VarChar(16)
-  supportedVersions String?  @map("supported_versions") @db.VarChar(255)
-  genres            String?  @db.VarChar(255)
-  verifiedStatus    String   @default("none") @map("verified_status") @db.VarChar(32)
-  status            String   @default("active") @db.VarChar(32)
-  layoutKey         String   @default("docs") @map("layout_key") @db.VarChar(32)
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId           BigInt    @map("space_id") @db.UnsignedBigInt
+  voteServerId      String?   @unique @map("vote_server_id") @db.Char(36)
+  serverName        String    @map("server_name") @db.VarChar(255)
+  slug              String    @unique @db.VarChar(255)
+  host              String?   @db.VarChar(255)
+  port              Int?      @db.UnsignedInt
+  edition           String    @default("unknown") @db.VarChar(16)
+  supportedVersions String?   @map("supported_versions") @db.VarChar(255)
+  genres            String?   @db.VarChar(255)
+  verifiedStatus    String    @default("none") @map("verified_status") @db.VarChar(32)
+  status            String    @default("active") @db.VarChar(32)
+  layoutKey         String    @default("docs") @map("layout_key") @db.VarChar(32)
   layoutUpdatedAt   DateTime? @map("layout_updated_at")
-  layoutUpdatedBy   BigInt?  @map("layout_updated_by") @db.UnsignedBigInt
-  createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
-  createdAt         DateTime @map("created_at")
-  updatedAt         DateTime @map("updated_at")
+  layoutUpdatedBy   BigInt?   @map("layout_updated_by") @db.UnsignedBigInt
+  createdBy         BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt         DateTime  @map("created_at")
+  updatedAt         DateTime  @map("updated_at")
 
   @@index([spaceId])
   @@index([status])

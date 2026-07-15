@@ -46,6 +46,7 @@ export interface WikiPermissionPage {
   readonly protectionLevel: string;
   readonly status: string;
   readonly createdBy?: bigint | null;
+  readonly ownerProfileId?: bigint | null;
 }
 
 export interface WikiPermissionRevision {
@@ -305,17 +306,23 @@ export class WikiPermissionService {
     if (this.isAdminActor(actor)) {
       return allow('admin_edit');
     }
+    let isUserDocumentOwner = false;
+    if (page.ownerProfileId !== null && page.ownerProfileId !== undefined) {
+      if (page.ownerProfileId !== actor.profileId) return deny('user_document_owner_required');
+      isUserDocumentOwner = true;
+    }
     const acl = await this.evaluateAcl('edit', actor, { pageId: page.id, spaceId: page.spaceId, namespaceId: page.namespaceId, title: page.title, createdBy: page.createdBy }, store);
     if (acl.matched) {
       return acl.allowed ? allow(acl.reason) : deny(acl.reason);
     }
     if (protectionLevel === 'open' || protectionLevel === 'login_required' || protectionLevel === 'review_required') {
-      return allow('open_edit');
+      return allow(isUserDocumentOwner ? 'user_document_owner_edit' : 'open_edit');
     }
     if (protectionLevel === 'autoconfirmed_only' || protectionLevel === 'trusted_only') {
-      return (await this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, EDITOR_ROLES)) ||
+      return isUserDocumentOwner ||
+        (await this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, EDITOR_ROLES)) ||
         space.ownerUserId === actor.profileId
-        ? allow('trusted_edit')
+        ? allow(isUserDocumentOwner ? 'user_document_owner_edit' : 'trusted_edit')
         : deny('trusted_required');
     }
     if (protectionLevel === 'owner_only' || protectionLevel === 'official_only') {
@@ -361,6 +368,24 @@ export class WikiPermissionService {
     }
     if (!ACTIVE_PROFILE_STATUSES.has(actor.status)) {
       return deny('actor_not_active');
+    }
+    if (input.namespaceCode === 'user') {
+      const owner = await this.resolveUserDocumentOwner(store, input.title);
+      if (!owner) return deny('user_document_owner_missing');
+      if (this.isAdminActor(actor)) return allow('admin_user_document_create');
+      if (owner.id !== actor.profileId) return deny('user_document_owner_required');
+      const space = await store.wikiSpace.findUnique({
+        where: { id: input.spaceId },
+        select: { id: true, status: true }
+      });
+      if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) return deny('space_not_active');
+      const acl = await this.evaluateAcl('create', actor, {
+        spaceId: input.spaceId,
+        namespaceCode: input.namespaceCode,
+        title: input.title
+      }, store);
+      if (acl.matched) return acl.allowed ? allow(acl.reason) : deny(acl.reason);
+      return allow('user_document_owner_create');
     }
     if (this.isAdminActor(actor)) {
       return allow('admin_create');
@@ -510,7 +535,11 @@ export class WikiPermissionService {
     if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status) || !page || page.status !== 'deleted') {
       throw new ForbiddenException('Wiki page restore is not allowed.');
     }
-    if (!(await this.canManagePageArea(store, actor, page))) {
+    if (page.ownerProfileId !== null && page.ownerProfileId !== undefined) {
+      if (!this.isAdminActor(actor) && page.ownerProfileId !== actor.profileId) {
+        throw new ForbiddenException('Wiki page restore is not allowed.');
+      }
+    } else if (!(await this.canManagePageArea(store, actor, page))) {
       throw new ForbiddenException('Wiki page restore is not allowed.');
     }
     const acl = await this.evaluateAcl('delete', actor, {
@@ -700,6 +729,15 @@ export class WikiPermissionService {
     const store = input.store ?? this.prisma;
     if (!input.actor || !ACTIVE_PROFILE_STATUSES.has(input.actor.status)) return false;
     if (this.isAdminActor(input.actor)) return true;
+    if (input.namespaceCode === 'user') {
+      const owner = await this.resolveUserDocumentOwner(store, input.title);
+      if (!owner || owner.id !== input.actor.profileId) return false;
+      const space = await store.wikiSpace.findUnique({
+        where: { id: input.spaceId },
+        select: { id: true, status: true }
+      });
+      return Boolean(space && ACTIVE_SPACE_STATUSES.has(space.status));
+    }
     const space = await store.wikiSpace.findUnique({
       where: { id: input.spaceId },
       select: { id: true, status: true, ownerUserId: true, createdBy: true }
@@ -827,6 +865,9 @@ export class WikiPermissionService {
     if (this.isAdminActor(actor)) {
       return true;
     }
+    if (page.ownerProfileId !== null && page.ownerProfileId !== undefined) {
+      return page.ownerProfileId === actor.profileId;
+    }
     if (page.createdBy === actor.profileId) {
       return true;
     }
@@ -865,6 +906,27 @@ export class WikiPermissionService {
       return true;
     }
     return this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, MOD_REVIEW_ROLES);
+  }
+
+  async resolveUserDocumentOwner(
+    store: WikiPermissionStore,
+    title: string
+  ): Promise<{ readonly id: bigint; readonly username: string } | null> {
+    const [rawRoot = ''] = title.split('/');
+    const root = rawRoot.normalize('NFKC');
+    const hasControlCharacter = [...root].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 0x1f || codePoint === 0x7f;
+    });
+    if (!root || root === '.' || root === '..' || root.includes('\\') || hasControlCharacter) return null;
+    const profile = await store.wikiProfile.findUnique({
+      where: { username: root },
+      select: { id: true, username: true, status: true }
+    });
+    if (!profile || !ACTIVE_PROFILE_STATUSES.has(profile.status)) return null;
+    return profile.username === rawRoot
+      ? { id: profile.id, username: profile.username }
+      : null;
   }
 
   private async hasAnySubwikiRole(

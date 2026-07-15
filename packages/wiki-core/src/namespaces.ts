@@ -17,6 +17,7 @@ export const namespaceSpecs: Array<{
   { code: 'help', displayName: '도움말', pathPrefix: '/wiki/도움말', isContent: false },
   { code: 'project', displayName: '프로젝트', pathPrefix: '/wiki/프로젝트', isContent: false },
   { code: 'template', displayName: '틀', pathPrefix: '/wiki/틀', isContent: false },
+  { code: 'user', displayName: '사용자', pathPrefix: '/user', isContent: false },
   { code: 'category', displayName: '분류', pathPrefix: '/wiki/category', isContent: false },
   { code: 'file', displayName: '파일', pathPrefix: '/file', isContent: false }
 ];
@@ -32,6 +33,7 @@ const prefixToNamespace: Array<[string, NamespaceCode]> = [
   ['help', 'help'],
   ['project', 'project'],
   ['template', 'template'],
+  ['user', 'user'],
   ['category', 'category'],
   ['file', 'file'],
   ['files', 'file'],
@@ -44,6 +46,7 @@ const prefixToNamespace: Array<[string, NamespaceCode]> = [
   ['도움말', 'help'],
   ['프로젝트', 'project'],
   ['틀', 'template'],
+  ['사용자', 'user'],
   ['분류', 'category'],
   ['파일', 'file']
 ];
@@ -55,6 +58,7 @@ export function resolveWikiPath(path: string) {
     const nested = prefixToNamespace.find(([prefix]) => prefix === rest[0]);
     if (nested) {
       const titlePath = rest.slice(1).join('/');
+      if (nested[1] === 'user') return resolveUserPath(titlePath);
       return { namespace: nested[1], title: normalizeTitle(titlePath), slug: slugifyTitle(titlePath) };
     }
     const titlePath = rest.join('/');
@@ -62,6 +66,7 @@ export function resolveWikiPath(path: string) {
   }
   const matched = prefixToNamespace.find(([prefix]) => prefix === head);
   if (matched) {
+    if (matched[1] === 'user') return resolveUserPath(rest.join('/'));
     return {
       namespace: matched[1],
       title: normalizeTitle(rest.join('/')),
@@ -69,6 +74,19 @@ export function resolveWikiPath(path: string) {
     };
   }
   return { namespace: 'main' as NamespaceCode, title: normalizeTitle(clean), slug: slugifyTitle(clean) };
+}
+
+function resolveUserPath(path: string) {
+  const [encodedUsername = '', ...encodedDocumentParts] = path.split('/');
+  const username = decodeURIComponent(encodedUsername).trim();
+  const documentTitle = normalizeTitle(encodedDocumentParts.join('/'));
+  const title = documentTitle ? `${username}/${documentTitle}` : username;
+  const documentSlug = slugifyTitle(documentTitle);
+  return {
+    namespace: 'user' as NamespaceCode,
+    title,
+    slug: documentSlug ? `${username}/${documentSlug}` : username
+  };
 }
 
 export function wikiUrl(namespace: NamespaceCode, title: string) {
@@ -82,6 +100,7 @@ export function wikiUrl(namespace: NamespaceCode, title: string) {
   if (namespace === 'guide') return `/guide/${encodedTitle}`;
   if (namespace === 'data') return `/data/${encodedTitle}`;
   if (namespace === 'template') return `/template/${encodedTitle}`;
+  if (namespace === 'user') return `/user/${encodedTitle}`;
   if (namespace === 'category') return `/wiki/category/${encodedTitle}`;
   const spec = namespaceSpecs.find((item) => item.code === namespace) ?? namespaceSpecs[0];
   return `${encodePathPrefix(spec.pathPrefix)}/${encodedTitle}`;
