@@ -35,6 +35,8 @@ function CallbackFallback() {
       eyebrow="계정 인증"
       title="계정 인증 응답을 확인하고 있습니다."
       subtitle="콜백 파라미터를 읽고 세션 처리를 준비하는 중입니다."
+      shellTitle="로그인"
+      shellDescription="MineWiki 계정으로 로그인하거나 새 계정을 만들 수 있습니다."
       status="pending"
     >
       <div className="space-y-4">

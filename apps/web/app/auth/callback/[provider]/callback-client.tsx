@@ -200,6 +200,12 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
       eyebrow={flowMode === 'link' ? '계정 연결' : '간편 로그인'}
       title={title}
       subtitle={subtitle}
+      shellTitle={flowMode === 'link' ? '로그인 수단 연결' : '로그인'}
+      shellDescription={
+        flowMode === 'link'
+          ? 'MineWiki 계정에 새로운 로그인 수단을 안전하게 연결합니다.'
+          : 'MineWiki 계정으로 로그인하거나 새 계정을 만들 수 있습니다.'
+      }
       status={shellStatus}
     >
       <div
@@ -217,7 +223,11 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
               {providerLabel}
             </p>
             <p className="mt-0.5 text-[10px] font-medium text-slate-500">
-              {flowMode === 'link' ? '로그인 수단 연결' : '간편 로그인'}
+              {status === 'pending'
+                ? 'MineWiki로 돌아오는 중'
+                : flowMode === 'link'
+                  ? '로그인 수단 연결'
+                  : '간편 로그인'}
             </p>
           </div>
           <span

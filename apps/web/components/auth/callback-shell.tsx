@@ -6,6 +6,8 @@ interface CallbackShellProps {
   readonly eyebrow: string;
   readonly title: string;
   readonly subtitle: string;
+  readonly shellTitle?: string;
+  readonly shellDescription?: string;
   readonly status: 'pending' | 'success' | 'warning' | 'error';
   readonly children: ReactNode;
   readonly aside?: ReactNode;
@@ -53,6 +55,8 @@ export function CallbackShell({
   eyebrow,
   title,
   subtitle,
+  shellTitle,
+  shellDescription,
   status,
   children,
   aside,
@@ -60,7 +64,10 @@ export function CallbackShell({
   const tone = statusStyles[status];
 
   return (
-    <AuthShellLayout title={title} description={subtitle}>
+    <AuthShellLayout
+      title={shellTitle ?? title}
+      description={shellDescription ?? subtitle}
+    >
       <div className={`mb-4 inline-flex items-center gap-2 text-xs font-semibold ${tone.text}`}>
         <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
         {eyebrow}
