@@ -7,6 +7,7 @@
   UnauthorizedException
 } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
+import type { Prisma } from '@prisma/client';
 import type { OAuthProvider } from '@minewiki/schemas';
 import { randomBytes } from 'node:crypto';
 import {
@@ -100,21 +101,30 @@ export class OAuthFlowService {
       throw new BadRequestException('OAuth 브라우저 확인 정보가 없습니다. 다시 시도해 주세요.');
     }
 
-    await this.prisma.oAuthState.create({
-      data: {
-        state,
-        provider,
-        redirectUri: normalizedRedirect,
-        returnTo: sanitizedReturnTo,
-        createdAt: now,
-        expiresAt,
-        mode,
-        linkAccountId: linkAccountId ?? null
-        ,agreeTerms
-        ,agreePrivacy,
-        browserBindingHash
-      }
-    });
+    const createState = (store: PrismaService | Prisma.TransactionClient) =>
+      store.oAuthState.create({
+        data: {
+          state,
+          provider,
+          redirectUri: normalizedRedirect,
+          returnTo: sanitizedReturnTo,
+          createdAt: now,
+          expiresAt,
+          mode,
+          linkAccountId: linkAccountId ?? null,
+          agreeTerms,
+          agreePrivacy,
+          browserBindingHash
+        }
+      });
+
+    if (mode === 'link') {
+      await withActiveCanonicalAccountGroup(this.prisma, [linkAccountId as string], (tx) =>
+        createState(tx)
+      );
+    } else {
+      await createState(this.prisma);
+    }
 
     return {
       authorizationUrl: url,

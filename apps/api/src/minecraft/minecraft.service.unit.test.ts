@@ -13,6 +13,20 @@ test('Microsoft authorization uses the fixed callback and keeps PKCE verifier se
     redirectUri: string;
     codeVerifier: string;
   }> = [];
+  const transaction = {
+    account: {
+      findMany: async () => [{ id: accountId, canonicalAccountId: accountId }],
+      count: async () => 1,
+    },
+    accountLink: { findMany: async () => [] },
+    $queryRaw: async () => [{ id: accountId }],
+    minecraftAuthorization: {
+      create: async ({ data }: { data: (typeof createdAuthorizations)[number] }) => {
+        createdAuthorizations.push(data);
+        return data;
+      },
+    },
+  };
   const service = new MinecraftService(
     {} as never,
     {
@@ -25,11 +39,9 @@ test('Microsoft authorization uses the fixed callback and keeps PKCE verifier se
     {
       minecraftAuthorization: {
         deleteMany: async () => ({ count: 0 }),
-        create: async ({ data }: { data: (typeof createdAuthorizations)[number] }) => {
-          createdAuthorizations.push(data);
-          return data;
-        },
       },
+      $transaction: async (callback: (tx: typeof transaction) => Promise<unknown>) =>
+        callback(transaction),
     } as never,
   );
 

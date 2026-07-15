@@ -105,16 +105,18 @@ export class MinecraftService {
     url.searchParams.set('code_challenge_method', 'S256');
 
     await this.evictExpiredAuthorizations();
-    await this.prisma.minecraftAuthorization.create({
-      data: {
-        state,
-        accountId: request.userId,
-        redirectUri,
-        codeVerifier,
-        createdAt: new Date(),
-        expiresAt: new Date(Date.now() + AUTH_STATE_TTL_MS)
-      }
-    });
+    await withActiveCanonicalAccountGroup(this.prisma, [request.userId], (tx) =>
+      tx.minecraftAuthorization.create({
+        data: {
+          state,
+          accountId: request.userId,
+          redirectUri,
+          codeVerifier,
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + AUTH_STATE_TTL_MS)
+        }
+      })
+    );
 
     return {
       authorizationUrl: url.toString(),
