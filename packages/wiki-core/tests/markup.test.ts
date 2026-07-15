@@ -78,6 +78,8 @@ test('renders validated wiki file license and source attribution', () => {
   assert.match(html, /라이선스: CC BY-SA 4\.0/);
   assert.match(html, /href="https:\/\/example\.com\/original"/);
   assert.match(html, /Example 제작자/);
+  assert.match(html, /^<figure class="wiki-file thumb">/);
+  assert.equal(html.includes('wiki-file-inline'), false);
   assert.match(html, /rel="nofollow noopener"/);
 });
 
@@ -372,6 +374,7 @@ test('supports inline file markup in prose and table cells without creating docu
   assert.match(html, /alt="작은 아이콘"/);
   assert.match(html, /alt="표 아이콘"/);
   assert.match(html, /<p>아이콘 <span class="wiki-file wiki-file-inline">/);
+  assert.equal(html.includes('<p>아이콘 <figure'), false);
 });
 
 test('collects file dependencies from every block and inline container', () => {

@@ -11,7 +11,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.6.1';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.6.2';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -965,7 +965,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         return `<aside class="wiki-include-notice">${message}</aside>`;
       }
       if (node.type === 'category') return '';
-      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options, true);
+      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options);
       if (node.type === 'redirect') return `<p class="notice">넘겨주기: ${renderInternalLink(node.target, node.target, options)}</p>`;
       if (node.type === 'codeblock') {
         return `<pre class="codeblock" data-lang="${escapeAttr(node.lang ?? '')}"><code>${escapeHtml(node.code)}</code></pre>`;
