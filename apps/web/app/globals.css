@@ -37,7 +37,9 @@
   h1,
   h2,
   h3,
-  h4 {
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-display), var(--font-body), sans-serif;
     letter-spacing: -0.01em;
   }
@@ -210,8 +212,7 @@ html[data-theme='light'] .wiki-rendered {
   color: #303a32;
 }
 
-html[data-theme='light'] .wiki-rendered h2,
-html[data-theme='light'] .wiki-rendered h3,
+html[data-theme='light'] .wiki-rendered :is(h1, h2, h3, h4, h5, h6),
 html[data-theme='light'] .surface-flat h2 {
   border-color: rgba(37, 49, 41, 0.14);
   color: #1e2820;
@@ -246,8 +247,7 @@ html[data-theme='dark'] .wiki-shell .wiki-rendered {
   box-shadow: 0 16px 44px -38px rgba(56, 189, 139, 0.52);
 }
 
-html[data-theme='dark'] .wiki-shell .wiki-rendered h2,
-html[data-theme='dark'] .wiki-shell .wiki-rendered h3 {
+html[data-theme='dark'] .wiki-shell .wiki-rendered :is(h1, h2, h3, h4, h5, h6) {
   border-color: rgba(118, 153, 132, 0.2);
   color: #edf5ef;
 }
@@ -603,8 +603,23 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered h2 {
     @apply mt-8 border-b border-white/10 pb-2 text-2xl font-bold text-white first:mt-0;
   }
+  .wiki-rendered h1 {
+    @apply mt-8 border-b border-white/10 pb-3 text-3xl font-bold text-white first:mt-0;
+  }
   .wiki-rendered h3 {
     @apply mt-7 text-xl font-semibold text-white;
+  }
+  .wiki-rendered h4 {
+    @apply mt-6 text-lg font-semibold text-white;
+  }
+  .wiki-rendered h5 {
+    @apply mt-5 text-base font-semibold text-white;
+  }
+  .wiki-rendered h6 {
+    @apply mt-5 text-sm font-semibold text-white;
+  }
+  .wiki-rendered :is(h1, h2, h3, h4, h5, h6) {
+    scroll-margin-top: 6rem;
   }
   .wiki-rendered p,
   .wiki-rendered ul,
@@ -846,6 +861,15 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   }
   .wiki-rendered .wiki-toc li.wiki-toc-level-3 {
     @apply pl-8;
+  }
+  .wiki-rendered .wiki-toc li.wiki-toc-level-4 {
+    @apply pl-12;
+  }
+  .wiki-rendered .wiki-toc li.wiki-toc-level-5 {
+    @apply pl-16;
+  }
+  .wiki-rendered .wiki-toc li.wiki-toc-level-6 {
+    @apply pl-20;
   }
   .wiki-rendered .wiki-toc a {
     @apply flex gap-2 rounded px-1 py-0.5 text-sm text-slate-300 no-underline hover:bg-white/[0.04] hover:text-emerald-200;

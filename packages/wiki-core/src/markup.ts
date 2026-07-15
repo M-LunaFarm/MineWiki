@@ -12,7 +12,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.1';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.2';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -97,9 +97,12 @@ const allowedTags = [
   'ul',
   'ol',
   'li',
+  'h1',
   'h2',
   'h3',
   'h4',
+  'h5',
+  'h6',
   'hr',
   's',
   'u',
@@ -266,11 +269,15 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
       }
     }
 
-    const heading = line.match(/^(={2,4})\s*(.+?)\s*\1$/);
+    const heading = parseWikiHeadingLine(line);
     if (heading) {
-      const level = heading[1].length;
-      const text = heading[2].trim();
-      ast.push({ type: 'heading', level, text, id: makeHeadingId(text), startLine: i + 1 });
+      ast.push({
+        type: 'heading',
+        level: heading.level,
+        text: heading.text,
+        id: makeHeadingId(heading.text),
+        startLine: i + 1
+      });
       continue;
     }
 
@@ -387,6 +394,29 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
     errors,
     blockingErrors
   };
+}
+
+function parseWikiHeadingLine(line: string): { level: number; text: string } | null {
+  const opening = line.match(/^=+/)?.[0] ?? '';
+  const closing = line.match(/=+$/)?.[0] ?? '';
+  if (!opening || opening.length !== closing.length || opening.length > 6) return null;
+
+  const rawText = line.slice(opening.length, -closing.length);
+  const level = opening.length;
+  // thetree's canonical form requires spaces around the title. MineWiki
+  // historically accepted compact level 2-4 headings, so keep only that
+  // established compatibility surface while requiring canonical syntax for
+  // the newly supported levels.
+  if ((level < 2 || level > 4) && !(rawText.startsWith(' ') && rawText.endsWith(' '))) {
+    return null;
+  }
+  // `=# title #=` is the separate folded-heading form in NamuMark. Folding is
+  // not silently downgraded to a normal heading until its section semantics are
+  // implemented.
+  if (rawText.startsWith('#') || rawText.endsWith('#')) return null;
+
+  const text = rawText.trim();
+  return text ? { level, text } : null;
 }
 
 function rejectedDocument(message: string): ParsedDocument {
@@ -1135,9 +1165,12 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
     allowedTags,
     allowedAttributes: {
       a: ['href', 'class', 'rel', 'target', 'title'],
+      h1: ['id'],
       h2: ['id'],
       h3: ['id'],
       h4: ['id'],
+      h5: ['id'],
+      h6: ['id'],
       pre: ['class', 'data-lang'],
       code: ['class'],
       div: ['class', 'data-*', 'style'],
@@ -1235,12 +1268,13 @@ function renderTableOfContents(
   if (headings.length === 0) {
     return '<aside class="wiki-toc-empty">목차에 표시할 제목이 없습니다.</aside>';
   }
-  const counters = [0, 0, 0];
+  const minimumLevel = Math.min(...headings.map((heading) => heading.level));
+  const counters = Array.from({ length: 7 - minimumLevel }, () => 0);
   const items = headings.map((heading) => {
-    const depth = Math.max(0, Math.min(2, heading.level - 2));
+    const depth = Math.max(0, Math.min(counters.length - 1, heading.level - minimumLevel));
     counters[depth] = (counters[depth] ?? 0) + 1;
     for (let index = depth + 1; index < counters.length; index += 1) counters[index] = 0;
-    const number = counters.slice(0, depth + 1).filter(Boolean).join('.');
+    const number = counters.slice(0, depth + 1).join('.');
     return `<li class="wiki-toc-level-${depth + 1}"><a href="#${escapeAttr(heading.id)}"><span>${number}</span>${escapeHtml(heading.text)}</a></li>`;
   }).join('');
   return `<nav class="wiki-toc" aria-label="문서 목차"><details${collapsed ? '' : ' open'}><summary>목차</summary><ol>${items}</ol></details></nav>`;

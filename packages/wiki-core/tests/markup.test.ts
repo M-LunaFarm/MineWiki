@@ -108,13 +108,84 @@ test('limits recursive folding blocks', () => {
 });
 
 test('duplicate heading anchors are blocking markup errors', () => {
-  const parsed = parseMarkup('== Intro ==\n첫 번째\n\n== Intro ==\n두 번째');
+  const parsed = parseMarkup('== Intro ==\n첫 번째\n\n===== Intro =====\n두 번째');
 
   assert.equal(parsed.headings.filter((heading) => heading.anchor === 'Intro').length, 2);
   assert.equal(
     parsed.blockingErrors.some((error) => error.includes('중복 제목 앵커')),
     true,
   );
+});
+
+test('parses all canonical NamuMark heading levels without truncating delimiters', () => {
+  const parsed = parseMarkup([
+    '[목차]',
+    '= 첫째 =',
+    '== 둘째 ==',
+    '=== 셋째 ===',
+    '==== 넷째 ====',
+    '===== 다섯째 =====',
+    '====== 여섯째 ======'
+  ].join('\n'));
+
+  assert.deepEqual(parsed.headings.map((heading) => ({
+    level: heading.level,
+    title: heading.title
+  })), [
+    { level: 1, title: '첫째' },
+    { level: 2, title: '둘째' },
+    { level: 3, title: '셋째' },
+    { level: 4, title: '넷째' },
+    { level: 5, title: '다섯째' },
+    { level: 6, title: '여섯째' }
+  ]);
+
+  const html = renderDocument(parsed.ast);
+  for (const [level, title] of ['첫째', '둘째', '셋째', '넷째', '다섯째', '여섯째'].entries()) {
+    assert.match(html, new RegExp(`<h${level + 1} id="[^"]+">${title}<\\/h${level + 1}>`));
+  }
+  assert.match(html, /wiki-toc-level-1[^]*?<span>1<\/span>첫째/);
+  assert.match(html, /wiki-toc-level-6[^]*?<span>1\.1\.1\.1\.1\.1<\/span>여섯째/);
+  assert.equal(html.includes('<h4 id="-다섯째-">= 다섯째 =</h4>'), false);
+  assert.equal(html.includes('<h4 id="-여섯째-">== 여섯째 ==</h4>'), false);
+});
+
+test('keeps compact level 2-4 headings compatible', () => {
+  const parsed = parseMarkup('==둘째==\n===셋째===\n====넷째====');
+
+  assert.deepEqual(parsed.headings.map((heading) => [heading.level, heading.title]), [
+    [2, '둘째'],
+    [3, '셋째'],
+    [4, '넷째']
+  ]);
+});
+
+test('does not promote malformed or unsupported heading delimiters', () => {
+  const sources = [
+    '== 둘째 ===',
+    '==== 넷째 ===',
+    '===== 다섯째 ====',
+    '===== 다섯째 ======',
+    '======= 일곱째 =======',
+    '=====무공백 다섯째=====',
+    '==# 접힌 제목 #==',
+    '====== ======'
+  ];
+  const parsed = parseMarkup(sources.join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.headings, []);
+  assert.equal(/<h[1-6]\b/.test(html), false);
+  for (const source of sources) assert.equal(html.includes(source), true);
+});
+
+test('numbers TOC entries relative to the shallowest heading without flattening skipped levels', () => {
+  const parsed = parseMarkup('[목차]\n=== 먼저 나온 하위 ===\n== 뒤의 상위 ==\n====== 건너뛴 깊이 ======');
+  const html = renderDocument(parsed.ast);
+
+  assert.match(html, /wiki-toc-level-2[^]*?<span>0\.1<\/span>먼저 나온 하위/);
+  assert.match(html, /wiki-toc-level-1[^]*?<span>1<\/span>뒤의 상위/);
+  assert.match(html, /wiki-toc-level-5[^]*?<span>1\.0\.0\.0\.1<\/span>건너뛴 깊이/);
 });
 
 test('parses standalone include macros and bounded parameters', () => {
@@ -149,7 +220,7 @@ test('rejects malformed, duplicate, and excessive include parameters', () => {
 });
 
 test('interpolates include parameters only after parsing and prefixes heading ids', () => {
-  const template = parseMarkup('== @제목=기본@ ==\n[[가이드/@문서@|@표시@]]\n{{{\n@제목@ [[비밀]]\n}}}');
+  const template = parseMarkup('===== @제목=기본@ =====\n[[가이드/@문서@|@표시@]]\n{{{\n@제목@ [[비밀]]\n}}}');
   const expanded = applyIncludeParametersToAst(template.ast, {
     제목: '<script>안전</script>',
     문서: '시작',
@@ -158,7 +229,10 @@ test('interpolates include parameters only after parsing and prefixes heading id
   const html = renderDocument(expanded);
 
   assert.equal(expanded[0]?.type, 'heading');
-  if (expanded[0]?.type === 'heading') assert.match(expanded[0].id, /^inc-2-/);
+  if (expanded[0]?.type === 'heading') {
+    assert.equal(expanded[0].level, 5);
+    assert.match(expanded[0].id, /^inc-2-/);
+  }
   assert.equal(html.includes('<script>'), false);
   assert.match(html, /&lt;script&gt;안전&lt;\/script&gt;/);
   assert.match(html, /'''&lt;b&gt;주입 불가&lt;\/b&gt;'''/);
@@ -201,7 +275,7 @@ test('parent table of contents excludes transcluded headings', () => {
     target: '틀:안내',
     params: {},
     state: 'resolved',
-    children: [{ type: 'heading', level: 2, text: '포함 제목', id: 'inc-1-포함-제목' }]
+    children: [{ type: 'heading', level: 6, text: '포함 제목', id: 'inc-1-포함-제목' }]
   });
   const html = renderDocument(ast);
   const toc = html.slice(html.indexOf('<nav class="wiki-toc"'), html.indexOf('</nav>') + 6);
