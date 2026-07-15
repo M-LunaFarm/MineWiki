@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation';
 import type { MinecraftIdentity, OAuthProvider } from '@minewiki/schemas';
 import { SessionList } from '../../components/account/session-list';
 import { MfaSecurityPanel } from '../../components/account/mfa-security-panel';
+import { WikiProfileMergePanel } from '../../components/account/wiki-profile-merge-panel';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
 import { useAuth } from '../../components/providers/auth-context';
 import { SiteHeader } from '../../components/layout/site-header';
@@ -1012,6 +1013,8 @@ export function AccountClientPage() {
             onMessageChange={setMergeRequestMessage}
             onCreateRequest={() => void handleCreateMergeRequest()}
           />
+
+          <WikiProfileMergePanel />
 
           <MfaSecurityPanel />
 

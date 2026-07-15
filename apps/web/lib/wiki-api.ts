@@ -390,6 +390,115 @@ export interface WikiContributionResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiProfileMergeCounts {
+  readonly historical: {
+    readonly revisions: number;
+    readonly recentChanges: number;
+    readonly discussionThreads: number;
+    readonly discussionComments: number;
+    readonly editRequests: number;
+  };
+  readonly current: {
+    readonly ownedPages: number;
+    readonly ownedSpaces: number;
+    readonly pendingUserDocuments: number;
+    readonly watches: number;
+    readonly discussionSubscriptions: number;
+    readonly pollVotes: number;
+    readonly notifications: number;
+    readonly pushSubscriptions: number;
+    readonly subwikiRoles: number;
+    readonly aclMemberships: number;
+    readonly directAclRules: number;
+    readonly wikiGroups: number;
+  };
+}
+
+export interface WikiProfileMergePreview {
+  readonly target: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string };
+  readonly candidates: ReadonlyArray<{
+    readonly profile: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string };
+    readonly counts: WikiProfileMergeCounts;
+    readonly requiresBlockedStatus: boolean;
+  }>;
+  readonly policy: {
+    readonly historicalActorsPreserved: true;
+    readonly currentStateTransferred: true;
+    readonly userDocumentsOverwritten: false;
+    readonly adminApprovalRequired: true;
+  };
+}
+
+export interface WikiProfileMergeRequestResponse {
+  readonly id: string;
+  readonly sourceProfileId: string;
+  readonly targetProfileId: string;
+  readonly status: string;
+  readonly requestedAt: string;
+}
+
+export interface WikiProfileMergeAdminRequest extends WikiProfileMergeRequestResponse {
+  readonly reason: string | null;
+  readonly preview: {
+    readonly profile: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string };
+    readonly counts: WikiProfileMergeCounts;
+    readonly requiresBlockedStatus: boolean;
+  };
+  readonly source: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string } | null;
+  readonly target: { readonly id: string; readonly username: string; readonly displayName: string; readonly status: string } | null;
+}
+
+export function fetchWikiProfileMergePreview(): Promise<WikiProfileMergePreview> {
+  return readWikiBrowser<WikiProfileMergePreview>('/v1/wiki/profile-merges/preview');
+}
+
+export async function requestWikiProfileMerge(input: {
+  readonly sourceProfileId: string;
+  readonly sourceUsername: string;
+  readonly targetUsername: string;
+  readonly reason?: string;
+}): Promise<WikiProfileMergeRequestResponse> {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/profile-merges`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+    body: JSON.stringify(input)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.message ?? '위키 프로필 병합 요청을 접수하지 못했습니다.');
+  return body as WikiProfileMergeRequestResponse;
+}
+
+export function fetchWikiProfileMergeRequests(status = 'pending'): Promise<WikiProfileMergeAdminRequest[]> {
+  return fetchWikiAdminJson(`/profile-merges?status=${encodeURIComponent(status)}`);
+}
+
+export function approveWikiProfileMerge(input: {
+  readonly requestId: string;
+  readonly sourceUsername: string;
+  readonly targetUsername: string;
+  readonly reason: string;
+}): Promise<WikiProfileMergeRequestResponse> {
+  return fetchWikiAdminJson(`/profile-merges/${encodeURIComponent(input.requestId)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({
+      sourceUsername: input.sourceUsername,
+      targetUsername: input.targetUsername,
+      reason: input.reason
+    })
+  });
+}
+
+export function rejectWikiProfileMerge(input: {
+  readonly requestId: string;
+  readonly reason: string;
+}): Promise<WikiProfileMergeRequestResponse> {
+  return fetchWikiAdminJson(`/profile-merges/${encodeURIComponent(input.requestId)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: input.reason })
+  });
+}
+
 export interface WikiDeletedPageSummary {
   readonly id: string;
   readonly namespace: string;

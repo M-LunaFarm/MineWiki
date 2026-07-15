@@ -11,6 +11,7 @@ import {
   type WikiUserBlockEventSummary
 } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
+import { WikiProfileMergeAdmin } from './wiki-profile-merge-admin';
 
 export function WikiUserAdmin() {
   const { account, loading: authLoading } = useAuth();
@@ -59,6 +60,7 @@ export function WikiUserAdmin() {
     <header className="border border-white/10 bg-white/[0.03] p-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="flex items-center gap-2 text-sm font-semibold text-emerald-200"><ShieldCheck className="size-4" /> Wiki Admin</p><h1 className="mt-2 text-2xl font-semibold text-white">사용자 기여 차단</h1><p className="mt-2 text-sm text-slate-400">계정 자체가 아니라 위키 편집·토론·문서 생성 권한만 차단합니다.</p></div><nav className="flex flex-wrap gap-2"><Link href="/admin/wiki" className="chip chip-muted">최근 변경</Link><Link href="/admin/wiki/pages" className="chip chip-muted">문서</Link><Link href="/admin/wiki/acl" className="chip chip-muted">ACL</Link><span className="chip chip-accent">사용자 차단</span><Link href="/admin/wiki/batch-rollback" className="chip chip-muted">일괄 복구</Link></nav></div>
     </header>
+    <WikiProfileMergeAdmin />
     {error ? <p role="alert" className="flex gap-2 border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100"><AlertTriangle className="size-4 flex-none" /> {error}</p> : null}
     <form onSubmit={search} className="flex gap-2"><input value={query} onChange={(event) => setQuery(event.target.value)} maxLength={64} placeholder="사용자명 또는 표시 이름" className="min-w-0 flex-1 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" /><button className="btn-secondary min-h-11">검색</button></form>
     <section className="grid gap-3">
