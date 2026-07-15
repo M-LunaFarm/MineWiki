@@ -1346,7 +1346,7 @@ export class WikiEditService {
       parsed.links,
       parsed.categories,
       parsed.includes,
-      { contentSize: revision.contentSize }
+      { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
     );
     await this.notifications?.notifyWatchedRevision(tx as Prisma.TransactionClient, {
       pageId: input.pageId,

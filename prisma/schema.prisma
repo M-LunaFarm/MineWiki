@@ -1209,6 +1209,15 @@ model WikiPageLink {
   @@map("page_links")
 }
 
+model WikiSearchDocument {
+  pageId       BigInt   @id @map("page_id") @db.UnsignedBigInt
+  revisionId   BigInt   @unique @map("revision_id") @db.UnsignedBigInt
+  searchVector String   @map("search_vector") @db.LongText
+  updatedAt    DateTime @map("updated_at") @db.DateTime(3)
+
+  @@map("wiki_search_documents")
+}
+
 model WikiSpecialSnapshot {
   type            String   @db.VarChar(32)
   namespaceCode   String   @default("") @map("namespace_code") @db.VarChar(32)

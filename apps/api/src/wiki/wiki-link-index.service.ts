@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { parseLinkTarget, slugifyTitle } from '@minewiki/wiki-core';
+import { buildWikiSearchVector, parseLinkTarget, slugifyTitle } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
 
-type WikiLinkStore = Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPageLink'>;
+type WikiLinkStore = Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPageLink' | 'wikiSearchDocument'>;
 
 @Injectable()
 export class WikiLinkIndexService {
@@ -13,11 +13,11 @@ export class WikiLinkIndexService {
     links: readonly string[],
     categories: readonly string[] = [],
     includes: readonly string[] = [],
-    metrics?: { readonly contentSize: number }
+    metrics?: { readonly contentSize: number; readonly contentRaw?: string }
   ): Promise<void> {
     const page = await store.wikiPage.findUnique({
       where: { id: pageId },
-      select: { namespaceId: true, localPath: true }
+      select: { namespaceId: true, localPath: true, slug: true, title: true, displayTitle: true }
     });
     if (!page) return;
     const namespace = await store.wikiNamespace.findUnique({
@@ -77,6 +77,29 @@ export class WikiLinkIndexService {
           currentCategoryCount: [...normalized.values()].filter((target) => target.linkType === 'category').length
         }
       });
+      if (metrics.contentRaw !== undefined) {
+        const searchVector = buildWikiSearchVector([
+          page.title,
+          page.displayTitle,
+          page.slug,
+          page.localPath,
+          metrics.contentRaw
+        ]);
+        await store.wikiSearchDocument.upsert({
+          where: { pageId },
+          create: {
+            pageId,
+            revisionId,
+            searchVector,
+            updatedAt: new Date()
+          },
+          update: {
+            revisionId,
+            searchVector,
+            updatedAt: new Date()
+          }
+        });
+      }
     }
   }
 }

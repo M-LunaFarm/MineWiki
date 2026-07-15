@@ -124,7 +124,9 @@ test('wiki search never uses matching historical revisions as current-document c
   const result = await new WikiReadService(prisma, permissions).search({ q: '검색어' });
 
   assert.match(rawSql, /r\.id = p\.current_revision_id/);
-  assert.match(rawSql, /LOCATE\(\?, r\.content_raw\)/);
+  assert.match(rawSql, /sd\.revision_id = p\.current_revision_id/);
+  assert.match(rawSql, /MATCH\(sd\.search_vector\) AGAINST \(\? IN BOOLEAN MODE\)/);
+  assert.doesNotMatch(rawSql, /LOCATE|content_raw/);
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0]?.pageId, '7');
 });

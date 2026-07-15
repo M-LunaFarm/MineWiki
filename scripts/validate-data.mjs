@@ -97,6 +97,22 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'public WikiPage has current search document',
+    `
+      SELECT p.id
+      FROM pages p
+      JOIN page_revisions r ON r.id = p.current_revision_id
+      LEFT JOIN wiki_search_documents sd
+        ON sd.page_id = p.id
+       AND sd.revision_id = p.current_revision_id
+      WHERE p.status IN ('normal', 'active', 'published')
+        AND r.visibility = 'public'
+        AND sd.page_id IS NULL
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'Server.wikiSpaceId points to WikiSpace',
     `
       SELECT s.id

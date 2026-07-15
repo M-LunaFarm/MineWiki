@@ -217,7 +217,7 @@ export class WikiModerationService {
       parsed.links,
       parsed.categories,
       parsed.includes,
-      { contentSize: revision.contentSize }
+      { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
     );
     await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
     const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });

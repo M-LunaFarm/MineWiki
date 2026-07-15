@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import type { WikiPage } from '@prisma/client';
 import {
   type AstNode,
+  buildWikiSearchBooleanQuery,
   parseLinkTarget,
   parseMarkup,
   renderDocument,
@@ -1283,10 +1284,8 @@ export class WikiReadService {
     }
 
     const scanLimit = Math.max(limit * 4, 50);
-    const slugQuery = slugifyTitle(query);
     const currentMatchIds = await findCurrentSearchMatchIds(this.prisma, {
       query,
-      slugQuery,
       namespaceId: namespace?.id ?? null,
       cursor,
       limit: scanLimit + 1
@@ -1474,7 +1473,8 @@ export class WikiReadService {
       revision.id,
       parsed.links,
       parsed.categories,
-      parsed.includes
+      parsed.includes,
+      { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
     ).catch(() => undefined);
     if (parsed.redirectTarget && options.followRedirects) {
       const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
@@ -1839,28 +1839,19 @@ async function findCurrentSearchMatchIds(
   prisma: PrismaService,
   input: {
     readonly query: string;
-    readonly slugQuery: string;
     readonly namespaceId: number | null;
     readonly cursor: { readonly updatedAt: Date; readonly id: bigint } | null;
     readonly limit: number;
   }
 ): Promise<bigint[]> {
+  const booleanQuery = buildWikiSearchBooleanQuery(input.query);
+  if (!booleanQuery) return [];
   const where = [
     "p.status IN ('normal', 'active', 'published')",
-    "r.visibility = 'public'"
+    "r.visibility = 'public'",
+    'MATCH(sd.search_vector) AGAINST (? IN BOOLEAN MODE)'
   ];
-  const values: unknown[] = [];
-  const matches = [
-    'LOCATE(?, p.title) > 0',
-    'LOCATE(?, p.display_title) > 0',
-    'LOCATE(?, r.content_raw) > 0'
-  ];
-  values.push(input.query, input.query, input.query);
-  if (input.slugQuery) {
-    matches.push('LOCATE(?, p.slug) > 0', 'LOCATE(?, p.local_path) > 0');
-    values.push(input.slugQuery, input.slugQuery);
-  }
-  where.push(`(${matches.join(' OR ')})`);
+  const values: unknown[] = [booleanQuery];
   if (input.namespaceId !== null) {
     where.push('p.namespace_id = ?');
     values.push(input.namespaceId);
@@ -1874,6 +1865,8 @@ async function findCurrentSearchMatchIds(
     `
       SELECT p.id
       FROM pages AS p
+      INNER JOIN wiki_search_documents AS sd
+        ON sd.page_id = p.id AND sd.revision_id = p.current_revision_id
       INNER JOIN page_revisions AS r ON r.id = p.current_revision_id
       WHERE ${where.join('\n        AND ')}
       ORDER BY p.updated_at DESC, p.id DESC

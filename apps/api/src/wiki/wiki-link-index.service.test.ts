@@ -6,9 +6,12 @@ import { WikiLinkIndexService } from './wiki-link-index.service';
 function createStore(namespaceCode: string, localPath: string) {
   const calls: Array<Record<string, unknown>> = [];
   const metricUpdates: Array<Record<string, unknown>> = [];
+  const searchUpdates: Array<Record<string, unknown>> = [];
   const store = {
     wikiPage: {
-      async findUnique() { return { namespaceId: 1, localPath }; },
+      async findUnique() {
+        return { namespaceId: 1, localPath, slug: localPath, title: '서버 안내', displayTitle: '서버 안내' };
+      },
       async update(input: { data: Record<string, unknown> }) {
         metricUpdates.push(input.data);
         return { id: 10n };
@@ -23,9 +26,15 @@ function createStore(namespaceCode: string, localPath: string) {
         calls.push(...input.data);
         return { count: input.data.length };
       }
+    },
+    wikiSearchDocument: {
+      async upsert(input: { create: Record<string, unknown> }) {
+        searchUpdates.push(input.create);
+        return input.create;
+      }
     }
-  } as unknown as Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPageLink'>;
-  return { store, calls, metricUpdates };
+  } as unknown as Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPageLink' | 'wikiSearchDocument'>;
+  return { store, calls, metricUpdates, searchUpdates };
 }
 
 test('link index normalizes and deduplicates generic wiki targets', async () => {
@@ -54,6 +63,20 @@ test('link index atomically materializes current source metrics', async () => {
   );
 
   assert.deepEqual(metricUpdates, [{ currentContentSize: 4096, currentCategoryCount: 2 }]);
+});
+
+test('link index replaces the current Korean search vector with its revision', async () => {
+  const { store, searchUpdates } = createStore('main', '서버/안내');
+  await new WikiLinkIndexService().replaceForRevision(
+    store, 10n, 20n, [], [], [],
+    { contentSize: 12, contentRaw: '마인크래프트 서버 안내' }
+  );
+
+  assert.equal(searchUpdates.length, 1);
+  assert.equal(searchUpdates[0]?.pageId, 10n);
+  assert.equal(searchUpdates[0]?.revisionId, 20n);
+  assert.equal(typeof searchUpdates[0]?.searchVector, 'string');
+  assert.equal((searchUpdates[0]?.searchVector as string).includes('마인크래프트'), false);
 });
 
 test('link index skips unresolved template placeholders', async () => {

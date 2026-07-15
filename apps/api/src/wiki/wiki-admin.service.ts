@@ -679,7 +679,7 @@ export class WikiAdminService {
         parsed.links,
         parsed.categories,
         parsed.includes,
-        { contentSize: revision.contentSize }
+        { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
       );
       await tx.wikiPage.update({
         where: { id: page.id },
