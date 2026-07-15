@@ -17,7 +17,6 @@ import {
 } from '../../../../lib/oauth-link-intent.mjs';
 import { useAuth } from '../../../../components/providers/auth-context';
 import {
-  CallbackCard,
   CallbackShell,
 } from '../../../../components/auth/callback-shell';
 
@@ -71,8 +70,8 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
     const errorParam = searchParams.get('error');
     if (errorParam) {
       setStatus('error');
-      setMessage('OAuth 인증이 취소되었거나 공급자에서 오류 응답을 반환했습니다.');
-      notifyOAuthLinkError(normalizedProvider, 'OAuth 인증이 취소되었거나 실패했습니다.');
+      setMessage('간편 로그인이 취소되었거나 외부 로그인 서비스에서 오류가 발생했습니다.');
+      notifyOAuthLinkError(normalizedProvider, '간편 로그인이 취소되었거나 실패했습니다.');
       return;
     }
 
@@ -80,8 +79,8 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
     const state = callbackState;
     if (!code || !state) {
       setStatus('error');
-      setMessage('OAuth 응답에 필요한 code 또는 state 값이 없습니다.');
-      notifyOAuthLinkError(normalizedProvider, 'OAuth 응답에 필요한 값이 없습니다.');
+      setMessage('로그인 응답에 필요한 정보가 없어 안전하게 중단했습니다.');
+      notifyOAuthLinkError(normalizedProvider, '로그인 응답에 필요한 정보가 없습니다.');
       return;
     }
 
@@ -158,27 +157,27 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
   const progressWidth = status === 'pending' ? '66%' : '100%';
   const title =
     status === 'pending'
-      ? `${providerLabel} 인증 응답을 처리하고 있습니다.`
+      ? `${providerLabel} 로그인을 확인하고 있습니다.`
       : status === 'success'
         ? flowMode === 'link'
           ? '계정 연동이 완료되었습니다.'
           : '로그인이 완료되었습니다.'
-        : '인증 처리를 완료하지 못했습니다.';
+        : '로그인을 완료하지 못했습니다.';
   const subtitle =
     status === 'pending'
-      ? '로그인 서비스에서 받은 인증 응답과 요청 안전성을 확인하고 있습니다. 창을 닫지 말아 주세요.'
+      ? '외부 로그인에서 돌아왔습니다. MineWiki 계정 연결을 마무리하고 있습니다.'
       : message;
   const detailTitle =
     status === 'pending'
-      ? '콜백 토큰 검증 중'
+      ? `${providerLabel}에서 돌아오는 중입니다.`
       : status === 'success'
         ? flowMode === 'link'
           ? '계정 연결이 확정되었습니다.'
           : '세션 발급이 완료되었습니다.'
-        : 'OAuth 처리 중 오류가 발생했습니다.';
+        : '간편 로그인을 완료하지 못했습니다.';
   const detailBody =
     status === 'pending'
-      ? '로그인 요청이 이 브라우저에서 시작되었는지 안전하게 확인하고 있습니다.'
+      ? 'MineWiki에서 시작한 요청인지 확인하고 안전한 로그인 세션을 준비합니다.'
       : status === 'success'
         ? flowMode === 'link'
           ? linkCompletionTarget === 'opener'
@@ -187,7 +186,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           : '잠시 후 계정 페이지로 자동 이동합니다.'
         : flowMode === 'link'
           ? '계정 페이지로 돌아가 로그인 수단 연결을 다시 시작해 주세요.'
-          : '로그인 화면으로 돌아가 OAuth 인증을 다시 시작해 주세요.';
+          : '로그인 화면으로 돌아가 간편 로그인을 다시 시작해 주세요.';
   const actionLabel =
     status === 'pending'
       ? '처리 중'
@@ -198,88 +197,120 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           : '계정 페이지로 이동';
   return (
     <CallbackShell
-      eyebrow="계정 인증"
+      eyebrow={flowMode === 'link' ? '계정 연결' : '간편 로그인'}
       title={title}
       subtitle={subtitle}
       status={shellStatus}
     >
-      <div role={status === 'error' ? 'alert' : 'status'} aria-live={status === 'error' ? 'assertive' : 'polite'}>
-      <CallbackCard status={shellStatus} progressWidth={progressWidth} footerLabel="MineWiki OAuth">
-        <div className="mb-5 flex flex-col items-start gap-3.5 min-[360px]:flex-row">
-          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/10">
-            {status === 'pending' ? (
-              <Loader2 className={`h-6 w-6 animate-spin ${statusTone}`} />
-            ) : status === 'success' ? (
-              <CheckCircle2 className={`h-6 w-6 ${statusTone}`} />
-            ) : (
-              <XCircle className={`h-6 w-6 ${statusTone}`} />
-            )}
-          </div>
-          <div className="min-w-0 text-left">
-            <p className="text-xs font-semibold text-slate-500">
-              {providerLabel} · {flowMode === 'link' ? '계정 연동' : '간편 로그인'}
+      <div
+        role={status === 'error' ? 'alert' : 'status'}
+        aria-live={status === 'error' ? 'assertive' : 'polite'}
+        className="space-y-5"
+      >
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-4 py-3">
+          <div className="min-w-0">
+            <p
+              className={`truncate text-xs font-black tracking-[0.02em] ${
+                normalizedProvider === 'discord' ? 'text-[#7c87ff]' : 'text-[#18d86b]'
+              }`}
+            >
+              {providerLabel}
             </p>
-            <h2 className="mt-1.5 text-lg font-bold tracking-tight text-white sm:text-xl">
-              {detailTitle}
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-slate-400">{detailBody}</p>
+            <p className="mt-0.5 text-[10px] font-medium text-slate-500">
+              {flowMode === 'link' ? '로그인 수단 연결' : '간편 로그인'}
+            </p>
+          </div>
+          <span
+            className={`h-2 w-2 flex-shrink-0 rounded-full ${
+              status === 'error'
+                ? 'bg-rose-400'
+                : status === 'success'
+                  ? 'bg-[#35e5b7]'
+                  : 'animate-pulse bg-[#35e5b7]'
+            }`}
+            aria-hidden
+          />
+        </div>
+
+        <div className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.025]">
+          <div className="h-1 w-full bg-white/[0.06]">
+            <div
+              className={`h-full transition-all duration-300 ${
+                status === 'error' ? 'bg-rose-400' : 'bg-[#35e5b7]'
+              }`}
+              style={{ width: progressWidth }}
+            />
+          </div>
+          <div className="flex items-start gap-3.5 p-4 sm:p-5">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/10">
+              {status === 'pending' ? (
+                <Loader2 className={`h-5 w-5 animate-spin ${statusTone}`} aria-hidden />
+              ) : status === 'success' ? (
+                <CheckCircle2 className={`h-5 w-5 ${statusTone}`} aria-hidden />
+              ) : (
+                <XCircle className={`h-5 w-5 ${statusTone}`} aria-hidden />
+              )}
+            </div>
+            <div className="min-w-0 text-left">
+              <h2 className="text-base font-bold tracking-tight text-white sm:text-lg">
+                {detailTitle}
+              </h2>
+              <p className="mt-1.5 text-xs leading-5 text-slate-400 sm:text-sm sm:leading-6">
+                {detailBody}
+              </p>
+            </div>
           </div>
         </div>
 
-        <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/10 px-3.5 py-3 text-xs">
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/10 px-3.5 py-3 text-xs">
           <span className="flex min-w-0 items-center gap-2 text-slate-400">
             <ShieldCheck className="h-4 w-4 flex-shrink-0 text-[#35e5b7]" aria-hidden />
-            요청 무결성 보호
+            MineWiki 보안 연결
           </span>
           <span className={`flex-shrink-0 font-semibold ${statusTone}`}>
             {status === 'pending' ? '확인 중' : status === 'success' ? '확인 완료' : '다시 시도 필요'}
           </span>
         </div>
 
-        {status === 'error' && message ? (
-          <p className="mb-5 rounded-lg border border-rose-400/25 bg-rose-500/10 px-3.5 py-3 text-xs leading-5 text-rose-300">
-            {message}
-          </p>
-        ) : null}
-
-        <div className="space-y-3">
-          <button
-            type="button"
-            disabled={status === 'pending'}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#35e5b7] px-6 py-3.5 text-sm font-bold text-[#07100e] transition hover:bg-[#5bedc8] disabled:cursor-not-allowed disabled:border disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-slate-500"
-            onClick={() => {
-              if (flowMode === 'link' && status === 'success') {
-                if (linkCompletionTarget === 'redirect') {
-                  router.replace('/me');
-                  return;
-                }
+        <button
+          type="button"
+          disabled={status === 'pending'}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#35e5b7] px-6 py-3.5 text-sm font-bold text-[#07100e] transition hover:bg-[#5bedc8] disabled:cursor-not-allowed disabled:border disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-slate-500"
+          onClick={() => {
+            if (flowMode === 'link' && status === 'success') {
+              if (linkCompletionTarget === 'redirect') {
+                router.replace('/me');
+                return;
+              }
+              closeOAuthWindowOrNavigate(window, (path) => router.replace(path));
+              return;
+            }
+            if (status === 'error') {
+              if (flowMode === 'link') {
                 closeOAuthWindowOrNavigate(window, (path) => router.replace(path));
                 return;
               }
-              if (status === 'error') {
-                if (flowMode === 'link') {
-                  closeOAuthWindowOrNavigate(window, (path) => router.replace(path));
-                  return;
-                }
-                router.replace('/login');
-                return;
-              }
-              router.replace('/me');
-            }}
-          >
-            {status === 'pending' ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : status === 'error' ? (
-              <RotateCcw className="h-4 w-4" />
-            ) : flowMode === 'link' ? (
-              <ExternalLink className="h-4 w-4" />
-            ) : (
-              <ShieldCheck className="h-4 w-4" />
-            )}
-            <span>{actionLabel}</span>
-          </button>
-        </div>
-      </CallbackCard>
+              router.replace('/login');
+              return;
+            }
+            router.replace('/me');
+          }}
+        >
+          {status === 'pending' ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : status === 'error' ? (
+            <RotateCcw className="h-4 w-4" aria-hidden />
+          ) : flowMode === 'link' ? (
+            <ExternalLink className="h-4 w-4" aria-hidden />
+          ) : (
+            <ShieldCheck className="h-4 w-4" aria-hidden />
+          )}
+          <span>{actionLabel}</span>
+        </button>
+
+        <p className="text-center text-[11px] leading-5 text-slate-500">
+          인증 결과만 확인하며 외부 계정 비밀번호는 MineWiki에 저장되지 않습니다.
+        </p>
       </div>
     </CallbackShell>
   );

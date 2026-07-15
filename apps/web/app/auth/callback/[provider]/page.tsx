@@ -2,7 +2,6 @@ import { Suspense, use } from 'react';
 import { OAuthCallbackClient } from './callback-client';
 import { createPageMetadata } from '../../../../lib/metadata';
 import {
-  CallbackCard,
   CallbackShell,
 } from '../../../../components/auth/callback-shell';
 
@@ -38,15 +37,20 @@ function CallbackFallback() {
       subtitle="콜백 파라미터를 읽고 세션 처리를 준비하는 중입니다."
       status="pending"
     >
-      <CallbackCard status="pending" progressWidth="66%" footerLabel="MineWiki OAuth">
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-[#6b7280]">
-          간편 로그인
-        </p>
-        <p className="mt-3 text-lg font-semibold text-white">계정 인증 응답을 확인하고 있습니다.</p>
-        <p className="mt-2 text-sm leading-6 text-[#a9b0ba]">
-          잠시 후 인증 결과 화면으로 전환됩니다.
-        </p>
-      </CallbackCard>
+      <div className="space-y-4">
+        <div className="h-1 overflow-hidden rounded-full bg-white/[0.06]">
+          <div className="h-full w-2/3 animate-pulse bg-[#35e5b7]" />
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-4 py-4">
+          <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-[#35e5b7]" aria-hidden />
+          <div>
+            <p className="text-sm font-semibold text-white">간편 로그인 확인 중</p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              잠시 후 인증 결과 화면으로 이어집니다.
+            </p>
+          </div>
+        </div>
+      </div>
     </CallbackShell>
   );
 }

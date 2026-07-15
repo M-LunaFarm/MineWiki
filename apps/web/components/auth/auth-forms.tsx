@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, Eye, EyeOff, Loader2, MessageCircle, Minus } from 'lucide-react';
+import { Check, Eye, EyeOff, Loader2, Minus } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAuth } from '../providers/auth-context';
 import {
@@ -304,37 +304,24 @@ export function AuthForms() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={() => void handleOAuth('discord')}
-          className="flex items-center justify-center gap-2 rounded-lg bg-[#5865F2] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#4752c4] disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={loading || oauthPendingProvider !== null || !oauthAvailability.discord}
-        >
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-white/20">
-            {oauthPendingProvider === 'discord' ? (
-              <Loader2 className="h-4 w-4 animate-spin text-white" aria-hidden />
-            ) : (
-              <MessageCircle className="h-4 w-4 text-white" aria-hidden />
-            )}
-          </span>
-          {oauthPendingProvider === 'discord' ? '이동 중…' : 'Discord'}
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleOAuth('naver')}
-          className="flex items-center justify-center gap-2 rounded-lg bg-[#03C75A] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#02b350] disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={loading || oauthPendingProvider !== null || !oauthAvailability.naver}
-        >
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded bg-white text-sm font-extrabold text-[#03C75A]">
-            {oauthPendingProvider === 'naver' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              'N'
-            )}
-          </span>
-          {oauthPendingProvider === 'naver' ? '이동 중…' : 'NAVER'}
-        </button>
+      <div>
+        <p className="mb-2 text-xs font-semibold text-slate-400">간편 로그인</p>
+        <div className="grid grid-cols-2 gap-3">
+          <OAuthProviderButton
+            provider="discord"
+            label="Discord"
+            pending={oauthPendingProvider === 'discord'}
+            disabled={loading || oauthPendingProvider !== null || !oauthAvailability.discord}
+            onClick={() => void handleOAuth('discord')}
+          />
+          <OAuthProviderButton
+            provider="naver"
+            label="NAVER"
+            pending={oauthPendingProvider === 'naver'}
+            disabled={loading || oauthPendingProvider !== null || !oauthAvailability.naver}
+            onClick={() => void handleOAuth('naver')}
+          />
+        </div>
       </div>
 
       {oauthPendingProvider ? (
@@ -671,5 +658,48 @@ function PasswordRequirement(props: { met: boolean; children: ReactNode }) {
       </span>
       {children}
     </li>
+  );
+}
+
+function OAuthProviderButton({
+  provider,
+  label,
+  pending,
+  disabled,
+  onClick,
+}: {
+  readonly provider: OAuthProvider;
+  readonly label: string;
+  readonly pending: boolean;
+  readonly disabled: boolean;
+  readonly onClick: () => void;
+}) {
+  const accent = provider === 'discord' ? 'text-[#7c87ff]' : 'text-[#18d86b]';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="auth-provider-button flex min-h-14 items-center justify-between gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-3.5 py-3 text-left transition hover:border-[#35e5b7]/40 hover:bg-white/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#35e5b7]/35 disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={disabled}
+      aria-label={`${label}로 ${pending ? '이동 중' : '간편 로그인'}`}
+    >
+      <span className="min-w-0">
+        <span className={`block truncate text-xs font-black tracking-[0.02em] ${accent}`}>
+          {label}
+        </span>
+        <span className="mt-0.5 block text-[10px] font-medium text-slate-500">
+          {pending ? '이동 중' : '계정으로 계속'}
+        </span>
+      </span>
+      {pending ? (
+        <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[#35e5b7]" aria-hidden />
+      ) : (
+        <span
+          className={`h-2 w-2 flex-shrink-0 rounded-full ${provider === 'discord' ? 'bg-[#7c87ff]' : 'bg-[#18d86b]'}`}
+          aria-hidden
+        />
+      )}
+    </button>
   );
 }

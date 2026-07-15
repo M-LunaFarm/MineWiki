@@ -315,6 +315,17 @@ html[data-theme='light'] .auth-card textarea::placeholder {
   color: #818b83;
 }
 
+html[data-theme='light'] .auth-provider-button,
+html[data-theme='light'] .auth-card [class*='bg-[#0d1416]'] {
+  border-color: rgba(37, 49, 41, 0.16);
+  background: #f7f9f6;
+}
+
+html[data-theme='light'] .auth-provider-button:hover {
+  border-color: rgba(20, 199, 148, 0.42);
+  background: #f0f6f1;
+}
+
 html[data-theme='light'] .auth-card [class*='bg-[#09100f]'] {
   background: #ffffff;
 }
