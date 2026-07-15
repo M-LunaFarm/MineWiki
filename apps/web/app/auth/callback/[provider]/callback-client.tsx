@@ -191,7 +191,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
     >
       <div role={status === 'error' ? 'alert' : 'status'} aria-live={status === 'error' ? 'assertive' : 'polite'}>
       <CallbackCard status={shellStatus} progressWidth={progressWidth} footerLabel="MineWiki OAuth">
-        <div className="mb-5 flex items-start gap-3.5">
+        <div className="mb-5 flex flex-col items-start gap-3.5 min-[360px]:flex-row">
           <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/10">
             {status === 'pending' ? (
               <Loader2 className={`h-6 w-6 animate-spin ${statusTone}`} />

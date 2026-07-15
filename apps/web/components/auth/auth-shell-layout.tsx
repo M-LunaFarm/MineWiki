@@ -32,12 +32,12 @@ export function AuthShellLayout({ title, description, children }: AuthShellLayou
             <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#35e5b7]/30 bg-[#35e5b7]/10 text-[#35e5b7]">
               <BookOpenText className="h-5 w-5" />
             </span>
-            <span className="text-lg font-black tracking-[-.03em]">MineWiki<span className="text-[#35e5b7]">.kr</span></span>
+            <span className="text-base font-black tracking-[-.03em] sm:text-lg">MineWiki<span className="text-[#35e5b7]">.kr</span></span>
           </Link>
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <Link href="/" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-xs font-semibold text-slate-300 backdrop-blur-md transition hover:border-[#35e5b7]/30 hover:text-white">
-              <ArrowLeft className="h-4 w-4" /> 홈으로
+              <ArrowLeft className="h-4 w-4" /> <span className="max-[340px]:sr-only">홈으로</span>
             </Link>
           </div>
         </header>
