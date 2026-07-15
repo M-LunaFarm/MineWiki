@@ -6,6 +6,7 @@ import { parseMarkup } from '@minewiki/wiki-core';
 import {
   astContainsFile,
   categoryDocumentReferencesSelf,
+  isReservedWikiToolPath,
   replaceSectionByAnchor,
   sectionByAnchor,
   WikiEditService,
@@ -27,6 +28,17 @@ test('category documents cannot list themselves as a parent', () => {
   assert.equal(categoryDocumentReferencesSelf('category', '게임 플레이/몹', ['게임_플레이/몹']), true);
   assert.equal(categoryDocumentReferencesSelf('category', '게임 플레이/몹', ['게임 플레이']), false);
   assert.equal(categoryDocumentReferencesSelf('main', '게임 플레이/몹', ['게임 플레이/몹']), false);
+});
+
+test('explicit tool routes are reserved without rejecting similarly named documents', () => {
+  for (const namespace of ['main', 'mod', 'guide', 'category', 'file']) {
+    assert.equal(isReservedWikiToolPath(namespace, '_tools/edit/문서'), true);
+    assert.equal(isReservedWikiToolPath(namespace, 'API/_tools/edit'), false);
+    assert.equal(isReservedWikiToolPath(namespace, 'history'), false);
+    assert.equal(isReservedWikiToolPath(namespace, 'API/edit'), false);
+  }
+  assert.equal(isReservedWikiToolPath('server', 'minewiki/_tools/edit/규칙'), true);
+  assert.equal(isReservedWikiToolPath('server', 'minewiki/API/_tools'), false);
 });
 
 test('section ranges are derived from server-parsed heading anchors', () => {

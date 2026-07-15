@@ -217,6 +217,9 @@ export class WikiEditService {
     } else if (namespaceCode !== 'file') {
       throw new ForbiddenException('Authorized file uploads can only create file documents.');
     }
+    if (isReservedWikiToolPath(namespaceCode, slug)) {
+      throw new BadRequestException('Wiki document paths cannot use the reserved _tools segment.');
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
       const existing = await tx.wikiPage.findUnique({
@@ -644,6 +647,9 @@ export class WikiEditService {
         pageType: page.pageType,
         store: tx
       });
+      if (isReservedWikiToolPath(namespace.code, nextSlug)) {
+        throw new BadRequestException('Wiki document paths cannot use the reserved _tools segment.');
+      }
       if (nextSlug === page.slug) {
         throw new BadRequestException('The destination title is the same as the current title.');
       }
@@ -1471,6 +1477,11 @@ export class WikiEditService {
 
 export function astContainsFile(ast: readonly AstNode[]): boolean {
   return ast.some((node) => node.type === 'file' || (node.type === 'folding' && astContainsFile(node.children)));
+}
+
+export function isReservedWikiToolPath(namespaceCode: string, slug: string): boolean {
+  const segments = slug.split('/').filter(Boolean);
+  return namespaceCode === 'server' ? segments[1] === '_tools' : segments[0] === '_tools';
 }
 
 export function categoryDocumentReferencesSelf(
