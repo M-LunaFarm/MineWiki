@@ -5,6 +5,7 @@ import { fetchServerRankings } from '../../lib/api';
 import { buildServerPath } from '../../lib/server-routes';
 import type { WikiSearchResult } from '../../lib/wiki-api';
 import { searchWiki } from '../../lib/wiki-server-api';
+import { formatCombinedSearchSummary, formatWikiResultBadge } from '../../lib/search-result-count.mjs';
 
 interface SearchPageProps {
   readonly searchParams: Promise<{
@@ -43,7 +44,13 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         { items: [] as WikiSearchResult[], nextCursor: null, available: true },
         { items: [] as ServerSummary[], total: 0, available: true },
       ];
-  const total = wikiResult.items.length + serverResult.total;
+  const wikiHasMore = Boolean(wikiResult.nextCursor);
+  const combinedSummary = formatCombinedSearchSummary({
+    serverTotal: serverResult.total,
+    wikiShown: wikiResult.items.length,
+    wikiHasMore,
+    continued: Boolean(cursor),
+  });
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
@@ -96,7 +103,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         <div className="space-y-10">
           <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
             <p className="text-slate-300">
-              <strong className="text-white">&lsquo;{query}&rsquo;</strong> 검색 결과 {total.toLocaleString('ko-KR')}개
+              <strong className="text-white">&lsquo;{query}&rsquo;</strong> {combinedSummary}
             </p>
             <Link href={`/servers?search=${encodeURIComponent(query)}`} className="text-[#35e5b7] hover:text-[#64efc8]">
               서버 고급 필터로 보기
@@ -119,6 +126,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             icon={<BookOpen />}
             title="위키 지식"
             count={wikiResult.items.length}
+            countLabel={formatWikiResultBadge({ wikiShown: wikiResult.items.length, wikiHasMore, continued: Boolean(cursor) })}
             available={wikiResult.available}
             unavailableMessage="위키 검색에 일시적으로 연결할 수 없습니다."
           >
@@ -150,10 +158,11 @@ function EmptySearch() {
   );
 }
 
-function SearchSection({ icon, title, count, available, unavailableMessage, children }: {
+function SearchSection({ icon, title, count, countLabel, available, unavailableMessage, children }: {
   readonly icon: React.ReactElement;
   readonly title: string;
   readonly count: number;
+  readonly countLabel?: string;
   readonly available: boolean;
   readonly unavailableMessage: string;
   readonly children: React.ReactNode;
@@ -163,7 +172,7 @@ function SearchSection({ icon, title, count, available, unavailableMessage, chil
       <div className="mb-4 flex items-center gap-3">
         <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#35e5b7]/20 bg-[#35e5b7]/[.08] text-[#35e5b7] [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
         <h2 className="text-xl font-bold text-white">{title}</h2>
-        <span className="chip chip-muted">{count.toLocaleString('ko-KR')}</span>
+        <span className="chip chip-muted">{countLabel ?? count.toLocaleString('ko-KR')}</span>
       </div>
       {!available ? (
         <p className="rounded-xl border border-rose-400/20 bg-rose-500/[.06] p-5 text-sm text-rose-200">{unavailableMessage}</p>
