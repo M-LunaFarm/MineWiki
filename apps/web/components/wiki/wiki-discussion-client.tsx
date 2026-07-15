@@ -708,7 +708,20 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                   최근 조정 기록 500건만 표시합니다. 전체 감사 기록은 서버에 계속 보존됩니다.
                 </p>
               ) : null}
-              {selected.comments.map((item) => (
+              {selected.comments.map((item) => item.entryType === 'system' && item.systemEvent ? (
+                <article id={`comment-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedCommentId || undefined} key={item.id} className="border-l-2 border-emerald-300/35 bg-emerald-300/[0.035] px-4 py-3 outline-none data-[highlighted=true]:border-emerald-300 data-[highlighted=true]:bg-emerald-300/10 sm:px-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="flex min-w-0 items-start gap-2 text-sm leading-6 text-slate-300">
+                      <History aria-hidden="true" className="mt-1 size-4 shrink-0 text-emerald-300" />
+                      <span className="[overflow-wrap:anywhere]">{discussionSystemEventLabel(item.systemEvent)}</span>
+                    </p>
+                    <p className="flex shrink-0 flex-wrap items-center gap-x-2 text-xs text-slate-500">
+                      <Link href={`/wiki/contributions/${item.createdBy}`} className="hover:text-emerald-200">{item.createdByName}</Link>
+                      <time>{formatDate(item.createdAt)}</time>
+                    </p>
+                  </div>
+                </article>
+              ) : (
                 <article id={`comment-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedCommentId || undefined} key={item.id} className={`border p-4 outline-none data-[highlighted=true]:border-emerald-300/60 data-[highlighted=true]:bg-emerald-300/10 ${item.status === 'hidden' ? 'border-amber-300/30 bg-amber-300/[0.04]' : item.pinned ? 'border-amber-300/50 bg-[#111821]' : 'border-white/10 bg-[#111821]'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
                     <span className="flex items-center gap-2">
@@ -1011,6 +1024,20 @@ function DiscussionPollCard({
 
 function message(error: unknown) {
   return error instanceof Error ? error.message : '토론 요청에 실패했습니다.';
+}
+function discussionSystemEventLabel(event: NonNullable<WikiThreadDetail['comments'][number]['systemEvent']>): string {
+  const protectedValue = '비공개 대상';
+  const before = event.beforeRedacted ? protectedValue : event.before;
+  const after = event.afterRedacted ? protectedValue : event.after;
+  if (event.type === 'status_change') {
+    const status = (value: string | null) => ({ open: '열림', paused: '일시 중지', closed: '닫힘' } as Record<string, string>)[value ?? ''] ?? '알 수 없음';
+    return `토론 상태를 ${status(before)}에서 ${status(after)}으로 변경했습니다.`;
+  }
+  if (event.type === 'topic_change') return `주제를 “${before ?? '이전 주제'}”에서 “${after ?? '새 주제'}”으로 변경했습니다.`;
+  if (event.type === 'page_move') return `토론 문서를 “${before ?? protectedValue}”에서 “${after ?? protectedValue}”으로 이동했습니다.`;
+  if (!before && after) return `${after} 댓글을 고정했습니다.`;
+  if (before && !after) return `${before} 댓글의 고정을 해제했습니다.`;
+  return `고정 댓글을 ${before ?? protectedValue}에서 ${after ?? protectedValue}으로 변경했습니다.`;
 }
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('ko-KR', {

@@ -29,6 +29,7 @@ export interface WikiThreadListResponse {
 
 export type WikiDiscussionStatus = 'open' | 'paused' | 'closed';
 export type WikiDiscussionStatusFilter = 'all' | 'active' | WikiDiscussionStatus;
+export type WikiDiscussionSystemEventType = 'status_change' | 'topic_change' | 'page_move' | 'pin_change';
 
 export interface WikiDiscussionStatusCounts {
   readonly total: number;
@@ -62,6 +63,14 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
+    readonly entryType: 'comment' | 'system';
+    readonly systemEvent: {
+      readonly type: WikiDiscussionSystemEventType;
+      readonly before: string | null;
+      readonly after: string | null;
+      readonly beforeRedacted: boolean;
+      readonly afterRedacted: boolean;
+    } | null;
     readonly content: string | null;
     readonly status: string;
     readonly createdBy: string;
@@ -133,7 +142,7 @@ export class WikiDiscussionService {
     const countRows = threads.length > 0
       ? await this.prisma.wikiDiscussionComment.groupBy({
           by: ['threadId'],
-          where: { threadId: { in: threads.map((thread) => thread.id) } },
+          where: { threadId: { in: threads.map((thread) => thread.id) }, entryType: 'comment' },
           _count: { _all: true }
         })
       : [];
@@ -180,7 +189,7 @@ export class WikiDiscussionService {
     const countRows = pageThreads.length > 0
       ? await this.prisma.wikiDiscussionComment.groupBy({
           by: ['threadId'],
-          where: { threadId: { in: pageThreads.map((thread) => thread.id) } },
+          where: { threadId: { in: pageThreads.map((thread) => thread.id) }, entryType: 'comment' },
           _count: { _all: true }
         })
       : [];
@@ -278,7 +287,7 @@ export class WikiDiscussionService {
     const countRows = pageRows.length > 0
       ? await this.prisma.wikiDiscussionComment.groupBy({
           by: ['threadId'],
-          where: { threadId: { in: pageRows.map(({ thread }) => thread.id) } },
+          where: { threadId: { in: pageRows.map(({ thread }) => thread.id) }, entryType: 'comment' },
           _count: { _all: true }
         })
       : [];
@@ -379,7 +388,7 @@ export class WikiDiscussionService {
       ? await this.prisma.wikiDiscussionComment.findUnique({ where: { id: thread.pinnedCommentId } })
       : null;
     const displayComments = pinnedComment && pinnedComment.threadId === thread.id ? [...pageComments, pinnedComment] : pageComments;
-    const commentCount = await this.prisma.wikiDiscussionComment.count({ where: { threadId: thread.id } });
+    const commentCount = await this.prisma.wikiDiscussionComment.count({ where: { threadId: thread.id, entryType: 'comment' } });
     const profileById = await this.profileNames([thread.createdBy, ...displayComments.map((comment) => comment.createdBy)]);
     const viewer = session ? await this.wikiProfiles.ensureWikiProfile(session.userId) : null;
     const subscription = viewer ? await this.prisma.wikiDiscussionSubscription.findUnique({
@@ -422,12 +431,13 @@ export class WikiDiscussionService {
       moderationByCommentId.set(event.commentId, history);
     }
     const pollByCommentId = await this.hydratePolls({
-      comments: displayComments,
+      comments: displayComments.filter((comment) => comment.entryType !== 'system'),
       viewerProfileId: viewer?.id ?? null,
       canManagePage: Boolean(canManage),
       canReply,
       threadStatus: thread.status
     });
+    const systemEvents = await this.hydrateSystemEvents(displayComments, session?.userId ?? null);
     return {
       ...this.toThreadSummary(thread, profileById, commentCount),
       canModerate,
@@ -445,13 +455,15 @@ export class WikiDiscussionService {
         return left.id < right.id ? -1 : 1;
       }).map((comment) => ({
         id: comment.id.toString(),
-        content: comment.status === 'deleted' || (comment.status === 'hidden' && !canManage) ? null : comment.content,
+        entryType: comment.entryType === 'system' ? 'system' as const : 'comment' as const,
+        systemEvent: comment.entryType === 'system' ? systemEvents.get(comment.id) ?? null : null,
+        content: comment.entryType === 'system' || comment.status === 'deleted' || (comment.status === 'hidden' && !canManage) ? null : comment.content,
         status: comment.status,
         createdBy: comment.createdBy.toString(),
         createdByName: profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
         createdAt: comment.createdAt.toISOString(),
-        canDelete: Boolean(comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
-        canChangeVisibility: Boolean(canManage && comment.status !== 'deleted'),
+        canDelete: Boolean(comment.entryType !== 'system' && comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
+        canChangeVisibility: Boolean(comment.entryType !== 'system' && canManage && comment.status !== 'deleted'),
         pinned: comment.id === thread.pinnedCommentId,
         poll: comment.status === 'deleted' || (comment.status === 'hidden' && !canManage)
           ? null
@@ -656,11 +668,18 @@ export class WikiDiscussionService {
       if (!currentThread || currentThread.status === 'deleted') {
         throw new NotFoundException('Wiki discussion thread not found.');
       }
+      if (currentThread.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
       const requiresPageManager = status === 'paused' || currentThread.status === 'paused';
       if ((requiresPageManager && !canManagePage) || (!requiresPageManager && currentThread.createdBy !== profile.id && !canManagePage)) {
         throw new ForbiddenException('Wiki discussion moderation is not allowed.');
       }
-      await tx.wikiDiscussionThread.update({ where: { id }, data: { status, updatedAt: new Date() } });
+      if (currentThread.status === status) throw new ConflictException(`Wiki discussion thread is already ${status}.`);
+      const now = new Date();
+      await tx.wikiDiscussionThread.update({ where: { id }, data: { status, updatedAt: now } });
+      await this.createSystemEntry(tx, {
+        threadId: id, actorProfileId: profile.id, type: 'status_change',
+        before: currentThread.status, after: status, now
+      });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.audit(`wiki.discussion.${status}`, session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
@@ -669,7 +688,19 @@ export class WikiDiscussionService {
   async updateThreadTopic(session: SessionPayload, threadId: string, titleInput?: string): Promise<WikiThreadDetail> {
     const thread = await this.moderatableThread(session, threadId);
     const title = this.requiredText(titleInput, 'title', 255);
-    await this.prisma.wikiDiscussionThread.update({ where: { id: thread.id }, data: { title, updatedAt: new Date() } });
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, thread.id);
+      const current = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
+      if (!current || current.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
+      if (current.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
+      if (current.title === title) throw new ConflictException('Wiki discussion topic already has that title.');
+      const now = new Date();
+      await tx.wikiDiscussionThread.update({ where: { id: thread.id }, data: { title, updatedAt: now } });
+      await this.createSystemEntry(tx, {
+        threadId: thread.id, actorProfileId: thread.profileId, type: 'topic_change',
+        before: current.title, after: title, now
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.audit('wiki.discussion.topic', session, thread.profileId, thread.pageId, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -688,10 +719,18 @@ export class WikiDiscussionService {
     const targetAllowed = await this.wikiPermissions.canManagePage({ actor: thread.actor, page: targetPage });
     if (!targetAllowed) throw new ForbiddenException('Target wiki page management is not allowed.');
     const reason = this.optionalReason(reasonInput);
-    await this.prisma.wikiDiscussionThread.update({
-      where: { id: thread.id },
-      data: { pageId: targetPage.id, updatedAt: new Date() }
-    });
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, thread.id);
+      const current = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
+      if (!current || current.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
+      if (current.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
+      const now = new Date();
+      await tx.wikiDiscussionThread.update({ where: { id: thread.id }, data: { pageId: targetPage.id, updatedAt: now } });
+      await this.createSystemEntry(tx, {
+        threadId: thread.id, actorProfileId: thread.profileId, type: 'page_move',
+        before: current.pageId.toString(), after: targetPage.id.toString(), now
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.audit('wiki.discussion.move', session, thread.profileId, thread.pageId, thread.id, {
       targetPageId: targetPage.id.toString(), reason
     });
@@ -718,7 +757,7 @@ export class WikiDiscussionService {
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
     const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null);
     const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: this.parseId(commentId, 'commentId') } });
-    if (!comment || comment.threadId !== thread.id || !['normal', 'hidden'].includes(comment.status)) {
+    if (!comment || comment.threadId !== thread.id || comment.entryType === 'system' || !['normal', 'hidden'].includes(comment.status)) {
       throw new NotFoundException('Wiki discussion comment not found.');
     }
     if (comment.status === 'hidden') {
@@ -735,11 +774,25 @@ export class WikiDiscussionService {
   async setPinnedComment(session: SessionPayload, threadId: string, commentId: string | null): Promise<WikiThreadDetail> {
     const thread = await this.moderatableThread(session, threadId);
     const parsedCommentId = commentId ? this.parseId(commentId, 'commentId') : null;
-    if (parsedCommentId) {
-      const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: parsedCommentId } });
-      if (!comment || comment.threadId !== thread.id || comment.status !== 'normal') throw new NotFoundException('Wiki discussion comment not found.');
-    }
-    await this.prisma.wikiDiscussionThread.update({ where: { id: thread.id }, data: { pinnedCommentId: parsedCommentId, updatedAt: new Date() } });
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, thread.id, parsedCommentId ?? undefined);
+      const current = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
+      if (!current || current.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
+      if (current.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
+      if (parsedCommentId) {
+        const comment = await tx.wikiDiscussionComment.findUnique({ where: { id: parsedCommentId } });
+        if (!comment || comment.threadId !== thread.id || comment.entryType === 'system' || comment.status !== 'normal') {
+          throw new NotFoundException('Wiki discussion comment not found.');
+        }
+      }
+      if (current.pinnedCommentId === parsedCommentId) throw new ConflictException('Wiki discussion pin is already in that state.');
+      const now = new Date();
+      await tx.wikiDiscussionThread.update({ where: { id: thread.id }, data: { pinnedCommentId: parsedCommentId, updatedAt: now } });
+      await this.createSystemEntry(tx, {
+        threadId: thread.id, actorProfileId: thread.profileId, type: 'pin_change',
+        before: current.pinnedCommentId?.toString() ?? null, after: parsedCommentId?.toString() ?? null, now
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.audit(parsedCommentId ? 'wiki.discussion.pin' : 'wiki.discussion.unpin', session, thread.profileId, thread.pageId, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -748,7 +801,7 @@ export class WikiDiscussionService {
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: this.parseId(threadId, 'threadId') } });
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
     const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: this.parseId(commentId, 'commentId') } });
-    if (!comment || comment.threadId !== thread.id) throw new NotFoundException('Wiki discussion comment not found.');
+    if (!comment || comment.threadId !== thread.id || comment.entryType === 'system') throw new NotFoundException('Wiki discussion comment not found.');
     const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
     if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
@@ -756,10 +809,26 @@ export class WikiDiscussionService {
     if (comment.createdBy !== profile.id && !(await this.wikiPermissions.canManagePage({ actor, page }))) {
       throw new ForbiddenException('Wiki discussion comment deletion is not allowed.');
     }
-    await this.prisma.wikiDiscussionComment.update({
-      where: { id: comment.id },
-      data: { status: 'deleted', content: '', updatedAt: new Date() }
-    });
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, thread.id, comment.id);
+      const [currentThread, currentComment] = await Promise.all([
+        tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } }),
+        tx.wikiDiscussionComment.findUnique({ where: { id: comment.id } })
+      ]);
+      if (!currentThread || currentThread.status === 'deleted' || !currentComment || currentComment.entryType === 'system' || currentComment.status === 'deleted') {
+        throw new NotFoundException('Wiki discussion comment not found.');
+      }
+      if (currentThread.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
+      const now = new Date();
+      await tx.wikiDiscussionComment.update({ where: { id: comment.id }, data: { status: 'deleted', content: '', updatedAt: now } });
+      if (currentThread.pinnedCommentId === comment.id) {
+        await tx.wikiDiscussionThread.update({ where: { id: thread.id }, data: { pinnedCommentId: null, updatedAt: now } });
+        await this.createSystemEntry(tx, {
+          threadId: thread.id, actorProfileId: profile.id, type: 'pin_change',
+          before: comment.id.toString(), after: null, now
+        });
+      }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.audit('wiki.discussion.comment_delete', session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
   }
@@ -774,7 +843,7 @@ export class WikiDiscussionService {
     const thread = await this.managedThread(session, threadId);
     const commentIdValue = this.parseId(commentId, 'commentId');
     const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: commentIdValue } });
-    if (!comment || comment.threadId !== thread.id || comment.status === 'deleted') {
+    if (!comment || comment.threadId !== thread.id || comment.entryType === 'system' || comment.status === 'deleted') {
       throw new NotFoundException('Wiki discussion comment not found.');
     }
     if (comment.status === status) throw new ConflictException(`Wiki discussion comment is already ${status}.`);
@@ -783,14 +852,25 @@ export class WikiDiscussionService {
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
       await this.lockDiscussionRows(tx, thread.id, comment.id);
+      const currentThread = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
+      const currentComment = await tx.wikiDiscussionComment.findUnique({ where: { id: comment.id } });
+      if (!currentThread || currentThread.status === 'deleted' || !currentComment || currentComment.entryType === 'system' || currentComment.status === 'deleted') {
+        throw new NotFoundException('Wiki discussion comment not found.');
+      }
+      if (currentThread.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
+      if (currentComment.status === status) throw new ConflictException(`Wiki discussion comment is already ${status}.`);
       await tx.wikiDiscussionComment.update({
         where: { id: comment.id },
         data: { status, updatedAt: now }
       });
-      if (status === 'hidden' && thread.pinnedCommentId === comment.id) {
+      if (status === 'hidden' && currentThread.pinnedCommentId === comment.id) {
         await tx.wikiDiscussionThread.update({
           where: { id: thread.id },
           data: { pinnedCommentId: null, updatedAt: now }
+        });
+        await this.createSystemEntry(tx, {
+          threadId: thread.id, actorProfileId: thread.profileId, type: 'pin_change',
+          before: comment.id.toString(), after: null, now
         });
       }
       await tx.wikiDiscussionModerationEvent.create({
@@ -965,6 +1045,112 @@ export class WikiDiscussionService {
         }))
       } satisfies WikiDiscussionPollDetail] as const;
     }));
+  }
+
+  private async createSystemEntry(
+    tx: Prisma.TransactionClient,
+    input: {
+      readonly threadId: bigint;
+      readonly actorProfileId: bigint;
+      readonly type: WikiDiscussionSystemEventType;
+      readonly before: string | null;
+      readonly after: string | null;
+      readonly now: Date;
+    }
+  ): Promise<void> {
+    this.assertSystemEventShape(input.type, input.before, input.after);
+    await tx.wikiDiscussionComment.create({
+      data: {
+        threadId: input.threadId,
+        content: '',
+        status: 'normal',
+        entryType: 'system',
+        eventType: input.type,
+        eventBefore: input.before,
+        eventAfter: input.after,
+        createdBy: input.actorProfileId,
+        createdAt: input.now
+      }
+    });
+  }
+
+  private assertSystemEventShape(type: WikiDiscussionSystemEventType, before: string | null, after: string | null): void {
+    if (before === after) throw new Error(`Invalid ${type} system event: values must change.`);
+    if (type === 'status_change') {
+      if (!before || !after || !['open', 'paused', 'closed'].includes(before) || !['open', 'paused', 'closed'].includes(after)) {
+        throw new Error('Invalid status_change system event.');
+      }
+      return;
+    }
+    if (type === 'topic_change') {
+      if (!before || !after || before.length > 255 || after.length > 255) throw new Error('Invalid topic_change system event.');
+      return;
+    }
+    if (type === 'page_move') {
+      if (!before || !after || !/^\d+$/.test(before) || !/^\d+$/.test(after)) throw new Error('Invalid page_move system event.');
+      return;
+    }
+    if ((!before && !after) || (before && !/^\d+$/.test(before)) || (after && !/^\d+$/.test(after))) {
+      throw new Error('Invalid pin_change system event.');
+    }
+  }
+
+  private async hydrateSystemEvents(
+    comments: ReadonlyArray<{
+      readonly id: bigint;
+      readonly entryType: string;
+      readonly eventType: string | null;
+      readonly eventBefore: string | null;
+      readonly eventAfter: string | null;
+    }>,
+    accountId: string | null
+  ): Promise<Map<bigint, NonNullable<WikiThreadDetail['comments'][number]['systemEvent']>>> {
+    const rows = comments.filter((comment) => comment.entryType === 'system');
+    const pageIds = rows.flatMap((row) => row.eventType === 'page_move'
+      ? [row.eventBefore, row.eventAfter].filter((value): value is string => Boolean(value) && /^\d+$/.test(value!)).map(BigInt)
+      : []);
+    const pinIds = rows.flatMap((row) => row.eventType === 'pin_change'
+      ? [row.eventBefore, row.eventAfter].filter((value): value is string => Boolean(value) && /^\d+$/.test(value!)).map(BigInt)
+      : []);
+    const [pages, pinComments] = await Promise.all([
+      pageIds.length > 0 ? this.prisma.wikiPage.findMany({ where: { id: { in: [...new Set(pageIds)] } } }) : [],
+      pinIds.length > 0 ? this.prisma.wikiDiscussionComment.findMany({
+        where: { id: { in: [...new Set(pinIds)] }, entryType: 'comment', status: 'normal' }, select: { id: true }
+      }) : []
+    ]);
+    const readablePageNames = new Map<string, string>();
+    for (const page of pages) {
+      try {
+        await this.wikiPermissions.assertCanReadPage({ accountId, page });
+        readablePageNames.set(page.id.toString(), page.displayTitle);
+      } catch {
+        // Deliberately omit private page names and identifiers from the public timeline.
+      }
+    }
+    const readablePins = new Set(pinComments.map((comment) => comment.id.toString()));
+    const result = new Map<bigint, NonNullable<WikiThreadDetail['comments'][number]['systemEvent']>>();
+    for (const row of rows) {
+      if (!['status_change', 'topic_change', 'page_move', 'pin_change'].includes(row.eventType ?? '')) continue;
+      const type = row.eventType as WikiDiscussionSystemEventType;
+      const label = (value: string | null): { value: string | null; redacted: boolean } => {
+        if (value === null) return { value: null, redacted: false };
+        if (type === 'page_move') {
+          const name = readablePageNames.get(value);
+          return name ? { value: name, redacted: false } : { value: null, redacted: true };
+        }
+        if (type === 'pin_change') {
+          return readablePins.has(value) ? { value: `#${value}`, redacted: false } : { value: null, redacted: true };
+        }
+        return { value, redacted: false };
+      };
+      const before = label(row.eventBefore);
+      const after = label(row.eventAfter);
+      result.set(row.id, {
+        type, before: before.value, after: after.value,
+        beforeRedacted: before.redacted, afterRedacted: after.redacted
+      });
+    }
+    return result;
   }
 
   private async lockDiscussionRows(

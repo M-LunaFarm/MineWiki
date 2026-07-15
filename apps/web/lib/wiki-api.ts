@@ -414,6 +414,14 @@ export interface WikiThreadDetail extends WikiThreadSummary {
   readonly nextCommentCursor: string | null;
   readonly comments: ReadonlyArray<{
     readonly id: string;
+    readonly entryType?: 'comment' | 'system';
+    readonly systemEvent?: {
+      readonly type: 'status_change' | 'topic_change' | 'page_move' | 'pin_change';
+      readonly before: string | null;
+      readonly after: string | null;
+      readonly beforeRedacted: boolean;
+      readonly afterRedacted: boolean;
+    } | null;
     readonly content: string | null;
     readonly status: string;
     readonly createdBy: string;

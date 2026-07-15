@@ -58,7 +58,7 @@ function contributionActivity(value: string | undefined): ContributionActivity {
 }
 
 function activityLabel(value: string): string {
-  return ({ create: '새 문서', edit: '편집', move: '이동', delete: '삭제', restore: '복구', revert: '되돌리기', comment: '토론 댓글', edit_request: '편집 요청', review: '요청 검토' } as Record<string, string>)[value] ?? value;
+  return ({ create: '새 문서', edit: '편집', move: '이동', delete: '삭제', restore: '복구', revert: '되돌리기', comment: '토론 댓글', status_change: '상태 변경', topic_change: '주제 변경', page_move: '문서 이동', pin_change: '댓글 고정', discussion_event: '토론 관리', edit_request: '편집 요청', review: '요청 검토' } as Record<string, string>)[value] ?? value;
 }
 
 function statusLabel(value: string): string {

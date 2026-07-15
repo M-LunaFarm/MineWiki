@@ -902,16 +902,30 @@ export class WikiReadService {
       const routePath = routePaths.routePath(page, namespace);
       items.push({
         id: comment.id.toString(), kind: 'discussion', pageId: page.id.toString(), revisionId: null,
-        changeType: 'comment', title: thread.title, namespace, routePath,
+        changeType: comment.entryType === 'system' ? comment.eventType ?? 'discussion_event' : 'comment', title: thread.title, namespace, routePath,
         href: serverSlug
           ? `${buildServerWikiToolPath(serverSlug, page.localPath, 'discuss')}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`
           : `/wiki/discuss/${page.id.toString()}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`,
-        summary: comment.status === 'normal' ? comment.content.slice(0, 255) : '삭제된 댓글', isMinor: false,
+        summary: comment.entryType === 'system'
+          ? this.discussionEventSummary(comment.eventType, comment.eventBefore, comment.eventAfter)
+          : comment.status === 'normal' ? comment.content.slice(0, 255) : '삭제된 댓글', isMinor: false,
         status: thread.status, createdAt: comment.createdAt.toISOString()
       });
       if (items.length >= input.limit) break;
     }
     return this.contributionResponse('discussions', input.profile, items, comments, lastScannedId, input.limit, scanLimit);
+  }
+
+  private discussionEventSummary(type: string | null, before: string | null, after: string | null): string {
+    if (type === 'status_change') return `토론 상태 변경: ${this.discussionStatusLabel(before)} → ${this.discussionStatusLabel(after)}`;
+    if (type === 'topic_change') return `주제 변경: ${before ?? '이전 주제'} → ${after ?? '새 주제'}`;
+    if (type === 'page_move') return '토론 문서를 이동함';
+    if (type === 'pin_change') return after ? '댓글을 고정함' : '댓글 고정을 해제함';
+    return '토론 관리 작업';
+  }
+
+  private discussionStatusLabel(value: string | null): string {
+    return ({ open: '열림', paused: '일시 중지', closed: '닫힘' } as Record<string, string>)[value ?? ''] ?? '알 수 없음';
   }
 
   private async getEditRequestContributions(input: {

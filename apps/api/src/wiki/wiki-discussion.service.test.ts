@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import type { WikiPermissionService } from './wiki-permission.service';
@@ -44,6 +44,7 @@ function service(options: {
   onWriteThreadComment?: () => void;
   onThreadUpdate?: (args: unknown) => void;
   onCommentUpdate?: (args: unknown) => void;
+  onSystemCreate?: (args: unknown) => void;
   onModerationCreate?: (args: unknown) => void;
 } = {}) {
   const store = {
@@ -56,6 +57,7 @@ function service(options: {
       async findUnique() { return options.comment ?? null; },
       async findMany() { return []; },
       async count() { return 0; },
+      async create(args: unknown) { options.onSystemCreate?.(args); return args; },
       async update(args: unknown) { options.onCommentUpdate?.(args); return options.comment; }
     },
     wikiDiscussionModerationEvent: {
@@ -151,9 +153,82 @@ test('only page managers can pause or resume a paused discussion', async () => {
   );
 
   let update: unknown;
-  await service({ canManage: true, onThreadUpdate: (args) => { update = args; } })
+  let event: unknown;
+  await service({ canManage: true, onThreadUpdate: (args) => { update = args; }, onSystemCreate: (args) => { event = args; } })
     .setThreadStatus(session, thread.id.toString(), 'paused');
   assert.equal((update as { data: { status: string } }).data.status, 'paused');
+  assert.deepEqual((event as { data: unknown }).data, {
+    threadId: thread.id, content: '', status: 'normal', entryType: 'system', eventType: 'status_change',
+    eventBefore: 'open', eventAfter: 'paused', createdBy: 20n,
+    createdAt: (event as { data: { createdAt: Date } }).data.createdAt
+  });
+});
+
+test('topic changes append the previous and next title to the system timeline', async () => {
+  let event: unknown;
+  await service({ onSystemCreate: (args) => { event = args; } })
+    .updateThreadTopic(session, thread.id.toString(), '새 토론 주제');
+
+  assert.deepEqual((event as { data: unknown }).data, {
+    threadId: thread.id, content: '', status: 'normal', entryType: 'system', eventType: 'topic_change',
+    eventBefore: thread.title, eventAfter: '새 토론 주제', createdBy: 20n,
+    createdAt: (event as { data: { createdAt: Date } }).data.createdAt
+  });
+});
+
+test('pin changes append only a normal user comment to the system timeline', async () => {
+  const pinTarget = {
+    id: 40n, threadId: thread.id, content: '고정할 댓글', status: 'normal', createdBy: 99n,
+    createdAt: new Date('2026-01-01T00:00:00Z'), updatedAt: null
+  };
+  let event: unknown;
+  await service({ comment: pinTarget, onSystemCreate: (args) => { event = args; } })
+    .setPinnedComment(session, thread.id.toString(), pinTarget.id.toString());
+
+  assert.deepEqual((event as { data: unknown }).data, {
+    threadId: thread.id, content: '', status: 'normal', entryType: 'system', eventType: 'pin_change',
+    eventBefore: null, eventAfter: pinTarget.id.toString(), createdBy: 20n,
+    createdAt: (event as { data: { createdAt: Date } }).data.createdAt
+  });
+});
+
+test('page move timeline redacts a page name the reader cannot access', async () => {
+  const privatePage = { ...page, id: 99n, title: 'Secret', displayTitle: '비공개 작전' };
+  const event = {
+    id: 41n, threadId: thread.id, content: '', status: 'normal', entryType: 'system', eventType: 'page_move',
+    eventBefore: privatePage.id.toString(), eventAfter: page.id.toString(), createdBy: 20n,
+    createdAt: new Date('2026-01-02T00:00:00Z'), updatedAt: null
+  };
+  const store = {
+    wikiPage: {
+      async findUnique() { return page; },
+      async findMany() { return [privatePage, page]; }
+    },
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiDiscussionComment: { async findMany() { return [event]; }, async count() { return 0; } },
+    wikiDiscussionSubscription: { async findUnique() { return null; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const permissions = {
+    async assertCanReadPage({ page: checked }: { page: { id: bigint } }) {
+      if (checked.id === privatePage.id) throw new ForbiddenException();
+    }
+  } as unknown as WikiPermissionService;
+  const result = await new WikiDiscussionService(store as unknown as PrismaService, {} as WikiProfileService, permissions).getThread('30');
+  assert.equal(result.comments[0]?.content, null);
+  assert.deepEqual(result.comments[0]?.systemEvent, {
+    type: 'page_move', before: null, after: 'Guide', beforeRedacted: true, afterRedacted: false
+  });
+  assert.equal(JSON.stringify(result).includes('비공개 작전'), false);
+  assert.equal(JSON.stringify(result).includes('99'), false);
+});
+
+test('system timeline entries cannot be read through the raw comment endpoint', async () => {
+  const systemEntry = {
+    id: 41n, threadId: thread.id, content: '', status: 'normal', entryType: 'system', eventType: 'topic_change',
+    eventBefore: '이전', eventAfter: '이후', createdBy: 20n, createdAt: new Date(), updatedAt: null
+  };
+  await assert.rejects(service({ comment: systemEntry }).getCommentRaw('30', '41'), NotFoundException);
 });
 
 test('thread author cannot overwrite a concurrent manager pause', async () => {
@@ -409,12 +484,14 @@ test('page manager hides a pinned comment and appends moderation history atomica
   let commentUpdate: unknown;
   let threadUpdate: unknown;
   let moderationCreate: unknown;
+  let systemCreate: unknown;
   const discussions = service({
     thread: { ...thread, pinnedCommentId: 40n },
     comment: hiddenTarget,
     canManage: true,
     onCommentUpdate: (args) => { commentUpdate = args; },
     onThreadUpdate: (args) => { threadUpdate = args; },
+    onSystemCreate: (args) => { systemCreate = args; },
     onModerationCreate: (args) => { moderationCreate = args; }
   });
 
@@ -422,6 +499,11 @@ test('page manager hides a pinned comment and appends moderation history atomica
 
   assert.equal((commentUpdate as { data: { status: string } }).data.status, 'hidden');
   assert.equal((threadUpdate as { data: { pinnedCommentId: bigint | null } }).data.pinnedCommentId, null);
+  assert.deepEqual((systemCreate as { data: unknown }).data, {
+    threadId: thread.id, content: '', status: 'normal', entryType: 'system', eventType: 'pin_change',
+    eventBefore: hiddenTarget.id.toString(), eventAfter: null, createdBy: 20n,
+    createdAt: (systemCreate as { data: { createdAt: Date } }).data.createdAt
+  });
   const event = (moderationCreate as { data: { action: string; reason: string; commentId: bigint } }).data;
   assert.deepEqual([event.action, event.reason, event.commentId], ['hide', '개인정보 노출', 40n]);
 });

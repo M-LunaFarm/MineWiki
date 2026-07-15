@@ -1298,8 +1298,13 @@ model WikiDiscussionComment {
   createdBy BigInt    @map("created_by") @db.UnsignedBigInt
   createdAt DateTime  @map("created_at")
   updatedAt DateTime? @map("updated_at")
+  entryType   String    @default("comment") @map("entry_type") @db.VarChar(16)
+  eventType   String?   @map("event_type") @db.VarChar(32)
+  eventBefore String?   @map("event_before") @db.Text
+  eventAfter  String?   @map("event_after") @db.Text
 
   @@index([threadId, id], map: "idx_wiki_comments_thread")
+  @@index([threadId, entryType, id], map: "idx_wiki_comments_thread_entry")
   @@index([createdBy, createdAt], map: "idx_wiki_comments_creator")
   @@map("wiki_discussion_comments")
 }
