@@ -185,7 +185,9 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
             ? '원래 창으로 결과를 전달한 뒤 자동으로 닫힙니다.'
             : '연결된 로그인 수단을 반영한 계정 및 보안 화면으로 이동합니다.'
           : '잠시 후 계정 페이지로 자동 이동합니다.'
-        : '로그인 화면으로 돌아가 OAuth 인증을 다시 시작해 주세요.';
+        : flowMode === 'link'
+          ? '계정 페이지로 돌아가 로그인 수단 연결을 다시 시작해 주세요.'
+          : '로그인 화면으로 돌아가 OAuth 인증을 다시 시작해 주세요.';
   const actionLabel =
     status === 'pending'
       ? '처리 중'
