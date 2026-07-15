@@ -101,7 +101,7 @@ export class WikiNotificationService {
     const discussionComments = canFilterDiscussions && discussionCommentIds.length > 0
       ? await this.prisma.wikiDiscussionComment.findMany({
           where: { id: { in: [...new Set(discussionCommentIds)] } },
-          select: { id: true, threadId: true }
+          select: { id: true, threadId: true, status: true }
         })
       : [];
     const commentById = new Map(discussionComments.map((comment) => [comment.id, comment]));
@@ -134,7 +134,7 @@ export class WikiNotificationService {
       }
       if (canFilterDiscussions && row.sourceType === 'discussion_comment') {
         const comment = /^\d+$/.test(row.sourceId) ? commentById.get(BigInt(row.sourceId)) : undefined;
-        if (!comment || !visibleThreadIds.has(comment.threadId)) {
+        if (!comment || comment.status !== 'normal' || !visibleThreadIds.has(comment.threadId)) {
           hiddenIds.push(row.id);
           continue;
         }
@@ -220,7 +220,7 @@ export class WikiNotificationService {
 
   async notifyDiscussionReply(
     tx: Prisma.TransactionClient,
-    input: { readonly pageId: bigint; readonly threadId: bigint; readonly commentId: bigint; readonly actorProfileId: bigint; readonly title: string }
+    input: { readonly pageId: bigint; readonly threadId: bigint; readonly commentId: bigint; readonly actorProfileId: bigint; readonly title: string; readonly excludeProfileIds?: readonly bigint[] }
   ): Promise<void> {
     const [thread, page, comments, subscriptions] = await Promise.all([
       tx.wikiDiscussionThread.findUnique({ where: { id: input.threadId } }),
@@ -231,8 +231,9 @@ export class WikiNotificationService {
     const muted = new Set(subscriptions.filter((subscription) => subscription.muted).map((subscription) => subscription.profileId));
     const recipients = [...new Set([thread?.createdBy, ...comments.map((comment) => comment.createdBy), ...subscriptions.filter((subscription) => !subscription.muted).map((subscription) => subscription.profileId)])]
       .filter((profileId): profileId is bigint => typeof profileId === 'bigint' && profileId !== input.actorProfileId);
+    const excluded = new Set(input.excludeProfileIds ?? []);
     const candidateRecipients = recipients
-      .filter((profileId) => !muted.has(profileId))
+      .filter((profileId) => !muted.has(profileId) && !excluded.has(profileId))
       .slice(0, MAX_DISCUSSION_NOTIFICATION_RECIPIENTS);
     if (!thread || !page || thread.pageId !== page.id) return;
     const activeRecipients = await this.filterReadableRecipientIds(tx, candidateRecipients, thread, page);
@@ -253,6 +254,57 @@ export class WikiNotificationService {
         readAt: null,
         createdAt: now
       })));
+  }
+
+  async notifyDiscussionMentions(
+    tx: Prisma.TransactionClient,
+    input: {
+      readonly pageId: bigint;
+      readonly threadId: bigint;
+      readonly commentId: bigint;
+      readonly actorProfileId: bigint;
+      readonly title: string;
+      readonly usernames: readonly string[];
+    }
+  ): Promise<readonly bigint[]> {
+    if (input.usernames.length === 0) return [];
+    const [thread, page, profiles, subscriptions] = await Promise.all([
+      tx.wikiDiscussionThread.findUnique({ where: { id: input.threadId } }),
+      tx.wikiPage.findUnique({ where: { id: input.pageId } }),
+      tx.wikiProfile.findMany({
+        where: { username: { in: [...input.usernames] }, status: 'active' },
+        select: { id: true, username: true }
+      }),
+      tx.wikiDiscussionSubscription.findMany({
+        where: { threadId: input.threadId }, select: { profileId: true, muted: true }
+      })
+    ]);
+    if (!thread || !page || thread.pageId !== page.id) return [];
+    const muted = new Set(subscriptions.filter((subscription) => subscription.muted).map((subscription) => subscription.profileId));
+    const requested = new Set(input.usernames.map((username) => username.toLocaleLowerCase('en-US')));
+    const candidates = [...new Set(profiles
+      .filter((profile) => requested.has(profile.username.toLocaleLowerCase('en-US')))
+      .map((profile) => profile.id))]
+      .filter((profileId) => profileId !== input.actorProfileId && !muted.has(profileId));
+    const activeRecipients = await this.filterReadableRecipientIds(tx, candidates, thread, page);
+    if (activeRecipients.length === 0) return [];
+    const now = new Date();
+    const href = await this.discussionReplyHref(tx, input);
+    await this.persistDeliveries(tx, `discussion-mention:${input.commentId.toString()}`, 'discussion_mention', activeRecipients.map((profileId) => ({
+      profileId,
+      type: 'discussion_mention',
+      pageId: input.pageId,
+      actorProfileId: input.actorProfileId,
+      sourceType: 'discussion_comment',
+      sourceId: input.commentId.toString(),
+      title: input.title,
+      message: '토론 댓글에서 회원님을 언급했습니다.',
+      href,
+      dedupeKey: `discussion-mention:${input.commentId.toString()}:profile:${profileId.toString()}`,
+      readAt: null,
+      createdAt: now
+    })));
+    return activeRecipients;
   }
 
   private async discussionReplyHref(
@@ -289,7 +341,7 @@ export class WikiNotificationService {
     if ((type === 'edit_request_accepted' || type === 'edit_request_rejected') && /^\d+$/.test(sourceId)) {
       return `${buildServerWikiToolPath(serverSlug, page.localPath, 'requests')}?request=${sourceId}`;
     }
-    if (type !== 'discussion_reply') return href;
+    if (type !== 'discussion_reply' && type !== 'discussion_mention') return href;
     try {
       const parsed = new URL(href, 'https://minewiki.invalid');
       const threadId = parsed.searchParams.get('thread');
@@ -393,7 +445,7 @@ export class WikiNotificationService {
     const commentIds = rows.flatMap((row) => /^\d+$/.test(row.sourceId) ? [BigInt(row.sourceId)] : []);
     const comments = commentIds.length > 0
       ? await this.prisma.wikiDiscussionComment.findMany({
-          where: { id: { in: [...new Set(commentIds)] } }, select: { id: true, threadId: true }
+          where: { id: { in: [...new Set(commentIds)] } }, select: { id: true, threadId: true, status: true }
         })
       : [];
     const commentById = new Map(comments.map((comment) => [comment.id, comment]));
@@ -423,7 +475,7 @@ export class WikiNotificationService {
     const visibleThreadIds = new Set(visible.map((item) => item.thread.id));
     const hiddenIds = rows.flatMap((row) => {
       const comment = /^\d+$/.test(row.sourceId) ? commentById.get(BigInt(row.sourceId)) : undefined;
-      return comment && visibleThreadIds.has(comment.threadId) ? [] : [row.id];
+      return comment && comment.status === 'normal' && visibleThreadIds.has(comment.threadId) ? [] : [row.id];
     });
     if (hiddenIds.length > 0) {
       await this.prisma.wikiNotification.deleteMany({ where: { id: { in: hiddenIds }, profileId } });

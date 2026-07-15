@@ -171,6 +171,66 @@ test('muted discussion subscribers are excluded from reply delivery', async () =
   assert.deepEqual(deliveries.map((delivery) => delivery.profileId), ['9']);
 });
 
+test('discussion mentions notify only active readable non-muted targets and use a distinct dedupe key', async () => {
+  let deliveries: Array<{ profileId: string; type: string; dedupeKey: string; href: string }> = [];
+  const tx = {
+    wikiDiscussionThread: { async findUnique() { return { id: 3n, pageId: 2n, status: 'open', createdBy: 7n }; } },
+    wikiDiscussionSubscription: { async findMany() { return [{ profileId: 9n, muted: true }]; } },
+    wikiPage: { async findUnique() { return { id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'Guide', title: 'Guide', protectionLevel: 'open', status: 'normal', createdBy: 7n }; } },
+    wikiProfile: { async findMany(args: { where?: { id?: { in: bigint[] } } }) {
+      const rows = [
+        { id: 7n, username: 'self', accountId: 'account-7', status: 'active' },
+        { id: 8n, username: 'Alice', accountId: 'account-8', status: 'active' },
+        { id: 9n, username: 'muted', accountId: 'account-9', status: 'active' }
+      ];
+      return args.where?.id ? rows.filter((row) => args.where!.id!.in.includes(row.id)) : rows;
+    } },
+    accountRole: { async findMany() { return []; } },
+    wikiNamespace: { async findUnique() { return { code: 'main' }; } },
+    wikiNotificationEvent: {
+      async createMany(args: { data: Array<{ payloadJson: { deliveries: typeof deliveries } }> }) {
+        deliveries = args.data[0]?.payloadJson.deliveries ?? [];
+        return { count: 1 };
+      }
+    }
+  };
+  const permissions = { async filterReadableThreads(input: { items: unknown[] }) { return input.items; } } as unknown as WikiPermissionService;
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, permissions);
+
+  const recipients = await service.notifyDiscussionMentions(tx as never, {
+    pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide',
+    usernames: ['self', 'Alice', 'muted', 'missing']
+  });
+
+  assert.deepEqual(recipients, [8n]);
+  assert.deepEqual(deliveries.map(({ profileId, type, dedupeKey, href }) => ({ profileId, type, dedupeKey, href })), [{
+    profileId: '8', type: 'discussion_mention',
+    dedupeKey: 'discussion-mention:4:profile:8', href: '/wiki/discuss/2?thread=3&comment=4'
+  }]);
+});
+
+test('discussion reply excludes recipients already notified by a mention', async () => {
+  let deliveries: Array<{ profileId: string }> = [];
+  const tx = {
+    wikiDiscussionThread: { async findUnique() { return { createdBy: 8n }; } },
+    wikiDiscussionComment: { async findMany() { return [{ createdBy: 9n }]; } },
+    wikiDiscussionSubscription: { async findMany() { return []; } },
+    wikiPage: { async findUnique() { return { namespaceId: 1, spaceId: 1n, localPath: 'Guide' }; } },
+    wikiNamespace: { async findUnique() { return { code: 'main' }; } },
+    wikiNotificationEvent: {
+      async createMany(args: { data: Array<{ payloadJson: { deliveries: typeof deliveries } }> }) {
+        deliveries = args.data[0]?.payloadJson.deliveries ?? [];
+        return { count: 1 };
+      }
+    }
+  };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+  await service.notifyDiscussionReply(tx as never, {
+    pageId: 2n, threadId: 3n, commentId: 4n, actorProfileId: 7n, title: 'Guide', excludeProfileIds: [8n]
+  });
+  assert.deepEqual(deliveries.map((delivery) => delivery.profileId), ['9']);
+});
+
 test('discussion delivery persists notifications only for recipients who can currently read the thread', async () => {
   let deliveries: Array<{ profileId: string }> = [];
   const fullPage = { ...({ id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'Guide', title: 'Guide', protectionLevel: 'open', status: 'normal', createdBy: 8n }) };

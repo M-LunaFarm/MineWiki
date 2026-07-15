@@ -9,6 +9,7 @@ import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
 import { buildServerWikiPagePath, buildServerWikiToolPath } from './wiki-read.service';
 import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
+import { extractDiscussionMentions, uniqueDiscussionMentionUsernames } from './wiki-discussion-mention';
 
 export interface WikiThreadSummary {
   readonly id: string;
@@ -94,6 +95,13 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     readonly status: string;
     readonly createdBy: string;
     readonly createdByName: string;
+    readonly createdByUsername: string | null;
+    readonly mentions: ReadonlyArray<{
+      readonly username: string;
+      readonly profileId: string;
+      readonly start: number;
+      readonly end: number;
+    }>;
     readonly createdAt: string;
     readonly canDelete: boolean;
     readonly canChangeVisibility: boolean;
@@ -469,7 +477,26 @@ export class WikiDiscussionService {
       : null;
     const displayComments = pinnedComment && pinnedComment.threadId === thread.id ? [...pageComments, pinnedComment] : pageComments;
     const commentCount = await this.prisma.wikiDiscussionComment.count({ where: { threadId: thread.id, entryType: 'comment' } });
-    const profileById = await this.profileNames([thread.createdBy, ...displayComments.map((comment) => comment.createdBy)]);
+    const authorIds = [...new Set([thread.createdBy, ...displayComments.map((comment) => comment.createdBy)])];
+    const mentionOccurrencesByComment = new Map(displayComments.map((comment) => [
+      comment.id,
+      comment.entryType === 'system' || comment.status === 'deleted' ? [] : extractDiscussionMentions(comment.content)
+    ]));
+    const mentionUsernames = [...new Set([...mentionOccurrencesByComment.values()].flat().map((mention) => mention.username))];
+    const identityRows = await this.prisma.wikiProfile.findMany({
+      where: {
+        OR: [
+          { id: { in: authorIds } },
+          ...(mentionUsernames.length > 0 ? [{ username: { in: mentionUsernames }, status: 'active' }] : [])
+        ]
+      },
+      select: { id: true, username: true, displayName: true, status: true }
+    });
+    const profileById = new Map(identityRows.map((profile) => [profile.id, profile.displayName]));
+    const usernameByProfileId = new Map(identityRows.map((profile) => [profile.id, profile.username]));
+    const mentionProfileByUsername = new Map(identityRows
+      .filter((profile) => profile.status === 'active')
+      .map((profile) => [profile.username.toLocaleLowerCase('en-US'), profile]));
     const viewer = session ? await this.wikiProfiles.ensureWikiProfile(session.userId) : null;
     const subscription = viewer ? await this.prisma.wikiDiscussionSubscription.findUnique({
       where: { threadId_profileId: { threadId: thread.id, profileId: viewer.id } }, select: { muted: true }
@@ -548,6 +575,13 @@ export class WikiDiscussionService {
         status: comment.status,
         createdBy: comment.createdBy.toString(),
         createdByName: profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
+        createdByUsername: usernameByProfileId.get(comment.createdBy) ?? null,
+        mentions: comment.entryType === 'system' || comment.status === 'deleted' || (comment.status === 'hidden' && !canManage)
+          ? []
+          : (mentionOccurrencesByComment.get(comment.id) ?? []).flatMap((mention) => {
+              const target = mentionProfileByUsername.get(mention.username.toLocaleLowerCase('en-US'));
+              return target ? [{ username: target.username, profileId: target.id.toString(), start: mention.start, end: mention.end }] : [];
+            }),
         createdAt: comment.createdAt.toISOString(),
         canDelete: Boolean(comment.entryType !== 'system' && comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
         canChangeVisibility: Boolean(comment.entryType !== 'system' && canManage && comment.status !== 'deleted'),
@@ -594,6 +628,14 @@ export class WikiDiscussionService {
       await tx.wikiDiscussionSubscription.create({
         data: { threadId: created.id, profileId: profile.id, muted: false, createdAt: now, updatedAt: now }
       });
+      await this.notifications?.notifyDiscussionMentions(tx, {
+        pageId: page.id,
+        threadId: created.id,
+        commentId: comment.id,
+        actorProfileId: profile.id,
+        title,
+        usernames: uniqueDiscussionMentionUsernames(content)
+      });
       return created;
     });
     this.live?.publish(thread.id);
@@ -636,12 +678,21 @@ export class WikiDiscussionService {
         update: {}
       });
       await tx.wikiDiscussionThread.update({ where: { id: thread.id }, data: { updatedAt: now } });
+      const mentionedProfileIds = await this.notifications?.notifyDiscussionMentions(tx, {
+        pageId: page.id,
+        threadId: thread.id,
+        commentId: comment.id,
+        actorProfileId: profile.id,
+        title: thread.title,
+        usernames: uniqueDiscussionMentionUsernames(content)
+      }) ?? [];
       await this.notifications?.notifyDiscussionReply(tx, {
         pageId: page.id,
         threadId: thread.id,
         commentId: comment.id,
         actorProfileId: profile.id,
-        title: thread.title
+        title: thread.title,
+        excludeProfileIds: mentionedProfileIds
       });
     });
     this.live?.publish(thread.id);
