@@ -11,6 +11,7 @@ import {
   type WikiNotificationItem
 } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
+import { WikiPushControl } from './wiki-push-control';
 
 export function WikiNotificationsClient() {
   const { account, loading: authLoading } = useAuth();
@@ -77,6 +78,7 @@ export function WikiNotificationsClient() {
   if (!account) return <p className="text-sm text-slate-300"><Link href="/login?returnTo=%2Fwiki%2Fnotifications" className="text-emerald-300 hover:underline">로그인</Link>하면 관심 문서와 토론 활동 알림을 확인할 수 있습니다.</p>;
 
   return <div className="space-y-4">
+    <WikiPushControl />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-sm text-slate-400">읽지 않은 알림 <strong className="text-emerald-300">{unreadCount.toLocaleString('ko-KR')}</strong>개</p>
       <button type="button" disabled={working || unreadCount === 0} onClick={() => void markAll()} className="chip chip-muted inline-flex items-center gap-1.5 disabled:opacity-40"><CheckCheck className="size-4" /> 모두 읽음</button>

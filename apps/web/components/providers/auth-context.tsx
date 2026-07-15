@@ -15,6 +15,7 @@ import {
   type EmailRegistrationResult,
   type ResendVerificationResult,
 } from '../../lib/auth-client';
+import { unsubscribeCurrentBrowserPush } from '../../lib/web-push';
 
 interface AuthContextValue {
   readonly account: AuthAccount | null;
@@ -118,6 +119,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     setLoading(true);
     try {
+      await Promise.race([
+        unsubscribeCurrentBrowserPush().catch(() => undefined),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 1200)),
+      ]);
       await apiLogout();
       setAccount(null);
     } finally {

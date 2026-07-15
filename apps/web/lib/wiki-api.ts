@@ -323,6 +323,24 @@ export interface WikiNotificationListResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiPushStatus {
+  readonly enabled: boolean;
+  readonly subscribed: boolean;
+  readonly publicKey: string | null;
+  readonly publicKeyFingerprint: string | null;
+  readonly expirationTime: string | null;
+  readonly maxDevices: number;
+}
+
+export interface WikiPushSubscriptionInput {
+  readonly endpoint: string;
+  readonly expirationTime?: number | null;
+  readonly keys: {
+    readonly p256dh: string;
+    readonly auth: string;
+  };
+}
+
 export interface WikiBacklinkItem {
   readonly id: string;
   readonly sourcePageId: string;
@@ -987,6 +1005,18 @@ export async function markWikiNotificationRead(notificationId: string): Promise<
 
 export async function markAllWikiNotificationsRead(throughId: string): Promise<{ readonly count: number }> {
   return mutateWikiBrowser<{ readonly count: number }>('/v1/wiki/notifications/read-all', 'POST', { throughId });
+}
+
+export async function fetchWikiPushStatus(): Promise<WikiPushStatus> {
+  return readWikiBrowser<WikiPushStatus>('/v1/wiki/notifications/push');
+}
+
+export async function registerWikiPushSubscription(input: WikiPushSubscriptionInput): Promise<WikiPushStatus> {
+  return mutateWikiBrowser<WikiPushStatus>('/v1/wiki/notifications/push/subscription', 'PUT', { ...input });
+}
+
+export async function unregisterWikiPushSubscription(): Promise<{ readonly removed: boolean }> {
+  return mutateWikiBrowser<{ readonly removed: boolean }>('/v1/wiki/notifications/push/subscription', 'DELETE', {});
 }
 
 export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]> {
