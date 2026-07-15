@@ -39,7 +39,7 @@ export function ServerWikiSidebar({ page }: { readonly page: WikiPageResponse })
           <BookOpen className="size-4" />
           문서
         </div>
-        <ServerWikiNavigation items={wiki.navigation} />
+        <ServerWikiNavigation items={wiki.navigation} storageKey={`minewiki:server-wiki:${wiki.slug}:collapsed`} />
         <div className="mt-3">
           <ServerWikiCreateLink serverSlug={wiki.slug} />
         </div>
