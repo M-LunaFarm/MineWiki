@@ -213,6 +213,7 @@ export class AccountSeparationService {
         if (!fresh || fresh.status !== 'pending' || fresh.verificationCode !== code) {
           throw new ConflictException('계정 연결 요청 상태가 변경되었습니다.');
         }
+        await this.assertSingleMinecraftIdentity(tx, group.accountIds);
         await tx.accountLink.createMany({
           data: [
             { primaryAccountId: fresh.primaryAccountId, linkedAccountId: fresh.targetAccountId },
@@ -242,6 +243,7 @@ export class AccountSeparationService {
       this.prisma,
       [primaryAccountId, linkedAccountId],
       async (tx, group) => {
+        await this.assertSingleMinecraftIdentity(tx, group.accountIds);
         await tx.accountLink.createMany({
           data: [
             { primaryAccountId, linkedAccountId },
@@ -341,6 +343,22 @@ export class AccountSeparationService {
       where: { id: { in: [...accountIds] } },
       data: { canonicalAccountId },
     });
+  }
+
+  private async assertSingleMinecraftIdentity(
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    accountIds: readonly string[],
+  ): Promise<void> {
+    const identities = await tx.minecraftIdentity.findMany({
+      where: { accountId: { in: [...accountIds] } },
+      select: { uuid: true },
+      take: 2,
+    });
+    if (identities.length > 1) {
+      throw new ConflictException(
+        '서로 다른 Minecraft 계정이 인증된 MineWiki 계정은 바로 연결할 수 없습니다. support@minewiki.kr로 병합을 요청해 주세요.',
+      );
+    }
   }
 
   private async ensureAccount(accountId: string) {
