@@ -660,6 +660,13 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered th {
     @apply bg-white/[0.06] text-left text-white;
   }
+  .wiki-rendered .wiki-table tr[style*='background-color'] > th:not([style*='background-color']) {
+    background-color: inherit;
+  }
+  .wiki-rendered .wiki-table tr:is([style^='color:'], [style*=';color:'])
+    > :is(th, td):not([style^='color:']):not([style*=';color:']) {
+    color: inherit;
+  }
   .wiki-rendered .table-scroll {
     @apply my-4 max-w-full overflow-x-auto rounded-lg;
   }

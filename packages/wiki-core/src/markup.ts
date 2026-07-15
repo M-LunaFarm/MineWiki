@@ -6,12 +6,13 @@ import type {
   WikiListKind,
   WikiListNode,
   WikiTableCell,
-  WikiTableOptions
+  WikiTableOptions,
+  WikiTableRow
 } from './types.js';
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.7.1';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -291,19 +292,20 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
 
     const tableStart = parseWikiTableStart(line, lines[i + 1]);
     if (tableStart) {
-      const rows: WikiTableCell[][] = [];
+      const rows: WikiTableRow[] = [];
       const tableOptions: WikiTableOptions = {};
+      const tableParseState = createWikiTableParseState();
       const caption = tableStart.caption === null
         ? []
         : parseInline(tableStart.caption, links, errors, blockingErrors, footnotes);
       if (tableStart.firstRow !== null) {
-        const cells = parseWikiTableRow(tableStart.firstRow, tableOptions, links, errors, blockingErrors, footnotes);
-        if (cells.length > 0) rows.push(cells);
+        const row = parseWikiTableRow(tableStart.firstRow, tableOptions, tableParseState, links, errors, blockingErrors, footnotes);
+        if (row.cells.length > 0) rows.push(row);
       }
       if (tableStart.consumeNextLine) i += 1;
       while (i < lines.length && lines[i]?.trim().startsWith('||')) {
-        const cells = parseWikiTableRow(lines[i] ?? '', tableOptions, links, errors, blockingErrors, footnotes);
-        if (cells.length > 0) rows.push(cells);
+        const row = parseWikiTableRow(lines[i] ?? '', tableOptions, tableParseState, links, errors, blockingErrors, footnotes);
+        if (row.cells.length > 0) rows.push(row);
         i += 1;
       }
       i -= 1;
@@ -564,26 +566,34 @@ function parseWikiListBlock(
 function parseWikiTableRow(
   line: string,
   tableOptions: WikiTableOptions,
+  tableState: WikiTableParseState,
   links: Set<string>,
   errors: string[],
   blockingErrors: string[],
   footnotes: string[]
-): WikiTableCell[] {
+): WikiTableRow {
+  const row: WikiTableRow = { cells: [] };
   const cells: WikiTableCell[] = [];
+  const occupiedSpans = tableState.activeRowSpans
+    .filter((span) => span.untilRow >= tableState.rowIndex)
+    .sort((left, right) => left.start - right.start);
   let pendingColspan = 1;
+  let nextVisualColumn = 0;
+  let occupiedSpanCursor = 0;
   for (const rawCell of splitWikiTableRow(line)) {
     if (!rawCell.trim()) {
       pendingColspan = Math.min(1000, pendingColspan + 1);
       continue;
     }
     const cell: WikiTableCell = { children: [], colspan: pendingColspan, rowspan: 1 };
+    const scopedColors: WikiTableScopedColors = {};
     pendingColspan = 1;
     let content = rawCell;
     while (content.startsWith('<')) {
       const end = content.indexOf('>');
       if (end < 0) break;
       const modifier = content.slice(1, end).trim();
-      if (!applyWikiTableModifier(modifier, cell, tableOptions, errors)) break;
+      if (!applyWikiTableModifier(modifier, cell, row, scopedColors, tableOptions, errors)) break;
       content = content.slice(end + 1);
     }
     if (!cell.align) {
@@ -594,9 +604,103 @@ function parseWikiTableRow(
       else if (endsWithSpace) cell.align = 'left';
     }
     cell.children = parseInline(content.trim(), links, errors, blockingErrors, footnotes);
+    const placement = findWikiTableVisualColumn(
+      occupiedSpans,
+      occupiedSpanCursor,
+      nextVisualColumn,
+      cell.colspan
+    );
+    const visualColumn = placement.column;
+    occupiedSpanCursor = placement.nextSpanCursor;
+    if (scopedColors.columnBackgroundColor) {
+      tableState.columnBackgroundColors.set(visualColumn, scopedColors.columnBackgroundColor);
+    }
+    if (scopedColors.columnColor) {
+      tableState.columnColors.set(visualColumn, scopedColors.columnColor);
+    }
+    applyInheritedWikiTableColor(cell, 'backgroundColor', tableState.columnBackgroundColors.get(visualColumn));
+    applyInheritedWikiTableColor(cell, 'color', tableState.columnColors.get(visualColumn));
+    if (cell.rowspan > 1) {
+      tableState.activeRowSpans.push({
+        start: visualColumn,
+        end: visualColumn + cell.colspan - 1,
+        untilRow: tableState.rowIndex + cell.rowspan - 1
+      });
+    }
+    nextVisualColumn = visualColumn + cell.colspan;
     cells.push(cell);
   }
-  return cells;
+  row.cells = cells;
+  tableState.rowIndex += 1;
+  tableState.activeRowSpans = tableState.activeRowSpans.filter(
+    (span) => span.untilRow >= tableState.rowIndex
+  );
+  return row;
+}
+
+interface WikiTableColorPair {
+  light: string;
+  dark?: string;
+}
+
+interface WikiTableScopedColors {
+  columnBackgroundColor?: WikiTableColorPair;
+  columnColor?: WikiTableColorPair;
+}
+
+interface WikiTableRowSpan {
+  start: number;
+  end: number;
+  untilRow: number;
+}
+
+interface WikiTableParseState {
+  rowIndex: number;
+  columnBackgroundColors: Map<number, WikiTableColorPair>;
+  columnColors: Map<number, WikiTableColorPair>;
+  activeRowSpans: WikiTableRowSpan[];
+}
+
+function createWikiTableParseState(): WikiTableParseState {
+  return {
+    rowIndex: 0,
+    columnBackgroundColors: new Map(),
+    columnColors: new Map(),
+    activeRowSpans: []
+  };
+}
+
+function findWikiTableVisualColumn(
+  occupiedSpans: readonly WikiTableRowSpan[],
+  initialSpanCursor: number,
+  initialColumn: number,
+  colspan: number
+) {
+  let column = initialColumn;
+  let spanCursor = initialSpanCursor;
+  while (spanCursor < occupiedSpans.length) {
+    const span = occupiedSpans[spanCursor]!;
+    const end = column + colspan - 1;
+    if (span.end < column) {
+      spanCursor += 1;
+      continue;
+    }
+    if (span.start > end) break;
+    column = span.end + 1;
+    spanCursor += 1;
+  }
+  return { column, nextSpanCursor: spanCursor };
+}
+
+function applyInheritedWikiTableColor(
+  cell: WikiTableCell,
+  property: 'backgroundColor' | 'color',
+  inherited: WikiTableColorPair | undefined
+) {
+  if (!inherited || cell[property]) return;
+  cell[property] = inherited.light;
+  const darkProperty = property === 'backgroundColor' ? 'darkBackgroundColor' : 'darkColor';
+  if (inherited.dark) cell[darkProperty] = inherited.dark;
 }
 
 interface WikiTableStart {
@@ -639,6 +743,8 @@ function unescapeWikiTableCaption(value: string) {
 function applyWikiTableModifier(
   modifier: string,
   cell: WikiTableCell,
+  row: WikiTableRow,
+  scopedColors: WikiTableScopedColors,
   table: WikiTableOptions,
   errors: string[]
 ): boolean {
@@ -660,6 +766,27 @@ function applyWikiTableModifier(
   }
   if (modifier.toLowerCase() === 'thead') {
     cell.header = true;
+    return true;
+  }
+
+  const scopedColorModifier = modifier.match(/^(row|col)(bgcolor|color)=(.+)$/i);
+  if (scopedColorModifier) {
+    const scope = scopedColorModifier[1]!.toLowerCase();
+    const property = scopedColorModifier[2]!.toLowerCase();
+    const colors = normalizeTableColorPair(scopedColorModifier[3]!.trim());
+    if (!colors) {
+      addTableModifierWarning(errors, modifier);
+    } else if (scope === 'row' && property === 'bgcolor') {
+      row.backgroundColor ??= colors.light;
+      if (colors.dark) row.darkBackgroundColor ??= colors.dark;
+    } else if (scope === 'row') {
+      row.color ??= colors.light;
+      if (colors.dark) row.darkColor ??= colors.dark;
+    } else if (property === 'bgcolor') {
+      scopedColors.columnBackgroundColor ??= colors;
+    } else {
+      scopedColors.columnColor ??= colors;
+    }
     return true;
   }
 
@@ -808,7 +935,10 @@ export function applyIncludeParametersToAst(
     if (node.type === 'wiki_table') return {
       ...node,
       caption: inline(node.caption),
-      rows: node.rows.map((row) => row.map((cell) => ({ ...cell, children: inline(cell.children) })))
+      rows: node.rows.map((row) => ({
+        ...row,
+        cells: row.cells.map((cell) => ({ ...cell, children: inline(cell.children) }))
+      }))
     };
     if (node.type === 'folding') return {
       ...node,
@@ -1028,6 +1158,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       sup: ['class'],
       sub: ['class'],
       table: ['class', 'data-table-key', 'style'],
+      tr: ['style'],
       th: ['class', 'colspan', 'rowspan', 'style'],
       td: ['class', 'colspan', 'rowspan', 'style'],
       details: ['class', 'open'],
@@ -1055,6 +1186,12 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         '--wiki-dark-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
         '--wiki-dark-background-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
         '--wiki-dark-border-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
+      },
+      tr: {
+        color: [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        '--wiki-dark-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
+        '--wiki-dark-background-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
       },
       th: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
@@ -1164,7 +1301,7 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
       collectInline(node.caption);
-      for (const row of node.rows) for (const cell of row) collectInline(cell.children);
+      for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
     } else if (node.type === 'folding' || (node.type === 'include' && node.children)) {
       collectWikiFileNames(node.children, output);
     }
@@ -1425,7 +1562,7 @@ function renderWikiList(node: WikiListNode, footnotes: string[], options: Render
 
 function renderWikiTable(
   caption: InlineNode[],
-  rows: WikiTableCell[][],
+  rows: WikiTableRow[],
   tableOptions: WikiTableOptions,
   footnotes: string[],
   options: RenderOptions
@@ -1445,15 +1582,21 @@ function renderWikiTable(
     'margin-right': tableOptions.align === 'center' ? 'auto' : undefined
   });
   const wrapperClass = tableOptions.align ? `table-scroll table-${tableOptions.align}` : 'table-scroll';
-  const hasExplicitHeaders = rows.some((row) => row.some((cell) => cell.header));
+  const hasExplicitHeaders = rows.some((row) => row.cells.some((cell) => cell.header));
   let bodyStarted = false;
   const renderedRows = rows.map((row, rowIndex) => {
-    const requestedHeader = row.some((cell) => cell.header);
+    const requestedHeader = row.cells.some((cell) => cell.header);
     const isHeader = hasExplicitHeaders ? requestedHeader && !bodyStarted : rowIndex === 0;
     if (!isHeader) bodyStarted = true;
+    const rowStyles = styleAttribute({
+      color: row.color,
+      'background-color': row.backgroundColor,
+      '--wiki-dark-color': row.darkColor,
+      '--wiki-dark-background-color': row.darkBackgroundColor
+    });
     return {
       isHeader,
-      html: `<tr>${row
+      html: `<tr${rowStyles}>${row.cells
       .map((cell) => {
         const tag = isHeader ? 'th' : 'td';
         const colspan = cell.colspan > 1 ? ` colspan="${cell.colspan}"` : '';

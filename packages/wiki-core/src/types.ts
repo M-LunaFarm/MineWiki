@@ -47,6 +47,14 @@ export interface WikiTableCell {
   darkColor?: string;
 }
 
+export interface WikiTableRow {
+  cells: WikiTableCell[];
+  backgroundColor?: string;
+  darkBackgroundColor?: string;
+  color?: string;
+  darkColor?: string;
+}
+
 export interface WikiTableOptions {
   align?: 'left' | 'center' | 'right';
   width?: string;
@@ -64,7 +72,7 @@ export type AstNode =
   | WikiListNode
   | { type: 'blockquote'; children: InlineNode[] }
   | { type: 'hr' }
-  | { type: 'wiki_table'; caption: InlineNode[]; rows: WikiTableCell[][]; options: WikiTableOptions }
+  | { type: 'wiki_table'; caption: InlineNode[]; rows: WikiTableRow[]; options: WikiTableOptions }
   | { type: 'folding'; title: InlineNode[]; children: AstNode[] }
   | { type: 'toc'; collapsed: boolean }
   | {

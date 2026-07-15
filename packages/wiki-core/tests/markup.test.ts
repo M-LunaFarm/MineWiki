@@ -228,14 +228,14 @@ test('parses and safely renders advanced NamuMark table controls', () => {
     borderColor: '#336699'
   });
   assert.deepEqual({
-    colspan: table.rows[0]?.[0]?.colspan,
-    rowspan: table.rows[0]?.[0]?.rowspan,
-    align: table.rows[0]?.[0]?.align,
-    verticalAlign: table.rows[0]?.[0]?.verticalAlign,
-    width: table.rows[0]?.[0]?.width,
-    height: table.rows[0]?.[0]?.height,
-    backgroundColor: table.rows[0]?.[0]?.backgroundColor,
-    color: table.rows[0]?.[0]?.color
+    colspan: table.rows[0]?.cells[0]?.colspan,
+    rowspan: table.rows[0]?.cells[0]?.rowspan,
+    align: table.rows[0]?.cells[0]?.align,
+    verticalAlign: table.rows[0]?.cells[0]?.verticalAlign,
+    width: table.rows[0]?.cells[0]?.width,
+    height: table.rows[0]?.cells[0]?.height,
+    backgroundColor: table.rows[0]?.cells[0]?.backgroundColor,
+    color: table.rows[0]?.cells[0]?.color
   }, {
     colspan: 2,
     rowspan: 2,
@@ -246,8 +246,8 @@ test('parses and safely renders advanced NamuMark table controls', () => {
     backgroundColor: '#112233',
     color: 'white'
   });
-  assert.equal(table.rows[1]?.[1]?.colspan, 2);
-  assert.equal(table.rows[0]?.[0]?.children[0]?.type, 'file');
+  assert.equal(table.rows[1]?.cells[1]?.colspan, 2);
+  assert.equal(table.rows[0]?.cells[0]?.children[0]?.type, 'file');
 
   const html = renderDocument(parsed.ast, {
     files: {
@@ -289,7 +289,7 @@ test('renders NamuMark table captions and explicit header rows semantically', ()
   assert.equal(table?.type, 'wiki_table');
   if (table?.type !== 'wiki_table') return;
   assert.equal(table.caption.length, 3);
-  assert.equal(table.rows[0]?.every((cell) => cell.header), true);
+  assert.equal(table.rows[0]?.cells.every((cell) => cell.header), true);
   assert.deepEqual(parsed.links, ['서버 목록']);
   assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['table-icon.png']);
 
@@ -314,8 +314,8 @@ test('preserves validated light and dark NamuMark table colors for theme switchi
     color: 'black', darkColor: 'white',
     borderColor: '#336699', darkBorderColor: '#88aadd'
   });
-  assert.equal(table.rows[0]?.[0]?.darkBackgroundColor, '#202830');
-  assert.equal(table.rows[0]?.[0]?.darkColor, '#ddeeff');
+  assert.equal(table.rows[0]?.cells[0]?.darkBackgroundColor, '#202830');
+  assert.equal(table.rows[0]?.cells[0]?.darkColor, '#ddeeff');
 
   const html = renderDocument(parsed.ast);
   assert.match(html, /--wiki-dark-color:white/);
@@ -332,6 +332,90 @@ test('rejects malformed light and dark color pairs without leaking CSS', () => {
   assert.equal(parsed.errors.some((error) => error.includes('표 제어자')), true);
   assert.equal(html.includes('javascript:'), false);
   assert.equal(html.includes('--wiki-dark'), false);
+});
+
+test('applies row and visual-column table colors across rowspans with cell overrides', () => {
+  const parsed = parseMarkup([
+    '||<-2><|2>병합||<colbgcolor=#eeeeff,#111122><colcolor=#111133,#eeeeff>열 시작||',
+    '||<rowbgcolor=#ffeeee,#221111><rowcolor=#331111,#eeeeee>병합 옆||',
+    '||일반||일반 둘째||<bgcolor=#abcdef><color=navy>직접 지정||',
+    '||<rowbgcolor=#fff4dd,#332211><rowcolor=#553311,#ffeecc>행 첫째||행 둘째||'
+  ].join('\n'));
+  const table = parsed.ast[0];
+
+  assert.equal(table?.type, 'wiki_table');
+  if (table?.type !== 'wiki_table') return;
+
+  const columnOrigin = table.rows[0]?.cells[1];
+  const shiftedByRowspan = table.rows[1]?.cells[0];
+  const unstyledFirstColumn = table.rows[2]?.cells[0];
+  const directOverride = table.rows[2]?.cells[2];
+  const rowStyled = table.rows[3];
+
+  assert.deepEqual({
+    backgroundColor: columnOrigin?.backgroundColor,
+    darkBackgroundColor: columnOrigin?.darkBackgroundColor,
+    color: columnOrigin?.color,
+    darkColor: columnOrigin?.darkColor
+  }, {
+    backgroundColor: '#eeeeff',
+    darkBackgroundColor: '#111122',
+    color: '#111133',
+    darkColor: '#eeeeff'
+  });
+  assert.deepEqual({
+    backgroundColor: shiftedByRowspan?.backgroundColor,
+    darkBackgroundColor: shiftedByRowspan?.darkBackgroundColor,
+    color: shiftedByRowspan?.color,
+    darkColor: shiftedByRowspan?.darkColor
+  }, {
+    backgroundColor: '#eeeeff',
+    darkBackgroundColor: '#111122',
+    color: '#111133',
+    darkColor: '#eeeeff'
+  });
+  assert.equal(unstyledFirstColumn?.backgroundColor, undefined);
+  assert.deepEqual({
+    backgroundColor: directOverride?.backgroundColor,
+    darkBackgroundColor: directOverride?.darkBackgroundColor,
+    color: directOverride?.color,
+    darkColor: directOverride?.darkColor
+  }, {
+    backgroundColor: '#abcdef',
+    darkBackgroundColor: undefined,
+    color: 'navy',
+    darkColor: undefined
+  });
+  assert.deepEqual({
+    backgroundColor: rowStyled?.backgroundColor,
+    darkBackgroundColor: rowStyled?.darkBackgroundColor,
+    color: rowStyled?.color,
+    darkColor: rowStyled?.darkColor
+  }, {
+    backgroundColor: '#fff4dd',
+    darkBackgroundColor: '#332211',
+    color: '#553311',
+    darkColor: '#ffeecc'
+  });
+
+  const html = renderDocument(parsed.ast);
+  assert.match(html, /<tr style="color:#553311;background-color:#fff4dd;--wiki-dark-color:#ffeecc;--wiki-dark-background-color:#332211">/);
+  assert.match(html, /style="color:#111133;background-color:#eeeeff;--wiki-dark-color:#eeeeff;--wiki-dark-background-color:#111122">병합 옆/);
+  assert.match(html, /style="color:navy;background-color:#abcdef">직접 지정/);
+  assert.equal(html.includes('rowbgcolor'), false);
+  assert.equal(html.includes('colbgcolor'), false);
+});
+
+test('consumes invalid row and column colors without exposing unsafe syntax', () => {
+  const parsed = parseMarkup('||<rowbgcolor=url(javascript:alert(1))><colcolor=#fff,#000,red>안전||');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.blockingErrors.length, 0);
+  assert.equal(parsed.errors.filter((error) => error.includes('표 제어자')).length, 2);
+  assert.equal(html.includes('javascript:'), false);
+  assert.equal(html.includes('rowbgcolor'), false);
+  assert.equal(html.includes('colcolor'), false);
+  assert.match(html, />안전<\/th>/);
 });
 
 test('accepts compact NamuMark table captions and interpolates include parameters safely', () => {
