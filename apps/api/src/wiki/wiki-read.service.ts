@@ -1769,7 +1769,7 @@ export function buildServerWikiToolPath(serverSlug: string, localPath: string, t
 
 export function serverWikiNavigationDepth(serverSlug: string, localPath: string): number {
   const relativePath = serverWikiRelativePath(serverSlug, localPath);
-  return relativePath ? Math.max(0, relativePath.split('/').filter(Boolean).length - 1) : 0;
+  return relativePath ? relativePath.split('/').filter(Boolean).length : 0;
 }
 
 export function buildServerWikiNavigation(
@@ -1793,13 +1793,19 @@ export function buildServerWikiNavigation(
     const relativePath = serverWikiRelativePath(serverSlug, item.localPath);
     return {
       id: item.id.toString(),
-      title: item.displayTitle,
+      title: serverWikiNavigationTitle(serverSlug, item.displayTitle),
       path: buildServerWikiPagePath(serverSlug, item.localPath),
       current: item.id === currentPageId,
       depth: serverWikiNavigationDepth(serverSlug, item.localPath),
       hasChildren: parentPaths.has(relativePath)
     };
   });
+}
+
+function serverWikiNavigationTitle(serverSlug: string, displayTitle: string): string {
+  const title = displayTitle.trim();
+  const duplicatedPrefix = `${serverSlug.trim()}/`;
+  return title.startsWith(duplicatedPrefix) ? title.slice(duplicatedPrefix.length) : title;
 }
 
 function serverWikiRelativePath(serverSlug: string, localPath: string): string {

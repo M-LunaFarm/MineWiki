@@ -14,9 +14,9 @@ test('server wiki navigation removes the duplicated space slug', () => {
 
 test('server wiki navigation derives a stable document tree depth', () => {
   assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main'), 0);
-  assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main/시작하기'), 0);
-  assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main/가이드/설치'), 1);
-  assert.equal(serverWikiNavigationDepth('luna-main', '운영/권한/ACL'), 2);
+  assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main/시작하기'), 1);
+  assert.equal(serverWikiNavigationDepth('luna-main', 'luna-main/가이드/설치'), 2);
+  assert.equal(serverWikiNavigationDepth('luna-main', '운영/권한/ACL'), 3);
 });
 
 test('server wiki API deep links use the reserved tool prefix', () => {
@@ -37,7 +37,18 @@ test('server wiki navigation keeps every document beyond the former 100 item cap
   assert.equal(navigation.length, 150);
   assert.equal(navigation[0]?.path, '/server/luna');
   assert.equal(navigation[0]?.hasChildren, true);
+  assert.equal(navigation[1]?.depth, 2);
   assert.equal(navigation.at(-1)?.current, true);
+});
+
+test('server wiki navigation removes a duplicated server slug from labels', () => {
+  const navigation = buildServerWikiNavigation('luna', [
+    { id: 1n, localPath: 'luna', displayTitle: '루나 서버' },
+    { id: 2n, localPath: 'luna/guide', displayTitle: 'luna/가이드' },
+    { id: 3n, localPath: 'luna/guide/install', displayTitle: '설치' },
+  ], 3n);
+  assert.deepEqual(navigation.map((item) => item.title), ['루나 서버', '가이드', '설치']);
+  assert.deepEqual(navigation.map((item) => item.depth), [0, 1, 2]);
 });
 
 test('wiki search cursor is stable and rejects tampering', () => {
