@@ -1,0 +1,2 @@
+ALTER TABLE `wiki_user_block_events`
+  ADD COLUMN `public_reason` VARCHAR(300) NULL AFTER `reason`;

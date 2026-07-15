@@ -206,11 +206,24 @@ test('wiki user block updates status and appends immutable history in one transa
   };
   const service = new WikiAdminService(prisma as unknown as PrismaService);
 
-  const result = await service.setUserBlocked({ targetProfileId: '9', actorProfileId: 2n, blocked: true, reason: '반복적인 문서 훼손' });
+  const result = await service.setUserBlocked({ targetProfileId: '9', actorProfileId: 2n, blocked: true, reason: '반복적인 문서 훼손', publicReason: '문서 훼손이 반복되어 차단했습니다.' });
   assert.equal(result.status, 'blocked');
   assert.deepEqual(eventData && { action: eventData.action, previousStatus: eventData.previousStatus, newStatus: eventData.newStatus }, {
     action: 'block', previousStatus: 'active', newStatus: 'blocked'
   });
+  assert.equal(eventData?.publicReason, '문서 훼손이 반복되어 차단했습니다.');
+});
+
+test('wiki user block keeps public reason optional and bounded', async () => {
+  const service = new WikiAdminService({} as PrismaService);
+  await assert.rejects(
+    service.setUserBlocked({ targetProfileId: '9', actorProfileId: 2n, blocked: true, reason: '충분히 긴 내부 사유', publicReason: '짧음' }),
+    BadRequestException
+  );
+  await assert.rejects(
+    service.setUserBlocked({ targetProfileId: '9', actorProfileId: 2n, blocked: true, reason: '충분히 긴 내부 사유', publicReason: '가'.repeat(301) }),
+    BadRequestException
+  );
 });
 
 test('wiki user block rejects a concurrent status change without appending history', async () => {

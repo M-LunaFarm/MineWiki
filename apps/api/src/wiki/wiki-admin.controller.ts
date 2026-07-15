@@ -78,22 +78,22 @@ export class WikiAdminController {
   @Throttle({ default: { limit: 8, ttl: 60 } })
   async blockUser(
     @Param('id') targetProfileId: string,
-    @Body() body: { reason?: string },
+    @Body() body: { reason?: string; publicReason?: string },
     @CurrentSession() session: SessionPayload
   ) {
     const actor = await this.assertBlockAdmin(session);
-    return this.wikiAdmin.setUserBlocked({ targetProfileId, actorProfileId: actor.id, blocked: true, reason: body.reason });
+    return this.wikiAdmin.setUserBlocked({ targetProfileId, actorProfileId: actor.id, blocked: true, reason: body.reason, publicReason: body.publicReason });
   }
 
   @Post('users/:id/unblock')
   @Throttle({ default: { limit: 8, ttl: 60 } })
   async unblockUser(
     @Param('id') targetProfileId: string,
-    @Body() body: { reason?: string },
+    @Body() body: { reason?: string; publicReason?: string },
     @CurrentSession() session: SessionPayload
   ) {
     const actor = await this.assertBlockAdmin(session);
-    return this.wikiAdmin.setUserBlocked({ targetProfileId, actorProfileId: actor.id, blocked: false, reason: body.reason });
+    return this.wikiAdmin.setUserBlocked({ targetProfileId, actorProfileId: actor.id, blocked: false, reason: body.reason, publicReason: body.publicReason });
   }
 
   @Get('acl')

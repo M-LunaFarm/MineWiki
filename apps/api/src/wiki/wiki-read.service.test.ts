@@ -6,6 +6,54 @@ import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiIncludeService } from './wiki-include.service';
 import { buildServerWikiNavigation, buildServerWikiPagePath, buildServerWikiToolPath, encodeWikiSearchCursor, parseWikiSearchCursor, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
 
+test('public block history redacts private reasons and account identity while keeping a stable cursor', async () => {
+  const now = new Date('2026-07-15T12:00:00.000Z');
+  const events = [
+    { id: 3n, targetProfileId: 11n, actorProfileId: 21n, action: 'block', previousStatus: 'active', newStatus: 'blocked', reason: 'private incident details', publicReason: '반복적인 문서 훼손', createdAt: now },
+    { id: 2n, targetProfileId: 12n, actorProfileId: 21n, action: 'unblock', previousStatus: 'blocked', newStatus: 'active', reason: 'private appeal details', publicReason: null, createdAt: now }
+  ];
+  let receivedWhere: unknown;
+  const prisma = {
+    wikiUserBlockEvent: {
+      async findMany(input: { where: unknown }) { receivedWhere = input.where; return events; }
+    },
+    wikiProfile: {
+      async findMany(input: { select: Record<string, boolean> }) {
+        assert.equal(input.select.accountId, undefined);
+        assert.equal(input.select.email, undefined);
+        return [
+          { id: 11n, username: 'target', displayName: '대상 사용자' },
+          { id: 21n, username: 'moderator', displayName: '관리자' }
+        ];
+      }
+    }
+  };
+  const service = new WikiReadService(prisma as unknown as PrismaService, {} as WikiPermissionService);
+  const result = await service.getPublicBlockHistory({ cursor: '4', limit: '1', action: 'block' });
+
+  assert.deepEqual(receivedWhere, { id: { lt: 4n }, action: 'block' });
+  assert.equal(result.items.length, 1);
+  assert.equal(result.nextCursor, '3');
+  assert.equal(result.items[0]?.publicReason, '반복적인 문서 훼손');
+  assert.equal(result.items[0]?.target.username, 'target');
+  assert.equal('reason' in (result.items[0] as unknown as Record<string, unknown>), false);
+  assert.equal('accountId' in (result.items[0]?.target as unknown as Record<string, unknown>), false);
+});
+
+test('public block history validates filters and uses a privacy-safe deleted-profile fallback', async () => {
+  const service = new WikiReadService({
+    wikiUserBlockEvent: { async findMany() { return [{ id: 1n, targetProfileId: 99n, actorProfileId: 98n, action: 'block', publicReason: null, createdAt: new Date() }]; } },
+    wikiProfile: { async findMany() { return []; } }
+  } as unknown as PrismaService, {} as WikiPermissionService);
+
+  await assert.rejects(() => service.getPublicBlockHistory({ action: 'delete' }), /action must be block or unblock/u);
+  await assert.rejects(() => service.getPublicBlockHistory({ cursor: 'not-an-id' }), /unsigned integer/u);
+  const result = await service.getPublicBlockHistory({});
+  assert.equal(result.items[0]?.target.displayName, '탈퇴한 사용자');
+  assert.equal(result.items[0]?.target.username, null);
+  assert.equal(result.items[0]?.publicReason, null);
+});
+
 test('server wiki navigation removes the duplicated space slug', () => {
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main'), '/server/luna-main');
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main/규칙'), '/server/luna-main/%EA%B7%9C%EC%B9%99');

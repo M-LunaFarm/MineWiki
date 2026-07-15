@@ -34,7 +34,8 @@ import {
   type WikiRevisionListResponse,
   type WikiSearchResponse,
   type WikiSearchSuggestionResponse,
-  type WikiSpecialDocumentResponse
+  type WikiSpecialDocumentResponse,
+  type WikiPublicBlockHistoryResponse
 } from './wiki-read.service';
 import { WikiProfileService, type WikiMeResponse } from './wiki-profile.service';
 
@@ -189,6 +190,17 @@ export class WikiController {
     @Query('limit') limit?: string
   ): Promise<WikiSpecialDocumentResponse> {
     return this.wikiRead.getSpecialDocuments({ type, namespace, limit, accountId: request.sessionPayload?.userId ?? null });
+  }
+
+  @Get('block-history')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  blockHistory(
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+    @Query('action') action?: string,
+    @Query('q') query?: string
+  ): Promise<WikiPublicBlockHistoryResponse> {
+    return this.wikiRead.getPublicBlockHistory({ cursor, limit, action, query });
   }
 
   @Get('categories/:category')

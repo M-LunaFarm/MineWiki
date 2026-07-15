@@ -11,6 +11,19 @@ import type { WikiEditService } from './wiki-edit.service';
 import type { WikiProfileService } from './wiki-profile.service';
 import type { WikiReadService } from './wiki-read.service';
 
+test('public block history controller is callable without an authenticated session', async () => {
+  let input: unknown;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    { async getPublicBlockHistory(value: unknown) { input = value; return { items: [], nextCursor: null }; } } as unknown as WikiReadService,
+    {} as WikiEditService
+  );
+
+  const response = await controller.blockHistory('20', '50', 'block', 'target');
+  assert.deepEqual(input, { cursor: '20', limit: '50', action: 'block', query: 'target' });
+  assert.deepEqual(response, { items: [], nextCursor: null });
+});
+
 test('anonymous wiki controller read applies CIDR ACL from the central request context', async () => {
   const store = {
     aclRule: {

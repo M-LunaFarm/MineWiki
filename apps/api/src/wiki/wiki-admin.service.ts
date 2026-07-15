@@ -97,6 +97,7 @@ export interface WikiUserBlockEventSummary {
   readonly previousStatus: string;
   readonly newStatus: string;
   readonly reason: string;
+  readonly publicReason: string | null;
   readonly createdAt: string;
 }
 
@@ -220,6 +221,7 @@ export class WikiAdminService {
       previousStatus: event.previousStatus,
       newStatus: event.newStatus,
       reason: event.reason,
+      publicReason: event.publicReason,
       createdAt: event.createdAt.toISOString()
     }));
   }
@@ -229,11 +231,16 @@ export class WikiAdminService {
     readonly actorProfileId: bigint;
     readonly blocked: boolean;
     readonly reason?: string;
+    readonly publicReason?: string;
   }): Promise<WikiAdminUserSummary> {
     const targetId = this.parseBigIntId(input.targetProfileId, 'targetProfileId');
     if (targetId === input.actorProfileId) throw new BadRequestException('자기 자신의 위키 기여 권한은 변경할 수 없습니다.');
     const reason = input.reason?.trim() ?? '';
     if (reason.length < 5 || reason.length > 1000) throw new BadRequestException('사유는 5자 이상 1000자 이하로 입력하세요.');
+    const publicReason = input.publicReason?.trim() || null;
+    if (publicReason && (publicReason.length < 5 || publicReason.length > 300)) {
+      throw new BadRequestException('공개 사유는 비워 두거나 5자 이상 300자 이하로 입력하세요.');
+    }
     const newStatus = input.blocked ? 'blocked' : 'active';
     const previousStatus = input.blocked ? 'active' : 'blocked';
     const now = new Date();
@@ -268,6 +275,7 @@ export class WikiAdminService {
             previousStatus,
             newStatus,
             reason,
+            publicReason,
             createdAt: now
           }
         });
@@ -280,7 +288,7 @@ export class WikiAdminService {
       actorProfileId: input.actorProfileId,
       subjectType: 'wiki_profile',
       subjectId: targetId,
-      metadata: { previousStatus, status: newStatus, reason }
+      metadata: { previousStatus, status: newStatus, reason, publicReason }
     });
     return {
       id: updated.id.toString(), accountId: updated.accountId, username: updated.username,

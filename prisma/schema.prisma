@@ -1104,6 +1104,7 @@ model WikiUserBlockEvent {
   previousStatus  String   @map("previous_status") @db.VarChar(32)
   newStatus       String   @map("new_status") @db.VarChar(32)
   reason          String   @db.VarChar(1000)
+  publicReason    String?  @map("public_reason") @db.VarChar(300)
   createdAt       DateTime @map("created_at") @db.DateTime(3)
 
   @@index([targetProfileId, id], map: "idx_wiki_user_block_events_target")

@@ -218,6 +218,28 @@ export interface WikiSpecialDocumentResponse {
   readonly isStale?: boolean;
 }
 
+export interface WikiPublicBlockEvent {
+  readonly id: string;
+  readonly target: {
+    readonly profileId: string;
+    readonly username: string | null;
+    readonly displayName: string;
+  };
+  readonly actor: {
+    readonly profileId: string;
+    readonly username: string | null;
+    readonly displayName: string;
+  };
+  readonly action: 'block' | 'unblock';
+  readonly publicReason: string | null;
+  readonly createdAt: string;
+}
+
+export interface WikiPublicBlockHistoryResponse {
+  readonly items: WikiPublicBlockEvent[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiCategoryResponse {
   readonly category: string;
   readonly document: {
@@ -1115,6 +1137,72 @@ export class WikiReadService {
       return this.getIndexedSpecialDocuments(type, limit, namespace?.id, input.accountId ?? null);
     }
     return this.getSnapshotSpecialDocuments(type, limit, namespace?.code ?? '', input.accountId ?? null);
+  }
+
+  async getPublicBlockHistory(input: {
+    readonly cursor?: string;
+    readonly limit?: string;
+    readonly action?: string;
+    readonly query?: string;
+  }): Promise<WikiPublicBlockHistoryResponse> {
+    const cursor = input.cursor?.trim() ? this.parseBigIntId(input.cursor, 'cursor') : null;
+    const parsedLimit = input.limit?.trim() ? Number(input.limit) : 50;
+    if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1) {
+      throw new BadRequestException('limit must be a positive integer.');
+    }
+    const limit = Math.min(parsedLimit, 100);
+    const action = input.action?.trim() || null;
+    if (action && action !== 'block' && action !== 'unblock') {
+      throw new BadRequestException('action must be block or unblock.');
+    }
+    const query = input.query?.trim().slice(0, 64) ?? '';
+    const matchingProfiles = query
+      ? await this.prisma.wikiProfile.findMany({
+          where: { OR: [{ username: { contains: query } }, { displayName: { contains: query } }] },
+          select: { id: true },
+          take: 200
+        })
+      : null;
+    if (matchingProfiles && matchingProfiles.length === 0) return { items: [], nextCursor: null };
+
+    const events = await this.prisma.wikiUserBlockEvent.findMany({
+      where: {
+        ...(cursor ? { id: { lt: cursor } } : {}),
+        ...(action ? { action } : {}),
+        ...(matchingProfiles ? { targetProfileId: { in: matchingProfiles.map((profile) => profile.id) } } : {})
+      },
+      orderBy: [{ id: 'desc' }],
+      take: limit + 1
+    });
+    const hasMore = events.length > limit;
+    const visible = events.slice(0, limit);
+    const profileIds = [...new Set(visible.flatMap((event) => [event.targetProfileId, event.actorProfileId]))];
+    const profiles = profileIds.length > 0
+      ? await this.prisma.wikiProfile.findMany({
+          where: { id: { in: profileIds } },
+          select: { id: true, username: true, displayName: true }
+        })
+      : [];
+    const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+    const publicProfile = (profileId: bigint, fallback: string) => {
+      const profile = profileById.get(profileId);
+      return {
+        profileId: profileId.toString(),
+        username: profile?.username ?? null,
+        displayName: profile?.displayName ?? fallback
+      };
+    };
+    return {
+      items: visible.map((event) => ({
+        id: event.id.toString(),
+        target: publicProfile(event.targetProfileId, '탈퇴한 사용자'),
+        actor: publicProfile(event.actorProfileId, '알 수 없는 관리자'),
+        action: event.action === 'unblock' ? 'unblock' : 'block',
+        publicReason: event.publicReason?.trim() || null,
+        createdAt: event.createdAt.toISOString()
+      })),
+      nextCursor: hasMore && visible.length > 0 ? visible[visible.length - 1]!.id.toString() : null
+    };
   }
 
   private async getSnapshotSpecialDocuments(
