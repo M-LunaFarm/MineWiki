@@ -165,6 +165,131 @@ if (!hasDatabase) {
     } finally { await cleanup([group.firstId, group.secondId]); }
   });
 
+  test('due processing tombstones user documents without losing immutable ownership', async () => {
+    const group = await createGroup();
+    const now = new Date();
+    const profile = await prisma.wikiProfile.create({
+      data: {
+        accountId: group.firstId,
+        username: `user_${randomUUID().replaceAll('-', '').slice(0, 20)}`,
+        displayName: '탈퇴 문서 테스트',
+        status: 'active',
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    const [namespace, space] = await Promise.all([
+      prisma.wikiNamespace.findUniqueOrThrow({ where: { code: 'user' } }),
+      prisma.wikiSpace.findUniqueOrThrow({ where: { code: 'user' } }),
+    ]);
+    const root = await prisma.wikiPage.create({
+      data: {
+        namespaceId: namespace.id,
+        spaceId: space.id,
+        localPath: profile.username,
+        slug: profile.username,
+        title: profile.username,
+        displayTitle: profile.displayName,
+        pageType: 'article',
+        protectionLevel: 'open',
+        status: 'normal',
+        createdBy: profile.id,
+        ownerProfileId: profile.id,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    const child = await prisma.wikiPage.create({
+      data: {
+        namespaceId: namespace.id,
+        spaceId: space.id,
+        localPath: `${profile.username}/개인_작업실`,
+        slug: `${profile.username}/개인_작업실`,
+        title: `${profile.username}/개인_작업실`,
+        displayTitle: '개인 작업실',
+        pageType: 'article',
+        protectionLevel: 'open',
+        status: 'normal',
+        createdBy: profile.id,
+        ownerProfileId: profile.id,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    await prisma.wikiRecentChange.create({
+      data: {
+        pageId: root.id,
+        actorId: profile.id,
+        changeType: 'create',
+        title: profile.username,
+        namespaceCode: 'user',
+        isMinor: false,
+        createdAt: now,
+      },
+    });
+    const editRequest = await prisma.wikiEditRequest.create({
+      data: {
+        requestKind: 'create',
+        targetNamespaceId: namespace.id,
+        targetNamespaceCode: 'user',
+        targetSpaceId: space.id,
+        targetTitle: `${profile.username}/제안`,
+        targetSlug: `${profile.username}/제안`,
+        targetDisplayTitle: '제안',
+        targetPageType: 'article',
+        targetOwnerProfileId: profile.id,
+        proposedContent: '사용자 문서 제안',
+        editSummary: '탈퇴 전 제안',
+        status: 'stale',
+        createdBy: profile.id,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+
+    try {
+      const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
+      await prisma.accountDeletionRequest.update({
+        where: { id: requested.id },
+        data: { scheduledFor: new Date(Date.now() - 1000) },
+      });
+      const completed = await service.process(requested.id, randomUUID(), 'user document privacy test');
+      assert.equal(completed.status, 'completed');
+
+      const [storedProfile, storedRoot, storedChild, recent, storedEditRequest] = await Promise.all([
+        prisma.wikiProfile.findUniqueOrThrow({ where: { id: profile.id } }),
+        prisma.wikiPage.findUniqueOrThrow({ where: { id: root.id } }),
+        prisma.wikiPage.findUniqueOrThrow({ where: { id: child.id } }),
+        prisma.wikiRecentChange.findFirstOrThrow({ where: { pageId: root.id } }),
+        prisma.wikiEditRequest.findUniqueOrThrow({ where: { id: editRequest.id } }),
+      ]);
+      assert.equal(storedProfile.username, `deleted-${profile.id}`);
+      assert.equal(storedProfile.status, 'closed');
+      assert.equal(storedRoot.localPath, `deleted-${profile.id}`);
+      assert.equal(storedChild.localPath, `deleted-${profile.id}/page-${child.id}`);
+      assert.equal(storedRoot.status, 'deleted');
+      assert.equal(storedChild.status, 'deleted');
+      assert.equal(storedRoot.ownerProfileId, profile.id);
+      assert.equal(storedChild.ownerProfileId, profile.id);
+      assert.equal(recent.title, `deleted-${profile.id}`);
+      assert.equal(storedEditRequest.status, 'closed');
+      assert.equal(storedEditRequest.targetTitle, `deleted-${profile.id}`);
+      assert.equal(storedEditRequest.targetSlug, `deleted-${profile.id}`);
+      assert.doesNotMatch(`${storedRoot.title}/${storedChild.title}`, new RegExp(profile.username, 'u'));
+    } finally {
+      const pageIds = [root.id, child.id];
+      await prisma.wikiEditRequest.deleteMany({ where: { id: editRequest.id } });
+      await prisma.wikiPageLink.deleteMany({ where: { OR: [{ sourcePageId: { in: pageIds } }] } });
+      await prisma.wikiRecentChange.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiSearchDocument.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageRevision.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPage.deleteMany({ where: { id: { in: pageIds } } });
+      await prisma.wikiProfile.delete({ where: { id: profile.id } }).catch(() => undefined);
+      await cleanup([group.firstId, group.secondId]);
+    }
+  });
+
   test('due processing preserves public review and vote rows while removing account identifiers', async () => {
     const group = await createGroup();
     const minecraftUuid = randomUUID();

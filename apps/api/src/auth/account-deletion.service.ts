@@ -254,10 +254,14 @@ export class AccountDeletionService {
         });
         return { blocked: true as const, blockers };
       }
-      const profiles = await tx.wikiProfile.findMany({ where: { accountId: { in: accountIds } }, select: { id: true } });
+      const profiles = await tx.wikiProfile.findMany({
+        where: { accountId: { in: accountIds } },
+        select: { id: true, username: true },
+      });
       const profileIds = profiles.map((item) => item.id);
       const identityCleanup = await this.scrubExternalIdentities(tx, request.id, accountIds);
       await this.revokeCredentials(tx, accountIds);
+      await this.anonymizeUserDocuments(tx, request.id, profiles, now);
       await tx.uploadedFile.updateMany({ where: { ownerAccountId: { in: accountIds } }, data: { ownerAccountId: null } });
       await tx.reviewHelpfulVote.deleteMany({ where: { accountId: { in: accountIds } } });
       await tx.reviewReport.deleteMany({ where: { accountId: { in: accountIds } } });
@@ -337,6 +341,116 @@ export class AccountDeletionService {
       }
     }
     return { processed, blocked, failed };
+  }
+
+  private async anonymizeUserDocuments(
+    tx: Prisma.TransactionClient,
+    deletionRequestId: string,
+    profiles: ReadonlyArray<{ readonly id: bigint; readonly username: string }>,
+    now: Date,
+  ): Promise<void> {
+    if (profiles.length === 0) return;
+    const profileIds = profiles.map((profile) => profile.id);
+    const pages = await tx.wikiPage.findMany({
+      where: { ownerProfileId: { in: profileIds } },
+      select: {
+        id: true,
+        namespaceId: true,
+        ownerProfileId: true,
+        localPath: true,
+      },
+      orderBy: [{ id: 'asc' }],
+    });
+    await this.closeUserDocumentEditRequests(tx, profiles, now);
+    if (pages.length === 0) return;
+
+    const requestKey = deletionRequestId.replace(/[^a-zA-Z0-9]/gu, '').slice(0, 24);
+    for (const page of pages) {
+      const temporaryPath = `__deleting_${requestKey}_${page.id}`;
+      await tx.wikiPage.update({
+        where: { id: page.id },
+        data: {
+          localPath: temporaryPath,
+          slug: temporaryPath,
+          title: temporaryPath,
+          displayTitle: '탈퇴 처리 중인 사용자 문서',
+          status: 'deleted',
+          updatedAt: now,
+        },
+      });
+    }
+
+    const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+    for (const page of pages) {
+      const profile = profileById.get(page.ownerProfileId ?? -1n);
+      if (!profile) continue;
+      const rootPath = `deleted-${profile.id}`;
+      const wasRoot = !page.localPath.includes('/');
+      const finalPath = wasRoot ? rootPath : `${rootPath}/page-${page.id}`;
+      await tx.wikiPage.update({
+        where: { id: page.id },
+        data: {
+          localPath: finalPath,
+          slug: finalPath,
+          title: finalPath,
+          displayTitle: wasRoot ? '탈퇴한 사용자' : '탈퇴한 사용자 문서',
+          status: 'deleted',
+          updatedAt: now,
+        },
+      });
+      await tx.wikiRecentChange.updateMany({
+        where: { pageId: page.id },
+        data: { title: finalPath },
+      });
+    }
+
+    const pageIds = pages.map((page) => page.id);
+    await tx.wikiPageRenderCache.deleteMany({ where: { pageId: { in: pageIds } } });
+    await tx.wikiSearchDocument.deleteMany({ where: { pageId: { in: pageIds } } });
+    const userRoots = new Set(profiles.map((profile) => profile.username));
+    for (const page of pages) {
+      const [root] = page.localPath.split('/');
+      if (root) userRoots.add(root);
+    }
+    for (const root of userRoots) {
+      await tx.wikiPageLink.deleteMany({
+        where: {
+          OR: [
+            { sourcePageId: { in: pageIds } },
+            {
+              targetNamespaceCode: 'user',
+              OR: [
+                { targetSlug: root },
+                { targetSlug: { startsWith: `${root}/` } },
+              ],
+            },
+          ],
+        },
+      });
+    }
+  }
+
+  private async closeUserDocumentEditRequests(
+    tx: Prisma.TransactionClient,
+    profiles: ReadonlyArray<{ readonly id: bigint }>,
+    now: Date,
+  ): Promise<void> {
+    for (const profile of profiles) {
+      const tombstone = `deleted-${profile.id}`;
+      await tx.wikiEditRequest.updateMany({
+        where: {
+          targetOwnerProfileId: profile.id,
+          status: { in: ['pending', 'reviewing', 'stale'] },
+        },
+        data: {
+          targetTitle: tombstone,
+          targetSlug: tombstone,
+          targetDisplayTitle: '탈퇴한 사용자 문서',
+          status: 'closed',
+          updatedAt: now,
+        },
+      });
+    }
   }
 
   async reject(requestId: string, adminAccountId: string, note: string): Promise<AccountDeletionStatus> {
