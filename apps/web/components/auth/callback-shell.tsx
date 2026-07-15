@@ -144,10 +144,14 @@ export function OAuthJourney({
   readonly providerLabel: string;
   readonly currentStep: 1 | 2 | 3;
 }) {
-  const steps = ['MineWiki 요청', `${providerLabel} 인증`, 'MineWiki 복귀'];
+  const steps = [
+    { label: 'MineWiki 요청', compactLabel: '요청' },
+    { label: `${providerLabel} 인증`, compactLabel: providerLabel },
+    { label: 'MineWiki 복귀', compactLabel: '복귀' },
+  ];
   return (
     <ol className="grid grid-cols-3 gap-2" aria-label="간편 로그인 진행 단계">
-      {steps.map((label, index) => {
+      {steps.map(({ label, compactLabel }, index) => {
         const step = (index + 1) as 1 | 2 | 3;
         const complete = step < currentStep;
         const current = step === currentStep;
@@ -164,7 +168,8 @@ export function OAuthJourney({
             }`}
           >
             <span className="block text-[9px] font-bold uppercase tracking-[.12em]">{step}단계</span>
-            <span className="mt-1 block truncate text-[10px] font-semibold sm:text-[11px]">{label}</span>
+            <span className="mt-1 block truncate text-[10px] font-semibold min-[361px]:hidden">{compactLabel}</span>
+            <span className="mt-1 hidden truncate text-[11px] font-semibold min-[361px]:block">{label}</span>
           </li>
         );
       })}
