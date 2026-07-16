@@ -67,10 +67,14 @@ test('notification inbox upgrades legacy server edit request links to canonical 
 
 test('notification inbox removes notifications whose source comment is hidden', async () => {
   let deletedIds: bigint[] = [];
+  let purgeQuery: { orderBy?: unknown; take?: number } | undefined;
   const row = { id: 4n, profileId: 8n, type: 'discussion_mention', pageId: 2n, actorProfileId: null, sourceType: 'discussion_comment', sourceId: '4', title: 'Guide', message: null, href: '/wiki/discuss/2?thread=3&comment=4', dedupeKey: 'key', readAt: now, createdAt: now };
   const prisma = {
     wikiNotification: {
-      async findMany(args: { select?: unknown }) { return args.select ? [] : [row]; },
+      async findMany(args: { select?: unknown; orderBy?: unknown; take?: number }) {
+        if (args.select) { purgeQuery = args; return []; }
+        return [row];
+      },
       async count() { return 0; },
       async deleteMany(args: { where: { id: { in: bigint[] } } }) { deletedIds = args.where.id.in; return { count: deletedIds.length }; }
     },
@@ -91,6 +95,8 @@ test('notification inbox removes notifications whose source comment is hidden', 
 
   assert.deepEqual(result.items, []);
   assert.deepEqual(deletedIds, [4n]);
+  assert.deepEqual(purgeQuery?.orderBy, { id: 'desc' });
+  assert.equal(purgeQuery?.take, 200);
 });
 
 test('watched revision notifications exclude the editor and deduplicate per recipient', async () => {

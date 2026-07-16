@@ -42,6 +42,7 @@ interface PendingNotificationDelivery {
 
 const MAX_DISCUSSION_NOTIFICATION_RECIPIENTS = 500;
 const DISCUSSION_ACL_RECIPIENT_CHUNK = 20;
+const UNREAD_DISCUSSION_PURGE_BATCH = 200;
 
 @Injectable()
 export class WikiNotificationService {
@@ -435,7 +436,9 @@ export class WikiNotificationService {
     if (!surface.wikiDiscussionComment || !surface.wikiDiscussionThread) return;
     const rows = await this.prisma.wikiNotification.findMany({
       where: { profileId, readAt: null, sourceType: 'discussion_comment' },
-      select: { id: true, sourceId: true, pageId: true }
+      select: { id: true, sourceId: true, pageId: true },
+      orderBy: { id: 'desc' },
+      take: UNREAD_DISCUSSION_PURGE_BATCH
     });
     if (rows.length === 0) return;
     const commentIds = rows.flatMap((row) => /^\d+$/.test(row.sourceId) ? [BigInt(row.sourceId)] : []);
