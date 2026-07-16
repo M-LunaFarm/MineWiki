@@ -22,7 +22,9 @@ import {
   type WikiEditConflictDetails,
   type WikiDocumentTemplateSummary,
   WikiApiError,
-  type WikiPageResponse
+  type ServerWikiPresentation,
+  type WikiPageResponse,
+  type WikiPolicyAcceptance,
 } from '../../lib/wiki-api';
 
 interface WikiEditorClientProps {
@@ -30,9 +32,11 @@ interface WikiEditorClientProps {
   readonly namespace: string;
   readonly title: string;
   readonly routePath: string;
+  readonly presentation: ServerWikiPresentation | null;
+  readonly presentationLoadFailed: boolean;
 }
 
-export function WikiEditorClient({ page, namespace, title, routePath }: WikiEditorClientProps) {
+export function WikiEditorClient({ page, namespace, title, routePath, presentation, presentationLoadFailed }: WikiEditorClientProps) {
   const router = useRouter();
   const { account, loading } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -61,12 +65,22 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [editConflict, setEditConflict] = useState<WikiEditConflictDetails | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaKey, setCaptchaKey] = useState(0);
+  const [policyAccepted, setPolicyAccepted] = useState(false);
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
   const fileSourceRequired = Boolean(fileLicense && fileLicense !== 'self-created');
   const canUploadImage = Boolean(page && fileLicense && (!fileSourceRequired || fileSourceUrl.trim()));
   const hasUnresolvedConflict = containsWikiConflictMarkers(contentRaw);
   const needsCaptcha = !page && isCaptchaConfigured();
+  const policyRequired = Boolean(presentation?.policy.required && presentation.policy.html);
+  const policyReady = !presentationLoadFailed && (!policyRequired || policyAccepted);
+  const policyAcceptance: WikiPolicyAcceptance | undefined = policyRequired && policyAccepted && presentation
+    ? { version: presentation.policy.version, accepted: true }
+    : undefined;
+
+  useEffect(() => {
+    setPolicyAccepted(false);
+  }, [presentation?.policy.version]);
 
   const heading = page
     ? sectionAnchor
@@ -156,8 +170,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   }, [account, page]);
 
   const canSubmit = useMemo(() => {
-    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict && (!needsCaptcha || captchaToken));
-  }, [account, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict, needsCaptcha, captchaToken]);
+    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict && (!needsCaptcha || captchaToken) && policyReady);
+  }, [account, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict, needsCaptcha, captchaToken, policyReady]);
 
   function renderPreview() {
     setFeedback(null);
@@ -182,7 +196,11 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
     if (!canSubmit) {
       setFeedback(blockingErrors.length > 0 ? null : needsCaptcha && !captchaToken
         ? '새 문서를 만들기 전에 로봇 방지 확인을 완료해 주세요.'
-        : '본문과 편집 요약을 입력해야 합니다.');
+        : !policyReady
+          ? presentationLoadFailed
+            ? '서버 위키 기여 정책을 불러오지 못해 저장을 중단했습니다. 새로고침 후 다시 시도해 주세요.'
+            : '서버 위키 기여 정책을 확인하고 동의해 주세요.'
+          : '본문과 편집 요약을 입력해야 합니다.');
       return;
     }
     setFeedback(null);
@@ -195,7 +213,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
             contentRaw,
             editSummary,
             isMinor,
-            baseRevisionId
+            baseRevisionId,
+            policyAcceptance,
           });
           router.push(`${routePath}#${encodeURIComponent(result.sectionAnchor)}`);
         } else {
@@ -207,7 +226,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
             editSummary,
             isMinor,
             baseRevisionId,
-            captchaToken: needsCaptcha ? captchaToken ?? undefined : undefined
+            captchaToken: needsCaptcha ? captchaToken ?? undefined : undefined,
+            policyAcceptance,
           });
           router.push(routePath);
         }
@@ -253,13 +273,19 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       setFeedback('새 문서 요청을 보내기 전에 로봇 방지 확인을 완료해 주세요.');
       return;
     }
+    if (!policyReady) {
+      setFeedback(presentationLoadFailed
+        ? '서버 위키 기여 정책을 불러오지 못해 요청을 중단했습니다. 새로고침 후 다시 시도해 주세요.'
+        : '서버 위키 기여 정책을 확인하고 동의해 주세요.');
+      return;
+    }
     setFeedback(null);
     startSaveTransition(async () => {
       try {
         if (page && baseRevisionId) {
-          await createWikiEditRequest({ pageId: page.id, baseRevisionId, contentRaw, editSummary, isMinor });
+          await createWikiEditRequest({ pageId: page.id, baseRevisionId, contentRaw, editSummary, isMinor, policyAcceptance });
         } else {
-          await createWikiPageRequest({ namespace, title, contentRaw, editSummary, isMinor, captchaToken: captchaToken ?? undefined });
+          await createWikiPageRequest({ namespace, title, contentRaw, editSummary, isMinor, captchaToken: captchaToken ?? undefined, policyAcceptance });
         }
         setFeedback(page
           ? '편집 요청을 제출했습니다. 문서 관리자가 검토하면 실제 리비전으로 반영됩니다.'
@@ -388,6 +414,37 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
         </div>
       ) : null}
 
+      {presentationLoadFailed ? (
+        <div className="flex gap-3 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100" role="alert">
+          <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
+          <p>서버 위키의 편집 정책을 불러오지 못했습니다. 정책을 확인하지 않은 변경은 저장할 수 없습니다.</p>
+        </div>
+      ) : null}
+
+      {presentation?.policy.html || presentation?.editHelpHtml ? (
+        <section className="space-y-4 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.045] p-4 sm:p-5" aria-labelledby="server-wiki-policy-title">
+          <div>
+            <h2 id="server-wiki-policy-title" className="text-sm font-semibold text-white">이 서버 위키의 편집 안내</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-400">서버 운영진이 정한 기여 기준과 문서 작성 도움말입니다.</p>
+          </div>
+          {presentation.policy.html ? (
+            <div className="wiki-rendered rounded-lg border border-white/10 bg-black/10 px-4 py-3 text-sm" dangerouslySetInnerHTML={{ __html: presentation.policy.html }} />
+          ) : null}
+          {presentation.editHelpHtml ? (
+            <details className="rounded-lg border border-white/10 bg-black/10 px-4 py-3" open={!presentation.policy.html}>
+              <summary className="cursor-pointer text-sm font-semibold text-emerald-200">편집 도움말</summary>
+              <div className="wiki-rendered mt-3 text-sm" dangerouslySetInnerHTML={{ __html: presentation.editHelpHtml }} />
+            </details>
+          ) : null}
+          {policyRequired ? (
+            <label className="flex min-h-12 cursor-pointer items-start gap-3 rounded-lg border border-emerald-400/25 bg-emerald-400/[0.07] px-4 py-3 text-sm text-slate-200">
+              <input type="checkbox" checked={policyAccepted} onChange={(event) => setPolicyAccepted(event.target.checked)} className="mt-0.5 h-5 w-5 flex-none accent-emerald-400" />
+              <span><strong className="text-white">기여 정책 v{presentation.policy.version}을 확인했습니다.</strong><span className="mt-1 block text-xs leading-5 text-slate-400">정책이 개정되면 최신 내용을 다시 확인해야 합니다.</span></span>
+            </label>
+          ) : null}
+        </section>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="space-y-4">
           {editConflict ? (
@@ -447,7 +504,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
           {!sectionAnchor ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
               <p className="max-w-2xl text-xs leading-5 text-slate-400">{page ? '직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.' : '직접 생성할 수 없는 문서도 관리자가 검토하는 새 문서 요청으로 제출할 수 있습니다.'}</p>
-              <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim() || (needsCaptcha && !captchaToken)} className="btn-secondary h-10 disabled:opacity-50">{page ? '검토 요청' : '새 문서 검토 요청'}</button>
+              <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim() || (needsCaptcha && !captchaToken) || !policyReady} className="btn-secondary h-10 disabled:opacity-50">{page ? '검토 요청' : '새 문서 검토 요청'}</button>
             </div>
           ) : null}
           <section className="rounded-lg border border-white/10 bg-white/[0.025] p-4">

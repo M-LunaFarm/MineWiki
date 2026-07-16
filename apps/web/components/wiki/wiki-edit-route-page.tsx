@@ -1,4 +1,4 @@
-import { fetchWikiPageByPath } from '../../lib/wiki-server-api';
+import { fetchServerWikiPresentation, fetchWikiPageByPath } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiEditorClient } from './wiki-editor-client';
 import { ServerWikiWorkspace } from './server-wiki-workspace';
@@ -28,6 +28,18 @@ export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoute
   const title = segments.length > 0 ? segments.map(decodeWikiRouteSegment).join('/') : '대문';
   const routePath = buildWikiRoutePath(prefix, segments);
   const page = await fetchWikiPageByPath(routePath).catch(() => null);
+  const serverSlug = prefix === 'server'
+    ? page?.serverWiki?.slug ?? (segments[0] ? decodeWikiRouteSegment(segments[0]) : null)
+    : null;
+  let presentation = null;
+  let presentationLoadFailed = false;
+  if (serverSlug) {
+    try {
+      presentation = await fetchServerWikiPresentation(serverSlug);
+    } catch {
+      presentationLoadFailed = true;
+    }
+  }
 
   const editor = (
     <WikiEditorClient
@@ -35,6 +47,8 @@ export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoute
       namespace={namespaceByPrefix[prefix]}
       title={title}
       routePath={routePath}
+      presentation={presentation}
+      presentationLoadFailed={presentationLoadFailed}
     />
   );
   if (prefix === 'server' && page?.serverWiki) {

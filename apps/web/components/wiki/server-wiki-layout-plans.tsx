@@ -34,7 +34,7 @@ export function ServerWikiLayoutPlans({ serverId }: { readonly serverId: string 
   );
 }
 
-function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: string }) {
+export function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: string }) {
   const [settings, setSettings] = useState<LayoutSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);

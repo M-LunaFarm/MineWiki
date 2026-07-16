@@ -13,7 +13,8 @@ import type {
   WikiSpecialDocumentResponse,
   WikiSpecialDocumentType,
   WikiPublicBlockHistoryResponse,
-  WikiPublicProfileResponse
+  WikiPublicProfileResponse,
+  ServerWikiPresentation,
 } from './wiki-api';
 
 const API_BASE = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL);
@@ -23,6 +24,17 @@ export async function fetchWikiPageByPath(path: string): Promise<WikiPageRespons
   const response = await wikiFetch(`/v1/wiki/page/by-path?${params.toString()}`);
   if (response.status === 404) return null;
   return readWikiResponse<WikiPageResponse>(response, `Failed to load wiki page (${path}).`);
+}
+
+export async function fetchServerWikiPresentation(slug: string): Promise<ServerWikiPresentation | null> {
+  const response = await wikiFetch(
+    `/v1/wiki/server-wikis/${encodeURIComponent(slug)}/presentation`,
+  );
+  if (response.status === 404) return null;
+  return readWikiResponse<ServerWikiPresentation>(
+    response,
+    'Failed to load server wiki presentation settings.',
+  );
 }
 
 export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisionResponse> {

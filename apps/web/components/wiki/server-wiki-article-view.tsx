@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 
 import type { WikiPageResponse } from '../../lib/wiki-api';
+import { fetchServerWikiPresentation } from '../../lib/wiki-server-api';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
 import { WikiPageTools } from './wiki-page-tools';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
@@ -20,9 +21,10 @@ interface ServerWikiArticleViewProps {
   readonly routePath: string;
 }
 
-export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleViewProps) {
+export async function ServerWikiArticleView({ page, routePath }: ServerWikiArticleViewProps) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
+  const presentation = await fetchServerWikiPresentation(wiki.slug);
 
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
@@ -96,7 +98,25 @@ export function ServerWikiArticleView({ page, routePath }: ServerWikiArticleView
             )
           ) : null}
 
+          {presentation?.topNoticeHtml ? (
+            <aside
+              className="server-wiki-notice wiki-rendered mt-8 rounded-xl border border-emerald-400/25 border-l-4 border-l-emerald-400 bg-emerald-400/[0.06] px-5 py-4 text-sm text-slate-300"
+              role="note"
+              aria-label="서버 위키 상단 안내"
+              dangerouslySetInnerHTML={{ __html: presentation.topNoticeHtml }}
+            />
+          ) : null}
+
           <div className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: page.html }} />
+
+          {presentation?.bottomNoticeHtml ? (
+            <aside
+              className="server-wiki-notice wiki-rendered mt-8 rounded-xl border border-white/10 bg-white/[0.025] px-5 py-4 text-sm text-slate-400"
+              role="note"
+              aria-label="서버 위키 하단 안내"
+              dangerouslySetInnerHTML={{ __html: presentation.bottomNoticeHtml }}
+            />
+          ) : null}
 
           {page.headings.length > 0 ? (
             <details className="mt-8 rounded-xl border border-white/10 p-4 2xl:hidden">

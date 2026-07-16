@@ -83,6 +83,24 @@ export interface WikiPageResponse {
   } | null;
 }
 
+export interface ServerWikiPresentation {
+  readonly slug: string;
+  readonly settingsVersion: number;
+  readonly policy: {
+    readonly html: string | null;
+    readonly version: number;
+    readonly required: boolean;
+  };
+  readonly editHelpHtml: string | null;
+  readonly topNoticeHtml: string | null;
+  readonly bottomNoticeHtml: string | null;
+}
+
+export interface WikiPolicyAcceptance {
+  readonly version: number;
+  readonly accepted: true;
+}
+
 export async function fetchWikiPageByPath(path: string): Promise<WikiPageResponse | null> {
   const searchParams = new URLSearchParams({ path });
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/page/by-path?${searchParams.toString()}`, {
@@ -1350,11 +1368,11 @@ export async function fetchWikiEditRequestContext(requestId: string): Promise<Wi
   return readWikiBrowser<WikiEditRequestListResponse>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}/context`);
 }
 
-export async function createWikiEditRequest(input: { pageId: string; baseRevisionId: string; contentRaw: string; editSummary: string; isMinor: boolean }): Promise<WikiEditRequestSummary> {
+export async function createWikiEditRequest(input: { pageId: string; baseRevisionId: string; contentRaw: string; editSummary: string; isMinor: boolean; policyAcceptance?: WikiPolicyAcceptance }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/edit-requests`, 'POST', input);
 }
 
-export async function createWikiPageRequest(input: { namespace: string; title: string; spaceId?: string; contentRaw: string; editSummary: string; isMinor: boolean; captchaToken?: string }): Promise<WikiEditRequestSummary> {
+export async function createWikiPageRequest(input: { namespace: string; title: string; spaceId?: string; contentRaw: string; editSummary: string; isMinor: boolean; captchaToken?: string; policyAcceptance?: WikiPolicyAcceptance }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>('/v1/wiki/edit-requests', 'POST', input);
 }
 
@@ -1704,7 +1722,7 @@ export async function previewWikiMarkup(contentRaw: string): Promise<{ html: str
   return response.json();
 }
 
-export async function saveWikiPage(input: { pageId?: string; namespace: string; title: string; contentRaw: string; editSummary: string; isMinor: boolean; baseRevisionId?: string; captchaToken?: string }): Promise<WikiMutationResponse> {
+export async function saveWikiPage(input: { pageId?: string; namespace: string; title: string; contentRaw: string; editSummary: string; isMinor: boolean; baseRevisionId?: string; captchaToken?: string; policyAcceptance?: WikiPolicyAcceptance }): Promise<WikiMutationResponse> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages${input.pageId ? `/${input.pageId}` : ''}`, {
     method: input.pageId ? 'PATCH' : 'POST',
     credentials: 'include',
@@ -1717,6 +1735,7 @@ export async function saveWikiPage(input: { pageId?: string; namespace: string; 
       isMinor: input.isMinor,
       baseRevisionId: input.baseRevisionId,
       captchaToken: input.captchaToken,
+      policyAcceptance: input.policyAcceptance,
     }),
   });
   if (!response.ok) {
@@ -1733,6 +1752,7 @@ export async function saveWikiSection(input: {
   editSummary: string;
   isMinor: boolean;
   baseRevisionId: string;
+  policyAcceptance?: WikiPolicyAcceptance;
 }): Promise<WikiSectionMutationResponse> {
   const response = await fetch(
     `${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(input.pageId)}/sections/${encodeURIComponent(input.anchor)}`,
@@ -1744,7 +1764,8 @@ export async function saveWikiSection(input: {
         contentRaw: input.contentRaw,
         editSummary: input.editSummary,
         isMinor: input.isMinor,
-        baseRevisionId: input.baseRevisionId
+        baseRevisionId: input.baseRevisionId,
+        policyAcceptance: input.policyAcceptance,
       })
     }
   );
