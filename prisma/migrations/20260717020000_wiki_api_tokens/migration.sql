@@ -1,0 +1,41 @@
+CREATE TABLE `wiki_api_tokens` (
+  `id` CHAR(36) NOT NULL,
+  `account_id` VARCHAR(191) NOT NULL,
+  `name` VARCHAR(80) NOT NULL,
+  `token_prefix` VARCHAR(24) NOT NULL,
+  `secret_hash` CHAR(64) NOT NULL,
+  `scopes` JSON NOT NULL,
+  `space_id` BIGINT UNSIGNED NULL,
+  `status` VARCHAR(16) NOT NULL DEFAULT 'active',
+  `expires_at` DATETIME(3) NOT NULL,
+  `last_used_at` DATETIME(3) NULL,
+  `last_used_ip` VARCHAR(64) NULL,
+  `revoked_at` DATETIME(3) NULL,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `wiki_api_tokens_token_prefix_key` (`token_prefix`),
+  INDEX `wiki_api_tokens_account_id_status_created_at_idx` (`account_id`, `status`, `created_at`),
+  INDEX `wiki_api_tokens_space_id_status_idx` (`space_id`, `status`),
+  INDEX `wiki_api_tokens_status_expires_at_idx` (`status`, `expires_at`),
+  CONSTRAINT `wiki_api_tokens_account_id_fkey` FOREIGN KEY (`account_id`) REFERENCES `Account` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `wiki_api_tokens_space_id_fkey` FOREIGN KEY (`space_id`) REFERENCES `wiki_spaces` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `wiki_api_idempotency_records` (
+  `id` CHAR(36) NOT NULL,
+  `token_id` CHAR(36) NOT NULL,
+  `key_hash` CHAR(64) NOT NULL,
+  `request_hash` CHAR(64) NOT NULL,
+  `method` VARCHAR(8) NOT NULL,
+  `route` VARCHAR(191) NOT NULL,
+  `status` VARCHAR(16) NOT NULL DEFAULT 'processing',
+  `response_status` SMALLINT UNSIGNED NULL,
+  `response_body` JSON NULL,
+  `expires_at` DATETIME(3) NOT NULL,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `completed_at` DATETIME(3) NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `wiki_api_idempotency_records_token_id_key_hash_key` (`token_id`, `key_hash`),
+  INDEX `wiki_api_idempotency_records_expires_at_idx` (`expires_at`),
+  CONSTRAINT `wiki_api_idempotency_records_token_id_fkey` FOREIGN KEY (`token_id`) REFERENCES `wiki_api_tokens` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

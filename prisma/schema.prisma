@@ -133,6 +133,7 @@ model Account {
   consents                AccountConsent[]
   mfaTotpCredential       MfaTotpCredential?
   mfaRecoveryCodes        MfaRecoveryCode[]
+  wikiApiTokens           WikiApiToken[]
 
   @@unique([provider, providerUserId])
   @@index([email])
@@ -1188,10 +1189,57 @@ model WikiSpace {
   ownerPageId       BigInt?  @map("owner_page_id") @db.UnsignedBigInt
   createdAt         DateTime @map("created_at")
   updatedAt         DateTime @map("updated_at")
+  apiTokens         WikiApiToken[]
 
   @@index([spaceType, status])
   @@index([parentSpaceId])
   @@map("wiki_spaces")
+}
+
+model WikiApiToken {
+  id          String    @id @default(uuid()) @db.Char(36)
+  accountId   String    @map("account_id")
+  name        String    @db.VarChar(80)
+  tokenPrefix String    @unique @map("token_prefix") @db.VarChar(24)
+  secretHash  String    @map("secret_hash") @db.Char(64)
+  scopes      Json
+  spaceId     BigInt?   @map("space_id") @db.UnsignedBigInt
+  status      String    @default("active") @db.VarChar(16)
+  expiresAt   DateTime  @map("expires_at") @db.DateTime(3)
+  lastUsedAt  DateTime? @map("last_used_at") @db.DateTime(3)
+  lastUsedIp  String?   @map("last_used_ip") @db.VarChar(64)
+  revokedAt   DateTime? @map("revoked_at") @db.DateTime(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  account            Account                    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  space              WikiSpace?                 @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  idempotencyRecords WikiApiIdempotencyRecord[]
+
+  @@index([accountId, status, createdAt])
+  @@index([spaceId, status])
+  @@index([status, expiresAt])
+  @@map("wiki_api_tokens")
+}
+
+model WikiApiIdempotencyRecord {
+  id             String    @id @default(uuid()) @db.Char(36)
+  tokenId        String    @map("token_id") @db.Char(36)
+  keyHash        String    @map("key_hash") @db.Char(64)
+  requestHash    String    @map("request_hash") @db.Char(64)
+  method         String    @db.VarChar(8)
+  route          String    @db.VarChar(191)
+  status         String    @default("processing") @db.VarChar(16)
+  responseStatus Int?      @map("response_status") @db.UnsignedSmallInt
+  responseBody   Json?     @map("response_body")
+  expiresAt      DateTime  @map("expires_at") @db.DateTime(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  completedAt    DateTime? @map("completed_at") @db.DateTime(3)
+
+  token WikiApiToken @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  @@unique([tokenId, keyHash])
+  @@index([expiresAt])
+  @@map("wiki_api_idempotency_records")
 }
 
 model WikiNamespace {

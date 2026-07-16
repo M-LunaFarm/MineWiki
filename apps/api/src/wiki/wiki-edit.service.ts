@@ -181,8 +181,12 @@ export class WikiEditService {
     @Optional() private readonly notifications?: WikiNotificationService
   ) {}
 
-  async createPage(session: SessionPayload, request: WikiPageMutationRequest): Promise<WikiMutationResponse> {
-    return this.createPageInternal(session, request, false);
+  async createPage(
+    session: SessionPayload,
+    request: WikiPageMutationRequest,
+    options: { readonly allowedSpaceId?: bigint } = {}
+  ): Promise<WikiMutationResponse> {
+    return this.createPageInternal(session, request, false, options.allowedSpaceId);
   }
 
   async createFileDocumentAfterAuthorizedUpload(
@@ -217,13 +221,17 @@ export class WikiEditService {
   private async createPageInternal(
     session: SessionPayload,
     request: WikiPageMutationRequest,
-    authorizedFileUpload: boolean
+    authorizedFileUpload: boolean,
+    allowedSpaceId?: bigint
   ): Promise<WikiMutationResponse> {
     const contentRaw = this.requiredString(request.contentRaw, 'contentRaw');
     const createTarget = await this.resolveCreatePageTarget(request);
     const namespaceCode = createTarget.namespaceCode;
     const title = createTarget.title;
     const spaceId = createTarget.spaceId;
+    if (allowedSpaceId !== undefined && spaceId !== allowedSpaceId) {
+      throw new NotFoundException('Wiki space not found.');
+    }
     const requestedPageType = this.cleanOptional(request.pageType);
     if (requestedPageType && requestedPageType !== createTarget.pageType) {
       throw new BadRequestException(`Page type must be ${createTarget.pageType} in this wiki space.`);
@@ -433,6 +441,7 @@ export class WikiEditService {
     options: {
       readonly attributionProfileId?: bigint;
       readonly conflictScope?: 'page' | 'section';
+      readonly allowedSpaceId?: bigint;
     } = {}
   ): Promise<WikiMutationResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
@@ -450,6 +459,9 @@ export class WikiEditService {
       await this.lockPageForRevision(tx, parsedPageId);
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page || page.status === 'deleted') {
+        throw new NotFoundException('Wiki page not found.');
+      }
+      if (options.allowedSpaceId !== undefined && page.spaceId !== options.allowedSpaceId) {
         throw new NotFoundException('Wiki page not found.');
       }
       const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
@@ -1386,11 +1398,15 @@ export class WikiEditService {
   async getRawPage(
     pageId: string,
     accountId?: string | null,
-    revisionId?: string | null
+    revisionId?: string | null,
+    options: { readonly allowedSpaceId?: bigint } = {}
   ): Promise<WikiRevisionResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
     if (!page) {
+      throw new NotFoundException('Wiki page not found.');
+    }
+    if (options.allowedSpaceId !== undefined && page.spaceId !== options.allowedSpaceId) {
       throw new NotFoundException('Wiki page not found.');
     }
     await this.wikiPermissions.assertCanReadPage({ accountId: accountId ?? null, page });

@@ -67,12 +67,21 @@ if (!hasDatabase) {
     ] });
     await prisma.oAuthCredential.create({ data: { accountId: group.secondId, provider: 'discord', providerUserId: `delete-${group.secondId}`, accessToken: 'secret' } });
     await prisma.passwordReset.create({ data: { token: randomUUID(), accountId: group.firstId, email: `delete-${group.firstId}@example.com`, expiresAt: new Date(Date.now() + 60_000) } });
+    await prisma.wikiApiToken.create({ data: {
+      accountId: group.secondId,
+      name: 'account deletion test',
+      tokenPrefix: randomUUID().replaceAll('-', '').slice(0, 12),
+      secretHash: createHash('sha256').update(randomUUID()).digest('hex'),
+      scopes: ['wiki:read'],
+      expiresAt: new Date(Date.now() + 60_000),
+    } });
     try {
       const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
       assert.equal(await prisma.account.count({ where: { id: { in: [group.firstId, group.secondId] }, lifecycleStatus: 'deletion_pending' } }), 2);
       assert.equal(await prisma.session.count({ where: { accountId: { in: [group.firstId, group.secondId] } } }), 0);
       assert.equal(await prisma.oAuthCredential.count({ where: { accountId: group.secondId } }), 0);
       assert.equal(await prisma.passwordReset.count({ where: { accountId: group.firstId } }), 0);
+      assert.equal(await prisma.wikiApiToken.count({ where: { accountId: { in: [group.firstId, group.secondId] } } }), 0);
       await assert.rejects(() => new SessionService(prisma).issueSession({ userId: group.secondId }), /활성 상태가 아닙니다/);
 
       const results = await Promise.allSettled([service.cancel(requested.cancelToken), service.cancel(requested.cancelToken)]);

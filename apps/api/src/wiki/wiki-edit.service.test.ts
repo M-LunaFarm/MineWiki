@@ -162,6 +162,63 @@ test('server wiki paths must stay inside the selected server slug', async () => 
   );
 });
 
+test('API space constraints reject a create target resolved outside the token space', async () => {
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
+    wikiSpace: { async findUnique() { return { id: 9n, status: 'active', spaceType: 'basic', rootNamespaceCode: 'main' }; } },
+  } as unknown as PrismaService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, {} as WikiPermissionService);
+
+  await assert.rejects(
+    edits.createPage(
+      session('account'),
+      { namespace: 'main', title: '문서', spaceId: '9', contentRaw: '내용' },
+      { allowedSpaceId: 10n },
+    ),
+    /Wiki space not found/u,
+  );
+});
+
+test('API space constraints reject raw and update access before ACL evaluation', async () => {
+  let aclChecks = 0;
+  const page = {
+    id: 7n,
+    namespaceId: 1,
+    spaceId: 9n,
+    status: 'normal',
+    currentRevisionId: 11n,
+  };
+  const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    async $queryRaw() { return [{ id: 7n }]; },
+    wikiPage: { async findUnique() { return page; } },
+  } as unknown as PrismaService;
+  const profiles = {
+    async ensureWikiProfile() { return { id: 3n, status: 'active' }; },
+  } as unknown as WikiProfileService;
+  const permissions = {
+    async assertCanReadPage() { aclChecks += 1; },
+    async assertCanUsePageAction() { aclChecks += 1; },
+    async assertCanEditPage() { aclChecks += 1; },
+  } as unknown as WikiPermissionService;
+  const edits = new WikiEditService(prisma, profiles, permissions);
+
+  await assert.rejects(
+    edits.getRawPage('7', 'account', null, { allowedSpaceId: 10n }),
+    /Wiki page not found/u,
+  );
+  await assert.rejects(
+    edits.updatePage(
+      session('account'),
+      '7',
+      { baseRevisionId: '11', contentRaw: '수정' },
+      { allowedSpaceId: 10n },
+    ),
+    /Wiki page not found/u,
+  );
+  assert.equal(aclChecks, 0);
+});
+
 test('new-page request acceptance creates the page and first revision atomically under the requester identity', async () => {
   const now = new Date('2026-07-15T00:00:00Z');
   const request = {
