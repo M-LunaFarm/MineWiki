@@ -42,8 +42,8 @@ export function AuthShellLayout({ title, description, children }: AuthShellLayou
           </div>
         </header>
 
-        <div className="grid flex-1 items-center gap-10 py-6 lg:grid-cols-[minmax(0,1fr)_minmax(420px,520px)] lg:py-14">
-          <section className="hidden max-w-2xl lg:block lg:pb-12">
+        <div className="grid flex-1 items-start gap-10 py-6 lg:grid-cols-[minmax(0,1fr)_minmax(420px,520px)] lg:py-14">
+          <section className="hidden max-w-2xl lg:block lg:pt-24">
             <p className="text-xs font-bold uppercase tracking-[.2em] text-[#35e5b7]">Secure MineWiki Account</p>
             <h1 className="mt-5 text-4xl font-black leading-[1.08] tracking-[-.045em] sm:text-5xl lg:text-6xl">
               하나의 계정으로<br /><span className="text-[#35e5b7]">서버와 지식</span>을 연결하세요.

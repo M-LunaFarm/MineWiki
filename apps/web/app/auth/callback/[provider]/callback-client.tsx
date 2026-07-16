@@ -19,6 +19,7 @@ import { useAuth } from '../../../../components/providers/auth-context';
 import {
   CallbackShell,
 } from '../../../../components/auth/callback-shell';
+import { OAuthProviderChoice } from '../../../../components/auth/oauth-provider-choice';
 
 interface OAuthCallbackClientProps {
   readonly provider: string;
@@ -203,6 +204,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         : flowMode === 'link'
           ? linkCompletionTarget === 'opener' ? '창 닫기' : '계정 페이지로 이동'
           : '이전 화면으로 이동';
+  const providerState = status === 'pending' ? 'pending' : status === 'success' ? 'success' : 'error';
   return (
     <CallbackShell
       eyebrow={flowMode === 'link' ? '계정 연결' : '간편 로그인'}
@@ -221,32 +223,14 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         aria-live={status === 'error' ? 'assertive' : 'polite'}
         className="space-y-4"
       >
-        <div className="auth-provider-button flex min-h-14 items-center justify-between gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-3.5 py-3 text-left">
-          <div className="min-w-0">
-            <p
-              className={`truncate text-xs font-black tracking-[0.02em] ${
-                normalizedProvider === 'discord' ? 'text-[#7c87ff]' : 'text-[#18d86b]'
-              }`}
-            >
-              {providerLabel}
-            </p>
-            <p className="mt-0.5 text-[10px] font-medium text-slate-500">
-              {status === 'pending'
-                ? '계정 확인 중'
-                : flowMode === 'link'
-                  ? '로그인 수단 연결'
-                  : '간편 로그인'}
-            </p>
-          </div>
-          <span
-            className={`h-2 w-2 flex-shrink-0 rounded-full ${
-              status === 'error'
-                ? 'bg-rose-400'
-                : status === 'success'
-                  ? 'bg-[#35e5b7]'
-                  : 'animate-pulse bg-[#35e5b7]'
-            }`}
-            aria-hidden
+        <div className="grid grid-cols-2 gap-3" aria-label="간편 로그인 공급자">
+          <OAuthProviderChoice
+            provider="discord"
+            state={normalizedProvider === 'discord' ? providerState : 'inactive'}
+          />
+          <OAuthProviderChoice
+            provider="naver"
+            state={normalizedProvider === 'naver' ? providerState : 'inactive'}
           />
         </div>
 

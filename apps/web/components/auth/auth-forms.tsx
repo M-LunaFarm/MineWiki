@@ -9,6 +9,7 @@ import {
   type OAuthProviderAvailability,
 } from '../../lib/auth-client';
 import type { OAuthProvider } from '@minewiki/schemas';
+import { OAuthProviderChoice } from './oauth-provider-choice';
 
 export function AuthForms() {
   const {
@@ -266,27 +267,24 @@ export function AuthForms() {
       {mode !== 'verify' ? <div>
         <p className="mb-2 text-xs font-semibold text-slate-400">간편 로그인·가입</p>
         <div className="grid grid-cols-2 gap-3">
-          <OAuthProviderButton
+          <OAuthProviderChoice
             provider="discord"
-            label="Discord"
-            pending={oauthPendingProvider === 'discord'}
+            state={oauthPendingProvider === 'discord' ? 'pending' : oauthPendingProvider ? 'inactive' : 'idle'}
             disabled={loading || oauthPendingProvider !== null || !oauthAvailability.discord}
             onClick={() => void handleOAuth('discord')}
           />
-          <OAuthProviderButton
+          <OAuthProviderChoice
             provider="naver"
-            label="NAVER"
-            pending={oauthPendingProvider === 'naver'}
+            state={oauthPendingProvider === 'naver' ? 'pending' : oauthPendingProvider ? 'inactive' : 'idle'}
             disabled={loading || oauthPendingProvider !== null || !oauthAvailability.naver}
             onClick={() => void handleOAuth('naver')}
           />
         </div>
-        <p className="mt-2 text-[11px] leading-5 text-slate-500">기존 계정은 바로 로그인합니다. 처음 만드는 계정만 외부 인증 후 MineWiki에서 약관을 확인합니다.</p>
-        {oauthPendingProvider ? (
+        <div className="mt-2 min-h-[3.75rem]" aria-live="polite">
+          {oauthPendingProvider ? (
           <div
-            className="mt-3 flex items-center gap-3 rounded-lg border border-[#35e5b7]/25 bg-[#35e5b7]/[0.07] px-3.5 py-3"
+            className="flex min-h-[3.75rem] items-center gap-3 rounded-lg border border-[#35e5b7]/25 bg-[#35e5b7]/[0.07] px-3.5 py-2.5"
             role="status"
-            aria-live="polite"
           >
             <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[#35e5b7] motion-reduce:animate-none" aria-hidden />
             <div className="min-w-0">
@@ -298,7 +296,10 @@ export function AuthForms() {
               </p>
             </div>
           </div>
-        ) : null}
+          ) : (
+            <p className="text-[11px] leading-5 text-slate-500">기존 계정은 바로 로그인합니다. 처음 만드는 계정만 외부 인증 후 MineWiki에서 약관을 확인합니다.</p>
+          )}
+        </div>
       </div> : null}
 
       {!oauthAvailability.discord || !oauthAvailability.naver ? (
@@ -628,48 +629,5 @@ function PasswordRequirement(props: { met: boolean; children: ReactNode }) {
       </span>
       {children}
     </li>
-  );
-}
-
-function OAuthProviderButton({
-  provider,
-  label,
-  pending,
-  disabled,
-  onClick,
-}: {
-  readonly provider: OAuthProvider;
-  readonly label: string;
-  readonly pending: boolean;
-  readonly disabled: boolean;
-  readonly onClick: () => void;
-}) {
-  const accent = provider === 'discord' ? 'text-[#7c87ff]' : 'text-[#18d86b]';
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="auth-provider-button flex min-h-14 items-center justify-between gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-3.5 py-3 text-left transition hover:border-[#35e5b7]/40 hover:bg-white/[0.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#35e5b7]/35 disabled:cursor-not-allowed disabled:opacity-50"
-      disabled={disabled}
-      aria-label={`${label}로 ${pending ? '이동 중' : '간편 로그인'}`}
-    >
-      <span className="min-w-0">
-        <span className={`block truncate text-xs font-black tracking-[0.02em] ${accent}`}>
-          {label}
-        </span>
-        <span className="mt-0.5 block text-[10px] font-medium text-slate-500">
-          {pending ? '이동 중' : '계정으로 계속'}
-        </span>
-      </span>
-      {pending ? (
-        <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[#35e5b7]" aria-hidden />
-      ) : (
-        <span
-          className={`h-2 w-2 flex-shrink-0 rounded-full ${provider === 'discord' ? 'bg-[#7c87ff]' : 'bg-[#18d86b]'}`}
-          aria-hidden
-        />
-      )}
-    </button>
   );
 }
