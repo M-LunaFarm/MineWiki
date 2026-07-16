@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   Activity,
   AlertTriangle,
@@ -21,6 +22,7 @@ import type { MinecraftIdentity, OAuthProvider } from '@minewiki/schemas';
 import { SessionList } from '../../components/account/session-list';
 import { MfaSecurityPanel } from '../../components/account/mfa-security-panel';
 import { WikiProfileMergePanel } from '../../components/account/wiki-profile-merge-panel';
+import { WikiApiTokenPanel } from '../../components/account/wiki-api-token-panel';
 import { AuthShellLayout } from '../../components/auth/auth-shell-layout';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
 import { useAuth } from '../../components/providers/auth-context';
@@ -773,9 +775,12 @@ export function AccountClientPage() {
               <div className="mb-6 flex items-center gap-4">
                 <div className="relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border border-[#3b4248] bg-[#23272b] text-2xl font-bold text-white">
                   {avatarImageSrc ? (
-                    <img
+                    <Image
                       src={avatarImageSrc}
                       alt={`${displayIdentity} 프로필`}
+                      fill
+                      sizes="64px"
+                      unoptimized
                       className="h-full w-full object-cover"
                       onError={handleAvatarLoadError}
                     />
@@ -1067,6 +1072,8 @@ export function AccountClientPage() {
           <WikiProfileMergePanel />
 
           <MfaSecurityPanel />
+
+          <WikiApiTokenPanel />
 
           <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
             <section className="rounded-lg border border-[#30363d] bg-[#181a1d] p-6 shadow-sm">

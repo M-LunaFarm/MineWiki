@@ -875,6 +875,31 @@ export interface WikiAclCatalog {
   readonly aclGroups: ReadonlyArray<{ id: string; key: string; name: string; status: string }>;
 }
 
+export type WikiApiTokenScope = 'wiki:read' | 'wiki:create' | 'wiki:edit';
+
+export interface WikiApiTokenSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly tokenPrefix: string;
+  readonly scopes: readonly WikiApiTokenScope[];
+  readonly space: { readonly id: string; readonly name: string; readonly path: string } | null;
+  readonly status: 'active' | 'expired' | 'revoked' | string;
+  readonly expiresAt: string;
+  readonly lastUsedAt: string | null;
+  readonly createdAt: string;
+}
+
+export interface WikiApiTokenCreated extends WikiApiTokenSummary {
+  readonly token: string;
+}
+
+export interface WikiApiTokenSpace {
+  readonly id: string;
+  readonly name: string;
+  readonly path: string;
+  readonly type: string;
+}
+
 export interface WikiAclGroupSummary {
   readonly id: string;
   readonly key: string;
@@ -1349,6 +1374,36 @@ export async function changeWikiEditRequestState(requestId: string, action: 'clo
 
 export async function fetchWikiEditRequestDiff(requestId: string): Promise<WikiEditRequestDiffResponse> {
   return readWikiBrowser<WikiEditRequestDiffResponse>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}/diff`);
+}
+
+export async function listWikiApiTokens(): Promise<WikiApiTokenSummary[]> {
+  return readWikiBrowser<WikiApiTokenSummary[]>('/v1/wiki/api-tokens');
+}
+
+export async function listWikiApiTokenSpaces(): Promise<WikiApiTokenSpace[]> {
+  return readWikiBrowser<WikiApiTokenSpace[]>('/v1/wiki/api-tokens/spaces');
+}
+
+export async function createWikiApiToken(input: {
+  readonly name: string;
+  readonly scopes: readonly WikiApiTokenScope[];
+  readonly spaceId?: string;
+  readonly expiresInDays: number;
+}): Promise<WikiApiTokenCreated> {
+  return mutateWikiBrowser<WikiApiTokenCreated>('/v1/wiki/api-tokens', 'POST', {
+    name: input.name,
+    scopes: [...input.scopes],
+    spaceId: input.spaceId || null,
+    expiresInDays: input.expiresInDays,
+  });
+}
+
+export async function revokeWikiApiToken(tokenId: string): Promise<{ readonly revoked: true }> {
+  return mutateWikiBrowser<{ readonly revoked: true }>(
+    `/v1/wiki/api-tokens/${encodeURIComponent(tokenId)}`,
+    'DELETE',
+    {},
+  );
 }
 
 async function readWikiBrowser<T>(path: string): Promise<T> {
