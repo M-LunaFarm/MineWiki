@@ -1487,6 +1487,9 @@ export class WikiEditService {
       this.getRevisionForAction(leftId, accountId ?? null, 'history'),
       this.getRevisionForAction(rightId, accountId ?? null, 'history')
     ]);
+    if (left.pageId !== right.pageId) {
+      throw new BadRequestException('Wiki revisions must belong to the same page.');
+    }
     return {
       left,
       right,

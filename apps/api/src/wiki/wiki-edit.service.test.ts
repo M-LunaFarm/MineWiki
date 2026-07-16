@@ -1,7 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { HttpException } from '@nestjs/common';
+import { BadRequestException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { parseMarkup } from '@minewiki/wiki-core';
 import {
@@ -143,6 +143,41 @@ test('revision source requires raw ACL while diff requires history ACL', async (
   await edits.getRevisionDiff('11', '11');
 
   assert.deepEqual(actions, ['raw', 'history', 'history']);
+});
+
+test('revision diff rejects cross-page comparisons after authorizing both revisions', async () => {
+  const revisions = new Map([
+    [11n, {
+      id: 11n, pageId: 7n, revisionNo: 1, parentRevisionId: null, contentRaw: '첫 문서',
+      contentHash: 'a'.repeat(64), contentSize: 10, syntaxVersion: 'bwm-0.3', editSummary: null,
+      isMinor: false, createdBy: 3n, actorUserId: 3n, createdAt: new Date(), visibility: 'public'
+    }],
+    [12n, {
+      id: 12n, pageId: 8n, revisionNo: 1, parentRevisionId: null, contentRaw: '둘째 문서',
+      contentHash: 'b'.repeat(64), contentSize: 11, syntaxVersion: 'bwm-0.3', editSummary: null,
+      isMinor: false, createdBy: 4n, actorUserId: 4n, createdAt: new Date(), visibility: 'public'
+    }]
+  ]);
+  const prisma = {
+    wikiPageRevision: { async findUnique(input: { where: { id: bigint } }) { return revisions.get(input.where.id) ?? null; } },
+    wikiPage: {
+      async findUnique(input: { where: { id: bigint } }) {
+        return { id: input.where.id, spaceId: 1n, title: `문서 ${input.where.id}`, protectionLevel: 'open', status: 'normal' };
+      }
+    }
+  } as unknown as PrismaService;
+  let authorizationChecks = 0;
+  const permissions = {
+    async assertCanReadPage() { authorizationChecks += 1; },
+    async assertCanUsePageAction() { authorizationChecks += 1; }
+  } as unknown as WikiPermissionService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, permissions);
+
+  await assert.rejects(
+    edits.getRevisionDiff('11', '12'),
+    (error: unknown) => error instanceof BadRequestException
+  );
+  assert.equal(authorizationChecks, 4);
 });
 
 test('explicit spaces cannot cross namespace boundaries', async () => {
