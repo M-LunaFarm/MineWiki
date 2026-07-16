@@ -166,7 +166,9 @@ test('vote rejects an option from another poll after acquiring lifecycle locks',
   assert.equal(upserted, false);
 });
 
-test('real database keeps one ballot during concurrent changes and rejects votes after close', async (context) => {
+test('real database keeps one ballot during concurrent changes and rejects votes after close', {
+  skip: process.env.DATABASE_URL?.trim() ? false : 'DATABASE_URL is not configured.'
+}, async (context) => {
   const db = new PrismaService();
   await db.$connect();
   const targetPage = await db.wikiPage.findFirst({ where: { status: { not: 'deleted' } }, orderBy: { id: 'asc' } });
