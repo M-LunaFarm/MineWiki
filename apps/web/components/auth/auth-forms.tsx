@@ -9,7 +9,6 @@ import {
   type OAuthProviderAvailability,
 } from '../../lib/auth-client';
 import type { OAuthProvider } from '@minewiki/schemas';
-import { OAuthJourney } from './callback-shell';
 
 export function AuthForms() {
   const {
@@ -262,34 +261,8 @@ export function AuthForms() {
     );
   }
 
-  if (oauthPendingProvider) {
-    const providerLabel = PROVIDER_LABEL[oauthPendingProvider];
-    const providerTone = oauthPendingProvider === 'discord' ? 'text-[#7c87ff]' : 'text-[#18d86b]';
-    return (
-      <div className="flex min-h-[420px] flex-col justify-center space-y-5" role="status" aria-live="polite">
-        <OAuthJourney providerLabel={providerLabel} currentStep={2} />
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0d1416]">
-          <div className="h-1 w-full bg-white/[0.06]">
-            <div className="h-full w-2/3 animate-pulse bg-[#35e5b7]" />
-          </div>
-          <div className="p-5 text-center sm:p-7">
-            <span className={`text-xs font-black tracking-[.04em] ${providerTone}`}>{providerLabel}</span>
-            <h3 className="mt-3 text-lg font-bold text-white">공식 로그인 화면으로 이동합니다.</h3>
-            <p className="mx-auto mt-2 max-w-sm text-xs leading-6 text-slate-400">
-              다음 화면은 {providerLabel}에서 제공하므로 모양이 달라집니다. 인증을 마치면 같은 MineWiki 화면으로 자동 복귀합니다.
-            </p>
-            <Loader2 className="mx-auto mt-5 h-5 w-5 animate-spin text-[#35e5b7]" aria-hidden />
-          </div>
-        </div>
-        <p className="text-center text-[11px] leading-5 text-slate-500">
-          외부 계정 비밀번호는 MineWiki에 전달되거나 저장되지 않습니다.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-busy={oauthPendingProvider !== null}>
       {mode !== 'verify' ? <div>
         <p className="mb-2 text-xs font-semibold text-slate-400">간편 로그인·가입</p>
         <div className="grid grid-cols-2 gap-3">
@@ -309,6 +282,23 @@ export function AuthForms() {
           />
         </div>
         <p className="mt-2 text-[11px] leading-5 text-slate-500">기존 계정은 바로 로그인합니다. 처음 만드는 계정만 외부 인증 후 MineWiki에서 약관을 확인합니다.</p>
+        {oauthPendingProvider ? (
+          <div
+            className="mt-3 flex items-center gap-3 rounded-lg border border-[#35e5b7]/25 bg-[#35e5b7]/[0.07] px-3.5 py-3"
+            role="status"
+            aria-live="polite"
+          >
+            <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[#35e5b7] motion-reduce:animate-none" aria-hidden />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-white">
+                {PROVIDER_LABEL[oauthPendingProvider]} 보안 로그인으로 연결 중
+              </p>
+              <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
+                인증 후 이 화면의 다음 단계로 돌아옵니다.
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div> : null}
 
       {!oauthAvailability.discord || !oauthAvailability.naver ? (
@@ -482,7 +472,7 @@ export function AuthForms() {
             <button
               type="submit"
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-[#13ec80] px-6 py-3.5 text-sm font-bold text-[#06110d] shadow-sm transition-all hover:bg-[#10cf70] disabled:opacity-50"
-              disabled={loading}
+              disabled={loading || oauthPendingProvider !== null}
             >
               {mode === 'login' ? '로그인하기' : '가입 후 인증 진행'}
             </button>
@@ -601,7 +591,7 @@ function PolicyAgreements({
 }) {
   return (
     <fieldset className="space-y-2 rounded-lg border border-white/10 bg-[#0d1416] px-4 py-3 text-xs leading-5 text-slate-400">
-      <legend className="px-1 font-semibold text-slate-200">간편 로그인·신규 가입 필수 동의</legend>
+      <legend className="px-1 font-semibold text-slate-200">이메일 신규 가입 필수 동의</legend>
       <PolicyCheckbox checked={termsAccepted} onChange={onTermsChange} href="/policies/terms" label="이용약관" />
       <PolicyCheckbox checked={privacyAccepted} onChange={onPrivacyChange} href="/policies/privacy" label="개인정보 처리방침" />
     </fieldset>
