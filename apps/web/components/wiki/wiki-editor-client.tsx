@@ -644,6 +644,28 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
           <p className="min-h-5 text-xs text-slate-500" role="status" aria-live="polite">
             {draftStatus === 'saved' ? '이 브라우저에 초안을 자동 저장했습니다.' : draftStatus === 'unavailable' ? '브라우저 저장소를 사용할 수 없어 자동 저장하지 못했습니다.' : '내용을 수정하면 이 브라우저에 초안을 자동 저장합니다.'}
           </p>
+          <section id="wiki-mobile-preview" className="surface-flat p-4 lg:hidden" aria-labelledby="wiki-mobile-preview-title">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 id="wiki-mobile-preview-title" className="text-sm font-semibold text-white">미리보기</h2>
+                <p className="mt-1 text-xs text-slate-500">저장 전에 현재 본문이 어떻게 보이는지 확인합니다.</p>
+              </div>
+              <button
+                type="button"
+                onClick={renderPreview}
+                disabled={previewing}
+                className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:opacity-50"
+              >
+                {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
+                {previewHtml ? '새로고침' : '미리보기'}
+              </button>
+            </div>
+            <div
+              className="wiki-rendered max-h-[420px] overflow-auto p-4 text-sm"
+              aria-live="polite"
+              dangerouslySetInnerHTML={{ __html: previewHtml || '<p>미리보기를 생성하세요.</p>' }}
+            />
+          </section>
           {needsCaptcha ? <CaptchaChallenge resetKey={captchaKey} onTokenChange={setCaptchaToken} /> : null}
           <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
             <input
@@ -733,6 +755,8 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
                   void loadWikiFiles();
                 }
               }}
+              aria-expanded={filePickerOpen}
+              aria-controls="wiki-file-picker"
               disabled={saving || loadingRevision}
             >
               <FileImage className="h-3.5 w-3.5" />
@@ -740,7 +764,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             </button>
           </div>
           {filePickerOpen ? (
-            <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+            <section id="wiki-file-picker" className="rounded-lg border border-white/10 bg-white/[0.03] p-4" aria-label="위키 파일 선택">
               <fieldset className="mb-4 grid gap-3 rounded-lg border border-white/10 bg-[#0d1219]/70 p-3 sm:grid-cols-2 lg:grid-cols-4">
                 <legend className="px-1 text-xs font-semibold text-slate-300">파일 표시 설정</legend>
                 <label className="grid gap-1.5 text-xs text-slate-400">
@@ -764,7 +788,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
                   <input value={fileDisplayAlt} maxLength={256} onChange={(event) => setFileDisplayAlt(event.target.value)} placeholder="비우면 캡션 사용" className="h-9 rounded-md border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-300/50" />
                 </label>
               </fieldset>
-              <div className="flex flex-col gap-3 sm:flex-row">
+              <form className="flex flex-col gap-3 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void loadWikiFiles(fileSearch); }} role="search">
                 <input
                   value={fileSearch}
                   onChange={(event) => setFileSearch(event.target.value)}
@@ -772,15 +796,14 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
                   className="h-9 flex-1 rounded-md border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-emerald-300/50"
                 />
                 <button
-                  type="button"
-                  onClick={() => void loadWikiFiles(fileSearch)}
+                  type="submit"
                   disabled={loadingFiles}
                   className="inline-flex h-9 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:opacity-50"
                 >
                   {loadingFiles ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
                   검색
                 </button>
-              </div>
+              </form>
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
                 {wikiFiles.map((file) => (
                   <button
@@ -861,7 +884,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             </div>
           </section>
 
-          <section className="surface-flat p-4">
+          <section className="surface-flat hidden p-4 lg:block">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-sm font-semibold text-white">미리보기</h2>
               <button

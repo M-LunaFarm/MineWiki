@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { Pencil, PencilLine, Star } from 'lucide-react';
+import { History, MessageSquareText, Pencil, PencilLine, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath, buildWikiHistoryPath, buildWikiRevisionPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
@@ -22,6 +22,9 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
       ? buildCategoryWikiToolPath(routePath, 'edit')
       : buildStandardWikiToolPath(routePath, 'edit');
   const historyPath = buildWikiHistoryPath(routePath);
+  const discussionPath = routePath.startsWith('/server/')
+    ? buildServerWikiToolPath(routePath, 'discuss')
+    : `/wiki/discuss/${encodeURIComponent(page.id)}?returnTo=${encodeURIComponent(routePath)}`;
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -66,6 +69,18 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
           </p>
         ) : null}
       </header>
+
+      <nav aria-label="문서 주요 작업" className="grid grid-cols-3 gap-2 lg:hidden">
+        <Link href={editPath} className="chip chip-accent inline-flex min-h-11 items-center justify-center gap-1.5 px-3">
+          <PencilLine className="size-3.5" /> 편집
+        </Link>
+        <Link href={historyPath} className="chip chip-muted inline-flex min-h-11 items-center justify-center gap-1.5 px-3">
+          <History className="size-3.5" /> 역사
+        </Link>
+        <Link href={discussionPath} className="chip chip-muted inline-flex min-h-11 items-center justify-center gap-1.5 px-3">
+          <MessageSquareText className="size-3.5" /> 토론
+        </Link>
+      </nav>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
         {page.headings.length > 0 ? (
