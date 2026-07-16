@@ -257,6 +257,32 @@ test('server wiki Docs layout is always included without a paid entitlement', as
   assert.equal(settings.layouts.find((layout) => layout.key === 'handbook')?.entitled, false);
 });
 
+test('server wiki settings downgrade an expired persisted premium layout to Docs', async () => {
+  const prisma = {
+    serverWiki: {
+      async findUnique() {
+        return { id: 5n, layoutKey: 'brand', layoutUpdatedAt: new Date('2026-07-01T00:00:00.000Z') };
+      },
+    },
+    serverWikiLayoutEntitlement: {
+      async findMany() {
+        return [{
+          layoutKey: 'brand',
+          status: 'active',
+          startsAt: new Date('2026-06-01T00:00:00.000Z'),
+          expiresAt: new Date('2026-06-30T00:00:00.000Z'),
+          source: 'manual',
+        }];
+      },
+    },
+  };
+  const settings = await new ServerService({} as never, prisma as never, {} as never)
+    .getWikiLayoutSettings(randomUUID());
+
+  assert.equal(settings.selected, 'docs');
+  assert.equal(settings.layouts.find((layout) => layout.key === 'brand')?.entitled, false);
+});
+
 test('server wiki rejects selecting a premium layout without an active entitlement', async () => {
   const prisma = {
     serverWiki: {

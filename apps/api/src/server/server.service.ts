@@ -36,6 +36,13 @@ import {
   sourceAuditSummary,
   type ServerWikiContentSettingsInput,
 } from './server-wiki-content-settings';
+import {
+  SERVER_WIKI_LAYOUTS,
+  isActiveServerWikiLayoutEntitlement,
+  isServerWikiLayoutKey,
+  resolveEffectiveServerWikiLayout,
+  type ServerWikiLayoutKey,
+} from './server-wiki-layout-policy';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
@@ -47,32 +54,6 @@ const SHORT_CODE_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
 const SHORT_CODE_LENGTH = 7;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHORT_CODE_PATTERN = /^[a-z0-9]{5,12}$/;
-
-export const SERVER_WIKI_LAYOUTS = [
-  {
-    key: 'docs',
-    conceptNumber: 3,
-    name: 'Docs',
-    description: '문서 탐색과 가독성에 집중한 기본 GitBook형 레이아웃',
-    tier: 'free',
-  },
-  {
-    key: 'handbook',
-    conceptNumber: 1,
-    name: 'Handbook',
-    description: '서버 핸드북의 정보 구조를 강조하는 프리미엄 레이아웃',
-    tier: 'premium',
-  },
-  {
-    key: 'brand',
-    conceptNumber: 2,
-    name: 'Brand',
-    description: '서버 브랜딩과 핵심 정보를 강조하는 프리미엄 레이아웃',
-    tier: 'premium',
-  },
-] as const;
-
-type ServerWikiLayoutKey = (typeof SERVER_WIKI_LAYOUTS)[number]['key'];
 
 @Injectable()
 export class ServerService {
@@ -1553,20 +1534,23 @@ export class ServerService {
       where: {
         serverWikiId: serverWiki.id,
         status: 'active',
-        startsAt: { lte: now },
-        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
       },
-      select: { layoutKey: true, expiresAt: true, source: true }
+      select: { layoutKey: true, status: true, startsAt: true, expiresAt: true, source: true }
     });
     const allowed = new Set<ServerWikiLayoutKey>(['docs']);
     for (const entitlement of entitlements) {
-      if (isServerWikiLayoutKey(entitlement.layoutKey)) allowed.add(entitlement.layoutKey);
+      if (
+        isServerWikiLayoutKey(entitlement.layoutKey) &&
+        isActiveServerWikiLayoutEntitlement(entitlement, entitlement.layoutKey, now)
+      ) allowed.add(entitlement.layoutKey);
     }
     return {
-      selected: isServerWikiLayoutKey(serverWiki.layoutKey) ? serverWiki.layoutKey : 'docs',
+      selected: resolveEffectiveServerWikiLayout(serverWiki.layoutKey, entitlements, now),
       updatedAt: serverWiki.layoutUpdatedAt?.toISOString() ?? null,
       layouts: SERVER_WIKI_LAYOUTS.map((layout) => {
-        const entitlement = entitlements.find((item) => item.layoutKey === layout.key);
+        const entitlement = entitlements.find((item) =>
+          isActiveServerWikiLayoutEntitlement(item, layout.key, now),
+        );
         return {
           ...layout,
           entitled: allowed.has(layout.key),
@@ -1595,7 +1579,19 @@ export class ServerService {
         layoutUpdatedAt: new Date(),
         layoutUpdatedBy: actorProfile?.id ?? null
       },
-      select: { layoutKey: true, layoutUpdatedAt: true }
+      select: { id: true, layoutKey: true, layoutUpdatedAt: true }
+    });
+    await this.events?.audit('server.wiki.layout.update', {
+      category: 'billing',
+      actorAccountId: actorAccountId ?? null,
+      actorProfileId: actorProfile?.id ?? null,
+      subjectType: 'server_wiki',
+      subjectId: updated.id,
+      metadata: {
+        serverId,
+        previousEffectiveLayout: settings.selected,
+        layoutKey: updated.layoutKey,
+      },
     });
     return {
       selected: updated.layoutKey,
@@ -1994,9 +1990,6 @@ function createRegistrationEndpointKey(
   return createHash('sha256').update(`${edition}:${host}:${port}`).digest('hex');
 }
 
-function isServerWikiLayoutKey(value: string): value is ServerWikiLayoutKey {
-  return SERVER_WIKI_LAYOUTS.some((layout) => layout.key === value);
-}
 
 function normalizeServerWikiSelector(
   input: ServerWikiLinkRequest,

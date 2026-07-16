@@ -23,6 +23,7 @@ import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiIncludeService } from './wiki-include.service';
 import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath, WikiRoutePathResolver, type WikiRoutePathBatch } from './wiki-route-path.resolver';
 import { matchCommonLines } from './wiki-line-diff';
+import { resolveEffectiveServerWikiLayout } from '../server/server-wiki-layout-policy';
 import { publicWikiRecentChangeSummary, publicWikiRevisionEditSummary } from './wiki-revision-summary';
 
 export interface WikiPageResponse {
@@ -2110,6 +2111,7 @@ export class WikiReadService {
     const serverWiki = await this.prisma.serverWiki.findFirst({
       where: { spaceId },
       select: {
+        id: true,
         voteServerId: true,
         serverName: true,
         slug: true,
@@ -2124,7 +2126,8 @@ export class WikiReadService {
     if (!serverWiki) {
       return null;
     }
-    const [server, pages] = await Promise.all([
+    const now = new Date();
+    const [server, pages, layoutEntitlements] = await Promise.all([
       serverWiki.voteServerId
         ? this.prisma.server.findUnique({
             where: { id: serverWiki.voteServerId },
@@ -2140,7 +2143,20 @@ export class WikiReadService {
       this.prisma.wikiPage.findMany({
         where: { spaceId, status: { not: 'deleted' }, pageType: { not: 'redirect' } },
         orderBy: [{ localPath: 'asc' }, { id: 'asc' }]
-      })
+      }),
+      serverWiki.layoutKey === 'handbook' || serverWiki.layoutKey === 'brand'
+        ? this.prisma.serverWikiLayoutEntitlement.findMany({
+            where: {
+              serverWikiId: serverWiki.id,
+              layoutKey: serverWiki.layoutKey,
+              status: 'active',
+              startsAt: { lte: now },
+              OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+            },
+            select: { layoutKey: true, status: true, startsAt: true, expiresAt: true },
+            take: 1,
+          })
+        : Promise.resolve([]),
     ]);
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
     const publicRevisions = currentRevisionIds.length > 0
@@ -2167,7 +2183,7 @@ export class WikiReadService {
         isOnline: server?.isOnline ?? null,
         playersOnline: server?.playersOnline ?? null,
         playersMax: server?.playersMax ?? null,
-        layout: normalizeServerWikiLayoutKey(serverWiki.layoutKey),
+        layout: resolveEffectiveServerWikiLayout(serverWiki.layoutKey, layoutEntitlements, now),
         navigation
       }
     };
@@ -2361,10 +2377,6 @@ function resolveContextualLinkTarget(namespace: string, localPath: string, targe
     namespace: 'server' as const,
     title: `${serverSlug}/${parsed.title}`,
   };
-}
-
-function normalizeServerWikiLayoutKey(value: string): 'docs' | 'handbook' | 'brand' {
-  return value === 'handbook' || value === 'brand' ? value : 'docs';
 }
 
 function transferLineAttribution<T>(oldLines: readonly string[], oldAttribution: readonly T[], newLines: readonly string[], fallback: T): T[] {

@@ -171,6 +171,56 @@ test('public block history validates filters and uses a privacy-safe deleted-pro
   assert.equal(result.items[0]?.publicReason, null);
 });
 
+test('public server wiki rendering fails closed when a persisted premium layout has no current entitlement', async () => {
+  let entitlementRows: Array<{
+    layoutKey: string;
+    status: string;
+    startsAt: Date;
+    expiresAt: Date | null;
+  }> = [];
+  const prisma = {
+    serverWiki: {
+      async findFirst() {
+        return {
+          id: 5n,
+          voteServerId: null,
+          serverName: 'Luna',
+          slug: 'luna',
+          host: 'play.example.test',
+          port: 25565,
+          edition: 'java',
+          supportedVersions: ['1.21'],
+          genres: ['survival'],
+          layoutKey: 'brand',
+        };
+      },
+    },
+    serverWikiLayoutEntitlement: { async findMany() { return entitlementRows; } },
+    wikiPage: { async findMany() { return []; } },
+    wikiPageRevision: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async filterReadablePages({ pages }: { pages: unknown[] }) { return pages; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions) as unknown as {
+    findServerWikiContext(namespace: string, spaceId: bigint, pageId: bigint, access: unknown): Promise<{
+      context: { layout: string };
+    } | null>;
+  };
+
+  const withoutEntitlement = await service.findServerWikiContext('server', 7n, 9n, {});
+  assert.equal(withoutEntitlement?.context.layout, 'docs');
+
+  entitlementRows = [{
+    layoutKey: 'brand',
+    status: 'active',
+    startsAt: new Date(Date.now() - 60_000),
+    expiresAt: new Date(Date.now() + 60_000),
+  }];
+  const entitled = await service.findServerWikiContext('server', 7n, 9n, {});
+  assert.equal(entitled?.context.layout, 'brand');
+});
+
 test('server wiki navigation removes the duplicated space slug', () => {
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main'), '/server/luna-main');
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main/규칙'), '/server/luna-main/%EA%B7%9C%EC%B9%99');
