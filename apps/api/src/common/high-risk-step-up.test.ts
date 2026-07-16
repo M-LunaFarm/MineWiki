@@ -7,6 +7,7 @@ import { AuditController } from '../events/audit.controller';
 import { ReviewModerationController } from '../review/review-moderation.controller';
 import { RoleAdminController } from '../roles/role-admin.controller';
 import { ServerController } from '../server/server.controller';
+import { ServerWikiLayoutEntitlementAdminController } from '../server/server-wiki-layout-entitlement-admin.controller';
 import { SessionGuard } from '../session/session.guard';
 import { STEP_UP_PURPOSE_METADATA, StepUpGuard } from '../session/step-up.guard';
 import { VoteAdminController } from '../vote/vote-admin.controller';
@@ -29,6 +30,7 @@ const classPolicies = [
   [WikiReportModerationController, 'wiki_admin'],
   [VoteAdminController, 'vote_admin'],
   [VoteMonitorController, 'vote_admin'],
+  [ServerWikiLayoutEntitlementAdminController, 'server_admin'],
 ] as const;
 
 const methodPolicies = [

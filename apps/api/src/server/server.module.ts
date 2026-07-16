@@ -13,11 +13,13 @@ import { VerifyModule } from '../verify/verify.module';
 import { ServerWikiPresentationController } from './server-wiki-presentation.controller';
 import { ServerWikiCollaboratorController } from './server-wiki-collaborator.controller';
 import { ServerWikiCollaboratorService } from './server-wiki-collaborator.service';
+import { ServerWikiLayoutEntitlementAdminController } from './server-wiki-layout-entitlement-admin.controller';
+import { ServerWikiLayoutEntitlementAdminService } from './server-wiki-layout-entitlement-admin.service';
 
 @Module({
   imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
-  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController],
+  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController],
   exports: [ServerService]
 })
 export class ServerModule {}

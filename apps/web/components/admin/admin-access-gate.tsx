@@ -91,6 +91,7 @@ function adminStepUpPurpose(pathname: string): MfaStepUpPurpose | null {
   if (pathname.startsWith('/admin/users')) return 'account_moderation';
   if (pathname.startsWith('/admin/reviews')) return 'review_moderation';
   if (pathname.startsWith('/admin/account-deletions')) return 'account_delete_admin';
+  if (pathname.startsWith('/admin/billing')) return 'server_admin';
   if (pathname.startsWith('/admin/audit')) return 'audit_read';
   return null;
 }

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookOpenCheck, ClipboardList, Flag, Headphones, ShieldCheck, UserRoundX, UsersRound } from 'lucide-react';
+import { BookOpenCheck, ClipboardList, Crown, Flag, Headphones, ShieldCheck, UserRoundX, UsersRound } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -14,6 +14,12 @@ const ADMIN_TOOLS: ReadonlyArray<{
   readonly icon: typeof UsersRound;
   readonly accent?: boolean;
 }> = [
+  {
+    href: '/admin/billing',
+    title: '서버 위키 요금제 권한',
+    description: '프리미엄 레이아웃 권한을 부여·연장·회수하고 결제 참조와 감사 이력을 확인합니다.',
+    icon: Crown,
+  },
   {
     href: '/admin/reviews',
     title: '리뷰 신고',
