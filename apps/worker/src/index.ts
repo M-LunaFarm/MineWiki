@@ -44,7 +44,8 @@ import type {
 import { terminateOnRunLoopFailure } from './runtime-failure';
 import { triggerAccountDeletionSweep } from './account-deletion-scheduler';
 import { processAccountDeletionDiscordRevocations } from './account-deletion-discord-revocations';
-import { deriveAccountDeletionServiceToken } from '@minewiki/auth';
+import { triggerBillingEntitlementSweep } from './billing-entitlement-scheduler';
+import { deriveAccountDeletionServiceToken, deriveBillingLifecycleServiceToken } from '@minewiki/auth';
 
 const PING_INTERVAL_MS = 5 * 60 * 1000;
 const RANK_INTERVAL_MS = 60 * 60 * 1000;
@@ -55,6 +56,7 @@ const WIKI_PUSH_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000;
 const ACCOUNT_DELETION_INTERVAL_MS = 60 * 60 * 1000;
 const ACCOUNT_DELETION_DISCORD_REVOCATION_INTERVAL_MS = 60 * 1000;
+const BILLING_ENTITLEMENT_INTERVAL_MS = 5 * 60 * 1000;
 const CLAIM_PENDING_THRESHOLD_HOURS = 1;
 const CLAIM_VERIFIED_THRESHOLD_HOURS = 24;
 const MAX_PING_BATCH = 200;
@@ -626,6 +628,7 @@ async function bootstrapWorker(): Promise<void> {
   });
   const internalApiBaseUrl = config.getOptional('INTERNAL_API_BASE_URL') ?? 'http://api:3000';
   const accountDeletionServiceToken = deriveAccountDeletionServiceToken(config.get('APP_ENCRYPTION_KEY'));
+  const billingLifecycleServiceToken = deriveBillingLifecycleServiceToken(config.get('APP_ENCRYPTION_KEY'));
   scheduleInterval('account-deletion', ACCOUNT_DELETION_INTERVAL_MS, async () => {
     const result = await triggerAccountDeletionSweep({ apiBaseUrl: internalApiBaseUrl, internalToken: accountDeletionServiceToken });
     if (result.processed > 0 || result.blocked > 0 || result.failed > 0) Logger.info(result, 'Account deletion sweep completed');
@@ -633,6 +636,12 @@ async function bootstrapWorker(): Promise<void> {
   scheduleInterval('account-deletion-discord-revocations', ACCOUNT_DELETION_DISCORD_REVOCATION_INTERVAL_MS, async () => {
     const result = await processAccountDeletionDiscordRevocations(prisma, discordToken);
     if (result.processed > 0 || result.retried > 0 || result.failed > 0) Logger.info(result, 'Account deletion Discord role revocation sweep completed');
+  });
+  scheduleInterval('billing-entitlement', BILLING_ENTITLEMENT_INTERVAL_MS, async () => {
+    const result = await triggerBillingEntitlementSweep({ apiBaseUrl: internalApiBaseUrl, internalToken: billingLifecycleServiceToken });
+    if (result.expired > 0 || result.downgraded > 0 || result.skipped > 0 || result.failed > 0) {
+      Logger.info(result, 'Billing entitlement sweep completed');
+    }
   });
   Logger.info({ redisUrl, workerCount: workers.length }, 'Worker bootstrapped and waiting for jobs');
 }

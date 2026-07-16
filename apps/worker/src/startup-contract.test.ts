@@ -11,6 +11,7 @@ test('worker gates consumers and schedulers on database and Redis readiness', ()
   const redisCompatible = source.indexOf('assertSupportedQueueServer', redisReady);
   const workerStart = source.indexOf('worker.run()', bootstrapStart);
   const schedulerStart = source.indexOf("scheduleInterval('server-ping'", bootstrapStart);
+  const billingSchedulerStart = source.indexOf("scheduleInterval('billing-entitlement'", bootstrapStart);
 
   assert.ok(bootstrapStart >= 0);
   assert.ok(databaseReady > bootstrapStart);
@@ -18,6 +19,7 @@ test('worker gates consumers and schedulers on database and Redis readiness', ()
   assert.ok(redisCompatible > redisReady);
   assert.ok(workerStart > redisCompatible);
   assert.ok(schedulerStart > workerStart);
+  assert.ok(billingSchedulerStart > workerStart);
   assert.match(source, /autorun:\s*false/);
   assert.match(source, /Worker bootstrap failed/);
 });

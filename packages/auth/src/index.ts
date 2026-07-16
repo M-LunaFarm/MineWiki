@@ -24,3 +24,9 @@ export function deriveAccountDeletionServiceToken(appEncryptionKey: string): str
     .update('minewiki:account-deletion-worker:v1')
     .digest('base64url');
 }
+
+export function deriveBillingLifecycleServiceToken(appEncryptionKey: string): string {
+  return createHmac('sha256', appEncryptionKey)
+    .update('minewiki:billing-lifecycle-worker:v1')
+    .digest('base64url');
+}

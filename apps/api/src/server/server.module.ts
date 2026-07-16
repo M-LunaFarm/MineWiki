@@ -15,11 +15,13 @@ import { ServerWikiCollaboratorController } from './server-wiki-collaborator.con
 import { ServerWikiCollaboratorService } from './server-wiki-collaborator.service';
 import { ServerWikiLayoutEntitlementAdminController } from './server-wiki-layout-entitlement-admin.controller';
 import { ServerWikiLayoutEntitlementAdminService } from './server-wiki-layout-entitlement-admin.service';
+import { ServerWikiLayoutEntitlementInternalController } from './server-wiki-layout-entitlement-internal.controller';
+import { ServerWikiLayoutEntitlementLifecycleService } from './server-wiki-layout-entitlement-lifecycle.service';
 
 @Module({
   imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
-  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController],
+  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController],
   exports: [ServerService]
 })
 export class ServerModule {}
