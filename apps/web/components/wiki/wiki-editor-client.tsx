@@ -7,6 +7,7 @@ import { AlertTriangle, Eye, FileImage, ImagePlus, LayoutTemplate, Loader2, Save
 import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
 import { CaptchaChallenge, isCaptchaConfigured } from '../security/captcha-challenge';
+import { WikiEditorLoadError } from './wiki-editor-load-error';
 import {
   fetchWikiRevision,
   fetchWikiSection,
@@ -58,6 +59,9 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [loadingRevision, setLoadingRevision] = useState(Boolean(page));
+  const [sourceReady, setSourceReady] = useState(false);
+  const [sourceLoadError, setSourceLoadError] = useState<string | null>(null);
+  const [sourceReloadKey, setSourceReloadKey] = useState(0);
   const [sectionAnchor, setSectionAnchor] = useState<string | null | undefined>(undefined);
   const [sectionTitle, setSectionTitle] = useState<string | null>(null);
   const [baseRevisionId, setBaseRevisionId] = useState<string | undefined>(page?.revision.id);
@@ -104,9 +108,12 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
     let cancelled = false;
     async function loadRevision() {
       if (sectionAnchor === undefined) return;
+      setSourceReady(false);
+      setSourceLoadError(null);
       if (!page) {
         setContentRaw('');
         setLoadingRevision(false);
+        setSourceReady(true);
         return;
       }
       if (sectionAnchor && !account) {
@@ -123,6 +130,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             setBaseRevisionId(section.baseRevisionId);
             setBaseRevisionNo(page.revision.revisionNo);
             setEditConflict(null);
+            setSourceReady(true);
           }
         } else {
           const revision = await fetchWikiRevision(page.revision.id);
@@ -132,11 +140,12 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             setBaseRevisionId(revision.id);
             setBaseRevisionNo(revision.revisionNo);
             setEditConflict(null);
+            setSourceReady(true);
           }
         }
       } catch (error) {
         if (!cancelled) {
-          setFeedback(error instanceof Error ? error.message : '리비전을 불러오지 못했습니다.');
+          setSourceLoadError(error instanceof Error ? error.message : '리비전을 불러오지 못했습니다.');
         }
       } finally {
         if (!cancelled) {
@@ -148,7 +157,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
     return () => {
       cancelled = true;
     };
-  }, [account, page, sectionAnchor]);
+  }, [account, page, sectionAnchor, sourceReloadKey]);
 
   useEffect(() => {
     if (!account || page) return;
@@ -170,8 +179,8 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   }, [account, page]);
 
   const canSubmit = useMemo(() => {
-    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict && (!needsCaptcha || captchaToken) && policyReady);
-  }, [account, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict, needsCaptcha, captchaToken, policyReady]);
+    return Boolean(account && sourceReady && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict && (!needsCaptcha || captchaToken) && policyReady);
+  }, [account, sourceReady, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict, needsCaptcha, captchaToken, policyReady]);
 
   function renderPreview() {
     setFeedback(null);
@@ -382,6 +391,26 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             로그인
           </Link>
         </div>
+      </div>
+    );
+  }
+
+  if (sourceLoadError) {
+    return (
+      <WikiEditorLoadError
+        title="편집 원문을 불러오지 못했습니다"
+        message={`${sourceLoadError} 원문과 기준 리비전을 확인하기 전에는 편집하거나 저장할 수 없습니다.`}
+        backHref={routePath}
+        onRetry={() => setSourceReloadKey((current) => current + 1)}
+      />
+    );
+  }
+
+  if (!sourceReady || loadingRevision) {
+    return (
+      <div className="mx-auto flex min-h-[50vh] max-w-4xl items-center justify-center gap-3 px-4 text-sm text-slate-300" role="status">
+        <Loader2 className="size-5 animate-spin text-emerald-300" />
+        편집 원문을 불러오는 중입니다.
       </div>
     );
   }

@@ -1,6 +1,7 @@
 import { fetchServerWikiPresentation, fetchWikiPageByPath } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiEditorClient } from './wiki-editor-client';
+import { WikiEditorLoadError } from './wiki-editor-load-error';
 import { ServerWikiWorkspace } from './server-wiki-workspace';
 
 interface WikiEditRoutePageProps {
@@ -27,7 +28,18 @@ const namespaceByPrefix = {
 export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoutePageProps) {
   const title = segments.length > 0 ? segments.map(decodeWikiRouteSegment).join('/') : '대문';
   const routePath = buildWikiRoutePath(prefix, segments);
-  const page = await fetchWikiPageByPath(routePath).catch(() => null);
+  let page;
+  try {
+    page = await fetchWikiPageByPath(routePath);
+  } catch {
+    return (
+      <WikiEditorLoadError
+        title="편집 정보를 불러오지 못했습니다"
+        message="문서 존재 여부를 확인할 수 없어 새 문서 편집기를 열지 않았습니다. 잠시 후 다시 시도해 주세요."
+        backHref={routePath}
+      />
+    );
+  }
   const serverSlug = prefix === 'server'
     ? page?.serverWiki?.slug ?? (segments[0] ? decodeWikiRouteSegment(segments[0]) : null)
     : null;
