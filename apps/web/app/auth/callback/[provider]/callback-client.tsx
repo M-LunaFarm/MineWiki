@@ -3,12 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  CheckCircle2,
   ExternalLink,
   Loader2,
   RotateCcw,
   ShieldCheck,
-  XCircle,
 } from 'lucide-react';
 import { completeOAuthLogin, type OAuthProvider } from '../../../../lib/auth-client';
 import {
@@ -19,7 +17,7 @@ import { useAuth } from '../../../../components/providers/auth-context';
 import {
   CallbackShell,
 } from '../../../../components/auth/callback-shell';
-import { OAuthProviderChoice } from '../../../../components/auth/oauth-provider-choice';
+import { OAuthFlowStatus } from '../../../../components/auth/oauth-flow-status';
 
 interface OAuthCallbackClientProps {
   readonly provider: string;
@@ -103,7 +101,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         if (result.consentRequired) {
           setStatus('success');
           setMessage('처음 만드는 계정입니다. MineWiki에서 필수 정책을 확인합니다.');
-          router.replace('/auth/signup-consent');
+          router.replace(`/auth/signup-consent?provider=${normalizedProvider}`);
           return;
         }
         if (!('mode' in result) || !result.mode || !('account' in result) || !result.account) {
@@ -223,40 +221,12 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         aria-live={status === 'error' ? 'assertive' : 'polite'}
         className="space-y-4"
       >
-        <div className="grid grid-cols-2 gap-3" aria-label="간편 로그인 공급자">
-          <OAuthProviderChoice
-            provider="discord"
-            state={normalizedProvider === 'discord' ? providerState : 'inactive'}
-          />
-          <OAuthProviderChoice
-            provider="naver"
-            state={normalizedProvider === 'naver' ? providerState : 'inactive'}
-          />
-        </div>
-
-        <div className={`flex items-start gap-3 rounded-lg border px-3.5 py-3 ${
-          status === 'error'
-            ? 'border-rose-400/30 bg-rose-500/10'
-            : 'border-[#35e5b7]/25 bg-[#35e5b7]/[0.07]'
-        }`}>
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/10">
-              {status === 'pending' ? (
-                <Loader2 className={`h-4 w-4 animate-spin ${statusTone}`} aria-hidden />
-              ) : status === 'success' ? (
-                <CheckCircle2 className={`h-4 w-4 ${statusTone}`} aria-hidden />
-              ) : (
-                <XCircle className={`h-4 w-4 ${statusTone}`} aria-hidden />
-              )}
-            </div>
-            <div className="min-w-0 text-left">
-              <h2 className="text-sm font-semibold text-white">
-                {detailTitle}
-              </h2>
-              <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
-                {detailBody}
-              </p>
-            </div>
-        </div>
+        <OAuthFlowStatus
+          provider={normalizedProvider}
+          state={providerState}
+          title={detailTitle}
+          description={detailBody}
+        />
 
         <div className="flex items-center justify-between gap-3 px-0.5 text-[11px]">
           <span className="flex min-w-0 items-center gap-2 text-slate-400">

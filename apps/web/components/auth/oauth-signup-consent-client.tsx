@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { Check, Loader2, ShieldCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import type { OAuthProvider } from '@minewiki/schemas';
 import { acceptOAuthSignupConsent } from '../../lib/auth-client';
+import { OAuthFlowStatus } from './oauth-flow-status';
 
-export function OAuthSignupConsentClient() {
+export function OAuthSignupConsentClient({ provider }: { readonly provider: OAuthProvider | null }) {
   const router = useRouter();
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -28,10 +30,16 @@ export function OAuthSignupConsentClient() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl border border-[#35e5b7]/20 bg-[#35e5b7]/[0.06] p-4">
-        <ShieldCheck className="h-5 w-5 text-[#35e5b7]" aria-hidden />
-        <h2 className="mt-3 text-base font-bold text-white">처음 만드는 MineWiki 계정입니다.</h2>
-        <p className="mt-1.5 text-xs leading-6 text-slate-400">외부 계정 인증은 이미 끝났습니다. 아래 필수 정책에 동의하면 다시 로그인할 필요 없이 계정 생성과 로그인이 완료됩니다.</p>
+      <OAuthFlowStatus
+        provider={provider}
+        state="success"
+        title="처음 만드는 MineWiki 계정입니다."
+        description="외부 계정 인증이 끝났습니다. 아래 필수 정책을 확인하면 같은 흐름에서 가입과 로그인이 완료됩니다."
+      />
+
+      <div className="flex items-center gap-2 px-0.5 text-[11px] text-slate-400">
+        <ShieldCheck className="h-4 w-4 flex-shrink-0 text-[#35e5b7]" aria-hidden />
+        인증된 외부 계정으로 최초 가입을 계속합니다.
       </div>
 
       <fieldset className="space-y-3">

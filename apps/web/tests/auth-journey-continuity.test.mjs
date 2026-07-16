@@ -22,12 +22,28 @@ test('OAuth callback keeps the same provider-card language as the login screen',
     'utf8',
   );
 
-  assert.match(source, /<OAuthProviderChoice/u);
-  assert.match(source, /provider="discord"/u);
-  assert.match(source, /provider="naver"/u);
+  assert.match(source, /<OAuthFlowStatus/u);
+  assert.match(source, /provider=\$\{normalizedProvider\}/u);
   assert.doesNotMatch(source, /OAuthJourney/u);
   assert.doesNotMatch(source, /progressWidth/u);
   assert.match(source, /MineWiki 보안 연결/u);
+});
+
+test('first OAuth signup keeps the callback provider stage and login shell', async () => {
+  const pageSource = await readFile(
+    new URL('../app/auth/signup-consent/page.tsx', import.meta.url),
+    'utf8',
+  );
+  const consentSource = await readFile(
+    new URL('../components/auth/oauth-signup-consent-client.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(pageSource, /title="로그인"/u);
+  assert.match(pageSource, /normalizeProvider/u);
+  assert.match(consentSource, /<OAuthFlowStatus/u);
+  assert.match(consentSource, /state="success"/u);
+  assert.match(consentSource, /provider=\{provider\}/u);
 });
 
 test('OAuth signup consent stays separate from email signup consent copy', async () => {
