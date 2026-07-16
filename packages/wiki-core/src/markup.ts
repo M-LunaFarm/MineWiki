@@ -13,7 +13,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.8.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.9.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -81,6 +81,7 @@ const allowedTags = [
   'mark',
   'small',
   'br',
+  'time',
   'ruby',
   'rp',
   'rt',
@@ -994,6 +995,7 @@ export function applyIncludeParametersToAst(
       caption: node.caption === null ? null : replace(node.caption)
     };
     if (node.type === 'unsupported_macro') return { ...node };
+    if (node.type === 'dynamic_time') return { ...node };
     if (node.type === 'video') return { ...node };
     if (node.type === 'math') {
       const source = replace(node.source);
@@ -1129,6 +1131,14 @@ function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors:
   const normalizedName = name.toLowerCase();
   if (normalizedName === 'br' && rawArgs === undefined) return { type: 'line_break' };
   if (normalizedName === 'clearfix' && rawArgs === undefined) return { type: 'clearfix' };
+  if ((normalizedName === 'date' || normalizedName === 'datetime') && rawArgs === undefined) {
+    return { type: 'dynamic_time', mode: 'datetime', date: null };
+  }
+  if ((normalizedName === 'age' || normalizedName === 'dday') && rawArgs !== undefined) {
+    const date = normalizeMacroDate(rawArgs);
+    if (date) return { type: 'dynamic_time', mode: normalizedName, date };
+    return invalidDateMacro(normalizedName, errors);
+  }
   if (normalizedName === 'anchor' && rawArgs !== undefined) {
     const id = normalizeMacroAnchor(rawArgs);
     if (id) return { type: 'anchor', id };
@@ -1179,6 +1189,25 @@ function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors:
     return { type: 'video', provider: 'youtube', videoId, width, height, start, end };
   }
   const warning = `지원되지 않는 매크로입니다: ${name}`;
+  if (!errors.includes(warning)) errors.push(warning);
+  return { type: 'unsupported_macro', name };
+}
+
+function normalizeMacroDate(value: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12) return null;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (day < 1 || day > (daysInMonth[month - 1] ?? 0)) return null;
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function invalidDateMacro(name: string, errors: string[]): InlineNode {
+  const warning = `${name} 매크로 날짜는 YYYY-MM-DD 형식의 실제 날짜여야 합니다.`;
   if (!errors.includes(warning)) errors.push(warning);
   return { type: 'unsupported_macro', name };
 }
@@ -1349,6 +1378,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       blockquote: ['class'],
       caption: ['class'],
       span: ['class', 'style', 'title', 'id', 'aria-hidden'],
+      time: ['class', 'datetime', 'data-wiki-time', 'data-wiki-date'],
       ruby: ['class'],
       rt: ['class'],
       rp: ['class'],
@@ -1477,6 +1507,13 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
           ? `<span style="color: ${escapeAttr(node.color)}">${escapeHtml(node.ruby)}</span>`
           : escapeHtml(node.ruby);
         return `<ruby>${escapeHtml(node.text)}<rp>(</rp><rt>${ruby}</rt><rp>)</rp></ruby>`;
+      }
+      if (node.type === 'dynamic_time') {
+        const dateAttributes = node.date
+          ? ` data-wiki-date="${escapeAttr(node.date)}" datetime="${escapeAttr(node.date)}"`
+          : '';
+        const fallback = node.date ?? '현재 시각';
+        return `<time class="wiki-dynamic-time" data-wiki-time="${node.mode}"${dateAttributes}>${escapeHtml(fallback)}</time>`;
       }
       if (node.type === 'bold') return `<strong>${escapeHtml(node.text)}</strong>`;
       if (node.type === 'italic') return `<em>${escapeHtml(node.text)}</em>`;

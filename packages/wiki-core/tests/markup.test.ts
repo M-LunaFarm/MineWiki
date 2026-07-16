@@ -663,18 +663,57 @@ test('collects file dependencies from every block and inline container', () => {
 });
 
 test('renders explicit safe placeholders for unsupported macros', () => {
-  const parsed = parseMarkup('오늘은 [date], 경과는 [age(2020-01-01)]이고 [[문서]]와 [https://example.com 외부]는 링크다.');
+  const parsed = parseMarkup('통계는 [pagecount], 선택은 [vote(항목)]이고 [[문서]]와 [https://example.com 외부]는 링크다.');
   const html = renderDocument(parsed.ast);
 
   assert.deepEqual(
     parsed.errors.filter((error) => error.startsWith('지원되지 않는 매크로입니다:')),
-    ['지원되지 않는 매크로입니다: date', '지원되지 않는 매크로입니다: age']
+    ['지원되지 않는 매크로입니다: pagecount', '지원되지 않는 매크로입니다: vote']
   );
-  assert.match(html, /<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: \[date\]<\/span>/);
-  assert.match(html, />지원하지 않는 매크로: \[age\]<\/span>/);
-  assert.equal(html.includes('2020-01-01'), false);
+  assert.match(html, /<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: \[pagecount\]<\/span>/);
+  assert.match(html, />지원하지 않는 매크로: \[vote\]<\/span>/);
   assert.match(html, /class="wiki-link"/);
   assert.match(html, /href="https:\/\/example\.com"/);
+});
+
+test('renders cache-safe semantic markers for date, datetime, age, and dday macros', () => {
+  const parsed = parseMarkup('[date] [datetime] [age(2020-02-29)] [dday(2030-01-02)]');
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(
+    parsed.errors.filter((error) => error.includes('매크로') || error.startsWith('지원되지 않는')),
+    [],
+  );
+  assert.equal(parsed.ast[0]?.type, 'paragraph');
+  assert.match(html, /<time class="wiki-dynamic-time" data-wiki-time="datetime">현재 시각<\/time>/);
+  assert.equal((html.match(/data-wiki-time="datetime"/g) ?? []).length, 2);
+  assert.match(html, /<time class="wiki-dynamic-time" data-wiki-time="age" data-wiki-date="2020-02-29" datetime="2020-02-29">2020-02-29<\/time>/);
+  assert.match(html, /<time class="wiki-dynamic-time" data-wiki-time="dday" data-wiki-date="2030-01-02" datetime="2030-01-02">2030-01-02<\/time>/);
+});
+
+test('rejects malformed and impossible dynamic macro dates without normalizing them', () => {
+  const parsed = parseMarkup('[age(2023-02-29)] [dday(2024-02-30)] [age(2024-2-01)]');
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(
+    parsed.errors.filter((error) => error.includes('매크로 날짜')),
+    [
+      'age 매크로 날짜는 YYYY-MM-DD 형식의 실제 날짜여야 합니다.',
+      'dday 매크로 날짜는 YYYY-MM-DD 형식의 실제 날짜여야 합니다.',
+    ],
+  );
+  assert.equal(html.includes('data-wiki-time='), false);
+  assert.equal((html.match(/wiki-macro-warning/g) ?? []).length, 3);
+});
+
+test('preserves dynamic macro markers while applying include parameters safely', () => {
+  const parsed = parseMarkup('[age(2020-01-02)] [date]');
+  const expanded = applyIncludeParametersToAst(parsed.ast, { date: '2022-03-04' }, 'inc-');
+  const html = renderDocument(expanded);
+
+  assert.match(html, /data-wiki-time="age" data-wiki-date="2020-01-02"/);
+  assert.match(html, /data-wiki-time="datetime"/);
+  assert.equal(html.includes('2022-03-04'), false);
 });
 
 test('renders safe static NamuMark macros without falling back to warnings', () => {

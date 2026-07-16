@@ -96,6 +96,7 @@ export type InlineNode =
   | { type: 'clearfix' }
   | { type: 'anchor'; id: string }
   | { type: 'ruby'; text: string; ruby: string; color: string | null }
+  | { type: 'dynamic_time'; mode: 'datetime' | 'age' | 'dday'; date: string | null }
   | { type: 'video'; provider: 'youtube'; videoId: string; width: number; height: number; start: number | null; end: number | null }
   | { type: 'math'; source: string; error: string | null }
   | { type: 'bold'; text: string }
