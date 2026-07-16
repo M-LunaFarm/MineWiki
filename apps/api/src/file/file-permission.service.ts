@@ -22,7 +22,7 @@ export function fileReadDecision(
   file: FilePermissionSubject | null,
   identity?: { readonly accountId?: string | null; readonly permissions?: readonly string[] }
 ): FileReadDecision {
-  if (!file || file.status === 'deleted') return 'missing';
+  if (!file || file.status !== 'active') return 'missing';
   if (file.visibility === 'public' || file.visibility === 'unlisted' || !file.visibility) return 'allow';
   if (identity?.permissions?.includes('file.admin') === true || (identity?.accountId && file.ownerAccountId === identity.accountId)) return 'allow';
   return file.visibility === 'restricted' ? 'linked' : 'deny';
@@ -97,7 +97,7 @@ export class FilePermissionService {
   }
 
   assertCanDelete(file: FilePermissionSubject | null, session: SessionPayload): asserts file is FilePermissionSubject {
-    if (!file || file.status === 'deleted') {
+    if (!file || (file.status !== 'active' && file.status !== 'delete_pending')) {
       throw new NotFoundException('File not found.');
     }
     if (this.isOwnerOrAdmin(file, session)) {

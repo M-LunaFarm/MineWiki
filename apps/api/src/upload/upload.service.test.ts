@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -43,6 +43,9 @@ test('stores valid png image after sanitisation', async () => {
   const fileStat = statSync(stored.storagePath);
   assert.ok(fileStat.isFile());
   assert.ok(stored.width <= 400 && stored.height <= 200);
+  await service.deleteObject(stored.storagePath);
+  assert.equal(existsSync(stored.storagePath), false);
+  await assert.rejects(() => service.deleteObject(join(storageRoot, '..', 'outside.webp')), /outside the configured upload root/);
   rmSync(storageRoot, { recursive: true, force: true });
 });
 

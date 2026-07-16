@@ -2,9 +2,9 @@
 import { ConfigService } from '@minewiki/config';
 import { mkdirSync, existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import {
   validateImageUpload,
   ImageValidationError,
@@ -171,5 +171,30 @@ export class UploadService {
       throw new Error('Stored object body is missing.');
     }
     return Buffer.from(await response.Body.transformToByteArray());
+  }
+
+  async deleteObject(storagePath: string): Promise<void> {
+    if (this.storageMode === 's3' && this.s3 && this.bucket) {
+      const prefix = `s3://${this.bucket}/`;
+      if (!storagePath.startsWith(prefix)) {
+        throw new Error('Stored object does not belong to the configured bucket.');
+      }
+      const key = storagePath.slice(prefix.length);
+      const currentKey = /^uploads\/(?:public|private)\/[A-Za-z0-9-]+\.(?:png|jpe?g|webp)$/iu.test(key);
+      const legacyKey = /^uploads\/[A-Za-z0-9-]+\.(?:png|jpe?g|webp)$/iu.test(key);
+      if (!currentKey && !legacyKey) throw new Error('Stored object key is invalid.');
+      await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+      return;
+    }
+    if (this.storageMode === 'local' && this.storageRoot) {
+      const target = resolve(storagePath);
+      const relativePath = relative(this.storageRoot, target);
+      if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
+        throw new Error('Stored object path is outside the configured upload root.');
+      }
+      await fs.rm(target, { force: true });
+      return;
+    }
+    throw new Error('Upload storage is not configured.');
   }
 }

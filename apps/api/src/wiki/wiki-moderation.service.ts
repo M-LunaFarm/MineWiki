@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { hashContent, parseMarkup, renderDocument, wikiUrl, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
+import { collectWikiFileNames, hashContent, parseMarkup, renderDocument, wikiUrl, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
@@ -217,7 +217,11 @@ export class WikiModerationService {
       parsed.links,
       parsed.categories,
       parsed.includes,
-      { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
+      {
+        contentSize: revision.contentSize,
+        contentRaw: revision.contentRaw,
+        fileNames: [...collectWikiFileNames(parsed.ast)]
+      }
     );
     await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
     const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });

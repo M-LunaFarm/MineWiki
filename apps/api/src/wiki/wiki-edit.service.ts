@@ -1874,7 +1874,11 @@ export class WikiEditService {
       parsed.links,
       parsed.categories,
       parsed.includes,
-      { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
+      {
+        contentSize: revision.contentSize,
+        contentRaw: revision.contentRaw,
+        fileNames: [...collectWikiFileNames(parsed.ast)]
+      }
     );
     await this.notifications?.notifyWatchedRevision(tx as Prisma.TransactionClient, {
       pageId: input.pageId,
@@ -1903,7 +1907,11 @@ export class WikiEditService {
       parsed.links,
       parsed.categories,
       parsed.includes,
-      { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
+      {
+        contentSize: revision.contentSize,
+        contentRaw: revision.contentRaw,
+        fileNames: [...collectWikiFileNames(parsed.ast)]
+      }
     );
   }
 

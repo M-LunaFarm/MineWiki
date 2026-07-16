@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { hashContent, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
+import { collectWikiFileNames, hashContent, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService, toAuditJson } from '../events/business-event.service';
@@ -885,7 +885,11 @@ export class WikiAdminService {
         parsed.links,
         parsed.categories,
         parsed.includes,
-        { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
+        {
+          contentSize: revision.contentSize,
+          contentRaw: revision.contentRaw,
+          fileNames: [...collectWikiFileNames(parsed.ast)]
+        }
       );
       await tx.wikiPage.update({
         where: { id: page.id },

@@ -51,7 +51,7 @@ test('link index normalizes and deduplicates generic wiki targets', async () => 
 });
 
 test('link index atomically materializes current source metrics', async () => {
-  const { store, metricUpdates } = createStore('main', '대문');
+  const { store, calls, metricUpdates } = createStore('main', '대문');
   await new WikiLinkIndexService().replaceForRevision(
     store,
     10n,
@@ -59,10 +59,14 @@ test('link index atomically materializes current source metrics', async () => {
     [],
     ['가이드', '운영'],
     [],
-    { contentSize: 4096 }
+    { contentSize: 4096, fileNames: ['image.webp', 'image.webp'] }
   );
 
   assert.deepEqual(metricUpdates, [{ currentContentSize: 4096, currentCategoryCount: 2 }]);
+  assert.deepEqual(
+    calls.filter((item) => item.linkType === 'file').map((item) => [item.targetNamespaceCode, item.targetSlug]),
+    [['file', 'image.webp']]
+  );
 });
 
 test('link index replaces the current Korean search vector with its revision', async () => {

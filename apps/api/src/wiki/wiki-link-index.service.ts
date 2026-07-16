@@ -14,7 +14,7 @@ export class WikiLinkIndexService {
     links: readonly string[],
     categories: readonly string[] = [],
     includes: readonly string[] = [],
-    metrics?: { readonly contentSize: number; readonly contentRaw?: string }
+    metrics?: { readonly contentSize: number; readonly contentRaw?: string; readonly fileNames?: readonly string[] }
   ): Promise<void> {
     const page = await store.wikiPage.findUnique({
       where: { id: pageId },
@@ -54,6 +54,14 @@ export class WikiLinkIndexService {
       normalized.set(`include:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, {
         ...resolved,
         linkType: 'include'
+      });
+    }
+    for (const fileName of metrics?.fileNames ?? []) {
+      if (!fileName || fileName.length > 255 || containsIncludePlaceholder(fileName)) continue;
+      normalized.set(`file:file:${fileName}`, {
+        targetNamespaceCode: 'file',
+        targetSlug: fileName,
+        linkType: 'file'
       });
     }
     await store.wikiPageLink.deleteMany({ where: { sourcePageId: pageId } });

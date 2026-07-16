@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { promises as fs } from 'node:fs';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
@@ -313,12 +314,37 @@ export class FileService {
   }
 
   async deleteFile(id: string, session: SessionPayload): Promise<{ deleted: true }> {
-    const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
-    this.permissions.assertCanDelete(file, session);
-    await this.prisma.uploadedFile.update({
-      where: { id },
-      data: { status: 'deleted' }
-    });
+    const file = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.uploadedFile.findUnique({ where: { id } });
+      this.permissions.assertCanDelete(current, session);
+      if (current.status === 'active' && current.usageContext === 'wiki_editor') {
+        const references = await tx.$queryRaw<Array<{ sourcePageId: bigint }>>`
+          SELECT l.source_page_id AS sourcePageId
+          FROM page_links l
+          JOIN pages p
+            ON p.id = l.source_page_id
+           AND p.current_revision_id = l.source_revision_id
+          WHERE l.target_namespace_code = 'file'
+            AND l.target_slug = ${current.filename}
+            AND l.link_type = 'file'
+            AND p.status <> 'deleted'
+          LIMIT 1
+        `;
+        if (references.length > 0) {
+          throw new ConflictException('File is still referenced by a current wiki document.');
+        }
+      }
+      if (current.status === 'active') {
+        await tx.uploadedFile.update({ where: { id }, data: { status: 'delete_pending' } });
+      }
+      return current;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    try {
+      await this.uploads.deleteObject(file.storagePath);
+    } catch {
+      throw new ServiceUnavailableException('Stored file deletion failed. Retry the same request.');
+    }
+    await this.prisma.uploadedFile.update({ where: { id }, data: { status: 'deleted' } });
     await this.events?.audit('file.delete', {
       category: 'file',
       actorAccountId: session.userId,

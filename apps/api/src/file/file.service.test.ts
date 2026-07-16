@@ -36,6 +36,7 @@ test('shared file read policy treats owners and file administrators identically'
   assert.equal(fileReadDecision(privateFile, { accountId: 'admin', permissions: ['file.admin'] }), 'allow');
   assert.equal(fileReadDecision(privateFile, { accountId: 'stranger' }), 'deny');
   assert.equal(fileReadDecision({ ...privateFile, visibility: 'restricted' }, { accountId: 'stranger' }), 'linked');
+  assert.equal(fileReadDecision({ ...privateFile, status: 'delete_pending' }, { accountId: 'owner' }), 'missing');
 });
 
 interface VisibilityCondition {
@@ -65,10 +66,11 @@ function session(userId: string, isElevated = false, permissions: string[] = [])
   };
 }
 
-function createService(options: { denyUploadFile?: boolean; failFileDocument?: boolean } = {}) {
+function createService(options: { denyUploadFile?: boolean; failFileDocument?: boolean; referencedWikiFilename?: string; failObjectDelete?: boolean } = {}) {
   const files = new Map<string, TestFile>();
   const actionCalls: string[] = [];
   const fileDocuments: Array<{ filename: string; linkedPageId: string }> = [];
+  let deleteAttempts = 0;
   const wikiPages = new Map<bigint, { id: bigint; status: string }>([
     [7n, { id: 7n, status: 'normal' }]
   ]);
@@ -87,9 +89,19 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     },
     async readPrivateObject() {
       return Buffer.from('private s3 image');
+    },
+    async deleteObject() {
+      deleteAttempts += 1;
+      if (options.failObjectDelete) throw new Error('storage unavailable');
     }
   };
   const prisma = {
+    async $transaction(callback: (store: unknown) => Promise<unknown>) {
+      return callback(prisma);
+    },
+    async $queryRaw() {
+      return options.referencedWikiFilename ? [{ sourcePageId: 7n }] : [];
+    },
     uploadedFile: {
       async create(args: { data: Record<string, unknown> }) {
         const now = new Date('2026-07-05T00:00:00.000Z');
@@ -199,7 +211,8 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     files,
     wikiPages,
     actionCalls,
-    fileDocuments
+    fileDocuments,
+    getDeleteAttempts: () => deleteAttempts
   };
 }
 
@@ -271,7 +284,7 @@ test('file service list hides private and unlisted files from non-owners', async
 });
 
 test('file service requires owner before delete', async () => {
-  const { service } = createService();
+  const { service, files, getDeleteAttempts } = createService();
   const uploaded = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'wiki.png'
@@ -279,6 +292,32 @@ test('file service requires owner before delete', async () => {
 
   await assert.rejects(() => service.deleteFile(uploaded.id, session('account-2', true)), /owner is required/);
   await assert.doesNotReject(() => service.deleteFile(uploaded.id, session('account-1')));
+  assert.equal(files.get(uploaded.id)?.status, 'deleted');
+  assert.equal(getDeleteAttempts(), 1);
+});
+
+test('wiki file deletion blocks current references and keeps failed object deletion retryable', async () => {
+  const referenced = createService({ referencedWikiFilename: 'stored.webp' });
+  const uploaded = await referenced.service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'wiki.png',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7'
+  }, session('account-1'));
+  await assert.rejects(() => referenced.service.deleteFile(uploaded.id, session('account-1')), /still referenced/);
+  assert.equal(referenced.files.get(uploaded.id)?.status, 'active');
+  assert.equal(referenced.getDeleteAttempts(), 0);
+
+  const failing = createService({ failObjectDelete: true });
+  const retryable = await failing.service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'general.png'
+  });
+  await assert.rejects(() => failing.service.deleteFile(retryable.id, session('account-1')), /Retry the same request/);
+  assert.equal(failing.files.get(retryable.id)?.status, 'delete_pending');
+  await assert.rejects(() => failing.service.getFile(retryable.id, session('account-1')), /File not found/);
 });
 
 test('private raw file is only readable by owner or file administrator', async () => {
