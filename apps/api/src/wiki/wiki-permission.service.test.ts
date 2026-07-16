@@ -12,15 +12,62 @@ function createService(options: {
     ownerUserId?: bigint | null;
     createdBy?: bigint | null;
     spaceType?: string;
+    rootPageId?: bigint | null;
   } | null;
   readonly roles?: string[];
-  readonly serverWiki?: { voteServerId: string | null; createdBy: bigint | null } | null;
-  readonly server?: { ownerAccountId: string | null } | null;
+  readonly serverWiki?: {
+    id?: bigint;
+    spaceId?: bigint;
+    voteServerId: string | null;
+    createdBy: bigint | null;
+    slug?: string;
+    status?: string;
+  } | null;
+  readonly server?: {
+    id?: string;
+    ownerAccountId: string | null;
+    wikiSpaceId?: bigint | null;
+    wikiPageId?: bigint | null;
+    wikiSlug?: string | null;
+  } | null;
+  readonly accounts?: readonly {
+    id: string;
+    canonicalAccountId: string | null;
+    lifecycleStatus: string;
+  }[];
   readonly modWiki?: { verifiedBy: bigint | null } | null;
   readonly acl?: WikiAclService;
   readonly profile?: { id: bigint; username: string; status: string } | null;
 } = {}) {
+  const defaultSpace = {
+    id: 10n,
+    status: 'active',
+    ownerUserId: null,
+    createdBy: null,
+    spaceType: 'basic',
+    rootPageId: 1n
+  };
+  const normalizedSpace = options.space === undefined
+    ? defaultSpace
+    : options.space
+      ? { ...defaultSpace, ...options.space }
+      : null;
+  const normalizedServerWiki = options.serverWiki
+    ? { id: 20n, spaceId: 10n, slug: 'server-one', status: 'active', ...options.serverWiki }
+    : null;
+  const normalizedServer = options.server
+    ? { id: 'server-1', wikiSpaceId: 10n, wikiPageId: 1n, wikiSlug: 'server-one', ...options.server }
+    : null;
+  const accounts = options.accounts ?? [
+    { id: 'account-1', canonicalAccountId: null, lifecycleStatus: 'active' },
+    { id: 'account-2', canonicalAccountId: null, lifecycleStatus: 'active' }
+  ];
   const store = {
+    account: {
+      async findMany(input: { where: { id: { in: string[] } } }) {
+        return accounts.filter((account) => input.where.id.in.includes(account.id));
+      }
+    },
     wikiProfile: {
       async findUnique() {
         return options.profile ?? null;
@@ -28,15 +75,10 @@ function createService(options: {
     },
     wikiSpace: {
       async findUnique() {
-        return options.space === undefined
-          ? { id: 10n, status: 'active', ownerUserId: null, createdBy: null, spaceType: 'basic' }
-          : options.space;
+        return normalizedSpace;
       },
       async findMany() {
-        const space = options.space === undefined
-          ? { id: 10n, status: 'active', ownerUserId: null, createdBy: null, spaceType: 'basic' }
-          : options.space;
-        return space ? [space] : [];
+        return normalizedSpace ? [normalizedSpace] : [];
       }
     },
     subwikiRole: {
@@ -46,17 +88,23 @@ function createService(options: {
     },
     serverWiki: {
       async findFirst() {
-        return options.serverWiki ?? null;
+        return normalizedServerWiki;
+      },
+      async findMany() {
+        return normalizedServerWiki ? [normalizedServerWiki] : [];
       }
     },
     server: {
       async findUnique() {
-        return options.server ?? null;
+        return normalizedServer;
       }
     },
     modWiki: {
       async findFirst() {
         return options.modWiki ?? null;
+      },
+      async findMany() {
+        return options.modWiki ? [{ spaceId: 10n, ...options.modWiki }] : [];
       }
     }
   };
@@ -490,6 +538,7 @@ test('ACL deny still blocks a locked editor', async () => {
 
 test('linked server owner can edit owner-only server wiki page', async () => {
   const service = createService({
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki' },
     serverWiki: { voteServerId: 'server-1', createdBy: 300n },
     server: { ownerAccountId: 'account-1' }
   });
@@ -499,6 +548,136 @@ test('linked server owner can edit owner-only server wiki page', async () => {
   });
 
   assert.equal(decision.allowed, true);
+});
+
+test('linked server wiki authority ignores provenance and follows active canonical server ownership', async () => {
+  const linked = {
+    space: {
+      id: 10n,
+      status: 'active',
+      spaceType: 'server_wiki',
+      rootPageId: 1n,
+      ownerUserId: 300n,
+      createdBy: 300n
+    },
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n },
+    server: { ownerAccountId: 'canonical-owner' },
+    accounts: [
+      { id: 'old-creator', canonicalAccountId: null, lifecycleStatus: 'active' },
+      { id: 'canonical-owner', canonicalAccountId: null, lifecycleStatus: 'active' },
+      { id: 'owner-alias', canonicalAccountId: 'canonical-owner', lifecycleStatus: 'active' },
+      { id: 'manager-account', canonicalAccountId: null, lifecycleStatus: 'active' }
+    ]
+  } as const;
+  const historicalPage = page({ createdBy: 300n, ownerProfileId: 300n, protectionLevel: 'owner_only' });
+  const thread = { id: 50n, pageId: historicalPage.id, status: 'open' };
+  const createTarget = { namespaceId: 1, namespaceCode: 'server', spaceId: 10n, title: '운영 규칙' };
+  const oldCreator = actor({ accountId: 'old-creator', profileId: 300n });
+  const owner = actor({ accountId: 'canonical-owner', profileId: 400n });
+  const ownerAlias = actor({ accountId: 'owner-alias', profileId: 401n });
+  const manager = actor({ accountId: 'manager-account', profileId: 500n });
+
+  const service = createService(linked);
+  assert.equal(await service.canManagePage({ actor: oldCreator, page: historicalPage }), false);
+  assert.equal(await service.canManageSpace({ actor: oldCreator, spaceId: 10n }), false);
+  assert.equal(await service.canManageCreateTarget({ actor: oldCreator, ...createTarget }), false);
+  assert.equal((await service.canEditPage({ actor: oldCreator, page: historicalPage })).allowed, false);
+  assert.equal((await service.canCreatePage({ actor: oldCreator, ...createTarget })).allowed, false);
+  assert.equal((await service.canManageThreadAcl({ actor: oldCreator, page: historicalPage, thread })).allowed, false);
+
+  for (const currentOwner of [owner, ownerAlias]) {
+    assert.equal(await service.canManagePage({ actor: currentOwner, page: historicalPage }), true);
+    assert.equal(await service.canManageSpace({ actor: currentOwner, spaceId: 10n }), true);
+    assert.equal(await service.canManageCreateTarget({ actor: currentOwner, ...createTarget }), true);
+    assert.equal((await service.canEditPage({ actor: currentOwner, page: historicalPage })).allowed, true);
+    assert.equal((await service.canCreatePage({ actor: currentOwner, ...createTarget })).allowed, true);
+    assert.equal((await service.canManageThreadAcl({ actor: currentOwner, page: historicalPage, thread })).allowed, true);
+  }
+
+  const managerService = createService({ ...linked, roles: ['manager'] });
+  assert.equal(await managerService.canManagePage({ actor: manager, page: historicalPage }), true);
+  assert.equal(await managerService.canManageSpace({ actor: manager, spaceId: 10n }), true);
+  assert.equal(await managerService.canManageCreateTarget({ actor: manager, ...createTarget }), true);
+  assert.equal((await managerService.canEditPage({ actor: manager, page: historicalPage })).allowed, true);
+  assert.equal((await managerService.canManageThreadAcl({ actor: manager, page: historicalPage, thread })).allowed, true);
+});
+
+test('linked server wiki management fails closed when the canonical linkage invariant is broken', async () => {
+  const inconsistent = createService({
+    space: {
+      id: 10n,
+      status: 'active',
+      spaceType: 'server_wiki',
+      rootPageId: 1n,
+      ownerUserId: 300n,
+      createdBy: 300n
+    },
+    roles: ['manager'],
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n },
+    server: { ownerAccountId: 'account-1', wikiPageId: 999n }
+  });
+  const historicalPage = page({ createdBy: 300n, ownerProfileId: 300n, protectionLevel: 'owner_only' });
+
+  assert.equal(await inconsistent.canManagePage({ actor: actor({ profileId: 300n }), page: historicalPage }), false);
+  assert.equal(await inconsistent.canManageSpace({ actor: actor(), spaceId: 10n }), false);
+  assert.equal((await inconsistent.canEditPage({ actor: actor(), page: historicalPage })).allowed, false);
+  assert.equal(await inconsistent.canManagePage({
+    actor: actor({ profileId: 999n, permissions: ['wiki.admin'] }),
+    page: historicalPage
+  }), true);
+
+  const archivedLink = createService({
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki', ownerUserId: 300n, createdBy: 300n },
+    roles: ['manager'],
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n, status: 'archived' },
+    server: { ownerAccountId: 'account-1' }
+  });
+  assert.equal(await archivedLink.canManagePage({ actor: actor({ profileId: 300n }), page: historicalPage }), false);
+
+  const archivedSpace = createService({
+    space: { id: 10n, status: 'archived', spaceType: 'server_wiki', ownerUserId: 300n, createdBy: 300n },
+    roles: ['manager'],
+    serverWiki: { voteServerId: null, createdBy: 300n, status: 'archived' }
+  });
+  assert.equal(await archivedSpace.canManagePage({ actor: actor({ profileId: 300n }), page: historicalPage }), false);
+});
+
+test('legacy unlinked server wiki keeps its narrow provenance fallback', async () => {
+  const legacySpaceOwner = createService({
+    space: {
+      id: 10n,
+      status: 'active',
+      spaceType: 'server_wiki',
+      ownerUserId: 200n,
+      createdBy: 999n
+    },
+    serverWiki: { voteServerId: null, createdBy: 300n }
+  });
+  const legacyWikiCreator = createService({
+    space: {
+      id: 10n,
+      status: 'active',
+      spaceType: 'server_wiki',
+      ownerUserId: 999n,
+      createdBy: 999n
+    },
+    serverWiki: { voteServerId: null, createdBy: 300n }
+  });
+
+  assert.equal(await legacySpaceOwner.canManageSpace({
+    actor: actor({ profileId: 200n }),
+    spaceId: 10n
+  }), true);
+  assert.equal(await legacyWikiCreator.canManagePage({
+    actor: actor({ profileId: 300n }),
+    page: page({ createdBy: 999n, ownerProfileId: null })
+  }), true);
+  assert.equal((await legacyWikiCreator.canCreatePage({
+    actor: actor({ profileId: 300n }),
+    namespaceCode: 'server',
+    spaceId: 10n,
+    title: '레거시 문서'
+  })).allowed, true);
 });
 
 test('blocked wiki profile cannot edit open page', async () => {
@@ -617,6 +796,7 @@ test('section owner group can edit its locked section', async () => {
 
 test('owner-only section accepts linked server owner', async () => {
   const service = createService({
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki' },
     serverWiki: { voteServerId: 'server-1', createdBy: 300n },
     server: { ownerAccountId: 'account-1' }
   });
@@ -891,6 +1071,7 @@ test('space management preserves active owner, subwiki, server, mod, and admin a
   }).canManageSpace({ actor: actor(), spaceId }), true);
   assert.equal(await createService({ roles: ['manager'] }).canManageSpace({ actor: actor(), spaceId }), true);
   assert.equal(await createService({
+    space: { id: spaceId, status: 'active', spaceType: 'server_wiki' },
     serverWiki: { voteServerId: 'server-1', createdBy: 300n },
     server: { ownerAccountId: 'account-1' }
   }).canManageSpace({ actor: actor({ profileId: 200n }), spaceId }), true);

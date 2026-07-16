@@ -6,6 +6,7 @@ import { WikiAclService, type WikiAclAction, type WikiAclDecision, type WikiThre
 type WikiPermissionStore = Pick<
   PrismaService,
   | 'wikiProfile'
+  | 'account'
   | 'wikiSpace'
   | 'subwikiRole'
   | 'serverWiki'
@@ -76,6 +77,8 @@ const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published']);
 const PUBLIC_REVISION_VISIBILITIES = new Set(['public']);
 const ACTIVE_SPACE_STATUSES = new Set(['active']);
 const ACTIVE_PROFILE_STATUSES = new Set(['active']);
+const ACTIVE_ACCOUNT_STATUSES = new Set(['active']);
+const MAX_CANONICAL_ACCOUNT_DEPTH = 16;
 const RESTRICTED_CREATE_NAMESPACES = new Set(['dev', 'help', 'project', 'template', 'category', 'file']);
 const PUBLIC_READ_PROTECTION_LEVELS = new Set([
   'open',
@@ -313,7 +316,7 @@ export class WikiPermissionService {
     }
     const space = await store.wikiSpace.findUnique({
       where: { id: page.spaceId },
-      select: { id: true, status: true, ownerUserId: true }
+      select: { id: true, status: true, spaceType: true, rootPageId: true, ownerUserId: true }
     });
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) {
       return deny('space_not_active');
@@ -325,8 +328,11 @@ export class WikiPermissionService {
     if (this.isAdminActor(actor)) {
       return allow('admin_edit');
     }
+    const linkedServerAuthority = space.spaceType === 'server_wiki'
+      ? await this.linkedServerWikiAuthority(store, actor, page.spaceId, space)
+      : null;
     let isUserDocumentOwner = false;
-    if (page.ownerProfileId !== null && page.ownerProfileId !== undefined) {
+    if (linkedServerAuthority === null && page.ownerProfileId !== null && page.ownerProfileId !== undefined) {
       if (page.ownerProfileId !== actor.profileId) return deny('user_document_owner_required');
       isUserDocumentOwner = true;
     }
@@ -339,13 +345,24 @@ export class WikiPermissionService {
     }
     if (protectionLevel === 'autoconfirmed_only' || protectionLevel === 'trusted_only') {
       return isUserDocumentOwner ||
-        (await this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, EDITOR_ROLES)) ||
-        space.ownerUserId === actor.profileId
+        (linkedServerAuthority?.state === 'consistent'
+          ? linkedServerAuthority.isOwner ||
+            (await this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, EDITOR_ROLES))
+          : linkedServerAuthority?.state === 'inconsistent'
+            ? false
+            : (await this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, EDITOR_ROLES)) ||
+              space.ownerUserId === actor.profileId)
         ? allow(isUserDocumentOwner ? 'user_document_owner_edit' : 'trusted_edit')
         : deny('trusted_required');
     }
     if (protectionLevel === 'owner_only' || protectionLevel === 'official_only') {
-      return space.ownerUserId === actor.profileId || (await this.canManagePageArea(store, actor, page))
+      const canManage = linkedServerAuthority?.state === 'consistent'
+        ? linkedServerAuthority.isOwner ||
+          await this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, OWNER_ROLES)
+        : linkedServerAuthority?.state === 'inconsistent'
+          ? false
+          : await this.canManagePageArea(store, actor, page);
+      return canManage
         ? allow('owner_edit')
         : deny('owner_required');
     }
@@ -411,7 +428,7 @@ export class WikiPermissionService {
     }
     const space = await store.wikiSpace.findUnique({
       where: { id: input.spaceId },
-      select: { id: true, status: true, spaceType: true, ownerUserId: true, createdBy: true }
+      select: { id: true, status: true, spaceType: true, rootPageId: true, ownerUserId: true, createdBy: true }
     });
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) {
       return deny('space_not_active');
@@ -431,30 +448,26 @@ export class WikiPermissionService {
       return allow('basic_create');
     }
     if (space.spaceType === 'server_wiki') {
+      const authority = await this.linkedServerWikiAuthority(store, actor, input.spaceId, space);
+      if (authority?.state === 'inconsistent') return deny('server_wiki_link_inconsistent');
+      if (authority?.state === 'consistent') {
+        if (authority.isOwner) return allow('linked_server_owner_create');
+        return await this.hasAnySubwikiRole(store, actor.profileId, input.spaceId, EDITOR_ROLES)
+          ? allow('server_role_create')
+          : deny('server_wiki_role_required');
+      }
       if (space.ownerUserId === actor.profileId || space.createdBy === actor.profileId) {
         return allow('server_owner_create');
       }
       if (await this.hasAnySubwikiRole(store, actor.profileId, input.spaceId, EDITOR_ROLES)) {
         return allow('server_role_create');
       }
-      const serverWiki = await store.serverWiki.findFirst({
-        where: {
-          spaceId: input.spaceId,
-          status: { not: 'deleted' }
-        },
-        select: { voteServerId: true, createdBy: true }
+      const legacyServerWiki = await store.serverWiki.findFirst({
+        where: { spaceId: input.spaceId, status: { not: 'deleted' } },
+        select: { createdBy: true }
       });
-      if (serverWiki?.createdBy === actor.profileId) {
+      if (legacyServerWiki?.createdBy === actor.profileId) {
         return allow('server_wiki_creator_create');
-      }
-      if (serverWiki?.voteServerId) {
-        const server = await store.server.findUnique({
-          where: { id: serverWiki.voteServerId },
-          select: { ownerAccountId: true }
-        });
-        if (server?.ownerAccountId === actor.accountId) {
-          return allow('linked_server_owner_create');
-        }
       }
       return deny('server_wiki_role_required');
     }
@@ -768,9 +781,16 @@ export class WikiPermissionService {
     if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status)) return false;
     const space = await store.wikiSpace.findUnique({
       where: { id: input.spaceId },
-      select: { id: true, status: true, ownerUserId: true, createdBy: true }
+      select: { id: true, status: true, spaceType: true, rootPageId: true, ownerUserId: true, createdBy: true }
     });
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) return false;
+    if (space.spaceType === 'server_wiki') {
+      const authority = await this.linkedServerWikiAuthority(store, actor, input.spaceId, space);
+      if (authority?.state === 'inconsistent') return false;
+      if (authority?.state === 'consistent') {
+        return authority.isOwner || this.hasAnySubwikiRole(store, actor.profileId, input.spaceId, OWNER_ROLES);
+      }
+    }
     if (space.ownerUserId === actor.profileId || space.createdBy === actor.profileId) return true;
     return this.canManagePageArea(store, actor, {
       id: 0n,
@@ -804,9 +824,17 @@ export class WikiPermissionService {
     }
     const space = await store.wikiSpace.findUnique({
       where: { id: input.spaceId },
-      select: { id: true, status: true, ownerUserId: true, createdBy: true }
+      select: { id: true, status: true, spaceType: true, rootPageId: true, ownerUserId: true, createdBy: true }
     });
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) return false;
+    if (space.spaceType === 'server_wiki') {
+      const authority = await this.linkedServerWikiAuthority(store, input.actor, input.spaceId, space);
+      if (authority?.state === 'inconsistent') return false;
+      if (authority?.state === 'consistent') {
+        return authority.isOwner ||
+          this.hasAnySubwikiRole(store, input.actor.profileId, input.spaceId, OWNER_ROLES);
+      }
+    }
     if (space.ownerUserId === input.actor.profileId || space.createdBy === input.actor.profileId) return true;
     return this.canManagePageArea(store, input.actor, {
       id: 0n,
@@ -952,6 +980,14 @@ export class WikiPermissionService {
     if (this.isAdminActor(actor)) {
       return true;
     }
+    const linkedServerAuthority = await this.linkedServerWikiAuthority(store, actor, page.spaceId);
+    if (linkedServerAuthority?.state === 'inconsistent') {
+      return false;
+    }
+    if (linkedServerAuthority?.state === 'consistent') {
+      return linkedServerAuthority.isOwner ||
+        this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, OWNER_ROLES);
+    }
     if (page.ownerProfileId !== null && page.ownerProfileId !== undefined) {
       return page.ownerProfileId === actor.profileId;
     }
@@ -962,26 +998,10 @@ export class WikiPermissionService {
       return true;
     }
     const serverWiki = await store.serverWiki.findFirst({
-      where: {
-        spaceId: page.spaceId,
-        status: { not: 'deleted' }
-      },
-      select: { voteServerId: true, createdBy: true }
+      where: { spaceId: page.spaceId, status: { not: 'deleted' } },
+      select: { createdBy: true }
     });
-    if (serverWiki) {
-      if (serverWiki.createdBy === actor.profileId) {
-        return true;
-      }
-      if (serverWiki.voteServerId) {
-        const server = await store.server.findUnique({
-          where: { id: serverWiki.voteServerId },
-          select: { ownerAccountId: true }
-        });
-        if (server?.ownerAccountId === actor.accountId) {
-          return true;
-        }
-      }
-    }
+    if (serverWiki?.createdBy === actor.profileId) return true;
     const modWiki = await store.modWiki.findFirst({
       where: {
         spaceId: page.spaceId,
@@ -993,6 +1013,106 @@ export class WikiPermissionService {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Returns null for non-server and legacy unlinked spaces. Once an active server wiki is linked,
+   * provenance fields stop participating in live authorization and a broken relationship fails closed.
+   */
+  private async linkedServerWikiAuthority(
+    store: WikiPermissionStore,
+    actor: WikiPermissionActor,
+    spaceId: bigint,
+    knownSpace?: {
+      readonly id: bigint;
+      readonly status: string;
+      readonly spaceType: string;
+      readonly rootPageId?: bigint | null;
+    }
+  ): Promise<{ readonly state: 'consistent'; readonly isOwner: boolean } |
+    { readonly state: 'inconsistent'; readonly isOwner: false } | null> {
+    const space = knownSpace ?? await store.wikiSpace.findUnique({
+      where: { id: spaceId },
+      select: { id: true, status: true, spaceType: true, rootPageId: true }
+    });
+    if (!space || space.spaceType !== 'server_wiki') return null;
+    if (!ACTIVE_SPACE_STATUSES.has(space.status)) return { state: 'inconsistent', isOwner: false };
+
+    const wikis = await store.serverWiki.findMany({
+      where: { spaceId },
+      select: { id: true, spaceId: true, voteServerId: true, slug: true, status: true }
+    });
+    if (wikis.length === 0) return null;
+    if (wikis.length !== 1) return { state: 'inconsistent', isOwner: false };
+    const wiki = wikis[0];
+    if (wiki?.status !== 'active') return { state: 'inconsistent', isOwner: false };
+    if (wiki.voteServerId === null) return null;
+    if (!wiki?.voteServerId || wiki.spaceId !== space.id) {
+      return { state: 'inconsistent', isOwner: false };
+    }
+    const server = await store.server.findUnique({
+      where: { id: wiki.voteServerId },
+      select: { id: true, ownerAccountId: true, wikiSpaceId: true, wikiPageId: true, wikiSlug: true }
+    });
+    if (!server || server.wikiSpaceId !== space.id || server.wikiPageId !== space.rootPageId ||
+        server.wikiSlug !== wiki.slug || !server.ownerAccountId) {
+      return { state: 'inconsistent', isOwner: false };
+    }
+
+    const roots = await this.resolveCanonicalActiveAccountRoots(store, [actor.accountId, server.ownerAccountId]);
+    const actorRoot = roots.get(actor.accountId) ?? null;
+    const ownerRoot = roots.get(server.ownerAccountId) ?? null;
+    return {
+      state: 'consistent',
+      isOwner: actorRoot !== null && ownerRoot !== null && actorRoot === ownerRoot
+    };
+  }
+
+  private async resolveCanonicalActiveAccountRoots(
+    store: WikiPermissionStore,
+    seedAccountIds: readonly string[]
+  ): Promise<Map<string, string | null>> {
+    const seeds = [...new Set(seedAccountIds)];
+    const accounts = new Map<string, { readonly id: string; readonly canonicalAccountId: string | null; readonly lifecycleStatus: string }>();
+    const attempted = new Set<string>();
+    let frontier = seeds;
+
+    for (let depth = 0; depth < MAX_CANONICAL_ACCOUNT_DEPTH && frontier.length > 0; depth += 1) {
+      const ids = [...new Set(frontier)].filter((id) => !attempted.has(id));
+      if (ids.length === 0) break;
+      ids.forEach((id) => attempted.add(id));
+      const rows = await store.account.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, canonicalAccountId: true, lifecycleStatus: true }
+      });
+      rows.forEach((account) => accounts.set(account.id, account));
+      frontier = rows.flatMap((account) =>
+        account.canonicalAccountId && account.canonicalAccountId !== account.id
+          ? [account.canonicalAccountId]
+          : []
+      );
+    }
+
+    const roots = new Map<string, string | null>();
+    for (const seed of seeds) {
+      const visited = new Set<string>();
+      let current = seed;
+      let root: string | null = null;
+      for (let depth = 0; depth < MAX_CANONICAL_ACCOUNT_DEPTH; depth += 1) {
+        if (visited.has(current)) break;
+        visited.add(current);
+        const account = accounts.get(current);
+        if (!account || !ACTIVE_ACCOUNT_STATUSES.has(account.lifecycleStatus)) break;
+        const next = account.canonicalAccountId;
+        if (!next || next === account.id) {
+          root = account.id;
+          break;
+        }
+        current = next;
+      }
+      roots.set(seed, root);
+    }
+    return roots;
   }
 
   async resolveUserDocumentOwner(
@@ -1041,41 +1161,38 @@ export class WikiPermissionService {
     const spaceIds = [...new Set(requestedSpaceIds)];
     if (spaceIds.length === 0) return new Set();
     if (this.isAdminActor(actor)) return new Set(spaceIds);
-    const [spaces, ownerRoles, serverWikis, modWikis] = await Promise.all([
+    const [spaces, ownerRoles, modWikis] = await Promise.all([
       store.wikiSpace.findMany({
         where: { id: { in: spaceIds }, status: 'active' },
-        select: { id: true, ownerUserId: true, createdBy: true }
+        select: { id: true, status: true, spaceType: true, rootPageId: true, ownerUserId: true, createdBy: true }
       }),
       store.subwikiRole.findMany({
         where: { spaceId: { in: spaceIds }, userId: actor.profileId, status: 'active', role: 'owner' },
         select: { spaceId: true }
-      }),
-      store.serverWiki.findMany({
-        where: { spaceId: { in: spaceIds }, status: { not: 'deleted' } },
-        select: { spaceId: true, voteServerId: true, createdBy: true }
       }),
       store.modWiki.findMany({
         where: { spaceId: { in: spaceIds }, status: { not: 'deleted' } },
         select: { spaceId: true, verifiedBy: true }
       })
     ]);
+    const serverAuthorities = new Map(await Promise.all(spaces
+      .filter((space) => space.spaceType === 'server_wiki')
+      .map(async (space) => [
+        space.id,
+        await this.linkedServerWikiAuthority(store, actor, space.id, space)
+      ] as const)));
     const recoverable = new Set<bigint>();
     for (const space of spaces) {
-      if (space.ownerUserId === actor.profileId || space.createdBy === actor.profileId) recoverable.add(space.id);
-    }
-    for (const role of ownerRoles) recoverable.add(role.spaceId);
-    const serverIds = [...new Set(serverWikis.flatMap((wiki) => wiki.voteServerId ? [wiki.voteServerId] : []))];
-    const servers = serverIds.length > 0
-      ? await store.server.findMany({
-          where: { id: { in: serverIds }, ownerAccountId: actor.accountId },
-          select: { id: true }
-        })
-      : [];
-    const ownedServerIds = new Set(servers.map((server) => server.id));
-    for (const wiki of serverWikis) {
-      if (wiki.createdBy === actor.profileId || (wiki.voteServerId && ownedServerIds.has(wiki.voteServerId))) {
-        recoverable.add(wiki.spaceId);
+      const authority = serverAuthorities.get(space.id);
+      if (authority?.state === 'consistent') {
+        if (authority.isOwner) recoverable.add(space.id);
+      } else if (authority?.state !== 'inconsistent' &&
+          (space.ownerUserId === actor.profileId || space.createdBy === actor.profileId)) {
+        recoverable.add(space.id);
       }
+    }
+    for (const role of ownerRoles) {
+      if (serverAuthorities.get(role.spaceId)?.state !== 'inconsistent') recoverable.add(role.spaceId);
     }
     for (const wiki of modWikis) {
       if (wiki.verifiedBy === actor.profileId) recoverable.add(wiki.spaceId);
