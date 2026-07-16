@@ -322,7 +322,9 @@ export class ServerController {
     @CurrentSession() session: SessionPayload
   ) {
     await this.ensureServerWikiAccess(id, session);
-    return this.serverService.createServerWiki(id, session.userId);
+    return this.serverService.createServerWiki(id, session.userId, {
+      allowTargetAuthorityBypass: session.permissions?.includes('server.admin') === true,
+    });
   }
 
   @RequireStepUp('server_admin')
@@ -336,7 +338,9 @@ export class ServerController {
   ) {
     await this.ensureServerWikiAccess(id, session);
     const payload = serverWikiLinkPayloadSchema.parse(body);
-    return this.serverService.linkServerWiki(id, payload, session.userId);
+    return this.serverService.linkServerWiki(id, payload, session.userId, {
+      allowTargetAuthorityBypass: session.permissions?.includes('server.admin') === true,
+    });
   }
 
   @RequireStepUp('server_admin')

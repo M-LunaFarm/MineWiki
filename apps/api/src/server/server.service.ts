@@ -16,7 +16,7 @@ import type {
   ServerUpdate,
   VotifierTarget,
 } from '@minewiki/schemas';
-import { Prisma } from '@prisma/client';
+import { Prisma, type Server, type ServerWiki } from '@prisma/client';
 import { status, statusBedrock } from 'minecraft-server-util';
 import { resolveSrv } from 'node:dns/promises';
 import { createHash, randomInt } from 'node:crypto';
@@ -651,14 +651,23 @@ export class ServerService {
     return toServerWikiLinkResponse(server, serverWiki);
   }
 
-  async createServerWiki(serverId: string, accountId: string): Promise<ServerWikiLinkResponse> {
+  async createServerWiki(
+    serverId: string,
+    accountId: string,
+    options: ServerWikiLinkOptions = {},
+  ): Promise<ServerWikiLinkResponse> {
     const server = await this.ensureExists(serverId);
     const existing = await this.findServerWikiForServer(server.id, server.wikiSpaceId);
     if (existing) {
       if (server.wikiSpaceId && server.wikiPageId && server.wikiSlug) {
         return toServerWikiLinkResponse(server, existing);
       }
-      return this.linkServerWiki(server.id, { serverWikiId: existing.id.toString() }, accountId);
+      return this.linkServerWiki(
+        server.id,
+        { serverWikiId: existing.id.toString() },
+        accountId,
+        options,
+      );
     }
 
     const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
@@ -868,64 +877,213 @@ export class ServerService {
     serverId: string,
     input: ServerWikiLinkRequest,
     accountId?: string | null,
+    options: ServerWikiLinkOptions = {},
   ): Promise<ServerWikiLinkResponse> {
-    const server = await this.ensureExists(serverId);
     const selector = normalizeServerWikiSelector(input);
     if (!selector) {
       throw new BadRequestException('serverWikiId, spaceId, or wikiSlug is required.');
     }
+    if (!accountId) {
+      throw new ForbiddenException('Server wiki linking requires an authenticated account.');
+    }
 
-    const serverWiki = await this.prisma.serverWiki.findFirst({ where: selector });
-    if (!serverWiki) {
+    const selectedTarget = await this.prisma.serverWiki.findFirst({
+      where: selector,
+      select: { id: true },
+    });
+    if (!selectedTarget) {
       throw new NotFoundException('Server wiki link target not found.');
     }
-    if (serverWiki.voteServerId && serverWiki.voteServerId !== server.id) {
-      throw new ConflictException('Server wiki is already linked to another server.');
+
+    let linked: { server: Server; serverWiki: ServerWiki };
+    try {
+      linked = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM \`Server\` WHERE id = ${serverId} FOR UPDATE
+        `;
+        const server = await tx.server.findUnique({ where: { id: serverId } });
+        if (!server) throw new NotFoundException(`Server ${serverId} not found`);
+
+        await tx.$queryRaw<Array<{ id: bigint }>>`
+          SELECT id FROM server_wikis WHERE id = ${selectedTarget.id} FOR UPDATE
+        `;
+        const serverWiki = await tx.serverWiki.findUnique({
+          where: { id: selectedTarget.id },
+        });
+        if (!serverWiki) throw new NotFoundException('Server wiki link target not found.');
+        if (serverWiki.voteServerId && serverWiki.voteServerId !== server.id) {
+          throw new ConflictException('Server wiki is already linked to another server.');
+        }
+
+        await tx.$queryRaw<Array<{ id: bigint }>>`
+          SELECT id
+          FROM server_wikis
+          WHERE space_id = ${serverWiki.spaceId}
+          ORDER BY id
+          FOR UPDATE
+        `;
+        const spaceWikiRows = await tx.serverWiki.findMany({
+          where: { spaceId: serverWiki.spaceId },
+          select: { id: true },
+          orderBy: { id: 'asc' },
+        });
+        if (spaceWikiRows.length !== 1 || spaceWikiRows[0]?.id !== serverWiki.id) {
+          throw new ConflictException('Server wiki target space has ambiguous linkage.');
+        }
+
+        const existingForServer = await tx.serverWiki.findUnique({
+          where: { voteServerId: server.id },
+          select: { id: true },
+        });
+        if (existingForServer && existingForServer.id !== serverWiki.id) {
+          throw new ConflictException('Server is already linked to another server wiki.');
+        }
+        if (server.wikiSpaceId && server.wikiSpaceId !== serverWiki.spaceId) {
+          throw new ConflictException('Server wiki linkage is inconsistent.');
+        }
+
+        await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM \`Server\`
+          WHERE wikiSpaceId = ${serverWiki.spaceId} OR wikiSlug = ${serverWiki.slug}
+          ORDER BY id
+          FOR UPDATE
+        `;
+        const competingServer = await tx.server.findFirst({
+          where: {
+            id: { not: server.id },
+            OR: [{ wikiSpaceId: serverWiki.spaceId }, { wikiSlug: serverWiki.slug }],
+          },
+          select: { id: true },
+        });
+        if (competingServer) {
+          throw new ConflictException('Server wiki is already referenced by another server.');
+        }
+
+        await tx.$queryRaw<Array<{ id: bigint }>>`
+          SELECT id FROM wiki_spaces WHERE id = ${serverWiki.spaceId} FOR UPDATE
+        `;
+        const space = await tx.wikiSpace.findUnique({
+          where: { id: serverWiki.spaceId },
+          select: {
+            id: true,
+            rootPageId: true,
+            ownerUserId: true,
+            status: true,
+            spaceType: true,
+            slug: true,
+          },
+        });
+        if (!space) throw new NotFoundException('Server wiki target space not found.');
+        if (
+          space.status !== 'active'
+          || space.spaceType !== 'server_wiki'
+          || space.slug !== serverWiki.slug
+          || serverWiki.status !== 'active'
+        ) {
+          throw new ConflictException('Server wiki target linkage is inconsistent.');
+        }
+        if (!space.ownerUserId) {
+          throw new ForbiddenException('Target server wiki has no active canonical owner.');
+        }
+
+        const ownerProfile = await tx.wikiProfile.findUnique({
+          where: { id: space.ownerUserId },
+          select: { accountId: true, status: true },
+        });
+        if (!ownerProfile?.accountId || ownerProfile.status !== 'active') {
+          throw new ForbiddenException('Target server wiki has no active canonical owner.');
+        }
+
+        const actorCanonicalId = await resolveCanonicalAccountId(tx, accountId, true);
+        const serverOwnerCanonicalId = server.ownerAccountId
+          ? await resolveCanonicalAccountId(tx, server.ownerAccountId, false)
+          : null;
+        const targetOwnerCanonicalId = await resolveCanonicalAccountId(
+          tx,
+          ownerProfile.accountId,
+          true,
+        );
+        if (!options.allowTargetAuthorityBypass) {
+          if (!serverOwnerCanonicalId || actorCanonicalId !== serverOwnerCanonicalId) {
+            throw new ForbiddenException('Only the canonical server owner can link a server wiki.');
+          }
+          if (targetOwnerCanonicalId !== serverOwnerCanonicalId) {
+            throw new ForbiddenException('You do not own the target server wiki.');
+          }
+        }
+
+        const page = space.rootPageId
+          ? await tx.wikiPage.findUnique({
+              where: { id: space.rootPageId },
+              select: { id: true, spaceId: true },
+            })
+          : await tx.wikiPage.findFirst({
+              where: { spaceId: serverWiki.spaceId, status: { not: 'deleted' } },
+              select: { id: true, spaceId: true },
+              orderBy: [{ updatedAt: 'desc' }],
+            });
+        if (page && page.spaceId !== serverWiki.spaceId) {
+          throw new ConflictException('Server wiki root page belongs to another space.');
+        }
+        const claimed = await tx.serverWiki.updateMany({
+          where: {
+            id: serverWiki.id,
+            OR: [{ voteServerId: null }, { voteServerId: server.id }],
+          },
+          data: {
+            voteServerId: server.id,
+            serverName: server.name,
+            host: server.joinHost,
+            port: server.joinPort,
+            edition: server.edition,
+            updatedAt: new Date(),
+          },
+        });
+        if (claimed.count !== 1) {
+          throw new ConflictException('Server wiki is already linked to another server.');
+        }
+        const updatedServerWiki = await tx.serverWiki.findUniqueOrThrow({
+          where: { id: serverWiki.id },
+        });
+        const updatedServer = await tx.server.update({
+          where: { id: server.id },
+          data: {
+            wikiSpaceId: serverWiki.spaceId,
+            wikiPageId: page?.id ?? null,
+            wikiSlug: serverWiki.slug,
+          },
+        });
+        await tx.auditEvent.create({
+          data: {
+            category: 'server',
+            action: 'server.wiki.link',
+            severity: 'info',
+            actorAccountId: actorCanonicalId,
+            subjectType: 'server',
+            subjectId: server.id,
+            metadata: {
+              serverId: server.id,
+              serverWikiId: serverWiki.id.toString(),
+              wikiSpaceId: serverWiki.spaceId.toString(),
+              wikiPageId: page?.id.toString() ?? null,
+              wikiSlug: serverWiki.slug,
+            },
+          },
+        });
+        return { server: updatedServer, serverWiki: updatedServerWiki };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String(error.code)
+        : null;
+      if (code === 'P2002' || code === 'P2034') {
+        throw new ConflictException('Server wiki linking changed concurrently. Please retry.');
+      }
+      throw error;
     }
 
-    const linked = await this.prisma.$transaction(async (tx) => {
-      const space = await tx.wikiSpace.findUnique({ where: { id: serverWiki.spaceId } });
-      const page = space?.rootPageId
-        ? await tx.wikiPage.findUnique({ where: { id: space.rootPageId } })
-        : await tx.wikiPage.findFirst({
-            where: { spaceId: serverWiki.spaceId, status: { not: 'deleted' } },
-            orderBy: [{ updatedAt: 'desc' }],
-          });
-      const updatedServerWiki = await tx.serverWiki.update({
-        where: { id: serverWiki.id },
-        data: {
-          voteServerId: server.id,
-          serverName: server.name,
-          host: server.joinHost,
-          port: server.joinPort,
-          edition: server.edition,
-          updatedAt: new Date(),
-        },
-      });
-      const updatedServer = await tx.server.update({
-        where: { id: server.id },
-        data: {
-          wikiSpaceId: serverWiki.spaceId,
-          wikiPageId: page?.id ?? null,
-          wikiSlug: serverWiki.slug,
-        },
-      });
-      return { server: updatedServer, serverWiki: updatedServerWiki };
-    });
-
     const response = toServerWikiLinkResponse(linked.server, linked.serverWiki);
-    await this.events?.audit('server.wiki.link', {
-      category: 'server',
-      actorAccountId: accountId ?? null,
-      subjectType: 'server',
-      subjectId: server.id,
-      metadata: {
-        serverWikiId: serverWiki.id,
-        wikiSpaceId: response.wikiSpaceId,
-        wikiPageId: response.wikiPageId,
-        wikiSlug: response.wikiSlug
-      }
-    });
     return response;
   }
 
@@ -1526,6 +1684,10 @@ export interface ServerWikiLinkRequest {
   readonly wikiSlug?: string;
 }
 
+export interface ServerWikiLinkOptions {
+  readonly allowTargetAuthorityBypass?: boolean;
+}
+
 export interface ServerWikiLinkResponse {
   readonly serverId: string;
   readonly serverWikiId: string | null;
@@ -1681,6 +1843,40 @@ function normalizeServerWikiSelector(
     return { slug: input.wikiSlug.trim() };
   }
   return null;
+}
+
+async function resolveCanonicalAccountId(
+  tx: Prisma.TransactionClient,
+  accountId: string,
+  requireSeedActive: boolean,
+): Promise<string> {
+  const visited = new Set<string>();
+  let currentId = accountId;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (visited.has(currentId)) {
+      throw new ConflictException('Canonical account ownership contains a cycle.');
+    }
+    visited.add(currentId);
+    const account = await tx.account.findUnique({
+      where: { id: currentId },
+      select: { id: true, canonicalAccountId: true, lifecycleStatus: true },
+    });
+    if (!account) {
+      throw new ForbiddenException('Canonical account owner could not be resolved.');
+    }
+    if (depth === 0 && requireSeedActive && account.lifecycleStatus !== 'active') {
+      throw new ForbiddenException('Canonical account owner is not active.');
+    }
+    const nextId = account.canonicalAccountId;
+    if (!nextId || nextId === account.id) {
+      if (account.lifecycleStatus !== 'active') {
+        throw new ForbiddenException('Canonical account owner is not active.');
+      }
+      return account.id;
+    }
+    currentId = nextId;
+  }
+  throw new ConflictException('Canonical account ownership chain is too deep.');
 }
 
 function parseUnsignedBigInt(value: string, label: string): bigint {

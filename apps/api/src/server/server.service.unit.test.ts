@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { downsamplePingSamples, ServerService } from './server.service';
 
 test('server stats downsampling preserves the seven-day range endpoints', () => {
@@ -576,4 +577,357 @@ test('server banner upload uses canonical file service metadata path', async () 
       data: { bannerUrl: 'upload://banner.webp' },
     },
   ]);
+});
+
+function createServerWikiLinkFixture(input: {
+  readonly actorAccountId: string;
+  readonly serverOwnerAccountId: string;
+  readonly targetOwnerAccountId: string;
+  readonly targetVoteServerId?: string | null;
+  readonly actorOwnsServer?: boolean;
+  readonly duplicateTargetSpaceRow?: boolean;
+  readonly failAudit?: boolean;
+}) {
+  const serverId = randomUUID();
+  const targetWikiId = 71n;
+  const targetSpaceId = 72n;
+  const targetPageId = 73n;
+  const canonicalAccountId = randomUUID();
+  const accounts = new Map([
+    [input.actorAccountId, {
+      id: input.actorAccountId,
+      canonicalAccountId: input.actorOwnsServer === false ? input.actorAccountId : canonicalAccountId,
+      lifecycleStatus: 'active',
+    }],
+    [input.serverOwnerAccountId, {
+      id: input.serverOwnerAccountId,
+      canonicalAccountId,
+      lifecycleStatus: 'active',
+    }],
+    [input.targetOwnerAccountId, {
+      id: input.targetOwnerAccountId,
+      canonicalAccountId: input.targetOwnerAccountId === input.serverOwnerAccountId
+        ? canonicalAccountId
+        : input.targetOwnerAccountId,
+      lifecycleStatus: 'active',
+    }],
+    [canonicalAccountId, {
+      id: canonicalAccountId,
+      canonicalAccountId,
+      lifecycleStatus: 'active',
+    }],
+  ]);
+  const server = {
+    id: serverId,
+    ownerAccountId: input.serverOwnerAccountId,
+    wikiSpaceId: null,
+    wikiPageId: null,
+    wikiSlug: null,
+    name: 'Tenant A',
+    joinHost: 'tenant-a.example.com',
+    joinPort: 25565,
+    edition: 'java',
+  };
+  const serverWiki = {
+    id: targetWikiId,
+    spaceId: targetSpaceId,
+    voteServerId: input.targetVoteServerId ?? null,
+    slug: 'tenant-b-wiki',
+    status: 'active',
+  };
+  const updatedServerWikis: unknown[] = [];
+  const updatedServers: unknown[] = [];
+  const audits: Array<Record<string, unknown>> = [];
+  const outsideAudits: unknown[] = [];
+  const tx = {
+    $queryRaw: async () => [],
+    server: {
+      findUnique: async () => ({ ...server }),
+      findFirst: async () => null,
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(server, data);
+        updatedServers.push(data);
+        return { ...server };
+      },
+    },
+    serverWiki: {
+      findFirst: async () => ({ ...serverWiki }),
+      findUnique: async ({ where }: { where: { id?: bigint; voteServerId?: string } }) => {
+        if (where.voteServerId) {
+          return serverWiki.voteServerId === where.voteServerId ? { ...serverWiki } : null;
+        }
+        return where.id === serverWiki.id ? { ...serverWiki } : null;
+      },
+      findUniqueOrThrow: async () => ({ ...serverWiki }),
+      findMany: async () => input.duplicateTargetSpaceRow
+        ? [{ id: serverWiki.id }, { id: serverWiki.id + 1n }]
+        : [{ id: serverWiki.id }],
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        Object.assign(serverWiki, data);
+        updatedServerWikis.push(data);
+        return { ...serverWiki };
+      },
+      updateMany: async ({ where, data }: {
+        where: { id: bigint; OR: Array<{ voteServerId: string | null }> };
+        data: Record<string, unknown>;
+      }) => {
+        const expected = where.OR.map((candidate) => candidate.voteServerId);
+        if (where.id !== serverWiki.id || !expected.includes(serverWiki.voteServerId)) {
+          return { count: 0 };
+        }
+        Object.assign(serverWiki, data);
+        updatedServerWikis.push(data);
+        return { count: 1 };
+      },
+    },
+    wikiSpace: {
+      findUnique: async () => ({
+        id: targetSpaceId,
+        rootPageId: targetPageId,
+        ownerUserId: 91n,
+        status: 'active',
+        spaceType: 'server_wiki',
+        slug: serverWiki.slug,
+      }),
+    },
+    wikiPage: {
+      findUnique: async () => ({ id: targetPageId, spaceId: targetSpaceId }),
+      findFirst: async () => ({ id: targetPageId, spaceId: targetSpaceId }),
+    },
+    wikiProfile: {
+      findUnique: async () => ({
+        id: 91n,
+        accountId: input.targetOwnerAccountId,
+        status: 'active',
+      }),
+    },
+    account: {
+      findUnique: async ({ where }: { where: { id: string } }) => accounts.get(where.id) ?? null,
+    },
+    auditEvent: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        if (input.failAudit) throw new Error('audit write failed');
+        audits.push(data);
+        return { id: randomUUID(), ...data };
+      },
+    },
+  };
+  const prisma = {
+    server: {
+      findUnique: async () => ({ ...server }),
+    },
+    serverWiki: {
+      findFirst: async () => ({ ...serverWiki, voteServerId: null }),
+    },
+    $transaction: async <T>(
+      callback: (client: typeof tx) => Promise<T>,
+      options?: { isolationLevel: string },
+    ) => {
+      assert.equal(options?.isolationLevel, Prisma.TransactionIsolationLevel.Serializable);
+      const serverBefore = { ...server };
+      const serverWikiBefore = { ...serverWiki };
+      const updatedServersLength = updatedServers.length;
+      const updatedServerWikisLength = updatedServerWikis.length;
+      const auditsLength = audits.length;
+      try {
+        return await callback(tx);
+      } catch (error) {
+        restoreObject(server, serverBefore);
+        restoreObject(serverWiki, serverWikiBefore);
+        updatedServers.length = updatedServersLength;
+        updatedServerWikis.length = updatedServerWikisLength;
+        audits.length = auditsLength;
+        throw error;
+      }
+    },
+  };
+  return {
+    serverId,
+    targetWikiId,
+    canonicalAccountId,
+    service: new ServerService(
+      {} as never,
+      prisma as never,
+      {} as never,
+      undefined,
+      { async audit(...args: unknown[]) { outsideAudits.push(args); } } as never,
+    ),
+    updatedServerWikis,
+    updatedServers,
+    audits,
+    outsideAudits,
+    server,
+    serverWiki,
+  };
+}
+
+function restoreObject<T extends object>(target: T, snapshot: T): void {
+  for (const key of Object.keys(target)) {
+    if (!(key in snapshot)) delete (target as Record<string, unknown>)[key];
+  }
+  Object.assign(target, snapshot);
+}
+
+test('server wiki link rejects a target owned by another canonical account', async () => {
+  const actorAccountId = randomUUID();
+  const fixture = createServerWikiLinkFixture({
+    actorAccountId,
+    serverOwnerAccountId: randomUUID(),
+    targetOwnerAccountId: randomUUID(),
+  });
+
+  await assert.rejects(
+    () => fixture.service.linkServerWiki(
+      fixture.serverId,
+      { serverWikiId: fixture.targetWikiId.toString() },
+      actorAccountId,
+    ),
+    /target.*wiki|대상 서버 위키/u,
+  );
+  assert.equal(fixture.updatedServerWikis.length, 0);
+  assert.equal(fixture.updatedServers.length, 0);
+});
+
+test('server wiki link rejects a target claimed concurrently by another server', async () => {
+  const actorAccountId = randomUUID();
+  const ownerAccountId = randomUUID();
+  const fixture = createServerWikiLinkFixture({
+    actorAccountId,
+    serverOwnerAccountId: ownerAccountId,
+    targetOwnerAccountId: ownerAccountId,
+    targetVoteServerId: randomUUID(),
+  });
+
+  await assert.rejects(
+    () => fixture.service.linkServerWiki(
+      fixture.serverId,
+      { serverWikiId: fixture.targetWikiId.toString() },
+      actorAccountId,
+    ),
+    /already linked|이미 다른 서버/u,
+  );
+  assert.equal(fixture.updatedServerWikis.length, 0);
+  assert.equal(fixture.updatedServers.length, 0);
+});
+
+test('server wiki link fails closed when a space has duplicate server-wiki rows', async () => {
+  const actorAccountId = randomUUID();
+  const ownerAccountId = randomUUID();
+  const fixture = createServerWikiLinkFixture({
+    actorAccountId,
+    serverOwnerAccountId: ownerAccountId,
+    targetOwnerAccountId: ownerAccountId,
+    duplicateTargetSpaceRow: true,
+  });
+
+  await assert.rejects(
+    () => fixture.service.linkServerWiki(
+      fixture.serverId,
+      { spaceId: '72' },
+      actorAccountId,
+    ),
+    /ambiguous linkage/u,
+  );
+  assert.equal(fixture.updatedServerWikis.length, 0);
+  assert.equal(fixture.updatedServers.length, 0);
+});
+
+test('server wiki link rechecks canonical server ownership inside the transaction', async () => {
+  const actorAccountId = randomUUID();
+  const ownerAccountId = randomUUID();
+  const fixture = createServerWikiLinkFixture({
+    actorAccountId,
+    serverOwnerAccountId: ownerAccountId,
+    targetOwnerAccountId: ownerAccountId,
+    actorOwnsServer: false,
+  });
+
+  await assert.rejects(
+    () => fixture.service.linkServerWiki(
+      fixture.serverId,
+      { serverWikiId: fixture.targetWikiId.toString() },
+      actorAccountId,
+    ),
+    /canonical server owner/u,
+  );
+  assert.equal(fixture.updatedServerWikis.length, 0);
+  assert.equal(fixture.updatedServers.length, 0);
+});
+
+test('server wiki link preserves the explicit global-admin break-glass path', async () => {
+  const actorAccountId = randomUUID();
+  const fixture = createServerWikiLinkFixture({
+    actorAccountId,
+    serverOwnerAccountId: randomUUID(),
+    targetOwnerAccountId: randomUUID(),
+  });
+
+  const result = await fixture.service.linkServerWiki(
+    fixture.serverId,
+    { serverWikiId: fixture.targetWikiId.toString() },
+    actorAccountId,
+    { allowTargetAuthorityBypass: true },
+  );
+
+  assert.equal(result.serverWikiId, fixture.targetWikiId.toString());
+  assert.equal(fixture.updatedServerWikis.length, 1);
+  assert.equal(fixture.updatedServers.length, 1);
+});
+
+test('server wiki link rolls back both linkage writes when strict audit persistence fails', async () => {
+  const actorAccountId = randomUUID();
+  const ownerAccountId = randomUUID();
+  const fixture = createServerWikiLinkFixture({
+    actorAccountId,
+    serverOwnerAccountId: ownerAccountId,
+    targetOwnerAccountId: ownerAccountId,
+    failAudit: true,
+  });
+
+  await assert.rejects(
+    () => fixture.service.linkServerWiki(
+      fixture.serverId,
+      { serverWikiId: fixture.targetWikiId.toString() },
+      actorAccountId,
+    ),
+    /audit write failed/u,
+  );
+  assert.equal(fixture.serverWiki.voteServerId, null);
+  assert.equal(fixture.server.wikiSpaceId, null);
+  assert.equal(fixture.server.wikiPageId, null);
+  assert.equal(fixture.server.wikiSlug, null);
+  assert.equal(fixture.updatedServerWikis.length, 0);
+  assert.equal(fixture.updatedServers.length, 0);
+  assert.equal(fixture.audits.length, 0);
+  assert.equal(fixture.outsideAudits.length, 0);
+});
+
+test('server wiki link accepts canonical aliases when source and target ownership match', async () => {
+  const actorAccountId = randomUUID();
+  const ownerAccountId = randomUUID();
+  const fixture = createServerWikiLinkFixture({
+    actorAccountId,
+    serverOwnerAccountId: ownerAccountId,
+    targetOwnerAccountId: ownerAccountId,
+  });
+
+  const result = await fixture.service.linkServerWiki(
+    fixture.serverId,
+    { wikiSlug: 'tenant-b-wiki' },
+    actorAccountId,
+  );
+
+  assert.equal(result.serverWikiId, fixture.targetWikiId.toString());
+  assert.equal(fixture.updatedServerWikis.length, 1);
+  assert.equal(fixture.updatedServers.length, 1);
+  assert.equal(fixture.audits.length, 1);
+  assert.equal(fixture.audits[0]?.actorAccountId, fixture.canonicalAccountId);
+  assert.equal(fixture.audits[0]?.action, 'server.wiki.link');
+  assert.equal(fixture.audits[0]?.subjectId, fixture.serverId);
+  assert.deepEqual(
+    Object.keys(fixture.audits[0]?.metadata as Record<string, unknown>).sort(),
+    ['serverId', 'serverWikiId', 'wikiPageId', 'wikiSlug', 'wikiSpaceId'],
+  );
+  assert.equal(JSON.stringify(fixture.audits[0]).includes('tenant-a.example.com'), false);
+  assert.equal(fixture.outsideAudits.length, 0);
 });

@@ -329,4 +329,146 @@ if (!hasDatabase) {
       cleanup();
     }
   });
+
+  test('server wiki linking enforces tenant ownership and admits only one concurrent claimant', async () => {
+    const { service, cleanup } = createService();
+    const unique = randomUUID().replace(/-/g, '').slice(0, 12);
+    const serverIds: string[] = [];
+    const accountIds: string[] = [];
+    let spaceId: bigint | null = null;
+
+    try {
+      const owner = await prisma.account.create({
+        data: {
+          provider: 'email',
+          providerUserId: `link-owner-${unique}`,
+          email: `link-owner-${unique}@example.com`,
+          displayName: `LinkOwner_${unique}`,
+          emailVerified: true,
+        },
+      });
+      const foreignOwner = await prisma.account.create({
+        data: {
+          provider: 'email',
+          providerUserId: `link-foreign-${unique}`,
+          email: `link-foreign-${unique}@example.com`,
+          displayName: `LinkForeign_${unique}`,
+          emailVerified: true,
+        },
+      });
+      accountIds.push(owner.id, foreignOwner.id);
+      const ownerProfile = await wikiProfiles.ensureWikiProfile(owner.id);
+
+      const space = await prisma.wikiSpace.create({
+        data: {
+          code: `link-space-${unique}`,
+          spaceKey: `link-space-${unique}`,
+          name: `Link Space ${unique}`,
+          title: `Link Space ${unique}`,
+          slug: `link-space-${unique}`,
+          spaceType: 'server_wiki',
+          rootNamespaceCode: 'server',
+          rootPath: `/server/link-space-${unique}`,
+          status: 'active',
+          createdBy: ownerProfile.id,
+          ownerUserId: ownerProfile.id,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+      spaceId = space.id;
+      const target = await prisma.serverWiki.create({
+        data: {
+          spaceId: space.id,
+          serverName: `Unlinked ${unique}`,
+          slug: `link-space-${unique}`,
+          status: 'active',
+          createdBy: ownerProfile.id,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      const registerOwnedServer = async (suffix: string, ownerAccountId: string) => {
+        const server = await service.register({
+          name: `Link ${suffix} ${unique}`,
+          joinHost: `link-${suffix}-${unique}.example.com`,
+          joinPort: 25565,
+          edition: 'java',
+          supportedVersions: ['1.21'],
+          tags: ['test'],
+          shortDescription: `Link ${suffix} test`,
+          longDescription: `Link ${suffix} transaction test`,
+          websiteUrl: null,
+          discordUrl: null,
+          ownerAccountId,
+        });
+        serverIds.push(server.id);
+        return server;
+      };
+      const first = await registerOwnedServer('first', owner.id);
+      const second = await registerOwnedServer('second', owner.id);
+      const foreign = await registerOwnedServer('foreign', foreignOwner.id);
+
+      await assert.rejects(
+        () => service.linkServerWiki(
+          foreign.id,
+          { serverWikiId: target.id.toString() },
+          foreignOwner.id,
+        ),
+        /target.*wiki/u,
+      );
+
+      const outcomes = await Promise.allSettled([
+        service.linkServerWiki(first.id, { wikiSlug: target.slug }, owner.id),
+        service.linkServerWiki(second.id, { spaceId: space.id.toString() }, owner.id),
+      ]);
+      assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
+      assert.equal(outcomes.filter((outcome) => outcome.status === 'rejected').length, 1);
+
+      const storedTarget = await prisma.serverWiki.findUnique({ where: { id: target.id } });
+      assert.ok(storedTarget?.voteServerId === first.id || storedTarget?.voteServerId === second.id);
+      const linkedServers = await prisma.server.count({
+        where: { wikiSpaceId: space.id },
+      });
+      assert.equal(linkedServers, 1);
+      const linkAudits = await prisma.auditEvent.findMany({
+        where: {
+          action: 'server.wiki.link',
+          subjectType: 'server',
+          subjectId: { in: serverIds },
+        },
+      });
+      assert.equal(linkAudits.length, 1);
+      assert.equal(linkAudits[0]?.actorAccountId, owner.id);
+      assert.deepEqual(
+        Object.keys(linkAudits[0]?.metadata as Record<string, unknown>).sort(),
+        ['serverId', 'serverWikiId', 'wikiPageId', 'wikiSlug', 'wikiSpaceId'],
+      );
+    } finally {
+      if (serverIds.length > 0) {
+        await prisma.auditEvent.deleteMany({
+          where: { action: 'server.wiki.link', subjectId: { in: serverIds } },
+        }).catch(() => {});
+      }
+      if (serverIds.length > 0) {
+        await prisma.server.updateMany({
+          where: { id: { in: serverIds } },
+          data: { wikiSpaceId: null, wikiPageId: null, wikiSlug: null },
+        }).catch(() => {});
+      }
+      if (spaceId) {
+        await prisma.serverWiki.deleteMany({ where: { spaceId } }).catch(() => {});
+        await prisma.wikiSpace.delete({ where: { id: spaceId } }).catch(() => {});
+      }
+      if (serverIds.length > 0) {
+        await prisma.server.deleteMany({ where: { id: { in: serverIds } } }).catch(() => {});
+      }
+      if (accountIds.length > 0) {
+        await prisma.wikiProfile.deleteMany({ where: { accountId: { in: accountIds } } }).catch(() => {});
+        await prisma.account.deleteMany({ where: { id: { in: accountIds } } }).catch(() => {});
+      }
+      cleanup();
+    }
+  });
 }
