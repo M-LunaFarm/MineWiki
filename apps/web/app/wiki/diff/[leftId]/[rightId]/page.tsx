@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { ServerWikiWorkspace } from '../../../../../components/wiki/server-wiki-workspace';
-import { buildServerWikiToolPath, buildWikiRevisionPath, safeWikiReturnTo } from '../../../../../lib/wiki-routes.mjs';
+import { buildWikiHistoryPath, buildWikiRevisionPath, safeWikiReturnTo } from '../../../../../lib/wiki-routes.mjs';
 import { fetchWikiPageByPath, fetchWikiRevisionDiff } from '../../../../../lib/wiki-server-api';
 
 interface PageProps {
@@ -61,7 +61,7 @@ async function diffContext(pageId: string, requestedReturnTo?: string) {
   return {
     page,
     returnTo,
-    historyPath: page.serverWiki ? buildServerWikiToolPath(returnTo, 'history') : null,
+    historyPath: buildWikiHistoryPath(returnTo),
   };
 }
 

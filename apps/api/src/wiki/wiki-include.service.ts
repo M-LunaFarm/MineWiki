@@ -7,7 +7,7 @@ import {
   slugifyTitle
 } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
-import { WikiPermissionService } from './wiki-permission.service';
+import { WikiPermissionService, type WikiPermissionActor } from './wiki-permission.service';
 
 const MAX_INCLUDE_OCCURRENCES = 20;
 const MAX_UNIQUE_INCLUDE_TARGETS = 20;
@@ -34,6 +34,8 @@ export class WikiIncludeService {
   async expand(input: {
     readonly ast: readonly AstNode[];
     readonly accountId: string | null;
+    readonly actor?: WikiPermissionActor | null;
+    readonly requestIp?: string | null;
     readonly sourcePageId: bigint;
     readonly sourceNamespace: string;
     readonly sourceLocalPath: string;
@@ -65,7 +67,11 @@ export class WikiIncludeService {
 
       let sourcePromise = memo.get(targetKey);
       if (!sourcePromise) {
-        sourcePromise = this.loadSource(target.namespace, target.title, input.accountId);
+        sourcePromise = this.loadSource(target.namespace, target.title, {
+          accountId: input.accountId,
+          actor: input.actor,
+          requestIp: input.requestIp
+        });
         memo.set(targetKey, sourcePromise);
       }
       const source = await sourcePromise;
@@ -92,7 +98,11 @@ export class WikiIncludeService {
   private async loadSource(
     namespaceCode: string,
     title: string,
-    accountId: string | null
+    access: {
+      readonly accountId: string | null;
+      readonly actor?: WikiPermissionActor | null;
+      readonly requestIp?: string | null;
+    }
   ): Promise<IncludeSource | null> {
     try {
       const namespace = await this.prisma.wikiNamespace.findUnique({
@@ -117,7 +127,7 @@ export class WikiIncludeService {
         }
       });
       if (!revision) return null;
-      await this.wikiPermissions.assertCanReadPage({ accountId, page, revision });
+      await this.wikiPermissions.assertCanReadPage({ ...access, page, revision });
       const parsed = parseMarkup(revision.contentRaw);
       if (parsed.blockingErrors.length > 0 || parsed.redirectTarget) return null;
       return {

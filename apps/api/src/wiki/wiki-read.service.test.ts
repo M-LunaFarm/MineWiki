@@ -412,7 +412,53 @@ test('revision history uses a stable revision number cursor beyond the first pag
   const result = await new WikiReadService(prisma, permissions).getRevisions('1', null, '5', 2);
   assert.deepEqual(revisionWhere, { pageId: 1n, visibility: 'public', revisionNo: { lt: 5 } });
   assert.deepEqual(result.items.map((item) => item.revisionNo), [4, 3]);
+  assert.deepEqual(result.items.map((item) => item.previousPublicRevisionId), ['3', '2']);
+  assert.deepEqual(result.items.map((item) => item.sizeDelta), [1, 1]);
   assert.equal(result.nextCursor, '3');
+});
+
+test('historical revision rendering keeps raw source private and applies read plus history ACLs', async () => {
+  const now = new Date('2026-07-16T00:00:00Z');
+  const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'history', slug: 'history', title: 'History', displayTitle: 'History', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
+  const revision = { id: 11n, pageId: 1n, revisionNo: 3, parentRevisionId: 10n, contentRaw: '= Historical =\nRendered body', contentHash: 'hash', contentSize: 28, syntaxVersion: 'bwm-0.3', editSummary: 'old copy', isMinor: true, editTags: null, contentAst: null, createdBy: 2n, actorType: 'user', actorUserId: 2n, actorIp: null, actorIpText: null, actorIpHash: null, createdAt: now, visibility: 'public' };
+  const prisma = {
+    wikiPage: { async findUnique() { return page; }, async findFirst() { return { namespaceId: 1 }; } },
+    wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
+    wikiPageRevision: { async findFirst(input: { where: { id: bigint } }) { return input.where.id === 11n ? revision : null; } },
+    wikiPageRenderCache: { async findUnique() { return null; }, async create() { return {}; } }
+  } as unknown as PrismaService;
+  const actions: string[] = [];
+  let readRevisionId: bigint | undefined;
+  const permissions = {
+    async assertCanReadPage(input: { revision?: { id: bigint } }) { readRevisionId = input.revision?.id; },
+    async assertCanUsePageAction(input: { action: string }) { actions.push(input.action); }
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getRenderedRevision('11');
+
+  assert.equal(result.id, '1');
+  assert.equal(result.revision.id, '11');
+  assert.equal(result.revision.editSummary, 'old copy');
+  assert.equal(result.revision.isCurrent, false);
+  assert.equal(result.currentRevisionId, '12');
+  assert.equal(result.routePath, '/wiki/History');
+  assert.equal(result.render.dependencyMode, 'live-current');
+  assert.match(result.html, /Historical/u);
+  assert.equal('contentRaw' in (result as unknown as Record<string, unknown>), false);
+  assert.equal(readRevisionId, 11n);
+  assert.deepEqual(actions, ['history']);
+});
+
+test('historical revision rendering conceals non-public revisions before ACL evaluation', async () => {
+  let permissionChecks = 0;
+  const service = new WikiReadService({
+    wikiPageRevision: { async findFirst() { return null; } }
+  } as unknown as PrismaService, {
+    async assertCanReadPage() { permissionChecks += 1; }
+  } as unknown as WikiPermissionService);
+
+  await assert.rejects(() => service.getRenderedRevision('99'), /Public wiki revision not found/u);
+  assert.equal(permissionChecks, 0);
 });
 
 test('recent changes use filters, a stable cursor, and one page visibility check per document', async () => {

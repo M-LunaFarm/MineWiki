@@ -48,9 +48,9 @@ function createFixture(pages: FixturePage[], deniedPageIds = new Set<bigint>()) 
       }
     }
   };
-  const permissionCalls: Array<{ accountId?: string | null; page?: { id: bigint } | null }> = [];
+  const permissionCalls: Array<{ accountId?: string | null; actor?: unknown; requestIp?: string | null; page?: { id: bigint } | null }> = [];
   const permissions = {
-    async assertCanReadPage(input: { accountId?: string | null; page?: { id: bigint } | null }) {
+    async assertCanReadPage(input: { accountId?: string | null; actor?: unknown; requestIp?: string | null; page?: { id: bigint } | null }) {
       permissionCalls.push(input);
       if (input.page && deniedPageIds.has(input.page.id)) throw new Error('denied');
     }
@@ -81,10 +81,13 @@ test('expands a readable include with AST-safe parameters and disables nested in
     contentRaw: '== @제목=기본@ ==\n안녕하세요, @이름@\n[include(틀:중첩)]\n{{{\n@이름@\n}}}'
   };
   const { service, permissionCalls } = createFixture([template]);
+  const actor = { profileId: 7n, groups: ['trusted'], permissions: ['wiki.read.private'] };
   const parent = parseMarkup('[include(틀:안내,제목=<script>소개</script>,이름=루나)]');
   const result = await service.expand({
     ast: parent.ast,
     accountId: 'account-1',
+    actor: actor as never,
+    requestIp: '192.0.2.44',
     sourcePageId: 1n,
     sourceNamespace: 'main',
     sourceLocalPath: '대문'
@@ -107,6 +110,8 @@ test('expands a readable include with AST-safe parameters and disables nested in
   assert.equal(html.includes('<script>'), false);
   assert.match(html, /&lt;script&gt;소개&lt;\/script&gt;/);
   assert.equal(permissionCalls[0]?.accountId, 'account-1');
+  assert.equal(permissionCalls[0]?.actor, actor);
+  assert.equal(permissionCalls[0]?.requestIp, '192.0.2.44');
 });
 
 test('renders denied and missing include targets identically without target disclosure', async () => {

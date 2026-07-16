@@ -83,6 +83,24 @@ export interface WikiPageResponse {
   } | null;
 }
 
+export interface WikiRenderedRevisionResponse extends WikiPageResponse {
+  readonly routePath: string;
+  readonly currentRevisionId: string | null;
+  readonly render: {
+    readonly rendererVersion: string;
+    readonly dependencyMode: 'live-current';
+  };
+  readonly revision: WikiPageResponse['revision'] & {
+    readonly parentRevisionId: string | null;
+    readonly editSummary: string | null;
+    readonly isMinor: boolean;
+    readonly contentSize: number;
+    readonly syntaxVersion: string;
+    readonly visibility: 'public';
+    readonly isCurrent: boolean;
+  };
+}
+
 export interface ServerWikiPresentation {
   readonly slug: string;
   readonly settingsVersion: number;
@@ -163,6 +181,8 @@ export interface WikiRevisionSummary {
   readonly createdAt: string;
   readonly contentHash: string;
   readonly contentSize: number;
+  readonly previousPublicRevisionId: string | null;
+  readonly sizeDelta: number | null;
 }
 
 export interface WikiPublicProfileResponse {

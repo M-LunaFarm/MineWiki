@@ -25,6 +25,7 @@ import {
   type WikiAccessContext,
   type WikiAccessViewer,
 } from './wiki-read.service';
+import { matchCommonLines } from './wiki-line-diff';
 
 type ChangeType = 'create' | 'edit' | 'move' | 'delete' | 'restore' | 'revert';
 
@@ -1805,23 +1806,29 @@ export class WikiEditService {
   diffText(left: string, right: string): WikiRevisionDiffResponse['hunks'] {
     const leftLines = left.split('\n');
     const rightLines = right.split('\n');
-    const max = Math.max(leftLines.length, rightLines.length);
     const hunks: WikiRevisionDiffResponse['hunks'] = [];
-    for (let index = 0; index < max; index += 1) {
-      const leftLine = leftLines[index];
-      const rightLine = rightLines[index];
-      if (leftLine === rightLine) {
-        if (leftLine !== undefined) {
-          hunks.push({ type: 'context', line: leftLine, leftLine: index + 1, rightLine: index + 1 });
-        }
-        continue;
+    let leftIndex = 0;
+    let rightIndex = 0;
+    for (const [matchedLeft, matchedRight] of matchCommonLines(leftLines, rightLines)) {
+      while (leftIndex < matchedLeft) {
+        hunks.push({ type: 'removed', line: leftLines[leftIndex]!, leftLine: leftIndex + 1, rightLine: null });
+        leftIndex += 1;
       }
-      if (leftLine !== undefined) {
-        hunks.push({ type: 'removed', line: leftLine, leftLine: index + 1, rightLine: null });
+      while (rightIndex < matchedRight) {
+        hunks.push({ type: 'added', line: rightLines[rightIndex]!, leftLine: null, rightLine: rightIndex + 1 });
+        rightIndex += 1;
       }
-      if (rightLine !== undefined) {
-        hunks.push({ type: 'added', line: rightLine, leftLine: null, rightLine: index + 1 });
-      }
+      hunks.push({ type: 'context', line: leftLines[matchedLeft]!, leftLine: matchedLeft + 1, rightLine: matchedRight + 1 });
+      leftIndex = matchedLeft + 1;
+      rightIndex = matchedRight + 1;
+    }
+    while (leftIndex < leftLines.length) {
+      hunks.push({ type: 'removed', line: leftLines[leftIndex]!, leftLine: leftIndex + 1, rightLine: null });
+      leftIndex += 1;
+    }
+    while (rightIndex < rightLines.length) {
+      hunks.push({ type: 'added', line: rightLines[rightIndex]!, leftLine: null, rightLine: rightIndex + 1 });
+      rightIndex += 1;
     }
     return hunks;
   }

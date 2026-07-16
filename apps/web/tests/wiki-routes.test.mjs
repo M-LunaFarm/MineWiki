@@ -6,6 +6,7 @@ import {
   buildServerWikiToolPath,
   buildStandardWikiToolPath,
   buildWikiDiffPath,
+  buildWikiHistoryPath,
   buildWikiPagePath,
   buildWikiRevisionPath,
   buildWikiRoutePath,
@@ -144,6 +145,12 @@ test('revision and diff links preserve the canonical source document', () => {
     buildWikiDiffPath('41', '42', returnTo),
     '/wiki/diff/41/42?returnTo=%2Fserver%2Fluna%2FAPI%2Frequests',
   );
+});
+
+test('history links preserve server, category, and standard document route families', () => {
+  assert.equal(buildWikiHistoryPath('/server/luna/rules'), '/server/luna/_tools/history/rules');
+  assert.equal(buildWikiHistoryPath('/wiki/category/게임/몹'), '/wiki/category/_tools/history/게임/몹');
+  assert.equal(buildWikiHistoryPath('/guide/setup'), '/guide/_tools/history/setup');
 });
 
 test('current revision action uses the canonical source document return path', async () => {

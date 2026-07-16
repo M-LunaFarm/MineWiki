@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
@@ -32,6 +32,7 @@ import {
   type WikiPageResponse,
   type WikiRecentChangeListResponse,
   type WikiRevisionListResponse,
+  type WikiRenderedRevisionResponse,
   type WikiSearchResponse,
   type WikiSearchSuggestionResponse,
   type WikiPublicStatsResponse,
@@ -263,6 +264,17 @@ export class WikiController {
     @Req() request: FastifyRequest
   ): Promise<WikiRevisionResponse> {
     return this.wikiEdit.getRevision(revisionId, request.sessionPayload ?? null);
+  }
+
+  @Get('revisions/:revisionId/rendered')
+  @UseGuards(OptionalSessionGuard)
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Vary', 'Cookie, Authorization')
+  getRenderedRevision(
+    @Param('revisionId') revisionId: string,
+    @Req() request: FastifyRequest
+  ): Promise<WikiRenderedRevisionResponse> {
+    return this.wikiRead.getRenderedRevision(revisionId, request.sessionPayload ?? null);
   }
 
   @Get('revisions/:leftId/diff/:rightId')

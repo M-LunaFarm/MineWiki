@@ -112,6 +112,18 @@ test('preview returns blocking markup errors', () => {
   assert.ok(preview.blockingErrors.some((error) => error.includes('HTML')));
 });
 
+test('revision diff aligns unchanged lines after an insertion', () => {
+  const edits = new WikiEditService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+  const hunks = edits.diffText('alpha\nbeta\ngamma', 'intro\nalpha\nbeta\ngamma');
+
+  assert.deepEqual(hunks, [
+    { type: 'added', line: 'intro', leftLine: null, rightLine: 1 },
+    { type: 'context', line: 'alpha', leftLine: 1, rightLine: 2 },
+    { type: 'context', line: 'beta', leftLine: 2, rightLine: 3 },
+    { type: 'context', line: 'gamma', leftLine: 3, rightLine: 4 }
+  ]);
+});
+
 test('revision source requires raw ACL while diff requires history ACL', async () => {
   const actions: string[] = [];
   const revision = {

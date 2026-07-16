@@ -20,6 +20,7 @@ import { WikiPermissionService, type WikiPermissionActor } from './wiki-permissi
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiIncludeService } from './wiki-include.service';
 import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath, WikiRoutePathResolver, type WikiRoutePathBatch } from './wiki-route-path.resolver';
+import { matchCommonLines } from './wiki-line-diff';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -77,6 +78,24 @@ export interface WikiPageResponse {
   } | null;
 }
 
+export interface WikiRenderedRevisionResponse extends WikiPageResponse {
+  readonly routePath: string;
+  readonly currentRevisionId: string | null;
+  readonly render: {
+    readonly rendererVersion: string;
+    readonly dependencyMode: 'live-current';
+  };
+  readonly revision: WikiPageResponse['revision'] & {
+    readonly parentRevisionId: string | null;
+    readonly editSummary: string | null;
+    readonly isMinor: boolean;
+    readonly contentSize: number;
+    readonly syntaxVersion: string;
+    readonly visibility: 'public';
+    readonly isCurrent: boolean;
+  };
+}
+
 export interface WikiRevisionSummary {
   readonly id: string;
   readonly revisionNo: number;
@@ -88,6 +107,8 @@ export interface WikiRevisionSummary {
   readonly createdAt: string;
   readonly contentHash: string;
   readonly contentSize: number;
+  readonly previousPublicRevisionId: string | null;
+  readonly sizeDelta: number | null;
 }
 
 export interface WikiRecentChangeSummary {
@@ -497,6 +518,54 @@ export class WikiReadService {
     return this.getPage(resolved.namespace, resolved.title, viewer, options);
   }
 
+  async getRenderedRevision(revisionId: string, viewer?: WikiAccessViewer): Promise<WikiRenderedRevisionResponse> {
+    const parsedRevisionId = this.parseBigIntId(revisionId, 'revisionId');
+    const revision = await this.prisma.wikiPageRevision.findFirst({
+      where: { id: parsedRevisionId, visibility: 'public' }
+    });
+    if (!revision) {
+      throw new NotFoundException('Public wiki revision not found.');
+    }
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: revision.pageId } });
+    if (!page) {
+      throw new NotFoundException('Public wiki revision not found.');
+    }
+    const namespace = await this.prisma.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
+    if (!namespace) throw new NotFoundException('Public wiki revision not found.');
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    await this.wikiPermissions.assertCanReadPage({ ...access, page, revision });
+    await this.wikiPermissions.assertCanUsePageAction({
+      ...access,
+      action: 'history',
+      page
+    });
+    const rendered = await this.renderPage(namespace.code, page, access, {
+      followRedirects: false,
+      redirectTrail: [],
+      revisionId: revision.id
+    });
+    const routePaths = await this.routePaths.preload([page], new Map([[namespace.id, namespace.code]]));
+    return {
+      ...rendered,
+      routePath: routePaths.routePath(page, namespace.code),
+      currentRevisionId: page.currentRevisionId?.toString() ?? null,
+      render: {
+        rendererVersion: WIKI_RENDERER_VERSION,
+        dependencyMode: 'live-current'
+      },
+      revision: {
+        ...rendered.revision,
+        parentRevisionId: revision.parentRevisionId?.toString() ?? null,
+        editSummary: revision.editSummary,
+        isMinor: revision.isMinor,
+        contentSize: revision.contentSize,
+        syntaxVersion: revision.syntaxVersion,
+        visibility: 'public',
+        isCurrent: page.currentRevisionId === revision.id
+      }
+    };
+  }
+
   async getRevisions(pageId: string, viewer?: WikiAccessViewer, cursor?: string, requestedLimit: string | number = 50): Promise<WikiRevisionListResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
@@ -525,18 +594,23 @@ export class WikiReadService {
     const pageRows = revisions.slice(0, limit);
     const profileIds = [...new Set(pageRows.flatMap((revision) => revision.createdBy ? [revision.createdBy] : []))];
     const profileById = await this.canonicalProfileViews(profileIds);
-    const items = pageRows.map((revision) => ({
-      id: revision.id.toString(),
-      revisionNo: revision.revisionNo,
-      editSummary: revision.editSummary,
-      isMinor: revision.isMinor,
-      createdBy: revision.createdBy?.toString() ?? null,
-      createdByName: revision.createdBy ? profileById.get(revision.createdBy)?.displayName ?? null : null,
-      createdByUsername: revision.createdBy ? profileById.get(revision.createdBy)?.username ?? null : null,
-      createdAt: revision.createdAt.toISOString(),
-      contentHash: revision.contentHash,
-      contentSize: revision.contentSize
-    }));
+    const items = pageRows.map((revision, index) => {
+      const previous = revisions[index + 1];
+      return {
+        id: revision.id.toString(),
+        revisionNo: revision.revisionNo,
+        editSummary: revision.editSummary,
+        isMinor: revision.isMinor,
+        createdBy: revision.createdBy?.toString() ?? null,
+        createdByName: revision.createdBy ? profileById.get(revision.createdBy)?.displayName ?? null : null,
+        createdByUsername: revision.createdBy ? profileById.get(revision.createdBy)?.username ?? null : null,
+        createdAt: revision.createdAt.toISOString(),
+        contentHash: revision.contentHash,
+        contentSize: revision.contentSize,
+        previousPublicRevisionId: previous?.id.toString() ?? null,
+        sizeDelta: previous ? revision.contentSize - previous.contentSize : null
+      };
+    });
     return { items, nextCursor: hasMore ? pageRows.at(-1)?.revisionNo.toString() ?? null : null };
   }
 
@@ -1852,8 +1926,17 @@ export class WikiReadService {
   }, access: WikiAccessContext, options: {
     readonly followRedirects: boolean;
     readonly redirectTrail: readonly string[];
+    readonly revisionId?: bigint;
   }): Promise<WikiPageResponse> {
-    const revision = page.currentRevisionId
+    const revision = options.revisionId
+      ? await this.prisma.wikiPageRevision.findFirst({
+          where: {
+            id: options.revisionId,
+            pageId: page.id,
+            visibility: 'public'
+          }
+        })
+      : page.currentRevisionId
       ? await this.prisma.wikiPageRevision.findFirst({
           where: {
             id: page.currentRevisionId,
@@ -1894,11 +1977,13 @@ export class WikiReadService {
       };
     }
 
-    const serverWiki = await this.findServerWikiContext(namespace, page.spaceId, page.id);
+    const serverWiki = await this.findServerWikiContext(namespace, page.spaceId, page.id, access);
     const expanded = parsed.includes.length > 0 && this.wikiIncludes
       ? await this.wikiIncludes.expand({
           ast: parsed.ast,
           accountId: access.accountId,
+          actor: access.actor,
+          requestIp: access.requestIp,
           sourcePageId: page.id,
           sourceNamespace: namespace,
           sourceLocalPath: page.localPath
@@ -1971,7 +2056,7 @@ export class WikiReadService {
     };
   }
 
-  private async findServerWikiContext(namespace: string, spaceId: bigint, currentPageId: bigint) {
+  private async findServerWikiContext(namespace: string, spaceId: bigint, currentPageId: bigint, access: WikiAccessContext) {
     if (namespace !== 'server') {
       return null;
     }
@@ -2007,11 +2092,21 @@ export class WikiReadService {
         : null,
       this.prisma.wikiPage.findMany({
         where: { spaceId, status: { not: 'deleted' }, pageType: { not: 'redirect' } },
-        select: { id: true, localPath: true, displayTitle: true },
         orderBy: [{ localPath: 'asc' }, { id: 'asc' }]
       })
     ]);
-    const navigation = buildServerWikiNavigation(serverWiki.slug, pages, currentPageId);
+    const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+    const publicRevisions = currentRevisionIds.length > 0
+      ? await this.prisma.wikiPageRevision.findMany({
+          where: { id: { in: currentRevisionIds }, visibility: 'public' },
+          select: { id: true, pageId: true }
+        })
+      : [];
+    const publicRevisionKeys = new Set(publicRevisions.map((revision) => `${revision.pageId}:${revision.id}`));
+    const publicPages = pages.filter((page) => page.currentRevisionId !== null
+      && publicRevisionKeys.has(`${page.id}:${page.currentRevisionId}`));
+    const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
+    const navigation = buildServerWikiNavigation(serverWiki.slug, readablePages, currentPageId);
     return {
       directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
       context: {
@@ -2217,51 +2312,11 @@ function normalizeServerWikiLayoutKey(value: string): 'docs' | 'handbook' | 'bra
 function transferLineAttribution<T>(oldLines: readonly string[], oldAttribution: readonly T[], newLines: readonly string[], fallback: T): T[] {
   const next = newLines.map(() => fallback);
   if (oldLines.length === 0 || newLines.length === 0) return next;
-  const matches = oldLines.length * newLines.length <= 2_000_000
-    ? longestCommonLineMatches(oldLines, newLines)
-    : monotonicLineMatches(oldLines, newLines);
+  const matches = matchCommonLines(oldLines, newLines);
   for (const [oldIndex, newIndex] of matches) {
     if (oldAttribution[oldIndex] !== undefined) next[newIndex] = oldAttribution[oldIndex]!;
   }
   return next;
-}
-
-function longestCommonLineMatches(oldLines: readonly string[], newLines: readonly string[]): Array<[number, number]> {
-  const rows = Array.from({ length: oldLines.length + 1 }, () => new Uint32Array(newLines.length + 1));
-  for (let oldIndex = 1; oldIndex <= oldLines.length; oldIndex += 1) {
-    for (let newIndex = 1; newIndex <= newLines.length; newIndex += 1) {
-      rows[oldIndex]![newIndex] = oldLines[oldIndex - 1] === newLines[newIndex - 1]
-        ? rows[oldIndex - 1]![newIndex - 1]! + 1
-        : Math.max(rows[oldIndex - 1]![newIndex]!, rows[oldIndex]![newIndex - 1]!);
-    }
-  }
-  const matches: Array<[number, number]> = [];
-  let oldIndex = oldLines.length;
-  let newIndex = newLines.length;
-  while (oldIndex > 0 && newIndex > 0) {
-    if (oldLines[oldIndex - 1] === newLines[newIndex - 1]) {
-      matches.push([oldIndex - 1, newIndex - 1]); oldIndex -= 1; newIndex -= 1;
-    } else if (rows[oldIndex - 1]![newIndex]! >= rows[oldIndex]![newIndex - 1]!) {
-      oldIndex -= 1;
-    } else {
-      newIndex -= 1;
-    }
-  }
-  return matches.reverse();
-}
-
-function monotonicLineMatches(oldLines: readonly string[], newLines: readonly string[]): Array<[number, number]> {
-  const oldPositions = new Map<string, number[]>();
-  oldLines.forEach((line, index) => oldPositions.set(line, [...(oldPositions.get(line) ?? []), index]));
-  const matches: Array<[number, number]> = [];
-  let previousOldIndex = -1;
-  for (let newIndex = 0; newIndex < newLines.length; newIndex += 1) {
-    const candidate = oldPositions.get(newLines[newIndex]!)?.find((index) => index > previousOldIndex);
-    if (candidate === undefined) continue;
-    matches.push([candidate, newIndex]);
-    previousOldIndex = candidate;
-  }
-  return matches;
 }
 
 function categoryTitleFromSlug(slug: string): string {

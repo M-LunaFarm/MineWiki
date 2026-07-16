@@ -112,6 +112,12 @@ export function buildWikiRevisionPath(revisionId, returnTo) {
   return appendWikiReturnTo(`/wiki/revision/${encodeURIComponent(revisionId)}`, returnTo);
 }
 
+export function buildWikiHistoryPath(routePath) {
+  if (routePath.startsWith('/server/')) return buildServerWikiToolPath(routePath, 'history');
+  if (routePath.startsWith('/wiki/category/')) return buildCategoryWikiToolPath(routePath, 'history');
+  return buildStandardWikiToolPath(routePath, 'history');
+}
+
 export function buildWikiDiffPath(leftId, rightId, returnTo) {
   return appendWikiReturnTo(
     `/wiki/diff/${encodeURIComponent(leftId)}/${encodeURIComponent(rightId)}`,

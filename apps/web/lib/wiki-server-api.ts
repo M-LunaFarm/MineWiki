@@ -7,6 +7,7 @@ import type {
   WikiRecentChangeListResponse,
   WikiRevisionDiffResponse,
   WikiRevisionResponse,
+  WikiRenderedRevisionResponse,
   WikiRevisionListResponse,
   WikiSearchResult,
   WikiSearchResponse,
@@ -40,6 +41,11 @@ export async function fetchServerWikiPresentation(slug: string): Promise<ServerW
 export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisionResponse> {
   const response = await wikiFetch(`/v1/wiki/revisions/${encodeURIComponent(revisionId)}`);
   return readWikiResponse<WikiRevisionResponse>(response, 'Failed to load wiki revision.');
+}
+
+export async function fetchWikiRenderedRevision(revisionId: string): Promise<WikiRenderedRevisionResponse> {
+  const response = await wikiFetch(`/v1/wiki/revisions/${encodeURIComponent(revisionId)}/rendered`);
+  return readWikiResponse<WikiRenderedRevisionResponse>(response, 'Failed to load rendered wiki revision.');
 }
 
 export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionListResponse> {

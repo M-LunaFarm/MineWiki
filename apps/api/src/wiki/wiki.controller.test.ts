@@ -84,6 +84,7 @@ test('optional browser wiki reads forward the complete session payload', async (
     async getPage(_namespace: string, _title: string, viewer: unknown) { received.push({ method: 'page', viewer }); return {}; },
     async getPageByPath(_path: string, viewer: unknown) { received.push({ method: 'by-path', viewer }); return {}; },
     async getRevisions(_pageId: string, viewer: unknown) { received.push({ method: 'revisions', viewer }); return { items: [], nextCursor: null }; },
+    async getRenderedRevision(_revisionId: string, viewer: unknown) { received.push({ method: 'rendered-revision', viewer }); return {}; },
     async getBacklinks(input: { viewer?: unknown }) { received.push({ method: 'backlinks', viewer: input.viewer }); return { items: [], nextCursor: null }; },
     async getBlame(_pageId: string, viewer: unknown) { received.push({ method: 'blame', viewer }); return {}; },
     async getRecent(input: { viewer?: unknown }) { received.push({ method: 'recent', viewer: input.viewer }); return { items: [], nextCursor: null }; },
@@ -114,12 +115,13 @@ test('optional browser wiki reads forward the complete session payload', async (
     controller.categoryMembers('category', request),
     controller.templates(request),
     controller.getRevision('11', request),
+    controller.getRenderedRevision('11', request),
     controller.getRevisionDiff('11', '12', request)
   ]);
 
   assert.deepEqual(received.map((entry) => entry.method).sort(), [
     'backlinks', 'blame', 'by-path', 'categories', 'diff', 'page', 'raw',
-    'recent', 'revision', 'revisions', 'search', 'special', 'suggest', 'templates'
+    'recent', 'rendered-revision', 'revision', 'revisions', 'search', 'special', 'suggest', 'templates'
   ]);
   assert.equal(received.every((entry) => entry.viewer === session), true);
 });
