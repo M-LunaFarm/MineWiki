@@ -262,6 +262,7 @@ export class AccountDeletionService {
       const identityCleanup = await this.scrubExternalIdentities(tx, request.id, accountIds);
       await this.revokeCredentials(tx, accountIds);
       await this.anonymizeUserDocuments(tx, request.id, profiles, now);
+      const wikiCollaboratorRolesRevoked = await this.revokeWikiCollaboratorRoles(tx, profileIds, now);
       await tx.uploadedFile.updateMany({ where: { ownerAccountId: { in: accountIds } }, data: { ownerAccountId: null } });
       await tx.reviewHelpfulVote.deleteMany({ where: { accountId: { in: accountIds } } });
       await tx.reviewReport.deleteMany({ where: { accountId: { in: accountIds } } });
@@ -300,7 +301,7 @@ export class AccountDeletionService {
         data: {
           category: 'account', action: 'account.deletion.completed', severity: 'warning',
           actorAccountId: adminAccountId, subjectType: 'account_deletion_request', subjectId: request.id,
-          metadata: { canonicalAccountId: request.canonicalAccountId, accountCount: accountIds.length, wikiProfileCount: profiles.length, discordRevocationsQueued: identityCleanup.discordRevocationsQueued, preservation: ['wiki_contributions', 'reviews', 'votes', 'audit_events'] },
+          metadata: { canonicalAccountId: request.canonicalAccountId, accountCount: accountIds.length, wikiProfileCount: profiles.length, wikiCollaboratorRolesRevoked, discordRevocationsQueued: identityCleanup.discordRevocationsQueued, preservation: ['wiki_contributions', 'reviews', 'votes', 'audit_events'] },
         },
       });
       const updated = await tx.accountDeletionRequest.findUnique({ where: { id: request.id } });
@@ -546,6 +547,30 @@ export class AccountDeletionService {
       ...entitlements.map((item) => ({ type: 'entitlement' as const, id: item.id.toString(), name: `${item.layoutKey} 요금제`, reason: '활성 유료 권리를 다른 서버 관리자로 이전하거나 종료해야 합니다.' })),
       ...privileged.map((item) => ({ type: 'privileged_role' as const, id: item.id, name: item.role.code, reason: '보호된 전역 역할을 다른 운영자에게 인계하거나 해제해야 합니다.' })),
     ];
+  }
+
+  private async revokeWikiCollaboratorRoles(
+    tx: Prisma.TransactionClient,
+    profileIds: bigint[],
+    now: Date,
+  ): Promise<number> {
+    if (profileIds.length === 0) return 0;
+    const revoked = await tx.subwikiRole.updateMany({
+      where: {
+        userId: { in: profileIds },
+        status: 'active',
+        role: { not: 'owner' },
+      },
+      data: {
+        status: 'revoked',
+        revokedAt: now,
+        // This is a system lifecycle action. The account-deletion audit records
+        // the UUID processor; revokedBy is a WikiProfile id and must not falsely
+        // attribute the revocation to either the deleting profile or a worker.
+        revokedBy: null,
+      },
+    });
+    return revoked.count;
   }
 
   private async scrubExternalIdentities(

@@ -459,6 +459,121 @@ if (!hasDatabase) {
     } finally { await cleanup([group.firstId, group.secondId]); }
   });
 
+  test('completion atomically revokes all active non-owner wiki roles and audits the exact count', async () => {
+    const group = await createGroup();
+    const unique = randomUUID().replaceAll('-', '');
+    const now = new Date();
+    const ownerAccountId = randomUUID();
+    const processorId = randomUUID();
+    const triggerName = `account_deletion_audit_fail_${unique.slice(0, 20)}`;
+    let triggerCreated = false;
+    await prisma.account.create({ data: {
+      id: ownerAccountId,
+      canonicalAccountId: ownerAccountId,
+      provider: 'email',
+      providerUserId: `role-owner-${unique}@example.com`,
+      email: `role-owner-${unique}@example.com`,
+      emailVerified: true,
+    } });
+    const ownerProfile = await prisma.wikiProfile.create({ data: {
+      accountId: ownerAccountId,
+      username: `role_owner_${unique.slice(0, 20)}`,
+      displayName: '역할 공간 소유자',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    } });
+    const deletingProfile = await prisma.wikiProfile.create({ data: {
+      accountId: group.firstId,
+      username: `role_delete_${unique.slice(0, 20)}`,
+      displayName: '역할 삭제 대상',
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    } });
+    const space = await prisma.wikiSpace.create({ data: {
+      code: `role-delete-${unique}`,
+      name: '역할 해제 테스트 공간',
+      title: '역할 해제 테스트 공간',
+      rootNamespaceCode: 'wiki',
+      rootPath: `role-delete-${unique}`,
+      ownerUserId: ownerProfile.id,
+      status: 'active',
+      createdBy: ownerProfile.id,
+      createdAt: now,
+      updatedAt: now,
+    } });
+    const roles = ['editor', 'reviewer', 'trusted', 'legacy-custom'];
+    await prisma.subwikiRole.createMany({ data: roles.map((role) => ({
+      spaceId: space.id,
+      userId: deletingProfile.id,
+      role,
+      status: 'active',
+      grantedBy: ownerProfile.id,
+      grantedAt: now,
+    })) });
+
+    try {
+      const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
+      await prisma.accountDeletionRequest.update({
+        where: { id: requested.id },
+        data: { scheduledFor: new Date(Date.now() - 1000) },
+      });
+      await prisma.$executeRawUnsafe(`
+        CREATE TRIGGER \`${triggerName}\`
+        BEFORE INSERT ON audit_events
+        FOR EACH ROW
+        BEGIN
+          IF NEW.action = 'account.deletion.completed' AND NEW.subject_id = '${requested.id}' THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'forced account deletion audit failure';
+          END IF;
+        END
+      `);
+      triggerCreated = true;
+
+      await assert.rejects(
+        () => service.process(requested.id, processorId, 'forced rollback test'),
+        /forced account deletion audit failure/u,
+      );
+      assert.equal(await prisma.subwikiRole.count({
+        where: { userId: deletingProfile.id, status: 'active', role: { in: roles } },
+      }), roles.length);
+      assert.equal((await prisma.wikiProfile.findUniqueOrThrow({ where: { id: deletingProfile.id } })).status, 'active');
+      assert.equal(await prisma.account.count({
+        where: { id: { in: [group.firstId, group.secondId] }, lifecycleStatus: 'deletion_pending' },
+      }), 2);
+
+      await prisma.$executeRawUnsafe(`DROP TRIGGER \`${triggerName}\``);
+      triggerCreated = false;
+      const completed = await service.process(requested.id, processorId, 'collaborator cleanup test');
+      assert.equal(completed.status, 'completed');
+
+      const storedRoles = await prisma.subwikiRole.findMany({
+        where: { userId: deletingProfile.id, role: { in: roles } },
+        orderBy: { role: 'asc' },
+      });
+      assert.equal(storedRoles.length, roles.length);
+      assert.ok(storedRoles.every((role) => role.status === 'revoked'));
+      assert.ok(storedRoles.every((role) => role.revokedAt instanceof Date));
+      assert.ok(storedRoles.every((role) => role.revokedBy === null));
+      const audit = await prisma.auditEvent.findFirstOrThrow({
+        where: {
+          subjectType: 'account_deletion_request',
+          subjectId: requested.id,
+          action: 'account.deletion.completed',
+        },
+      });
+      assert.equal((audit.metadata as { wikiCollaboratorRolesRevoked?: number }).wikiCollaboratorRolesRevoked, roles.length);
+    } finally {
+      if (triggerCreated) await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS \`${triggerName}\``);
+      await prisma.subwikiRole.deleteMany({ where: { spaceId: space.id } });
+      await prisma.wikiSpace.delete({ where: { id: space.id } }).catch(() => undefined);
+      await prisma.wikiProfile.deleteMany({ where: { id: { in: [deletingProfile.id, ownerProfile.id] } } });
+      await prisma.account.delete({ where: { id: ownerAccountId } }).catch(() => undefined);
+      await cleanup([group.firstId, group.secondId]);
+    }
+  });
+
   test('automatic processing includes only stale processing claims in its recovery query', async () => {
     let receivedWhere: unknown;
     const recoveryService = new AccountDeletionService({
