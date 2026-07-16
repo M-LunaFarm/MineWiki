@@ -8,6 +8,7 @@ import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, delete
 import { useAuth } from '../providers/auth-context';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { countWikiDiscussionStatuses, WIKI_DISCUSSION_STATUS_FILTERS, wikiDiscussionFilterCount, wikiDiscussionMatchesStatusFilter, wikiDiscussionStatusClass, wikiDiscussionStatusLabel } from '../../lib/wiki-discussion-status.mjs';
+import { CaptchaChallenge, isCaptchaConfigured } from '../security/captcha-challenge';
 
 export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
   const { account } = useAuth();
@@ -39,6 +40,8 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaKey, setCaptchaKey] = useState(0);
   const [moveQuery, setMoveQuery] = useState('');
   const [moveResults, setMoveResults] = useState<WikiSearchResult[]>([]);
   const [movePageId, setMovePageId] = useState('');
@@ -57,6 +60,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [moderationReason, setModerationReason] = useState('');
   const prependAnchor = useRef<{ id: string; top: number } | null>(null);
   const replyTextarea = useRef<HTMLTextAreaElement | null>(null);
+  const needsCaptcha = isCaptchaConfigured();
 
   function mentionAuthor(username: string) {
     const mention = `@${username} `;
@@ -242,6 +246,10 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (needsCaptcha && !captchaToken) {
+      setError('새 토론을 만들기 전에 로봇 방지 확인을 완료해 주세요.');
+      return;
+    }
     setWorking(true);
     setError(null);
     try {
@@ -250,6 +258,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
         title,
         content,
         poll: createPollEnabled ? toPollInput(createPollDraft) : undefined,
+        captchaToken: captchaToken ?? undefined,
       });
       setSelected(thread);
       await refreshThreadList();
@@ -257,7 +266,11 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       setContent('');
       setCreatePollEnabled(false);
       setCreatePollDraft(emptyPollDraft());
+      setCaptchaToken(null);
+      setCaptchaKey((current) => current + 1);
     } catch (caught) {
+      setCaptchaToken(null);
+      setCaptchaKey((current) => current + 1);
       setError(message(caught));
     } finally {
       setWorking(false);
@@ -590,7 +603,8 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                 <input value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={255} placeholder="토론 제목" aria-label="토론 제목" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
                 <textarea value={content} onChange={(event) => setContent(event.target.value)} required maxLength={10000} rows={5} placeholder="첫 의견" aria-label="첫 의견" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
                 <PollComposer enabled={createPollEnabled} onEnabledChange={setCreatePollEnabled} draft={createPollDraft} onDraftChange={setCreatePollDraft} compact />
-                <button disabled={working} className="btn-primary inline-flex items-center gap-2">
+                {needsCaptcha ? <CaptchaChallenge resetKey={captchaKey} onTokenChange={setCaptchaToken} /> : null}
+                <button disabled={working || (needsCaptcha && !captchaToken)} className="btn-primary inline-flex items-center gap-2 disabled:opacity-50">
                   <MessageSquarePlus className="size-4" /> 토론 만들기
                 </button>
               </form>

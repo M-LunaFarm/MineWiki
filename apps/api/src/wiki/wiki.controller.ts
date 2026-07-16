@@ -38,13 +38,15 @@ import {
   type WikiPublicBlockHistoryResponse
 } from './wiki-read.service';
 import { WikiProfileService, type WikiMeResponse, type WikiPublicProfileResponse } from './wiki-profile.service';
+import { WikiCaptchaService } from './wiki-captcha.service';
 
 @Controller('v1/wiki')
 export class WikiController {
   constructor(
     private readonly wikiProfiles: WikiProfileService,
     private readonly wikiRead: WikiReadService,
-    private readonly wikiEdit: WikiEditService
+    private readonly wikiEdit: WikiEditService,
+    private readonly wikiCaptcha?: WikiCaptchaService
   ) {}
 
   @Get('page')
@@ -274,11 +276,15 @@ export class WikiController {
   @Post('pages')
   @Throttle({ default: { limit: 8, ttl: 60 } })
   @UseGuards(SessionGuard)
-  createPage(
-    @Body() body: WikiPageMutationRequest,
-    @CurrentSession() session: SessionPayload
+  async createPage(
+    @Body() body: WikiPageMutationRequest & { readonly captchaToken?: string },
+    @CurrentSession() session: SessionPayload,
+    @Req() request: FastifyRequest
   ): Promise<WikiMutationResponse> {
-    return this.wikiEdit.createPage(session, body);
+    await this.wikiCaptcha?.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
+    const mutation = { ...body };
+    delete mutation.captchaToken;
+    return this.wikiEdit.createPage(session, mutation);
   }
 
   @Patch('pages/:id')

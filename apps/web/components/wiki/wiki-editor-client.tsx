@@ -6,6 +6,7 @@ import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiTo
 import { AlertTriangle, Eye, FileImage, ImagePlus, LayoutTemplate, Loader2, Save } from 'lucide-react';
 import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
+import { CaptchaChallenge, isCaptchaConfigured } from '../security/captcha-challenge';
 import {
   fetchWikiRevision,
   fetchWikiSection,
@@ -58,11 +59,14 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   const [baseRevisionId, setBaseRevisionId] = useState<string | undefined>(page?.revision.id);
   const [baseRevisionNo, setBaseRevisionNo] = useState<number | undefined>(page?.revision.revisionNo);
   const [editConflict, setEditConflict] = useState<WikiEditConflictDetails | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaKey, setCaptchaKey] = useState(0);
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
   const fileSourceRequired = Boolean(fileLicense && fileLicense !== 'self-created');
   const canUploadImage = Boolean(page && fileLicense && (!fileSourceRequired || fileSourceUrl.trim()));
   const hasUnresolvedConflict = containsWikiConflictMarkers(contentRaw);
+  const needsCaptcha = !page && isCaptchaConfigured();
 
   const heading = page
     ? sectionAnchor
@@ -152,8 +156,8 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
   }, [account, page]);
 
   const canSubmit = useMemo(() => {
-    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict);
-  }, [account, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict]);
+    return Boolean(account && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict && (!needsCaptcha || captchaToken));
+  }, [account, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict, needsCaptcha, captchaToken]);
 
   function renderPreview() {
     setFeedback(null);
@@ -176,7 +180,9 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
 
   function submit() {
     if (!canSubmit) {
-      setFeedback(blockingErrors.length > 0 ? null : '본문과 편집 요약을 입력해야 합니다.');
+      setFeedback(blockingErrors.length > 0 ? null : needsCaptcha && !captchaToken
+        ? '새 문서를 만들기 전에 로봇 방지 확인을 완료해 주세요.'
+        : '본문과 편집 요약을 입력해야 합니다.');
       return;
     }
     setFeedback(null);
@@ -200,12 +206,14 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
             contentRaw,
             editSummary,
             isMinor,
-            baseRevisionId
+            baseRevisionId,
+            captchaToken: needsCaptcha ? captchaToken ?? undefined : undefined
           });
           router.push(routePath);
         }
         router.refresh();
       } catch (error) {
+        if (needsCaptcha) { setCaptchaToken(null); setCaptchaKey((current) => current + 1); }
         const conflict = wikiEditConflict(error);
         if (conflict) {
           setContentRaw(conflict.mergedContentRaw);
@@ -241,18 +249,23 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
       setFeedback('본문과 편집 요약을 입력해야 편집 요청을 보낼 수 있습니다.');
       return;
     }
+    if (needsCaptcha && !captchaToken) {
+      setFeedback('새 문서 요청을 보내기 전에 로봇 방지 확인을 완료해 주세요.');
+      return;
+    }
     setFeedback(null);
     startSaveTransition(async () => {
       try {
         if (page && baseRevisionId) {
           await createWikiEditRequest({ pageId: page.id, baseRevisionId, contentRaw, editSummary, isMinor });
         } else {
-          await createWikiPageRequest({ namespace, title, contentRaw, editSummary, isMinor });
+          await createWikiPageRequest({ namespace, title, contentRaw, editSummary, isMinor, captchaToken: captchaToken ?? undefined });
         }
         setFeedback(page
           ? '편집 요청을 제출했습니다. 문서 관리자가 검토하면 실제 리비전으로 반영됩니다.'
           : '새 문서 작성 요청을 제출했습니다. 관리자가 승인하기 전까지 문서는 공개되지 않습니다.');
       } catch (error) {
+        if (needsCaptcha) { setCaptchaToken(null); setCaptchaKey((current) => current + 1); }
         setFeedback(error instanceof Error ? error.message : '편집 요청을 제출하지 못했습니다.');
       }
     });
@@ -403,6 +416,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
             className="min-h-[520px] w-full resize-y rounded-lg border border-white/10 bg-[#0d1219] p-4 font-mono text-sm leading-6 text-slate-100 outline-none transition focus:border-emerald-300/50"
             spellCheck={false}
           />
+          {needsCaptcha ? <CaptchaChallenge resetKey={captchaKey} onTokenChange={setCaptchaToken} /> : null}
           <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
             <input
               aria-label="편집 요약"
@@ -433,7 +447,7 @@ export function WikiEditorClient({ page, namespace, title, routePath }: WikiEdit
           {!sectionAnchor ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
               <p className="max-w-2xl text-xs leading-5 text-slate-400">{page ? '직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.' : '직접 생성할 수 없는 문서도 관리자가 검토하는 새 문서 요청으로 제출할 수 있습니다.'}</p>
-              <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim()} className="btn-secondary h-10 disabled:opacity-50">{page ? '검토 요청' : '새 문서 검토 요청'}</button>
+              <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim() || (needsCaptcha && !captchaToken)} className="btn-secondary h-10 disabled:opacity-50">{page ? '검토 요청' : '새 문서 검토 요청'}</button>
             </div>
           ) : null}
           <section className="rounded-lg border border-white/10 bg-white/[0.025] p-4">

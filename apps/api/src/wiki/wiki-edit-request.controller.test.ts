@@ -4,6 +4,27 @@ import type { FastifyRequest } from 'fastify';
 import type { SessionPayload } from '../session/session.service';
 import { WikiEditRequestController } from './wiki-edit-request.controller';
 import type { WikiEditRequestService } from './wiki-edit-request.service';
+import type { WikiCaptchaService } from './wiki-captcha.service';
+
+test('new-page review requests verify captcha without persisting the token', async () => {
+  let captchaInput: unknown;
+  let requestInput: unknown;
+  const service = {
+    async createForNewPage(receivedSession: SessionPayload, body: unknown) {
+      requestInput = { receivedSession, body };
+      return { id: '72' };
+    }
+  } as unknown as WikiEditRequestService;
+  const controller = new WikiEditRequestController(service, {
+    async assertVerified(token: string | undefined, ip: string | undefined) { captchaInput = { token, ip }; }
+  } as WikiCaptchaService);
+  const request = { clientIp: '192.0.2.23' } as FastifyRequest;
+
+  await controller.createForNewPage({ namespace: 'guide', title: '새 문서', captchaToken: 'verified-token' }, session, request);
+
+  assert.deepEqual(captchaInput, { token: 'verified-token', ip: '192.0.2.23' });
+  assert.deepEqual(requestInput, { receivedSession: session, body: { namespace: 'guide', title: '새 문서' } });
+});
 
 const session = { userId: 'account-1' } as SessionPayload;
 

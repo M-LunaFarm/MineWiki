@@ -6,10 +6,11 @@ import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import { WikiEditRequestService } from './wiki-edit-request.service';
+import { WikiCaptchaService } from './wiki-captcha.service';
 
 @Controller('v1/wiki')
 export class WikiEditRequestController {
-  constructor(private readonly requests: WikiEditRequestService) {}
+  constructor(private readonly requests: WikiEditRequestService, private readonly wikiCaptcha?: WikiCaptchaService) {}
 
   @Get('edit-requests')
   @UseGuards(OptionalSessionGuard)
@@ -60,10 +61,16 @@ export class WikiEditRequestController {
   @Post('edit-requests')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })
-  createForNewPage(
-    @Body() body: { namespace?: string; title?: string; spaceId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean },
-    @CurrentSession() session: SessionPayload
-  ) { return this.requests.createForNewPage(session, body); }
+  async createForNewPage(
+    @Body() body: { namespace?: string; title?: string; spaceId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; captchaToken?: string },
+    @CurrentSession() session: SessionPayload,
+    @Req() request: FastifyRequest
+  ) {
+    await this.wikiCaptcha?.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
+    const editRequest = { ...body };
+    delete editRequest.captchaToken;
+    return this.requests.createForNewPage(session, editRequest);
+  }
 
   @Post('edit-requests/:requestId/accept')
   @UseGuards(SessionGuard)

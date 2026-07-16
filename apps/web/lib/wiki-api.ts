@@ -1216,11 +1216,12 @@ export async function fetchRecentWikiThreads(cursor?: string): Promise<WikiRecen
   return readWikiBrowser<WikiRecentThreadListResponse>(`/v1/wiki/discussions/recent?${params.toString()}`);
 }
 
-export async function createWikiThread(input: { pageId: string; title: string; content: string; poll?: WikiDiscussionPollInput }): Promise<WikiThreadDetail> {
+export async function createWikiThread(input: { pageId: string; title: string; content: string; poll?: WikiDiscussionPollInput; captchaToken?: string }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/discussions`, 'POST', {
     title: input.title,
     content: input.content,
     poll: input.poll,
+    captchaToken: input.captchaToken,
   });
 }
 
@@ -1343,7 +1344,7 @@ export async function createWikiEditRequest(input: { pageId: string; baseRevisio
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/edit-requests`, 'POST', input);
 }
 
-export async function createWikiPageRequest(input: { namespace: string; title: string; spaceId?: string; contentRaw: string; editSummary: string; isMinor: boolean }): Promise<WikiEditRequestSummary> {
+export async function createWikiPageRequest(input: { namespace: string; title: string; spaceId?: string; contentRaw: string; editSummary: string; isMinor: boolean; captchaToken?: string }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>('/v1/wiki/edit-requests', 'POST', input);
 }
 
@@ -1693,7 +1694,7 @@ export async function previewWikiMarkup(contentRaw: string): Promise<{ html: str
   return response.json();
 }
 
-export async function saveWikiPage(input: { pageId?: string; namespace: string; title: string; contentRaw: string; editSummary: string; isMinor: boolean; baseRevisionId?: string }): Promise<WikiMutationResponse> {
+export async function saveWikiPage(input: { pageId?: string; namespace: string; title: string; contentRaw: string; editSummary: string; isMinor: boolean; baseRevisionId?: string; captchaToken?: string }): Promise<WikiMutationResponse> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages${input.pageId ? `/${input.pageId}` : ''}`, {
     method: input.pageId ? 'PATCH' : 'POST',
     credentials: 'include',
@@ -1705,6 +1706,7 @@ export async function saveWikiPage(input: { pageId?: string; namespace: string; 
       editSummary: input.editSummary,
       isMinor: input.isMinor,
       baseRevisionId: input.baseRevisionId,
+      captchaToken: input.captchaToken,
     }),
   });
   if (!response.ok) {

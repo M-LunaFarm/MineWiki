@@ -5,6 +5,26 @@ import type { FastifyRequest } from 'fastify';
 import type { SessionPayload } from '../session/session.service';
 import { WikiDiscussionController } from './wiki-discussion.controller';
 import type { WikiDiscussionService, WikiDiscussionStatus, WikiDiscussionStatusFilter } from './wiki-discussion.service';
+import type { WikiCaptchaService } from './wiki-captcha.service';
+
+test('new discussion captcha is verified and never forwarded into discussion content', async () => {
+  let captchaInput: unknown;
+  let discussionInput: unknown;
+  const service = {
+    async createThread(receivedSession: SessionPayload, pageId: string, body: unknown) {
+      discussionInput = { receivedSession, pageId, body };
+      return { id: '30' };
+    }
+  } as unknown as WikiDiscussionService;
+  const controller = new WikiDiscussionController(service, {
+    async assertVerified(token: string | undefined, ip: string | undefined) { captchaInput = { token, ip }; }
+  } as WikiCaptchaService);
+
+  await controller.create('10', { title: '주제', content: '의견', captchaToken: 'verified-token' }, session, { clientIp: '192.0.2.22' } as FastifyRequest);
+
+  assert.deepEqual(captchaInput, { token: 'verified-token', ip: '192.0.2.22' });
+  assert.deepEqual(discussionInput, { receivedSession: session, pageId: '10', body: { title: '주제', content: '의견' } });
+});
 
 const session = { userId: 'account-1' } as SessionPayload;
 

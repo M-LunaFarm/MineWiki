@@ -10,6 +10,26 @@ import { WikiController } from './wiki.controller';
 import type { WikiEditService } from './wiki-edit.service';
 import type { WikiProfileService } from './wiki-profile.service';
 import type { WikiReadService } from './wiki-read.service';
+import type { SessionPayload } from '../session/session.service';
+import type { WikiCaptchaService } from './wiki-captcha.service';
+
+test('new wiki pages require captcha before the clean mutation reaches the edit service', async () => {
+  const session = { userId: 'account-1', requestIp: '192.0.2.20' } as SessionPayload;
+  let captchaInput: unknown;
+  let mutationInput: unknown;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    {} as WikiReadService,
+    { async createPage(receivedSession: SessionPayload, body: unknown) { mutationInput = { receivedSession, body }; return { pageId: '1' }; } } as unknown as WikiEditService,
+    { async assertVerified(token: string | undefined, ip: string | undefined) { captchaInput = { token, ip }; } } as WikiCaptchaService
+  );
+  const request = { clientIp: '192.0.2.21' } as FastifyRequest;
+
+  await controller.createPage({ namespace: 'main', title: '새 문서', contentRaw: '본문', captchaToken: 'verified-token' }, session, request);
+
+  assert.deepEqual(captchaInput, { token: 'verified-token', ip: '192.0.2.21' });
+  assert.deepEqual(mutationInput, { receivedSession: session, body: { namespace: 'main', title: '새 문서', contentRaw: '본문' } });
+});
 
 test('public block history controller is callable without an authenticated session', async () => {
   let input: unknown;

@@ -6,10 +6,11 @@ import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import { WikiDiscussionService, type WikiDiscussionPollInput, type WikiDiscussionStatus, type WikiDiscussionStatusFilter, type WikiRecentThreadListResponse, type WikiThreadDetail, type WikiThreadListResponse, type WikiThreadSummary } from './wiki-discussion.service';
+import { WikiCaptchaService } from './wiki-captcha.service';
 
 @Controller('v1/wiki')
 export class WikiDiscussionController {
-  constructor(private readonly discussions: WikiDiscussionService) {}
+  constructor(private readonly discussions: WikiDiscussionService, private readonly wikiCaptcha?: WikiCaptchaService) {}
 
   @Get('discussions/recent')
   @UseGuards(OptionalSessionGuard)
@@ -86,8 +87,16 @@ export class WikiDiscussionController {
   @Post('pages/:pageId/discussions')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 6, ttl: 60 } })
-  create(@Param('pageId') pageId: string, @Body() body: { title?: string; content?: string; poll?: WikiDiscussionPollInput }, @CurrentSession() session: SessionPayload) {
-    return this.discussions.createThread(session, pageId, body);
+  async create(
+    @Param('pageId') pageId: string,
+    @Body() body: { title?: string; content?: string; poll?: WikiDiscussionPollInput; captchaToken?: string },
+    @CurrentSession() session: SessionPayload,
+    @Req() request: FastifyRequest
+  ) {
+    await this.wikiCaptcha?.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
+    const thread = { ...body };
+    delete thread.captchaToken;
+    return this.discussions.createThread(session, pageId, thread);
   }
 
   @Post('discussions/:threadId/comments')

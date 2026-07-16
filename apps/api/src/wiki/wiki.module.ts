@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EventsModule } from '../events/events.module';
+import { CaptchaModule } from '../captcha/captcha.module';
 import { SessionModule } from '../session/session.module';
 import { WikiAdminController } from './wiki-admin.controller';
 import { WikiAdminService } from './wiki-admin.service';
@@ -38,11 +39,12 @@ import { WikiApiTokenController } from './wiki-api-token.controller';
 import { WikiApiController } from './wiki-api.controller';
 import { WikiApiTokenGuard } from './wiki-api-token.guard';
 import { WikiApiTokenService } from './wiki-api-token.service';
+import { WikiCaptchaService } from './wiki-captcha.service';
 
 @Module({
-  imports: [SessionModule, EventsModule],
+  imports: [SessionModule, EventsModule, CaptchaModule],
   controllers: [WikiController, WikiApiTokenController, WikiApiController, WikiAdminController, WikiProfileMergeController, WikiProfileMergeAdminController, WikiDiscussionController, WikiDiscussionLiveController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPushSubscriptionController, WikiPageAclController, WikiThreadAclController, WikiAclGroupAdminController, WikiAclGroupSelfController],
-  providers: [WikiProfileService, WikiProfileMergeService, WikiApiTokenService, WikiApiTokenGuard, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiDiscussionLiveService, WikiWatchService, WikiNotificationService, WikiPushSubscriptionService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService, WikiThreadAclService],
+  providers: [WikiProfileService, WikiProfileMergeService, WikiApiTokenService, WikiApiTokenGuard, WikiCaptchaService, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiDiscussionLiveService, WikiWatchService, WikiNotificationService, WikiPushSubscriptionService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService, WikiThreadAclService],
   exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}
