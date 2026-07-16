@@ -1197,23 +1197,191 @@ export class ServerService {
   async remove(id: string, actorAccountId?: string): Promise<void> {
     const startedAt = Date.now();
     try {
-      await this.ensureExists(id);
-      const [disabledCredentials] = await this.prisma.$transaction([
-        this.prisma.pluginServer.updateMany({
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM \`Server\` WHERE id = ${id} FOR UPDATE
+        `;
+        const server = await tx.server.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            ownerAccountId: true,
+            registrantAccountId: true,
+            wikiSpaceId: true,
+            wikiPageId: true,
+            wikiSlug: true,
+          },
+        });
+        if (!server) throw new NotFoundException(`Server ${id} not found`);
+        const actorStillAuthorized = Boolean(
+          actorAccountId
+          && (
+            server.ownerAccountId === actorAccountId
+            || (!server.ownerAccountId && server.registrantAccountId === actorAccountId)
+          )
+        );
+        if (!actorStillAuthorized) {
+          throw new BadRequestException('해당 서버를 제거할 권한이 없습니다.');
+        }
+
+        const linkageConditions = [Prisma.sql`vote_server_id = ${server.id}`];
+        if (server.wikiSpaceId !== null) {
+          linkageConditions.push(Prisma.sql`space_id = ${server.wikiSpaceId}`);
+        }
+        await tx.$queryRaw(Prisma.sql`
+          SELECT id
+          FROM server_wikis
+          WHERE ${Prisma.join(linkageConditions, ' OR ')}
+          ORDER BY id
+          FOR UPDATE
+        `);
+        const wikiCandidates = await tx.serverWiki.findMany({
+          where: {
+            OR: [
+              { voteServerId: server.id },
+              ...(server.wikiSpaceId !== null ? [{ spaceId: server.wikiSpaceId }] : []),
+            ],
+          },
+          select: {
+            id: true,
+            voteServerId: true,
+            spaceId: true,
+            slug: true,
+            status: true,
+          },
+          orderBy: { id: 'asc' },
+        });
+
+        const hasServerWikiReference =
+          server.wikiSpaceId !== null || server.wikiPageId !== null || server.wikiSlug !== null;
+        let archivedServerWikiId: bigint | null = null;
+        let archivedWikiSpaceId: bigint | null = null;
+        let revokedCollaboratorMemberships = 0;
+        let preservedOwnerMemberships = 0;
+        const now = new Date();
+
+        if (wikiCandidates.length === 0) {
+          if (hasServerWikiReference) {
+            throw new ConflictException('Server wiki linkage is inconsistent; deletion was cancelled.');
+          }
+        } else {
+          if (
+            wikiCandidates.length !== 1
+            || server.wikiSpaceId === null
+            || server.wikiSlug === null
+          ) {
+            throw new ConflictException('Server wiki linkage is ambiguous; deletion was cancelled.');
+          }
+          const serverWiki = wikiCandidates[0];
+          if (
+            serverWiki.voteServerId !== server.id
+            || serverWiki.spaceId !== server.wikiSpaceId
+            || serverWiki.slug !== server.wikiSlug
+            || serverWiki.status !== 'active'
+          ) {
+            throw new ConflictException('Server wiki linkage is inconsistent; deletion was cancelled.');
+          }
+
+          await tx.$queryRaw<Array<{ id: bigint }>>`
+            SELECT id FROM wiki_spaces WHERE id = ${serverWiki.spaceId} FOR UPDATE
+          `;
+          const space = await tx.wikiSpace.findUnique({
+            where: { id: serverWiki.spaceId },
+            select: { id: true, slug: true, spaceType: true, status: true },
+          });
+          if (
+            !space
+            || space.slug !== serverWiki.slug
+            || space.spaceType !== 'server_wiki'
+            || space.status !== 'active'
+          ) {
+            throw new ConflictException('Server wiki space is inconsistent; deletion was cancelled.');
+          }
+
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id
+            FROM \`Server\`
+            WHERE id <> ${server.id}
+              AND (wikiSpaceId = ${space.id} OR wikiSlug = ${serverWiki.slug})
+            ORDER BY id
+            FOR UPDATE
+          `;
+          const competingServers = await tx.server.findMany({
+            where: {
+              id: { not: server.id },
+              OR: [{ wikiSpaceId: space.id }, { wikiSlug: serverWiki.slug }],
+            },
+            select: { id: true },
+            take: 1,
+          });
+          if (competingServers.length > 0) {
+            throw new ConflictException('Server wiki is referenced by another tenant; deletion was cancelled.');
+          }
+
+          await tx.$queryRaw<Array<{ id: bigint }>>`
+            SELECT id
+            FROM subwiki_roles
+            WHERE space_id = ${space.id}
+            ORDER BY id
+            FOR UPDATE
+          `;
+          preservedOwnerMemberships = await tx.subwikiRole.count({
+            where: { spaceId: space.id, status: 'active', role: 'owner' },
+          });
+          const revoked = await tx.subwikiRole.updateMany({
+            where: { spaceId: space.id, status: 'active', role: { not: 'owner' } },
+            data: {
+              status: 'revoked',
+              revokedAt: now,
+              revokedBy: actorAccountId
+                ? (await tx.wikiProfile.findUnique({
+                    where: { accountId: actorAccountId },
+                    select: { id: true },
+                  }))?.id ?? null
+                : null,
+            },
+          });
+          revokedCollaboratorMemberships = revoked.count;
+
+          const archivedWiki = await tx.serverWiki.updateMany({
+            where: { id: serverWiki.id, voteServerId: server.id, status: 'active' },
+            data: { voteServerId: null, status: 'archived', updatedAt: now },
+          });
+          const archivedSpace = await tx.wikiSpace.updateMany({
+            where: { id: space.id, status: 'active' },
+            data: { status: 'archived', updatedAt: now },
+          });
+          if (archivedWiki.count !== 1 || archivedSpace.count !== 1) {
+            throw new ConflictException('Server wiki lifecycle changed concurrently; deletion was cancelled.');
+          }
+          archivedServerWikiId = serverWiki.id;
+          archivedWikiSpaceId = space.id;
+        }
+
+        const disabledCredentials = await tx.pluginServer.updateMany({
           where: { serverId: id, enabled: true },
           data: { enabled: false },
-        }),
-        this.prisma.server.delete({
-          where: { id },
-        }),
-      ]);
-      await this.events?.audit('server.deleted', {
-        category: 'server',
-        actorAccountId: actorAccountId ?? null,
-        subjectType: 'server',
-        subjectId: id,
-        metadata: { disabledPluginCredentials: disabledCredentials.count },
-      });
+        });
+        await tx.auditEvent.create({
+          data: {
+            category: 'server',
+            action: 'server.deleted',
+            severity: 'warning',
+            actorAccountId: actorAccountId ?? null,
+            subjectType: 'server',
+            subjectId: id,
+            metadata: {
+              disabledPluginCredentials: disabledCredentials.count,
+              archivedServerWikiId: archivedServerWikiId?.toString() ?? null,
+              archivedWikiSpaceId: archivedWikiSpaceId?.toString() ?? null,
+              revokedCollaboratorMemberships,
+              preservedOwnerMemberships,
+            },
+            createdAt: now,
+          },
+        });
+        await tx.server.delete({ where: { id } });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       void this.telemetry.record('delete', 'servers', Date.now() - startedAt, true);
     } catch (error) {
       void this.telemetry.record(
