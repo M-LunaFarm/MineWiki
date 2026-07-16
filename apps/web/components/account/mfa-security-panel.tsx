@@ -1,21 +1,25 @@
 'use client';
 
-import { Check, Clipboard, Download, KeyRound, Loader2, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react';
+import { browserSupportsWebAuthn, startRegistration } from '@simplewebauthn/browser';
+import { Check, Clipboard, Download, Fingerprint, KeyRound, Loader2, RefreshCw, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react';
 import Image from 'next/image';
 import QRCode from 'qrcode';
 import { useCallback, useEffect, useState } from 'react';
 import {
+  beginPasskeyRegistration,
   beginTotpEnrollment,
   confirmTotpEnrollment,
+  deletePasskey,
   disableTotp,
   fetchMfaStatus,
+  finishPasskeyRegistration,
   regenerateMfaRecoveryCodes,
   type MfaStatus,
   type TotpEnrollment,
 } from '../../lib/auth-client';
 import { MfaStepUpDialog } from '../auth/mfa-step-up-dialog';
 
-type ProtectedAction = 'regenerate' | 'disable' | null;
+type ProtectedAction = 'regenerate' | 'disable' | 'register_passkey' | 'delete_passkey' | null;
 
 export function MfaSecurityPanel() {
   const [status, setStatus] = useState<MfaStatus | null>(null);
@@ -27,6 +31,8 @@ export function MfaSecurityPanel() {
   const [working, setWorking] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [protectedAction, setProtectedAction] = useState<ProtectedAction>(null);
+  const [passkeyName, setPasskeyName] = useState('');
+  const [passkeyToDelete, setPasskeyToDelete] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -86,10 +92,27 @@ export function MfaSecurityPanel() {
         const result = await regenerateMfaRecoveryCodes();
         setRecoveryCodes(result.recoveryCodes);
         setFeedback({ type: 'success', text: '기존 복구 코드를 폐기하고 새 코드를 발급했습니다.' });
-      } else {
+      } else if (action === 'disable') {
         await disableTotp();
         setRecoveryCodes(null);
-        setFeedback({ type: 'success', text: '다중 인증을 해제하고 다른 기기의 세션을 종료했습니다.' });
+        setFeedback({ type: 'success', text: status?.passkeyCount ? '인증 앱을 해제했습니다. 등록된 패스키는 계속 사용할 수 있습니다.' : '다중 인증을 해제하고 다른 기기의 세션을 종료했습니다.' });
+      } else if (action === 'register_passkey') {
+        if (!browserSupportsWebAuthn()) throw new Error('이 브라우저에서는 패스키를 사용할 수 없습니다.');
+        const ceremony = await beginPasskeyRegistration();
+        const response = await startRegistration({
+          optionsJSON: ceremony.options as Parameters<typeof startRegistration>[0]['optionsJSON'],
+        });
+        await finishPasskeyRegistration({
+          ceremonyId: ceremony.ceremonyId,
+          name: passkeyName.trim(),
+          response,
+        });
+        setPasskeyName('');
+        setFeedback({ type: 'success', text: '패스키를 등록했습니다. 이제 관리자 작업 확인에 사용할 수 있습니다.' });
+      } else if (passkeyToDelete) {
+        await deletePasskey(passkeyToDelete);
+        setPasskeyToDelete(null);
+        setFeedback({ type: 'success', text: '패스키를 삭제하고 다른 기기의 세션을 종료했습니다.' });
       }
       await loadStatus();
     } catch (error) {
@@ -126,12 +149,12 @@ export function MfaSecurityPanel() {
             <ShieldCheck className="h-5 w-5 text-[#13ec80]" /> 다중 인증
           </h3>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-[#9aa5b1]">
-            인증 앱의 TOTP와 일회용 복구 코드로 관리자 작업과 계정 보안 변경을 한 번 더 보호합니다.
+            인증 앱, 패스키와 일회용 복구 코드로 관리자 작업과 계정 보안 변경을 한 번 더 보호합니다.
           </p>
         </div>
-        <span className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${status?.totpEnabled ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200' : 'border-amber-400/30 bg-amber-400/10 text-amber-200'}`}>
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : status?.totpEnabled ? <Check className="h-3.5 w-3.5" /> : <ShieldOff className="h-3.5 w-3.5" />}
-          {loading ? '확인 중' : status?.totpEnabled ? '사용 중' : '사용 안 함'}
+        <span className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${status?.mfaEnabled ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200' : 'border-amber-400/30 bg-amber-400/10 text-amber-200'}`}>
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : status?.mfaEnabled ? <Check className="h-3.5 w-3.5" /> : <ShieldOff className="h-3.5 w-3.5" />}
+          {loading ? '확인 중' : status?.mfaEnabled ? '사용 중' : '사용 안 함'}
         </span>
       </div>
 
@@ -185,9 +208,64 @@ export function MfaSecurityPanel() {
           </div>
           <div className="flex flex-col gap-2 sm:flex-row md:col-span-2">
             <button type="button" disabled={working} onClick={() => setProtectedAction('regenerate')} className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#13ec80]/35 bg-[#13ec80]/10 px-4 py-2.5 text-sm font-semibold text-[#71f5b1] disabled:opacity-50"><RefreshCw className="h-4 w-4" />복구 코드 새로 발급</button>
-            <button type="button" disabled={working} onClick={() => setProtectedAction('disable')} className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-400/35 bg-red-400/10 px-4 py-2.5 text-sm font-semibold text-red-200 disabled:opacity-50"><ShieldOff className="h-4 w-4" />다중 인증 해제</button>
+            <button type="button" disabled={working} onClick={() => setProtectedAction('disable')} className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-400/35 bg-red-400/10 px-4 py-2.5 text-sm font-semibold text-red-200 disabled:opacity-50"><ShieldOff className="h-4 w-4" />인증 앱 해제</button>
           </div>
         </div>
+      ) : null}
+
+      {!loading && status ? (
+        <section className="mt-5 rounded-xl border border-[#30363d] bg-[#111315] p-4 sm:p-5" aria-labelledby="passkey-settings-title">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h4 id="passkey-settings-title" className="flex items-center gap-2 font-bold text-white"><Fingerprint className="h-4 w-4 text-[#71f5b1]" />패스키</h4>
+              <p className="mt-1 text-xs leading-5 text-[#8f98a3]">지문, 얼굴 인식, 화면 잠금 또는 보안 키로 목적별 관리자 확인을 완료합니다. 비밀번호 없는 로그인에는 아직 사용하지 않습니다.</p>
+            </div>
+            <span className="shrink-0 rounded-full border border-white/10 px-2.5 py-1 text-xs text-[#aab3bd]">{status.passkeyCount}/10</span>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <label className="min-w-0 flex-1">
+              <span className="sr-only">새 패스키 이름</span>
+              <input
+                value={passkeyName}
+                onChange={(event) => setPasskeyName(event.target.value.slice(0, 64))}
+                maxLength={64}
+                autoComplete="off"
+                placeholder="예: 업무용 MacBook"
+                disabled={!status.mfaEnabled || status.passkeyCount >= 10 || working}
+                className="min-h-11 w-full rounded-lg border border-[#3a424a] bg-[#101214] px-3 text-sm text-white outline-none transition focus:border-[#13ec80] disabled:opacity-50"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => setProtectedAction('register_passkey')}
+              disabled={!status.mfaEnabled || status.passkeyCount >= 10 || !passkeyName.trim() || working}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#13ec80]/35 bg-[#13ec80]/10 px-4 text-sm font-semibold text-[#71f5b1] disabled:opacity-50"
+            >
+              <Fingerprint className="h-4 w-4" />패스키 추가
+            </button>
+          </div>
+          {!status.mfaEnabled ? <p className="mt-2 text-xs text-amber-200">첫 패스키를 안전하게 등록하려면 먼저 인증 앱을 활성화해 주세요.</p> : null}
+
+          {status.passkeys.length ? (
+            <ul className="mt-5 divide-y divide-white/10 border-t border-white/10">
+              {status.passkeys.map((passkey) => (
+                <li key={passkey.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-white">{passkey.name}</p>
+                    <p className="mt-1 text-xs text-[#8f98a3]">{passkey.backedUp ? '동기화 가능한 패스키' : '이 기기 또는 보안 키'} · 등록 {formatSecurityDate(passkey.createdAt)}{passkey.lastUsedAt ? ` · 최근 사용 ${formatSecurityDate(passkey.lastUsedAt)}` : ' · 아직 사용하지 않음'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setPasskeyToDelete(passkey.id); setProtectedAction('delete_passkey'); }}
+                    disabled={working}
+                    className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-red-400/30 bg-red-400/10 px-3 text-xs font-semibold text-red-200 disabled:opacity-50"
+                  ><Trash2 className="h-4 w-4" />삭제</button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="mt-5 border-t border-white/10 pt-4 text-sm text-[#8f98a3]">등록된 패스키가 없습니다.</p>}
+        </section>
       ) : null}
 
       {recoveryCodes ? (
@@ -204,7 +282,11 @@ export function MfaSecurityPanel() {
         </div>
       ) : null}
 
-      <MfaStepUpDialog open={protectedAction !== null} purpose="mfa_manage" onClose={() => setProtectedAction(null)} onSuccess={runProtectedAction} />
+      <MfaStepUpDialog open={protectedAction !== null} purpose="mfa_manage" onClose={() => { setProtectedAction(null); setPasskeyToDelete(null); }} onSuccess={runProtectedAction} />
     </section>
   );
+}
+
+function formatSecurityDate(value: string): string {
+  return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium' }).format(new Date(value));
 }

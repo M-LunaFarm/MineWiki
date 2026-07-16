@@ -165,11 +165,14 @@ export class RoleService {
           const role = await transaction.globalRole.findUnique({ where: { code: roleCode } });
           if (!role) throw new NotFoundException('Role was not found.');
           await lockRole(transaction, role.id);
-          const credential = await transaction.mfaTotpCredential.findUnique({
-            where: { accountId: targetCanonicalId },
-            select: { enabledAt: true },
-          });
-          if (!credential?.enabledAt) {
+          const [credential, passkeyCount] = await Promise.all([
+            transaction.mfaTotpCredential.findUnique({
+              where: { accountId: targetCanonicalId },
+              select: { enabledAt: true },
+            }),
+            transaction.webAuthnCredential.count({ where: { accountId: targetCanonicalId } }),
+          ]);
+          if (!credential?.enabledAt && passkeyCount === 0) {
             throw new BadRequestException(
               '보호된 관리자 역할을 받으려면 대상 계정에 다중 인증이 활성화되어 있어야 합니다.',
             );

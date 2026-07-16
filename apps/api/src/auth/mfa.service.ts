@@ -28,6 +28,7 @@ import {
   hashRecoveryCode,
   verifyTotpCode,
 } from './totp';
+import type { PasskeySummary } from './webauthn.service';
 
 const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
 const RECENT_PRIMARY_AUTH_MS = 15 * 60 * 1000;
@@ -35,7 +36,10 @@ const FAILURE_LOCK_THRESHOLD = 5;
 const FAILURE_LOCK_MS = 15 * 60 * 1000;
 
 export interface MfaStatus {
+  readonly mfaEnabled: boolean;
   readonly totpEnabled: boolean;
+  readonly passkeyCount: number;
+  readonly passkeys: readonly PasskeySummary[];
   readonly pendingEnrollment: boolean;
   readonly pendingExpiresAt: string | null;
   readonly recoveryCodesRemaining: number;
@@ -62,16 +66,51 @@ export class MfaService {
   ) {}
 
   async getStatus(accountId: string): Promise<MfaStatus> {
-    const canonicalId = await this.getCanonicalAccountId(accountId);
-    const [credential, recoveryCodesRemaining] = await Promise.all([
-      this.prisma.mfaTotpCredential.findUnique({ where: { accountId: canonicalId } }),
-      this.prisma.mfaRecoveryCode.count({
-        where: { accountId: canonicalId, usedAt: null },
-      }),
-    ]);
+    const { credential, recoveryCodesRemaining, passkeys } = await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [accountId],
+      async (tx, group) => {
+        const canonical = await canonicalAccount(tx, accountId, group.accountIds);
+        const [credential, recoveryCodesRemaining, passkeys] = await Promise.all([
+          tx.mfaTotpCredential.findUnique({ where: { accountId: canonical.id } }),
+          tx.mfaRecoveryCode.count({ where: { accountId: canonical.id, usedAt: null } }),
+          tx.webAuthnCredential.findMany({
+            where: { accountId: canonical.id },
+            orderBy: { createdAt: 'asc' },
+            select: {
+              id: true,
+              name: true,
+              transports: true,
+              deviceType: true,
+              backedUp: true,
+              createdAt: true,
+              lastUsedAt: true,
+            },
+          }),
+        ]);
+        return { credential, recoveryCodesRemaining, passkeys };
+      },
+      { inactiveError: () => new UnauthorizedException('계정이 활성 상태가 아닙니다.') },
+    );
     const now = Date.now();
+    const totpEnabled = Boolean(credential?.enabledAt);
     return {
-      totpEnabled: Boolean(credential?.enabledAt),
+      mfaEnabled: totpEnabled || passkeys.length > 0,
+      totpEnabled,
+      passkeyCount: passkeys.length,
+      passkeys: passkeys.map((passkey) => ({
+        id: passkey.id,
+        name: passkey.name,
+        transports: Array.isArray(passkey.transports)
+          ? passkey.transports.filter((value): value is 'ble' | 'cable' | 'hybrid' | 'internal' | 'nfc' | 'smart-card' | 'usb' =>
+              typeof value === 'string' && ['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb'].includes(value),
+            )
+          : [],
+        deviceType: passkey.deviceType,
+        backedUp: passkey.backedUp,
+        createdAt: passkey.createdAt.toISOString(),
+        lastUsedAt: passkey.lastUsedAt?.toISOString() ?? null,
+      })),
       pendingEnrollment: Boolean(
         credential?.pendingExpiresAt &&
         !credential.enabledAt &&
@@ -104,7 +143,7 @@ export class MfaService {
       [session.userId],
       async (tx, group) => {
         assertSessionBelongsToGroup(session, group.accountIds);
-        const canonical = await canonicalAccount(tx, session.userId);
+        const canonical = await canonicalAccount(tx, session.userId, group.accountIds);
         const existing = await tx.mfaTotpCredential.findUnique({
           where: { accountId: canonical.id },
         });
@@ -158,7 +197,7 @@ export class MfaService {
       [session.userId],
       async (tx, group) => {
         assertSessionBelongsToGroup(session, group.accountIds);
-        const canonical = await canonicalAccount(tx, session.userId);
+        const canonical = await canonicalAccount(tx, session.userId, group.accountIds);
         const credential = await tx.mfaTotpCredential.findUnique({
           where: { accountId: canonical.id },
         });
@@ -230,7 +269,7 @@ export class MfaService {
       [session.userId],
       async (tx, group) => {
         assertSessionBelongsToGroup(session, group.accountIds);
-        const canonical = await canonicalAccount(tx, session.userId);
+        const canonical = await canonicalAccount(tx, session.userId, group.accountIds);
         const credential = await tx.mfaTotpCredential.findUnique({
           where: { accountId: canonical.id },
         });
@@ -324,7 +363,7 @@ export class MfaService {
       [session.userId],
       async (tx, group) => {
         assertSessionBelongsToGroup(session, group.accountIds);
-        const canonical = await canonicalAccount(tx, session.userId);
+        const canonical = await canonicalAccount(tx, session.userId, group.accountIds);
         const credential = await tx.mfaTotpCredential.findUnique({ where: { accountId: canonical.id } });
         if (!credential?.enabledAt) throw new NotFoundException('활성화된 다중 인증이 없습니다.');
         await tx.mfaRecoveryCode.deleteMany({ where: { accountId: canonical.id } });
@@ -359,16 +398,19 @@ export class MfaService {
       [session.userId],
       async (tx, group) => {
         assertSessionBelongsToGroup(session, group.accountIds);
-        const canonical = await canonicalAccount(tx, session.userId);
+        const canonical = await canonicalAccount(tx, session.userId, group.accountIds);
         const credential = await tx.mfaTotpCredential.findUnique({ where: { accountId: canonical.id } });
         if (!credential?.enabledAt) throw new NotFoundException('활성화된 다중 인증이 없습니다.');
-        const privilegedRoleCount = await tx.accountRole.count({
-          where: {
-            accountId: { in: [...group.accountIds] },
-            role: { code: { in: [...PROTECTED_ROLE_CODES] } },
-          },
-        });
-        if (privilegedRoleCount > 0) {
+        const [privilegedRoleCount, passkeyCount] = await Promise.all([
+          tx.accountRole.count({
+            where: {
+              accountId: { in: [...group.accountIds] },
+              role: { code: { in: [...PROTECTED_ROLE_CODES] } },
+            },
+          }),
+          tx.webAuthnCredential.count({ where: { accountId: canonical.id } }),
+        ]);
+        if (privilegedRoleCount > 0 && passkeyCount === 0) {
           throw new ConflictException('보호된 관리자 역할을 보유한 동안에는 다중 인증을 해제할 수 없습니다.');
         }
         await tx.mfaRecoveryCode.deleteMany({ where: { accountId: canonical.id } });
@@ -384,7 +426,7 @@ export class MfaService {
           { expectedTokenVersion: session.tokenVersion, clearStepUp: true },
           tx,
         );
-        return { canonicalId: canonical.id, rotated };
+        return { canonicalId: canonical.id, passkeyCount, rotated };
       },
     );
     await this.events.audit('auth.mfa.totp_disabled', {
@@ -393,21 +435,11 @@ export class MfaService {
       actorAccountId: result.canonicalId,
       subjectType: 'account',
       subjectId: result.canonicalId,
-      metadata: { otherSessionsRevoked: true },
+      metadata: { otherSessionsRevoked: true, remainingPasskeyCount: result.passkeyCount },
     });
     return { session: result.rotated };
   }
 
-  private async getCanonicalAccountId(accountId: string): Promise<string> {
-    const account = await this.prisma.account.findUnique({
-      where: { id: accountId },
-      select: { id: true, canonicalAccountId: true, lifecycleStatus: true },
-    });
-    if (!account || account.lifecycleStatus !== 'active') {
-      throw new UnauthorizedException('계정이 활성 상태가 아닙니다.');
-    }
-    return account.canonicalAccountId ?? account.id;
-  }
 }
 
 function assertRecentPrimaryAuthentication(session: SessionPayload, nowMs: number): void {
@@ -433,21 +465,37 @@ function assertSessionBelongsToGroup(
   }
 }
 
-async function canonicalAccount(tx: Prisma.TransactionClient, accountId: string) {
-  const account = await tx.account.findUnique({
-    where: { id: accountId },
-    select: { id: true, canonicalAccountId: true, email: true, displayName: true },
-  });
-  if (!account) throw new UnauthorizedException('계정을 찾을 수 없습니다.');
-  const canonicalId = account.canonicalAccountId ?? account.id;
-  const canonical = canonicalId === account.id
-    ? account
-    : await tx.account.findUnique({
-        where: { id: canonicalId },
-        select: { id: true, canonicalAccountId: true, email: true, displayName: true },
-      });
-  if (!canonical) throw new UnauthorizedException('대표 계정을 찾을 수 없습니다.');
-  return canonical;
+async function canonicalAccount(
+  tx: Prisma.TransactionClient,
+  accountId: string,
+  groupAccountIds: readonly string[],
+) {
+  const visited = new Set<string>();
+  let currentId = accountId;
+  while (true) {
+    if (visited.has(currentId)) {
+      throw new UnauthorizedException('대표 계정 연결에 순환이 감지되었습니다.');
+    }
+    visited.add(currentId);
+    const account = await tx.account.findUnique({
+      where: { id: currentId },
+      select: {
+        id: true,
+        canonicalAccountId: true,
+        email: true,
+        displayName: true,
+        lifecycleStatus: true,
+      },
+    });
+    if (!account || account.lifecycleStatus !== 'active' || !groupAccountIds.includes(account.id)) {
+      throw new UnauthorizedException('활성 대표 계정을 찾을 수 없습니다.');
+    }
+    if (!account.canonicalAccountId || account.canonicalAccountId === account.id) return account;
+    if (!groupAccountIds.includes(account.canonicalAccountId)) {
+      throw new UnauthorizedException('대표 계정이 현재 계정 그룹과 일치하지 않습니다.');
+    }
+    currentId = account.canonicalAccountId;
+  }
 }
 
 async function consumeTotp(

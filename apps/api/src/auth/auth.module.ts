@@ -17,6 +17,12 @@ import { MfaController } from './mfa.controller';
 import { MfaService } from './mfa.service';
 import { AccountModerationController } from './account-moderation.controller';
 import { AccountModerationService } from './account-moderation.service';
+import { WebAuthnController } from './webauthn.controller';
+import {
+  DEFAULT_WEBAUTHN_SERVER,
+  WEBAUTHN_SERVER,
+  WebAuthnService,
+} from './webauthn.service';
 
 @Module({
   imports: [SessionModule, FileModule],
@@ -30,9 +36,11 @@ import { AccountModerationService } from './account-moderation.service';
     GuildSettingsRepository,
     AccountDeletionService,
     MfaService,
+    WebAuthnService,
+    { provide: WEBAUTHN_SERVER, useValue: DEFAULT_WEBAUTHN_SERVER },
     AccountModerationService
   ],
-  controllers: [AuthController, MfaController, AccountConflictController, AccountDeletionController, AccountDeletionAdminController, AccountDeletionInternalController, AccountModerationController],
+  controllers: [AuthController, MfaController, WebAuthnController, AccountConflictController, AccountDeletionController, AccountDeletionAdminController, AccountDeletionInternalController, AccountModerationController],
   exports: [AuthService, AccountSeparationService, OAuthFlowService, EmailService]
 })
 export class AuthModule {}

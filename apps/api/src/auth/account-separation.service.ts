@@ -222,6 +222,7 @@ export class AccountSeparationService {
           skipDuplicates: true,
         });
         await this.stabilizeCanonicalAccountInTransaction(tx, fresh.primaryAccountId, group.accountIds);
+        await this.rehomeWebAuthnForCanonicalMerge(tx, fresh.primaryAccountId, group.accountIds);
         await this.synchronizeWikiProfileBlocksForAccountLink(tx, group.accountIds);
         await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
         await tx.accountLinkRequest.update({
@@ -254,6 +255,7 @@ export class AccountSeparationService {
           skipDuplicates: true,
         });
         await this.stabilizeCanonicalAccountInTransaction(tx, primaryAccountId, group.accountIds);
+        await this.rehomeWebAuthnForCanonicalMerge(tx, primaryAccountId, group.accountIds);
         await this.synchronizeWikiProfileBlocksForAccountLink(tx, group.accountIds);
         await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
       },
@@ -363,6 +365,57 @@ export class AccountSeparationService {
         '서로 다른 Minecraft 계정이 인증된 MineWiki 계정은 바로 연결할 수 없습니다. support@minewiki.kr로 병합을 요청해 주세요.',
       );
     }
+  }
+
+  private async rehomeWebAuthnForCanonicalMerge(
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    primaryAccountId: string,
+    accountIds: readonly string[],
+  ): Promise<void> {
+    const primary = await tx.account.findUnique({
+      where: { id: primaryAccountId },
+      select: { id: true, canonicalAccountId: true },
+    });
+    if (!primary) throw new NotFoundException('계정 정보를 찾을 수 없습니다.');
+    const canonicalAccountId = primary.canonicalAccountId ?? primary.id;
+    if (!accountIds.includes(canonicalAccountId)) {
+      throw new ConflictException('패스키를 이전할 대표 계정이 계정 그룹과 일치하지 않습니다.');
+    }
+
+    await tx.webAuthnChallenge.deleteMany({ where: { accountId: { in: [...accountIds] } } });
+    const credentials = await tx.webAuthnCredential.findMany({
+      where: { accountId: { in: [...accountIds] } },
+      orderBy: { createdAt: 'asc' },
+    });
+    credentials.sort((left, right) =>
+      Number(right.accountId === canonicalAccountId) - Number(left.accountId === canonicalAccountId),
+    );
+    const reservedNames = new Set(credentials.map((credential) => credential.name.toLocaleLowerCase('en-US')));
+    const retainedNames = new Set<string>();
+    for (const credential of credentials) {
+      const normalized = credential.name.toLocaleLowerCase('en-US');
+      if (!retainedNames.has(normalized)) {
+        retainedNames.add(normalized);
+        continue;
+      }
+      let suffix = 2;
+      let candidate = '';
+      do {
+        const tail = ` (${suffix})`;
+        candidate = `${credential.name.slice(0, Math.max(1, 64 - tail.length))}${tail}`;
+        suffix += 1;
+      } while (reservedNames.has(candidate.toLocaleLowerCase('en-US')));
+      await tx.webAuthnCredential.update({
+        where: { id: credential.id },
+        data: { name: candidate },
+      });
+      reservedNames.add(candidate.toLocaleLowerCase('en-US'));
+      retainedNames.add(candidate.toLocaleLowerCase('en-US'));
+    }
+    await tx.webAuthnCredential.updateMany({
+      where: { accountId: { in: [...accountIds], not: canonicalAccountId } },
+      data: { accountId: canonicalAccountId },
+    });
   }
 
   private async revokeWikiApiTokensForAccountLink(

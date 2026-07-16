@@ -722,6 +722,8 @@ export class AccountDeletionService {
 
   private async revokeCredentials(tx: Prisma.TransactionClient, accountIds: string[]): Promise<void> {
     await tx.wikiApiToken.deleteMany({ where: { accountId: { in: accountIds } } });
+    await tx.webAuthnChallenge.deleteMany({ where: { accountId: { in: accountIds } } });
+    await tx.webAuthnCredential.deleteMany({ where: { accountId: { in: accountIds } } });
     await tx.session.deleteMany({ where: { accountId: { in: accountIds } } });
     await tx.oAuthCredential.deleteMany({ where: { accountId: { in: accountIds } } });
     await tx.oAuthState.deleteMany({ where: { linkAccountId: { in: accountIds } } });

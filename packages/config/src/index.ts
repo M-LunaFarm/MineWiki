@@ -48,6 +48,11 @@ const envSchema = z.object({
   NEXT_PUBLIC_SITE_URL: z.string().url().optional(),
   NEXT_PUBLIC_MAIN_SITE_URL: z.string().url().optional(),
   NEXT_PUBLIC_VERIFY_URL: z.string().url().optional(),
+  WEBAUTHN_ORIGIN: optionalUrl,
+  WEBAUTHN_RP_ID: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().min(1).max(253).optional()
+  ),
   INTERNAL_API_BASE_URL: z.string().url().optional(),
   DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().url().optional(),
@@ -103,6 +108,8 @@ const apiProductionKeys: Array<keyof EnvSchema> = [
   ...commonProductionKeys,
   'NEXT_PUBLIC_SITE_URL',
   'NEXT_PUBLIC_API_BASE_URL',
+  'WEBAUTHN_ORIGIN',
+  'WEBAUTHN_RP_ID',
   'INTERNAL_API_BASE_URL',
   'API_HOST',
   'API_PORT',
@@ -155,7 +162,12 @@ export class ConfigService {
   private readonly env: EnvSchema;
 
   constructor(source: NodeJS.ProcessEnv = process.env) {
-    this.env = envSchema.parse(source);
+    this.env = envSchema.parse(withWebAuthnDefaults(source));
+    const runtimeFailures: string[] = [];
+    validateWebAuthnConfiguration(this.env, runtimeFailures);
+    if (runtimeFailures.length > 0) {
+      throw new Error(`Runtime configuration is invalid: ${runtimeFailures.join('; ')}`);
+    }
     validateProductionEnvironment(this.env);
   }
 
@@ -197,6 +209,25 @@ export class ConfigService {
       throw new Error(`Configuration key ${String(key)} is not a valid number`);
     }
     return parsed;
+  }
+}
+
+function withWebAuthnDefaults(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (!isBlank(source.WEBAUTHN_ORIGIN) || !isBlank(source.WEBAUTHN_RP_ID)) return source;
+  if (isBlank(source.NEXT_PUBLIC_SITE_URL)) return source;
+  try {
+    const site = new URL(source.NEXT_PUBLIC_SITE_URL!);
+    const rpId = site.hostname.toLowerCase();
+    if (!/^(?:localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)$/u.test(rpId)) {
+      return source;
+    }
+    return {
+      ...source,
+      WEBAUTHN_ORIGIN: site.origin,
+      WEBAUTHN_RP_ID: rpId,
+    };
+  } catch {
+    return source;
   }
 }
 
@@ -330,6 +361,36 @@ function validateMicrosoftRedirectUri(env: EnvSchema, failures: string[]): void 
   const expected = new URL('/minecraft/callback', env.VERIFY_PUBLIC_BASE_URL).toString();
   if (env.MICROSOFT_REDIRECT_URI !== expected) {
     failures.push(`MICROSOFT_REDIRECT_URI must be ${expected}`);
+  }
+}
+
+function validateWebAuthnConfiguration(env: EnvSchema, failures: string[]): void {
+  const originValue = env.WEBAUTHN_ORIGIN;
+  const rpId = env.WEBAUTHN_RP_ID;
+  if (isBlank(originValue) && isBlank(rpId)) return;
+  if (isBlank(originValue) || isBlank(rpId)) {
+    failures.push('WEBAUTHN_ORIGIN and WEBAUTHN_RP_ID must be configured together');
+    return;
+  }
+  if (!/^(?:localhost|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)$/u.test(rpId!)) {
+    failures.push('WEBAUTHN_RP_ID must be a lowercase DNS hostname without a scheme or port');
+    return;
+  }
+  const origin = new URL(originValue!);
+  if (
+    origin.username ||
+    origin.password ||
+    origin.pathname !== '/' ||
+    origin.search ||
+    origin.hash
+  ) {
+    failures.push('WEBAUTHN_ORIGIN must contain only scheme, host, and optional port');
+  }
+  if (origin.protocol !== 'https:' && origin.hostname !== 'localhost') {
+    failures.push('WEBAUTHN_ORIGIN must use HTTPS except for the WebAuthn localhost secure-context exception');
+  }
+  if (origin.hostname !== rpId && !origin.hostname.endsWith(`.${rpId}`)) {
+    failures.push('WEBAUTHN_ORIGIN hostname must equal or be a subdomain of WEBAUTHN_RP_ID');
   }
 }
 

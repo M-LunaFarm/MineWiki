@@ -43,6 +43,34 @@ test('production config accepts complete environment', () => {
   assert.equal(config.get('APP_ENCRYPTION_KEY'), 'base64-production-key');
 });
 
+test('WebAuthn config requires an exact validated origin and related RP ID', () => {
+  assert.throws(
+    () => new ConfigService({ WEBAUTHN_ORIGIN: 'https://login.minewiki.kr' }),
+    /must be configured together/,
+  );
+  assert.throws(
+    () => new ConfigService({
+      WEBAUTHN_ORIGIN: 'https://evil.example',
+      WEBAUTHN_RP_ID: 'minewiki.kr',
+    }),
+    /must equal or be a subdomain/,
+  );
+  assert.throws(
+    () => new ConfigService({
+      WEBAUTHN_ORIGIN: 'https://minewiki.kr/auth',
+      WEBAUTHN_RP_ID: 'minewiki.kr',
+    }),
+    /only scheme, host/,
+  );
+  assert.doesNotThrow(() => new ConfigService({
+    WEBAUTHN_ORIGIN: 'http://localhost:8080',
+    WEBAUTHN_RP_ID: 'localhost',
+  }));
+  const derived = new ConfigService({ NEXT_PUBLIC_SITE_URL: 'https://login.minewiki.kr/path' });
+  assert.equal(derived.get('WEBAUTHN_ORIGIN'), 'https://login.minewiki.kr');
+  assert.equal(derived.get('WEBAUTHN_RP_ID'), 'login.minewiki.kr');
+});
+
 test('API production config allows optional login OAuth integrations to be absent', () => {
   const source = validProductionEnv();
   source.MINEWIKI_SERVICE = 'api';
@@ -214,6 +242,8 @@ function validProductionEnv() {
     NEXT_PUBLIC_MAIN_SITE_URL: 'https://minewiki.kr',
     NEXT_PUBLIC_VERIFY_URL: 'https://verify.minewiki.kr',
     NEXT_PUBLIC_API_BASE_URL: 'https://minewiki.kr/api',
+    WEBAUTHN_ORIGIN: 'https://minewiki.kr',
+    WEBAUTHN_RP_ID: 'minewiki.kr',
     INTERNAL_API_BASE_URL: 'http://127.0.0.1:3000',
     API_HOST: '127.0.0.1',
     API_PORT: '3000',

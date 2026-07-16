@@ -87,11 +87,30 @@ export type MfaStepUpPurpose =
   | 'mfa_manage';
 
 export interface MfaStatus {
+  readonly mfaEnabled: boolean;
   readonly totpEnabled: boolean;
+  readonly passkeyCount: number;
+  readonly passkeys: readonly PasskeySummary[];
   readonly pendingEnrollment: boolean;
   readonly pendingExpiresAt: string | null;
   readonly recoveryCodesRemaining: number;
   readonly lockedUntil: string | null;
+}
+
+export interface PasskeySummary {
+  readonly id: string;
+  readonly name: string;
+  readonly transports: readonly string[];
+  readonly deviceType: string;
+  readonly backedUp: boolean;
+  readonly createdAt: string;
+  readonly lastUsedAt: string | null;
+}
+
+export interface PasskeyCeremony<TOptions = unknown> {
+  readonly ceremonyId: string;
+  readonly expiresAt: string;
+  readonly options: TOptions;
 }
 
 export interface TotpEnrollment {
@@ -180,6 +199,37 @@ export function performMfaStepUp(input: {
   readonly code: string;
 }): Promise<{ readonly authLevel: 'aal2'; readonly purpose: MfaStepUpPurpose; readonly expiresAt: string }> {
   return mfaRequest('/v1/auth/mfa/step-up', { method: 'POST', body: input });
+}
+
+export function beginPasskeyRegistration(): Promise<PasskeyCeremony> {
+  return mfaRequest('/v1/auth/mfa/passkeys/registration/options', { method: 'POST', body: {} });
+}
+
+export function finishPasskeyRegistration(input: {
+  readonly ceremonyId: string;
+  readonly name: string;
+  readonly response: unknown;
+}): Promise<{ readonly passkey: PasskeySummary }> {
+  return mfaRequest('/v1/auth/mfa/passkeys/registration/verify', { method: 'POST', body: input });
+}
+
+export function beginPasskeyStepUp(purpose: MfaStepUpPurpose): Promise<PasskeyCeremony> {
+  return mfaRequest('/v1/auth/mfa/passkeys/step-up/options', {
+    method: 'POST',
+    body: { purpose },
+  });
+}
+
+export function finishPasskeyStepUp(input: {
+  readonly ceremonyId: string;
+  readonly purpose: MfaStepUpPurpose;
+  readonly response: unknown;
+}): Promise<{ readonly authLevel: 'aal2'; readonly method: 'webauthn'; readonly purpose: MfaStepUpPurpose; readonly expiresAt: string }> {
+  return mfaRequest('/v1/auth/mfa/passkeys/step-up/verify', { method: 'POST', body: input });
+}
+
+export function deletePasskey(passkeyId: string): Promise<{ readonly deleted: true }> {
+  return mfaRequest(`/v1/auth/mfa/passkeys/${encodeURIComponent(passkeyId)}`, { method: 'DELETE' });
 }
 
 export function regenerateMfaRecoveryCodes(): Promise<{ readonly recoveryCodes: readonly string[] }> {

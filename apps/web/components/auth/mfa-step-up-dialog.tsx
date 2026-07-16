@@ -1,9 +1,12 @@
 'use client';
 
+import { browserSupportsWebAuthn, startAuthentication } from '@simplewebauthn/browser';
 import { KeyRound, Loader2, ShieldAlert, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
+  beginPasskeyStepUp,
   fetchMfaStatus,
+  finishPasskeyStepUp,
   performMfaStepUp,
   type MfaStepUpPurpose,
 } from '../../lib/auth-client';
@@ -34,11 +37,13 @@ export function MfaStepUpDialog({
   readonly onSuccess: (expiresAt: string) => void | Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [method, setMethod] = useState<'totp' | 'recovery_code'>('totp');
+  const [method, setMethod] = useState<'totp' | 'recovery_code' | 'webauthn'>('totp');
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [checking, setChecking] = useState(false);
   const [enrolled, setEnrolled] = useState<boolean | null>(null);
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [passkeyCount, setPasskeyCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -47,7 +52,12 @@ export function MfaStepUpDialog({
     setError(null);
     setChecking(true);
     void fetchMfaStatus()
-      .then((status) => setEnrolled(status.totpEnabled))
+      .then((status) => {
+        setEnrolled(status.mfaEnabled);
+        setTotpEnabled(status.totpEnabled);
+        setPasskeyCount(status.passkeyCount);
+        setMethod(status.totpEnabled ? 'totp' : status.passkeyCount > 0 ? 'webauthn' : 'totp');
+      })
       .catch((loadError) => {
         setEnrolled(null);
         setError(loadError instanceof Error ? loadError.message : '다중 인증 상태를 확인하지 못했습니다.');
@@ -72,6 +82,7 @@ export function MfaStepUpDialog({
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (method === 'webauthn') return;
     setSubmitting(true);
     setError(null);
     try {
@@ -81,6 +92,32 @@ export function MfaStepUpDialog({
       onClose();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : '다중 인증을 확인하지 못했습니다.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitPasskey = async () => {
+    if (!browserSupportsWebAuthn()) {
+      setError('이 브라우저에서는 패스키를 사용할 수 없습니다.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const ceremony = await beginPasskeyStepUp(purpose);
+      const response = await startAuthentication({
+        optionsJSON: ceremony.options as Parameters<typeof startAuthentication>[0]['optionsJSON'],
+      });
+      const result = await finishPasskeyStepUp({
+        ceremonyId: ceremony.ceremonyId,
+        purpose,
+        response,
+      });
+      await onSuccess(result.expiresAt);
+      onClose();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '패스키 인증을 완료하지 못했습니다.');
     } finally {
       setSubmitting(false);
     }
@@ -103,7 +140,7 @@ export function MfaStepUpDialog({
               {PURPOSE_LABELS[purpose]} 계속하기
             </h2>
             <p className="mt-1 text-sm leading-6 text-[#9aa5b1]">
-              인증 앱 또는 일회용 복구 코드로 확인하면 해당 목적에만 5분 동안 사용할 수 있습니다.
+              인증 앱, 패스키 또는 일회용 복구 코드로 확인하면 해당 목적에만 5분 동안 사용할 수 있습니다.
             </p>
           </div>
           <button
@@ -130,23 +167,43 @@ export function MfaStepUpDialog({
           </div>
         ) : (
           <form className="mt-5 space-y-4" onSubmit={submit}>
-            <div className="grid grid-cols-2 gap-2 rounded-lg bg-[#111315] p-1">
-              <button
+            <div className="grid gap-2 rounded-lg bg-[#111315] p-1" style={{ gridTemplateColumns: `repeat(${(totpEnabled ? 2 : 0) + (passkeyCount > 0 ? 1 : 0)}, minmax(0, 1fr))` }}>
+              {totpEnabled ? <button
                 type="button"
                 onClick={() => { setMethod('totp'); setCode(''); setError(null); }}
                 className={`rounded-md px-3 py-2 text-xs font-semibold transition ${method === 'totp' ? 'bg-[#26312d] text-[#71f5b1]' : 'text-[#8f98a3] hover:text-white'}`}
               >
                 인증 앱
-              </button>
-              <button
+              </button> : null}
+              {totpEnabled ? <button
                 type="button"
                 onClick={() => { setMethod('recovery_code'); setCode(''); setError(null); }}
                 className={`rounded-md px-3 py-2 text-xs font-semibold transition ${method === 'recovery_code' ? 'bg-[#26312d] text-[#71f5b1]' : 'text-[#8f98a3] hover:text-white'}`}
               >
                 복구 코드
-              </button>
+              </button> : null}
+              {passkeyCount > 0 ? <button
+                type="button"
+                onClick={() => { setMethod('webauthn'); setCode(''); setError(null); }}
+                className={`rounded-md px-3 py-2 text-xs font-semibold transition ${method === 'webauthn' ? 'bg-[#26312d] text-[#71f5b1]' : 'text-[#8f98a3] hover:text-white'}`}
+              >
+                패스키
+              </button> : null}
             </div>
-            <label className="block">
+            {method === 'webauthn' ? (
+              <div className="rounded-lg border border-[#3a424a] bg-[#101214] p-4">
+                <p className="text-sm text-[#d7e0e8]">기기에 저장된 패스키를 선택한 뒤 지문, 얼굴 또는 화면 잠금으로 확인하세요.</p>
+                <button
+                  type="button"
+                  onClick={() => void submitPasskey()}
+                  disabled={submitting}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#13ec80] px-4 py-3 text-sm font-bold text-[#07130d] transition hover:bg-[#35f29a] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                  {submitting ? '패스키 확인 중' : '패스키로 확인'}
+                </button>
+              </div>
+            ) : <label className="block">
               <span className="mb-1.5 block text-xs font-medium text-[#aab3bd]">
                 {method === 'totp' ? '6자리 인증 코드' : '16자리 일회용 복구 코드'}
               </span>
@@ -163,16 +220,16 @@ export function MfaStepUpDialog({
                 disabled={submitting}
                 className="w-full rounded-lg border border-[#3a424a] bg-[#101214] px-3 py-3 font-mono text-base tracking-wider text-white outline-none transition focus:border-[#13ec80]"
               />
-            </label>
+            </label>}
             {error ? <p role="alert" className="text-sm text-red-300">{error}</p> : null}
-            <button
+            {method !== 'webauthn' ? <button
               type="submit"
               disabled={submitting || code.trim().length < 6}
               className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#13ec80] px-4 py-3 text-sm font-bold text-[#07130d] transition hover:bg-[#35f29a] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
               {submitting ? '확인 중입니다.' : '확인하고 계속'}
-            </button>
+            </button> : null}
           </form>
         )}
       </section>

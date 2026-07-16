@@ -150,6 +150,8 @@ model Account {
   consents                AccountConsent[]
   mfaTotpCredential       MfaTotpCredential?
   mfaRecoveryCodes        MfaRecoveryCode[]
+  webAuthnCredentials     WebAuthnCredential[]
+  webAuthnChallenges      WebAuthnChallenge[]
   wikiApiTokens           WikiApiToken[]
 
   @@unique([provider, providerUserId])
@@ -386,6 +388,7 @@ model Session {
 
   account              Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
   wikiPushSubscription WikiPushSubscription?
+  webAuthnChallenges   WebAuthnChallenge[]
 
   @@index([accountId])
   @@index([expiresAt])
@@ -422,6 +425,48 @@ model MfaRecoveryCode {
   @@unique([accountId, codeHash])
   @@index([accountId, usedAt])
   @@map("mfa_recovery_codes")
+}
+
+model WebAuthnCredential {
+  id             String    @id @default(uuid()) @db.Char(36)
+  accountId      String    @map("account_id")
+  credentialId   String    @unique @map("credential_id") @db.VarChar(512)
+  name           String    @db.VarChar(64)
+  publicKey      Bytes     @map("public_key") @db.Blob
+  counter        BigInt    @default(0) @db.UnsignedBigInt
+  counterVersion Int       @default(0) @map("counter_version") @db.UnsignedInt
+  transports     Json?
+  deviceType     String    @map("device_type") @db.VarChar(32)
+  backedUp       Boolean   @default(false) @map("backed_up")
+  lastUsedAt     DateTime? @map("last_used_at") @db.DateTime(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, name])
+  @@index([accountId, createdAt])
+  @@map("webauthn_credentials")
+}
+
+model WebAuthnChallenge {
+  id                  String    @id @default(uuid()) @db.Char(36)
+  accountId           String    @map("account_id")
+  sessionId           String    @map("session_id")
+  sessionTokenVersion Int       @map("session_token_version") @db.UnsignedInt
+  operation           String    @db.VarChar(32)
+  purpose             String?   @db.VarChar(64)
+  challenge           String    @unique @db.VarChar(255)
+  expiresAt           DateTime  @map("expires_at") @db.DateTime(3)
+  consumedAt          DateTime? @map("consumed_at") @db.DateTime(3)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, sessionId, operation, purpose, consumedAt], map: "webauthn_challenge_lookup_idx")
+  @@index([expiresAt])
+  @@map("webauthn_challenges")
 }
 
 model OAuthState {
