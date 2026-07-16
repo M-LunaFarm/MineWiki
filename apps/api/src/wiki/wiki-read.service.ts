@@ -16,7 +16,7 @@ import {
 } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
-import { WikiPermissionService } from './wiki-permission.service';
+import { WikiPermissionService, type WikiPermissionActor } from './wiki-permission.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiIncludeService } from './wiki-include.service';
 import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath, WikiRoutePathResolver, type WikiRoutePathBatch } from './wiki-route-path.resolver';
@@ -316,6 +316,37 @@ export interface WikiBlameResponse {
   }>;
 }
 
+/**
+ * Browser reads pass a SessionPayload so request-scoped authorization claims
+ * survive the controller boundary. Credentialed API callers keep passing only
+ * an account ID and therefore cannot acquire browser-session claims.
+ */
+export type WikiAccessViewer = SessionPayload | string | null | undefined;
+
+export interface WikiAccessContext {
+  readonly accountId: string | null;
+  readonly actor?: WikiPermissionActor | null;
+  readonly requestIp?: string | null;
+}
+
+export async function resolveWikiAccessContext(
+  prisma: Pick<PrismaService, 'wikiProfile'>,
+  wikiPermissions: WikiPermissionService,
+  viewer: WikiAccessViewer
+): Promise<WikiAccessContext> {
+  if (typeof viewer === 'string') return { accountId: viewer };
+  if (!viewer) return { accountId: null };
+  const profile = await prisma.wikiProfile.findUnique({
+    where: { accountId: viewer.userId },
+    select: { id: true, status: true }
+  });
+  return {
+    accountId: viewer.userId,
+    actor: profile ? wikiPermissions.actorFromSession(viewer, profile) : null,
+    requestIp: viewer.requestIp
+  };
+}
+
 @Injectable()
 export class WikiReadService {
   private readonly publicStatsCache = new Map<string, {
@@ -408,10 +439,11 @@ export class WikiReadService {
   async getPage(
     namespaceCode: string,
     title: string,
-    accountId?: string | null,
+    viewer?: WikiAccessViewer,
     options: { readonly followRedirects?: boolean } = {}
   ): Promise<WikiPageResponse> {
-    return this.getPageInternal(namespaceCode, title, accountId ?? null, {
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    return this.getPageInternal(namespaceCode, title, access, {
       followRedirects: options.followRedirects !== false,
       redirectTrail: []
     });
@@ -420,7 +452,7 @@ export class WikiReadService {
   private async getPageInternal(
     namespaceCode: string,
     title: string,
-    accountId: string | null,
+    access: WikiAccessContext,
     options: {
       readonly followRedirects: boolean;
       readonly redirectTrail: readonly string[];
@@ -453,30 +485,28 @@ export class WikiReadService {
     if (!page) {
       throw new NotFoundException('Wiki page not found.');
     }
-    return this.renderPage(namespace.code, page, accountId, options);
+    return this.renderPage(namespace.code, page, access, options);
   }
 
   getPageByPath(
     path: string,
-    accountId?: string | null,
+    viewer?: WikiAccessViewer,
     options: { readonly followRedirects?: boolean } = {}
   ): Promise<WikiPageResponse> {
     const resolved = resolveWikiPath(path);
-    return this.getPage(resolved.namespace, resolved.title, accountId ?? null, options);
+    return this.getPage(resolved.namespace, resolved.title, viewer, options);
   }
 
-  async getRevisions(pageId: string, accountId?: string | null, cursor?: string, requestedLimit: string | number = 50): Promise<WikiRevisionListResponse> {
+  async getRevisions(pageId: string, viewer?: WikiAccessViewer, cursor?: string, requestedLimit: string | number = 50): Promise<WikiRevisionListResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
     if (!page) {
       throw new NotFoundException('Wiki page not found.');
     }
-    await this.wikiPermissions.assertCanReadPage({
-      accountId: accountId ?? null,
-      page
-    });
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    await this.wikiPermissions.assertCanReadPage({ ...access, page });
     await this.wikiPermissions.assertCanUsePageAction({
-      accountId: accountId ?? null,
+      ...access,
       action: 'history',
       page
     });
@@ -512,12 +542,18 @@ export class WikiReadService {
 
   async getRecent(input: {
     readonly accountId?: string | null;
+    readonly viewer?: WikiAccessViewer;
     readonly cursor?: string;
     readonly limit?: string | number;
     readonly changeType?: string;
     readonly namespace?: string;
     readonly minor?: string;
   } = {}): Promise<WikiRecentChangeListResponse> {
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.viewer ?? input.accountId ?? null
+    );
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
     const changeType = this.parseRecentFilter(input.changeType, 'changeType');
@@ -553,7 +589,7 @@ export class WikiReadService {
         let readable = readableByPageId.get(change.pageId);
         if (readable === undefined) {
           try {
-            await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: pageById.get(change.pageId) ?? null });
+            await this.wikiPermissions.assertCanReadPage({ ...access, page: pageById.get(change.pageId) ?? null });
             readable = true;
           } catch {
             readable = false;
@@ -586,6 +622,7 @@ export class WikiReadService {
   async getBacklinks(input: {
     readonly pageId: string;
     readonly accountId?: string | null;
+    readonly viewer?: WikiAccessViewer;
     readonly sourceSpaceId?: bigint;
     readonly cursor?: string;
     readonly limit?: string | number;
@@ -593,7 +630,12 @@ export class WikiReadService {
     const pageId = this.parseBigIntId(input.pageId, 'pageId');
     const target = await this.prisma.wikiPage.findUnique({ where: { id: pageId } });
     if (!target) throw new NotFoundException('Wiki page not found.');
-    await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: target });
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.viewer ?? input.accountId ?? null
+    );
+    await this.wikiPermissions.assertCanReadPage({ ...access, page: target });
     const namespace = await this.prisma.wikiNamespace.findUnique({ where: { id: target.namespaceId } });
     if (!namespace) throw new NotFoundException('Wiki namespace not found.');
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
@@ -630,7 +672,7 @@ export class WikiReadService {
       const source = pageById.get(link.sourcePageId);
       if (!source || source.currentRevisionId !== link.sourceRevisionId) continue;
       try {
-        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: source });
+        await this.wikiPermissions.assertCanReadPage({ ...access, page: source });
       } catch {
         continue;
       }
@@ -658,10 +700,16 @@ export class WikiReadService {
   async getCategoryMembers(input: {
     readonly category: string;
     readonly accountId?: string | null;
+    readonly viewer?: WikiAccessViewer;
     readonly namespace?: string;
     readonly cursor?: string;
     readonly limit?: string | number;
   }): Promise<WikiCategoryResponse> {
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.viewer ?? input.accountId ?? null
+    );
     const category = input.category.trim().replace(/_/g, ' ');
     const categorySlug = slugifyTitle(category);
     if (!categorySlug) throw new BadRequestException('category is required.');
@@ -688,7 +736,7 @@ export class WikiReadService {
     let readableCategoryPage = null as typeof categoryPage;
     if (categoryPage && categoryPage.status !== 'deleted' && categoryPage.currentRevisionId) {
       try {
-        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: categoryPage });
+        await this.wikiPermissions.assertCanReadPage({ ...access, page: categoryPage });
         readableCategoryPage = categoryPage;
       } catch {
         readableCategoryPage = null;
@@ -738,7 +786,7 @@ export class WikiReadService {
       const link = childLinkByPageId.get(childPage.id);
       if (!link || childPage.currentRevisionId !== link.sourceRevisionId) continue;
       try {
-        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page: childPage });
+        await this.wikiPermissions.assertCanReadPage({ ...access, page: childPage });
       } catch {
         continue;
       }
@@ -752,7 +800,7 @@ export class WikiReadService {
     subcategories.sort((left, right) => left.displayTitle.localeCompare(right.displayTitle, 'ko'));
     const isRoot = categorySlug === slugifyTitle('분류');
     const reachesRoot = isRoot || (readableCategoryPage && categoryNamespace
-      ? await this.categoryParentsReachRoot(parentLinks.map((link) => link.targetSlug), categoryNamespace.id, input.accountId ?? null)
+      ? await this.categoryParentsReachRoot(parentLinks.map((link) => link.targetSlug), categoryNamespace.id, access)
       : false);
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
@@ -796,7 +844,7 @@ export class WikiReadService {
       const page = pageById.get(link.sourcePageId);
       if (!page || page.currentRevisionId !== link.sourceRevisionId) continue;
       try {
-        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+        await this.wikiPermissions.assertCanReadPage({ ...access, page });
       } catch {
         continue;
       }
@@ -828,7 +876,7 @@ export class WikiReadService {
     };
   }
 
-  private async categoryParentsReachRoot(initialParentSlugs: readonly string[], namespaceId: number, accountId: string | null): Promise<boolean> {
+  private async categoryParentsReachRoot(initialParentSlugs: readonly string[], namespaceId: number, access: WikiAccessContext): Promise<boolean> {
     const rootSlug = slugifyTitle('분류');
     const queue = [...initialParentSlugs];
     const visited = new Set<string>();
@@ -842,7 +890,7 @@ export class WikiReadService {
       });
       if (!page || page.status === 'deleted' || !page.currentRevisionId) continue;
       try {
-        await this.wikiPermissions.assertCanReadPage({ accountId, page });
+        await this.wikiPermissions.assertCanReadPage({ ...access, page });
       } catch {
         continue;
       }
@@ -863,17 +911,23 @@ export class WikiReadService {
 
   async getDocumentTemplates(input: {
     readonly accountId?: string | null;
+    readonly viewer?: WikiAccessViewer;
     readonly pageId?: string;
   }): Promise<WikiDocumentTemplateSummary[]> {
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.viewer ?? input.accountId ?? null
+    );
     let spaceId: bigint | null = null;
     if (input.pageId) {
       const page = await this.prisma.wikiPage.findUnique({ where: { id: this.parseBigIntId(input.pageId, 'pageId') } });
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
-      await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+      await this.wikiPermissions.assertCanReadPage({ ...access, page });
       spaceId = page.spaceId;
     }
-    const profile = input.accountId
-      ? await this.prisma.wikiProfile.findUnique({ where: { accountId: input.accountId }, select: { id: true } })
+    const profile = access.accountId
+      ? await this.prisma.wikiProfile.findUnique({ where: { accountId: access.accountId }, select: { id: true } })
       : null;
     const templates = await this.prisma.documentTemplate.findMany({
       where: {
@@ -1250,7 +1304,13 @@ export class WikiReadService {
     readonly namespace?: string;
     readonly limit?: string | number;
     readonly accountId?: string | null;
+    readonly viewer?: WikiAccessViewer;
   }): Promise<WikiSpecialDocumentResponse> {
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.viewer ?? input.accountId ?? null
+    );
     const allowedTypes: WikiSpecialDocumentType[] = [
       'random',
       'orphaned',
@@ -1272,9 +1332,9 @@ export class WikiReadService {
     if (input.namespace?.trim() && !namespace) return { type, items: [] };
     if (type === 'orphaned_categories' && namespace && namespace.code !== 'category') return { type, items: [] };
     if (type === 'random' || type === 'old' || type === 'long' || type === 'short' || type === 'uncategorized') {
-      return this.getIndexedSpecialDocuments(type, limit, namespace?.id, input.accountId ?? null);
+      return this.getIndexedSpecialDocuments(type, limit, namespace?.id, access);
     }
-    return this.getSnapshotSpecialDocuments(type, limit, namespace?.code ?? '', input.accountId ?? null);
+    return this.getSnapshotSpecialDocuments(type, limit, namespace?.code ?? '', access);
   }
 
   async getPublicBlockHistory(input: {
@@ -1347,7 +1407,7 @@ export class WikiReadService {
     type: 'orphaned' | 'orphaned_categories' | 'wanted' | 'categories',
     limit: number,
     namespaceCode: string,
-    accountId: string | null
+    access: WikiAccessContext
   ): Promise<WikiSpecialDocumentResponse> {
     const snapshot = await this.prisma.wikiSpecialSnapshot.findUnique({
       where: { type_namespaceCode: { type, namespaceCode } }
@@ -1360,7 +1420,7 @@ export class WikiReadService {
     const pages = pageIds.length > 0
       ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } })
       : [];
-    const readablePages = await this.wikiPermissions.filterReadablePages({ accountId, pages });
+    const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages });
     const readablePageIds = new Set(readablePages.map((page) => page.id.toString()));
     const items: WikiSpecialDocumentItem[] = [];
     for (const item of snapshotItems) {
@@ -1383,7 +1443,7 @@ export class WikiReadService {
     type: 'random' | 'old' | 'long' | 'short' | 'uncategorized',
     limit: number,
     namespaceId: number | undefined,
-    accountId: string | null
+    access: WikiAccessContext
   ): Promise<WikiSpecialDocumentResponse> {
     const scanBudget = Math.min(Math.max(limit * 5, 50), 500);
     const where = {
@@ -1427,7 +1487,7 @@ export class WikiReadService {
       candidates = await this.prisma.wikiPage.findMany({ where, orderBy, take: scanBudget });
     }
 
-    const visible = await this.wikiPermissions.filterReadablePages({ accountId, pages: candidates });
+    const visible = await this.wikiPermissions.filterReadablePages({ ...access, pages: candidates });
     const selected = type === 'random'
       ? visible.length > 0 ? [visible[Math.floor(Math.random() * visible.length)]!] : []
       : visible.slice(0, limit);
@@ -1451,12 +1511,13 @@ export class WikiReadService {
     };
   }
 
-  async getBlame(pageId: string, accountId?: string | null): Promise<WikiBlameResponse> {
+  async getBlame(pageId: string, viewer?: WikiAccessViewer): Promise<WikiBlameResponse> {
     const id = this.parseBigIntId(pageId, 'pageId');
     const page = await this.prisma.wikiPage.findUnique({ where: { id } });
     if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
-    await this.wikiPermissions.assertCanReadPage({ accountId: accountId ?? null, page });
-    await this.wikiPermissions.assertCanUsePageAction({ accountId: accountId ?? null, action: 'history', page });
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    await this.wikiPermissions.assertCanReadPage({ ...access, page });
+    await this.wikiPermissions.assertCanUsePageAction({ ...access, action: 'history', page });
     const total = await this.prisma.wikiPageRevision.count({ where: { pageId: page.id, visibility: 'public' } });
     const revisions = await this.prisma.wikiPageRevision.findMany({
       where: { pageId: page.id, visibility: 'public' },
@@ -1530,6 +1591,7 @@ export class WikiReadService {
     readonly limit?: string | number;
     readonly cursor?: string;
     readonly accountId?: string | null;
+    readonly viewer?: WikiAccessViewer;
   }): Promise<WikiSearchResponse> {
     const query = input.q?.trim() ?? '';
     if (!query) {
@@ -1595,10 +1657,12 @@ export class WikiReadService {
         .map((revision) => revision.id));
       publicPages = publicPages.filter((page) => page.currentRevisionId && matchingRevisionIds.has(page.currentRevisionId));
     }
-    const readablePages = await this.wikiPermissions.filterReadablePages({
-      accountId: input.accountId ?? null,
-      pages: publicPages
-    });
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.viewer ?? input.accountId ?? null
+    );
+    const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
     const resultPages = readablePages.slice(0, limit);
     const namespaceIds = [...new Set(resultPages.map((page) => page.namespaceId))];
     const namespaces = namespaceIds.length > 0
@@ -1651,6 +1715,7 @@ export class WikiReadService {
     readonly q?: string;
     readonly limit?: string | number;
     readonly accountId?: string | null;
+    readonly viewer?: WikiAccessViewer;
   }): Promise<WikiSearchSuggestionResponse> {
     const query = input.q?.trim().slice(0, 100) ?? '';
     if (!query) return { items: [], exactMatch: null };
@@ -1678,11 +1743,16 @@ export class WikiReadService {
       : [];
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
     const routePaths = await this.routePaths.preload(pages, namespaceById);
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.viewer ?? input.accountId ?? null
+    );
     const normalized = query.toLocaleLowerCase('ko-KR');
     const ranked: Array<{ score: number; exact: boolean; item: WikiSearchResult }> = [];
     for (const page of pages) {
       try {
-        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+        await this.wikiPermissions.assertCanReadPage({ ...access, page });
       } catch {
         continue;
       }
@@ -1719,7 +1789,7 @@ export class WikiReadService {
     sourceNamespace: string,
     sourceLocalPath: string,
     targets: readonly string[],
-    accountId: string | null
+    access: WikiAccessContext
   ): Promise<Set<string>> {
     const resolvedByLinkKey = new Map<string, { namespace: string; slug: string }>();
     for (const target of targets) {
@@ -1749,7 +1819,7 @@ export class WikiReadService {
       });
       for (const targetPage of pages) {
         try {
-          await this.wikiPermissions.assertCanReadPage({ accountId, page: targetPage });
+          await this.wikiPermissions.assertCanReadPage({ ...access, page: targetPage });
           readableTargets.add(`${namespace.code}:${targetPage.slug}`);
         } catch {
           // Restricted targets must be indistinguishable from missing pages.
@@ -1779,7 +1849,7 @@ export class WikiReadService {
     protectionLevel: string;
     status: string;
     updatedAt: Date;
-  }, accountId: string | null, options: {
+  }, access: WikiAccessContext, options: {
     readonly followRedirects: boolean;
     readonly redirectTrail: readonly string[];
   }): Promise<WikiPageResponse> {
@@ -1803,14 +1873,14 @@ export class WikiReadService {
       throw new NotFoundException('Public wiki revision not found.');
     }
     await this.wikiPermissions.assertCanReadPage({
-      accountId,
+      ...access,
       page,
       revision
     });
     const parsed = parseMarkup(revision.contentRaw);
     if (parsed.redirectTarget && options.followRedirects) {
       const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
-      const redirected = await this.getPageInternal(target.namespace, target.title, accountId, {
+      const redirected = await this.getPageInternal(target.namespace, target.title, access, {
         followRedirects: true,
         redirectTrail: [...options.redirectTrail, `${namespace}:${page.slug}`]
       });
@@ -1828,7 +1898,7 @@ export class WikiReadService {
     const expanded = parsed.includes.length > 0 && this.wikiIncludes
       ? await this.wikiIncludes.expand({
           ast: parsed.ast,
-          accountId,
+          accountId: access.accountId,
           sourcePageId: page.id,
           sourceNamespace: namespace,
           sourceLocalPath: page.localPath
@@ -1847,9 +1917,9 @@ export class WikiReadService {
             }
           }
         });
-    const files = cache ? {} : await this.findRenderableFiles(expanded.ast, accountId);
+    const files = cache ? {} : await this.findRenderableFiles(expanded.ast, access);
     const missingLinks = hasLinkDependencies
-      ? await this.findMissingLinks(namespace, page.localPath, parsed.links, accountId)
+      ? await this.findMissingLinks(namespace, page.localPath, parsed.links, access)
       : new Set<string>();
     const html = cache?.html ?? renderDocument(expanded.ast, {
       files,
@@ -1961,7 +2031,7 @@ export class WikiReadService {
     };
   }
 
-  private async findRenderableFiles(ast: AstNode[], accountId: string | null) {
+  private async findRenderableFiles(ast: AstNode[], access: WikiAccessContext) {
     const fileNames = Array.from(collectWikiFileNames(ast));
     if (fileNames.length === 0) {
       return {};
@@ -1980,7 +2050,7 @@ export class WikiReadService {
         continue;
       }
       if (file.visibility === 'private') {
-        if (accountId && file.ownerAccountId === accountId) visibleFiles.push(file);
+        if (access.accountId && file.ownerAccountId === access.accountId) visibleFiles.push(file);
         continue;
       }
       const linkedId = file.linkedResourceId?.trim();
@@ -1988,10 +2058,10 @@ export class WikiReadService {
       try {
         if (file.linkedResourceType === 'wiki_page') {
           const linkedPage = await this.prisma.wikiPage.findUnique({ where: { id: BigInt(linkedId) } });
-          await this.wikiPermissions.assertCanReadPage({ accountId, page: linkedPage });
+          await this.wikiPermissions.assertCanReadPage({ ...access, page: linkedPage });
           visibleFiles.push(file);
         } else if (file.linkedResourceType === 'wiki_space') {
-          await this.wikiPermissions.assertCanReadSpace({ accountId, spaceId: BigInt(linkedId) });
+          await this.wikiPermissions.assertCanReadSpace({ accountId: access.accountId, spaceId: BigInt(linkedId) });
           visibleFiles.push(file);
         }
       } catch {

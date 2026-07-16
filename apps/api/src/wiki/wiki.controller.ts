@@ -65,7 +65,7 @@ export class WikiController {
     @Query('redirect') redirect?: string,
     @Query('noRedirect') noRedirect?: string
   ): Promise<WikiPageResponse> {
-    return this.wikiRead.getPage(namespace, title, request.sessionPayload?.userId ?? null, {
+    return this.wikiRead.getPage(namespace, title, request.sessionPayload ?? null, {
       followRedirects: shouldFollowRedirects(redirect, noRedirect)
     });
   }
@@ -78,7 +78,7 @@ export class WikiController {
     @Query('redirect') redirect?: string,
     @Query('noRedirect') noRedirect?: string
   ): Promise<WikiPageResponse> {
-    return this.wikiRead.getPageByPath(path, request.sessionPayload?.userId ?? null, {
+    return this.wikiRead.getPageByPath(path, request.sessionPayload ?? null, {
       followRedirects: shouldFollowRedirects(redirect, noRedirect)
     });
   }
@@ -86,13 +86,13 @@ export class WikiController {
   @Get('page/:id/revisions')
   @UseGuards(OptionalSessionGuard)
   getRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string): Promise<WikiRevisionListResponse> {
-    return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null, cursor, limit);
+    return this.wikiRead.getRevisions(pageId, request.sessionPayload ?? null, cursor, limit);
   }
 
   @Get('pages/:id/revisions')
   @UseGuards(OptionalSessionGuard)
   getPageRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string): Promise<WikiRevisionListResponse> {
-    return this.wikiRead.getRevisions(pageId, request.sessionPayload?.userId ?? null, cursor, limit);
+    return this.wikiRead.getRevisions(pageId, request.sessionPayload ?? null, cursor, limit);
   }
 
   @Get('pages/:id/raw')
@@ -102,7 +102,7 @@ export class WikiController {
     @Req() request: FastifyRequest,
     @Query('revisionId') revisionId?: string
   ): Promise<WikiRevisionResponse> {
-    return this.wikiEdit.getRawPage(pageId, request.sessionPayload?.userId ?? null, revisionId);
+    return this.wikiEdit.getRawPage(pageId, request.sessionPayload ?? null, revisionId);
   }
 
   @Get('pages/:id/backlinks')
@@ -115,7 +115,7 @@ export class WikiController {
   ): Promise<WikiBacklinkResponse> {
     return this.wikiRead.getBacklinks({
       pageId,
-      accountId: request.sessionPayload?.userId ?? null,
+      viewer: request.sessionPayload ?? null,
       cursor,
       limit
     });
@@ -124,7 +124,7 @@ export class WikiController {
   @Get('pages/:id/blame')
   @UseGuards(OptionalSessionGuard)
   getBlame(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiBlameResponse> {
-    return this.wikiRead.getBlame(pageId, request.sessionPayload?.userId ?? null);
+    return this.wikiRead.getBlame(pageId, request.sessionPayload ?? null);
   }
 
   @Get('recent')
@@ -137,7 +137,7 @@ export class WikiController {
     @Query('namespace') namespace?: string,
     @Query('minor') minor?: string
   ): Promise<WikiRecentChangeListResponse> {
-    return this.wikiRead.getRecent({ accountId: request.sessionPayload?.userId ?? null, cursor, limit, changeType, namespace, minor });
+    return this.wikiRead.getRecent({ viewer: request.sessionPayload ?? null, cursor, limit, changeType, namespace, minor });
   }
 
   @Get('contributions/:profileId')
@@ -185,7 +185,7 @@ export class WikiController {
       target,
       limit,
       cursor,
-      accountId: request.sessionPayload?.userId ?? null
+      viewer: request.sessionPayload ?? null
     });
   }
 
@@ -197,7 +197,7 @@ export class WikiController {
     @Query('q') q: string | undefined,
     @Query('limit') limit: string | undefined
   ): Promise<WikiSearchSuggestionResponse> {
-    return this.wikiRead.suggest({ q, limit, accountId: request.sessionPayload?.userId ?? null });
+    return this.wikiRead.suggest({ q, limit, viewer: request.sessionPayload ?? null });
   }
 
   @Get('special')
@@ -209,7 +209,7 @@ export class WikiController {
     @Query('namespace') namespace?: string,
     @Query('limit') limit?: string
   ): Promise<WikiSpecialDocumentResponse> {
-    return this.wikiRead.getSpecialDocuments({ type, namespace, limit, accountId: request.sessionPayload?.userId ?? null });
+    return this.wikiRead.getSpecialDocuments({ type, namespace, limit, viewer: request.sessionPayload ?? null });
   }
 
   @Get('block-history')
@@ -232,7 +232,7 @@ export class WikiController {
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string
   ): Promise<WikiCategoryResponse> {
-    return this.wikiRead.getCategoryMembers({ category, namespace, cursor, limit, accountId: request.sessionPayload?.userId ?? null });
+    return this.wikiRead.getCategoryMembers({ category, namespace, cursor, limit, viewer: request.sessionPayload ?? null });
   }
 
   @Get('categories')
@@ -244,7 +244,7 @@ export class WikiController {
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string
   ): Promise<WikiCategoryResponse> {
-    return this.wikiRead.getCategoryMembers({ category: category ?? '', namespace, cursor, limit, accountId: request.sessionPayload?.userId ?? null });
+    return this.wikiRead.getCategoryMembers({ category: category ?? '', namespace, cursor, limit, viewer: request.sessionPayload ?? null });
   }
 
   @Get('templates')
@@ -253,7 +253,7 @@ export class WikiController {
     @Req() request: FastifyRequest,
     @Query('pageId') pageId?: string
   ): Promise<WikiDocumentTemplateSummary[]> {
-    return this.wikiRead.getDocumentTemplates({ pageId, accountId: request.sessionPayload?.userId ?? null });
+    return this.wikiRead.getDocumentTemplates({ pageId, viewer: request.sessionPayload ?? null });
   }
 
   @Get('revisions/:revisionId')
@@ -262,7 +262,7 @@ export class WikiController {
     @Param('revisionId') revisionId: string,
     @Req() request: FastifyRequest
   ): Promise<WikiRevisionResponse> {
-    return this.wikiEdit.getRevision(revisionId, request.sessionPayload?.userId ?? null);
+    return this.wikiEdit.getRevision(revisionId, request.sessionPayload ?? null);
   }
 
   @Get('revisions/:leftId/diff/:rightId')
@@ -272,7 +272,7 @@ export class WikiController {
     @Param('rightId') rightId: string,
     @Req() request: FastifyRequest
   ): Promise<WikiRevisionDiffResponse> {
-    return this.wikiEdit.getRevisionDiff(leftId, rightId, request.sessionPayload?.userId ?? null);
+    return this.wikiEdit.getRevisionDiff(leftId, rightId, request.sessionPayload ?? null);
   }
 
   @Post('preview')

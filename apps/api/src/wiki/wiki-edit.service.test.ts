@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
+import type { SessionPayload } from '../session/session.service';
 import { parseMarkup } from '@minewiki/wiki-core';
 import {
   astContainsFile,
@@ -143,6 +144,51 @@ test('revision source requires raw ACL while diff requires history ACL', async (
   await edits.getRevisionDiff('11', '11');
 
   assert.deepEqual(actions, ['raw', 'history', 'history']);
+});
+
+test('raw revision and diff reads preserve browser session ACL claims and request address', async () => {
+  const revision = {
+    id: 11n, pageId: 7n, revisionNo: 1, parentRevisionId: null, contentRaw: '문서 내용',
+    contentHash: 'a'.repeat(64), contentSize: 13, syntaxVersion: 'bwm-0.3', editSummary: null,
+    isMinor: false, createdBy: 3n, actorUserId: 3n, createdAt: new Date(), visibility: 'public'
+  };
+  const page = { id: 7n, spaceId: 1n, title: '문서', protectionLevel: 'open', status: 'normal', currentRevisionId: 11n };
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 9n, status: 'active' }; } },
+    wikiPageRevision: { async findUnique() { return revision; } },
+    wikiPage: { async findUnique() { return page; } }
+  } as unknown as PrismaService;
+  const readInputs: Array<Record<string, unknown>> = [];
+  const actor = {
+    accountId: 'account', profileId: 9n, status: 'active', isElevated: true,
+    groups: ['admin'], permissions: ['wiki.read.private'], requestIp: '198.51.100.8'
+  };
+  const permissions = {
+    actorFromSession() { return actor; },
+    async assertCanReadPage(input: Record<string, unknown>) { readInputs.push(input); },
+    async assertCanUsePageAction(input: Record<string, unknown>) {
+      assert.equal(input.accountId, 'account');
+      assert.equal(input.actor, actor);
+      assert.equal(input.requestIp, '198.51.100.8');
+    }
+  } as unknown as WikiPermissionService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, permissions);
+  const browserSession = {
+    ...session('account', true, ['wiki.read.private']),
+    tokenVersion: 2,
+    authenticatedAt: '2026-07-16T00:00:00.000Z',
+    groups: ['admin'],
+    requestIp: '198.51.100.8'
+  } satisfies SessionPayload;
+
+  await edits.getRawPage('7', browserSession);
+  await edits.getRevision('11', browserSession);
+  await edits.getRevisionDiff('11', '11', browserSession);
+
+  assert.equal(readInputs.length, 4);
+  assert.equal(readInputs.every((input) => input.accountId === 'account'), true);
+  assert.equal(readInputs.every((input) => input.actor === actor), true);
+  assert.equal(readInputs.every((input) => input.requestIp === '198.51.100.8'), true);
 });
 
 test('revision diff rejects cross-page comparisons after authorizing both revisions', async () => {

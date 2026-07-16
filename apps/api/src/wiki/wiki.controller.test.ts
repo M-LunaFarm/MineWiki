@@ -67,6 +67,63 @@ test('public block history controller is callable without an authenticated sessi
   assert.deepEqual(response, { items: [], nextCursor: null });
 });
 
+test('optional browser wiki reads forward the complete session payload', async () => {
+  const session = {
+    sessionId: 'session-1',
+    userId: 'account-1',
+    tokenVersion: 4,
+    isElevated: true,
+    authenticatedAt: '2026-07-16T00:00:00.000Z',
+    groups: ['admin'],
+    permissions: ['wiki.read.private'],
+    requestIp: '192.0.2.44'
+  } satisfies SessionPayload;
+  const request = { sessionPayload: session } as FastifyRequest;
+  const received: Array<{ readonly method: string; readonly viewer: unknown }> = [];
+  const reads = {
+    async getPage(_namespace: string, _title: string, viewer: unknown) { received.push({ method: 'page', viewer }); return {}; },
+    async getPageByPath(_path: string, viewer: unknown) { received.push({ method: 'by-path', viewer }); return {}; },
+    async getRevisions(_pageId: string, viewer: unknown) { received.push({ method: 'revisions', viewer }); return { items: [], nextCursor: null }; },
+    async getBacklinks(input: { viewer?: unknown }) { received.push({ method: 'backlinks', viewer: input.viewer }); return { items: [], nextCursor: null }; },
+    async getBlame(_pageId: string, viewer: unknown) { received.push({ method: 'blame', viewer }); return {}; },
+    async getRecent(input: { viewer?: unknown }) { received.push({ method: 'recent', viewer: input.viewer }); return { items: [], nextCursor: null }; },
+    async search(input: { viewer?: unknown }) { received.push({ method: 'search', viewer: input.viewer }); return { items: [], nextCursor: null }; },
+    async suggest(input: { viewer?: unknown }) { received.push({ method: 'suggest', viewer: input.viewer }); return { items: [], exactMatch: null }; },
+    async getSpecialDocuments(input: { viewer?: unknown }) { received.push({ method: 'special', viewer: input.viewer }); return { type: 'orphaned', items: [] }; },
+    async getCategoryMembers(input: { viewer?: unknown }) { received.push({ method: 'categories', viewer: input.viewer }); return { items: [] }; },
+    async getDocumentTemplates(input: { viewer?: unknown }) { received.push({ method: 'templates', viewer: input.viewer }); return []; }
+  } as unknown as WikiReadService;
+  const edits = {
+    async getRawPage(_pageId: string, viewer: unknown) { received.push({ method: 'raw', viewer }); return {}; },
+    async getRevision(_revisionId: string, viewer: unknown) { received.push({ method: 'revision', viewer }); return {}; },
+    async getRevisionDiff(_leftId: string, _rightId: string, viewer: unknown) { received.push({ method: 'diff', viewer }); return {}; }
+  } as unknown as WikiEditService;
+  const controller = new WikiController({} as WikiProfileService, reads, edits, captchaStub);
+
+  await Promise.all([
+    controller.getPage('main', '대문', request),
+    controller.getPageByPath('/wiki/대문', request),
+    controller.getRevisions('1', request),
+    controller.getPageRaw('1', request),
+    controller.getBacklinks('1', request),
+    controller.getBlame('1', request),
+    controller.getRecent(request),
+    controller.search(request, 'query', undefined, undefined, undefined, undefined),
+    controller.suggest(request, 'query', undefined),
+    controller.special(request),
+    controller.categoryMembers('category', request),
+    controller.templates(request),
+    controller.getRevision('11', request),
+    controller.getRevisionDiff('11', '12', request)
+  ]);
+
+  assert.deepEqual(received.map((entry) => entry.method).sort(), [
+    'backlinks', 'blame', 'by-path', 'categories', 'diff', 'page', 'raw',
+    'recent', 'revision', 'revisions', 'search', 'special', 'suggest', 'templates'
+  ]);
+  assert.equal(received.every((entry) => entry.viewer === session), true);
+});
+
 test('anonymous wiki controller read applies CIDR ACL from the central request context', async () => {
   const store = {
     aclRule: {

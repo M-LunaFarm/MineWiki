@@ -361,6 +361,38 @@ test('ACL deny read overrides public page read', async () => {
   assert.equal(decision.reason, 'acl_private');
 });
 
+test('page action ACL evaluates the complete browser actor and explicit request address', async () => {
+  const evaluations: Array<{ action: string; actor: WikiPermissionActor | null; requestIp?: string | null }> = [];
+  const browserActor = actor({
+    groups: ['admin'],
+    permissions: ['wiki.history.private'],
+    requestIp: '198.51.100.9'
+  });
+  const service = createService({
+    acl: {
+      async evaluate(input: { action: string; actor: WikiPermissionActor | null; requestIp?: string | null }) {
+        evaluations.push(input);
+        return input.action === 'history'
+          ? { matched: true, allowed: true, reason: 'session_claim_allow' }
+          : { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as unknown as WikiAclService
+  });
+
+  const decision = await service.canUsePageAction({
+    accountId: browserActor.accountId,
+    actor: browserActor,
+    requestIp: browserActor.requestIp,
+    action: 'history',
+    page: page()
+  });
+
+  assert.deepEqual(decision, { allowed: true, reason: 'session_claim_allow' });
+  assert.equal(evaluations.length, 2);
+  assert.equal(evaluations.every((input) => input.actor === browserActor), true);
+  assert.equal(evaluations.every((input) => input.requestIp === '198.51.100.9'), true);
+});
+
 test('logged-in active user can edit open page', async () => {
   const service = createService();
   const decision = await service.canEditPage({

@@ -20,6 +20,11 @@ import {
   WikiContributionPolicyService,
   type WikiPolicyAcceptance,
 } from './wiki-contribution-policy.service';
+import {
+  resolveWikiAccessContext,
+  type WikiAccessContext,
+  type WikiAccessViewer,
+} from './wiki-read.service';
 
 type ChangeType = 'create' | 'edit' | 'move' | 'delete' | 'restore' | 'revert';
 
@@ -1425,13 +1430,14 @@ export class WikiEditService {
     return { ...mutation, sectionAnchor: nextHeading.anchor };
   }
 
-  async getRevision(revisionId: string, accountId?: string | null): Promise<WikiRevisionResponse> {
-    return this.getRevisionForAction(revisionId, accountId ?? null, 'raw');
+  async getRevision(revisionId: string, viewer?: WikiAccessViewer): Promise<WikiRevisionResponse> {
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    return this.getRevisionForAction(revisionId, access, 'raw');
   }
 
   async getRawPage(
     pageId: string,
-    accountId?: string | null,
+    viewer?: WikiAccessViewer,
     revisionId?: string | null,
     options: { readonly allowedSpaceId?: bigint } = {}
   ): Promise<WikiRevisionResponse> {
@@ -1443,9 +1449,10 @@ export class WikiEditService {
     if (options.allowedSpaceId !== undefined && page.spaceId !== options.allowedSpaceId) {
       throw new NotFoundException('Wiki page not found.');
     }
-    await this.wikiPermissions.assertCanReadPage({ accountId: accountId ?? null, page });
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    await this.wikiPermissions.assertCanReadPage({ ...access, page });
     await this.wikiPermissions.assertCanUsePageAction({
-      accountId: accountId ?? null,
+      ...access,
       action: 'raw',
       page
     });
@@ -1464,7 +1471,7 @@ export class WikiEditService {
 
   private async getRevisionForAction(
     revisionId: string,
-    accountId: string | null,
+    access: WikiAccessContext,
     action: 'raw' | 'history',
     options: { readonly allowedSpaceId?: bigint } = {}
   ): Promise<WikiRevisionResponse> {
@@ -1478,23 +1485,24 @@ export class WikiEditService {
       throw new NotFoundException('Wiki revision not found.');
     }
     await this.wikiPermissions.assertCanReadPage({
-      accountId,
+      ...access,
       page,
       revision
     });
-    await this.wikiPermissions.assertCanUsePageAction({ accountId, action, page });
+    await this.wikiPermissions.assertCanUsePageAction({ ...access, action, page });
     return this.toRevisionResponse(revision);
   }
 
   async getRevisionDiff(
     leftId: string,
     rightId: string,
-    accountId?: string | null,
+    viewer?: WikiAccessViewer,
     options: { readonly allowedSpaceId?: bigint } = {}
   ): Promise<WikiRevisionDiffResponse> {
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
     const [left, right] = await Promise.all([
-      this.getRevisionForAction(leftId, accountId ?? null, 'history', options),
-      this.getRevisionForAction(rightId, accountId ?? null, 'history', options)
+      this.getRevisionForAction(leftId, access, 'history', options),
+      this.getRevisionForAction(rightId, access, 'history', options)
     ]);
     if (left.pageId !== right.pageId) {
       throw new BadRequestException('Wiki revisions must belong to the same page.');

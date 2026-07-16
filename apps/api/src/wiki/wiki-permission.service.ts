@@ -499,6 +499,8 @@ export class WikiPermissionService {
 
   async assertCanUsePageAction(input: {
     readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
+    readonly requestIp?: string | null;
     readonly action: WikiAclAction;
     readonly page: WikiPermissionPage | null;
     readonly store?: WikiPermissionStore;
@@ -841,6 +843,8 @@ export class WikiPermissionService {
 
   async canUsePageAction(input: {
     readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
+    readonly requestIp?: string | null;
     readonly action: WikiAclAction;
     readonly page: WikiPermissionPage | null;
     readonly store?: WikiPermissionStore;
@@ -851,20 +855,22 @@ export class WikiPermissionService {
     }
     const readDecision = await this.canReadPage({
       accountId: input.accountId,
+      actor: input.actor,
+      requestIp: input.requestIp,
       page: input.page,
       store
     });
     if (!readDecision.allowed) {
       return readDecision;
     }
-    const actor = await this.resolveActor(input.accountId, store);
+    const actor = input.actor === undefined ? await this.resolveActor(input.accountId, store) : input.actor;
     const acl = await this.evaluateAcl(input.action, actor, {
       pageId: input.page.id,
       spaceId: input.page.spaceId,
       namespaceId: input.page.namespaceId,
       title: input.page.title,
       createdBy: input.page.createdBy
-    }, store);
+    }, store, input.requestIp);
     if (acl.matched) {
       return acl.allowed ? allow(acl.reason) : deny(acl.reason);
     }

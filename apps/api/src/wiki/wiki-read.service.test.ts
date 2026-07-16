@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
+import type { SessionPayload } from '../session/session.service';
 import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiIncludeService } from './wiki-include.service';
 import { buildServerWikiNavigation, buildServerWikiPagePath, buildServerWikiToolPath, encodeWikiSearchCursor, parseWikiSearchCursor, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
@@ -72,6 +73,53 @@ test('public pagecount treats an unknown namespace as thetree-compatible site-wi
   assert.deepEqual(second, first);
   assert.equal(namespaceLookups, 2);
   assert.equal(pageQueries, 1);
+});
+
+test('revision reads build an ACL actor from browser sessions while bare account IDs stay claim-free', async () => {
+  const page = {
+    id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'page', slug: 'page', title: 'Page', displayTitle: 'Page',
+    currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 5n,
+    createdAt: new Date(), updatedAt: new Date()
+  };
+  const prisma = {
+    wikiProfile: {
+      async findUnique() { return { id: 9n, status: 'active' }; },
+      async findMany() { return []; }
+    },
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageRevision: { async findMany() { return []; } }
+  } as unknown as PrismaService;
+  const readInputs: Array<Record<string, unknown>> = [];
+  const actorInputs: Array<{ readonly session: SessionPayload; readonly profile: { readonly id: bigint; readonly status: string } }> = [];
+  const actor = {
+    accountId: 'account-1', profileId: 9n, status: 'active', isElevated: true,
+    groups: ['admin'], permissions: ['wiki.read.private'], requestIp: '192.0.2.44'
+  };
+  const permissions = {
+    actorFromSession(receivedSession: SessionPayload, profile: { id: bigint; status: string }) {
+      actorInputs.push({ session: receivedSession, profile });
+      return actor;
+    },
+    async assertCanReadPage(input: Record<string, unknown>) { readInputs.push(input); },
+    async assertCanUsePageAction() {}
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+  const browserSession = {
+    sessionId: 'session-1', userId: 'account-1', tokenVersion: 3, isElevated: true,
+    authenticatedAt: '2026-07-16T00:00:00.000Z', groups: ['admin'],
+    permissions: ['wiki.read.private'], requestIp: '192.0.2.44'
+  } satisfies SessionPayload;
+
+  await service.getRevisions('1', browserSession);
+  await service.getRevisions('1', 'token-account');
+
+  assert.deepEqual(actorInputs, [{ session: browserSession, profile: { id: 9n, status: 'active' } }]);
+  assert.equal(readInputs[0]?.actor, actor);
+  assert.equal(readInputs[0]?.requestIp, browserSession.requestIp);
+  assert.equal(readInputs[0]?.accountId, browserSession.userId);
+  assert.equal('actor' in readInputs[1]!, false);
+  assert.equal('requestIp' in readInputs[1]!, false);
+  assert.equal(readInputs[1]?.accountId, 'token-account');
 });
 
 test('public block history redacts private reasons and account identity while keeping a stable cursor', async () => {
