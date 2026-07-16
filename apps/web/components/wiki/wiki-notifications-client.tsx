@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, CheckCheck, GitCommitHorizontal, Loader2, MessageSquareText, PenLine } from 'lucide-react';
+import { Bell, CheckCheck, GitCommitHorizontal, Loader2, MessageSquareText, PenLine, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -8,6 +8,7 @@ import {
   fetchWikiNotifications,
   markAllWikiNotificationsRead,
   markWikiNotificationRead,
+  markWikiNotificationUnread,
   type WikiNotificationItem
 } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
@@ -62,6 +63,16 @@ export function WikiNotificationsClient() {
     } finally { setWorking(false); }
   }
 
+  async function markUnread(item: WikiNotificationItem) {
+    setWorking(true); setError(null);
+    try {
+      await markWikiNotificationUnread(item.id);
+      setItems((current) => current.map((candidate) => candidate.id === item.id ? { ...candidate, read: false } : candidate));
+      setUnreadCount((current) => current + 1);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '알림을 읽지 않음으로 되돌리지 못했습니다.'); }
+    finally { setWorking(false); }
+  }
+
   async function loadMore() {
     if (!cursor) return;
     setWorking(true); setError(null);
@@ -85,8 +96,8 @@ export function WikiNotificationsClient() {
     </div>
     {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
     {items.length === 0 ? <div className="border border-dashed border-white/15 p-10 text-center"><Bell className="mx-auto size-7 text-slate-600" /><p className="mt-3 text-sm text-slate-400">새 알림이 없습니다.</p></div> : <ol className="divide-y divide-white/[0.07] border border-white/10 bg-[#0d1219]">
-      {items.map((item) => <li key={item.id} className={item.read ? 'bg-transparent' : 'bg-emerald-300/[0.045]'}>
-        <button type="button" onClick={() => void open(item)} className="grid w-full grid-cols-[auto_minmax(0,1fr)] gap-3 p-4 text-left transition hover:bg-white/[0.035] sm:p-5">
+      {items.map((item) => <li key={item.id} className={`relative ${item.read ? 'bg-transparent' : 'bg-emerald-300/[0.045]'}`}>
+        <button type="button" onClick={() => void open(item)} className={`grid w-full grid-cols-[auto_minmax(0,1fr)] gap-3 p-4 text-left transition hover:bg-white/[0.035] sm:p-5 ${item.read ? 'pb-16 sm:pb-5 sm:pr-36' : ''}`}>
           <span className={`mt-0.5 flex size-9 items-center justify-center rounded-full ${item.read ? 'bg-white/[0.05] text-slate-500' : 'bg-emerald-300/10 text-emerald-300'}`}>{notificationIcon(item.type)}</span>
           <span className="min-w-0">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1"><strong className="truncate text-sm text-white">{item.title}</strong>{!item.read ? <span className="size-1.5 rounded-full bg-emerald-300" aria-label="읽지 않음" /> : null}</span>
@@ -94,6 +105,7 @@ export function WikiNotificationsClient() {
             <time className="mt-2 block text-xs text-slate-600">{formatDate(item.createdAt)}</time>
           </span>
         </button>
+        {item.read ? <button type="button" disabled={working} onClick={() => void markUnread(item)} className="chip chip-muted absolute bottom-3 right-3 inline-flex min-h-11 items-center gap-1.5"><RotateCcw className="size-3.5" /> 읽지 않음</button> : null}
       </li>)}
     </ol>}
     {cursor ? <button type="button" disabled={working} onClick={() => void loadMore()} className="chip chip-muted mx-auto flex items-center gap-2">{working ? <Loader2 className="size-4 animate-spin" /> : null} 이전 알림 더 보기</button> : null}

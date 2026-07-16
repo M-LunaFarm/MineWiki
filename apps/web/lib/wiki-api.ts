@@ -348,6 +348,33 @@ export interface WikiNotificationListResponse {
   readonly nextCursor: string | null;
 }
 
+export type WikiReportTargetType = 'page' | 'revision' | 'discussion' | 'comment';
+export type WikiReportStatus = 'open' | 'in_review' | 'resolved' | 'dismissed';
+
+export interface WikiReportCase {
+  readonly id: string;
+  readonly targetType: WikiReportTargetType;
+  readonly targetId: string;
+  readonly pageId: string;
+  readonly status: WikiReportStatus;
+  readonly reportCount: number;
+  readonly evidenceSnapshot: unknown;
+  readonly assigneeProfileId: string | null;
+  readonly assignedAt: string | null;
+  readonly resolution: string | null;
+  readonly version: number;
+  readonly statusUpdatedAt: string;
+  readonly createdAt: string;
+  readonly recentSubmissions: ReadonlyArray<{ readonly id: string; readonly reporterProfileId: string; readonly reason: string; readonly createdAt: string }>;
+}
+
+export interface WikiReportQueueResponse {
+  readonly items: WikiReportCase[];
+  readonly nextCursor: string | null;
+  readonly limit: number;
+  readonly snapshotAt: string;
+}
+
 export interface WikiPushStatus {
   readonly enabled: boolean;
   readonly subscribed: boolean;
@@ -1182,6 +1209,31 @@ export async function fetchWikiNotifications(cursor?: string): Promise<WikiNotif
 
 export async function markWikiNotificationRead(notificationId: string): Promise<{ readonly read: true }> {
   return mutateWikiBrowser<{ readonly read: true }>(`/v1/wiki/notifications/${encodeURIComponent(notificationId)}/read`, 'POST', {});
+}
+
+export async function markWikiNotificationUnread(notificationId: string): Promise<{ readonly read: false }> {
+  return mutateWikiBrowser<{ readonly read: false }>(`/v1/wiki/notifications/${encodeURIComponent(notificationId)}/unread`, 'POST', {});
+}
+
+export async function createWikiReport(input: { readonly targetType: WikiReportTargetType; readonly targetId: string; readonly reason: string }): Promise<{ readonly caseId: string; readonly deduplicated: boolean; readonly reportCount: number }> {
+  return mutateWikiBrowser('/v1/wiki/reports', 'POST', input);
+}
+
+export async function fetchWikiReportQueue(input: { readonly status?: WikiReportStatus; readonly targetType?: WikiReportTargetType; readonly assignee?: 'me' | 'unassigned'; readonly cursor?: string } = {}): Promise<WikiReportQueueResponse> {
+  const params = new URLSearchParams({ limit: '20' });
+  if (input.status) params.set('status', input.status);
+  if (input.targetType) params.set('targetType', input.targetType);
+  if (input.assignee) params.set('assignee', input.assignee);
+  if (input.cursor) params.set('cursor', input.cursor);
+  return readWikiBrowser(`/v1/admin/wiki/reports?${params.toString()}`);
+}
+
+export async function assignWikiReport(caseId: string, expectedVersion: number, assigneeProfileId?: string | null): Promise<WikiReportCase> {
+  return mutateWikiBrowser(`/v1/admin/wiki/reports/${encodeURIComponent(caseId)}/assignment`, 'PATCH', { expectedVersion, assigneeProfileId });
+}
+
+export async function transitionWikiReport(caseId: string, expectedVersion: number, status: WikiReportStatus, resolution?: string): Promise<WikiReportCase> {
+  return mutateWikiBrowser(`/v1/admin/wiki/reports/${encodeURIComponent(caseId)}/status`, 'PATCH', { expectedVersion, status, resolution });
 }
 
 export async function markAllWikiNotificationsRead(throughId: string): Promise<{ readonly count: number }> {

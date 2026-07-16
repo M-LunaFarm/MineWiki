@@ -7,6 +7,7 @@ import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { WikiWatchButton } from './wiki-watch-button';
 import { buildServerWikiToolPath, buildWikiPagePath } from '../../lib/wiki-routes.mjs';
+import { WikiReportButton } from './wiki-report-button';
 
 interface WikiPageToolsProps {
   readonly pageId: string;
@@ -97,6 +98,7 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
         <Link href={blameHref} className="chip chip-muted inline-flex items-center gap-1.5"><GitCommitHorizontal className="size-3.5" /> blame</Link>
         <Link href={aclHref} className="chip chip-muted inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5" /> ACL</Link>
         <Link href="/wiki/special" className="chip chip-muted inline-flex items-center gap-1.5"><Compass className="size-3.5" /> 특수 문서</Link>
+        <WikiReportButton targetType="page" targetId={pageId} returnTo={routePath} />
       </div>
       {!authLoading && !account ? (
         <p className="mt-4 border-t border-white/10 pt-4 text-xs text-slate-500">

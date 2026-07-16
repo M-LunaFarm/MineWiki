@@ -141,6 +141,9 @@ export function WikiAdminConsole({ view }: { readonly view: 'overview' | 'pages'
             <Link href="/admin/wiki/batch-rollback" className="chip chip-muted">
               일괄 복구
             </Link>
+            <Link href="/admin/wiki/reports" className="chip chip-muted">
+              신고 큐
+            </Link>
           </nav>
         </div>
       </section>

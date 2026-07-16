@@ -9,6 +9,7 @@ import { useAuth } from '../providers/auth-context';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { countWikiDiscussionStatuses, WIKI_DISCUSSION_STATUS_FILTERS, wikiDiscussionFilterCount, wikiDiscussionMatchesStatusFilter, wikiDiscussionStatusClass, wikiDiscussionStatusLabel } from '../../lib/wiki-discussion-status.mjs';
 import { CaptchaChallenge, isCaptchaConfigured } from '../security/captcha-challenge';
+import { WikiReportButton } from './wiki-report-button';
 
 export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
   const { account } = useAuth();
@@ -721,6 +722,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <WikiReportButton targetType="discussion" targetId={selected.id} returnTo={selectedThreadPath(pageId, returnTo, selected.id)} />
                   {account ? (
                     <button type="button" disabled={working} onClick={() => void toggleSubscription()} className="chip chip-muted inline-flex min-h-11 items-center gap-2">
                       {selected.subscribed ? <BellOff className="size-4" /> : <Bell className="size-4" />}
@@ -879,6 +881,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                           <Code2 className="size-3.5" /> {rawComment?.id === item.id ? '원문 닫기' : '원문'}
                         </button>
                       ) : null}
+                      {item.status === 'normal' ? <WikiReportButton targetType="comment" targetId={item.id} returnTo={`${selectedThreadPath(pageId, returnTo, selected.id)}&comment=${encodeURIComponent(item.id)}`} compact /> : null}
                       {selected.canModerate && item.status === 'normal' ? (
                         <button type="button" disabled={working} onClick={() => void togglePinnedComment(item.id)} className="inline-flex min-h-11 items-center gap-1 hover:text-amber-200">
                           <Pin className="size-3.5" /> {item.pinned ? '고정 해제' : '고정'}
