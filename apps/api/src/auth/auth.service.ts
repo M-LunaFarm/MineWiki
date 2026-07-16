@@ -523,10 +523,26 @@ export class AuthService {
     if (!account) {
       throw new NotFoundAccountError();
     }
-    const updated = await this.prisma.account.update({
-      where: { id: account.id },
-      data: { displayName: trimmed },
-    });
+    const updated = await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [account.id],
+      async (tx, group) => {
+        if (!group.accountIds.includes(account.id)) {
+          throw new NotFoundAccountError();
+        }
+        const now = new Date();
+        const canonical = await tx.account.update({
+          where: { id: account.id },
+          data: { displayName: trimmed },
+        });
+        await tx.wikiProfile.updateMany({
+          where: { accountId: account.id, status: 'active' },
+          data: { displayName: trimmed, updatedAt: now },
+        });
+        return canonical;
+      },
+      { inactiveError: () => new ForbiddenException('활성 계정의 표시 이름만 변경할 수 있습니다.') },
+    );
     return this.toAccountView({
       ...account,
       displayName: updated.displayName,
