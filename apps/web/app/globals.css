@@ -230,6 +230,11 @@ html[data-theme='light'] .chip-muted {
   color: #59645b;
 }
 
+.wiki-report-eyebrow { color: #fda4af; }
+.wiki-report-warning { border-color: rgba(252, 211, 77, 0.35); background: rgba(252, 211, 77, 0.08); color: #fef3c7; }
+html[data-theme='light'] .wiki-report-eyebrow { color: #be123c; }
+html[data-theme='light'] .wiki-report-warning { border-color: #d5a62f; background: #fff8e6; color: #664b00; }
+
 /* Wiki palette: paper-like in light mode, restrained forest ink in dark mode. */
 .wiki-shell {
   background-color: #0a100d;
