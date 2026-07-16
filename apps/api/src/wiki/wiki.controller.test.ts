@@ -53,6 +53,33 @@ test('new wiki pages require captcha before the clean mutation reaches the edit 
   assert.deepEqual(mutationInput, { receivedSession: session, body: { namespace: 'main', title: '새 문서', contentRaw: '본문' } });
 });
 
+test('wiki move controller forwards additive destination namespace and space fields', async () => {
+  const session = { userId: 'account-1' } as SessionPayload;
+  let mutationInput: unknown;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    {} as WikiReadService,
+    {
+      async movePage(receivedSession: SessionPayload, pageId: string, body: unknown) {
+        mutationInput = { receivedSession, pageId, body };
+        return { pageId, namespace: 'guide', spaceId: '22' };
+      }
+    } as unknown as WikiEditService,
+    captchaStub
+  );
+  const body = {
+    namespace: 'guide',
+    spaceId: '22',
+    title: '새 위치',
+    reason: '정리',
+    leaveRedirect: true
+  };
+
+  await controller.movePage('7', body, session);
+
+  assert.deepEqual(mutationInput, { receivedSession: session, pageId: '7', body });
+});
+
 test('public block history controller is callable without an authenticated session', async () => {
   let input: unknown;
   const controller = new WikiController(

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
-import { resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
+import { parseLinkTarget, resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
 test('normalizes titles, slugs, search text, and content hashes', () => {
@@ -31,6 +31,7 @@ test('resolves canonical wiki route mappings', () => {
   assert.equal(wikiUrl('guide', '서버 접속'), '/guide/%EC%84%9C%EB%B2%84_%EC%A0%91%EC%86%8D');
   assert.equal(wikiUrl('user', 'owner_name/작업실'), '/user/owner_name/%EC%9E%91%EC%97%85%EC%8B%A4');
   assert.equal(wikiUrl('category', '게임플레이/몹'), '/wiki/category/%EA%B2%8C%EC%9E%84%ED%94%8C%EB%A0%88%EC%9D%B4/%EB%AA%B9');
+  assert.deepEqual(parseLinkTarget('main:대문'), { namespace: 'main', title: '대문' });
 });
 
 test('parses links, categories, components, and safe HTML', () => {

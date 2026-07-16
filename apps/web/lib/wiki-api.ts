@@ -1074,6 +1074,10 @@ export interface WikiMutationResponse {
 
 export interface WikiMoveResponse extends WikiMutationResponse {
   readonly previousTitle: string;
+  readonly previousNamespace: string;
+  readonly previousSpaceId: string;
+  readonly spaceId: string;
+  readonly movedPageCount: number;
   readonly redirectPageId: string | null;
 }
 
@@ -1873,8 +1877,10 @@ function wikiApiError(response: Response, body: unknown, fallback: string): Wiki
   );
 }
 
-export async function moveWikiPage(input: { pageId: string; title: string; displayTitle?: string; reason: string; leaveRedirect: boolean }): Promise<WikiMoveResponse> {
+export async function moveWikiPage(input: { pageId: string; namespace?: string; spaceId?: string; title: string; displayTitle?: string; reason: string; leaveRedirect: boolean }): Promise<WikiMoveResponse> {
   return mutateWikiPage(input.pageId, 'move', {
+    namespace: input.namespace,
+    spaceId: input.spaceId,
     title: input.title,
     displayTitle: input.displayTitle,
     reason: input.reason,

@@ -64,6 +64,8 @@ export interface WikiSectionMutationResponse extends WikiMutationResponse {
 }
 
 export interface WikiMoveRequest {
+  readonly namespace?: string;
+  readonly spaceId?: string;
   readonly title?: string;
   readonly displayTitle?: string;
   readonly reason?: string;
@@ -138,6 +140,10 @@ export interface AuthorizedWikiFileDocumentRequest {
 
 export interface WikiMoveResponse extends WikiMutationResponse {
   readonly previousTitle: string;
+  readonly previousNamespace: string;
+  readonly previousSpaceId: string;
+  readonly spaceId: string;
+  readonly movedPageCount: number;
   readonly redirectPageId: string | null;
 }
 
@@ -370,13 +376,20 @@ export class WikiEditService {
   }
 
   async resolveCreatePageTarget(request: Pick<WikiPageMutationRequest, 'namespace' | 'title' | 'spaceId'>): Promise<ResolvedWikiCreateTarget> {
+    return this.resolveCreatePageTargetWithStore(this.prisma, request);
+  }
+
+  private async resolveCreatePageTargetWithStore(
+    store: PrismaService | Prisma.TransactionClient,
+    request: Pick<WikiPageMutationRequest, 'namespace' | 'title' | 'spaceId'>
+  ): Promise<ResolvedWikiCreateTarget> {
     const namespaceCode = this.cleanNamespace(request.namespace);
     const title = this.requiredString(request.title, 'title');
-    const namespace = await this.prisma.wikiNamespace.findUnique({ where: { code: namespaceCode } });
+    const namespace = await store.wikiNamespace.findUnique({ where: { code: namespaceCode } });
     if (!namespace) throw new NotFoundException('Wiki namespace not found.');
-    const target = await this.resolveCreateTarget(namespaceCode, title, request.spaceId);
+    const target = await this.resolveCreateTarget(store, namespaceCode, title, request.spaceId);
     const owner = namespaceCode === 'user'
-      ? await this.wikiPermissions.resolveUserDocumentOwner(this.prisma, title)
+      ? await this.wikiPermissions.resolveUserDocumentOwner(store, title)
       : null;
     if (namespaceCode === 'user' && !owner) {
       throw new BadRequestException('User document paths must start with an active canonical username.');
@@ -397,10 +410,15 @@ export class WikiEditService {
     };
   }
 
-  private async resolveCreateTarget(namespaceCode: string, title: string, requestedSpaceId?: string) {
+  private async resolveCreateTarget(
+    store: Pick<PrismaService, 'wikiSpace' | 'serverWiki'>,
+    namespaceCode: string,
+    title: string,
+    requestedSpaceId?: string
+  ) {
     if (requestedSpaceId) {
       const spaceId = this.parseBigIntId(requestedSpaceId, 'spaceId');
-      const space = await this.prisma.wikiSpace.findUnique({
+      const space = await store.wikiSpace.findUnique({
         where: { id: spaceId },
         select: { id: true, status: true, spaceType: true, rootNamespaceCode: true }
       });
@@ -414,7 +432,7 @@ export class WikiEditService {
         if (space.spaceType !== 'server_wiki') {
           throw new BadRequestException('Server pages require a server wiki space.');
         }
-        const serverWiki = await this.prisma.serverWiki.findFirst({
+        const serverWiki = await store.serverWiki.findFirst({
           where: { spaceId: space.id, status: { not: 'deleted' } },
           select: { slug: true }
         });
@@ -437,7 +455,7 @@ export class WikiEditService {
       if (!serverSlug || relativeParts.length === 0) {
         throw new BadRequestException('Server wiki child pages require a server slug and document path.');
       }
-      const serverWiki = await this.prisma.serverWiki.findUnique({
+      const serverWiki = await store.serverWiki.findUnique({
         where: { slug: serverSlug },
         select: { spaceId: true, status: true },
       });
@@ -451,7 +469,7 @@ export class WikiEditService {
       };
     }
     return {
-      spaceId: await this.findDefaultSpaceId(namespaceCode),
+      spaceId: await this.findDefaultSpaceId(store, namespaceCode),
       displayTitle: title,
       pageType: 'article',
     };
@@ -891,7 +909,6 @@ export class WikiEditService {
   async movePage(session: SessionPayload, pageId: string, request: WikiMoveRequest): Promise<WikiMoveResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
     const nextTitle = this.requiredString(request.title, 'title');
-    const nextSlug = slugifyTitle(nextTitle);
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const now = new Date();
 
@@ -905,41 +922,67 @@ export class WikiEditService {
       if (!namespace) {
         throw new NotFoundException('Wiki namespace not found.');
       }
+      const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
       await this.wikiPermissions.assertCanMutatePageAction({
-        actor: this.wikiPermissions.actorFromSession(session, actor),
+        actor: permissionActor,
         action: 'move',
         page,
         store: tx
       });
       await this.assertPageIsNotSpaceRoot(tx, page, 'move');
-      const destinationOwner = namespace.code === 'user'
-        ? await this.wikiPermissions.resolveUserDocumentOwner(tx, nextTitle)
-        : null;
-      if (namespace.code === 'user' && !userDocumentTreeHasSingleOwner(
+
+      const destinationNamespaceCode = this.cleanOptional(request.namespace) ?? namespace.code;
+      const destinationNamespace = await tx.wikiNamespace.findUnique({ where: { code: destinationNamespaceCode } });
+      if (!destinationNamespace) {
+        throw new NotFoundException('Wiki namespace not found.');
+      }
+      await this.lockNamespacesForMove(tx, [page.namespaceId, destinationNamespace.id]);
+
+      const destination = await this.resolveCreatePageTargetWithStore(tx, {
+        namespace: destinationNamespaceCode,
+        title: nextTitle,
+        spaceId: this.cleanOptional(request.spaceId)
+          ?? (destinationNamespaceCode === namespace.code ? page.spaceId.toString() : undefined)
+      });
+      this.assertMoveNamespaceInvariants(namespace.code, destination.namespaceCode, page.title, destination.title);
+      if (destination.namespaceCode === 'user' && !userDocumentTreeHasSingleOwner(
         page.ownerProfileId,
-        destinationOwner?.id,
+        destination.ownerProfileId,
         [page]
       )) {
         throw new BadRequestException('User documents can only move inside their owner namespace.');
       }
       await this.wikiPermissions.assertCanCreatePage({
-        actor: this.wikiPermissions.actorFromSession(session, actor),
-        namespaceCode: namespace.code,
-        spaceId: page.spaceId,
-        title: nextTitle,
-        pageType: page.pageType,
+        actor: permissionActor,
+        namespaceCode: destination.namespaceCode,
+        spaceId: destination.spaceId,
+        title: destination.title,
+        pageType: destination.pageType,
         store: tx
       });
-      if (isReservedWikiToolPath(namespace.code, nextSlug)) {
-        throw new BadRequestException('Wiki document paths cannot use the reserved _tools segment.');
-      }
-      if (nextSlug === page.slug) {
+      if (destination.namespaceId === page.namespaceId && destination.slug === page.slug) {
         throw new BadRequestException('The destination title is the same as the current title.');
       }
-      if (nextSlug.startsWith(`${page.slug}/`)) {
+      if (
+        destination.namespaceId === page.namespaceId
+        && destination.spaceId === page.spaceId
+        && destination.slug.startsWith(`${page.slug}/`)
+      ) {
         throw new BadRequestException('A wiki page tree cannot be moved inside itself.');
       }
-      await this.assertMoveStaysInSpace(tx, page, nextSlug);
+      const subtreeCandidates = await tx.wikiPage.findMany({
+        where: {
+          namespaceId: page.namespaceId,
+          spaceId: page.spaceId,
+          status: { not: 'deleted' },
+          pageType: { not: 'redirect' },
+          OR: [{ id: page.id }, { localPath: { startsWith: `${page.localPath}/` } }]
+        },
+        select: { id: true }
+      });
+      for (const item of subtreeCandidates) {
+        if (item.id !== page.id) await this.lockPageForRevision(tx, item.id);
+      }
       const subtree = await tx.wikiPage.findMany({
         where: {
           namespaceId: page.namespaceId,
@@ -949,14 +992,39 @@ export class WikiEditService {
           OR: [{ id: page.id }, { localPath: { startsWith: `${page.localPath}/` } }]
         }
       });
-      const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
-      const moves = subtree.map((item) => {
-        const suffix = item.localPath === page.localPath ? '' : item.localPath.slice(page.localPath.length);
-        return { source: item, slug: `${nextSlug}${suffix}` };
-      });
-      if (namespace.code === 'user' && !userDocumentTreeHasSingleOwner(
+
+      const moves: Array<{
+        readonly source: (typeof subtree)[number];
+        readonly target: ResolvedWikiCreateTarget;
+        readonly displayTitle: string;
+      }> = [];
+      for (const item of subtree) {
+        const titleSuffix = this.moveTitleSuffix(page, item);
+        const target = item.id === page.id
+          ? destination
+          : await this.resolveCreatePageTargetWithStore(tx, {
+              namespace: destination.namespaceCode,
+              title: `${destination.title}${titleSuffix}`,
+              spaceId: destination.spaceId.toString()
+            });
+        if (
+          target.namespaceId !== destination.namespaceId
+          || target.spaceId !== destination.spaceId
+          || target.pageType !== destination.pageType
+        ) {
+          throw new ConflictException('The document tree no longer resolves to one destination wiki space.');
+        }
+        moves.push({
+          source: item,
+          target,
+          displayTitle: item.id === page.id
+            ? this.cleanOptional(request.displayTitle) ?? target.displayTitle
+            : item.displayTitle
+        });
+      }
+      if (destination.namespaceCode === 'user' && !userDocumentTreeHasSingleOwner(
         page.ownerProfileId,
-        destinationOwner?.id,
+        destination.ownerProfileId,
         moves.map((move) => move.source)
       )) {
         throw new ConflictException('The user document tree contains inconsistent ownership.');
@@ -965,15 +1033,27 @@ export class WikiEditService {
         if (move.source.id === page.id) continue;
         await this.wikiPermissions.assertCanMutatePageAction({ actor: permissionActor, action: 'move', page: move.source, store: tx });
         await this.wikiPermissions.assertCanCreatePage({
-          actor: permissionActor, namespaceCode: namespace.code, spaceId: page.spaceId,
-          title: move.slug, pageType: move.source.pageType, store: tx
+          actor: permissionActor,
+          namespaceCode: move.target.namespaceCode,
+          spaceId: move.target.spaceId,
+          title: move.target.title,
+          pageType: move.target.pageType,
+          store: tx
         });
       }
       const conflicts = await tx.wikiPage.findMany({
         where: {
-          namespaceId: page.namespaceId,
-          slug: { in: moves.map((move) => move.slug) },
-          id: { notIn: moves.map((move) => move.source.id) }
+          id: { notIn: moves.map((move) => move.source.id) },
+          OR: [
+            {
+              namespaceId: destination.namespaceId,
+              slug: { in: moves.map((move) => move.target.slug) }
+            },
+            {
+              spaceId: destination.spaceId,
+              localPath: { in: moves.map((move) => move.target.slug) }
+            }
+          ]
         },
         select: { id: true }
       });
@@ -986,17 +1066,28 @@ export class WikiEditService {
         const updated = await tx.wikiPage.update({
           where: { id: move.source.id },
           data: {
-            localPath: move.slug,
-            slug: move.slug,
-            title: move.source.id === page.id ? nextTitle : move.slug,
-            displayTitle: move.source.id === page.id
-              ? this.cleanOptional(request.displayTitle) ?? nextTitle.split('/').at(-1) ?? nextTitle
-              : move.source.displayTitle,
+            namespaceId: move.target.namespaceId,
+            spaceId: move.target.spaceId,
+            localPath: move.target.slug,
+            slug: move.target.slug,
+            title: move.target.title,
+            displayTitle: move.displayTitle,
+            pageType: move.target.pageType,
+            ownerProfileId: move.target.ownerProfileId,
             updatedAt: now
           }
         });
         if (move.source.id === page.id) moved = updated;
       }
+
+      for (const move of moves) {
+        const revision = await this.findCurrentRevision(tx, move.source);
+        if (!revision) {
+          throw new NotFoundException('Public wiki revision not found.');
+        }
+        await this.rebuildCurrentRevisionIndexes(tx, move.source.id, revision);
+      }
+
       let redirectPageId: bigint | null = null;
       if (request.leaveRedirect !== false) for (const move of moves) {
         const redirect = await tx.wikiPage.create({
@@ -1020,7 +1111,7 @@ export class WikiEditService {
           pageId: redirect.id,
           revisionNo: 1,
           parentRevisionId: null,
-          contentRaw: this.redirectMarkup(namespace.code, move.source.id === page.id ? nextTitle : move.slug),
+          contentRaw: this.redirectMarkup(move.target.namespaceCode, move.target.title),
           editSummary: this.cleanOptional(request.reason) ?? `${move.source.title} 문서 이동`,
           isMinor: false,
           actorId: actor.id,
@@ -1036,11 +1127,18 @@ export class WikiEditService {
         if (move.source.id === page.id) redirectPageId = redirect.id;
       }
       for (const move of moves) {
-        const targetTitle = move.source.id === page.id ? nextTitle : move.slug;
         await this.insertRecentChange(tx, {
           pageId: move.source.id, revisionId: move.source.currentRevisionId, actorId: actor.id,
-          changeType: 'move', title: targetTitle, namespaceCode: namespace.code,
-          summary: this.cleanOptional(request.reason) ?? `${move.source.title} -> ${targetTitle}`,
+          changeType: 'move', title: move.target.title, namespaceCode: move.target.namespaceCode,
+          summary: this.moveRecentSummary({
+            reason: this.cleanOptional(request.reason),
+            previousNamespace: namespace.code,
+            previousSpaceId: move.source.spaceId,
+            previousTitle: move.source.title,
+            namespace: move.target.namespaceCode,
+            spaceId: move.target.spaceId,
+            title: move.target.title
+          }),
           isMinor: false, createdAt: now
         });
       }
@@ -1052,13 +1150,17 @@ export class WikiEditService {
         pageId: moved.id.toString(),
         revisionId: latest.id.toString(),
         revisionNo: latest.revisionNo,
-        namespace: namespace.code,
+        namespace: destination.namespaceCode,
         title: moved.title,
         slug: moved.slug,
         previousTitle: page.title,
+        previousNamespace: namespace.code,
+        previousSpaceId: page.spaceId.toString(),
+        spaceId: destination.spaceId.toString(),
+        movedPageCount: moves.length,
         redirectPageId: redirectPageId?.toString() ?? null
       };
-    });
+    }).catch((error: unknown) => this.throwMoveCollision(error));
     await this.events?.audit('wiki.move', {
       category: 'wiki',
       actorAccountId: session.userId,
@@ -1068,6 +1170,11 @@ export class WikiEditService {
       metadata: {
         previousTitle: result.previousTitle,
         title: result.title,
+        previousNamespace: result.previousNamespace,
+        namespace: result.namespace,
+        previousSpaceId: result.previousSpaceId,
+        spaceId: result.spaceId,
+        movedPageCount: result.movedPageCount,
         redirectPageId: result.redirectPageId,
         reason: this.cleanOptional(request.reason)
       }
@@ -1303,28 +1410,29 @@ export class WikiEditService {
     }
   }
 
-  private async assertMoveStaysInSpace(
-    tx: Prisma.TransactionClient,
-    page: { readonly spaceId: bigint },
-    nextSlug: string
-  ): Promise<void> {
-    const serverWiki = await tx.serverWiki.findFirst({
-      where: { spaceId: page.spaceId },
-      select: { slug: true }
-    });
-    if (!serverWiki) {
-      return;
+  private assertMoveNamespaceInvariants(
+    previousNamespace: string,
+    namespace: string,
+    previousTitle: string,
+    title: string
+  ): void {
+    const violation = wikiMoveNamespaceInvariantViolation({ previousNamespace, namespace, previousTitle, title });
+    if (violation) throw new BadRequestException(violation);
+  }
+
+  private moveTitleSuffix(
+    root: { readonly id: bigint; readonly title: string; readonly localPath: string },
+    page: { readonly id: bigint; readonly title: string; readonly localPath: string }
+  ): string {
+    if (page.id === root.id) return '';
+    if (page.title.startsWith(`${root.title}/`)) {
+      return page.title.slice(root.title.length);
     }
-    const serverSlug = slugifyTitle(serverWiki.slug);
-    if (!nextSlug.startsWith(`${serverSlug}/`)) {
-      throw new BadRequestException('Server wiki pages must stay under their server path.');
-    }
+    return page.localPath.slice(root.localPath.length);
   }
 
   private redirectMarkup(namespaceCode: string, title: string): string {
-    return namespaceCode === 'main'
-      ? `#넘겨주기 [[${title}]]`
-      : `#넘겨주기 [[${namespaceCode}:${title}]]`;
+    return `#넘겨주기 [[${namespaceCode}:${title}]]`;
   }
 
   async appendSection(session: SessionPayload, pageId: string, request: WikiSectionMutationRequest): Promise<WikiMutationResponse> {
@@ -1574,8 +1682,11 @@ export class WikiEditService {
     }
   }
 
-  private async findDefaultSpaceId(namespaceCode: string): Promise<bigint> {
-    const direct = await this.prisma.wikiSpace.findFirst({
+  private async findDefaultSpaceId(
+    store: Pick<PrismaService, 'wikiSpace'>,
+    namespaceCode: string
+  ): Promise<bigint> {
+    const direct = await store.wikiSpace.findFirst({
       where: {
         rootNamespaceCode: namespaceCode,
         status: 'active'
@@ -1635,11 +1746,28 @@ export class WikiEditService {
     `;
   }
 
+  private async lockNamespacesForMove(tx: Prisma.TransactionClient, namespaceIds: readonly number[]): Promise<void> {
+    const ordered = [...new Set(namespaceIds)].sort((left, right) => left - right);
+    for (const namespaceId of ordered) {
+      await this.lockNamespaceForCreate(tx, namespaceId);
+    }
+  }
+
   private throwCreateCollision(error: unknown): never {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
       throw new ConflictException({
         code: 'wiki_create_target_exists',
         message: 'A document now exists at the requested title.'
+      });
+    }
+    throw error;
+  }
+
+  private throwMoveCollision(error: unknown): never {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+      throw new ConflictException({
+        code: 'wiki_move_target_exists',
+        message: 'A document now exists at the requested move destination.'
       });
     }
     throw error;
@@ -1738,6 +1866,42 @@ export class WikiEditService {
       title: input.title
     });
     return revision;
+  }
+
+  private async rebuildCurrentRevisionIndexes(
+    tx: Prisma.TransactionClient,
+    pageId: bigint,
+    revision: {
+      readonly id: bigint;
+      readonly contentRaw: string;
+      readonly contentSize: number;
+    }
+  ): Promise<void> {
+    if (!this.wikiLinks) return;
+    const parsed = parseMarkup(revision.contentRaw);
+    await this.wikiLinks.replaceForRevision(
+      tx,
+      pageId,
+      revision.id,
+      parsed.links,
+      parsed.categories,
+      parsed.includes,
+      { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
+    );
+  }
+
+  private moveRecentSummary(input: {
+    readonly reason: string | null;
+    readonly previousNamespace: string;
+    readonly previousSpaceId: bigint;
+    readonly previousTitle: string;
+    readonly namespace: string;
+    readonly spaceId: bigint;
+    readonly title: string;
+  }): string {
+    const metadata = `[${input.previousNamespace}@${input.previousSpaceId.toString()} -> ${input.namespace}@${input.spaceId.toString()}]`;
+    const titles = `${input.previousTitle} -> ${input.title}`;
+    return `${metadata} ${titles}${input.reason ? ` | ${input.reason}` : ''}`.slice(0, 255);
   }
 
   private async insertRecentChange(
@@ -1875,6 +2039,36 @@ export function categoryDocumentReferencesSelf(
   if (namespaceCode !== 'category') return false;
   const pageSlug = slugifyTitle(pageTitle);
   return categories.some((category) => slugifyTitle(category) === pageSlug);
+}
+
+function wikiFileExtension(title: string): string | null {
+  const filename = title.split('/').at(-1) ?? '';
+  const match = filename.match(/(\.[^.]+)$/u);
+  return match?.[1]?.toLocaleLowerCase('en-US') ?? null;
+}
+
+export function wikiMoveNamespaceInvariantViolation(input: {
+  readonly previousNamespace: string;
+  readonly namespace: string;
+  readonly previousTitle: string;
+  readonly title: string;
+}): string | null {
+  if (input.previousNamespace !== input.namespace && (
+    input.previousNamespace === 'user'
+    || input.namespace === 'user'
+    || input.previousNamespace === 'file'
+    || input.namespace === 'file'
+  )) {
+    return 'User and file documents cannot move across namespaces.';
+  }
+  if (input.previousNamespace === 'file') {
+    const previousExtension = wikiFileExtension(input.previousTitle);
+    const extension = wikiFileExtension(input.title);
+    if (!previousExtension || !extension || previousExtension !== extension) {
+      return 'File document moves must preserve the file extension.';
+    }
+  }
+  return null;
 }
 
 function sectionContentsByAnchor(content: string, anchor: string): string[] {

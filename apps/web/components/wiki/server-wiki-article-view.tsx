@@ -142,6 +142,8 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
           <div className="mt-8">
             <WikiPageTools
               pageId={page.id}
+              namespace={page.namespace}
+              spaceId={page.spaceId}
               title={page.title}
               displayTitle={page.displayTitle}
               routePath={routePath}

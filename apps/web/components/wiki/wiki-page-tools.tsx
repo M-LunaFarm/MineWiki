@@ -11,14 +11,17 @@ import { WikiReportButton } from './wiki-report-button';
 
 interface WikiPageToolsProps {
   readonly pageId: string;
+  readonly namespace: string;
+  readonly spaceId: string;
   readonly title: string;
   readonly displayTitle: string;
   readonly routePath: string;
 }
 
-export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPageToolsProps) {
+export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle, routePath }: WikiPageToolsProps) {
   const { account, loading: authLoading } = useAuth();
   const [nextTitle, setNextTitle] = useState(title);
+  const [nextNamespace, setNextNamespace] = useState(namespace);
   const [moveReason, setMoveReason] = useState('');
   const [leaveRedirect, setLeaveRedirect] = useState(true);
   const [deleteReason, setDeleteReason] = useState('');
@@ -41,6 +44,8 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
     try {
       const result = await moveWikiPage({
         pageId,
+        namespace: nextNamespace,
+        spaceId: nextNamespace === namespace ? spaceId : undefined,
         title: nextTitle,
         reason: moveReason,
         leaveRedirect
@@ -115,12 +120,28 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
         </Link>
         <form onSubmit={move} className="mt-4 space-y-3">
           <label className="block text-xs font-semibold text-slate-400">
+            대상 네임스페이스
+            <select
+              value={nextNamespace}
+              onChange={(event) => setNextNamespace(event.target.value)}
+              className="mt-1.5 min-h-11 w-full rounded-md border border-white/10 bg-[#0d1219] px-3 text-sm text-white outline-none focus:border-emerald-400/50"
+              aria-describedby="wiki-move-namespace-help"
+            >
+              {moveNamespaceOptions(namespace).map((option) => (
+                <option key={option.code} value={option.code}>{option.label}</option>
+              ))}
+            </select>
+            <span id="wiki-move-namespace-help" className="mt-1.5 block text-[11px] font-normal leading-5 text-slate-500">
+              사용자·파일 문서는 식별자와 파일 연결을 보호하기 위해 현재 네임스페이스 안에서만 이동할 수 있습니다.
+            </span>
+          </label>
+          <label className="block text-xs font-semibold text-slate-400">
             새 문서 제목
             <input
               value={nextTitle}
               onChange={(event) => setNextTitle(event.target.value)}
               required
-              className="mt-1.5 w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400/50"
+              className="mt-1.5 min-h-11 w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400/50"
             />
           </label>
           <label className="block text-xs font-semibold text-slate-400">
@@ -129,14 +150,14 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
               value={moveReason}
               onChange={(event) => setMoveReason(event.target.value)}
               maxLength={255}
-              className="mt-1.5 w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400/50"
+              className="mt-1.5 min-h-11 w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400/50"
             />
           </label>
           <label className="flex items-start gap-2 text-xs text-slate-400">
             <input type="checkbox" checked={leaveRedirect} onChange={(event) => setLeaveRedirect(event.target.checked)} />
             이전 제목에 넘겨주기 문서 남기기
           </label>
-          <button type="submit" disabled={working !== null} className="chip chip-accent inline-flex items-center gap-1.5 disabled:opacity-50">
+          <button type="submit" disabled={working !== null} className="chip chip-accent inline-flex min-h-11 items-center gap-1.5 px-4 disabled:opacity-50">
             {working === 'move' ? <Loader2 className="size-3.5 animate-spin" /> : <FolderPen className="size-3.5" />}
             이동
           </button>
@@ -176,4 +197,26 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
 
 function pageHref(namespace: string, slug: string): string {
   return buildWikiPagePath(namespace, slug);
+}
+
+const STANDARD_MOVE_NAMESPACES = [
+  { code: 'main', label: '일반' },
+  { code: 'mod', label: '모드' },
+  { code: 'modpack', label: '모드팩' },
+  { code: 'guide', label: '가이드' },
+  { code: 'dev', label: '개발' },
+  { code: 'data', label: '데이터' },
+  { code: 'help', label: '도움말' },
+  { code: 'project', label: '프로젝트' },
+  { code: 'template', label: '틀' },
+  { code: 'category', label: '분류' },
+] as const;
+
+function moveNamespaceOptions(namespace: string): ReadonlyArray<{ readonly code: string; readonly label: string }> {
+  if (namespace === 'user') return [{ code: 'user', label: '사용자' }];
+  if (namespace === 'file') return [{ code: 'file', label: '파일' }];
+  if (namespace === 'server') return [{ code: 'server', label: '서버 위키' }, ...STANDARD_MOVE_NAMESPACES];
+  return STANDARD_MOVE_NAMESPACES.some((option) => option.code === namespace)
+    ? STANDARD_MOVE_NAMESPACES
+    : [{ code: namespace, label: namespace }];
 }

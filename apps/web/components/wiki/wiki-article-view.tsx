@@ -150,6 +150,8 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
           </section>
           <WikiPageTools
             pageId={page.id}
+            namespace={page.namespace}
+            spaceId={page.spaceId}
             title={page.title}
             displayTitle={page.displayTitle}
             routePath={routePath}

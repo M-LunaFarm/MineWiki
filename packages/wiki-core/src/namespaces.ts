@@ -23,6 +23,7 @@ export const namespaceSpecs: Array<{
 ];
 
 const prefixToNamespace: Array<[string, NamespaceCode]> = [
+  ['main', 'main'],
   ['modpack', 'modpack'],
   ['mod', 'mod'],
   ['server', 'server'],

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
-import { parseMarkup } from '@minewiki/wiki-core';
+import { buildWikiSearchVector, parseMarkup } from '@minewiki/wiki-core';
 import {
   astContainsFile,
   categoryDocumentReferencesSelf,
@@ -13,6 +13,7 @@ import {
   replaceSectionByAnchor,
   sectionByAnchor,
   userDocumentTreeHasSingleOwner,
+  wikiMoveNamespaceInvariantViolation,
   WikiEditService,
   type WikiPageMutationRequest
 } from './wiki-edit.service';
@@ -20,6 +21,8 @@ import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
 import type { WikiNotificationService } from './wiki-notification.service';
+import { WikiLinkIndexService } from './wiki-link-index.service';
+import type { BusinessEventService } from '../events/business-event.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -70,6 +73,137 @@ test('user root documents and cross-owner trees are rejected by immutable owners
     { ownerProfileId: 20n }
   ]), false);
   assert.equal(userDocumentTreeHasSingleOwner(null, null, []), false);
+});
+
+test('user and file move invariants prevent identity transfer and file extension changes', () => {
+  assert.match(wikiMoveNamespaceInvariantViolation({
+    previousNamespace: 'user', namespace: 'main', previousTitle: 'owner/page', title: 'page'
+  }) ?? '', /cannot move across namespaces/);
+  assert.match(wikiMoveNamespaceInvariantViolation({
+    previousNamespace: 'main', namespace: 'file', previousTitle: 'page', title: 'asset.png'
+  }) ?? '', /cannot move across namespaces/);
+  assert.match(wikiMoveNamespaceInvariantViolation({
+    previousNamespace: 'file', namespace: 'file', previousTitle: 'asset.png', title: 'renamed.webp'
+  }) ?? '', /preserve the file extension/);
+  assert.equal(wikiMoveNamespaceInvariantViolation({
+    previousNamespace: 'file', namespace: 'file', previousTitle: 'asset.PNG', title: 'renamed.png'
+  }), null);
+  assert.equal(wikiMoveNamespaceInvariantViolation({
+    previousNamespace: 'server', namespace: 'guide', previousTitle: 'server/page', title: 'page'
+  }), null);
+});
+
+test('namespace-aware moves update a whole subtree and rebuild every current index', async () => {
+  const sourceRoot = {
+    id: 7n, namespaceId: 1, spaceId: 10n, localPath: 'old', slug: 'old', title: 'Old',
+    displayTitle: 'Old', currentRevisionId: 71n, pageType: 'article', protectionLevel: 'open',
+    status: 'normal', createdBy: 3n, ownerProfileId: null
+  };
+  const sourceChild = {
+    ...sourceRoot, id: 8n, localPath: 'old/child', slug: 'old/child', title: 'Old/Child',
+    displayTitle: 'Child', currentRevisionId: 81n
+  };
+  const pages = new Map([[sourceRoot.id, sourceRoot], [sourceChild.id, sourceChild]]);
+  const revisions = new Map([
+    [71n, { id: 71n, pageId: 7n, revisionNo: 1, visibility: 'public', contentRaw: '[[도움말:Root]]', contentSize: 21 }],
+    [81n, { id: 81n, pageId: 8n, revisionNo: 1, visibility: 'public', contentRaw: '[[분류:Child]]', contentSize: 20 }]
+  ]);
+  const updates: Array<{ readonly id: bigint; readonly data: Record<string, unknown> }> = [];
+  const recent: Array<Record<string, unknown>> = [];
+  const indexed: Array<{ readonly pageId: bigint; readonly revisionId: bigint }> = [];
+  const permissionChecks: Array<{ readonly type: string; readonly namespace?: string; readonly spaceId?: bigint }> = [];
+  let auditMetadata: Record<string, unknown> | null = null;
+  const namespaces = [
+    { id: 1, code: 'main' },
+    { id: 2, code: 'guide' }
+  ];
+  const spaces = [
+    { id: 10n, status: 'active', spaceType: 'basic', rootNamespaceCode: 'main', rootPageId: null },
+    { id: 20n, status: 'active', spaceType: 'basic', rootNamespaceCode: 'guide', rootPageId: null }
+  ];
+  const tx = {
+    async $queryRaw() { return []; },
+    wikiNamespace: {
+      async findUnique(input: { where: { id?: number; code?: string } }) {
+        return namespaces.find((item) => item.id === input.where.id || item.code === input.where.code) ?? null;
+      }
+    },
+    wikiSpace: {
+      async findUnique(input: { where: { id: bigint } }) {
+        return spaces.find((item) => item.id === input.where.id) ?? null;
+      }
+    },
+    serverWiki: { async findFirst() { return null; } },
+    wikiPage: {
+      async findUnique(input: { where: { id: bigint } }) { return pages.get(input.where.id) ?? null; },
+      async findMany(input: { where: { status?: unknown } }) {
+        return input.where.status ? [...pages.values()] : [];
+      },
+      async update(input: { where: { id: bigint }; data: Record<string, unknown> }) {
+        updates.push({ id: input.where.id, data: input.data });
+        const updated = { ...pages.get(input.where.id)!, ...input.data } as typeof sourceRoot;
+        pages.set(input.where.id, updated);
+        return updated;
+      }
+    },
+    wikiPageRevision: {
+      async findUnique(input: { where: { id: bigint } }) { return revisions.get(input.where.id) ?? null; },
+      async findFirst(input: { where: { pageId: bigint } }) {
+        return [...revisions.values()].find((item) => item.pageId === input.where.pageId) ?? null;
+      }
+    },
+    wikiRecentChange: {
+      async create(input: { data: Record<string, unknown> }) { recent.push(input.data); return input.data; }
+    }
+  };
+  const prisma = {
+    ...tx,
+    async $transaction<T>(callback: (store: typeof tx) => Promise<T>) { return callback(tx); }
+  } as unknown as PrismaService;
+  const profiles = {
+    async ensureWikiProfile() { return { id: 3n, status: 'active' }; }
+  } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: 'account', profileId: 3n, status: 'active' }; },
+    async assertCanMutatePageAction() { permissionChecks.push({ type: 'move' }); },
+    async assertCanCreatePage(input: { namespaceCode: string; spaceId: bigint }) {
+      permissionChecks.push({ type: 'create', namespace: input.namespaceCode, spaceId: input.spaceId });
+    }
+  } as unknown as WikiPermissionService;
+  const events = {
+    async audit(_action: string, event: { metadata: Record<string, unknown> }) { auditMetadata = event.metadata; }
+  } as unknown as BusinessEventService;
+  const links = {
+    async replaceForRevision(_store: unknown, pageId: bigint, revisionId: bigint) {
+      indexed.push({ pageId, revisionId });
+    }
+  } as unknown as WikiLinkIndexService;
+  const edits = new WikiEditService(prisma, profiles, permissions, events, links);
+
+  const result = await edits.movePage(session('account'), '7', {
+    namespace: 'guide', spaceId: '20', title: 'New', leaveRedirect: false, reason: 'reorganize'
+  });
+
+  assert.equal(result.namespace, 'guide');
+  assert.equal(result.previousNamespace, 'main');
+  assert.equal(result.previousSpaceId, '10');
+  assert.equal(result.spaceId, '20');
+  assert.equal(result.movedPageCount, 2);
+  assert.deepEqual(indexed, [{ pageId: 7n, revisionId: 71n }, { pageId: 8n, revisionId: 81n }]);
+  assert.equal(updates.every((update) => update.data.namespaceId === 2 && update.data.spaceId === 20n), true);
+  assert.equal(updates.every((update) => update.data.pageType === 'article' && update.data.ownerProfileId === null), true);
+  assert.equal(pages.get(7n)?.title, 'New');
+  assert.equal(pages.get(8n)?.title, 'New/Child');
+  assert.equal(pages.get(7n)?.currentRevisionId, 71n);
+  assert.equal(pages.get(8n)?.currentRevisionId, 81n);
+  assert.equal(permissionChecks.filter((check) => check.type === 'move').length, 2);
+  assert.equal(permissionChecks.filter((check) => check.type === 'create').length, 2);
+  assert.equal(recent.length, 2);
+  assert.equal(recent.every((change) => String(change.summary).includes('[main@10 -> guide@20]')), true);
+  assert.deepEqual(auditMetadata, {
+    previousTitle: 'Old', title: 'New', previousNamespace: 'main', namespace: 'guide',
+    previousSpaceId: '10', spaceId: '20', movedPageCount: 2, redirectPageId: null, reason: 'reorganize'
+  });
 });
 
 test('section ranges are derived from server-parsed heading anchors', () => {
@@ -1069,6 +1203,241 @@ if (!hasDatabase) {
         /child documents cannot be deleted/
       );
     } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id
+      });
+    }
+  });
+
+  test('moves a subtree across namespaces without replacing page-linked state and rebuilds current indexes', async () => {
+    const fixture = await createFixture();
+    const destinationCode = `d${fixture.unique.slice(0, 12)}`;
+    const destinationNamespace = await prisma.wikiNamespace.create({
+      data: {
+        code: destinationCode,
+        displayName: `Destination ${fixture.unique}`,
+        pathPrefix: `/${destinationCode}`,
+        isContent: true
+      }
+    });
+    const destinationSpace = await prisma.wikiSpace.create({
+      data: {
+        code: `destination-${fixture.unique}`,
+        spaceKey: `destination-${fixture.unique}`,
+        name: `Destination ${fixture.unique}`,
+        title: `Destination ${fixture.unique}`,
+        slug: `destination-${fixture.unique}`,
+        spaceType: 'basic',
+        rootNamespaceCode: destinationCode,
+        rootPath: `/${destinationCode}`,
+        status: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    });
+    const indexedEdits = new WikiEditService(prisma, profiles, permissions, undefined, new WikiLinkIndexService());
+    let createdPageIds: bigint[] = [];
+    try {
+      const sourceTitle = `source_${fixture.unique}`;
+      const childTitle = `${sourceTitle}/child`;
+      const destinationTitle = `destination_${fixture.unique}`;
+      const root = await indexedEdits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        spaceId: fixture.space.id.toString(),
+        title: sourceTitle,
+        contentRaw: `[[도움말:index_${fixture.unique}]]`
+      });
+      const child = await indexedEdits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        spaceId: fixture.space.id.toString(),
+        title: childTitle,
+        contentRaw: `[[분류:child_${fixture.unique}]]`
+      });
+      createdPageIds = [BigInt(root.pageId), BigInt(child.pageId)];
+      const profile = await prisma.wikiProfile.findUniqueOrThrow({ where: { accountId: fixture.account.id } });
+      const thread = await prisma.wikiDiscussionThread.create({
+        data: {
+          pageId: BigInt(root.pageId), title: 'Preserved discussion', status: 'open', createdBy: profile.id,
+          createdAt: new Date(), updatedAt: new Date()
+        }
+      });
+      const watch = await prisma.wikiPageWatch.create({
+        data: {
+          profileId: profile.id, pageId: BigInt(root.pageId), lastSeenRevisionId: BigInt(root.revisionId),
+          createdAt: new Date(), updatedAt: new Date()
+        }
+      });
+      const acl = await prisma.aclRule.create({
+        data: {
+          targetType: 'page', targetId: BigInt(root.pageId), action: 'read', effect: 'allow',
+          subjectType: 'user', subjectValue: profile.id.toString(), sortOrder: 1,
+          reason: 'preserve-on-move', createdBy: profile.id, createdAt: new Date(), updatedAt: new Date()
+        }
+      });
+      await prisma.wikiPageLink.deleteMany({ where: { sourcePageId: { in: createdPageIds } } });
+      await prisma.wikiPageLink.create({
+        data: {
+          sourcePageId: BigInt(root.pageId), sourceRevisionId: BigInt(root.revisionId),
+          targetNamespaceCode: 'main', targetSlug: 'stale', linkType: 'link', createdAt: new Date()
+        }
+      });
+      await prisma.wikiSearchDocument.updateMany({
+        where: { pageId: { in: createdPageIds } },
+        data: { searchVector: 'stale-index', updatedAt: new Date() }
+      });
+
+      const moved = await indexedEdits.movePage(session(fixture.account.id), root.pageId, {
+        namespace: destinationCode,
+        spaceId: destinationSpace.id.toString(),
+        title: destinationTitle,
+        leaveRedirect: true,
+        reason: 'cross namespace fixture'
+      });
+
+      const [movedRoot, movedChild] = await Promise.all(createdPageIds.map((id) =>
+        prisma.wikiPage.findUniqueOrThrow({ where: { id } })
+      ));
+      assert.equal(moved.pageId, root.pageId);
+      assert.equal(moved.namespace, destinationCode);
+      assert.equal(moved.previousNamespace, fixture.namespace.code);
+      assert.equal(moved.previousSpaceId, fixture.space.id.toString());
+      assert.equal(moved.spaceId, destinationSpace.id.toString());
+      assert.equal(moved.movedPageCount, 2);
+      assert.equal(movedRoot.namespaceId, destinationNamespace.id);
+      assert.equal(movedChild.namespaceId, destinationNamespace.id);
+      assert.equal(movedRoot.spaceId, destinationSpace.id);
+      assert.equal(movedChild.spaceId, destinationSpace.id);
+      assert.equal(movedRoot.id, BigInt(root.pageId));
+      assert.equal(movedChild.id, BigInt(child.pageId));
+      assert.equal(movedRoot.currentRevisionId, BigInt(root.revisionId));
+      assert.equal(movedChild.currentRevisionId, BigInt(child.revisionId));
+      assert.equal(movedRoot.title, destinationTitle);
+      assert.equal(movedChild.title, `${destinationTitle}/child`);
+      assert.equal(movedRoot.pageType, 'article');
+      assert.equal(movedRoot.ownerProfileId, null);
+      assert.ok(await prisma.wikiDiscussionThread.findUnique({ where: { id: thread.id } }));
+      assert.ok(await prisma.wikiPageWatch.findUnique({ where: { id: watch.id } }));
+      assert.ok(await prisma.aclRule.findUnique({ where: { id: acl.id } }));
+
+      const searchDocuments = await prisma.wikiSearchDocument.findMany({ where: { pageId: { in: createdPageIds } } });
+      assert.equal(searchDocuments.length, 2);
+      assert.equal(searchDocuments.every((document) => document.searchVector !== 'stale-index'), true);
+      const rootSearch = searchDocuments.find((document) => document.pageId === BigInt(root.pageId));
+      const destinationTitleTerms = buildWikiSearchVector([destinationTitle]).split(' ');
+      assert.ok(rootSearch);
+      assert.equal(destinationTitleTerms.every((term) => rootSearch.searchVector.split(' ').includes(term)), true);
+      const rootLinks = await prisma.wikiPageLink.findMany({ where: { sourcePageId: BigInt(root.pageId) } });
+      assert.equal(rootLinks.some((link) => link.targetNamespaceCode === 'help' && link.targetSlug === `index_${fixture.unique}`), true);
+      assert.equal(rootLinks.some((link) => link.targetSlug === 'stale'), false);
+
+      const redirects = await prisma.wikiPage.findMany({
+        where: { namespaceId: fixture.namespace.id, spaceId: fixture.space.id, pageType: 'redirect' }
+      });
+      assert.equal(redirects.length, 2);
+      const rootRedirect = redirects.find((redirect) => redirect.localPath === sourceTitle);
+      assert.ok(rootRedirect?.currentRevisionId);
+      const redirectRevision = await prisma.wikiPageRevision.findUniqueOrThrow({ where: { id: rootRedirect!.currentRevisionId! } });
+      assert.equal(redirectRevision.contentRaw, `#넘겨주기 [[${destinationCode}:${destinationTitle}]]`);
+      const moveChanges = await prisma.wikiRecentChange.findMany({
+        where: { pageId: { in: createdPageIds }, changeType: 'move' }
+      });
+      assert.equal(moveChanges.length, 2);
+      assert.equal(moveChanges.every((change) => change.namespaceCode === destinationCode), true);
+      assert.equal(moveChanges.every((change) => change.summary?.includes(
+        `[${fixture.namespace.code}@${fixture.space.id.toString()} -> ${destinationCode}@${destinationSpace.id.toString()}]`
+      )), true);
+    } finally {
+      const pages = await prisma.wikiPage.findMany({
+        where: { OR: [{ spaceId: fixture.space.id }, { spaceId: destinationSpace.id }] },
+        select: { id: true }
+      });
+      const pageIds = pages.map((page) => page.id);
+      await prisma.wikiDiscussionThread.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageWatch.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.aclRule.deleteMany({ where: { targetType: 'page', targetId: { in: pageIds } } });
+      await prisma.wikiRecentChange.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageLink.deleteMany({ where: { sourcePageId: { in: pageIds } } });
+      await prisma.wikiSearchDocument.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageRevision.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPage.deleteMany({ where: { id: { in: pageIds } } });
+      await prisma.wikiSpace.delete({ where: { id: destinationSpace.id } }).catch(() => {});
+      await prisma.wikiNamespace.delete({ where: { id: destinationNamespace.id } }).catch(() => {});
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id
+      });
+    }
+  });
+
+  test('destination collisions return 409 without partially moving a subtree', async () => {
+    const fixture = await createFixture();
+    const destinationCode = `c${fixture.unique.slice(0, 12)}`;
+    const destinationNamespace = await prisma.wikiNamespace.create({
+      data: { code: destinationCode, displayName: `Collision ${fixture.unique}`, pathPrefix: `/${destinationCode}`, isContent: true }
+    });
+    const destinationSpace = await prisma.wikiSpace.create({
+      data: {
+        code: `collision-${fixture.unique}`, spaceKey: `collision-${fixture.unique}`, name: `Collision ${fixture.unique}`,
+        title: `Collision ${fixture.unique}`, slug: `collision-${fixture.unique}`, spaceType: 'basic',
+        rootNamespaceCode: destinationCode, rootPath: `/${destinationCode}`, status: 'active',
+        createdAt: new Date(), updatedAt: new Date()
+      }
+    });
+    const indexedEdits = new WikiEditService(prisma, profiles, permissions, undefined, new WikiLinkIndexService());
+    try {
+      const sourceTitle = `collision_source_${fixture.unique}`;
+      const targetTitle = `collision_target_${fixture.unique}`;
+      const root = await indexedEdits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code, spaceId: fixture.space.id.toString(), title: sourceTitle, contentRaw: 'root'
+      });
+      const child = await indexedEdits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code, spaceId: fixture.space.id.toString(), title: `${sourceTitle}/child`, contentRaw: 'child'
+      });
+      await indexedEdits.createPage(session(fixture.account.id), {
+        namespace: destinationCode, spaceId: destinationSpace.id.toString(), title: targetTitle, contentRaw: 'occupied'
+      });
+
+      await assert.rejects(
+        indexedEdits.movePage(session(fixture.account.id), root.pageId, {
+          namespace: destinationCode, spaceId: destinationSpace.id.toString(), title: targetTitle, leaveRedirect: true
+        }),
+        (error: unknown) => error instanceof HttpException && error.getStatus() === 409
+      );
+
+      const [unchangedRoot, unchangedChild, moveCount, redirects] = await Promise.all([
+        prisma.wikiPage.findUniqueOrThrow({ where: { id: BigInt(root.pageId) } }),
+        prisma.wikiPage.findUniqueOrThrow({ where: { id: BigInt(child.pageId) } }),
+        prisma.wikiRecentChange.count({ where: { pageId: { in: [BigInt(root.pageId), BigInt(child.pageId)] }, changeType: 'move' } }),
+        prisma.wikiPage.count({ where: { namespaceId: fixture.namespace.id, pageType: 'redirect' } })
+      ]);
+      assert.equal(unchangedRoot.namespaceId, fixture.namespace.id);
+      assert.equal(unchangedChild.namespaceId, fixture.namespace.id);
+      assert.equal(unchangedRoot.spaceId, fixture.space.id);
+      assert.equal(unchangedChild.spaceId, fixture.space.id);
+      assert.equal(unchangedRoot.title, sourceTitle);
+      assert.equal(unchangedChild.title, `${sourceTitle}/child`);
+      assert.equal(moveCount, 0);
+      assert.equal(redirects, 0);
+    } finally {
+      const pages = await prisma.wikiPage.findMany({
+        where: { OR: [{ spaceId: fixture.space.id }, { spaceId: destinationSpace.id }] },
+        select: { id: true }
+      });
+      const pageIds = pages.map((page) => page.id);
+      await prisma.wikiRecentChange.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageLink.deleteMany({ where: { sourcePageId: { in: pageIds } } });
+      await prisma.wikiSearchDocument.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageRevision.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPage.deleteMany({ where: { id: { in: pageIds } } });
+      await prisma.wikiSpace.delete({ where: { id: destinationSpace.id } }).catch(() => {});
+      await prisma.wikiNamespace.delete({ where: { id: destinationNamespace.id } }).catch(() => {});
       await cleanupFixture({
         accountId: fixture.account.id,
         namespaceId: fixture.namespace.id,
