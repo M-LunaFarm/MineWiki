@@ -15,6 +15,7 @@ import { fetchServerWikiPresentation } from '../../lib/wiki-server-api';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
 import { WikiPageTools } from './wiki-page-tools';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
 
 interface ServerWikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -25,6 +26,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
   const wiki = page.serverWiki;
   if (!wiki) return null;
   const presentation = await fetchServerWikiPresentation(wiki.slug);
+  const contentId = `wiki-content-${page.id}`;
 
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
@@ -107,7 +109,8 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
             />
           ) : null}
 
-          <div className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: page.html }} />
+          <div id={contentId} className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: page.html }} />
+          <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
 
           {presentation?.bottomNoticeHtml ? (
             <aside

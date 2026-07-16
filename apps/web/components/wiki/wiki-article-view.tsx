@@ -2,8 +2,9 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Pencil, PencilLine, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
-import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath, buildWikiRevisionPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
+import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
 
 interface WikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -13,6 +14,7 @@ interface WikiArticleViewProps {
 }
 
 export function WikiArticleView({ page, routePath, beforeContent, afterContent }: WikiArticleViewProps) {
+  const contentId = `wiki-content-${page.id}`;
   const isCategoryDocument = routePath.startsWith('/wiki/category/');
   const editPath = routePath.startsWith('/server/')
     ? buildServerWikiToolPath(routePath, 'edit')
@@ -71,9 +73,11 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <article
+          id={contentId}
           className="wiki-rendered min-w-0"
           dangerouslySetInnerHTML={{ __html: page.html }}
         />
+        <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
         <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
           {page.namespace === 'server' && page.serverDirectoryPath ? (
             <Link
@@ -135,7 +139,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
               <Link href={historyPath} className="chip chip-accent">
                 역사
               </Link>
-              <Link href={`/wiki/revision/${page.revision.id}`} className="chip chip-muted">
+              <Link href={buildWikiRevisionPath(page.revision.id, routePath)} className="chip chip-muted">
                 현재 판
               </Link>
             </div>

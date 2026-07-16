@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   buildCategoryWikiToolPath,
@@ -143,6 +144,16 @@ test('revision and diff links preserve the canonical source document', () => {
     buildWikiDiffPath('41', '42', returnTo),
     '/wiki/diff/41/42?returnTo=%2Fserver%2Fluna%2FAPI%2Frequests',
   );
+});
+
+test('current revision action uses the canonical source document return path', async () => {
+  const source = await readFile(
+    new URL('../components/wiki/wiki-article-view.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(source, /buildWikiRevisionPath\(page\.revision\.id, routePath\)/u);
+  assert.doesNotMatch(source, /href=\{`\/wiki\/revision\/\$\{page\.revision\.id\}`\}/u);
 });
 
 test('wiki return paths reject external and protocol-relative destinations', () => {
