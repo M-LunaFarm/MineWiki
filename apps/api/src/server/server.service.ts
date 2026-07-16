@@ -30,6 +30,12 @@ import type { ClaimMethod } from '../claim/claim.types';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
 import { encryptAppSecret } from '../common/secret-codec';
 import { BusinessEventService } from '../events/business-event.service';
+import {
+  normalizeServerWikiContentSettings,
+  renderServerWikiPresentation,
+  sourceAuditSummary,
+  type ServerWikiContentSettingsInput,
+} from './server-wiki-content-settings';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
@@ -1244,7 +1250,7 @@ export class ServerService {
     };
   }
 
-  async updateWikiLayout(serverId: string, layoutKey: string, actorProfileId?: bigint | null) {
+  async updateWikiLayout(serverId: string, layoutKey: string, actorAccountId?: string | null) {
     if (!isServerWikiLayoutKey(layoutKey)) {
       throw new BadRequestException('Unknown server wiki layout.');
     }
@@ -1253,18 +1259,177 @@ export class ServerService {
     if (!layout?.entitled) {
       throw new ForbiddenException('This premium layout is not included in the server plan.');
     }
+    const actorProfile = actorAccountId
+      ? await this.wikiProfiles.ensureWikiProfile(actorAccountId)
+      : null;
     const updated = await this.prisma.serverWiki.update({
       where: { voteServerId: serverId },
       data: {
         layoutKey,
         layoutUpdatedAt: new Date(),
-        layoutUpdatedBy: actorProfileId ?? null
+        layoutUpdatedBy: actorProfile?.id ?? null
       },
       select: { layoutKey: true, layoutUpdatedAt: true }
     });
     return {
       selected: updated.layoutKey,
       updatedAt: updated.layoutUpdatedAt?.toISOString() ?? null
+    };
+  }
+
+  async getWikiContentSettings(serverId: string) {
+    const settings = await this.prisma.serverWiki.findUnique({
+      where: { voteServerId: serverId },
+      select: {
+        id: true,
+        slug: true,
+        contributionPolicySource: true,
+        editHelpSource: true,
+        topNoticeSource: true,
+        bottomNoticeSource: true,
+        requireContributionPolicyAck: true,
+        contributionPolicyVersion: true,
+        contentSettingsVersion: true,
+        contentSettingsUpdatedAt: true,
+        contentSettingsUpdatedBy: true,
+      },
+    });
+    if (!settings) throw new NotFoundException('Server wiki not found.');
+    return toWikiContentSettingsResponse(settings);
+  }
+
+  async updateWikiContentSettings(
+    serverId: string,
+    input: ServerWikiContentSettingsInput,
+    actorAccountId: string,
+  ) {
+    const normalized = normalizeServerWikiContentSettings(input);
+    const current = await this.prisma.serverWiki.findUnique({
+      where: { voteServerId: serverId },
+      select: {
+        id: true,
+        slug: true,
+        contributionPolicySource: true,
+        editHelpSource: true,
+        topNoticeSource: true,
+        bottomNoticeSource: true,
+        requireContributionPolicyAck: true,
+        contributionPolicyVersion: true,
+        contentSettingsVersion: true,
+      },
+    });
+    if (!current) throw new NotFoundException('Server wiki not found.');
+    if (current.contentSettingsVersion !== normalized.expectedVersion) {
+      throwWikiSettingsConflict(current.contentSettingsVersion);
+    }
+
+    const sourceFields = [
+      'contributionPolicySource',
+      'editHelpSource',
+      'topNoticeSource',
+      'bottomNoticeSource',
+    ] as const;
+    const changedFields: string[] = sourceFields.filter(
+      (field) => current[field] !== normalized[field],
+    );
+    if (current.requireContributionPolicyAck !== normalized.requireContributionPolicyAck) {
+      changedFields.push('requireContributionPolicyAck');
+    }
+    const policyChanged =
+      current.contributionPolicySource !== normalized.contributionPolicySource
+      || current.requireContributionPolicyAck !== normalized.requireContributionPolicyAck;
+    const actor = await this.wikiProfiles.ensureWikiProfile(actorAccountId);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.serverWiki.updateMany({
+        where: {
+          id: current.id,
+          contentSettingsVersion: normalized.expectedVersion,
+        },
+        data: {
+          contributionPolicySource: normalized.contributionPolicySource,
+          editHelpSource: normalized.editHelpSource,
+          topNoticeSource: normalized.topNoticeSource,
+          bottomNoticeSource: normalized.bottomNoticeSource,
+          requireContributionPolicyAck: normalized.requireContributionPolicyAck,
+          contributionPolicyVersion: policyChanged ? { increment: 1 } : undefined,
+          contentSettingsVersion: { increment: 1 },
+          contentSettingsUpdatedAt: new Date(),
+          contentSettingsUpdatedBy: actor.id,
+        },
+      });
+      if (result.count !== 1) {
+        const latest = await tx.serverWiki.findUnique({
+          where: { id: current.id },
+          select: { contentSettingsVersion: true },
+        });
+        throwWikiSettingsConflict(latest?.contentSettingsVersion ?? normalized.expectedVersion + 1);
+      }
+      return tx.serverWiki.findUniqueOrThrow({
+        where: { id: current.id },
+        select: {
+          id: true,
+          slug: true,
+          contributionPolicySource: true,
+          editHelpSource: true,
+          topNoticeSource: true,
+          bottomNoticeSource: true,
+          requireContributionPolicyAck: true,
+          contributionPolicyVersion: true,
+          contentSettingsVersion: true,
+          contentSettingsUpdatedAt: true,
+          contentSettingsUpdatedBy: true,
+        },
+      });
+    });
+
+    await this.events?.audit('server.wiki.settings.update', {
+      category: 'server',
+      actorAccountId,
+      actorProfileId: actor.id,
+      subjectType: 'server_wiki',
+      subjectId: current.id,
+      metadata: {
+        changedFields,
+        previousVersion: current.contentSettingsVersion,
+        version: updated.contentSettingsVersion,
+        previousPolicyVersion: current.contributionPolicyVersion,
+        policyVersion: updated.contributionPolicyVersion,
+        sources: Object.fromEntries(sourceFields.map((field) => [
+          field,
+          sourceAuditSummary(updated[field]),
+        ])),
+      },
+    });
+    return toWikiContentSettingsResponse(updated);
+  }
+
+  async getWikiPresentationBySlug(slug: string) {
+    const settings = await this.prisma.serverWiki.findUnique({
+      where: { slug },
+      select: {
+        slug: true,
+        contributionPolicySource: true,
+        editHelpSource: true,
+        topNoticeSource: true,
+        bottomNoticeSource: true,
+        requireContributionPolicyAck: true,
+        contributionPolicyVersion: true,
+        contentSettingsVersion: true,
+      },
+    });
+    if (!settings) throw new NotFoundException('Server wiki not found.');
+    const rendered = renderServerWikiPresentation(settings);
+    return {
+      slug: settings.slug,
+      settingsVersion: settings.contentSettingsVersion,
+      policy: {
+        html: rendered.policyHtml,
+        version: settings.contributionPolicyVersion,
+        required: settings.requireContributionPolicyAck && Boolean(rendered.policyHtml),
+      },
+      editHelpHtml: rendered.editHelpHtml,
+      topNoticeHtml: rendered.topNoticeHtml,
+      bottomNoticeHtml: rendered.bottomNoticeHtml,
     };
   }
 
@@ -1370,6 +1535,45 @@ export interface ServerWikiLinkResponse {
   readonly wikiUrl: string | null;
   readonly serverDirectoryPath: string;
   readonly status: 'linked' | 'unlinked';
+}
+
+interface ServerWikiContentSettingsRecord {
+  readonly id: bigint;
+  readonly slug: string;
+  readonly contributionPolicySource: string | null;
+  readonly editHelpSource: string | null;
+  readonly topNoticeSource: string | null;
+  readonly bottomNoticeSource: string | null;
+  readonly requireContributionPolicyAck: boolean;
+  readonly contributionPolicyVersion: number;
+  readonly contentSettingsVersion: number;
+  readonly contentSettingsUpdatedAt: Date | null;
+  readonly contentSettingsUpdatedBy: bigint | null;
+}
+
+function toWikiContentSettingsResponse(settings: ServerWikiContentSettingsRecord) {
+  return {
+    serverWikiId: settings.id.toString(),
+    slug: settings.slug,
+    version: settings.contentSettingsVersion,
+    contributionPolicyVersion: settings.contributionPolicyVersion,
+    contributionPolicySource: settings.contributionPolicySource,
+    editHelpSource: settings.editHelpSource,
+    topNoticeSource: settings.topNoticeSource,
+    bottomNoticeSource: settings.bottomNoticeSource,
+    requireContributionPolicyAck: settings.requireContributionPolicyAck,
+    updatedAt: settings.contentSettingsUpdatedAt?.toISOString() ?? null,
+    updatedByProfileId: settings.contentSettingsUpdatedBy?.toString() ?? null,
+  };
+}
+
+function throwWikiSettingsConflict(currentVersion: number): never {
+  throw new ConflictException({
+    statusCode: 409,
+    code: 'SERVER_WIKI_SETTINGS_CONFLICT',
+    message: '다른 관리자가 서버 위키 설정을 먼저 변경했습니다.',
+    currentVersion,
+  });
 }
 
 export interface VerificationRecheckOptions {

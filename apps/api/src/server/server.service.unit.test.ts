@@ -275,6 +275,102 @@ test('server wiki rejects selecting a premium layout without an active entitleme
   );
 });
 
+test('server wiki settings use optimistic versioning and increment policy version only for policy changes', async () => {
+  const current = {
+    id: 5n,
+    slug: 'sample-server',
+    contributionPolicySource: '기존 정책',
+    editHelpSource: null,
+    topNoticeSource: null,
+    bottomNoticeSource: null,
+    requireContributionPolicyAck: true,
+    contributionPolicyVersion: 2,
+    contentSettingsVersion: 4,
+    contentSettingsUpdatedAt: null as Date | null,
+    contentSettingsUpdatedBy: null as bigint | null,
+  };
+  const auditEvents: Array<Record<string, unknown>> = [];
+  const serverWiki = {
+    async findUnique() { return { ...current }; },
+    async updateMany({ where, data }: { where: { contentSettingsVersion: number }; data: Record<string, unknown> }) {
+      if (where.contentSettingsVersion !== current.contentSettingsVersion) return { count: 0 };
+      current.editHelpSource = data.editHelpSource as string | null;
+      current.contentSettingsVersion += 1;
+      current.contentSettingsUpdatedAt = data.contentSettingsUpdatedAt as Date;
+      current.contentSettingsUpdatedBy = data.contentSettingsUpdatedBy as bigint;
+      return { count: 1 };
+    },
+    async findUniqueOrThrow() { return { ...current }; },
+  };
+  const prisma = {
+    serverWiki,
+    async $transaction(callback: (tx: { serverWiki: typeof serverWiki }) => Promise<unknown>) {
+      return callback({ serverWiki });
+    },
+  };
+  const service = new ServerService(
+    {} as never,
+    prisma as never,
+    { async ensureWikiProfile() { return { id: 9n }; } } as never,
+    undefined,
+    { async audit(_action: string, input: Record<string, unknown>) { auditEvents.push(input); } } as never,
+  );
+
+  const result = await service.updateWikiContentSettings(randomUUID(), {
+    expectedVersion: 4,
+    contributionPolicySource: '기존 정책',
+    editHelpSource: '새 도움말',
+    topNoticeSource: null,
+    bottomNoticeSource: null,
+    requireContributionPolicyAck: true,
+  }, randomUUID());
+
+  assert.equal(result.version, 5);
+  assert.equal(result.contributionPolicyVersion, 2);
+  assert.equal(auditEvents.length, 1);
+  assert.equal(
+    JSON.stringify(auditEvents, (_key, value) => typeof value === 'bigint' ? value.toString() : value)
+      .includes('새 도움말'),
+    false,
+  );
+});
+
+test('server wiki settings reject a stale expected version', async () => {
+  const service = new ServerService(
+    {} as never,
+    {
+      serverWiki: {
+        async findUnique() {
+          return {
+            id: 5n,
+            slug: 'sample-server',
+            contributionPolicySource: null,
+            editHelpSource: null,
+            topNoticeSource: null,
+            bottomNoticeSource: null,
+            requireContributionPolicyAck: false,
+            contributionPolicyVersion: 0,
+            contentSettingsVersion: 8,
+          };
+        },
+      },
+    } as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    () => service.updateWikiContentSettings(randomUUID(), {
+      expectedVersion: 7,
+      contributionPolicySource: null,
+      editHelpSource: null,
+      topNoticeSource: null,
+      bottomNoticeSource: null,
+      requireContributionPolicyAck: false,
+    }, randomUUID()),
+    /다른 관리자가 서버 위키 설정을 먼저 변경했습니다/u,
+  );
+});
+
 test('Votifier settings never return the stored v2 token', async () => {
   const service = new ServerService(
     {} as never,

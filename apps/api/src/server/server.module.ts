@@ -10,11 +10,12 @@ import { FileModule } from '../file/file.module';
 import { EventsModule } from '../events/events.module';
 import { PluginCredentialService } from './plugin-credential.service';
 import { VerifyModule } from '../verify/verify.module';
+import { ServerWikiPresentationController } from './server-wiki-presentation.controller';
 
 @Module({
   imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
   providers: [ServerService, PluginCredentialService],
-  controllers: [ServerController, ServerVerificationController],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController],
   exports: [ServerService]
 })
 export class ServerModule {}

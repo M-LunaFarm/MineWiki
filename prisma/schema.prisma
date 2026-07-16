@@ -1171,24 +1171,24 @@ model WikiUserBlockEvent {
 }
 
 model WikiSpace {
-  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  code              String   @unique @db.VarChar(64)
-  spaceKey          String?  @unique @map("space_key") @db.VarChar(64)
-  name              String   @db.VarChar(128)
-  title             String?  @db.VarChar(255)
-  slug              String?  @unique @db.VarChar(255)
-  spaceType         String   @default("basic") @map("space_type") @db.VarChar(32)
-  parentSpaceId     BigInt?  @map("parent_space_id") @db.UnsignedBigInt
-  rootPageId        BigInt?  @map("root_page_id") @db.UnsignedBigInt
-  rootNamespaceCode String   @map("root_namespace_code") @db.VarChar(32)
-  rootPath          String   @unique @map("root_path") @db.VarChar(128)
-  description       String?  @db.Text
-  status            String   @default("active") @db.VarChar(32)
-  createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
-  ownerUserId       BigInt?  @map("owner_user_id") @db.UnsignedBigInt
-  ownerPageId       BigInt?  @map("owner_page_id") @db.UnsignedBigInt
-  createdAt         DateTime @map("created_at")
-  updatedAt         DateTime @map("updated_at")
+  id                BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
+  code              String         @unique @db.VarChar(64)
+  spaceKey          String?        @unique @map("space_key") @db.VarChar(64)
+  name              String         @db.VarChar(128)
+  title             String?        @db.VarChar(255)
+  slug              String?        @unique @db.VarChar(255)
+  spaceType         String         @default("basic") @map("space_type") @db.VarChar(32)
+  parentSpaceId     BigInt?        @map("parent_space_id") @db.UnsignedBigInt
+  rootPageId        BigInt?        @map("root_page_id") @db.UnsignedBigInt
+  rootNamespaceCode String         @map("root_namespace_code") @db.VarChar(32)
+  rootPath          String         @unique @map("root_path") @db.VarChar(128)
+  description       String?        @db.Text
+  status            String         @default("active") @db.VarChar(32)
+  createdBy         BigInt?        @map("created_by") @db.UnsignedBigInt
+  ownerUserId       BigInt?        @map("owner_user_id") @db.UnsignedBigInt
+  ownerPageId       BigInt?        @map("owner_page_id") @db.UnsignedBigInt
+  createdAt         DateTime       @map("created_at")
+  updatedAt         DateTime       @map("updated_at")
   apiTokens         WikiApiToken[]
 
   @@index([spaceType, status])
@@ -1595,29 +1595,30 @@ model WikiDiscussionSubscription {
 }
 
 model WikiEditRequest {
-  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  requestKind          String    @default("edit") @map("request_kind") @db.VarChar(16)
-  pageId               BigInt?   @map("page_id") @db.UnsignedBigInt
-  baseRevisionId       BigInt?   @map("base_revision_id") @db.UnsignedBigInt
-  targetNamespaceId    Int?      @map("target_namespace_id") @db.UnsignedInt
-  targetNamespaceCode  String?   @map("target_namespace_code") @db.VarChar(32)
-  targetSpaceId        BigInt?   @map("target_space_id") @db.UnsignedBigInt
-  targetTitle          String?   @map("target_title") @db.VarChar(255)
-  targetSlug           String?   @map("target_slug") @db.VarChar(255)
-  targetDisplayTitle   String?   @map("target_display_title") @db.VarChar(255)
-  targetPageType       String?   @map("target_page_type") @db.VarChar(32)
-  targetOwnerProfileId BigInt?   @map("target_owner_profile_id") @db.UnsignedBigInt
-  proposedContent      String    @map("proposed_content") @db.MediumText
-  editSummary          String    @map("edit_summary") @db.VarChar(255)
-  isMinor              Boolean   @default(false) @map("is_minor")
-  status               String    @default("pending") @db.VarChar(32)
-  createdBy            BigInt    @map("created_by") @db.UnsignedBigInt
-  reviewedBy           BigInt?   @map("reviewed_by") @db.UnsignedBigInt
-  reviewNote           String?   @map("review_note") @db.VarChar(1000)
-  acceptedRevisionId   BigInt?   @map("accepted_revision_id") @db.UnsignedBigInt
-  createdAt            DateTime  @map("created_at")
-  updatedAt            DateTime  @map("updated_at")
-  reviewedAt           DateTime? @map("reviewed_at")
+  id                        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  requestKind               String    @default("edit") @map("request_kind") @db.VarChar(16)
+  pageId                    BigInt?   @map("page_id") @db.UnsignedBigInt
+  baseRevisionId            BigInt?   @map("base_revision_id") @db.UnsignedBigInt
+  targetNamespaceId         Int?      @map("target_namespace_id") @db.UnsignedInt
+  targetNamespaceCode       String?   @map("target_namespace_code") @db.VarChar(32)
+  targetSpaceId             BigInt?   @map("target_space_id") @db.UnsignedBigInt
+  targetTitle               String?   @map("target_title") @db.VarChar(255)
+  targetSlug                String?   @map("target_slug") @db.VarChar(255)
+  targetDisplayTitle        String?   @map("target_display_title") @db.VarChar(255)
+  targetPageType            String?   @map("target_page_type") @db.VarChar(32)
+  targetOwnerProfileId      BigInt?   @map("target_owner_profile_id") @db.UnsignedBigInt
+  proposedContent           String    @map("proposed_content") @db.MediumText
+  editSummary               String    @map("edit_summary") @db.VarChar(255)
+  isMinor                   Boolean   @default(false) @map("is_minor")
+  status                    String    @default("pending") @db.VarChar(32)
+  createdBy                 BigInt    @map("created_by") @db.UnsignedBigInt
+  reviewedBy                BigInt?   @map("reviewed_by") @db.UnsignedBigInt
+  reviewNote                String?   @map("review_note") @db.VarChar(1000)
+  acceptedRevisionId        BigInt?   @map("accepted_revision_id") @db.UnsignedBigInt
+  createdAt                 DateTime  @map("created_at")
+  updatedAt                 DateTime  @map("updated_at")
+  reviewedAt                DateTime? @map("reviewed_at")
+  contributionPolicyVersion Int?      @map("contribution_policy_version")
 
   @@index([pageId, status, createdAt], map: "idx_wiki_edit_requests_page")
   @@index([targetNamespaceId, targetSlug, status, createdAt], map: "idx_wiki_edit_requests_target")
@@ -1649,24 +1650,33 @@ model WikiRecentChange {
 }
 
 model ServerWiki {
-  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  spaceId           BigInt    @map("space_id") @db.UnsignedBigInt
-  voteServerId      String?   @unique @map("vote_server_id") @db.Char(36)
-  serverName        String    @map("server_name") @db.VarChar(255)
-  slug              String    @unique @db.VarChar(255)
-  host              String?   @db.VarChar(255)
-  port              Int?      @db.UnsignedInt
-  edition           String    @default("unknown") @db.VarChar(16)
-  supportedVersions String?   @map("supported_versions") @db.VarChar(255)
-  genres            String?   @db.VarChar(255)
-  verifiedStatus    String    @default("none") @map("verified_status") @db.VarChar(32)
-  status            String    @default("active") @db.VarChar(32)
-  layoutKey         String    @default("docs") @map("layout_key") @db.VarChar(32)
-  layoutUpdatedAt   DateTime? @map("layout_updated_at")
-  layoutUpdatedBy   BigInt?   @map("layout_updated_by") @db.UnsignedBigInt
-  createdBy         BigInt?   @map("created_by") @db.UnsignedBigInt
-  createdAt         DateTime  @map("created_at")
-  updatedAt         DateTime  @map("updated_at")
+  id                           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId                      BigInt    @map("space_id") @db.UnsignedBigInt
+  voteServerId                 String?   @unique @map("vote_server_id") @db.Char(36)
+  serverName                   String    @map("server_name") @db.VarChar(255)
+  slug                         String    @unique @db.VarChar(255)
+  host                         String?   @db.VarChar(255)
+  port                         Int?      @db.UnsignedInt
+  edition                      String    @default("unknown") @db.VarChar(16)
+  supportedVersions            String?   @map("supported_versions") @db.VarChar(255)
+  genres                       String?   @db.VarChar(255)
+  verifiedStatus               String    @default("none") @map("verified_status") @db.VarChar(32)
+  status                       String    @default("active") @db.VarChar(32)
+  layoutKey                    String    @default("docs") @map("layout_key") @db.VarChar(32)
+  layoutUpdatedAt              DateTime? @map("layout_updated_at")
+  layoutUpdatedBy              BigInt?   @map("layout_updated_by") @db.UnsignedBigInt
+  contributionPolicySource     String?   @map("contribution_policy_source") @db.Text
+  editHelpSource               String?   @map("edit_help_source") @db.Text
+  topNoticeSource              String?   @map("top_notice_source") @db.Text
+  bottomNoticeSource           String?   @map("bottom_notice_source") @db.Text
+  requireContributionPolicyAck Boolean   @default(false) @map("require_contribution_policy_ack")
+  contributionPolicyVersion    Int       @default(0) @map("contribution_policy_version") @db.UnsignedInt
+  contentSettingsVersion       Int       @default(0) @map("content_settings_version") @db.UnsignedInt
+  contentSettingsUpdatedAt     DateTime? @map("content_settings_updated_at")
+  contentSettingsUpdatedBy     BigInt?   @map("content_settings_updated_by") @db.UnsignedBigInt
+  createdBy                    BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt                    DateTime  @map("created_at")
+  updatedAt                    DateTime  @map("updated_at")
 
   @@index([spaceId])
   @@index([status])

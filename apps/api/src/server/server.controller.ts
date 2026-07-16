@@ -38,6 +38,7 @@ import { FileService } from '../file/file.service';
 import { serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schemas';
 import { PluginCredentialService } from './plugin-credential.service';
 import { GuildAccessService } from '../verify/guild-access.service';
+import type { ServerWikiContentSettingsInput } from './server-wiki-content-settings';
 
 const votifierPayloadSchema = z.object({
   targets: z.array(votifierTargetSchema).min(1)
@@ -57,6 +58,14 @@ const pluginCredentialPayloadSchema = z.object({
 const pluginCredentialStatusSchema = z.object({ enabled: z.boolean() });
 const serverWikiLayoutPayloadSchema = z.object({
   layoutKey: z.enum(['docs', 'handbook', 'brand'])
+});
+const serverWikiContentSettingsPayloadSchema = z.object({
+  expectedVersion: z.number().int().min(0),
+  contributionPolicySource: z.string().nullable(),
+  editHelpSource: z.string().nullable(),
+  topNoticeSource: z.string().nullable(),
+  bottomNoticeSource: z.string().nullable(),
+  requireContributionPolicyAck: z.boolean(),
 });
 
 const rankingQuerySchema = z.object({
@@ -159,6 +168,30 @@ export class ServerController {
     return this.serverService.getWikiLayoutSettings(id);
   }
 
+  @UseGuards(SessionGuard)
+  @Get(':id/wiki-settings')
+  async wikiSettings(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    return this.serverService.getWikiContentSettings(id);
+  }
+
+  @RequireStepUp('server_admin')
+  @UseGuards(SessionGuard)
+  @Patch(':id/wiki-settings')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  async updateWikiSettings(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    const payload = serverWikiContentSettingsPayloadSchema.parse(body) as ServerWikiContentSettingsInput;
+    return this.serverService.updateWikiContentSettings(id, payload, session.userId);
+  }
+
   @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Patch(':id/wiki-layout')
@@ -170,7 +203,7 @@ export class ServerController {
   ) {
     await this.assertCanManageServer(id, session);
     const payload = serverWikiLayoutPayloadSchema.parse(body);
-    return this.serverService.updateWikiLayout(id, payload.layoutKey);
+    return this.serverService.updateWikiLayout(id, payload.layoutKey, session.userId);
   }
 
   @Get(':id/stats')
@@ -445,7 +478,7 @@ export class ServerController {
 
   private async assertCanManageServer(id: string, session: SessionPayload): Promise<void> {
     if (!(await this.canManageServer(id, session))) {
-      throw new ForbiddenException('해당 서버의 플러그인 자격증명을 관리할 권한이 없습니다.');
+      throw new ForbiddenException('해당 서버의 관리 설정을 변경할 권한이 없습니다.');
     }
   }
 }

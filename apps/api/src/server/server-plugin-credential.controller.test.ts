@@ -51,6 +51,37 @@ test('elevation without server authority cannot create a server wiki', async () 
   assert.equal(created, false);
 });
 
+test('elevation without server authority cannot read or update server wiki settings', async () => {
+  let settingsRead = false;
+  let settingsUpdated = false;
+  const controller = new ServerController(
+    {
+      async getWikiContentSettings() { settingsRead = true; return {}; },
+      async updateWikiContentSettings() { settingsUpdated = true; return {}; },
+    } as never,
+    { async isOwner() { return false; } } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  const elevated = { ...session, isElevated: true };
+
+  await assert.rejects(() => controller.wikiSettings('server-1', elevated), ForbiddenException);
+  await assert.rejects(
+    () => controller.updateWikiSettings('server-1', {
+      expectedVersion: 0,
+      contributionPolicySource: null,
+      editHelpSource: null,
+      topNoticeSource: null,
+      bottomNoticeSource: null,
+      requireContributionPolicyAck: false,
+    }, elevated),
+    ForbiddenException,
+  );
+  assert.equal(settingsRead, false);
+  assert.equal(settingsUpdated, false);
+});
+
 test('plugin credential creation binds only an accessible guild', async () => {
   let checkedGuildId = '';
   let createdGuildId = '';
