@@ -116,4 +116,50 @@ if (!hasDatabase) {
       await prisma.account.deleteMany({ where: { id: { in: [first.id, second.id] } } });
     }
   });
+
+  test('linking accounts revokes every active Wiki API token before authority changes', async () => {
+    const first = await service.registerAccount({
+      provider: 'discord',
+      providerUserId: `discord-${randomUUID()}`,
+    });
+    const second = await service.registerAccount({
+      provider: 'naver',
+      providerUserId: `naver-${randomUUID()}`,
+    });
+    const tokenIds = [randomUUID(), randomUUID()];
+    await prisma.wikiApiToken.createMany({
+      data: [
+        {
+          id: tokenIds[0],
+          accountId: first.id,
+          name: 'first token',
+          tokenPrefix: randomUUID().replaceAll('-', '').slice(0, 12),
+          secretHash: randomUUID().replaceAll('-', '').padEnd(64, '0').slice(0, 64),
+          scopes: ['wiki:read'],
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+        {
+          id: tokenIds[1],
+          accountId: second.id,
+          name: 'second token',
+          tokenPrefix: randomUUID().replaceAll('-', '').slice(0, 12),
+          secretHash: randomUUID().replaceAll('-', '').padEnd(64, '1').slice(0, 64),
+          scopes: ['wiki:read'],
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      ],
+    });
+
+    try {
+      await service.linkActiveAccounts(first.id, second.id);
+      const tokens = await prisma.wikiApiToken.findMany({
+        where: { id: { in: tokenIds } },
+        select: { status: true, revokedAt: true },
+      });
+      assert.equal(tokens.length, 2);
+      assert.ok(tokens.every((token) => token.status === 'revoked' && token.revokedAt));
+    } finally {
+      await prisma.account.deleteMany({ where: { id: { in: [first.id, second.id] } } });
+    }
+  });
 }

@@ -222,6 +222,7 @@ export class AccountSeparationService {
           skipDuplicates: true,
         });
         await this.stabilizeCanonicalAccountInTransaction(tx, fresh.primaryAccountId, group.accountIds);
+        await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
         await tx.accountLinkRequest.update({
           where: { id: requestId },
           data: { status: 'linked', confirmedAt: new Date() },
@@ -252,6 +253,7 @@ export class AccountSeparationService {
           skipDuplicates: true,
         });
         await this.stabilizeCanonicalAccountInTransaction(tx, primaryAccountId, group.accountIds);
+        await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
       },
     );
   }
@@ -359,6 +361,16 @@ export class AccountSeparationService {
         '서로 다른 Minecraft 계정이 인증된 MineWiki 계정은 바로 연결할 수 없습니다. support@minewiki.kr로 병합을 요청해 주세요.',
       );
     }
+  }
+
+  private async revokeWikiApiTokensForAccountLink(
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    accountIds: readonly string[],
+  ): Promise<void> {
+    await tx.wikiApiToken.updateMany({
+      where: { accountId: { in: [...accountIds] }, status: 'active' },
+      data: { status: 'revoked', revokedAt: new Date() },
+    });
   }
 
   private async ensureAccount(accountId: string) {

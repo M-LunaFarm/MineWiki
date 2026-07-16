@@ -1238,6 +1238,7 @@ model WikiApiIdempotencyRecord {
   token WikiApiToken @relation(fields: [tokenId], references: [id], onDelete: Cascade)
 
   @@unique([tokenId, keyHash])
+  @@unique([tokenId, requestHash, route])
   @@index([expiresAt])
   @@map("wiki_api_idempotency_records")
 }

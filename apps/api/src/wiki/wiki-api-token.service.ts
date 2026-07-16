@@ -73,6 +73,7 @@ export class WikiApiTokenService {
       throw new BadRequestException('토큰 이름, 권한, 만료일 또는 Wiki 공간이 올바르지 않습니다.');
     }
     const input = parsed.data;
+    const accountGroup = await this.resolveActiveAccountGroup(session.userId);
     const scopes = [...new Set(input.scopes)];
     const spaceId = input.spaceId ? BigInt(input.spaceId) : null;
     const space = spaceId
@@ -87,7 +88,7 @@ export class WikiApiTokenService {
     const token = `mwk_${prefix}_${randomBytes(32).toString('base64url')}`;
     const created = await this.prisma.wikiApiToken.create({
       data: {
-        accountId: session.userId,
+        accountId: accountGroup.canonicalAccountId,
         name: input.name,
         tokenPrefix: prefix,
         secretHash: hashValue(token),
@@ -99,7 +100,7 @@ export class WikiApiTokenService {
     });
     await this.events.audit('wiki.api_token.created', {
       category: 'wiki',
-      actorAccountId: session.userId,
+      actorAccountId: accountGroup.canonicalAccountId,
       subjectType: 'wiki_api_token',
       subjectId: created.id,
       ipAddress: session.requestIp ?? null,
@@ -109,8 +110,9 @@ export class WikiApiTokenService {
   }
 
   async list(accountId: string): Promise<WikiApiTokenView[]> {
+    const accountGroup = await this.resolveActiveAccountGroup(accountId);
     const rows = await this.prisma.wikiApiToken.findMany({
-      where: { accountId },
+      where: { accountId: { in: accountGroup.accountIds } },
       include: { space: { select: { id: true, name: true, rootPath: true } } },
       orderBy: { createdAt: 'desc' },
       take: 100,
@@ -135,14 +137,15 @@ export class WikiApiTokenService {
 
   async revoke(session: SessionPayload, tokenId: string): Promise<{ readonly revoked: true }> {
     if (!/^[0-9a-f-]{36}$/i.test(tokenId)) throw new NotFoundException('토큰을 찾을 수 없습니다.');
+    const accountGroup = await this.resolveActiveAccountGroup(session.userId);
     const revoked = await this.prisma.wikiApiToken.updateMany({
-      where: { id: tokenId, accountId: session.userId, status: 'active' },
+      where: { id: tokenId, accountId: { in: accountGroup.accountIds }, status: 'active' },
       data: { status: 'revoked', revokedAt: new Date() },
     });
     if (revoked.count !== 1) throw new NotFoundException('활성 토큰을 찾을 수 없습니다.');
     await this.events.audit('wiki.api_token.revoked', {
       category: 'wiki',
-      actorAccountId: session.userId,
+      actorAccountId: accountGroup.canonicalAccountId,
       subjectType: 'wiki_api_token',
       subjectId: tokenId,
       ipAddress: session.requestIp ?? null,
@@ -171,18 +174,8 @@ export class WikiApiTokenService {
     if (token.spaceId && token.space?.status !== 'active') {
       throw new UnauthorizedException('이 토큰에 연결된 Wiki 공간이 더 이상 활성 상태가 아닙니다.');
     }
-    const canonicalAccountId = token.account.canonicalAccountId ?? token.account.id;
-    const group = await this.prisma.account.findMany({
-      where: { OR: [{ id: canonicalAccountId }, { canonicalAccountId }] },
-      select: { id: true, lifecycleStatus: true },
-    });
-    if (
-      token.account.lifecycleStatus !== 'active' ||
-      !group.some((account) => account.id === canonicalAccountId) ||
-      group.some((account) => account.lifecycleStatus !== 'active')
-    ) {
-      throw new UnauthorizedException('토큰 소유 계정이 활성 상태가 아닙니다.');
-    }
+    const accountGroup = await this.resolveActiveAccountGroup(token.account.id);
+    const canonicalAccountId = accountGroup.canonicalAccountId;
     const policyConsent = await this.sessions.getPolicyConsentStatus(canonicalAccountId);
     if (policyConsent.required) {
       throw new ForbiddenException({
@@ -266,6 +259,10 @@ export class WikiApiTokenService {
     }
     const keyHash = hashValue(key);
     const requestHash = hashValue(`${input.method}\n${input.route}\n${stableJson(input.body)}`);
+    const now = new Date();
+    await this.prisma.wikiApiIdempotencyRecord.deleteMany({
+      where: { status: 'completed', expiresAt: { lte: now } },
+    });
     try {
       await this.prisma.wikiApiIdempotencyRecord.create({
         data: {
@@ -279,13 +276,26 @@ export class WikiApiTokenService {
       });
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
-      const existing = await this.prisma.wikiApiIdempotencyRecord.findUnique({
+      const existingByKey = await this.prisma.wikiApiIdempotencyRecord.findUnique({
         where: { tokenId_keyHash: { tokenId: input.tokenId, keyHash } },
+      });
+      const existing = existingByKey ?? await this.prisma.wikiApiIdempotencyRecord.findFirst({
+        where: { tokenId: input.tokenId, requestHash, route: input.route },
       });
       if (!existing || existing.requestHash !== requestHash || existing.method !== input.method || existing.route !== input.route) {
         throw new ConflictException('같은 Idempotency-Key가 다른 요청에 사용되었습니다.');
       }
       if (existing.status === 'completed' && existing.responseBody) return existing.responseBody as T;
+      if (existing.status === 'indeterminate' || existing.expiresAt.getTime() <= now.getTime()) {
+        await this.prisma.wikiApiIdempotencyRecord.updateMany({
+          where: { id: existing.id, status: 'processing' },
+          data: { status: 'indeterminate', completedAt: now },
+        });
+        throw new ConflictException({
+          code: 'IDEMPOTENCY_RESULT_UNKNOWN',
+          message: '이 요청은 처리 결과를 확정할 수 없습니다. 같은 변경을 다시 보내지 말고 먼저 문서의 현재 리비전을 확인해 주세요.',
+        });
+      }
       throw new ConflictException('같은 요청이 처리 중입니다. 잠시 후 결과를 확인해 주세요.');
     }
     let response: T;
@@ -310,6 +320,10 @@ export class WikiApiTokenService {
       });
       return response;
     } catch (error) {
+      await this.prisma.wikiApiIdempotencyRecord.updateMany({
+        where: { tokenId: input.tokenId, keyHash, status: 'processing' },
+        data: { status: 'indeterminate', completedAt: new Date() },
+      }).catch(() => undefined);
       throw new ConflictException({
         code: 'IDEMPOTENCY_RESULT_UNAVAILABLE',
         message: '요청은 처리되었지만 재시도 결과를 저장하지 못했습니다. 같은 키로 다시 변경하지 말고 문서 상태를 확인해 주세요.',
@@ -323,6 +337,31 @@ export class WikiApiTokenService {
     if (session.authLevel !== 'aal2' && (!Number.isFinite(authenticatedAt) || Date.now() - authenticatedAt > RECENT_AUTH_MS)) {
       throw new ForbiddenException('보안을 위해 다시 로그인한 뒤 15분 안에 API 토큰을 만들어 주세요.');
     }
+  }
+
+  private async resolveActiveAccountGroup(seedAccountId: string): Promise<{
+    readonly canonicalAccountId: string;
+    readonly accountIds: string[];
+  }> {
+    const seed = await this.prisma.account.findUnique({
+      where: { id: seedAccountId },
+      select: { id: true, canonicalAccountId: true, lifecycleStatus: true },
+    });
+    if (!seed || seed.lifecycleStatus !== 'active') {
+      throw new UnauthorizedException('토큰 소유 계정이 활성 상태가 아닙니다.');
+    }
+    const canonicalAccountId = seed.canonicalAccountId ?? seed.id;
+    const accounts = await this.prisma.account.findMany({
+      where: { OR: [{ id: canonicalAccountId }, { canonicalAccountId }] },
+      select: { id: true, lifecycleStatus: true },
+    });
+    if (
+      !accounts.some((account) => account.id === canonicalAccountId) ||
+      accounts.some((account) => account.lifecycleStatus !== 'active')
+    ) {
+      throw new UnauthorizedException('토큰 소유 계정이 활성 상태가 아닙니다.');
+    }
+    return { canonicalAccountId, accountIds: accounts.map((account) => account.id) };
   }
 
   private toView(row: {
