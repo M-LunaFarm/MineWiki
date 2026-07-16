@@ -7,6 +7,8 @@ import { WikiDiscussionController } from './wiki-discussion.controller';
 import type { WikiDiscussionService, WikiDiscussionStatus, WikiDiscussionStatusFilter } from './wiki-discussion.service';
 import type { WikiCaptchaService } from './wiki-captcha.service';
 
+const captchaStub = { async assertVerified() {} } as WikiCaptchaService;
+
 test('new discussion captcha is verified and never forwarded into discussion content', async () => {
   let captchaInput: unknown;
   let discussionInput: unknown;
@@ -36,7 +38,7 @@ test('discussion status endpoint accepts paused and forwards the authenticated a
       return { id: threadId, status };
     }
   } as unknown as WikiDiscussionService;
-  const controller = new WikiDiscussionController(service);
+  const controller = new WikiDiscussionController(service, captchaStub);
 
   await controller.status('30', { status: 'paused' }, session);
   assert.deepEqual(received, { threadId: '30', status: 'paused', session });
@@ -53,7 +55,7 @@ test('discussion list endpoint validates and forwards status filters', async () 
       return { items: [], nextCursor: null, statusCounts: { total: 0, open: 0, paused: 0, closed: 0 } };
     }
   } as unknown as WikiDiscussionService;
-  const controller = new WikiDiscussionController(service);
+  const controller = new WikiDiscussionController(service, captchaStub);
   const request = { sessionPayload: session } as FastifyRequest;
 
   await controller.listPage('10', request, undefined, 'active', 20, 'first-latest');

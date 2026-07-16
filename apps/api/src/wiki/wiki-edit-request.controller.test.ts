@@ -6,6 +6,8 @@ import { WikiEditRequestController } from './wiki-edit-request.controller';
 import type { WikiEditRequestService } from './wiki-edit-request.service';
 import type { WikiCaptchaService } from './wiki-captcha.service';
 
+const captchaStub = { async assertVerified() {} } as WikiCaptchaService;
+
 test('new-page review requests verify captcha without persisting the token', async () => {
   let captchaInput: unknown;
   let requestInput: unknown;
@@ -36,10 +38,10 @@ test('new-page request controller forwards the authenticated target and draft', 
       return { id: '71', requestKind: 'create' };
     }
   } as unknown as WikiEditRequestService;
-  const controller = new WikiEditRequestController(service);
+  const controller = new WikiEditRequestController(service, captchaStub);
   const body = { namespace: 'guide', title: '새 문서', contentRaw: '초안', editSummary: '새 문서 제안' };
 
-  const result = await controller.createForNewPage(body, session);
+  const result = await controller.createForNewPage(body, session, {} as FastifyRequest);
 
   assert.deepEqual(received, { receivedSession: session, body });
   assert.deepEqual(result, { id: '71', requestKind: 'create' });
@@ -53,7 +55,7 @@ test('request context controller preserves the optional viewer session', async (
       return { items: [], canReview: false, viewerProfileId: null, nextCursor: null, currentRevisionId: null };
     }
   } as unknown as WikiEditRequestService;
-  const controller = new WikiEditRequestController(service);
+  const controller = new WikiEditRequestController(service, captchaStub);
 
   await controller.context('71', { sessionPayload: session } as FastifyRequest);
 

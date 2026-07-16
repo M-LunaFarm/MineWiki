@@ -10,7 +10,7 @@ import { WikiCaptchaService } from './wiki-captcha.service';
 
 @Controller('v1/wiki')
 export class WikiDiscussionController {
-  constructor(private readonly discussions: WikiDiscussionService, private readonly wikiCaptcha?: WikiCaptchaService) {}
+  constructor(private readonly discussions: WikiDiscussionService, private readonly wikiCaptcha: WikiCaptchaService) {}
 
   @Get('discussions/recent')
   @UseGuards(OptionalSessionGuard)
@@ -93,7 +93,7 @@ export class WikiDiscussionController {
     @CurrentSession() session: SessionPayload,
     @Req() request: FastifyRequest
   ) {
-    await this.wikiCaptcha?.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
+    await this.wikiCaptcha.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
     const thread = { ...body };
     delete thread.captchaToken;
     return this.discussions.createThread(session, pageId, thread);

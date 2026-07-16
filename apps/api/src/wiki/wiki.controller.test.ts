@@ -13,6 +13,8 @@ import type { WikiReadService } from './wiki-read.service';
 import type { SessionPayload } from '../session/session.service';
 import type { WikiCaptchaService } from './wiki-captcha.service';
 
+const captchaStub = { async assertVerified() {} } as WikiCaptchaService;
+
 test('new wiki pages require captcha before the clean mutation reaches the edit service', async () => {
   const session = { userId: 'account-1', requestIp: '192.0.2.20' } as SessionPayload;
   let captchaInput: unknown;
@@ -36,7 +38,8 @@ test('public block history controller is callable without an authenticated sessi
   const controller = new WikiController(
     {} as WikiProfileService,
     { async getPublicBlockHistory(value: unknown) { input = value; return { items: [], nextCursor: null }; } } as unknown as WikiReadService,
-    {} as WikiEditService
+    {} as WikiEditService,
+    captchaStub
   );
 
   const response = await controller.blockHistory('20', '50', 'block', 'target');
@@ -76,7 +79,8 @@ test('anonymous wiki controller read applies CIDR ACL from the central request c
   const controller = new WikiController(
     {} as WikiProfileService,
     wikiRead,
-    {} as WikiEditService
+    {} as WikiEditService,
+    captchaStub
   );
   const guard = new OptionalSessionGuard({
     async getSessionByToken() { return null; }

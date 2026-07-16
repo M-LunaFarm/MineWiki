@@ -10,7 +10,7 @@ import { WikiCaptchaService } from './wiki-captcha.service';
 
 @Controller('v1/wiki')
 export class WikiEditRequestController {
-  constructor(private readonly requests: WikiEditRequestService, private readonly wikiCaptcha?: WikiCaptchaService) {}
+  constructor(private readonly requests: WikiEditRequestService, private readonly wikiCaptcha: WikiCaptchaService) {}
 
   @Get('edit-requests')
   @UseGuards(OptionalSessionGuard)
@@ -66,7 +66,7 @@ export class WikiEditRequestController {
     @CurrentSession() session: SessionPayload,
     @Req() request: FastifyRequest
   ) {
-    await this.wikiCaptcha?.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
+    await this.wikiCaptcha.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
     const editRequest = { ...body };
     delete editRequest.captchaToken;
     return this.requests.createForNewPage(session, editRequest);

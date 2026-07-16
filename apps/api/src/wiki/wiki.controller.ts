@@ -46,7 +46,7 @@ export class WikiController {
     private readonly wikiProfiles: WikiProfileService,
     private readonly wikiRead: WikiReadService,
     private readonly wikiEdit: WikiEditService,
-    private readonly wikiCaptcha?: WikiCaptchaService
+    private readonly wikiCaptcha: WikiCaptchaService
   ) {}
 
   @Get('page')
@@ -281,7 +281,7 @@ export class WikiController {
     @CurrentSession() session: SessionPayload,
     @Req() request: FastifyRequest
   ): Promise<WikiMutationResponse> {
-    await this.wikiCaptcha?.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
+    await this.wikiCaptcha.assertVerified(body.captchaToken, request.clientIp ?? session.requestIp);
     const mutation = { ...body };
     delete mutation.captchaToken;
     return this.wikiEdit.createPage(session, mutation);
