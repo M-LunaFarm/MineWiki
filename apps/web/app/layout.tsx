@@ -67,7 +67,10 @@ const monoFont = JetBrains_Mono({
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ko" data-theme="dark" suppressHydrationWarning>
-      <head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
+      <head>
+        <link rel="search" type="application/opensearchdescription+xml" title="MineWiki 통합 검색" href="/opensearch.xml" />
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body
         className={`${displayFont.variable} ${bodyFont.variable} ${editorialFont.variable} ${monoFont.variable} min-h-screen bg-surface-100 font-sans text-slate-100 antialiased`}
       >
