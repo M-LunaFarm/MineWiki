@@ -129,6 +129,13 @@ export interface WikiSearchSuggestionResponse {
   readonly exactMatch: WikiSearchResult | null;
 }
 
+export interface WikiPublicStatsResponse {
+  readonly pageCount: number;
+  /** Canonical namespace code, or null when the site-wide count was requested. */
+  readonly namespace: string | null;
+  readonly generatedAt: string;
+}
+
 export interface WikiBacklinkItem {
   readonly id: string;
   readonly sourcePageId: string;
@@ -305,6 +312,12 @@ export interface WikiBlameResponse {
 
 @Injectable()
 export class WikiReadService {
+  private readonly publicStatsCache = new Map<string, {
+    readonly expiresAt: number;
+    readonly value: WikiPublicStatsResponse;
+  }>();
+  private readonly publicStatsInflight = new Map<string, Promise<WikiPublicStatsResponse>>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly wikiPermissions: WikiPermissionService,
@@ -315,6 +328,75 @@ export class WikiReadService {
 
   private get routePaths(): WikiRoutePathResolver {
     return this.injectedRoutePaths ?? new WikiRoutePathResolver(this.prisma);
+  }
+
+  async getPublicStats(namespaceInput?: string): Promise<WikiPublicStatsResponse> {
+    const requestedNamespace = namespaceInput?.trim().slice(0, 64) || null;
+    const namespace = requestedNamespace
+      ? await this.prisma.wikiNamespace.findFirst({
+          where: { OR: [{ code: requestedNamespace }, { displayName: requestedNamespace }] },
+          select: { id: true, code: true }
+        })
+      : null;
+    // thetree treats an unknown namespace argument as an unscoped pagecount.
+    const cacheKey = namespace ? `namespace:${namespace.id}` : 'all';
+    const cached = this.publicStatsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const running = this.publicStatsInflight.get(cacheKey);
+    if (running) return running;
+
+    const calculation = this.countAnonymousReadablePages(namespace?.id)
+      .then((pageCount) => {
+        const value: WikiPublicStatsResponse = {
+          pageCount,
+          namespace: namespace?.code ?? null,
+          generatedAt: new Date().toISOString()
+        };
+        this.publicStatsCache.set(cacheKey, { expiresAt: Date.now() + 30_000, value });
+        return value;
+      })
+      .finally(() => this.publicStatsInflight.delete(cacheKey));
+    this.publicStatsInflight.set(cacheKey, calculation);
+    return calculation;
+  }
+
+  private async countAnonymousReadablePages(namespaceId?: number): Promise<number> {
+    const batchSize = 500;
+    let cursor: bigint | null = null;
+    let count = 0;
+    for (;;) {
+      const pages = await this.prisma.wikiPage.findMany({
+        where: {
+          ...(cursor !== null ? { id: { gt: cursor } } : {}),
+          ...(namespaceId !== undefined ? { namespaceId } : {}),
+          status: { in: ['normal', 'active', 'published'] },
+          currentRevisionId: { not: null }
+        },
+        orderBy: { id: 'asc' },
+        take: batchSize
+      });
+      if (pages.length === 0) break;
+      cursor = pages[pages.length - 1]!.id;
+      const revisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+      const publicRevisions = await this.prisma.wikiPageRevision.findMany({
+        where: { id: { in: revisionIds }, visibility: 'public' },
+        select: { id: true }
+      });
+      const publicRevisionIds = new Set(publicRevisions.map((revision) => revision.id));
+      const publicCandidates = pages.filter((page) =>
+        page.currentRevisionId !== null && publicRevisionIds.has(page.currentRevisionId)
+      );
+      const readable = await this.wikiPermissions.filterReadablePages({
+        actor: null,
+        pages: publicCandidates,
+        // Public pagecount must not vary with the requester's IP or expose an
+        // address-scoped allow rule through a shared statistic.
+        requestIp: ''
+      });
+      count += readable.length;
+      if (pages.length < batchSize) break;
+    }
+    return count;
   }
 
   async getPage(

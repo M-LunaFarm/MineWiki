@@ -13,7 +13,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.10.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.11.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -82,6 +82,7 @@ const allowedTags = [
   'small',
   'br',
   'time',
+  'output',
   'ruby',
   'rp',
   'rt',
@@ -1003,6 +1004,7 @@ export function applyIncludeParametersToAst(
     };
     if (node.type === 'unsupported_macro') return { ...node };
     if (node.type === 'dynamic_time') return { ...node };
+    if (node.type === 'dynamic_stat') return { ...node };
     if (node.type === 'video') return { ...node };
     if (node.type === 'math') {
       const source = replace(node.source);
@@ -1145,6 +1147,10 @@ function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors:
     const date = normalizeMacroDate(rawArgs);
     if (date) return { type: 'dynamic_time', mode: normalizedName, date };
     return invalidDateMacro(normalizedName, errors);
+  }
+  if (normalizedName === 'pagecount') {
+    const namespace = rawArgs?.trim().slice(0, 64) || null;
+    return { type: 'dynamic_stat', stat: 'pagecount', namespace };
   }
   if (normalizedName === 'anchor' && rawArgs !== undefined) {
     const id = normalizeMacroAnchor(rawArgs);
@@ -1387,6 +1393,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       caption: ['class'],
       span: ['class', 'style', 'title', 'id', 'aria-hidden'],
       time: ['class', 'datetime', 'data-wiki-time', 'data-wiki-date'],
+      output: ['class', 'data-wiki-stat', 'data-wiki-namespace', 'aria-label'],
       ruby: ['class'],
       rt: ['class'],
       rp: ['class'],
@@ -1532,6 +1539,12 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
           : '';
         const fallback = node.date ?? '현재 시각';
         return `<time class="wiki-dynamic-time" data-wiki-time="${node.mode}"${dateAttributes}>${escapeHtml(fallback)}</time>`;
+      }
+      if (node.type === 'dynamic_stat') {
+        const namespaceAttribute = node.namespace
+          ? ` data-wiki-namespace="${escapeAttr(node.namespace)}"`
+          : '';
+        return `<output class="wiki-dynamic-stat" data-wiki-stat="${node.stat}"${namespaceAttribute} aria-label="문서 수">…</output>`;
       }
       if (node.type === 'bold') return `<strong>${escapeHtml(node.text)}</strong>`;
       if (node.type === 'italic') return `<em>${escapeHtml(node.text)}</em>`;

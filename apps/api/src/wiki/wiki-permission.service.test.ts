@@ -278,10 +278,12 @@ test('delegated page ACL manager can manage thread ACL without being the thread 
 
 test('batch page visibility loads ACL decisions once and preserves candidate order', async () => {
   let batchCalls = 0;
+  let receivedRequestIp: string | null | undefined;
   const service = createService({
     acl: {
-      async evaluateReadBatch() {
+      async evaluateReadBatch(input: { requestIp?: string | null }) {
         batchCalls += 1;
+        receivedRequestIp = input.requestIp;
         return new Map([
           [1n, { matched: false, allowed: false, reason: 'acl_no_match' }],
           [2n, { matched: true, allowed: false, reason: 'private_page' }]
@@ -291,11 +293,36 @@ test('batch page visibility loads ACL decisions once and preserves candidate ord
   });
 
   const result = await service.filterReadablePages({
-    pages: [page({ id: 1n }), page({ id: 2n }), page({ id: 3n, status: 'deleted' })]
+    pages: [page({ id: 1n }), page({ id: 2n }), page({ id: 3n, status: 'deleted' })],
+    requestIp: ''
   });
 
   assert.deepEqual(result.map((item) => item.id), [1n]);
   assert.equal(batchCalls, 1);
+  assert.equal(receivedRequestIp, '');
+});
+
+test('single-page ACL fallback preserves explicit neutral address context', async () => {
+  let receivedRequestIp: string | null | undefined;
+  const service = createService({
+    roles: ['owner'],
+    acl: {
+      async evaluate(input: { requestIp?: string | null }) {
+        receivedRequestIp = input.requestIp;
+        return { matched: false, allowed: false, reason: 'acl_no_match' };
+      },
+      async evaluateReadBatch() { return new Map(); }
+    } as unknown as WikiAclService
+  });
+
+  const result = await service.filterReadablePages({
+    actor: actor(),
+    pages: [page({ protectionLevel: 'custom_restricted' })],
+    requestIp: ''
+  });
+
+  assert.deepEqual(result.map((item) => item.id), [1n]);
+  assert.equal(receivedRequestIp, '');
 });
 
 test('hidden and deleted pages are denied for read', async () => {

@@ -746,6 +746,12 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+  .wiki-rendered .wiki-dynamic-stat {
+    display: inline;
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+    white-space: nowrap;
+  }
   .wiki-rendered .wiki-math-inline {
     display: inline-block;
     max-width: 100%;

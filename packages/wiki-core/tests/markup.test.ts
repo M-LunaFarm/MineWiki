@@ -663,17 +663,26 @@ test('collects file dependencies from every block and inline container', () => {
 });
 
 test('renders explicit safe placeholders for unsupported macros', () => {
-  const parsed = parseMarkup('통계는 [pagecount], 선택은 [vote(항목)]이고 [[문서]]와 [https://example.com 외부]는 링크다.');
+  const parsed = parseMarkup('영상은 [navertv(123)], 선택은 [vote(항목)]이고 [[문서]]와 [https://example.com 외부]는 링크다.');
   const html = renderDocument(parsed.ast);
 
   assert.deepEqual(
     parsed.errors.filter((error) => error.startsWith('지원되지 않는 매크로입니다:')),
-    ['지원되지 않는 매크로입니다: pagecount', '지원되지 않는 매크로입니다: vote']
+    ['지원되지 않는 매크로입니다: navertv', '지원되지 않는 매크로입니다: vote']
   );
-  assert.match(html, /<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: \[pagecount\]<\/span>/);
+  assert.match(html, /<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: \[navertv\]<\/span>/);
   assert.match(html, />지원하지 않는 매크로: \[vote\]<\/span>/);
   assert.match(html, /class="wiki-link"/);
   assert.match(html, /href="https:\/\/example\.com"/);
+});
+
+test('renders cache-safe pagecount markers with an optional namespace', () => {
+  const parsed = parseMarkup('[pagecount] [pagecount(서버)]');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.errors.some((error) => error.includes('지원되지 않는 매크로')), false);
+  assert.match(html, /data-wiki-stat="pagecount" aria-label="문서 수">…<\/output>/);
+  assert.match(html, /data-wiki-stat="pagecount" data-wiki-namespace="서버" aria-label="문서 수">…<\/output>/);
 });
 
 test('renders cache-safe semantic markers for date, datetime, age, and dday macros', () => {

@@ -34,6 +34,7 @@ import {
   type WikiRevisionListResponse,
   type WikiSearchResponse,
   type WikiSearchSuggestionResponse,
+  type WikiPublicStatsResponse,
   type WikiSpecialDocumentResponse,
   type WikiPublicBlockHistoryResponse
 } from './wiki-read.service';
@@ -48,6 +49,12 @@ export class WikiController {
     private readonly wikiEdit: WikiEditService,
     private readonly wikiCaptcha: WikiCaptchaService
   ) {}
+
+  @Get('stats')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  getPublicStats(@Query('namespace') namespace?: string): Promise<WikiPublicStatsResponse> {
+    return this.wikiRead.getPublicStats(namespace);
+  }
 
   @Get('page')
   @UseGuards(OptionalSessionGuard)

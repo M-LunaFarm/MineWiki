@@ -120,6 +120,7 @@ export class WikiPermissionService {
     readonly page: WikiPermissionPage | null;
     readonly revision?: WikiPermissionRevision | null;
     readonly store?: WikiPermissionStore;
+    readonly requestIp?: string | null;
   }): Promise<void> {
     const decision = await this.canReadPage(input);
     if (!decision.allowed) {
@@ -132,6 +133,8 @@ export class WikiPermissionService {
     readonly actor?: WikiPermissionActor | null;
     readonly pages: readonly T[];
     readonly store?: WikiPermissionStore;
+    /** Explicit ACL address context. An empty string represents a neutral public actor. */
+    readonly requestIp?: string | null;
   }): Promise<T[]> {
     if (input.pages.length === 0) return [];
     const store = input.store ?? this.prisma;
@@ -159,7 +162,8 @@ export class WikiPermissionService {
             title: page.title,
             createdBy: page.createdBy
           })),
-          store
+          store,
+          requestIp: input.requestIp
         })
       : new Map<bigint, WikiAclDecision>();
     const readableIds = new Set(normalCandidates
@@ -174,7 +178,13 @@ export class WikiPermissionService {
       !PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)
     );
     for (const page of unusual) {
-      const decision = await this.canReadPage({ accountId: input.accountId, page, store });
+      const decision = await this.canReadPage({
+        accountId: input.accountId,
+        actor,
+        page,
+        store,
+        requestIp: input.requestIp
+      });
       if (decision.allowed) readableIds.add(page.id);
     }
     return input.pages.filter((page) => readableIds.has(page.id));
@@ -232,6 +242,7 @@ export class WikiPermissionService {
     readonly page: WikiPermissionPage | null;
     readonly revision?: WikiPermissionRevision | null;
     readonly store?: WikiPermissionStore;
+    readonly requestIp?: string | null;
   }): Promise<WikiPermissionDecision> {
     const store = input.store ?? this.prisma;
     const page = input.page;
@@ -257,7 +268,13 @@ export class WikiPermissionService {
         return deny('protection_not_readable');
       }
     }
-    const acl = await this.evaluateAcl('read', actor, { pageId: page.id, spaceId: page.spaceId, namespaceId: page.namespaceId, title: page.title, createdBy: page.createdBy }, store);
+    const acl = await this.evaluateAcl(
+      'read',
+      actor,
+      { pageId: page.id, spaceId: page.spaceId, namespaceId: page.namespaceId, title: page.title, createdBy: page.createdBy },
+      store,
+      input.requestIp
+    );
     if (acl.matched && !acl.allowed) {
       return deny(acl.reason);
     }
@@ -1033,9 +1050,10 @@ export class WikiPermissionService {
       readonly title?: string | null;
       readonly createdBy?: bigint | null;
     },
-    store: WikiPermissionStore
+    store: WikiPermissionStore,
+    requestIp?: string | null
   ): Promise<WikiAclDecision> {
-    return this.wikiAcl?.evaluate({ actor, action, resource, store }) ??
+    return this.wikiAcl?.evaluate({ actor, action, resource, store, requestIp }) ??
       Promise.resolve({ matched: false, allowed: false, reason: 'acl_disabled' });
   }
 }

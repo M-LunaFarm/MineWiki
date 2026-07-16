@@ -6,6 +6,74 @@ import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiIncludeService } from './wiki-include.service';
 import { buildServerWikiNavigation, buildServerWikiPagePath, buildServerWikiToolPath, encodeWikiSearchCursor, parseWikiSearchCursor, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
 
+test('public pagecount filters revisions, ACLs, and namespaces without request-specific address context', async () => {
+  const pages = [
+    { id: 1n, namespaceId: 1, spaceId: 10n, title: '공개', protectionLevel: 'open', status: 'normal', currentRevisionId: 11n },
+    { id: 2n, namespaceId: 1, spaceId: 10n, title: '비공개 리비전', protectionLevel: 'open', status: 'normal', currentRevisionId: 12n },
+    { id: 3n, namespaceId: 1, spaceId: 10n, title: 'ACL 차단', protectionLevel: 'open', status: 'normal', currentRevisionId: 13n }
+  ];
+  const pageQueries: unknown[] = [];
+  const prisma = {
+    wikiNamespace: {
+      async findFirst() { return { id: 1, code: 'main' }; }
+    },
+    wikiPage: {
+      async findMany(input: unknown) { pageQueries.push(input); return pages; }
+    },
+    wikiPageRevision: {
+      async findMany() { return [{ id: 11n }, { id: 13n }]; }
+    }
+  } as unknown as PrismaService;
+  let permissionInput: unknown;
+  const permissions = {
+    async filterReadablePages(input: { pages: typeof pages; requestIp?: string | null }) {
+      permissionInput = input;
+      return input.pages.filter((page) => page.id === 1n);
+    }
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getPublicStats('main');
+
+  assert.equal(result.pageCount, 1);
+  assert.equal(result.namespace, 'main');
+  assert.equal(Number.isNaN(Date.parse(result.generatedAt)), false);
+  assert.equal((permissionInput as { requestIp: string }).requestIp, '');
+  assert.deepEqual((permissionInput as { pages: typeof pages }).pages.map((page) => page.id), [1n, 3n]);
+  assert.deepEqual(pageQueries, [{
+    where: {
+      namespaceId: 1,
+      status: { in: ['normal', 'active', 'published'] },
+      currentRevisionId: { not: null }
+    },
+    orderBy: { id: 'asc' },
+    take: 500
+  }]);
+});
+
+test('public pagecount treats an unknown namespace as thetree-compatible site-wide scope and caches it', async () => {
+  let namespaceLookups = 0;
+  let pageQueries = 0;
+  const prisma = {
+    wikiNamespace: {
+      async findFirst() { namespaceLookups += 1; return null; }
+    },
+    wikiPage: {
+      async findMany() { pageQueries += 1; return []; }
+    },
+    wikiPageRevision: { async findMany() { return []; } }
+  } as unknown as PrismaService;
+  const permissions = { async filterReadablePages() { return []; } } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const first = await service.getPublicStats('존재하지않음');
+  const second = await service.getPublicStats('다른미등록값');
+
+  assert.equal(first.namespace, null);
+  assert.deepEqual(second, first);
+  assert.equal(namespaceLookups, 2);
+  assert.equal(pageQueries, 1);
+});
+
 test('public block history redacts private reasons and account identity while keeping a stable cursor', async () => {
   const now = new Date('2026-07-15T12:00:00.000Z');
   const events = [

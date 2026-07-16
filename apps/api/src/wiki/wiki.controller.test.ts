@@ -15,6 +15,26 @@ import type { WikiCaptchaService } from './wiki-captcha.service';
 
 const captchaStub = { async assertVerified() {} } as WikiCaptchaService;
 
+test('public wiki stats controller forwards an optional namespace without authentication', async () => {
+  let receivedNamespace: string | undefined;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    {
+      async getPublicStats(namespace?: string) {
+        receivedNamespace = namespace;
+        return { pageCount: 42, namespace: 'main', generatedAt: '2026-07-16T00:00:00.000Z' };
+      }
+    } as unknown as WikiReadService,
+    {} as WikiEditService,
+    captchaStub
+  );
+
+  const response = await controller.getPublicStats('main');
+
+  assert.equal(receivedNamespace, 'main');
+  assert.equal(response.pageCount, 42);
+});
+
 test('new wiki pages require captcha before the clean mutation reaches the edit service', async () => {
   const session = { userId: 'account-1', requestIp: '192.0.2.20' } as SessionPayload;
   let captchaInput: unknown;
