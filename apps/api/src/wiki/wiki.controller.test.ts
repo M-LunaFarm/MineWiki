@@ -166,7 +166,9 @@ test('anonymous wiki controller read applies CIDR ACL from the central request c
       }
     },
     aclGroup: {
-      async findUnique() { return { id: 1n, groupKey: 'blocked_networks', status: 'active' }; }
+      async findUnique() {
+        return { id: 1n, groupKey: 'blocked_networks', status: 'active', scopeType: 'site', spaceId: null };
+      }
     },
     aclGroupMember: {
       async findFirst() { return null; },

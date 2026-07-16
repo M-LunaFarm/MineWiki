@@ -16,7 +16,13 @@ function createService(options: {
     reason?: string | null;
     expiresAt?: Date | null;
   }>;
-  readonly aclGroup?: { id: bigint; groupKey: string; status: string } | null;
+  readonly aclGroup?: {
+    id: bigint;
+    groupKey: string;
+    status: string;
+    scopeType: 'site' | 'space';
+    spaceId: bigint | null;
+  } | null;
   readonly aclGroupMember?: { id: bigint } | null;
   readonly aclGroupIpMembers?: Array<{ cidr: string | null }>;
   readonly userGroups?: Array<{ groupId: number }>;
@@ -217,7 +223,7 @@ test('ACL group member can match allow rule', async () => {
       subjectType: 'aclgroup',
       subjectValue: 'trusted_editors'
     }],
-    aclGroup: { id: 5n, groupKey: 'trusted_editors', status: 'active' },
+    aclGroup: { id: 5n, groupKey: 'trusted_editors', status: 'active', scopeType: 'space', spaceId: 10n },
     aclGroupMember: { id: 9n }
   });
 
@@ -232,13 +238,37 @@ test('ACL group member can match allow rule', async () => {
   assert.equal(decision.allowed, true);
 });
 
+test('space-scoped ACL group cannot match a rule evaluated in another wiki space', async () => {
+  const { service, store } = createService({
+    rules: [{
+      targetType: 'space',
+      targetId: 20n,
+      action: 'edit',
+      effect: 'allow',
+      subjectType: 'aclgroup',
+      subjectValue: 'tenant_a_editors'
+    }],
+    aclGroup: { id: 5n, groupKey: 'tenant_a_editors', status: 'active', scopeType: 'space', spaceId: 10n },
+    aclGroupMember: { id: 9n }
+  });
+
+  const decision = await service.evaluate({
+    actor: { accountId: 'account-1', profileId: 100n, status: 'active' },
+    action: 'edit',
+    resource: { pageId: 2n, spaceId: 20n, title: '다른 공간 문서' },
+    store: store as unknown as PrismaService
+  });
+
+  assert.deepEqual(decision, { matched: false, allowed: false, reason: 'acl_no_match' });
+});
+
 test('ACL group CIDR member matches a centrally supplied IPv4 request address for guests', async () => {
   const { service, store } = createService({
     rules: [{
       targetType: 'site', action: 'read', effect: 'deny',
       subjectType: 'aclgroup', subjectValue: 'blocked_networks'
     }],
-    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active' },
+    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active', scopeType: 'site', spaceId: null },
     aclGroupIpMembers: [{ cidr: '192.0.2.0/24' }]
   });
 
@@ -260,7 +290,7 @@ test('ACL group CIDR member uses the isolated HTTP request context for anonymous
       targetType: 'site', action: 'read', effect: 'deny',
       subjectType: 'aclgroup', subjectValue: 'blocked_networks'
     }],
-    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active' },
+    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active', scopeType: 'site', spaceId: null },
     aclGroupIpMembers: [{ cidr: '192.0.2.0/24' }]
   });
 
@@ -281,7 +311,7 @@ test('ACL group CIDR member does not match another network or an invalid address
       targetType: 'site', action: 'read', effect: 'deny',
       subjectType: 'aclgroup', subjectValue: 'blocked_networks'
     }],
-    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active' },
+    aclGroup: { id: 6n, groupKey: 'blocked_networks', status: 'active', scopeType: 'site', spaceId: null },
     aclGroupIpMembers: [{ cidr: '2001:db8::/32' }]
   });
 
@@ -300,7 +330,7 @@ test('rules referencing an archived ACL group remain inert without becoming an i
       targetType: 'site', action: 'edit', effect: 'allow',
       subjectType: 'aclgroup', subjectValue: 'retired_editors'
     }],
-    aclGroup: { id: 7n, groupKey: 'retired_editors', status: 'archived' },
+    aclGroup: { id: 7n, groupKey: 'retired_editors', status: 'archived', scopeType: 'site', spaceId: null },
     aclGroupMember: { id: 11n }
   });
   const decision = await service.evaluate({

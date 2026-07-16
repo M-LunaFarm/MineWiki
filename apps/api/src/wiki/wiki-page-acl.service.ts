@@ -4,6 +4,7 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiAdminService } from './wiki-admin.service';
 import { WikiPermissionService, type WikiPermissionActor, type WikiPermissionPage } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
+import { activeAclGroupScopeWhere, aclGroupScopeMatches } from './wiki-acl-group-scope';
 
 const ACL_ACTIONS = ['read', 'edit', 'create', 'move', 'delete', 'revert', 'history', 'raw', 'discuss', 'create_thread', 'write_thread_comment', 'upload_file', 'acl'] as const;
 const ACL_EFFECTS = new Set(['allow', 'deny']);
@@ -50,15 +51,15 @@ export class WikiPageAclService {
         where: { targetType: 'page', targetId: page.id },
         orderBy: [{ action: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }]
       }),
-      this.prisma.wikiGroup.findMany({
+      management.allowed ? this.prisma.wikiGroup.findMany({
         orderBy: [{ displayName: 'asc' }],
         select: { code: true, displayName: true }
-      }),
-      this.prisma.aclGroup.findMany({
-        where: { status: 'active' },
+      }) : Promise.resolve([]),
+      management.allowed ? this.prisma.aclGroup.findMany({
+        where: activeAclGroupScopeWhere(page.spaceId),
         orderBy: [{ title: 'asc' }],
         select: { groupKey: true, title: true }
-      })
+      }) : Promise.resolve([])
     ]);
     return {
       page: {
@@ -76,7 +77,7 @@ export class WikiPageAclService {
       catalog: {
         groups: groups.map((group) => ({ code: group.code, name: group.displayName })),
         aclGroups: aclGroups.map((group) => ({ key: group.groupKey, name: group.title })),
-        roles: [...ACL_ROLES]
+        roles: management.allowed ? [...ACL_ROLES] : []
       }
     };
   }
@@ -97,7 +98,7 @@ export class WikiPageAclService {
     if (!ACL_ACTIONS.includes(action as (typeof ACL_ACTIONS)[number])) throw new BadRequestException('Invalid ACL action.');
     if (!ACL_EFFECTS.has(effect)) throw new BadRequestException('Invalid ACL effect.');
     if (!ACL_SUBJECT_TYPES.has(subjectType)) throw new BadRequestException('Invalid ACL subject type.');
-    await this.validateSubject(subjectType, subjectValue);
+    await this.validateSubject(subjectType, subjectValue, page.spaceId);
     if (input.expiresAt?.trim()) {
       const expiresAt = new Date(input.expiresAt);
       if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
@@ -179,7 +180,7 @@ export class WikiPageAclService {
     return page;
   }
 
-  private async validateSubject(subjectType: string, subjectValue: string): Promise<void> {
+  private async validateSubject(subjectType: string, subjectValue: string, spaceId: bigint): Promise<void> {
     if (!subjectValue || subjectValue.length > 255) throw new BadRequestException('ACL subject is required.');
     if (subjectType === 'user') {
       const profile = await this.prisma.wikiProfile.findUnique({ where: { id: parseId(subjectValue, 'subjectValue') }, select: { id: true } });
@@ -193,8 +194,13 @@ export class WikiPageAclService {
       return;
     }
     if (subjectType === 'aclgroup') {
-      const group = await this.prisma.aclGroup.findUnique({ where: { groupKey: subjectValue }, select: { status: true } });
-      if (!group || group.status !== 'active') throw new BadRequestException('ACL group does not exist.');
+      const group = await this.prisma.aclGroup.findUnique({
+        where: { groupKey: subjectValue },
+        select: { status: true, scopeType: true, spaceId: true }
+      });
+      if (!group || group.status !== 'active' || !aclGroupScopeMatches(group, spaceId)) {
+        throw new BadRequestException('ACL group does not exist in this wiki space.');
+      }
       return;
     }
     if (subjectType === 'role') {

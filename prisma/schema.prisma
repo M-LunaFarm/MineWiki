@@ -1258,6 +1258,7 @@ model WikiSpace {
   serverWiki        ServerWiki?    @relation("ServerWikiSpace")
   linkedServer      Server?        @relation("ServerLinkedWikiSpace")
   rootPage          WikiPage?      @relation("WikiSpaceRootPage", fields: [rootPageId], references: [id], onDelete: SetNull)
+  aclGroups         AclGroup[]
 
   @@index([spaceType, status])
   @@index([parentSpaceId])
@@ -1869,14 +1870,18 @@ model SubwikiRole {
 model AclGroup {
   id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   groupKey      String   @map("group_key") @db.VarChar(64)
+  scopeType     String   @default("site") @map("scope_type") @db.VarChar(16)
+  spaceId       BigInt?  @map("space_id") @db.UnsignedBigInt
   title         String   @db.VarChar(255)
   description   String?  @db.Text
   status        String   @default("active") @db.VarChar(32)
   selfRemovable Boolean  @default(false) @map("self_removable")
   createdAt     DateTime @map("created_at")
   updatedAt     DateTime @map("updated_at")
+  space         WikiSpace? @relation(fields: [spaceId], references: [id], onDelete: Restrict)
 
   @@unique([groupKey], map: "uk_acl_groups_key")
+  @@index([scopeType, spaceId, status], map: "idx_acl_groups_scope")
   @@map("acl_groups")
 }
 

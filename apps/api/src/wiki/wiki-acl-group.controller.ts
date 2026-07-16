@@ -21,16 +21,21 @@ export class WikiAclGroupAdminController {
     @Query('cursor') cursor: string | undefined,
     @Query('limit') limit: string | undefined,
     @Query('status') status: string | undefined,
-    @CurrentSession() session: SessionPayload
+    @CurrentSession() session: SessionPayload,
+    @Query('scopeType') scopeType?: string,
+    @Query('spaceId') spaceId?: string
   ) {
     await this.assertAdmin(session);
-    return this.groups.listGroups({ cursor, limit, status });
+    return this.groups.listGroups({ cursor, limit, status, scopeType, spaceId });
   }
 
   @Post()
   @Throttle({ default: { limit: 10, ttl: 60 } })
   async create(
-    @Body() body: { key?: string; title?: string; description?: string | null; selfRemovable?: boolean },
+    @Body() body: {
+      key?: string; title?: string; description?: string | null; selfRemovable?: boolean;
+      scopeType?: string; spaceId?: string | null;
+    },
     @CurrentSession() session: SessionPayload
   ) {
     const actor = await this.assertAdmin(session);

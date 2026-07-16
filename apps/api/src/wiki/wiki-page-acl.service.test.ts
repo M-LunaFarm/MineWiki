@@ -149,3 +149,59 @@ test('page ACL creation rejects past expirations before persistence', async () =
   );
   assert.equal(created, false);
 });
+
+test('page ACL rejects a group scoped to another wiki space', async () => {
+  let created = false;
+  const prisma = {
+    wikiPage: { async findUnique() { return page(); } },
+    aclGroup: {
+      async findUnique() {
+        return { status: 'active', scopeType: 'space', spaceId: 99n };
+      }
+    }
+  };
+  const profiles = { async ensureWikiProfile() { return { id: 3n, status: 'active' }; } };
+  const permissions = {
+    actorFromSession() { return { accountId: 'account-1', profileId: 3n, status: 'active' }; },
+    async assertCanManagePageAcl() {}
+  };
+  const admin = { async createAclRule() { created = true; } };
+  const service = new WikiPageAclService(
+    prisma as unknown as PrismaService,
+    profiles as unknown as WikiProfileService,
+    permissions as unknown as WikiPermissionService,
+    admin as unknown as WikiAdminService
+  );
+
+  await assert.rejects(
+    service.createRule('7', session, {
+      action: 'edit', effect: 'allow', subjectType: 'aclgroup', subjectValue: 'other_space'
+    }),
+    /this wiki space/i
+  );
+  assert.equal(created, false);
+});
+
+test('page readers do not receive the manager-only ACL subject catalog', async () => {
+  let catalogQueried = false;
+  const prisma = {
+    wikiPage: { async findUnique() { return page(); } },
+    aclRule: { async findMany() { return []; } },
+    wikiGroup: { async findMany() { catalogQueried = true; return []; } },
+    aclGroup: { async findMany() { catalogQueried = true; return []; } }
+  };
+  const permissions = {
+    async assertCanReadPage() {},
+    async canManagePageAcl() { return { allowed: false, reason: 'page_manager_required' }; }
+  };
+  const service = new WikiPageAclService(
+    prisma as unknown as PrismaService,
+    {} as WikiProfileService,
+    permissions as unknown as WikiPermissionService,
+    {} as WikiAdminService
+  );
+
+  const result = await service.getPageAcl('7', null);
+  assert.equal(catalogQueried, false);
+  assert.deepEqual(result.catalog, { groups: [], aclGroups: [], roles: [] });
+});

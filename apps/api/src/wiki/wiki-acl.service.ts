@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { cidrContains, normalizeIpOrCidr } from '@minewiki/security';
 import { PrismaService } from '../common/prisma.service';
 import { getCurrentRequestIp } from '../common/http/request-context';
+import { aclGroupScopeMatches } from './wiki-acl-group-scope';
 import type { WikiPermissionActor } from './wiki-permission.service';
 
 type WikiAclStore = Pick<
@@ -300,7 +301,7 @@ export class WikiAclService {
       return Boolean(actor && safeBigInt(subjectValue) === actor.profileId);
     }
     if (subjectType === 'aclgroup') {
-      return this.aclGroupMatches(store, subjectValue, actor, requestIp);
+      return this.aclGroupMatches(store, subjectValue, actor, resource.spaceId, requestIp);
     }
     if (subjectType === 'role') {
       return this.roleMatches(store, subjectValue, actor, resource);
@@ -454,13 +455,14 @@ export class WikiAclService {
     store: WikiAclStore,
     groupKey: string,
     actor: WikiPermissionActor | null,
+    resourceSpaceId: bigint | null | undefined,
     requestIp: string | null
   ): Promise<boolean> {
     const group = await store.aclGroup.findUnique({
       where: { groupKey },
-      select: { id: true, status: true }
+      select: { id: true, status: true, scopeType: true, spaceId: true }
     });
-    if (!group || group.status !== 'active') {
+    if (!group || group.status !== 'active' || !aclGroupScopeMatches(group, resourceSpaceId)) {
       return false;
     }
     const now = new Date();

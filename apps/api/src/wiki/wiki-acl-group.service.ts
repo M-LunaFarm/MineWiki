@@ -11,11 +11,14 @@ import { PrismaService } from '../common/prisma.service';
 
 const GROUP_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/u;
 const GROUP_STATUSES = new Set(['active', 'archived']);
+const GROUP_SCOPE_TYPES = new Set(['site', 'space']);
 const MEMBER_TYPES = new Set(['user', 'ip', 'cidr']);
 
 export interface WikiAclGroupSummary {
   readonly id: string;
   readonly key: string;
+  readonly scopeType: 'site' | 'space';
+  readonly spaceId: string | null;
   readonly title: string;
   readonly description: string | null;
   readonly status: string;
@@ -47,14 +50,23 @@ export class WikiAclGroupService {
     readonly cursor?: string;
     readonly limit?: string | number;
     readonly status?: string;
+    readonly scopeType?: string;
+    readonly spaceId?: string;
   } = {}): Promise<{ readonly items: WikiAclGroupSummary[]; readonly nextCursor: string | null }> {
     const limit = parseLimit(input.limit);
     const cursor = parseOptionalId(input.cursor, 'cursor');
     const status = input.status?.trim() || undefined;
     if (status && !GROUP_STATUSES.has(status)) throw new BadRequestException('Invalid ACL group status.');
+    const scopeType = input.scopeType?.trim() || undefined;
+    if (scopeType && !GROUP_SCOPE_TYPES.has(scopeType)) throw new BadRequestException('Invalid ACL group scope.');
+    const spaceId = parseOptionalId(input.spaceId, 'spaceId');
+    if (scopeType === 'site' && spaceId) throw new BadRequestException('Site ACL groups cannot have a space.');
+    if (scopeType === 'space' && !spaceId) throw new BadRequestException('Space ACL groups require a space.');
     const rows = await this.prisma.aclGroup.findMany({
       where: {
         status,
+        scopeType,
+        ...(spaceId ? { spaceId } : {}),
         ...(cursor ? { id: { lt: cursor } } : {})
       },
       orderBy: [{ id: 'desc' }],
@@ -84,19 +96,32 @@ export class WikiAclGroupService {
     readonly title?: string;
     readonly description?: string | null;
     readonly selfRemovable?: boolean;
+    readonly scopeType?: string;
+    readonly spaceId?: string | null;
     readonly actorProfileId: bigint;
   }): Promise<WikiAclGroupSummary> {
     const key = normalizeGroupKey(input.key);
     const title = normalizeTitle(input.title);
     const description = normalizeDescription(input.description);
+    const scopeType = normalizeScopeType(input.scopeType);
+    if (scopeType === 'site' && input.spaceId?.trim()) {
+      throw new BadRequestException('Site ACL groups cannot have a space.');
+    }
+    const spaceId = scopeType === 'space' ? parseId(input.spaceId ?? '', 'spaceId') : null;
     const now = new Date();
     try {
       const created = await this.prisma.$transaction(async (tx) => {
         const existing = await tx.aclGroup.findUnique({ where: { groupKey: key }, select: { id: true } });
         if (existing) throw new ConflictException('같은 ACL 그룹 키가 이미 존재합니다.');
+        if (spaceId) {
+          const space = await tx.wikiSpace.findUnique({ where: { id: spaceId }, select: { status: true } });
+          if (!space || space.status !== 'active') throw new NotFoundException('Active wiki space not found.');
+        }
         const group = await tx.aclGroup.create({
           data: {
             groupKey: key,
+            scopeType,
+            spaceId,
             title,
             description,
             status: 'active',
@@ -406,6 +431,12 @@ function normalizeGroupKey(value?: string): string {
   return key;
 }
 
+function normalizeScopeType(value?: string): 'site' | 'space' {
+  const scopeType = value?.trim() || 'site';
+  if (!GROUP_SCOPE_TYPES.has(scopeType)) throw new BadRequestException('Invalid ACL group scope.');
+  return scopeType as 'site' | 'space';
+}
+
 function normalizeTitle(value?: string): string {
   const title = value?.trim() ?? '';
   if (title.length < 2 || title.length > 255) throw new BadRequestException('ACL 그룹 이름은 2자 이상 255자 이하로 입력하세요.');
@@ -463,10 +494,11 @@ function normalizeRequestIp(value: string) {
 
 function toGroupSummary(group: {
   id: bigint; groupKey: string; title: string; description: string | null; status: string;
-  selfRemovable: boolean; createdAt: Date; updatedAt: Date;
+  scopeType: string; spaceId: bigint | null; selfRemovable: boolean; createdAt: Date; updatedAt: Date;
 }, activeMemberCount: number): WikiAclGroupSummary {
   return {
     id: group.id.toString(), key: group.groupKey, title: group.title, description: group.description,
+    scopeType: group.scopeType as WikiAclGroupSummary['scopeType'], spaceId: group.spaceId?.toString() ?? null,
     status: group.status, selfRemovable: group.selfRemovable, activeMemberCount,
     createdAt: group.createdAt.toISOString(), updatedAt: group.updatedAt.toISOString()
   };
@@ -486,9 +518,14 @@ function toMemberSummary(member: {
 }
 
 function groupAuditValue(group: {
-  id: bigint; groupKey: string; title: string; description: string | null; status: string; selfRemovable: boolean;
+  id: bigint; groupKey: string; scopeType: string; spaceId: bigint | null; title: string;
+  description: string | null; status: string; selfRemovable: boolean;
 }) {
-  return { id: group.id.toString(), key: group.groupKey, title: group.title, description: group.description, status: group.status, selfRemovable: group.selfRemovable };
+  return {
+    id: group.id.toString(), key: group.groupKey, scopeType: group.scopeType,
+    spaceId: group.spaceId?.toString() ?? null, title: group.title, description: group.description,
+    status: group.status, selfRemovable: group.selfRemovable
+  };
 }
 
 function memberAuditValue(member: {

@@ -8,7 +8,8 @@ const now = new Date('2026-07-15T00:00:00.000Z');
 
 function group(overrides: Record<string, unknown> = {}) {
   return {
-    id: 1n, groupKey: 'trusted', title: '신뢰 사용자', description: null, status: 'active',
+    id: 1n, groupKey: 'trusted', scopeType: 'site', spaceId: null,
+    title: '신뢰 사용자', description: null, status: 'active',
     selfRemovable: false, createdAt: now, updatedAt: now, ...overrides
   };
 }
@@ -37,6 +38,30 @@ test('creates an ACL group and its immutable change log in one serializable tran
   const result = await service.createGroup({ key: 'trusted', title: '신뢰 사용자', actorProfileId: 2n });
   assert.equal(result.key, 'trusted');
   assert.deepEqual(operations, ['begin', 'group', 'acl-audit', 'business-audit', 'commit']);
+});
+
+test('creates a space-scoped ACL group only for an active wiki space', async () => {
+  let createdData: Record<string, unknown> | null = null;
+  const tx = {
+    wikiSpace: { async findUnique() { return { status: 'active' }; } },
+    aclGroup: {
+      async findUnique() { return null; },
+      async create(args: { data: Record<string, unknown> }) {
+        createdData = args.data;
+        return group({ ...args.data });
+      }
+    },
+    aclChangeLog: { async create() { return {}; } },
+    auditEvent: { async create() { return {}; } }
+  };
+  const prisma = { async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); } };
+  const service = new WikiAclGroupService(prisma as unknown as PrismaService);
+  const result = await service.createGroup({
+    key: 'server_editors', title: '서버 편집자', scopeType: 'space', spaceId: '12', actorProfileId: 2n
+  });
+  assert.equal(createdData?.scopeType, 'space');
+  assert.equal(createdData?.spaceId, 12n);
+  assert.equal(result.spaceId, '12');
 });
 
 test('adds and canonicalizes an IPv6 CIDR member while recording the audit atomically', async () => {

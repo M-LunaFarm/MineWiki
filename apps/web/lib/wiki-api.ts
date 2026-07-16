@@ -972,7 +972,14 @@ export interface WikiAclCatalog {
   }>;
   readonly pages: ReadonlyArray<{ id: string; name: string; spaceId: string }>;
   readonly groups: ReadonlyArray<{ code: string; name: string }>;
-  readonly aclGroups: ReadonlyArray<{ id: string; key: string; name: string; status: string }>;
+  readonly aclGroups: ReadonlyArray<{
+    id: string;
+    key: string;
+    name: string;
+    status: string;
+    scopeType: 'site' | 'space';
+    spaceId: string | null;
+  }>;
 }
 
 export type WikiApiTokenScope = 'wiki:read' | 'wiki:create' | 'wiki:edit';
@@ -1003,6 +1010,8 @@ export interface WikiApiTokenSpace {
 export interface WikiAclGroupSummary {
   readonly id: string;
   readonly key: string;
+  readonly scopeType: 'site' | 'space';
+  readonly spaceId: string | null;
   readonly title: string;
   readonly description: string | null;
   readonly status: string;
@@ -1750,14 +1759,28 @@ export async function deleteWikiAclRule(ruleId: string, reason?: string): Promis
   });
 }
 
-export async function fetchWikiAclGroups(input: { cursor?: string; status?: string } = {}): Promise<WikiAclGroupPage<WikiAclGroupSummary>> {
+export async function fetchWikiAclGroups(input: {
+  cursor?: string;
+  status?: string;
+  scopeType?: 'site' | 'space';
+  spaceId?: string;
+} = {}): Promise<WikiAclGroupPage<WikiAclGroupSummary>> {
   const params = new URLSearchParams({ limit: '50' });
   if (input.cursor) params.set('cursor', input.cursor);
   if (input.status) params.set('status', input.status);
+  if (input.scopeType) params.set('scopeType', input.scopeType);
+  if (input.spaceId) params.set('spaceId', input.spaceId);
   return fetchWikiAdminJson(`/acl-groups?${params.toString()}`);
 }
 
-export async function createWikiAclGroup(input: { key: string; title: string; description?: string; selfRemovable: boolean }): Promise<WikiAclGroupSummary> {
+export async function createWikiAclGroup(input: {
+  key: string;
+  title: string;
+  description?: string;
+  selfRemovable: boolean;
+  scopeType: 'site' | 'space';
+  spaceId?: string;
+}): Promise<WikiAclGroupSummary> {
   return fetchWikiAdminJson('/acl-groups', { method: 'POST', body: JSON.stringify(input) });
 }
 

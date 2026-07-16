@@ -7,6 +7,7 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService, type WikiPermissionActor } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
+import { activeAclGroupScopeWhere, aclGroupScopeMatches } from './wiki-acl-group-scope';
 
 const THREAD_ACL_ACTIONS = ['read', 'write_thread_comment'] as const;
 const THREAD_ACL_EFFECTS = new Set(['allow', 'deny']);
@@ -46,15 +47,15 @@ export class WikiThreadAclService {
     }
     const [rules, groups, aclGroups] = await Promise.all([
       this.rulesForThread(thread.id),
-      this.prisma.wikiGroup.findMany({
+      management.allowed ? this.prisma.wikiGroup.findMany({
         orderBy: [{ displayName: 'asc' }],
         select: { code: true, displayName: true }
-      }),
-      this.prisma.aclGroup.findMany({
-        where: { status: 'active' },
+      }) : Promise.resolve([]),
+      management.allowed ? this.prisma.aclGroup.findMany({
+        where: activeAclGroupScopeWhere(page.spaceId),
         orderBy: [{ title: 'asc' }],
         select: { groupKey: true, title: true }
-      })
+      }) : Promise.resolve([])
     ]);
     const now = Date.now();
     const activeWriteRules = rules.some((rule) =>
@@ -78,7 +79,7 @@ export class WikiThreadAclService {
       catalog: {
         groups: groups.map((group) => ({ code: group.code, name: group.displayName })),
         aclGroups: aclGroups.map((group) => ({ key: group.groupKey, name: group.title })),
-        roles: [...THREAD_ACL_ROLES]
+        roles: management.allowed ? [...THREAD_ACL_ROLES] : []
       }
     };
   }
@@ -97,10 +98,16 @@ export class WikiThreadAclService {
     const subjectValue = input.subjectValue?.trim() ?? '';
     if (!THREAD_ACL_EFFECTS.has(effect)) throw new BadRequestException('Invalid ACL effect.');
     if (!THREAD_ACL_SUBJECT_TYPES.has(subjectType)) throw new BadRequestException('Invalid ACL subject type.');
-    await this.validateSubject(subjectType, subjectValue);
+    if (subjectType === 'perm' && !THREAD_ACL_PERMISSIONS.has(subjectValue)) {
+      throw new BadRequestException('Invalid ACL permission.');
+    }
+    if (subjectType === 'role' && !THREAD_ACL_ROLES.has(subjectValue)) {
+      throw new BadRequestException('Invalid ACL role.');
+    }
     const expiresAt = parseOptionalFutureDate(input.expiresAt);
     const reason = requiredReason(input.reason);
     const { thread, page, actor } = await this.authorizeMutation(threadIdValue, session);
+    await this.validateSubject(subjectType, subjectValue, page.spaceId);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
       await lockThread(tx, thread.id);
@@ -272,7 +279,7 @@ export class WikiThreadAclService {
     return action as ThreadAclAction;
   }
 
-  private async validateSubject(subjectType: string, subjectValue: string): Promise<void> {
+  private async validateSubject(subjectType: string, subjectValue: string, spaceId: bigint): Promise<void> {
     if (!subjectValue || subjectValue.length > 255) throw new BadRequestException('ACL subject is required.');
     if (subjectType === 'user') {
       const profile = await this.prisma.wikiProfile.findUnique({
@@ -289,8 +296,13 @@ export class WikiThreadAclService {
       return;
     }
     if (subjectType === 'aclgroup') {
-      const group = await this.prisma.aclGroup.findUnique({ where: { groupKey: subjectValue }, select: { status: true } });
-      if (!group || group.status !== 'active') throw new BadRequestException('ACL group does not exist.');
+      const group = await this.prisma.aclGroup.findUnique({
+        where: { groupKey: subjectValue },
+        select: { status: true, scopeType: true, spaceId: true }
+      });
+      if (!group || group.status !== 'active' || !aclGroupScopeMatches(group, spaceId)) {
+        throw new BadRequestException('ACL group does not exist in this wiki space.');
+      }
       return;
     }
     if (subjectType === 'role') {

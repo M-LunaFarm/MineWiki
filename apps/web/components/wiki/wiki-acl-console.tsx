@@ -70,14 +70,27 @@ export function WikiAclConsole() {
     return catalog.pages.map((item) => ({ value: item.id, label: `${item.name} #${item.id}` }));
   }, [catalog, targetType]);
 
+  const targetSpaceId = useMemo(() => {
+    if (targetType === 'space') return targetId || null;
+    if (targetType === 'page') return catalog?.pages.find((item) => item.id === targetId)?.spaceId ?? null;
+    return null;
+  }, [catalog, targetId, targetType]);
+
   const subjectOptions = useMemo(() => {
     if (!catalog) return [];
     if (subjectType === 'perm') return PERMISSION_SUBJECTS.map(([value, label]) => ({ value, label }));
     if (subjectType === 'role') return ROLE_SUBJECTS.map(([value, label]) => ({ value, label }));
     if (subjectType === 'group') return catalog.groups.map((item) => ({ value: item.code, label: item.name }));
-    if (subjectType === 'aclgroup') return catalog.aclGroups.filter((item) => item.status === 'active').map((item) => ({ value: item.key, label: item.name }));
+    if (subjectType === 'aclgroup') return catalog.aclGroups
+      .filter((item) => item.status === 'active' && (
+        item.scopeType === 'site' || (targetSpaceId !== null && item.spaceId === targetSpaceId)
+      ))
+      .map((item) => ({
+        value: item.key,
+        label: `${item.name} · ${item.scopeType === 'site' ? '사이트' : catalog.spaces.find((space) => space.id === item.spaceId)?.name ?? '위키 공간'}`
+      }));
     return [];
-  }, [catalog, subjectType]);
+  }, [catalog, subjectType, targetSpaceId]);
 
   useEffect(() => {
     setTargetId(targetOptions[0]?.value ?? '');
@@ -134,7 +147,7 @@ export function WikiAclConsole() {
 
       {error ? <div className="flex gap-3 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100"><AlertTriangle className="size-4 shrink-0" />{error}</div> : null}
 
-      <WikiAclGroupConsole />
+      <WikiAclGroupConsole spaces={catalog?.spaces ?? []} />
 
       <form onSubmit={submit} className="grid gap-4 rounded-xl border border-white/10 bg-[#111821] p-5 lg:grid-cols-4">
         <Field label="범위"><select value={targetType} onChange={(e) => setTargetType(e.target.value as WikiAclRuleSummary['targetType'])} className="admin-acl-input"><option value="site">사이트 전체</option><option value="namespace">네임스페이스</option><option value="space">위키 공간</option><option value="page">개별 문서</option></select></Field>

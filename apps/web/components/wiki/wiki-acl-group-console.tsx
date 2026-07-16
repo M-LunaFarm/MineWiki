@@ -15,7 +15,9 @@ import {
   type WikiAclGroupSummary
 } from '../../lib/wiki-api';
 
-export function WikiAclGroupConsole() {
+export function WikiAclGroupConsole({ spaces }: {
+  readonly spaces: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+}) {
   const [groups, setGroups] = useState<WikiAclGroupSummary[]>([]);
   const [groupCursor, setGroupCursor] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -28,6 +30,8 @@ export function WikiAclGroupConsole() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [selfRemovable, setSelfRemovable] = useState(false);
+  const [scopeType, setScopeType] = useState<'site' | 'space'>('site');
+  const [spaceId, setSpaceId] = useState('');
   const [memberType, setMemberType] = useState<'user' | 'ip' | 'cidr'>('user');
   const [memberValue, setMemberValue] = useState('');
   const [memberReason, setMemberReason] = useState('');
@@ -54,7 +58,10 @@ export function WikiAclGroupConsole() {
   async function createGroup(event: FormEvent) {
     event.preventDefault(); setWorking(true); setError(null);
     try {
-      const created = await createWikiAclGroup({ key, title, description: description || undefined, selfRemovable });
+      const created = await createWikiAclGroup({
+        key, title, description: description || undefined, selfRemovable, scopeType,
+        ...(scopeType === 'space' ? { spaceId } : {})
+      });
       setGroups((current) => [created, ...current]); setSelectedId(created.id);
       setKey(''); setTitle(''); setDescription(''); setSelfRemovable(false);
     } catch (value) { setError(message(value)); } finally { setWorking(false); }
@@ -141,15 +148,17 @@ export function WikiAclGroupConsole() {
         {loading ? <Loader2 className="size-5 animate-spin text-emerald-300" /> : null}
       </div>
       {error ? <p className="rounded-lg border border-red-300/30 bg-red-500/10 p-3 text-sm text-red-100">{error}</p> : null}
-      <form onSubmit={createGroup} className="grid gap-3 rounded-lg border border-white/10 bg-black/20 p-4 md:grid-cols-2 xl:grid-cols-5">
+      <form onSubmit={createGroup} className="grid gap-3 rounded-lg border border-white/10 bg-black/20 p-4 md:grid-cols-2 xl:grid-cols-6">
         <input className="admin-acl-input" value={key} onChange={(event) => setKey(event.target.value)} placeholder="그룹 키 (영문)" required />
         <input className="admin-acl-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="그룹 이름" required />
-        <input className="admin-acl-input xl:col-span-2" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="설명" />
+        <select className="admin-acl-input" value={scopeType} onChange={(event) => { setScopeType(event.target.value as 'site' | 'space'); setSpaceId(''); }}><option value="site">사이트 전체</option><option value="space">위키 공간</option></select>
+        {scopeType === 'space' ? <select className="admin-acl-input" value={spaceId} onChange={(event) => setSpaceId(event.target.value)} required><option value="">공간 선택</option>{spaces.map((space) => <option key={space.id} value={space.id}>{space.name}</option>)}</select> : <input className="admin-acl-input" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="설명" />}
+        {scopeType === 'space' ? <input className="admin-acl-input" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="설명" /> : null}
         <div className="flex items-center gap-3"><label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={selfRemovable} onChange={(event) => setSelfRemovable(event.target.checked)} />직접 제거 허용</label><button disabled={working} className="btn-primary ml-auto h-10 gap-2"><Plus className="size-4" />생성</button></div>
       </form>
       <div className="grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,2fr)]">
         <div className="space-y-2">
-          {groups.map((group) => <button type="button" key={group.id} onClick={() => setSelectedId(group.id)} className={`w-full rounded-lg border p-3 text-left ${selectedId === group.id ? 'border-emerald-300/50 bg-emerald-400/10' : 'border-white/10 bg-black/20 hover:border-white/20'}`}><span className="block font-semibold text-white">{group.title}</span><span className="mt-1 block font-mono text-[11px] text-slate-500">{group.key} · {group.activeMemberCount}명</span></button>)}
+          {groups.map((group) => <button type="button" key={group.id} onClick={() => setSelectedId(group.id)} className={`w-full rounded-lg border p-3 text-left ${selectedId === group.id ? 'border-emerald-300/50 bg-emerald-400/10' : 'border-white/10 bg-black/20 hover:border-white/20'}`}><span className="block font-semibold text-white">{group.title}</span><span className="mt-1 block font-mono text-[11px] text-slate-500">{group.key} · {group.scopeType === 'site' ? '사이트' : spaces.find((space) => space.id === group.spaceId)?.name ?? '위키 공간'} · {group.activeMemberCount}명</span></button>)}
           {groupCursor ? <button type="button" onClick={() => void moreGroups()} className="w-full rounded-lg border border-white/10 py-2 text-xs text-slate-300">그룹 더 보기</button> : null}
         </div>
         {selected ? <div className="min-w-0 space-y-4">

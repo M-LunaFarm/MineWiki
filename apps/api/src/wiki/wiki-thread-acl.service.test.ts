@@ -68,6 +68,39 @@ test('thread ACL rejects unknown permission subjects before they can close the t
   }), BadRequestException);
 });
 
+test('thread ACL rejects a group scoped to another wiki space', async () => {
+  const prisma = {
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiPage: { async findUnique() { return page; } },
+    aclGroup: {
+      async findUnique() {
+        return { status: 'active', scopeType: 'space', spaceId: 99n };
+      }
+    }
+  } as unknown as PrismaService;
+  const service = new WikiThreadAclService(prisma, profileService(), permissionService());
+  await assert.rejects(service.createRule('30', session, {
+    action: 'read', effect: 'allow', subjectType: 'aclgroup', subjectValue: 'other_space', reason: '공간 격리 검증'
+  }), /this wiki space/i);
+});
+
+test('thread readers do not receive the manager-only ACL subject catalog', async () => {
+  let catalogQueried = false;
+  const prisma = {
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiPage: { async findUnique() { return page; } },
+    aclRule: { async findMany() { return []; } },
+    wikiGroup: { async findMany() { catalogQueried = true; return []; } },
+    aclGroup: { async findMany() { catalogQueried = true; return []; } }
+  } as unknown as PrismaService;
+  const service = new WikiThreadAclService(prisma, profileService(), permissionService({ manage: false }));
+  const result = await service.getThreadAcl('30', null);
+  assert.equal(catalogQueried, false);
+  assert.deepEqual(result.catalog.groups, []);
+  assert.deepEqual(result.catalog.aclGroups, []);
+  assert.deepEqual(result.catalog.roles, []);
+});
+
 test('thread ACL create locks the thread and writes both ACL and business audit records', async () => {
   let locked = false;
   let changeLogged = false;

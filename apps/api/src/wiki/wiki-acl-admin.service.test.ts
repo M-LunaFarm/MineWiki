@@ -9,6 +9,7 @@ test('ACL admin creates an ordered rule and immutable change log', async () => {
   const logs: unknown[] = [];
   const audits: unknown[] = [];
   const store = {
+    wikiNamespace: { async findUnique() { return { id: 7 }; } },
     aclRule: {
       async aggregate() { return { _max: { sortOrder: 20 } }; },
       async create({ data }: { data: Record<string, unknown> }) {
@@ -41,6 +42,33 @@ test('ACL admin creates an ordered rule and immutable change log', async () => {
   assert.equal(result.targetId, '7');
   assert.equal(logs.length, 1);
   assert.equal(audits.length, 1);
+});
+
+test('ACL admin rejects a space-scoped group on another wiki space target', async () => {
+  let created = false;
+  const store = {
+    wikiSpace: { async findUnique() { return { status: 'active' }; } },
+    aclGroup: {
+      async findUnique() {
+        return { status: 'active', scopeType: 'space', spaceId: 10n };
+      }
+    },
+    aclRule: {
+      async aggregate() { return { _max: { sortOrder: 0 } }; },
+      async create() { created = true; return {}; }
+    },
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) { return callback(store); }
+  };
+  const service = new WikiAdminService(store as unknown as PrismaService);
+
+  await assert.rejects(
+    () => service.createAclRule({
+      targetType: 'space', targetId: '20', action: 'edit', effect: 'allow',
+      subjectType: 'aclgroup', subjectValue: 'tenant_a_editors', actorProfileId: 3n
+    }),
+    /target scope/i
+  );
+  assert.equal(created, false);
 });
 
 test('ACL admin rejects resource rules without an unsigned target id', async () => {

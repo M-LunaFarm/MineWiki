@@ -7,6 +7,7 @@ import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence
 import { astContainsFile } from './wiki-edit.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiRoutePathResolver } from './wiki-route-path.resolver';
+import { aclGroupScopeMatches } from './wiki-acl-group-scope';
 
 const ALLOWED_PROTECTION_LEVELS = new Set([
   'open',
@@ -427,7 +428,7 @@ export class WikiAdminService {
       this.prisma.wikiGroup.findMany({ orderBy: [{ displayName: 'asc' }] }),
       this.prisma.aclGroup.findMany({
         orderBy: [{ status: 'asc' }, { title: 'asc' }],
-        select: { id: true, groupKey: true, title: true, status: true }
+        select: { id: true, groupKey: true, title: true, status: true, scopeType: true, spaceId: true }
       })
     ]);
     return {
@@ -435,7 +436,10 @@ export class WikiAdminService {
       spaces: spaces.map((item) => ({ id: item.id.toString(), name: item.name, type: item.spaceType, path: item.rootPath })),
       pages: pages.map((item) => ({ id: item.id.toString(), name: item.displayTitle, spaceId: item.spaceId.toString() })),
       groups: groups.map((item) => ({ code: item.code, name: item.displayName })),
-      aclGroups: aclGroups.map((item) => ({ id: item.id.toString(), key: item.groupKey, name: item.title, status: item.status }))
+      aclGroups: aclGroups.map((item) => ({
+        id: item.id.toString(), key: item.groupKey, name: item.title, status: item.status,
+        scopeType: item.scopeType, spaceId: item.spaceId?.toString() ?? null
+      }))
     };
   }
 
@@ -465,6 +469,16 @@ export class WikiAdminService {
     const expiresAt = parseOptionalDate(input.expiresAt, 'expiresAt');
     const reason = input.reason?.trim().slice(0, 1000) || null;
     const created = await this.prisma.$transaction(async (tx) => {
+      const resourceSpaceId = await this.aclTargetSpaceId(tx, targetType, targetId);
+      if (subjectType === 'aclgroup') {
+        const group = await tx.aclGroup.findUnique({
+          where: { groupKey: subjectValue },
+          select: { status: true, scopeType: true, spaceId: true }
+        });
+        if (!group || group.status !== 'active' || !aclGroupScopeMatches(group, resourceSpaceId)) {
+          throw new BadRequestException('ACL group does not exist in the target scope.');
+        }
+      }
       const aggregate = await tx.aclRule.aggregate({
         where: { targetType, targetId, action },
         _max: { sortOrder: true }
@@ -1080,6 +1094,32 @@ export class WikiAdminService {
       throw new BadRequestException(`${label} must be an unsigned integer.`);
     }
     return BigInt(value);
+  }
+
+  private async aclTargetSpaceId(
+    tx: Prisma.TransactionClient,
+    targetType: string,
+    targetId: bigint | null
+  ): Promise<bigint | null> {
+    if (targetType === 'site') return null;
+    if (targetId === null) throw new BadRequestException('ACL target is required.');
+    if (targetType === 'namespace') {
+      const namespaceId = Number(targetId);
+      if (!Number.isSafeInteger(namespaceId) || namespaceId > 4_294_967_295) {
+        throw new BadRequestException('ACL namespace target does not exist.');
+      }
+      const namespace = await tx.wikiNamespace.findUnique({ where: { id: namespaceId }, select: { id: true } });
+      if (!namespace) throw new BadRequestException('ACL namespace target does not exist.');
+      return null;
+    }
+    if (targetType === 'space') {
+      const space = await tx.wikiSpace.findUnique({ where: { id: targetId }, select: { status: true } });
+      if (!space || space.status !== 'active') throw new BadRequestException('ACL wiki space target does not exist.');
+      return targetId;
+    }
+    const page = await tx.wikiPage.findUnique({ where: { id: targetId }, select: { spaceId: true, status: true } });
+    if (!page || page.status === 'deleted') throw new BadRequestException('ACL page target does not exist.');
+    return page.spaceId;
   }
 
   private requiredModerationReason(value?: string | null): string {
