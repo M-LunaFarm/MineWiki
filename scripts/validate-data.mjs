@@ -460,6 +460,7 @@ async function runValidation() {
   await validateReviewReportCounts();
   await validateEncryptedCredentials();
   await validateExpiredReplayGuards();
+  await validateRenderCacheGraph();
   await validateRenderCache();
 }
 
@@ -785,6 +786,34 @@ async function validateRenderCache() {
   pass('WikiPage render cache', `rebuilt ${rows.length} current render cache entries`);
 }
 
+async function validateRenderCacheGraph() {
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      SELECT c.id
+      FROM page_render_cache c
+      LEFT JOIN pages p ON p.id = c.page_id
+      LEFT JOIN page_revisions r ON r.id = c.revision_id
+      WHERE p.id IS NULL
+         OR r.id IS NULL
+         OR r.page_id <> c.page_id
+      ORDER BY c.id
+      LIMIT ${args.fix ? args.fixLimit : args.sampleLimit}
+    `,
+  );
+  if (rows.length === 0) {
+    pass('WikiPage render cache graph', 'every cache belongs to its page revision');
+    return;
+  }
+  if (!args.fix) {
+    warn('WikiPage render cache graph', `${rows.length} sampled orphaned or cross-page cache rows; rerun with --fix to delete derived rows`);
+    return;
+  }
+  const ids = rows.map((row) => row.id);
+  const deleted = await prisma.wikiPageRenderCache.deleteMany({ where: { id: { in: ids } } });
+  summary.fixes += deleted.count;
+  pass('WikiPage render cache graph', `deleted ${deleted.count} invalid derived cache rows`);
+}
+
 async function errorIfRows(name, sql) {
   const rows = await prisma.$queryRawUnsafe(sql);
   if (rows.length === 0) {
@@ -902,5 +931,6 @@ By default this command never mutates data.
   - encrypt legacy OAuth, Votifier, and plugin credentials
   - delete expired PluginSyncReplayGuard rows
   - disable active plugin credentials whose canonical server no longer exists
+  - delete orphaned or cross-page wiki render cache rows
   - rebuild missing render cache for current public wiki revisions`);
 }
