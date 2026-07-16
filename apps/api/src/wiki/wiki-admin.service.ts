@@ -3,6 +3,7 @@ import { hashContent, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from 
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
+import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiRoutePathResolver } from './wiki-route-path.resolver';
 
@@ -85,6 +86,9 @@ export interface WikiAdminUserSummary {
   readonly status: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly canonicalAccountId: string | null;
+  readonly linkedProfileIds: string[];
+  readonly linkedProfileCount: number;
 }
 
 export interface WikiUserBlockEventSummary {
@@ -188,15 +192,53 @@ export class WikiAdminService {
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       take: 100
     });
-    return users.map((user) => ({
-      id: user.id.toString(),
-      accountId: user.accountId,
-      username: user.username,
-      displayName: user.displayName,
-      status: user.status,
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: user.updatedAt.toISOString()
-    }));
+    const accountIds = users.flatMap((user) => user.accountId ? [user.accountId] : []);
+    const seedAccounts = accountIds.length > 0
+      ? await this.prisma.account.findMany({
+          where: { id: { in: accountIds } },
+          select: { id: true, canonicalAccountId: true }
+        })
+      : [];
+    const canonicalIds = [...new Set(seedAccounts.map((account) => account.canonicalAccountId ?? account.id))];
+    const groupAccounts = canonicalIds.length > 0
+      ? await this.prisma.account.findMany({
+          where: { OR: [{ id: { in: canonicalIds } }, { canonicalAccountId: { in: canonicalIds } }] },
+          select: { id: true, canonicalAccountId: true }
+        })
+      : [];
+    const canonicalByAccount = new Map(groupAccounts.map((account) => [account.id, account.canonicalAccountId ?? account.id]));
+    const groupProfiles = groupAccounts.length > 0
+      ? await this.prisma.wikiProfile.findMany({
+          where: { accountId: { in: groupAccounts.map((account) => account.id) }, mergedIntoProfileId: null },
+          select: { id: true, accountId: true }
+        })
+      : [];
+    const profileIdsByCanonical = new Map<string, string[]>();
+    for (const profile of groupProfiles) {
+      if (!profile.accountId) continue;
+      const canonical = canonicalByAccount.get(profile.accountId) ?? profile.accountId;
+      const ids = profileIdsByCanonical.get(canonical) ?? [];
+      ids.push(profile.id.toString());
+      profileIdsByCanonical.set(canonical, ids);
+    }
+    return users.map((user) => {
+      const canonicalAccountId = user.accountId ? canonicalByAccount.get(user.accountId) ?? user.accountId : null;
+      const linkedProfileIds = canonicalAccountId
+        ? profileIdsByCanonical.get(canonicalAccountId) ?? [user.id.toString()]
+        : [user.id.toString()];
+      return {
+        id: user.id.toString(),
+        accountId: user.accountId,
+        username: user.username,
+        displayName: user.displayName,
+        status: user.status,
+        createdAt: user.createdAt.toISOString(),
+        updatedAt: user.updatedAt.toISOString(),
+        canonicalAccountId,
+        linkedProfileIds,
+        linkedProfileCount: linkedProfileIds.length
+      };
+    });
   }
 
   async getUserBlockEvents(targetProfileId?: string): Promise<WikiUserBlockEventSummary[]> {
@@ -244,32 +286,44 @@ export class WikiAdminService {
     const newStatus = input.blocked ? 'blocked' : 'active';
     const previousStatus = input.blocked ? 'active' : 'blocked';
     const now = new Date();
-    const updated = await this.prisma.$transaction(
-      async (tx) => {
-        const target = await tx.wikiProfile.findUnique({ where: { id: targetId } });
-        if (!target) throw new NotFoundException('Wiki profile not found.');
-        if (target.accountId) {
-          const protectedRoles = await tx.accountRole.findMany({
-            where: { accountId: target.accountId },
-            include: { role: true }
-          });
-          if (protectedRoles.some((entry) => entry.role.code === 'owner' || entry.role.code === 'admin')) {
-            throw new BadRequestException('보호된 운영자 계정의 위키 기여 권한은 이 화면에서 변경할 수 없습니다.');
-          }
-        }
-        if (target.status !== previousStatus) {
-          throw new ConflictException(input.blocked ? '이미 차단되었거나 상태가 변경된 사용자입니다.' : '이미 해제되었거나 상태가 변경된 사용자입니다.');
-        }
-        const changed = await tx.wikiProfile.updateMany({
-          where: { id: target.id, status: previousStatus },
-          data: { status: newStatus, updatedAt: now }
+    const initialTarget = await this.prisma.wikiProfile.findUnique({ where: { id: targetId } });
+    if (!initialTarget) throw new NotFoundException('Wiki profile not found.');
+    const write = async (tx: Prisma.TransactionClient, accountIds: readonly string[] | null) => {
+      const target = await tx.wikiProfile.findUnique({ where: { id: targetId } });
+      if (!target) throw new NotFoundException('Wiki profile not found.');
+      const groupProfiles = accountIds
+        ? await tx.wikiProfile.findMany({
+            where: { accountId: { in: [...accountIds] }, mergedIntoProfileId: null }
+          })
+        : [target];
+      if (groupProfiles.some((profile) => profile.id === input.actorProfileId)) {
+        throw new BadRequestException('자기 자신의 연결 계정 그룹은 차단하거나 해제할 수 없습니다.');
+      }
+      if (accountIds) {
+        const protectedRoles = await tx.accountRole.findMany({
+          where: { accountId: { in: [...accountIds] } },
+          include: { role: true }
         });
-        if (changed.count !== 1) {
-          throw new ConflictException('사용자 상태가 동시에 변경되었습니다. 새로고침 후 다시 시도하세요.');
+        if (protectedRoles.some((entry) => entry.role.code === 'owner' || entry.role.code === 'admin')) {
+          throw new BadRequestException('보호된 운영자 계정의 위키 기여 권한은 이 화면에서 변경할 수 없습니다.');
         }
+      }
+      const mutableProfiles = groupProfiles.filter((profile) => profile.status === 'active' || profile.status === 'blocked');
+      const changingProfiles = mutableProfiles.filter((profile) => profile.status === previousStatus);
+      if (changingProfiles.length === 0) {
+        throw new ConflictException(input.blocked ? '이미 차단되었거나 상태가 변경된 사용자입니다.' : '이미 해제되었거나 상태가 변경된 사용자입니다.');
+      }
+      const changed = await tx.wikiProfile.updateMany({
+        where: { id: { in: changingProfiles.map((profile) => profile.id) }, status: previousStatus },
+        data: { status: newStatus, updatedAt: now }
+      });
+      if (changed.count !== changingProfiles.length) {
+        throw new ConflictException('사용자 상태가 동시에 변경되었습니다. 새로고침 후 다시 시도하세요.');
+      }
+      for (const profile of changingProfiles) {
         await tx.wikiUserBlockEvent.create({
           data: {
-            targetProfileId: target.id,
+            targetProfileId: profile.id,
             actorProfileId: input.actorProfileId,
             action: input.blocked ? 'block' : 'unblock',
             previousStatus,
@@ -279,21 +333,39 @@ export class WikiAdminService {
             createdAt: now
           }
         });
-        return { ...target, status: newStatus, updatedAt: now };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+      }
+      const account = accountIds && target.accountId
+        ? await tx.account.findUnique({ where: { id: target.accountId }, select: { id: true, canonicalAccountId: true } })
+        : null;
+      return {
+        updated: { ...target, status: newStatus, updatedAt: now },
+        canonicalAccountId: account?.canonicalAccountId ?? account?.id ?? null,
+        linkedProfileIds: mutableProfiles.map((profile) => profile.id.toString()),
+        affectedProfileIds: changingProfiles.map((profile) => profile.id.toString())
+      };
+    };
+    const result = initialTarget.accountId
+      ? await withActiveCanonicalAccountGroup(this.prisma, [initialTarget.accountId], (tx, group) => write(tx, group.accountIds))
+      : await this.prisma.$transaction((tx) => write(tx, null), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     await this.events?.audit(input.blocked ? 'wiki.user_block' : 'wiki.user_unblock', {
       category: 'wiki',
       actorProfileId: input.actorProfileId,
       subjectType: 'wiki_profile',
       subjectId: targetId,
-      metadata: { previousStatus, status: newStatus, reason, publicReason }
+      metadata: {
+        previousStatus, status: newStatus, reason, publicReason,
+        canonicalAccountId: result.canonicalAccountId,
+        linkedProfileIds: result.linkedProfileIds,
+        affectedProfileIds: result.affectedProfileIds
+      }
     });
     return {
-      id: updated.id.toString(), accountId: updated.accountId, username: updated.username,
-      displayName: updated.displayName, status: updated.status,
-      createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString()
+      id: result.updated.id.toString(), accountId: result.updated.accountId, username: result.updated.username,
+      displayName: result.updated.displayName, status: result.updated.status,
+      createdAt: result.updated.createdAt.toISOString(), updatedAt: result.updated.updatedAt.toISOString(),
+      canonicalAccountId: result.canonicalAccountId,
+      linkedProfileIds: result.linkedProfileIds,
+      linkedProfileCount: result.linkedProfileIds.length
     };
   }
 

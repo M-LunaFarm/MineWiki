@@ -787,6 +787,9 @@ export interface WikiAdminUserSummary {
   readonly status: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly canonicalAccountId: string | null;
+  readonly linkedProfileIds: string[];
+  readonly linkedProfileCount: number;
 }
 
 export interface WikiUserBlockEventSummary {

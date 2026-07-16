@@ -162,4 +162,37 @@ if (!hasDatabase) {
       await prisma.account.deleteMany({ where: { id: { in: [first.id, second.id] } } });
     }
   });
+
+  test('linking an account group preserves an existing Wiki block across every active profile', async () => {
+    const first = await service.registerAccount({ provider: 'discord', providerUserId: `discord-${randomUUID()}` });
+    const second = await service.registerAccount({ provider: 'naver', providerUserId: `naver-${randomUUID()}` });
+    const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+    const profiles = await Promise.all([
+      prisma.wikiProfile.create({
+        data: {
+          accountId: first.id, username: `blocked-${suffix}`, displayName: '차단 프로필',
+          status: 'blocked', createdAt: new Date(), updatedAt: new Date()
+        }
+      }),
+      prisma.wikiProfile.create({
+        data: {
+          accountId: second.id, username: `active-${suffix}`, displayName: '활성 프로필',
+          status: 'active', createdAt: new Date(), updatedAt: new Date()
+        }
+      })
+    ]);
+
+    try {
+      await service.linkActiveAccounts(first.id, second.id);
+      const stored = await prisma.wikiProfile.findMany({
+        where: { id: { in: profiles.map((profile) => profile.id) } },
+        select: { status: true }
+      });
+      assert.equal(stored.length, 2);
+      assert.ok(stored.every((profile) => profile.status === 'blocked'));
+    } finally {
+      await prisma.wikiProfile.deleteMany({ where: { id: { in: profiles.map((profile) => profile.id) } } });
+      await prisma.account.deleteMany({ where: { id: { in: [first.id, second.id] } } });
+    }
+  });
 }

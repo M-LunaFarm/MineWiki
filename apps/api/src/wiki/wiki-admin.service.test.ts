@@ -185,7 +185,7 @@ function createService() {
 
 test('wiki user block updates status and appends immutable history in one transaction', async () => {
   const now = new Date('2026-07-06T00:00:00.000Z');
-  const profile = { id: 9n, accountId: 'account-9', username: 'user9', displayName: '사용자 9', status: 'active', createdAt: now, updatedAt: now };
+  const profile = { id: 9n, accountId: null, username: 'user9', displayName: '사용자 9', status: 'active', createdAt: now, updatedAt: now };
   let eventData: Record<string, unknown> | null = null;
   const tx = {
     wikiProfile: {
@@ -199,6 +199,7 @@ test('wiki user block updates status and appends immutable history in one transa
     wikiUserBlockEvent: { async create(args: { data: Record<string, unknown> }) { eventData = args.data; return { id: 1n, ...args.data }; } }
   };
   const prisma = {
+    wikiProfile: tx.wikiProfile,
     async $transaction(callback: (store: typeof tx) => unknown, options: { isolationLevel: string }) {
       assert.equal(options.isolationLevel, Prisma.TransactionIsolationLevel.Serializable);
       return callback(tx);
@@ -212,6 +213,53 @@ test('wiki user block updates status and appends immutable history in one transa
     action: 'block', previousStatus: 'active', newStatus: 'blocked'
   });
   assert.equal(eventData?.publicReason, '문서 훼손이 반복되어 차단했습니다.');
+});
+
+test('wiki user block applies atomically to every active profile in the canonical account group', async () => {
+  const now = new Date('2026-07-06T00:00:00.000Z');
+  const profiles = [
+    { id: 9n, accountId: 'account-a', username: 'user-a', displayName: '사용자 A', status: 'active', mergedIntoProfileId: null, createdAt: now, updatedAt: now },
+    { id: 10n, accountId: 'account-b', username: 'user-b', displayName: '사용자 B', status: 'active', mergedIntoProfileId: null, createdAt: now, updatedAt: now }
+  ];
+  const accounts = [
+    { id: 'account-a', canonicalAccountId: null },
+    { id: 'account-b', canonicalAccountId: 'account-a' }
+  ];
+  const eventTargets: bigint[] = [];
+  const tx = {
+    async $queryRaw() { return accounts.map((account) => ({ id: account.id })); },
+    account: {
+      async findMany() { return accounts; },
+      async count() { return accounts.length; },
+      async findUnique(args: { where: { id: string } }) { return accounts.find((account) => account.id === args.where.id) ?? null; }
+    },
+    accountLink: {
+      async findMany() { return [{ primaryAccountId: 'account-a', linkedAccountId: 'account-b' }]; }
+    },
+    wikiProfile: {
+      async findUnique(args: { where: { id: bigint } }) { return profiles.find((profile) => profile.id === args.where.id) ?? null; },
+      async findMany() { return profiles; },
+      async updateMany(args: { where: { id: { in: bigint[] }; status: string }; data: { status: string; updatedAt: Date } }) {
+        const targets = profiles.filter((profile) => args.where.id.in.includes(profile.id) && profile.status === args.where.status);
+        for (const profile of targets) Object.assign(profile, args.data);
+        return { count: targets.length };
+      }
+    },
+    accountRole: { async findMany() { return []; } },
+    wikiUserBlockEvent: {
+      async create(args: { data: { targetProfileId: bigint } }) { eventTargets.push(args.data.targetProfileId); return { id: BigInt(eventTargets.length), ...args.data }; }
+    }
+  };
+  const prisma = { ...tx, async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); } };
+  const service = new WikiAdminService(prisma as unknown as PrismaService);
+
+  const result = await service.setUserBlocked({ targetProfileId: '10', actorProfileId: 2n, blocked: true, reason: '연결 계정 전체 훼손 차단' });
+
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.canonicalAccountId, 'account-a');
+  assert.deepEqual(result.linkedProfileIds.sort(), ['10', '9']);
+  assert.ok(profiles.every((profile) => profile.status === 'blocked'));
+  assert.deepEqual(new Set(eventTargets), new Set([9n, 10n]));
 });
 
 test('wiki user block keeps public reason optional and bounded', async () => {
@@ -238,7 +286,7 @@ test('wiki user block rejects a concurrent status change without appending histo
     accountRole: { async findMany() { return []; } },
     wikiUserBlockEvent: { async create() { eventCreated = true; } }
   };
-  const prisma = { async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); } };
+  const prisma = { wikiProfile: tx.wikiProfile, async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); } };
   const service = new WikiAdminService(prisma as unknown as PrismaService);
 
   await assert.rejects(
@@ -253,14 +301,22 @@ test('wiki user block checks protected roles inside the status transaction', asy
   const profile = { id: 9n, accountId: 'account-9', username: 'admin9', displayName: '관리자 9', status: 'active', createdAt: now, updatedAt: now };
   let changed = false;
   const tx = {
+    async $queryRaw() { return [{ id: 'account-9' }]; },
+    account: {
+      async findMany() { return [{ id: 'account-9', canonicalAccountId: null }]; },
+      async count() { return 1; },
+      async findUnique() { return { id: 'account-9', canonicalAccountId: null }; }
+    },
+    accountLink: { async findMany() { return []; } },
     wikiProfile: {
       async findUnique() { return profile; },
+      async findMany() { return [profile]; },
       async updateMany() { changed = true; return { count: 1 }; }
     },
     accountRole: { async findMany() { return [{ role: { code: 'admin' } }]; } },
     wikiUserBlockEvent: { async create() { throw new Error('must not create'); } }
   };
-  const prisma = { async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); } };
+  const prisma = { ...tx, async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); } };
   const service = new WikiAdminService(prisma as unknown as PrismaService);
 
   await assert.rejects(

@@ -222,6 +222,7 @@ export class AccountSeparationService {
           skipDuplicates: true,
         });
         await this.stabilizeCanonicalAccountInTransaction(tx, fresh.primaryAccountId, group.accountIds);
+        await this.synchronizeWikiProfileBlocksForAccountLink(tx, group.accountIds);
         await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
         await tx.accountLinkRequest.update({
           where: { id: requestId },
@@ -253,6 +254,7 @@ export class AccountSeparationService {
           skipDuplicates: true,
         });
         await this.stabilizeCanonicalAccountInTransaction(tx, primaryAccountId, group.accountIds);
+        await this.synchronizeWikiProfileBlocksForAccountLink(tx, group.accountIds);
         await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
       },
     );
@@ -370,6 +372,30 @@ export class AccountSeparationService {
     await tx.wikiApiToken.updateMany({
       where: { accountId: { in: [...accountIds] }, status: 'active' },
       data: { status: 'revoked', revokedAt: new Date() },
+    });
+  }
+
+  private async synchronizeWikiProfileBlocksForAccountLink(
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    accountIds: readonly string[],
+  ): Promise<void> {
+    const profiles = await tx.wikiProfile.findMany({
+      where: { accountId: { in: [...accountIds] }, mergedIntoProfileId: null },
+      select: { id: true, status: true },
+    });
+    if (!profiles.some((profile) => profile.status === 'blocked')) return;
+    const activeProfileIds = profiles.filter((profile) => profile.status === 'active').map((profile) => profile.id);
+    if (activeProfileIds.length === 0) return;
+    const protectedRoles = await tx.accountRole.findMany({
+      where: { accountId: { in: [...accountIds] } },
+      include: { role: true },
+    });
+    if (protectedRoles.some((entry) => entry.role.code === 'owner' || entry.role.code === 'admin')) {
+      throw new ConflictException('차단된 Wiki 프로필은 운영자 계정 그룹에 연결할 수 없습니다. 먼저 support@minewiki.kr로 문의해 주세요.');
+    }
+    await tx.wikiProfile.updateMany({
+      where: { id: { in: activeProfileIds }, status: 'active' },
+      data: { status: 'blocked', updatedAt: new Date() },
     });
   }
 
