@@ -109,6 +109,20 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
             />
           ) : null}
 
+          {page.headings.length > 0 ? (
+            <details className="mt-8 rounded-xl border border-white/10 p-4 2xl:hidden">
+              <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-slate-300">섹션 목차·편집</summary>
+              <ul className="mt-3 space-y-1">
+                {page.headings.map((heading, index) => (
+                  <li key={`${heading.anchor}-mobile-${index}`} className="flex items-center gap-2 text-sm">
+                    <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-h-11 min-w-0 flex-1 py-3 text-slate-400 hover:text-emerald-300">{heading.title}</a>
+                    <Link href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`} className="grid size-11 shrink-0 place-items-center rounded text-slate-500 hover:bg-white/[0.05] hover:text-emerald-200" aria-label={`${heading.title} 섹션 편집`}><PencilLine className="size-3.5" /></Link>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+
           <div id={contentId} className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: page.html }} />
           <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
 
@@ -119,20 +133,6 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               aria-label="서버 위키 하단 안내"
               dangerouslySetInnerHTML={{ __html: presentation.bottomNoticeHtml }}
             />
-          ) : null}
-
-          {page.headings.length > 0 ? (
-            <details className="mt-8 rounded-xl border border-white/10 p-4 2xl:hidden">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-300">섹션 목차·편집</summary>
-              <ul className="mt-3 space-y-2">
-                {page.headings.map((heading, index) => (
-                  <li key={`${heading.anchor}-mobile-${index}`} className="flex items-center gap-2 text-sm">
-                    <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-w-0 flex-1 truncate text-slate-400 hover:text-emerald-300">{heading.title}</a>
-                    <Link href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`} className="rounded p-1.5 text-slate-500 hover:bg-white/[0.05] hover:text-emerald-200" aria-label={`${heading.title} 섹션 편집`}><PencilLine className="size-3.5" /></Link>
-                  </li>
-                ))}
-              </ul>
-            </details>
           ) : null}
 
           <div className="mt-12 grid overflow-hidden rounded-xl border border-white/10 sm:grid-cols-2">

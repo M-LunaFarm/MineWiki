@@ -34,14 +34,14 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
-      <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
+      <nav aria-label="문서 경로" className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
         <Link href="/wiki/%EB%8C%80%EB%AC%B8" className="hover:text-emerald-200">
           MineWiki
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <span className="text-slate-300">{page.namespace}</span>
-        <span>/</span>
-        <span className="text-slate-200">{page.displayTitle}</span>
+        <span aria-hidden="true">/</span>
+        <span aria-current="page" className="text-slate-200">{page.displayTitle}</span>
       </nav>
 
       {beforeContent}
@@ -50,7 +50,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
         <div className="mb-4 flex flex-wrap gap-2">
           <span className="chip chip-accent">{page.namespace}</span>
           <span className="chip chip-muted">rev {page.revision.revisionNo}</span>
-          <span className="chip chip-muted">{page.protectionLevel}</span>
+          <span className="chip chip-muted">{protectionLabel(page.protectionLevel)}</span>
         </div>
         {page.redirectedFrom ? (
           <div className="mb-4 rounded-md border border-sky-300/30 bg-sky-300/10 px-4 py-3 text-sm text-sky-100">
@@ -62,7 +62,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
         ) : null}
         <h1 className="max-w-4xl text-3xl font-bold text-white sm:text-4xl">{page.displayTitle}</h1>
         <p className="mt-3 text-sm text-slate-400">
-          {routePath} · 최근 수정 {updatedAt}
+          최근 수정 {updatedAt}
         </p>
         {page.redirectTarget ? (
           <p className="mt-3 text-sm text-slate-300">
@@ -72,6 +72,14 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
       </header>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        {page.headings.length > 0 ? (
+          <details className="surface-flat p-4 lg:hidden">
+            <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-white">목차·섹션 편집</summary>
+            <ol className="mt-3 space-y-1 text-sm">
+              {page.headings.map((heading, index) => <li key={`${heading.anchor}-mobile-${index}`} style={{ paddingInlineStart: `${Math.max(0, heading.level - 2) * 0.75}rem` }} className="flex min-w-0 items-center gap-2"><a href={`#${encodeURIComponent(heading.anchor)}`} className="min-h-11 min-w-0 flex-1 py-3 text-slate-400 hover:text-emerald-200">{heading.title}</a><Link href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`} className="grid size-11 shrink-0 place-items-center rounded text-slate-500 hover:bg-white/[0.05] hover:text-emerald-200" aria-label={`${heading.title} 섹션 편집`}><Pencil className="size-4" /></Link></li>)}
+            </ol>
+          </details>
+        ) : null}
         <article
           id={contentId}
           className="wiki-rendered min-w-0"
@@ -89,7 +97,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
             </Link>
           ) : null}
           {page.headings.length > 0 ? (
-            <nav className="surface-flat p-4" aria-label="문서 목차">
+            <nav className="surface-flat hidden p-4 lg:block" aria-label="문서 목차">
               <h2 className="text-sm font-semibold text-white">목차</h2>
               <ol className="mt-3 space-y-1.5 text-sm">
                 {page.headings.map((heading, index) => (
@@ -103,7 +111,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
                       </a>
                       <Link
                         href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`}
-                        className="rounded p-1 text-slate-600 transition hover:bg-white/[0.05] hover:text-emerald-200"
+                        className="grid size-11 shrink-0 place-items-center rounded text-slate-600 transition hover:bg-white/[0.05] hover:text-emerald-200"
                         aria-label={`${heading.title} 섹션 편집`}
                         title="섹션 편집"
                       >
@@ -124,7 +132,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">상태</dt>
-                <dd>{page.status}</dd>
+                <dd>{statusLabel(page.status)}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">링크</dt>
@@ -132,14 +140,14 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
               </div>
             </dl>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Link href={editPath} className="chip chip-accent inline-flex items-center gap-1.5">
+              <Link href={editPath} className="chip chip-accent inline-flex min-h-11 items-center gap-1.5 px-3">
                 <PencilLine className="h-3.5 w-3.5" />
                 편집
               </Link>
-              <Link href={historyPath} className="chip chip-accent">
+              <Link href={historyPath} className="chip chip-accent min-h-11 px-3">
                 역사
               </Link>
-              <Link href={buildWikiRevisionPath(page.revision.id, routePath)} className="chip chip-muted">
+              <Link href={buildWikiRevisionPath(page.revision.id, routePath)} className="chip chip-muted min-h-11 px-3">
                 현재 판
               </Link>
             </div>
@@ -167,4 +175,14 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
       {afterContent}
     </main>
   );
+}
+
+function protectionLabel(value: string): string {
+  const labels: Record<string, string> = { open: '누구나 편집', login_required: '로그인 필요', review_required: '검토 후 반영', autoconfirmed_only: '자동 인증 사용자', trusted_only: '신뢰 사용자', official_only: '공식 편집자', owner_only: '소유자만', admin_only: '관리자만', locked: '편집 잠김' };
+  return labels[value] ?? '사용자 지정 보호';
+}
+
+function statusLabel(value: string): string {
+  const labels: Record<string, string> = { normal: '공개', active: '공개', published: '공개', hidden: '숨김', deleted: '삭제됨' };
+  return labels[value] ?? '알 수 없음';
 }

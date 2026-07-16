@@ -76,28 +76,28 @@ export function WikiPageTools({ pageId, title, displayTitle, routePath }: WikiPa
         <WikiWatchButton pageId={pageId} routePath={routePath} />
         <Link
           href={rawHref}
-          className="chip chip-muted inline-flex items-center gap-1.5"
+          className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"
         >
           <Code2 className="size-3.5" /> 원문
         </Link>
-        {account ? <Link href="/wiki/watchlist" className="chip chip-muted inline-flex items-center gap-1.5"><ArchiveRestore className="size-3.5" /> 관심 목록</Link> : null}
+        {account ? <Link href="/wiki/watchlist" className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ArchiveRestore className="size-3.5" /> 관심 목록</Link> : null}
         <Link
           href={backlinksHref}
-          className="chip chip-muted inline-flex items-center gap-1.5"
+          className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"
         >
           <Link2 className="size-3.5" /> 역링크
         </Link>
         <Link
           href={discussionHref}
-          className="chip chip-muted inline-flex items-center gap-1.5"
+          className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"
         >
           <MessageSquareText className="size-3.5" /> 토론
         </Link>
-        <Link href={requestsHref} className="chip chip-muted inline-flex items-center gap-1.5"><FilePenLine className="size-3.5" /> 편집 요청</Link>
-        <Link href="/wiki/discussions" className="chip chip-muted inline-flex items-center gap-1.5"><MessagesSquare className="size-3.5" /> 최근 토론</Link>
-        <Link href={blameHref} className="chip chip-muted inline-flex items-center gap-1.5"><GitCommitHorizontal className="size-3.5" /> blame</Link>
-        <Link href={aclHref} className="chip chip-muted inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5" /> ACL</Link>
-        <Link href="/wiki/special" className="chip chip-muted inline-flex items-center gap-1.5"><Compass className="size-3.5" /> 특수 문서</Link>
+        <Link href={requestsHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><FilePenLine className="size-3.5" /> 편집 요청</Link>
+        <Link href="/wiki/discussions" className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><MessagesSquare className="size-3.5" /> 최근 토론</Link>
+        <Link href={blameHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><GitCommitHorizontal className="size-3.5" /> 기여 추적</Link>
+        <Link href={aclHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ShieldCheck className="size-3.5" /> ACL</Link>
+        <Link href="/wiki/special" className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><Compass className="size-3.5" /> 특수 문서</Link>
         <WikiReportButton targetType="page" targetId={pageId} returnTo={routePath} />
       </div>
       {!authLoading && !account ? (

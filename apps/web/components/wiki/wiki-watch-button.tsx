@@ -27,9 +27,9 @@ export function WikiWatchButton({ pageId, routePath }: { readonly pageId: string
     return () => { active = false; };
   }, [account, pageId]);
 
-  if (authLoading) return <span className="chip chip-muted"><Loader2 className="size-3.5 animate-spin" /> 확인 중</span>;
+  if (authLoading) return <span className="chip chip-muted min-h-11 px-3"><Loader2 className="size-3.5 animate-spin" /> 확인 중</span>;
   if (!account) {
-    return <Link href={`/login?returnTo=${encodeURIComponent(routePath)}`} className="chip chip-muted inline-flex items-center gap-1.5"><Star className="size-3.5" /> 관심 문서</Link>;
+    return <Link href={`/login?returnTo=${encodeURIComponent(routePath)}`} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><Star className="size-3.5" /> 관심 문서</Link>;
   }
 
   async function toggle() {
@@ -46,7 +46,7 @@ export function WikiWatchButton({ pageId, routePath }: { readonly pageId: string
 
   return (
     <span className="inline-flex flex-col items-start gap-1">
-      <button type="button" onClick={() => void toggle()} disabled={loading} aria-pressed={watched} className={watched ? 'chip chip-accent inline-flex items-center gap-1.5' : 'chip chip-muted inline-flex items-center gap-1.5'}>
+      <button type="button" onClick={() => void toggle()} disabled={loading} aria-pressed={watched} className={watched ? 'chip chip-accent inline-flex min-h-11 items-center gap-1.5 px-3' : 'chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3'}>
         {loading ? <Loader2 className="size-3.5 animate-spin" /> : watched ? <BellRing className="size-3.5" /> : <Star className="size-3.5" />}
         {watched ? '관심 해제' : '관심 문서'}
       </button>
