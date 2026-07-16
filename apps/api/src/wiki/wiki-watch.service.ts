@@ -19,6 +19,11 @@ export interface WikiWatchlistItem extends WikiWatchStatus {
   readonly updatedAt: string;
 }
 
+export interface WikiWatchlistResponse {
+  readonly items: WikiWatchlistItem[];
+  readonly nextCursor: string | null;
+}
+
 @Injectable()
 export class WikiWatchService {
   constructor(
@@ -70,15 +75,30 @@ export class WikiWatchService {
     return { watched: result.count > 0, unread: false };
   }
 
-  async list(session: SessionPayload): Promise<WikiWatchlistItem[]> {
+  async list(session: SessionPayload, cursor?: string, requestedLimit = 50): Promise<WikiWatchlistResponse> {
     const profile = await this.profiles.ensureWikiProfile(session.userId);
+    const limit = Math.min(Math.max(requestedLimit, 1), 100);
+    const decoded = cursor ? this.decodeCursor(cursor) : null;
+    const snapshotAt = decoded?.snapshotAt ?? new Date();
+    const candidateLimit = Math.min(limit * 5 + 1, 501);
     const watches = await this.prisma.wikiPageWatch.findMany({
-      where: { profileId: profile.id },
-      orderBy: [{ updatedAt: 'desc' }],
-      take: 200
+      where: {
+        profileId: profile.id,
+        updatedAt: { lte: snapshotAt },
+        ...(decoded ? {
+          OR: [
+            { updatedAt: { lt: decoded.updatedAt } },
+            { updatedAt: decoded.updatedAt, id: { lt: decoded.id } }
+          ]
+        } : {})
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: candidateLimit
     });
-    if (watches.length === 0) return [];
+    if (watches.length === 0) return { items: [], nextCursor: null };
     const pages = await this.prisma.wikiPage.findMany({ where: { id: { in: watches.map((watch) => watch.pageId) } } });
+    const actor = this.permissions.actorFromSession(session, profile);
+    const readablePages = await this.permissions.filterReadablePages({ accountId: session.userId, actor, pages });
     const namespaces = await this.prisma.wikiNamespace.findMany({
       where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
       select: { id: true, code: true }
@@ -87,21 +107,16 @@ export class WikiWatchService {
     const serverWikis = serverSpaces.length > 0
       ? await this.prisma.serverWiki.findMany({ where: { spaceId: { in: serverSpaces } }, select: { spaceId: true, slug: true } })
       : [];
-    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const pageById = new Map(readablePages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
     const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
-    const items: WikiWatchlistItem[] = [];
+    const visible: Array<{ watch: (typeof watches)[number]; item: WikiWatchlistItem }> = [];
     for (const watch of watches) {
       const page = pageById.get(watch.pageId);
       if (!page || page.status === 'deleted') continue;
-      try {
-        await this.permissions.assertCanReadPage({ accountId: session.userId, page });
-      } catch {
-        continue;
-      }
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
       const serverSlug = serverSlugBySpace.get(page.spaceId);
-      items.push({
+      visible.push({ watch, item: {
         pageId: page.id.toString(),
         title: page.displayTitle,
         namespace,
@@ -111,9 +126,39 @@ export class WikiWatchService {
         watched: true,
         unread: page.currentRevisionId !== watch.lastSeenRevisionId,
         updatedAt: page.updatedAt.toISOString()
-      });
+      } });
     }
-    return items;
+    const pageRows = visible.slice(0, limit);
+    const candidateWindowFull = watches.length === candidateLimit;
+    const hasMore = visible.length > limit || candidateWindowFull;
+    const cursorWatch = visible.length > limit
+      ? pageRows.at(-1)?.watch
+      : candidateWindowFull
+        ? watches.at(-1)
+        : null;
+    return {
+      items: pageRows.map((row) => row.item),
+      nextCursor: hasMore && cursorWatch
+        ? this.encodeCursor(snapshotAt, cursorWatch.updatedAt, cursorWatch.id)
+        : null
+    };
+  }
+
+  private encodeCursor(snapshotAt: Date, updatedAt: Date, id: bigint): string {
+    return Buffer.from(JSON.stringify({ snapshotAt: snapshotAt.toISOString(), updatedAt: updatedAt.toISOString(), id: id.toString() })).toString('base64url');
+  }
+
+  private decodeCursor(value: string): { snapshotAt: Date; updatedAt: Date; id: bigint } {
+    try {
+      const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Record<string, unknown>;
+      if (typeof parsed.snapshotAt !== 'string' || typeof parsed.updatedAt !== 'string' || typeof parsed.id !== 'string' || !/^\d+$/u.test(parsed.id)) throw new Error('shape');
+      const snapshotAt = new Date(parsed.snapshotAt);
+      const updatedAt = new Date(parsed.updatedAt);
+      if (Number.isNaN(snapshotAt.getTime()) || Number.isNaN(updatedAt.getTime()) || updatedAt > snapshotAt) throw new Error('date');
+      return { snapshotAt, updatedAt, id: BigInt(parsed.id) };
+    } catch {
+      throw new NotFoundException('Wiki watchlist cursor not found.');
+    }
   }
 
   private async context(session: SessionPayload, pageId: string) {

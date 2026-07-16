@@ -9,6 +9,8 @@ import { useAuth } from '../providers/auth-context';
 export function WikiWatchlistClient() {
   const { account, loading: authLoading } = useAuth();
   const [items, setItems] = useState<WikiWatchlistItem[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,7 +18,7 @@ export function WikiWatchlistClient() {
     let active = true;
     if (!account) { setLoading(false); return () => { active = false; }; }
     void fetchWikiWatchlist()
-      .then((result) => { if (active) setItems(result); })
+      .then((result) => { if (active) { setItems(result.items); setCursor(result.nextCursor); } })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '관심 문서를 불러오지 못했습니다.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -28,6 +30,21 @@ export function WikiWatchlistClient() {
       setItems((current) => current.filter((item) => item.pageId !== pageId));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '관심 문서를 해제하지 못했습니다.');
+    }
+  }
+
+  async function loadMore() {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const result = await fetchWikiWatchlist(cursor);
+      setItems((current) => [...current, ...result.items.filter((item) => !current.some((existing) => existing.pageId === item.pageId))]);
+      setCursor(result.nextCursor);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '관심 문서를 더 불러오지 못했습니다.');
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -50,6 +67,7 @@ export function WikiWatchlistClient() {
           <button type="button" onClick={() => void remove(item.pageId)} className="chip chip-muted inline-flex self-start items-center gap-1.5"><StarOff className="size-3.5" /> 해제</button>
         </article>
       ))}
+      {cursor ? <button type="button" disabled={loadingMore} onClick={() => void loadMore()} className="btn-secondary min-h-11 w-full">{loadingMore ? '불러오는 중…' : '관심 문서 더 보기'}</button> : null}
       {items.length === 0 ? <p className="border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">관심 문서가 없습니다. 문서 도구에서 관심 문서를 추가해 보세요.</p> : null}
     </div>
   );

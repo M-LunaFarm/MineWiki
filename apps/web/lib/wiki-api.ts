@@ -689,6 +689,11 @@ export interface WikiWatchlistItem extends WikiWatchStatus {
   readonly updatedAt: string;
 }
 
+export interface WikiWatchlistResponse {
+  readonly items: WikiWatchlistItem[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiEditRequestSummary {
   readonly id: string;
   readonly requestKind: 'edit' | 'create';
@@ -1337,8 +1342,10 @@ export async function markWikiPageWatchRead(pageId: string): Promise<WikiWatchSt
   return mutateWikiBrowser<WikiWatchStatus>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/watch/read`, 'POST', {});
 }
 
-export async function fetchWikiWatchlist(): Promise<WikiWatchlistItem[]> {
-  return readWikiBrowser<WikiWatchlistItem[]>('/v1/wiki/watchlist');
+export async function fetchWikiWatchlist(cursor?: string): Promise<WikiWatchlistResponse> {
+  const params = new URLSearchParams({ limit: '50' });
+  if (cursor) params.set('cursor', cursor);
+  return readWikiBrowser<WikiWatchlistResponse>(`/v1/wiki/watchlist?${params.toString()}`);
 }
 
 export async function fetchWikiEditRequests(pageId: string, cursor?: string): Promise<WikiEditRequestListResponse> {

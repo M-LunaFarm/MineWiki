@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CurrentSession } from '../session/session.decorator';
 import { SessionGuard } from '../session/session.guard';
@@ -11,7 +11,11 @@ export class WikiWatchController {
   constructor(private readonly watches: WikiWatchService) {}
 
   @Get('watchlist')
-  list(@CurrentSession() session: SessionPayload) { return this.watches.list(session); }
+  list(
+    @CurrentSession() session: SessionPayload,
+    @Query('cursor') cursor?: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number
+  ) { return this.watches.list(session, cursor, limit ?? 50); }
 
   @Get('pages/:pageId/watch')
   status(@Param('pageId') pageId: string, @CurrentSession() session: SessionPayload) { return this.watches.status(session, pageId); }
