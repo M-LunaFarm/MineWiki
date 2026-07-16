@@ -40,11 +40,12 @@ import { WikiApiController } from './wiki-api.controller';
 import { WikiApiTokenGuard } from './wiki-api-token.guard';
 import { WikiApiTokenService } from './wiki-api-token.service';
 import { WikiCaptchaService } from './wiki-captcha.service';
+import { WikiContributionPolicyService } from './wiki-contribution-policy.service';
 
 @Module({
   imports: [SessionModule, EventsModule, CaptchaModule],
   controllers: [WikiController, WikiApiTokenController, WikiApiController, WikiAdminController, WikiProfileMergeController, WikiProfileMergeAdminController, WikiDiscussionController, WikiDiscussionLiveController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPushSubscriptionController, WikiPageAclController, WikiThreadAclController, WikiAclGroupAdminController, WikiAclGroupSelfController],
-  providers: [WikiProfileService, WikiProfileMergeService, WikiApiTokenService, WikiApiTokenGuard, WikiCaptchaService, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiDiscussionLiveService, WikiWatchService, WikiNotificationService, WikiPushSubscriptionService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService, WikiThreadAclService],
+  providers: [WikiProfileService, WikiProfileMergeService, WikiApiTokenService, WikiApiTokenGuard, WikiCaptchaService, WikiContributionPolicyService, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiDiscussionLiveService, WikiWatchService, WikiNotificationService, WikiPushSubscriptionService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageAclService, WikiThreadAclService],
   exports: [WikiProfileService, WikiAdminService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}

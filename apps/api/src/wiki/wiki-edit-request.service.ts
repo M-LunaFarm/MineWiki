@@ -10,6 +10,10 @@ import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
 import { buildCanonicalServerWikiToolPath, WikiRoutePathResolver } from './wiki-route-path.resolver';
+import {
+  WikiContributionPolicyService,
+  type WikiPolicyAcceptance,
+} from './wiki-contribution-policy.service';
 
 export interface WikiEditRequestSummary {
   readonly id: string;
@@ -33,6 +37,7 @@ export interface WikiEditRequestSummary {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly reviewedAt: string | null;
+  readonly contributionPolicyVersion: number | null;
 }
 
 export interface WikiEditRequestListResponse {
@@ -85,6 +90,8 @@ interface WikiEditRequestQueueCandidate {
 
 @Injectable()
 export class WikiEditRequestService {
+  private readonly contributionPolicies: WikiContributionPolicyService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly profiles: WikiProfileService,
@@ -92,8 +99,12 @@ export class WikiEditRequestService {
     private readonly edits: WikiEditService,
     @Optional() private readonly events?: BusinessEventService,
     @Optional() private readonly notifications?: WikiNotificationService,
-    @Optional() private readonly routePaths?: WikiRoutePathResolver
-  ) {}
+    @Optional() private readonly routePaths?: WikiRoutePathResolver,
+    @Optional() contributionPolicies?: WikiContributionPolicyService,
+  ) {
+    this.contributionPolicies = contributionPolicies
+      ?? new WikiContributionPolicyService(prisma);
+  }
 
   async listGlobal(
     session: SessionPayload | null,
@@ -388,7 +399,13 @@ export class WikiEditRequestService {
   async create(
     session: SessionPayload,
     pageId: string,
-    input: { readonly baseRevisionId?: string; readonly contentRaw?: string; readonly editSummary?: string; readonly isMinor?: boolean }
+    input: {
+      readonly baseRevisionId?: string;
+      readonly contentRaw?: string;
+      readonly editSummary?: string;
+      readonly isMinor?: boolean;
+      readonly policyAcceptance?: WikiPolicyAcceptance;
+    }
   ): Promise<WikiEditRequestSummary> {
     const parsedPageId = this.id(pageId, 'pageId');
     const profile = await this.profiles.ensureWikiProfile(session.userId);
@@ -406,6 +423,11 @@ export class WikiEditRequestService {
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
       await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
+      const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
+        page.spaceId,
+        input.policyAcceptance,
+        tx,
+      );
       if (page.currentRevisionId !== baseRevisionId) {
         throw new ConflictException('The document changed before this edit request was submitted.');
       }
@@ -419,6 +441,7 @@ export class WikiEditRequestService {
           isMinor: Boolean(input.isMinor),
           status: 'pending',
           createdBy: profile.id,
+          contributionPolicyVersion,
           createdAt: now,
           updatedAt: now
         }
@@ -437,6 +460,7 @@ export class WikiEditRequestService {
       readonly contentRaw?: string;
       readonly editSummary?: string;
       readonly isMinor?: boolean;
+      readonly policyAcceptance?: WikiPolicyAcceptance;
     }
   ): Promise<WikiEditRequestSummary> {
     const profile = await this.profiles.ensureWikiProfile(session.userId);
@@ -462,6 +486,11 @@ export class WikiEditRequestService {
     const now = new Date();
     const request = await this.prisma.$transaction(async (tx) => {
       await this.lockNamespace(tx, target.namespaceId);
+      const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
+        target.spaceId,
+        input.policyAcceptance,
+        tx,
+      );
       const existing = await tx.wikiPage.findUnique({
         where: { namespaceId_slug: { namespaceId: target.namespaceId, slug: target.slug } },
         select: { id: true }
@@ -486,6 +515,7 @@ export class WikiEditRequestService {
           isMinor: Boolean(input.isMinor),
           status: 'pending',
           createdBy: profile.id,
+          contributionPolicyVersion,
           createdAt: now,
           updatedAt: now
         }
@@ -578,7 +608,13 @@ export class WikiEditRequestService {
     return (await this.present([updated]))[0]!;
   }
 
-  async update(session: SessionPayload, requestId: string, input: { readonly baseRevisionId?: string; readonly contentRaw?: string; readonly editSummary?: string; readonly isMinor?: boolean }): Promise<WikiEditRequestSummary> {
+  async update(session: SessionPayload, requestId: string, input: {
+    readonly baseRevisionId?: string;
+    readonly contentRaw?: string;
+    readonly editSummary?: string;
+    readonly isMinor?: boolean;
+    readonly policyAcceptance?: WikiPolicyAcceptance;
+  }): Promise<WikiEditRequestSummary> {
     const parsedRequestId = this.id(requestId, 'requestId');
     const initialRequest = await this.request(requestId);
     if (initialRequest.requestKind === 'create') {
@@ -606,6 +642,11 @@ export class WikiEditRequestService {
       await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
       if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can edit this request.');
       if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be edited.');
+      const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
+        page.spaceId,
+        input.policyAcceptance,
+        tx,
+      );
       if (baseRevisionId !== request.baseRevisionId) throw new ConflictException('Rebase the edit request before changing its base revision.');
       if (page.currentRevisionId !== request.baseRevisionId) throw new ConflictException('The document changed. Rebase this request before editing it.');
       const nextStatus = request.status === 'stale' ? 'pending' : request.status;
@@ -614,6 +655,7 @@ export class WikiEditRequestService {
         where: { id: request.id, createdBy: profile.id, status: request.status, updatedAt: request.updatedAt },
         data: {
           baseRevisionId, proposedContent: content, editSummary: summary, isMinor: Boolean(input.isMinor),
+          contributionPolicyVersion,
           status: nextStatus,
           updatedAt: new Date()
         }
@@ -633,6 +675,7 @@ export class WikiEditRequestService {
       readonly currentRevisionId?: string;
       readonly editSummary?: string;
       readonly isMinor?: boolean;
+      readonly policyAcceptance?: WikiPolicyAcceptance;
     } = {}
   ): Promise<WikiEditRequestSummary> {
     const parsedRequestId = this.id(requestId, 'requestId');
@@ -665,6 +708,11 @@ export class WikiEditRequestService {
       await this.permissions.assertCanUsePageAction({ accountId: session.userId, action: 'raw', page, store: tx });
       if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can rebase this request.');
       if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be rebased.');
+      const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
+        page.spaceId,
+        input.policyAcceptance,
+        tx,
+      );
       if (!page.currentRevisionId || page.currentRevisionId === request.baseRevisionId) {
         return { request, auditAction: null as string | null };
       }
@@ -714,6 +762,7 @@ export class WikiEditRequestService {
           proposedContent: nextContent,
           editSummary: resolvedSummary ?? request.editSummary,
           isMinor: input.isMinor ?? request.isMinor,
+          contributionPolicyVersion,
           status: nextStatus,
           updatedAt: new Date()
         }
@@ -734,7 +783,12 @@ export class WikiEditRequestService {
     session: SessionPayload,
     requestId: bigint,
     initial: WikiEditRequest,
-    input: { readonly contentRaw?: string; readonly editSummary?: string; readonly isMinor?: boolean }
+    input: {
+      readonly contentRaw?: string;
+      readonly editSummary?: string;
+      readonly isMinor?: boolean;
+      readonly policyAcceptance?: WikiPolicyAcceptance;
+    }
   ): Promise<WikiEditRequestSummary> {
     if (!this.hasCreateTarget(initial)) throw new NotFoundException('Wiki edit request target not found.');
     const profile = await this.profiles.ensureWikiProfile(session.userId);
@@ -758,6 +812,11 @@ export class WikiEditRequestService {
       });
       if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can edit this request.');
       if (!['pending', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be edited.');
+      const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
+        request.targetSpaceId,
+        input.policyAcceptance,
+        tx,
+      );
       const existing = await tx.wikiPage.findUnique({
         where: { namespaceId_slug: { namespaceId: request.targetNamespaceId, slug: request.targetSlug } },
         select: { id: true }
@@ -768,7 +827,13 @@ export class WikiEditRequestService {
       }
       const updated = await tx.wikiEditRequest.updateMany({
         where: { id: request.id, createdBy: profile.id, status: request.status, updatedAt: request.updatedAt },
-        data: { proposedContent: content, editSummary: summary, isMinor: Boolean(input.isMinor), updatedAt: new Date() }
+        data: {
+          proposedContent: content,
+          editSummary: summary,
+          isMinor: Boolean(input.isMinor),
+          contributionPolicyVersion,
+          updatedAt: new Date(),
+        }
       });
       if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
       return tx.wikiEditRequest.findUniqueOrThrow({ where: { id: request.id } });
@@ -870,6 +935,7 @@ export class WikiEditRequestService {
       createdBy: request.createdBy.toString(), createdByName: names.get(request.createdBy) ?? '알 수 없는 사용자',
       reviewedBy: request.reviewedBy?.toString() ?? null, reviewedByName: request.reviewedBy ? names.get(request.reviewedBy) ?? '알 수 없는 사용자' : null,
       reviewNote: request.reviewNote, acceptedRevisionId: request.acceptedRevisionId?.toString() ?? null,
+      contributionPolicyVersion: request.contributionPolicyVersion,
       createdAt: request.createdAt.toISOString(), updatedAt: request.updatedAt.toISOString(), reviewedAt: request.reviewedAt?.toISOString() ?? null
     }));
   }

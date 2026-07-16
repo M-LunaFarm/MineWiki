@@ -8,6 +8,7 @@ import { WikiEditRequestService } from './wiki-edit-request.service';
 import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiProfileService } from './wiki-profile.service';
 import type { WikiRoutePathResolver } from './wiki-route-path.resolver';
+import type { WikiContributionPolicyService } from './wiki-contribution-policy.service';
 
 const session = { userId: 'account-1' } as SessionPayload;
 const page = {
@@ -18,6 +19,7 @@ const page = {
 const request = {
   id: 40n, pageId: page.id, baseRevisionId: 30n, proposedContent: 'next', editSummary: 'update', isMinor: false,
   status: 'pending', createdBy: 99n, reviewedBy: null, reviewNote: null, acceptedRevisionId: null,
+  contributionPolicyVersion: null,
   createdAt: new Date('2026-01-02T00:00:00Z'), updatedAt: new Date('2026-01-02T00:00:00Z'), reviewedAt: null
 };
 
@@ -81,10 +83,26 @@ test('new-page edit requests persist an immutable target under a namespace lock'
       };
     }
   } as unknown as WikiEditService;
-  const service = new WikiEditRequestService(prisma, profiles, permissions, edits);
+  const contributionPolicies = {
+    async assertAccepted(_spaceId: bigint, acceptance: { accepted?: boolean; version?: number }) {
+      assert.deepEqual(acceptance, { accepted: true, version: 6 });
+      return 6;
+    },
+  } as unknown as WikiContributionPolicyService;
+  const service = new WikiEditRequestService(
+    prisma,
+    profiles,
+    permissions,
+    edits,
+    undefined,
+    undefined,
+    undefined,
+    contributionPolicies,
+  );
 
   const result = await service.createForNewPage(session, {
-    namespace: 'server', title: 'sample/규칙', contentRaw: '규칙 초안', editSummary: '규칙 문서 제안'
+    namespace: 'server', title: 'sample/규칙', contentRaw: '규칙 초안', editSummary: '규칙 문서 제안',
+    policyAcceptance: { accepted: true, version: 6 },
   });
 
   assert.equal(namespaceLocks, 1);
@@ -95,6 +113,7 @@ test('new-page edit requests persist an immutable target under a namespace lock'
   assert.equal(storedData?.targetNamespaceId, 7);
   assert.equal(storedData?.targetSpaceId, 8n);
   assert.equal(storedData?.targetSlug, 'sample/규칙');
+  assert.equal(storedData?.contributionPolicyVersion, 6);
   assert.equal(result.requestKind, 'create');
   assert.equal(result.pageId, null);
   assert.equal(result.targetDisplayTitle, '규칙');

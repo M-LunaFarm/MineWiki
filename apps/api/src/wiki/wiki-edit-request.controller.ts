@@ -7,6 +7,7 @@ import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import { WikiEditRequestService } from './wiki-edit-request.service';
 import { WikiCaptchaService } from './wiki-captcha.service';
+import type { WikiPolicyAcceptance } from './wiki-contribution-policy.service';
 
 @Controller('v1/wiki')
 export class WikiEditRequestController {
@@ -61,7 +62,7 @@ export class WikiEditRequestController {
   @Throttle({ default: { limit: 8, ttl: 60 } })
   create(
     @Param('pageId') pageId: string,
-    @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean },
+    @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; policyAcceptance?: WikiPolicyAcceptance },
     @CurrentSession() session: SessionPayload
   ) { return this.requests.create(session, pageId, body); }
 
@@ -69,7 +70,7 @@ export class WikiEditRequestController {
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })
   async createForNewPage(
-    @Body() body: { namespace?: string; title?: string; spaceId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; captchaToken?: string },
+    @Body() body: { namespace?: string; title?: string; spaceId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; captchaToken?: string; policyAcceptance?: WikiPolicyAcceptance },
     @CurrentSession() session: SessionPayload,
     @Req() request: FastifyRequest
   ) {
@@ -96,7 +97,7 @@ export class WikiEditRequestController {
   @Patch('edit-requests/:requestId')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })
-  update(@Param('requestId') requestId: string, @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean }, @CurrentSession() session: SessionPayload) {
+  update(@Param('requestId') requestId: string, @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; policyAcceptance?: WikiPolicyAcceptance }, @CurrentSession() session: SessionPayload) {
     return this.requests.update(session, requestId, body);
   }
 
@@ -105,7 +106,7 @@ export class WikiEditRequestController {
   @Throttle({ default: { limit: 8, ttl: 60 } })
   rebase(
     @Param('requestId') requestId: string,
-    @Body() body: { contentRaw?: string; currentRevisionId?: string; editSummary?: string; isMinor?: boolean },
+    @Body() body: { contentRaw?: string; currentRevisionId?: string; editSummary?: string; isMinor?: boolean; policyAcceptance?: WikiPolicyAcceptance },
     @CurrentSession() session: SessionPayload
   ) {
     return this.requests.rebase(session, requestId, body);

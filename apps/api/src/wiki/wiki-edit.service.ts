@@ -16,6 +16,10 @@ import { WikiProfileService } from './wiki-profile.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiNotificationService } from './wiki-notification.service';
 import { hasWikiConflictMarkers, mergeWikiSource, WikiMergeLimitError } from './wiki-merge';
+import {
+  WikiContributionPolicyService,
+  type WikiPolicyAcceptance,
+} from './wiki-contribution-policy.service';
 
 type ChangeType = 'create' | 'edit' | 'move' | 'delete' | 'restore' | 'revert';
 
@@ -29,6 +33,7 @@ export interface WikiPageMutationRequest {
   readonly editSummary?: string;
   readonly isMinor?: boolean;
   readonly baseRevisionId?: string;
+  readonly policyAcceptance?: WikiPolicyAcceptance;
 }
 
 export interface WikiSectionMutationRequest {
@@ -37,6 +42,7 @@ export interface WikiSectionMutationRequest {
   readonly editSummary?: string;
   readonly isMinor?: boolean;
   readonly baseRevisionId?: string;
+  readonly policyAcceptance?: WikiPolicyAcceptance;
 }
 
 export interface WikiSectionEditResponse {
@@ -172,14 +178,20 @@ export interface WikiPreviewResponse {
 
 @Injectable()
 export class WikiEditService {
+  private readonly contributionPolicies: WikiContributionPolicyService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly wikiProfiles: WikiProfileService,
     private readonly wikiPermissions: WikiPermissionService,
     @Optional() private readonly events?: BusinessEventService,
     @Optional() private readonly wikiLinks?: WikiLinkIndexService,
-    @Optional() private readonly notifications?: WikiNotificationService
-  ) {}
+    @Optional() private readonly notifications?: WikiNotificationService,
+    @Optional() contributionPolicies?: WikiContributionPolicyService,
+  ) {
+    this.contributionPolicies = contributionPolicies
+      ?? new WikiContributionPolicyService(prisma);
+  }
 
   async createPage(
     session: SessionPayload,
@@ -252,6 +264,11 @@ export class WikiEditService {
     }
     const result = await this.prisma.$transaction(async (tx) => {
       await this.lockNamespaceForCreate(tx, createTarget.namespaceId);
+      await this.contributionPolicies.assertAccepted(
+        createTarget.spaceId,
+        request.policyAcceptance,
+        tx,
+      );
       if (namespaceCode === 'user') {
         const currentOwner = await this.wikiPermissions.resolveUserDocumentOwner(tx, title);
         if (!currentOwner || currentOwner.id !== createTarget.ownerProfileId) {
@@ -479,6 +496,11 @@ export class WikiEditService {
         page,
         store: tx
       });
+      await this.contributionPolicies.assertAccepted(
+        page.spaceId,
+        request.policyAcceptance,
+        tx,
+      );
       const [latest, latestStored] = await Promise.all([
         this.findCurrentRevision(tx, page),
         this.findLatestStoredRevision(tx, page.id)
@@ -615,6 +637,11 @@ export class WikiEditService {
       }
       const page = await tx.wikiPage.findUnique({ where: { id: editRequest.pageId } });
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+      await this.contributionPolicies.assertStoredVersionCurrent(
+        page.spaceId,
+        editRequest.contributionPolicyVersion,
+        tx,
+      );
       const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
       if (!namespace) throw new NotFoundException('Wiki namespace not found.');
       const reviewerActor = this.wikiPermissions.actorFromSession(session, reviewer);
@@ -708,6 +735,11 @@ export class WikiEditService {
       if (!request || !this.hasCreateTarget(request) || request.targetNamespaceId !== initial.targetNamespaceId) {
         throw new NotFoundException('Wiki create request not found.');
       }
+      await this.contributionPolicies.assertStoredVersionCurrent(
+        request.targetSpaceId,
+        request.contributionPolicyVersion,
+        tx,
+      );
       const [namespace, space, existing] = await Promise.all([
         tx.wikiNamespace.findUnique({ where: { id: request.targetNamespaceId } }),
         tx.wikiSpace.findUnique({ where: { id: request.targetSpaceId } }),
@@ -1298,7 +1330,8 @@ export class WikiEditService {
       contentRaw: appended,
       editSummary: request.editSummary ?? `섹션 추가: ${heading}`,
       isMinor: request.isMinor,
-      baseRevisionId: request.baseRevisionId
+      baseRevisionId: request.baseRevisionId,
+      policyAcceptance: request.policyAcceptance,
     });
   }
 
@@ -1384,7 +1417,8 @@ export class WikiEditService {
         contentRaw: fullContent,
         editSummary: request.editSummary ?? `섹션 편집: ${baseSection.title}`,
         isMinor: request.isMinor,
-        baseRevisionId
+        baseRevisionId,
+        policyAcceptance: request.policyAcceptance,
       },
       { conflictScope: 'section' }
     );

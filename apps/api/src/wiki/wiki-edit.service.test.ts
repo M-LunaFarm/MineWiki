@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { HttpException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { parseMarkup } from '@minewiki/wiki-core';
 import {
@@ -20,6 +21,13 @@ import { WikiReadService } from './wiki-read.service';
 import type { WikiNotificationService } from './wiki-notification.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+function hasHttpErrorCode(error: unknown, code: string, status: number): boolean {
+  if (!(error instanceof HttpException) || error.getStatus() !== status) return false;
+  const response = error.getResponse();
+  return typeof response === 'object' && response !== null && 'code' in response
+    && response.code === code;
+}
 
 test('file dependencies are detected across block and inline containers', () => {
   assert.equal(astContainsFile(parseMarkup('일반 문서').ast), false);
@@ -808,6 +816,9 @@ if (!hasDatabase) {
         slug: serverSlug,
         edition: 'java',
         status: 'active',
+        contributionPolicySource: '기여 정책에 동의해 주세요.',
+        requireContributionPolicyAck: true,
+        contributionPolicyVersion: 3,
         createdBy: profile.id,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -815,11 +826,21 @@ if (!hasDatabase) {
     });
     let pageId: string | undefined;
     try {
+      await assert.rejects(
+        () => edits.createPage(session(account.id), {
+          namespace: 'server',
+          title: `${serverSlug}/운영_규칙`,
+          contentRaw: '== 운영 규칙 ==\n실제 규칙',
+          editSummary: '하위 문서 생성',
+        }),
+        (error: unknown) => hasHttpErrorCode(error, 'WIKI_CONTRIBUTION_POLICY_ACCEPTANCE_REQUIRED', 422),
+      );
       const created = await edits.createPage(session(account.id), {
         namespace: 'server',
         title: `${serverSlug}/운영_규칙`,
         contentRaw: '== 운영 규칙 ==\n실제 규칙',
         editSummary: '하위 문서 생성',
+        policyAcceptance: { accepted: true, version: 3 },
       });
       pageId = created.pageId;
       const page = await prisma.wikiPage.findUnique({ where: { id: BigInt(created.pageId) } });
@@ -827,6 +848,22 @@ if (!hasDatabase) {
       assert.equal(page?.localPath, `${serverSlug}/운영_규칙`);
       assert.equal(page?.displayTitle, '운영_규칙');
       assert.equal(page?.pageType, 'server');
+
+      await assert.rejects(
+        () => edits.updatePage(session(account.id), created.pageId, {
+          contentRaw: '== 운영 규칙 ==\n변경 규칙',
+          editSummary: '정책 없는 수정',
+          baseRevisionId: created.revisionId,
+        }),
+        (error: unknown) => hasHttpErrorCode(error, 'WIKI_CONTRIBUTION_POLICY_ACCEPTANCE_REQUIRED', 422),
+      );
+      const updated = await edits.updatePage(session(account.id), created.pageId, {
+        contentRaw: '== 운영 규칙 ==\n변경 규칙',
+        editSummary: '정책 동의 후 수정',
+        baseRevisionId: created.revisionId,
+        policyAcceptance: { accepted: true, version: 3 },
+      });
+      assert.equal(updated.revisionNo, 2);
     } finally {
       if (pageId) {
         await prisma.wikiRecentChange.deleteMany({ where: { pageId: BigInt(pageId) } });
