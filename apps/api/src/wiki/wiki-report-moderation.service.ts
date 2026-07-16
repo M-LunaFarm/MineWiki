@@ -4,11 +4,10 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
-import { BusinessEventService } from '../events/business-event.service';
+import { toAuditJson } from '../events/business-event.service';
 import { RoleService } from '../roles/role.service';
 import type { SessionPayload } from '../session/session.service';
 import { WIKI_REPORT_TARGET_TYPES, type WikiReportTargetType } from './wiki-report.service';
@@ -54,7 +53,6 @@ export class WikiReportModerationService {
     private readonly prisma: PrismaService,
     private readonly profiles: WikiProfileService,
     private readonly roles: RoleService,
-    @Optional() private readonly events?: BusinessEventService,
   ) {}
 
   async listQueue(session: SessionPayload, input: WikiReportQueueQuery) {
@@ -120,25 +118,28 @@ export class WikiReportModerationService {
         ? null
         : parseProfileOrTargetId(assigneeProfileIdInput, 'assigneeProfileId');
     if (assigneeProfileId !== null) await this.assertAssignableModerator(assigneeProfileId);
-    const existing = await this.prisma.wikiReportCase.findUnique({ where: { id: caseId } });
-    assertActiveCase(existing);
-    const now = new Date();
-    const nextStatus: Extract<WikiReportStatus, 'open' | 'in_review'> = assigneeProfileId === null ? 'open' : 'in_review';
-    const updated = await this.prisma.wikiReportCase.updateMany({
-      where: { id: caseId, version: expectedVersion, status: existing.status },
-      data: {
-        assigneeProfileId,
-        assignedAt: assigneeProfileId === null ? null : now,
-        status: nextStatus,
-        statusUpdatedAt: now,
-        version: { increment: 1 },
-      },
-    });
-    if (updated.count !== 1) throw versionConflict();
-    const result = await this.findCase(caseId);
-    await this.audit('wiki.report.assigned', session, actor.id, result, {
-      previousStatus: existing.status,
-      assigneeProfileId: assigneeProfileId?.toString() ?? null,
+    const result = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.wikiReportCase.findUnique({ where: { id: caseId } });
+      assertActiveCase(existing);
+      const now = new Date();
+      const nextStatus: Extract<WikiReportStatus, 'open' | 'in_review'> = assigneeProfileId === null ? 'open' : 'in_review';
+      const updated = await tx.wikiReportCase.updateMany({
+        where: { id: caseId, version: expectedVersion, status: existing.status },
+        data: {
+          assigneeProfileId,
+          assignedAt: assigneeProfileId === null ? null : now,
+          status: nextStatus,
+          statusUpdatedAt: now,
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count !== 1) throw versionConflict();
+      const reportCase = await this.findCase(caseId, tx);
+      await this.audit(tx, 'wiki.report.assigned', session, actor.id, reportCase, {
+        previousStatus: existing.status,
+        assigneeProfileId: assigneeProfileId?.toString() ?? null,
+      }, now);
+      return reportCase;
     });
     return toCaseResponse(result);
   }
@@ -147,33 +148,36 @@ export class WikiReportModerationService {
     const actor = await this.activeProfile(session.userId);
     const expectedVersion = parseExpectedVersion(input.expectedVersion);
     const status = parseStatus(input.status);
-    const existing = await this.prisma.wikiReportCase.findUnique({ where: { id: caseId } });
-    assertActiveCase(existing);
-    if (existing.status === status) throw new ConflictException('The report case is already in that status.');
-    const resolution = isFinal(status) ? parseResolution(input.resolution) : null;
-    const now = new Date();
-    const assigneeProfileId = status === 'open'
-      ? null
-      : existing.assigneeProfileId ?? actor.id;
-    const updated = await this.prisma.wikiReportCase.updateMany({
-      where: { id: caseId, version: expectedVersion, status: existing.status },
-      data: {
-        status,
-        assigneeProfileId,
-        assignedAt: status === 'open' ? null : existing.assignedAt ?? now,
+    const result = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.wikiReportCase.findUnique({ where: { id: caseId } });
+      assertActiveCase(existing);
+      if (existing.status === status) throw new ConflictException('The report case is already in that status.');
+      const resolution = isFinal(status) ? parseResolution(input.resolution) : null;
+      const now = new Date();
+      const assigneeProfileId = status === 'open'
+        ? null
+        : existing.assigneeProfileId ?? actor.id;
+      const updated = await tx.wikiReportCase.updateMany({
+        where: { id: caseId, version: expectedVersion, status: existing.status },
+        data: {
+          status,
+          assigneeProfileId,
+          assignedAt: status === 'open' ? null : existing.assignedAt ?? now,
+          resolution,
+          activeKey: isFinal(status) ? null : existing.activeKey,
+          resolvedAt: status === 'resolved' ? now : null,
+          dismissedAt: status === 'dismissed' ? now : null,
+          statusUpdatedAt: now,
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count !== 1) throw versionConflict();
+      const reportCase = await this.findCase(caseId, tx);
+      await this.audit(tx, `wiki.report.${status}`, session, actor.id, reportCase, {
+        previousStatus: existing.status,
         resolution,
-        activeKey: isFinal(status) ? null : existing.activeKey,
-        resolvedAt: status === 'resolved' ? now : null,
-        dismissedAt: status === 'dismissed' ? now : null,
-        statusUpdatedAt: now,
-        version: { increment: 1 },
-      },
-    });
-    if (updated.count !== 1) throw versionConflict();
-    const result = await this.findCase(caseId);
-    await this.audit(`wiki.report.${status}`, session, actor.id, result, {
-      previousStatus: existing.status,
-      resolution,
+      }, now);
+      return reportCase;
     });
     return toCaseResponse(result);
   }
@@ -203,8 +207,11 @@ export class WikiReportModerationService {
     }
   }
 
-  private async findCase(caseId: string) {
-    const reportCase = await this.prisma.wikiReportCase.findUnique({
+  private async findCase(
+    caseId: string,
+    store: Pick<Prisma.TransactionClient, 'wikiReportCase'> = this.prisma,
+  ) {
+    const reportCase = await store.wikiReportCase.findUnique({
       where: { id: caseId },
       include: REPORT_INCLUDE,
     });
@@ -213,24 +220,31 @@ export class WikiReportModerationService {
   }
 
   private async audit(
+    tx: Prisma.TransactionClient,
     action: string,
     session: SessionPayload,
     actorProfileId: bigint,
     reportCase: Prisma.WikiReportCaseGetPayload<{ include: typeof REPORT_INCLUDE }>,
     metadata: Record<string, unknown>,
+    createdAt: Date,
   ): Promise<void> {
-    await this.events?.audit(action, {
-      category: 'wiki',
-      actorAccountId: session.userId,
-      actorProfileId,
-      subjectType: 'wiki_report_case',
-      subjectId: reportCase.id,
-      metadata: {
-        targetType: reportCase.targetType,
-        targetId: reportCase.targetId.toString(),
-        pageId: reportCase.pageId.toString(),
-        version: reportCase.version,
-        ...metadata,
+    await tx.auditEvent.create({
+      data: {
+        category: 'wiki',
+        action,
+        severity: isFinal(reportCase.status) ? 'warning' : 'info',
+        actorAccountId: session.userId,
+        actorProfileId,
+        subjectType: 'wiki_report_case',
+        subjectId: reportCase.id,
+        metadata: toAuditJson({
+          targetType: reportCase.targetType,
+          targetId: reportCase.targetId.toString(),
+          pageId: reportCase.pageId.toString(),
+          version: reportCase.version,
+          ...metadata,
+        }),
+        createdAt,
       },
     });
   }
@@ -256,7 +270,7 @@ function toCaseResponse(reportCase: Prisma.WikiReportCaseGetPayload<{ include: t
     updatedAt: reportCase.updatedAt.toISOString(),
     recentSubmissions: reportCase.submissions.map((submission) => ({
       id: submission.id,
-      reporterProfileId: submission.reporterProfileId.toString(),
+      reporterProfileId: submission.reporterProfileId?.toString() ?? null,
       reason: submission.reason,
       createdAt: submission.createdAt.toISOString(),
     })),

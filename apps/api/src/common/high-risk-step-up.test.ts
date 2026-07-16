@@ -16,6 +16,7 @@ import { VoteMonitorController } from '../vote/vote-monitor.controller';
 import { WikiAclGroupAdminController } from '../wiki/wiki-acl-group.controller';
 import { WikiAdminController } from '../wiki/wiki-admin.controller';
 import { WikiPageAclController } from '../wiki/wiki-page-acl.controller';
+import { WikiReportModerationController } from '../wiki/wiki-report-moderation.controller';
 
 const classPolicies = [
   [WikiAdminController, 'wiki_admin'],
@@ -25,6 +26,7 @@ const classPolicies = [
   [AccountDeletionAdminController, 'account_delete_admin'],
   [AccountModerationController, 'account_moderation'],
   [ReviewModerationController, 'review_moderation'],
+  [WikiReportModerationController, 'wiki_admin'],
   [VoteAdminController, 'vote_admin'],
   [VoteMonitorController, 'vote_admin'],
 ] as const;

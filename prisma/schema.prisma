@@ -1529,7 +1529,7 @@ model WikiReportCase {
 model WikiReportSubmission {
   id                String         @id @default(uuid()) @db.Char(36)
   caseId            String         @map("case_id") @db.Char(36)
-  reporterProfileId BigInt         @map("reporter_profile_id") @db.UnsignedBigInt
+  reporterProfileId BigInt?        @map("reporter_profile_id") @db.UnsignedBigInt
   reason            String         @db.VarChar(1000)
   evidenceSnapshot  Json           @map("evidence_snapshot")
   createdAt         DateTime       @default(now()) @map("created_at") @db.DateTime(3)

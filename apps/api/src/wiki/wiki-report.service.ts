@@ -25,8 +25,8 @@ export interface WikiReportResponse {
   readonly targetType: WikiReportTargetType;
   readonly targetId: string;
   readonly status: 'open' | 'in_review';
-  readonly reportCount: number;
-  readonly version: number;
+  /** Compatibility receipt value; aggregate counts remain moderator-only. */
+  readonly reportCount: 1;
   readonly deduplicated: boolean;
   readonly createdAt: string;
 }
@@ -130,8 +130,7 @@ export class WikiReportService {
           targetType: result.reportCase.targetType,
           targetId: result.reportCase.targetId.toString(),
           status: result.reportCase.status as 'open' | 'in_review',
-          reportCount: result.reportCase.reportCount,
-          version: result.reportCase.version,
+          reportCount: 1,
           deduplicated: result.deduplicated,
           createdAt: result.reportCase.createdAt.toISOString(),
         };

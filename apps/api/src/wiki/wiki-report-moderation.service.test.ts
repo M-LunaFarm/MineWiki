@@ -46,6 +46,36 @@ test('assignment and lifecycle transitions use optimistic versions and close the
   );
 });
 
+test('audit persistence failures roll back assignment and finalization state', async () => {
+  const assignmentStore = moderationStore();
+  assignmentStore.failAudit = true;
+  await assert.rejects(
+    () => createModerationService(assignmentStore).assign(caseId, moderatorSession, 1),
+    /audit unavailable/u,
+  );
+  assert.equal(assignmentStore.reportCase.status, 'open');
+  assert.equal(assignmentStore.reportCase.assigneeProfileId, null);
+  assert.equal(assignmentStore.reportCase.version, 1);
+
+  const transitionStore = moderationStore();
+  transitionStore.reportCase.status = 'in_review';
+  transitionStore.reportCase.assigneeProfileId = 7n;
+  transitionStore.reportCase.assignedAt = now;
+  transitionStore.failAudit = true;
+  await assert.rejects(
+    () => createModerationService(transitionStore).transition(caseId, moderatorSession, {
+      expectedVersion: 1,
+      status: 'resolved',
+      resolution: '정책 위반을 확인했습니다.',
+    }),
+    /audit unavailable/u,
+  );
+  assert.equal(transitionStore.reportCase.status, 'in_review');
+  assert.equal(transitionStore.reportCase.activeKey, 'page:10');
+  assert.equal(transitionStore.reportCase.version, 1);
+  assert.equal(transitionStore.reportCase.resolution, null);
+});
+
 test('queue reads are bounded and use a stable creation-time keyset cursor', async () => {
   const store = moderationStore();
   const service = createModerationService(store);
@@ -71,6 +101,7 @@ function moderationStore() {
   const store: {
     reportCase: ReturnType<typeof queueCase>;
     auditActions: string[];
+    failAudit: boolean;
     queueRows: Array<ReturnType<typeof queueCase>>;
     lastFindMany?: { where: { AND?: unknown }; orderBy: unknown; take: number };
     wikiReportCase: {
@@ -79,9 +110,12 @@ function moderationStore() {
       findMany(input: { where: { AND?: unknown }; orderBy: unknown; take: number }): Promise<Array<ReturnType<typeof queueCase>>>;
     };
     wikiProfile: { findUnique(): Promise<{ accountId: string; status: string }> };
+    auditEvent: { create(input: { data: { action: string } }): Promise<{ id: string }> };
+    $transaction<T>(callback: (tx: typeof store) => Promise<T>): Promise<T>;
   } = {
     reportCase,
     auditActions,
+    failAudit: false,
     queueRows: [],
     wikiReportCase: {
       async findUnique() { return { ...store.reportCase, submissions: [...store.reportCase.submissions] }; },
@@ -104,6 +138,24 @@ function moderationStore() {
       },
     },
     wikiProfile: { async findUnique() { return { accountId: 'account-1', status: 'active' }; } },
+    auditEvent: {
+      async create(input) {
+        if (store.failAudit) throw new Error('audit unavailable');
+        store.auditActions.push(input.data.action);
+        return { id: `audit-${store.auditActions.length}` };
+      },
+    },
+    async $transaction(callback) {
+      const snapshot = cloneCase(store.reportCase);
+      const auditLength = store.auditActions.length;
+      try {
+        return await callback(store);
+      } catch (error) {
+        store.reportCase = snapshot;
+        store.auditActions.length = auditLength;
+        throw error;
+      }
+    },
   };
   return store;
 }
@@ -127,7 +179,14 @@ function queueCase(id: string, createdAt: Date) {
     dismissedAt: null as Date | null,
     createdAt,
     updatedAt: createdAt,
-    submissions: [{ id: `${id}-submission`, reporterProfileId: 1n, reason: '신고 사유', createdAt }],
+    submissions: [{ id: `${id}-submission`, reporterProfileId: 1n as bigint | null, reason: '신고 사유', createdAt }],
+  };
+}
+
+function cloneCase(reportCase: ReturnType<typeof queueCase>): ReturnType<typeof queueCase> {
+  return {
+    ...reportCase,
+    submissions: reportCase.submissions.map((submission) => ({ ...submission })),
   };
 }
 
@@ -138,8 +197,5 @@ function createModerationService(store: ReturnType<typeof moderationStore>) {
   const roles = {
     async getAccountAccess() { return { roles: ['moderator'], permissions: ['wiki.report.moderate'] }; },
   };
-  const events = {
-    async audit(action: string) { store.auditActions.push(action); },
-  };
-  return new WikiReportModerationService(store as never, profiles as never, roles as never, events as never);
+  return new WikiReportModerationService(store as never, profiles as never, roles as never);
 }

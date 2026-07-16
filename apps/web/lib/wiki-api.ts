@@ -386,7 +386,7 @@ export interface WikiReportCase {
   readonly version: number;
   readonly statusUpdatedAt: string;
   readonly createdAt: string;
-  readonly recentSubmissions: ReadonlyArray<{ readonly id: string; readonly reporterProfileId: string; readonly reason: string; readonly createdAt: string }>;
+  readonly recentSubmissions: ReadonlyArray<{ readonly id: string; readonly reporterProfileId: string | null; readonly reason: string; readonly createdAt: string }>;
 }
 
 export interface WikiReportQueueResponse {
@@ -1240,7 +1240,7 @@ export async function markWikiNotificationUnread(notificationId: string): Promis
   return mutateWikiBrowser<{ readonly read: false }>(`/v1/wiki/notifications/${encodeURIComponent(notificationId)}/unread`, 'POST', {});
 }
 
-export async function createWikiReport(input: { readonly targetType: WikiReportTargetType; readonly targetId: string; readonly reason: string }): Promise<{ readonly caseId: string; readonly deduplicated: boolean; readonly reportCount: number }> {
+export async function createWikiReport(input: { readonly targetType: WikiReportTargetType; readonly targetId: string; readonly reason: string }): Promise<{ readonly caseId: string; readonly deduplicated: boolean; readonly reportCount: 1 }> {
   return mutateWikiBrowser('/v1/wiki/reports', 'POST', input);
 }
 

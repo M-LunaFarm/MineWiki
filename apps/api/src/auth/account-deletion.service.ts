@@ -276,6 +276,10 @@ export class AccountDeletionService {
         });
       }
       if (profileIds.length > 0) {
+        await tx.wikiReportSubmission.updateMany({
+          where: { reporterProfileId: { in: profileIds } },
+          data: { reporterProfileId: null },
+        });
         await tx.wikiPageRevision.updateMany({ where: { actorUserId: { in: profileIds } }, data: { actorIp: null, actorIpText: null, actorIpHash: null } });
       }
       for (const accountId of accountIds) {

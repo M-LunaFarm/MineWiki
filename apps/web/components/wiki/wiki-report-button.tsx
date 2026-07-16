@@ -61,7 +61,7 @@ export function WikiReportButton({ targetType, targetId, returnTo, compact = fal
     try {
       const result = await createWikiReport({ targetType, targetId, reason: reason.trim() });
       setSuccess(true);
-      setMessage(result.deduplicated ? '이미 접수한 신고입니다. 기존 처리 건에 안전하게 연결했습니다.' : `신고가 접수되었습니다. 현재 ${result.reportCount.toLocaleString('ko-KR')}건이 함께 검토됩니다.`);
+      setMessage(result.deduplicated ? '이미 접수한 신고입니다. 기존 처리 건에 안전하게 연결했습니다.' : '신고가 접수되었습니다. 운영진이 보존된 증거와 함께 검토합니다.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '신고를 접수하지 못했습니다.');
     } finally { setWorking(false); }

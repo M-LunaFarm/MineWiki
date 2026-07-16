@@ -11,6 +11,8 @@ import { VoteDiagnosticsController } from '../vote/vote-diagnostics.controller';
 import { ServerVerificationController } from '../server/server-verification.controller';
 import { ReviewController } from '../review/review.controller';
 import { ReviewModerationController } from '../review/review-moderation.controller';
+import { WikiReportController } from '../wiki/wiki-report.controller';
+import { WikiReportModerationController } from '../wiki/wiki-report-moderation.controller';
 
 const THROTTLER_LIMIT = 'THROTTLER:LIMITdefault';
 const THROTTLER_TTL = 'THROTTLER:TTLdefault';
@@ -38,6 +40,9 @@ const protectedHandlers = [
   [ReviewModerationController, 'assign'],
   [ReviewModerationController, 'resolve'],
   [ReviewModerationController, 'dismiss'],
+  [WikiReportController, 'report'],
+  [WikiReportModerationController, 'assign'],
+  [WikiReportModerationController, 'transition'],
 ] as const;
 
 test('high-risk mutation endpoints define explicit rate limits', () => {

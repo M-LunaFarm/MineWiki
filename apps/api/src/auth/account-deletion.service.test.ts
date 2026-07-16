@@ -299,6 +299,72 @@ if (!hasDatabase) {
     }
   });
 
+  test('due processing retains wiki report evidence while nulling reporter identity', async () => {
+    const group = await createGroup();
+    const now = new Date();
+    const profile = await prisma.wikiProfile.create({
+      data: {
+        accountId: group.firstId,
+        username: `report_delete_${randomUUID().replaceAll('-', '').slice(0, 20)}`,
+        displayName: '신고자 탈퇴 테스트',
+        status: 'active',
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    const evidenceSnapshot = {
+      capturedAt: now.toISOString(),
+      targetType: 'page',
+      targetId: profile.id.toString(),
+      excerpt: '탈퇴 후에도 보존할 증거',
+    };
+    const reportCase = await prisma.wikiReportCase.create({
+      data: {
+        targetType: 'page',
+        targetId: profile.id,
+        pageId: profile.id,
+        activeKey: `page:${profile.id}`,
+        reportCount: 1,
+        evidenceSnapshot,
+        statusUpdatedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    const submission = await prisma.wikiReportSubmission.create({
+      data: {
+        caseId: reportCase.id,
+        reporterProfileId: profile.id,
+        reason: '계정 삭제 익명화 검증',
+        evidenceSnapshot,
+        createdAt: now,
+      },
+    });
+
+    try {
+      const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
+      await prisma.accountDeletionRequest.update({
+        where: { id: requested.id },
+        data: { scheduledFor: new Date(Date.now() - 1000) },
+      });
+      const completed = await service.process(requested.id, randomUUID(), 'wiki report privacy test');
+      assert.equal(completed.status, 'completed');
+
+      const [storedSubmission, storedCase] = await Promise.all([
+        prisma.wikiReportSubmission.findUniqueOrThrow({ where: { id: submission.id } }),
+        prisma.wikiReportCase.findUniqueOrThrow({ where: { id: reportCase.id } }),
+      ]);
+      assert.equal(storedSubmission.reporterProfileId, null);
+      assert.deepEqual(storedSubmission.evidenceSnapshot, evidenceSnapshot);
+      assert.deepEqual(storedCase.evidenceSnapshot, evidenceSnapshot);
+      assert.equal(storedCase.reportCount, 1);
+    } finally {
+      await prisma.wikiReportCase.delete({ where: { id: reportCase.id } }).catch(() => undefined);
+      await prisma.wikiProfile.delete({ where: { id: profile.id } }).catch(() => undefined);
+      await cleanup([group.firstId, group.secondId]);
+    }
+  });
+
   test('due processing preserves public review and vote rows while removing account identifiers', async () => {
     const group = await createGroup();
     const minecraftUuid = randomUUID();

@@ -65,8 +65,11 @@ test('different reporters aggregate an exact count inside serializable transacti
     targetType: 'page', targetId: '10', reason: '두 번째 신고 사유입니다.',
   });
 
-  assert.equal(aggregated.reportCount, 2);
-  assert.equal(aggregated.version, 2);
+  assert.equal(aggregated.reportCount, 1);
+  assert.equal('version' in aggregated, false);
+  const [storedCase] = [...store.cases.values()];
+  assert.equal(storedCase?.reportCount, 2);
+  assert.equal(storedCase?.version, 2);
   assert.equal(store.submissions.size, 2);
   assert.deepEqual(store.transactionIsolationLevels, ['Serializable', 'Serializable']);
 });
