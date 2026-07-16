@@ -611,7 +611,7 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
   assert.equal(second.statusCountsComplete, true);
   let pageQueries = queries.filter((query) => !query.select);
   assert.deepEqual(pageQueries[1]?.orderBy, [{ updatedAt: 'desc' }, { id: 'desc' }]);
-  assert.equal(pageQueries[1]?.take, 151);
+  assert.equal(pageQueries[1]?.take, 50);
   const secondWhere = pageQueries[1]?.where as { pageId: bigint; status: unknown; OR: unknown };
   assert.equal(secondWhere.pageId, page.id);
   assert.deepEqual(secondWhere.status, { not: 'deleted' });
@@ -710,6 +710,98 @@ test('page discussion pagination bounds ACL overfetch and advances past denied r
   assert.ok(result.nextCursor);
   assert.deepEqual(result.statusCounts, { total: 41, open: 41, paused: 0, closed: 0 });
   assert.equal(result.statusCountsComplete, true);
+});
+
+test('page discussion pagination exhausts terminal ACL-denied batches without a false cursor', async () => {
+  const updatedAt = new Date('2026-07-13T00:00:00Z');
+  const rows = Array.from({ length: 120 }, (_, index) => ({ ...thread, id: BigInt(220 - index), updatedAt }));
+  const pageQueries: Array<{ take: number }> = [];
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: {
+      async findMany(args: {
+        where: { OR?: Array<{ id?: { lt?: bigint } }> };
+        take: number;
+        select?: unknown;
+      }) {
+        if (args.select) return rows.slice(0, args.take);
+        pageQueries.push(args);
+        const cursorId = args.where.OR?.find((entry) => entry.id?.lt)?.id?.lt;
+        const candidates = cursorId === undefined ? rows : rows.filter((row) => row.id < cursorId);
+        return candidates.slice(0, args.take);
+      }
+    },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return []; } }
+  };
+  const permissions = {
+    async assertCanReadPage() {},
+    async filterReadableThreads() { return []; }
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    permissions
+  );
+
+  const result = await discussions.listThreadsPage(page.id.toString(), null, undefined, 10);
+
+  assert.deepEqual(result.items, []);
+  assert.equal(result.nextCursor, null);
+  assert.ok(pageQueries.length > 1);
+  assert.ok(pageQueries.every((query) => query.take <= 50));
+});
+
+test('page discussion pagination resumes after the ACL scan cap without duplicates or skips', async () => {
+  const updatedAt = new Date('2026-07-13T00:00:00Z');
+  const rows = Array.from({ length: 260 }, (_, index) => ({ ...thread, id: BigInt(400 - index), updatedAt }));
+  const pageQueries: Array<{
+    where: { OR?: Array<{ id?: { lt?: bigint } }> };
+    take: number;
+  }> = [];
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: {
+      async findMany(args: {
+        where: { OR?: Array<{ id?: { lt?: bigint } }> };
+        take: number;
+        select?: unknown;
+      }) {
+        const cursorId = args.where.OR?.find((entry) => entry.id?.lt)?.id?.lt;
+        const candidates = cursorId === undefined ? rows : rows.filter((row) => row.id < cursorId);
+        const result = candidates.slice(0, args.take);
+        if (args.select) return result.map((row) => ({ id: row.id, pageId: row.pageId, status: row.status }));
+        pageQueries.push(args);
+        return result;
+      }
+    },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const permissions = {
+    async assertCanReadPage() {},
+    async filterReadableThreads<T extends { thread: { id: bigint } }>({ items }: { items: T[] }) {
+      return items.filter((item) => item.thread.id <= 150n);
+    }
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    permissions
+  );
+
+  const first = await discussions.listThreadsPage(page.id.toString(), null, undefined, 10);
+  const firstQueryCount = pageQueries.length;
+  assert.deepEqual(first.items, []);
+  assert.ok(first.nextCursor);
+  assert.deepEqual(pageQueries.slice(0, firstQueryCount).map((query) => query.take), [50, 50, 50, 50, 50, 1]);
+
+  const second = await discussions.listThreadsPage(page.id.toString(), null, first.nextCursor ?? undefined, 10);
+  assert.deepEqual(second.items.map((item) => item.id), ['150', '149', '148', '147', '146', '145', '144', '143', '142', '141']);
+  assert.equal(new Set(second.items.map((item) => item.id)).size, second.items.length);
+  assert.equal(second.nextCursor, null);
+  assert.deepEqual(second.statusCounts, { total: 10, open: 10, paused: 0, closed: 0 });
+  assert.equal(second.statusCountsComplete, true);
 });
 
 test('recent server discussions deep-link through the canonical tool route', async () => {

@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { wikiUrl } from '@minewiki/wiki-core';
-import { Prisma } from '@prisma/client';
+import { Prisma, type WikiDiscussionThread } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
@@ -164,6 +164,8 @@ interface ThreadPreviewRow {
   readonly commentCount: bigint | number;
 }
 
+const THREAD_PAGE_CANDIDATE_BATCH_SIZE = 50;
+const MAX_THREAD_PAGE_CANDIDATE_SCAN = 250;
 const MAX_STATUS_COUNT_SCAN = 1_000;
 
 @Injectable()
@@ -240,33 +242,63 @@ export class WikiDiscussionService {
       : statusFilter === 'active'
         ? { in: ['open', 'paused'] }
         : statusFilter;
-    const position = decoded ? { updatedAt: decoded.updatedAt, id: decoded.id } : null;
-    const candidateLimit = Math.min(limit * 5 + 1, 251);
-    const candidates = await this.prisma.wikiDiscussionThread.findMany({
-      where: {
-        pageId: page.id,
-        status,
-        updatedAt: { lte: snapshotAt },
-        ...(position ? {
-          OR: [
-            { updatedAt: { lt: position.updatedAt } },
-            { updatedAt: position.updatedAt, id: { lt: position.id } }
-          ]
-        } : {})
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: candidateLimit
+    const candidateWhere = (position: { readonly updatedAt: Date; readonly id: bigint } | null): Prisma.WikiDiscussionThreadWhereInput => ({
+      pageId: page.id,
+      status,
+      updatedAt: { lte: snapshotAt },
+      ...(position ? {
+        OR: [
+          { updatedAt: { lt: position.updatedAt } },
+          { updatedAt: position.updatedAt, id: { lt: position.id } }
+        ]
+      } : {})
     });
     const actor = await this.viewerActor(viewer);
-    const visibleRows = await this.wikiPermissions.filterReadableThreads({
-      accountId,
-      actor,
-      items: candidates.map((thread) => ({ thread, page }))
-    });
-    const visibleThreads = visibleRows.map((item) => item.thread);
+    const visibleThreads: WikiDiscussionThread[] = [];
+    let scanPosition = decoded ? { updatedAt: decoded.updatedAt, id: decoded.id } : null;
+    let lastScanned: WikiDiscussionThread | undefined;
+    let scannedCandidateCount = 0;
+    let candidatesExhausted = false;
+    while (visibleThreads.length <= limit && scannedCandidateCount < MAX_THREAD_PAGE_CANDIDATE_SCAN) {
+      const take = Math.min(
+        THREAD_PAGE_CANDIDATE_BATCH_SIZE,
+        MAX_THREAD_PAGE_CANDIDATE_SCAN - scannedCandidateCount
+      );
+      const candidateRows = await this.prisma.wikiDiscussionThread.findMany({
+        where: candidateWhere(scanPosition),
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take
+      });
+      const candidates = candidateRows.slice(0, take);
+      if (candidates.length === 0) {
+        candidatesExhausted = true;
+        break;
+      }
+      scannedCandidateCount += candidates.length;
+      lastScanned = candidates.at(-1);
+      scanPosition = lastScanned
+        ? { updatedAt: lastScanned.updatedAt, id: lastScanned.id }
+        : scanPosition;
+      const visibleRows = await this.wikiPermissions.filterReadableThreads({
+        accountId,
+        actor,
+        items: candidates.map((thread) => ({ thread, page }))
+      });
+      visibleThreads.push(...visibleRows.map((item) => item.thread));
+      if (candidates.length < take) {
+        candidatesExhausted = true;
+        break;
+      }
+    }
+    const hasUnscannedCandidates = visibleThreads.length <= limit && !candidatesExhausted && lastScanned
+      ? (await this.prisma.wikiDiscussionThread.findMany({
+          where: candidateWhere({ updatedAt: lastScanned.updatedAt, id: lastScanned.id }),
+          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+          take: 1
+        })).length > 0
+      : false;
     const pageThreads = visibleThreads.slice(0, limit);
-    const candidateWindowFull = candidates.length === candidateLimit;
-    const hasMore = visibleThreads.length > limit || candidateWindowFull;
+    const hasMore = visibleThreads.length > limit || hasUnscannedCandidates;
     const canViewHidden = includePreview && Boolean(actor && await this.wikiPermissions.canManagePage({ actor, page }));
     const previewData = includePreview
       ? await this.loadThreadPreviews(pageThreads.map((thread) => thread.id))
@@ -289,8 +321,8 @@ export class WikiDiscussionService {
     ]);
     const last = visibleThreads.length > limit
       ? pageThreads.at(-1)
-      : candidateWindowFull
-        ? candidates.at(-1)
+      : hasUnscannedCandidates
+        ? lastScanned
         : undefined;
     const statusCandidates = await this.prisma.wikiDiscussionThread.findMany({
       where: {
