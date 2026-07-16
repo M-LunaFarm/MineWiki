@@ -116,8 +116,14 @@ export interface WikiSearchResult {
   readonly displayTitle: string;
   readonly routePath: string;
   readonly snippet: string;
+  readonly highlights: {
+    readonly title: ReadonlyArray<readonly [start: number, length: number]>;
+    readonly snippet: ReadonlyArray<readonly [start: number, length: number]>;
+  };
   readonly updatedAt: string;
 }
+
+export type WikiSearchTarget = 'all' | 'title' | 'content';
 
 export interface WikiSearchResponse {
   readonly items: WikiSearchResult[];
@@ -1512,6 +1518,7 @@ export class WikiReadService {
   async search(input: {
     readonly q?: string;
     readonly namespace?: string;
+    readonly target?: string;
     readonly limit?: string | number;
     readonly cursor?: string;
     readonly accountId?: string | null;
@@ -1521,6 +1528,10 @@ export class WikiReadService {
       return { items: [], nextCursor: null };
     }
     if (query.length > 100) throw new BadRequestException('q is too long.');
+    const target = input.target?.trim() || 'all';
+    if (!['all', 'title', 'content'].includes(target)) {
+      throw new BadRequestException('target must be all, title, or content.');
+    }
     const limit = Math.min(Math.max(Number(input.limit ?? 20) || 20, 1), 50);
     const cursor = parseWikiSearchCursor(input.cursor);
     const namespace = input.namespace?.trim()
@@ -1558,7 +1569,23 @@ export class WikiReadService {
         })
       : [];
     const publicRevisionIds = new Set(revisionVisibility.map((revision) => revision.id));
-    const publicPages = pages.filter((page) => page.currentRevisionId && publicRevisionIds.has(page.currentRevisionId));
+    let publicPages = pages.filter((page) => page.currentRevisionId && publicRevisionIds.has(page.currentRevisionId));
+    if (target === 'title') {
+      publicPages = publicPages.filter((page) => wikiSearchTextMatches(
+        [page.title, page.displayTitle, page.slug, page.localPath].join(' '),
+        query
+      ));
+    } else if (target === 'content' && publicPages.length > 0) {
+      const candidateRevisionIds = publicPages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+      const candidateRevisions = await this.prisma.wikiPageRevision.findMany({
+        where: { id: { in: candidateRevisionIds }, visibility: 'public' },
+        select: { id: true, contentRaw: true }
+      });
+      const matchingRevisionIds = new Set(candidateRevisions
+        .filter((revision) => wikiSearchTextMatches(revision.contentRaw, query))
+        .map((revision) => revision.id));
+      publicPages = publicPages.filter((page) => page.currentRevisionId && matchingRevisionIds.has(page.currentRevisionId));
+    }
     const readablePages = await this.wikiPermissions.filterReadablePages({
       accountId: input.accountId ?? null,
       pages: publicPages
@@ -1586,13 +1613,18 @@ export class WikiReadService {
       const revision = page.currentRevisionId ? revisionById.get(page.currentRevisionId) : null;
       if (!revision) continue;
       const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
+      const snippet = makeSearchSnippet(revision.contentRaw, query);
       items.push({
         pageId: page.id.toString(),
         namespace: namespaceCode,
         title: page.title,
         displayTitle: page.displayTitle,
         routePath: routePaths.routePath(page, namespaceCode),
-        snippet: makeSearchSnippet(revision.contentRaw, query),
+        snippet,
+        highlights: {
+          title: findSearchHighlights(page.displayTitle, query),
+          snippet: findSearchHighlights(snippet, query)
+        },
         updatedAt: page.updatedAt.toISOString()
       });
     }
@@ -1656,7 +1688,9 @@ export class WikiReadService {
         exact,
         item: {
           pageId: page.id.toString(), namespace, title: page.title, displayTitle: page.displayTitle,
-          routePath: routePaths.routePath(page, namespace), snippet: '', updatedAt: page.updatedAt.toISOString()
+          routePath: routePaths.routePath(page, namespace), snippet: '',
+          highlights: { title: findSearchHighlights(page.displayTitle, query), snippet: [] },
+          updatedAt: page.updatedAt.toISOString()
         }
       });
     }
@@ -2260,4 +2294,24 @@ function makeSearchSnippet(content: string, query: string): string {
   const start = Math.max(index - 60, 0);
   const end = Math.min(index + query.length + 100, normalizedContent.length);
   return `${start > 0 ? '...' : ''}${normalizedContent.slice(start, end)}${end < normalizedContent.length ? '...' : ''}`;
+}
+
+function wikiSearchTextMatches(value: string, query: string): boolean {
+  return value.normalize('NFKC').toLocaleLowerCase('ko-KR')
+    .includes(query.normalize('NFKC').toLocaleLowerCase('ko-KR'));
+}
+
+function findSearchHighlights(value: string, query: string): Array<readonly [number, number]> {
+  const normalizedValue = value.toLocaleLowerCase('ko-KR');
+  const normalizedQuery = query.toLocaleLowerCase('ko-KR');
+  if (!normalizedQuery) return [];
+  const ranges: Array<readonly [number, number]> = [];
+  let offset = 0;
+  while (ranges.length < 20) {
+    const index = normalizedValue.indexOf(normalizedQuery, offset);
+    if (index < 0) break;
+    ranges.push([index, query.length]);
+    offset = index + Math.max(query.length, 1);
+  }
+  return ranges;
 }

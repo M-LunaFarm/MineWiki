@@ -223,6 +223,10 @@ export interface WikiSearchResult {
   readonly displayTitle: string;
   readonly routePath: string;
   readonly snippet: string;
+  readonly highlights?: {
+    readonly title: ReadonlyArray<readonly [start: number, length: number]>;
+    readonly snippet: ReadonlyArray<readonly [start: number, length: number]>;
+  };
   readonly updatedAt: string;
 }
 
@@ -1492,7 +1496,7 @@ export async function fetchWikiRecent(
   return readWikiBrowser(`/v1/wiki/recent?${params.toString()}`);
 }
 
-export async function searchWiki(input: { q: string; namespace?: string; limit?: number; cursor?: string }): Promise<WikiSearchResponse> {
+export async function searchWiki(input: { q: string; namespace?: string; target?: 'all' | 'title' | 'content'; limit?: number; cursor?: string }): Promise<WikiSearchResponse> {
   const params = new URLSearchParams({
     q: input.q,
     limit: String(input.limit ?? 20),
@@ -1500,6 +1504,7 @@ export async function searchWiki(input: { q: string; namespace?: string; limit?:
   if (input.namespace) {
     params.set('namespace', input.namespace);
   }
+  if (input.target) params.set('target', input.target);
   if (input.cursor) params.set('cursor', input.cursor);
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/search?${params.toString()}`, {
     credentials: 'include',

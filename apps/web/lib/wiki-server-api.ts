@@ -82,11 +82,13 @@ export async function fetchWikiPublicProfile(username: string): Promise<WikiPubl
 export async function searchWiki(input: {
   readonly q: string;
   readonly namespace?: string;
+  readonly target?: 'all' | 'title' | 'content';
   readonly limit?: number;
   readonly cursor?: string;
 }): Promise<WikiSearchResponse> {
   const params = new URLSearchParams({ q: input.q, limit: String(input.limit ?? 20) });
   if (input.namespace) params.set('namespace', input.namespace);
+  if (input.target) params.set('target', input.target);
   if (input.cursor) params.set('cursor', input.cursor);
   const response = await wikiFetch(`/v1/wiki/search?${params.toString()}`);
   return readWikiResponse<WikiSearchResponse>(response, 'Failed to search wiki.');

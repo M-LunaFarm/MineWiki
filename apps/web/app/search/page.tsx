@@ -11,6 +11,7 @@ interface SearchPageProps {
   readonly searchParams: Promise<{
     q?: string;
     namespace?: string;
+    target?: string;
     cursor?: string;
   }>;
 }
@@ -24,10 +25,11 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const params = await searchParams;
   const query = params.q?.trim().slice(0, 100) ?? '';
   const namespace = params.namespace?.trim() ?? '';
+  const target = params.target === 'title' || params.target === 'content' ? params.target : 'all';
   const cursor = params.cursor?.trim() ?? '';
   const [wikiResult, serverResult] = query
     ? await Promise.all([
-        searchWiki({ q: query, namespace: namespace || undefined, cursor: cursor || undefined, limit: 30 })
+        searchWiki({ q: query, namespace: namespace || undefined, target, cursor: cursor || undefined, limit: 30 })
           .then((result) => ({ ...result, available: true }))
           .catch((error) => {
             console.error('Unified search failed to load wiki results', error);
@@ -64,7 +66,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </p>
       </header>
 
-      <form action="/search" className="surface-card grid gap-3 p-4 sm:grid-cols-[1fr_12rem_auto]">
+      <form action="/search" className="surface-card grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_10rem_12rem_auto]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
@@ -77,6 +79,16 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             className="h-12 w-full rounded-xl border border-white/10 bg-black/20 pl-10 pr-3 text-sm text-white placeholder:text-slate-500 focus:border-[#35e5b7]/50 focus:outline-none focus:ring-2 focus:ring-[#35e5b7]/10"
           />
         </label>
+        <select
+          name="target"
+          aria-label="위키 검색 대상"
+          defaultValue={target}
+          className="h-12 rounded-xl border border-white/10 bg-[#0d1219] px-3 text-sm text-white focus:border-[#35e5b7]/50 focus:outline-none"
+        >
+          <option value="all">제목 + 본문</option>
+          <option value="title">제목만</option>
+          <option value="content">본문만</option>
+        </select>
         <select
           name="namespace"
           aria-label="위키 이름공간"
@@ -135,7 +147,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             </div>
             {wikiResult.nextCursor ? (
               <Link
-                href={`/search?q=${encodeURIComponent(query)}${namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''}&cursor=${encodeURIComponent(wikiResult.nextCursor)}`}
+                href={`/search?q=${encodeURIComponent(query)}${namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''}&target=${encodeURIComponent(target)}&cursor=${encodeURIComponent(wikiResult.nextCursor)}`}
                 className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-white/10 px-4 py-2 text-sm font-semibold text-[#35e5b7] transition hover:border-[#35e5b7]/40 hover:bg-[#35e5b7]/[.06]"
               >
                 다음 위키 검색 결과
@@ -214,10 +226,31 @@ function WikiResult({ result }: { readonly result: WikiSearchResult }) {
         <span>{result.routePath}</span>
         <span>{new Date(result.updatedAt).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}</span>
       </div>
-      <h3 className="mt-2 text-lg font-semibold text-white">{result.displayTitle}</h3>
-      <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-300">{result.snippet}</p>
+      <h3 className="mt-2 text-lg font-semibold text-white">
+        <HighlightedText value={result.displayTitle} ranges={result.highlights?.title ?? []} />
+      </h3>
+      <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-300">
+        <HighlightedText value={result.snippet} ranges={result.highlights?.snippet ?? []} />
+      </p>
     </Link>
   );
+}
+
+function HighlightedText({ value, ranges }: {
+  readonly value: string;
+  readonly ranges: ReadonlyArray<readonly [start: number, length: number]>;
+}) {
+  if (ranges.length === 0) return value;
+  const parts: React.ReactNode[] = [];
+  let offset = 0;
+  for (const [start, length] of ranges) {
+    if (start < offset || start < 0 || length <= 0 || start + length > value.length) continue;
+    if (start > offset) parts.push(value.slice(offset, start));
+    parts.push(<mark key={`${start}:${length}`} className="rounded-sm bg-amber-300/25 px-0.5 text-amber-100">{value.slice(start, start + length)}</mark>);
+    offset = start + length;
+  }
+  if (offset < value.length) parts.push(value.slice(offset));
+  return <>{parts}</>;
 }
 
 function DiscoveryHint({ icon, title, body }: { readonly icon: React.ReactElement; readonly title: string; readonly body: string }) {

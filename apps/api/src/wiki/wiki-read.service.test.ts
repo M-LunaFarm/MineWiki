@@ -214,7 +214,54 @@ test('wiki search batches current revisions and returns a continuation cursor', 
   assert.equal(JSON.stringify(revisionSelects[0]).includes('contentRaw'), false);
   assert.equal(JSON.stringify(revisionSelects[1]).includes('contentRaw'), true);
   assert.equal(result.items.length, 2);
+  assert.deepEqual(result.items[0]?.highlights.title, [[0, 2]]);
+  assert.deepEqual(result.items[0]?.highlights.snippet, [[3, 2]]);
   assert.ok(result.nextCursor);
+});
+
+test('wiki search target filters distinguish title and body matches', async () => {
+  const now = new Date('2026-07-16T00:00:00Z');
+  const pages = [
+    {
+      id: 2n, namespaceId: 1, spaceId: 1n, localPath: '검색 제목', slug: '검색_제목',
+      title: '검색 제목', displayTitle: '검색 제목', currentRevisionId: 12n,
+      pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n,
+      createdAt: now, updatedAt: now
+    },
+    {
+      id: 1n, namespaceId: 1, spaceId: 1n, localPath: '다른 문서', slug: '다른_문서',
+      title: '다른 문서', displayTitle: '다른 문서', currentRevisionId: 11n,
+      pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n,
+      createdAt: now, updatedAt: new Date(now.getTime() - 1000)
+    }
+  ];
+  const bodies = new Map([[12n, '관계없는 본문'], [11n, '여기에 검색 본문이 있습니다']]);
+  const prisma = {
+    async $queryRawUnsafe() { return pages.map((page) => ({ id: page.id })); },
+    wikiPage: { async findMany() { return pages; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiPageRevision: {
+      async findMany(input: { select?: { contentRaw?: boolean } }) {
+        return input.select?.contentRaw
+          ? [...bodies].map(([id, contentRaw]) => ({ id, contentRaw }))
+          : [...bodies.keys()].map((id) => ({ id, visibility: 'public' }));
+      }
+    }
+  } as unknown as PrismaService;
+  const permissions = {
+    async filterReadablePages({ pages: candidates }: { pages: typeof pages }) { return [...candidates]; }
+  } as unknown as WikiPermissionService;
+
+  const titleResult = await new WikiReadService(prisma, permissions).search({ q: '검색', target: 'title' });
+  const contentResult = await new WikiReadService(prisma, permissions).search({ q: '검색', target: 'content' });
+
+  assert.deepEqual(titleResult.items.map((item) => item.pageId), ['2']);
+  assert.deepEqual(contentResult.items.map((item) => item.pageId), ['1']);
+  assert.deepEqual(contentResult.items[0]?.highlights.snippet, [[4, 2]]);
+  await assert.rejects(
+    new WikiReadService(prisma, permissions).search({ q: '검색', target: 'invalid' }),
+    /target must be all, title, or content/u
+  );
 });
 
 test('wiki search never uses matching historical revisions as current-document candidates', async () => {

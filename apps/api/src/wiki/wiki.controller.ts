@@ -175,12 +175,14 @@ export class WikiController {
     @Req() request: FastifyRequest,
     @Query('q') q: string | undefined,
     @Query('namespace') namespace: string | undefined,
+    @Query('target') target: string | undefined,
     @Query('limit') limit: string | undefined,
     @Query('cursor') cursor: string | undefined
   ): Promise<WikiSearchResponse> {
     return this.wikiRead.search({
       q,
       namespace,
+      target,
       limit,
       cursor,
       accountId: request.sessionPayload?.userId ?? null
