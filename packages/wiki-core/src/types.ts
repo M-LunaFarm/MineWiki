@@ -105,14 +105,14 @@ export type InlineNode =
   | { type: 'dynamic_stat'; stat: 'pagecount'; namespace: string | null }
   | { type: 'video'; provider: 'youtube'; videoId: string; width: number; height: number; start: number | null; end: number | null }
   | { type: 'math'; source: string; error: string | null }
-  | { type: 'bold'; text: string }
-  | { type: 'italic'; text: string }
-  | { type: 'strike'; text: string }
-  | { type: 'underline'; text: string }
-  | { type: 'sup'; text: string }
-  | { type: 'sub'; text: string }
-  | { type: 'color'; color: string; text: string }
-  | { type: 'size'; delta: number; text: string }
+  | { type: 'bold'; children: InlineNode[] }
+  | { type: 'italic'; children: InlineNode[] }
+  | { type: 'strike'; children: InlineNode[] }
+  | { type: 'underline'; children: InlineNode[] }
+  | { type: 'sup'; children: InlineNode[] }
+  | { type: 'sub'; children: InlineNode[] }
+  | { type: 'color'; color: string; children: InlineNode[] }
+  | { type: 'size'; delta: number; children: InlineNode[] }
   | { type: 'internal_link'; target: string; label: string; fragment?: string | null }
   | { type: 'external_link'; href: string; label: string }
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null }

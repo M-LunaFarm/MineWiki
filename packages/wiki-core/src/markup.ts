@@ -19,7 +19,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.13.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.14.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -30,6 +30,7 @@ const MAX_INCLUDE_PARAM_VALUE_BYTES = 4096;
 const MAX_INCLUDE_PARAM_BYTES = 32 * 1024;
 const MAX_MATH_SOURCE_BYTES = 4096;
 const MAX_MATH_NODES = 50;
+const MAX_INLINE_NESTING = 16;
 const INCLUDE_PARAM_KEY = /^[A-Za-z0-9가-힣_]+$/u;
 
 const componentNameMap: Record<string, string> = {
@@ -377,7 +378,7 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
       continue;
     }
 
-    const inlineComponent = line.match(/^\{\{(.+?)\}\}$/);
+    const inlineComponent = line.startsWith('{{{') ? null : line.match(/^\{\{(.+?)\}\}$/);
     if (inlineComponent) {
       const name = componentNameMap[inlineComponent[1].trim()] ?? inlineComponent[1].trim();
       ast.push({ type: 'component', name, props: {} });
@@ -1106,6 +1107,16 @@ export function applyIncludeParametersToAst(
     if (node.type === 'line_break' || node.type === 'clearfix') return { ...node };
     if (node.type === 'anchor') return { ...node, id: normalizeMacroAnchor(replace(node.id)) };
     if (node.type === 'ruby') return { ...node, text: replace(node.text), ruby: replace(node.ruby) };
+    if (
+      node.type === 'bold'
+      || node.type === 'italic'
+      || node.type === 'strike'
+      || node.type === 'underline'
+      || node.type === 'sup'
+      || node.type === 'sub'
+      || node.type === 'color'
+      || node.type === 'size'
+    ) return { ...node, children: inline(node.children) };
     return { ...node, text: replace(node.text) };
   });
   const list = (node: WikiListNode): WikiListNode => ({
@@ -1171,10 +1182,14 @@ function parseInline(
   errors: string[],
   blockingErrors: string[],
   footnotes: string[],
-  linkResolution?: WikiLinkResolutionContext
+  linkResolution?: WikiLinkResolutionContext,
+  nestingDepth = 0
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
   const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXml><ref>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?\s*(?<refShortText>[^\]]+?)\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
+  const nested = (value: string): InlineNode[] => nestingDepth >= MAX_INLINE_NESTING
+    ? [{ type: 'text', text: value }]
+    : parseInline(value, links, errors, blockingErrors, footnotes, linkResolution, nestingDepth + 1);
   let last = 0;
   for (const match of input.matchAll(pattern)) {
     if (match.index! > last) nodes.push({ type: 'text', text: input.slice(last, match.index) });
@@ -1198,9 +1213,9 @@ function parseInline(
     } else if (group.code !== undefined) {
       nodes.push({ type: 'code', code: group.codeText ?? '' });
     } else if (group.color !== undefined) {
-      nodes.push({ type: 'color', color: normalizeInlineColor(group.colorValue ?? ''), text: group.colorText ?? '' });
+      nodes.push({ type: 'color', color: normalizeInlineColor(group.colorValue ?? ''), children: nested(group.colorText ?? '') });
     } else if (group.size !== undefined) {
-      nodes.push({ type: 'size', delta: normalizeInlineSize(group.sizeValue ?? ''), text: group.sizeText ?? '' });
+      nodes.push({ type: 'size', delta: normalizeInlineSize(group.sizeValue ?? ''), children: nested(group.sizeText ?? '') });
     } else if (group.externalWiki !== undefined) {
       const href = group.externalWikiHref ?? '';
       nodes.push({ type: 'external_link', href, label: group.externalWikiLabel ?? href });
@@ -1228,17 +1243,17 @@ function parseInline(
       const macro = parseSafeInlineMacro(name, group.macroArgs, errors);
       nodes.push(macro);
     } else if (group.bold !== undefined) {
-      nodes.push({ type: 'bold', text: group.boldText ?? '' });
+      nodes.push({ type: 'bold', children: nested(group.boldText ?? '') });
     } else if (group.italic !== undefined) {
-      nodes.push({ type: 'italic', text: group.italicText ?? '' });
+      nodes.push({ type: 'italic', children: nested(group.italicText ?? '') });
     } else if (group.strikeTilde !== undefined || group.strikeDash !== undefined) {
-      nodes.push({ type: 'strike', text: group.strikeTildeText ?? group.strikeDashText ?? '' });
+      nodes.push({ type: 'strike', children: nested(group.strikeTildeText ?? group.strikeDashText ?? '') });
     } else if (group.underline !== undefined) {
-      nodes.push({ type: 'underline', text: group.underlineText ?? '' });
+      nodes.push({ type: 'underline', children: nested(group.underlineText ?? '') });
     } else if (group.sup !== undefined) {
-      nodes.push({ type: 'sup', text: group.supText ?? '' });
+      nodes.push({ type: 'sup', children: nested(group.supText ?? '') });
     } else if (group.sub !== undefined) {
-      nodes.push({ type: 'sub', text: group.subText ?? '' });
+      nodes.push({ type: 'sub', children: nested(group.subText ?? '') });
     }
     last = match.index! + match[0].length;
   }
@@ -1664,14 +1679,14 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
           : '';
         return `<output class="wiki-dynamic-stat" data-wiki-stat="${node.stat}"${namespaceAttribute} aria-label="문서 수">…</output>`;
       }
-      if (node.type === 'bold') return `<strong>${escapeHtml(node.text)}</strong>`;
-      if (node.type === 'italic') return `<em>${escapeHtml(node.text)}</em>`;
-      if (node.type === 'strike') return `<s>${escapeHtml(node.text)}</s>`;
-      if (node.type === 'underline') return `<u>${escapeHtml(node.text)}</u>`;
-      if (node.type === 'sup') return `<sup>${escapeHtml(node.text)}</sup>`;
-      if (node.type === 'sub') return `<sub>${escapeHtml(node.text)}</sub>`;
-      if (node.type === 'color') return `<span class="${inlineColorClass(node.color)}" style="color: ${escapeAttr(node.color)}">${escapeHtml(node.text)}</span>`;
-      if (node.type === 'size') return `<span class="wiki-size" style="font-size: ${inlineSizeEm(node.delta)}em">${escapeHtml(node.text)}</span>`;
+      if (node.type === 'bold') return `<strong>${renderInline(node.children, footnotes, options)}</strong>`;
+      if (node.type === 'italic') return `<em>${renderInline(node.children, footnotes, options)}</em>`;
+      if (node.type === 'strike') return `<s>${renderInline(node.children, footnotes, options)}</s>`;
+      if (node.type === 'underline') return `<u>${renderInline(node.children, footnotes, options)}</u>`;
+      if (node.type === 'sup') return `<sup>${renderInline(node.children, footnotes, options)}</sup>`;
+      if (node.type === 'sub') return `<sub>${renderInline(node.children, footnotes, options)}</sub>`;
+      if (node.type === 'color') return `<span class="${inlineColorClass(node.color)}" style="color: ${escapeAttr(node.color)}">${renderInline(node.children, footnotes, options)}</span>`;
+      if (node.type === 'size') return `<span class="wiki-size" style="font-size: ${inlineSizeEm(node.delta)}em">${renderInline(node.children, footnotes, options)}</span>`;
       if (node.type === 'code') return `<code>${escapeHtml(node.code)}</code>`;
       if (node.type === 'external_link') {
         return `<a href="${escapeAttr(node.href)}" rel="nofollow noopener" target="_blank">${escapeHtml(node.label)}</a>`;
@@ -1736,7 +1751,7 @@ function renderMath(source: string, displayMode: boolean, validationError: strin
 
 function countMathNodes(ast: readonly AstNode[]): number {
   const countInline = (nodes: readonly InlineNode[]) => nodes.reduce(
-    (count, node) => count + (node.type === 'math' ? 1 : 0),
+    (count, node) => count + (node.type === 'math' ? 1 : ('children' in node ? countInline(node.children) : 0)),
     0
   );
   const countList = (list: WikiListNode): number => list.items.reduce(
@@ -1764,6 +1779,7 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
   const collectInline = (nodes: readonly InlineNode[]) => {
     for (const node of nodes) {
       if (node.type === 'file') output.add(node.fileName);
+      else if ('children' in node) collectInline(node.children);
     }
   };
   const collectList = (list: WikiListNode) => {
@@ -1790,9 +1806,10 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
 export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set<string>()): Set<string> {
   const collectInline = (nodes: readonly InlineNode[]) => {
     for (const node of nodes) {
-      if (node.type !== 'internal_link') continue;
-      const resolved = resolveWikiLinkTarget(node.target);
-      if (!('error' in resolved) && resolved.target) output.add(resolved.target);
+      if (node.type === 'internal_link') {
+        const resolved = resolveWikiLinkTarget(node.target);
+        if (!('error' in resolved) && resolved.target) output.add(resolved.target);
+      } else if ('children' in node) collectInline(node.children);
     }
   };
   const collectList = (list: WikiListNode) => {

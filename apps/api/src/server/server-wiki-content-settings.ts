@@ -172,6 +172,10 @@ function findInvalidInline(nodes: readonly InlineNode[]): string | null {
         return 'external_link_url';
       }
     }
+    if ('children' in node) {
+      const invalid = findInvalidInline(node.children);
+      if (invalid) return invalid;
+    }
   }
   return null;
 }

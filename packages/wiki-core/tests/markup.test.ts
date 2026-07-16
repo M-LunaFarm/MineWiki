@@ -55,6 +55,30 @@ test('parses links, categories, components, and safe HTML', () => {
   assert.equal(html.includes('class="wiki-link missing"'), true);
 });
 
+test('renders nested inline markup and collects dependencies inside wrappers', () => {
+  const parsed = parseMarkup("'''굵게 ''기울임 [[내부 문서]]''와 ~~취소 [[파일:아이콘.png|설명]]~~'''\n{{{#336699 색상 __밑줄 [math(x^2)]__}}}");
+  const html = renderDocument(parsed.ast, {
+    files: {
+      '아이콘.png': { url: '/files/icon.png', originalName: '아이콘.png', license: null, sourceUrl: null, sourceText: null }
+    }
+  });
+
+  assert.match(html, /<strong>굵게 <em>기울임 <a[^>]+>내부 문서<\/a><\/em>와 <s>취소 <span class="wiki-file wiki-file-inline">/);
+  assert.match(html, /<span class="wiki-color wiki-color-dark-unsafe" style="color:#336699">색상 <u>밑줄 <span class="wiki-math wiki-math-inline">/);
+  assert.deepEqual(parsed.links, ['내부 문서']);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['내부 문서']);
+  assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['아이콘.png']);
+});
+
+test('keeps literal HTML escaped inside nested inline markup', () => {
+  const parsed = parseMarkup("'''안전 ''<img src=x onerror=alert(1)>''''' ");
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(html.includes('<img src=x'), false);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.equal(parsed.blockingErrors.some((error) => error.includes('허용되지 않은 HTML')), true);
+});
+
 test('collects internal links introduced by expanded nested AST containers', () => {
   const parent = parseMarkup('[[직접 링크]]');
   const included = parseMarkup('본문 [[포함 링크]]');
