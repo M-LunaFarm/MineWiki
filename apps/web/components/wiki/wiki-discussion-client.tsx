@@ -18,6 +18,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [threads, setThreads] = useState<WikiThreadSummary[]>([]);
   const [statusFilter, setStatusFilter] = useState<WikiDiscussionStatusFilter>('all');
   const [statusCounts, setStatusCounts] = useState<WikiDiscussionStatusCounts>({ total: 0, open: 0, paused: 0, closed: 0 });
+  const [statusCountsComplete, setStatusCountsComplete] = useState(true);
   const [nextThreadCursor, setNextThreadCursor] = useState<string | null>(null);
   const [canCreateThread, setCanCreateThread] = useState(false);
   const [selected, setSelected] = useState<WikiThreadDetail | null>(null);
@@ -78,6 +79,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
     setThreads(compatibleItems);
     setNextThreadCursor(result.nextCursor);
     setStatusCounts(result.statusCounts ?? countWikiDiscussionStatuses(result.items));
+    setStatusCountsComplete(result.statusCountsComplete ?? true);
   }, [statusFilter]);
 
   async function refreshThreadList() {
@@ -228,6 +230,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       setThreads((current) => [...current, ...compatibleItems.filter((thread) => !current.some((item) => item.id === thread.id))]);
       setNextThreadCursor(result.nextCursor);
       if (result.statusCounts) setStatusCounts(result.statusCounts);
+      setStatusCountsComplete(result.statusCountsComplete ?? true);
     } catch (caught) {
       setError(message(caught));
     } finally {
@@ -634,7 +637,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                 >
                   {filter.label}
                   <span aria-label={`${wikiDiscussionFilterCount(statusCounts, filter.value).toLocaleString('ko-KR')}개`}>
-                    {wikiDiscussionFilterCount(statusCounts, filter.value).toLocaleString('ko-KR')}
+                    {wikiDiscussionFilterCount(statusCounts, filter.value).toLocaleString('ko-KR')}{statusCountsComplete ? '' : '+'}
                   </span>
                 </button>
               ))}

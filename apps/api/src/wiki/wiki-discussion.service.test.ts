@@ -563,13 +563,24 @@ test('recent discussion cursors fail closed when tampered', async () => {
 test('page discussion lists paginate beyond the legacy one-hundred thread window', async () => {
   const updatedAt = new Date('2026-07-13T00:00:00Z');
   const rows = Array.from({ length: 31 }, (_, index) => ({ ...thread, id: BigInt(100 - index), updatedAt }));
-  const queries: Array<{ where: unknown; orderBy: unknown; take?: number }> = [];
+  const queries: Array<{ where: unknown; orderBy: unknown; take?: number; select?: unknown }> = [];
   const store = {
     wikiPage: { async findUnique() { return page; } },
     wikiDiscussionThread: {
-      async findMany(args: { where: unknown; orderBy: unknown; take?: number }) {
+      async findMany(args: { where: unknown; orderBy: unknown; take?: number; select?: unknown }) {
         queries.push(args);
-        return rows;
+        const where = args.where as {
+          status?: string | { in?: string[] };
+          OR?: Array<{ updatedAt?: { lt?: Date }; id?: { lt?: bigint } }>;
+        };
+        let result = rows;
+        const cursorId = where.OR?.find((entry) => entry.id?.lt)?.id?.lt;
+        if (cursorId !== undefined) result = result.filter((row) => row.id < cursorId);
+        if (typeof where.status === 'string') result = result.filter((row) => row.status === where.status);
+        if (typeof where.status === 'object' && where.status.in) {
+          result = result.filter((row) => where.status && typeof where.status === 'object' && where.status.in?.includes(row.status));
+        }
+        return result.slice(0, args.take);
       },
       async groupBy() {
         return [
@@ -597,14 +608,18 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
   assert.deepEqual(second.items.map((item) => item.id), ['70']);
   assert.equal(second.nextCursor, null);
   assert.deepEqual(second.statusCounts, { total: 31, open: 31, paused: 0, closed: 0 });
-  assert.deepEqual(queries[1]?.orderBy, [{ updatedAt: 'desc' }, { id: 'desc' }]);
-  assert.equal(queries[1]?.take, undefined);
-  const secondWhere = queries[1]?.where as { pageId: bigint; status: unknown };
+  assert.equal(second.statusCountsComplete, true);
+  let pageQueries = queries.filter((query) => !query.select);
+  assert.deepEqual(pageQueries[1]?.orderBy, [{ updatedAt: 'desc' }, { id: 'desc' }]);
+  assert.equal(pageQueries[1]?.take, 151);
+  const secondWhere = pageQueries[1]?.where as { pageId: bigint; status: unknown; OR: unknown };
   assert.equal(secondWhere.pageId, page.id);
   assert.deepEqual(secondWhere.status, { not: 'deleted' });
+  assert.ok(secondWhere.OR);
 
   await discussions.listThreadsPage(page.id.toString(), null, undefined, 30, 'paused');
-  assert.deepEqual((queries[2]?.where as { status: unknown }).status, { not: 'deleted' });
+  pageQueries = queries.filter((query) => !query.select);
+  assert.equal((pageQueries[2]?.where as { status: unknown }).status, 'paused');
 });
 
 test('discussion previews expose the first and latest comments without hidden or deleted content', async () => {
@@ -644,11 +659,11 @@ test('discussion previews expose the first and latest comments without hidden or
 });
 
 test('active discussion filter includes open and paused but excludes closed threads', async () => {
-  let where: unknown;
+  const queries: Array<{ where: unknown; select?: unknown }> = [];
   const store = {
     wikiPage: { async findUnique() { return page; } },
     wikiDiscussionThread: {
-      async findMany(args: { where: unknown }) { where = args.where; return []; },
+      async findMany(args: { where: unknown; select?: unknown }) { queries.push(args); return []; },
       async groupBy() { return []; }
     },
     wikiDiscussionComment: { async groupBy() { return []; } },
@@ -661,8 +676,40 @@ test('active discussion filter includes open and paused but excludes closed thre
   );
 
   const result = await discussions.listThreadsPage(page.id.toString(), null, undefined, 30, 'active');
-  assert.deepEqual((where as { status: unknown }).status, { not: 'deleted' });
+  assert.deepEqual((queries.find((query) => !query.select)?.where as { status: unknown }).status, { in: ['open', 'paused'] });
   assert.deepEqual(result.statusCounts, { total: 0, open: 0, paused: 0, closed: 0 });
+});
+
+test('page discussion pagination bounds ACL overfetch and advances past denied rows', async () => {
+  const updatedAt = new Date('2026-07-13T00:00:00Z');
+  const rows = Array.from({ length: 51 }, (_, index) => ({ ...thread, id: BigInt(100 - index), updatedAt }));
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: {
+      async findMany() { return rows; },
+      async groupBy() { return [{ status: 'open', _count: { _all: 51 } }]; }
+    },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } }
+  };
+  const permissions = {
+    async assertCanReadPage() {},
+    async filterReadableThreads({ items }: { items: Array<{ thread: typeof thread }> }) {
+      return items.filter((item) => item.thread.id <= 90n);
+    }
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    permissions
+  );
+
+  const result = await discussions.listThreadsPage(page.id.toString(), null, undefined, 10);
+
+  assert.deepEqual(result.items.map((item) => item.id), ['90', '89', '88', '87', '86', '85', '84', '83', '82', '81']);
+  assert.ok(result.nextCursor);
+  assert.deepEqual(result.statusCounts, { total: 41, open: 41, paused: 0, closed: 0 });
+  assert.equal(result.statusCountsComplete, true);
 });
 
 test('recent server discussions deep-link through the canonical tool route', async () => {

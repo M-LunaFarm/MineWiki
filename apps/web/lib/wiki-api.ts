@@ -569,6 +569,7 @@ export interface WikiThreadListResponse {
   readonly nextCursor: string | null;
   /** Optional during rolling API deployments. */
   readonly statusCounts?: WikiDiscussionStatusCounts;
+  readonly statusCountsComplete?: boolean;
 }
 
 export type WikiDiscussionStatus = 'open' | 'paused' | 'closed';

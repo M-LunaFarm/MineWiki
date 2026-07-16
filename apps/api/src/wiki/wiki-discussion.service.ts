@@ -44,6 +44,7 @@ export interface WikiThreadListResponse {
   readonly items: WikiThreadSummary[];
   readonly nextCursor: string | null;
   readonly statusCounts: WikiDiscussionStatusCounts;
+  readonly statusCountsComplete: boolean;
 }
 
 export type WikiDiscussionStatus = 'open' | 'paused' | 'closed';
@@ -163,6 +164,8 @@ interface ThreadPreviewRow {
   readonly commentCount: bigint | number;
 }
 
+const MAX_STATUS_COUNT_SCAN = 1_000;
+
 @Injectable()
 export class WikiDiscussionService {
   constructor(
@@ -232,26 +235,38 @@ export class WikiDiscussionService {
     const limit = Math.min(Math.max(requestedLimit, 1), 50);
     const decoded = cursor ? this.decodeRecentCursor(cursor) : null;
     const snapshotAt = decoded?.snapshotAt ?? new Date();
-    const allThreads = await this.prisma.wikiDiscussionThread.findMany({
-      where: { pageId: page.id, status: { not: 'deleted' } },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
+    const status = statusFilter === 'all'
+      ? { not: 'deleted' as const }
+      : statusFilter === 'active'
+        ? { in: ['open', 'paused'] }
+        : statusFilter;
+    const position = decoded ? { updatedAt: decoded.updatedAt, id: decoded.id } : null;
+    const candidateLimit = Math.min(limit * 5 + 1, 251);
+    const candidates = await this.prisma.wikiDiscussionThread.findMany({
+      where: {
+        pageId: page.id,
+        status,
+        updatedAt: { lte: snapshotAt },
+        ...(position ? {
+          OR: [
+            { updatedAt: { lt: position.updatedAt } },
+            { updatedAt: position.updatedAt, id: { lt: position.id } }
+          ]
+        } : {})
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: candidateLimit
     });
     const actor = await this.viewerActor(viewer);
     const visibleRows = await this.wikiPermissions.filterReadableThreads({
       accountId,
       actor,
-      items: allThreads.map((thread) => ({ thread, page }))
+      items: candidates.map((thread) => ({ thread, page }))
     });
     const visibleThreads = visibleRows.map((item) => item.thread);
-    const filteredThreads = visibleThreads.filter((thread) => {
-      if (thread.updatedAt > snapshotAt) return false;
-      if (decoded && !(thread.updatedAt < decoded.updatedAt || (thread.updatedAt.getTime() === decoded.updatedAt.getTime() && thread.id < decoded.id))) return false;
-      if (statusFilter === 'all') return true;
-      if (statusFilter === 'active') return thread.status === 'open' || thread.status === 'paused';
-      return thread.status === statusFilter;
-    });
-    const hasMore = filteredThreads.length > limit;
-    const pageThreads = filteredThreads.slice(0, limit);
+    const pageThreads = visibleThreads.slice(0, limit);
+    const candidateWindowFull = candidates.length === candidateLimit;
+    const hasMore = visibleThreads.length > limit || candidateWindowFull;
     const canViewHidden = includePreview && Boolean(actor && await this.wikiPermissions.canManagePage({ actor, page }));
     const previewData = includePreview
       ? await this.loadThreadPreviews(pageThreads.map((thread) => thread.id))
@@ -272,9 +287,32 @@ export class WikiDiscussionService {
       ...pageThreads.map((thread) => thread.createdBy),
       ...previewProfileIds
     ]);
-    const last = pageThreads.at(-1);
+    const last = visibleThreads.length > limit
+      ? pageThreads.at(-1)
+      : candidateWindowFull
+        ? candidates.at(-1)
+        : undefined;
+    const statusCandidates = await this.prisma.wikiDiscussionThread.findMany({
+      where: {
+        pageId: page.id,
+        status: { not: 'deleted' },
+        updatedAt: { lte: snapshotAt }
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: MAX_STATUS_COUNT_SCAN + 1,
+      select: { id: true, pageId: true, status: true }
+    });
+    const countWindow = statusCandidates.slice(0, MAX_STATUS_COUNT_SCAN);
+    const visibleCountRows = await this.wikiPermissions.filterReadableThreads({
+      accountId,
+      actor,
+      items: countWindow.map((thread) => ({ thread, page }))
+    });
     const statusCount = new Map<string, number>();
-    for (const thread of visibleThreads) statusCount.set(thread.status, (statusCount.get(thread.status) ?? 0) + 1);
+    for (const { thread } of visibleCountRows) {
+      statusCount.set(thread.status, (statusCount.get(thread.status) ?? 0) + 1);
+    }
+    const total = ['open', 'paused', 'closed'].reduce((sum, value) => sum + (statusCount.get(value) ?? 0), 0);
     return {
       items: pageThreads.map((thread) => this.toThreadSummary(
         thread,
@@ -289,11 +327,12 @@ export class WikiDiscussionService {
       )),
       nextCursor: hasMore && last ? this.encodeRecentCursor(snapshotAt, last.updatedAt, last.id) : null,
       statusCounts: {
-        total: visibleThreads.length,
+        total,
         open: statusCount.get('open') ?? 0,
         paused: statusCount.get('paused') ?? 0,
         closed: statusCount.get('closed') ?? 0
-      }
+      },
+      statusCountsComplete: statusCandidates.length <= MAX_STATUS_COUNT_SCAN
     };
   }
 
