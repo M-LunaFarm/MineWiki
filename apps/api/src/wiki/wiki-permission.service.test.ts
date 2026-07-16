@@ -906,6 +906,65 @@ test('space management preserves active owner, subwiki, server, mod, and admin a
   }).canManageSpace({ actor: actor({ permissions: ['wiki.admin'] }), spaceId }), false);
 });
 
+test('wiki roles keep reviewer least-privileged while editor and manager retain their distinct duties', async () => {
+  const target = page({ createdBy: 999n, protectionLevel: 'trusted_only' });
+  const reviewer = actor({ profileId: 200n });
+  const editor = actor({ profileId: 200n });
+  const manager = actor({ profileId: 200n });
+  const reviewerService = createService({
+    roles: ['reviewer'],
+    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' }
+  });
+  const editorService = createService({
+    roles: ['editor'],
+    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' }
+  });
+  const managerService = createService({
+    roles: ['manager'],
+    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' }
+  });
+  const createTarget = {
+    namespaceId: 1,
+    namespaceCode: 'server',
+    spaceId: 10n,
+    title: '규칙'
+  };
+
+  assert.equal((await reviewerService.canEditPage({ actor: reviewer, page: target })).allowed, false);
+  assert.equal((await reviewerService.canCreatePage({ actor: reviewer, ...createTarget })).allowed, false);
+  assert.equal(await reviewerService.canReviewPage({ actor: reviewer, page: target }), true);
+  assert.equal(await reviewerService.canReviewCreateTarget({ actor: reviewer, ...createTarget }), true);
+  assert.equal(await reviewerService.canModeratePage({ actor: reviewer, page: target }), true);
+  assert.equal(await reviewerService.canManagePage({ actor: reviewer, page: target }), false);
+  assert.equal(await reviewerService.canManageCreateTarget({ actor: reviewer, ...createTarget }), false);
+  assert.equal(await reviewerService.canManageSpace({ actor: reviewer, spaceId: 10n }), false);
+  assert.equal((await reviewerService.canManagePageAcl({ actor: reviewer, page: target })).allowed, false);
+  await assert.rejects(
+    reviewerService.assertCanMutatePageAction({ actor: reviewer, action: 'move', page: target }),
+    ForbiddenException
+  );
+  await assert.rejects(
+    reviewerService.assertCanMutatePageAction({ actor: reviewer, action: 'delete', page: target }),
+    ForbiddenException
+  );
+
+  assert.equal((await editorService.canEditPage({ actor: editor, page: target })).allowed, true);
+  assert.equal((await editorService.canCreatePage({ actor: editor, ...createTarget })).allowed, true);
+  assert.equal(await editorService.canReviewPage({ actor: editor, page: target }), false);
+  assert.equal(await editorService.canModeratePage({ actor: editor, page: target }), false);
+  assert.equal(await editorService.canManagePage({ actor: editor, page: target }), false);
+
+  assert.equal((await managerService.canEditPage({ actor: manager, page: target })).allowed, true);
+  assert.equal((await managerService.canCreatePage({ actor: manager, ...createTarget })).allowed, true);
+  assert.equal(await managerService.canReviewPage({ actor: manager, page: target }), true);
+  assert.equal(await managerService.canReviewCreateTarget({ actor: manager, ...createTarget }), true);
+  assert.equal(await managerService.canModeratePage({ actor: manager, page: target }), true);
+  assert.equal(await managerService.canManagePage({ actor: manager, page: target }), true);
+  assert.equal(await managerService.canManageCreateTarget({ actor: manager, ...createTarget }), true);
+  assert.equal(await managerService.canManageSpace({ actor: manager, spaceId: 10n }), true);
+  assert.equal((await managerService.canManagePageAcl({ actor: manager, page: target })).allowed, true);
+});
+
 test('target-specific read ACL hides a new-page request before the page exists', async () => {
   const service = createService({
     acl: {

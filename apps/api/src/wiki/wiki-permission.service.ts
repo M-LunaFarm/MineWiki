@@ -69,9 +69,9 @@ export interface WikiSectionLockPolicy {
   readonly ownerGroup?: string | null;
 }
 
-const EDITOR_ROLES = new Set(['owner', 'manager', 'editor', 'maintainer', 'reviewer', 'trusted']);
+const EDITOR_ROLES = new Set(['owner', 'manager', 'editor', 'maintainer', 'trusted']);
 const OWNER_ROLES = new Set(['owner', 'manager', 'maintainer']);
-const MOD_REVIEW_ROLES = new Set(['owner', 'manager', 'maintainer', 'reviewer']);
+const REVIEWER_ROLES = new Set(['reviewer']);
 const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published']);
 const PUBLIC_REVISION_VISIBILITIES = new Set(['public']);
 const ACTIVE_SPACE_STATUSES = new Set(['active']);
@@ -739,6 +739,25 @@ export class WikiPermissionService {
     return this.canManagePageArea(input.store ?? this.prisma, input.actor, input.page);
   }
 
+  async canReviewPage(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<boolean> {
+    if (!input.actor || !input.page || !ACTIVE_PROFILE_STATUSES.has(input.actor.status)) return false;
+    const store = input.store ?? this.prisma;
+    if (await this.canManagePageArea(store, input.actor, input.page)) return true;
+    return this.hasAnySubwikiRole(store, input.actor.profileId, input.page.spaceId, REVIEWER_ROLES);
+  }
+
+  async canModeratePage(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<boolean> {
+    return this.canReviewPage(input);
+  }
+
   async canManageSpace(input: {
     readonly actor: WikiPermissionActor | null;
     readonly spaceId: bigint;
@@ -798,6 +817,25 @@ export class WikiPermissionService {
       status: 'normal',
       createdBy: null
     });
+  }
+
+  async canReviewCreateTarget(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly namespaceId: number;
+    readonly namespaceCode: string;
+    readonly spaceId: bigint;
+    readonly title: string;
+    readonly store?: WikiPermissionStore;
+  }): Promise<boolean> {
+    const store = input.store ?? this.prisma;
+    if (await this.canManageCreateTarget({ ...input, store })) return true;
+    if (!input.actor || !ACTIVE_PROFILE_STATUSES.has(input.actor.status) || input.namespaceCode === 'user') return false;
+    const space = await store.wikiSpace.findUnique({
+      where: { id: input.spaceId },
+      select: { id: true, status: true }
+    });
+    if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) return false;
+    return this.hasAnySubwikiRole(store, input.actor.profileId, input.spaceId, REVIEWER_ROLES);
   }
 
   async assertCanManagePageAcl(input: {
@@ -954,7 +992,7 @@ export class WikiPermissionService {
     if (modWiki?.verifiedBy === actor.profileId) {
       return true;
     }
-    return this.hasAnySubwikiRole(store, actor.profileId, page.spaceId, MOD_REVIEW_ROLES);
+    return false;
   }
 
   async resolveUserDocumentOwner(

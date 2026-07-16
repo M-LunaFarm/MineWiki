@@ -39,7 +39,7 @@ function createService(canManage = false) {
     async assertCanReadPage() {},
     async assertCanUsePageAction() {},
     actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
-    async canManagePage() { return canManage; }
+    async canReviewPage() { return canManage; }
   } as unknown as WikiPermissionService;
   return new WikiEditRequestService(prisma, profiles, permissions, {} as WikiEditService);
 }
@@ -240,7 +240,7 @@ test('global edit request queue resolves readable pages and reviewer capability'
     async assertCanReadPage() { actions.push('read'); },
     async assertCanUsePageAction(input: { action: string }) { actions.push(input.action); },
     actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
-    async canManagePage() { return reviewAllowed; }
+    async canReviewPage() { return reviewAllowed; }
   } as unknown as WikiPermissionService;
   const routes = {
     async preload() {
@@ -335,7 +335,7 @@ test('reviewable queue scans past a full non-reviewable batch before returning a
     async assertCanReadPage() {},
     async assertCanUsePageAction() {},
     actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
-    async canManagePage({ page: target }: { page: { id: bigint } }) { return target.id === 999n; }
+    async canReviewPage({ page: target }: { page: { id: bigint } }) { return target.id === 999n; }
   } as unknown as WikiPermissionService;
   const service = new WikiEditRequestService(prisma, profiles, permissions, {} as WikiEditService);
 
@@ -401,7 +401,7 @@ test('reviewable queue includes an authorized new-page request with its canonica
   const permissions = {
     actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
     async assertCanReadCreateTarget() {},
-    async canManageCreateTarget() { return true; }
+    async canReviewCreateTarget() { return true; }
   } as unknown as WikiPermissionService;
   const service = new WikiEditRequestService(prisma, profiles, permissions, {} as WikiEditService);
 
@@ -412,7 +412,7 @@ test('reviewable queue includes an authorized new-page request with its canonica
   assert.equal(result.items[0]?.detailPath, '/wiki/edit-requests/request/71?returnTo=%2Fserver%2Fluna%2F%25EA%25B7%259C%25EC%25B9%2599');
 });
 
-test('only a page manager can reject an edit request', async () => {
+test('only an authorized reviewer can reject an edit request', async () => {
   await assert.rejects(
     createService(false).reject(session, request.id.toString(), 'not accepted'),
     ForbiddenException

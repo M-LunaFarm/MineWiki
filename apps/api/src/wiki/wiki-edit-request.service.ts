@@ -260,7 +260,7 @@ export class WikiEditRequestService {
         } catch {
           continue;
         }
-        const canReview = Boolean(input.session && input.profile && await this.permissions.canManagePage({
+        const canReview = Boolean(input.session && input.profile && await this.permissions.canReviewPage({
           actor: this.permissions.actorFromSession(input.session, input.profile),
           page
         }));
@@ -293,7 +293,7 @@ export class WikiEditRequestService {
         } catch {
           continue;
         }
-        const canReview = Boolean(input.session && input.profile && await this.permissions.canManageCreateTarget({
+        const canReview = Boolean(input.session && input.profile && await this.permissions.canReviewCreateTarget({
           actor: this.permissions.actorFromSession(input.session, input.profile),
           namespaceId: request.targetNamespaceId,
           namespaceCode: request.targetNamespaceCode,
@@ -340,7 +340,7 @@ export class WikiEditRequestService {
     if (session) {
       const profile = await this.profiles.ensureWikiProfile(session.userId);
       viewerProfileId = profile.id.toString();
-      canReview = await this.permissions.canManagePage({ actor: this.permissions.actorFromSession(session, profile), page });
+      canReview = await this.permissions.canReviewPage({ actor: this.permissions.actorFromSession(session, profile), page });
     }
     const hasMore = requests.length > limit;
     const pageRows = requests.slice(0, limit);
@@ -365,9 +365,9 @@ export class WikiEditRequestService {
       const profile = await this.profiles.ensureWikiProfile(session.userId);
       viewerProfileId = profile.id.toString();
       if (page) {
-        canReview = await this.permissions.canManagePage({ actor: this.permissions.actorFromSession(session, profile), page });
+        canReview = await this.permissions.canReviewPage({ actor: this.permissions.actorFromSession(session, profile), page });
       } else if (this.hasCreateTarget(request)) {
-        canReview = await this.permissions.canManageCreateTarget({
+        canReview = await this.permissions.canReviewCreateTarget({
           actor: this.permissions.actorFromSession(session, profile),
           namespaceId: request.targetNamespaceId,
           namespaceCode: request.targetNamespaceCode,
@@ -550,7 +550,7 @@ export class WikiEditRequestService {
     const page = await this.page(request.pageId.toString());
     const reviewer = await this.profiles.ensureWikiProfile(session.userId);
     const actor = this.permissions.actorFromSession(session, reviewer);
-    if (!(await this.permissions.canManagePage({ actor, page }))) throw new ForbiddenException('Edit request review is not allowed.');
+    if (!(await this.permissions.canReviewPage({ actor, page }))) throw new ForbiddenException('Edit request review is not allowed.');
     if (page.currentRevisionId !== request.baseRevisionId) {
       await this.markStale(request);
       throw new ConflictException({
@@ -575,8 +575,8 @@ export class WikiEditRequestService {
     const page = request.pageId === null ? null : await this.page(request.pageId.toString());
     if (!page && !this.hasCreateTarget(request)) throw new NotFoundException('Wiki edit request target not found.');
     const canReview = page
-      ? await this.permissions.canManagePage({ actor, page })
-      : this.hasCreateTarget(request) && await this.permissions.canManageCreateTarget({
+      ? await this.permissions.canReviewPage({ actor, page })
+      : this.hasCreateTarget(request) && await this.permissions.canReviewCreateTarget({
           actor,
           namespaceId: request.targetNamespaceId,
           namespaceCode: request.targetNamespaceCode,

@@ -537,7 +537,7 @@ test('new-page request acceptance creates the page and first revision atomically
   const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
   const permissions = {
     actorFromSession() { return { accountId: 'reviewer', profileId: 20n, status: 'active' }; },
-    async canManageCreateTarget() { return true; }
+    async canReviewCreateTarget() { return true; }
   } as unknown as WikiPermissionService;
   const service = new WikiEditService(prisma, profiles, permissions);
 

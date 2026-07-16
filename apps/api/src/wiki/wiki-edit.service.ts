@@ -671,7 +671,7 @@ export class WikiEditService {
       const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
       if (!namespace) throw new NotFoundException('Wiki namespace not found.');
       const reviewerActor = this.wikiPermissions.actorFromSession(session, reviewer);
-      if (!(await this.wikiPermissions.canManagePage({ actor: reviewerActor, page, store: tx }))) {
+      if (!(await this.wikiPermissions.canReviewPage({ actor: reviewerActor, page, store: tx }))) {
         throw new ForbiddenException('Edit request review is not allowed.');
       }
       const claimed = await tx.wikiEditRequest.updateMany({
@@ -788,7 +788,7 @@ export class WikiEditService {
           message: 'A document now exists at the requested title.'
         });
       }
-      if (!(await this.wikiPermissions.canManageCreateTarget({
+      if (!(await this.wikiPermissions.canReviewCreateTarget({
         actor: reviewerActor,
         namespaceId: request.targetNamespaceId,
         namespaceCode: request.targetNamespaceCode,

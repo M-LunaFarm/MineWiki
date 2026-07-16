@@ -185,6 +185,7 @@ export class WikiDiscussionService {
       assertCanReadThread?: WikiPermissionService['assertCanReadThread'];
       filterReadableThreads?: WikiPermissionService['filterReadableThreads'];
       canManageThreadAcl?: WikiPermissionService['canManageThreadAcl'];
+      canModeratePage?: WikiPermissionService['canModeratePage'];
     };
     permissionSurface.assertCanReadThread ??= async ({ accountId, page }) => {
       if (typeof (this.wikiPermissions as Partial<WikiPermissionService>).assertCanReadPage === 'function') {
@@ -192,6 +193,7 @@ export class WikiDiscussionService {
       }
     };
     permissionSurface.filterReadableThreads ??= async ({ items }) => [...items];
+    permissionSurface.canModeratePage ??= (input) => this.wikiPermissions.canManagePage(input);
     permissionSurface.canManageThreadAcl ??= async ({ actor, page }) => ({
       allowed: await this.wikiPermissions.canManagePage({ actor, page }), reason: 'legacy_page_manager'
     });
@@ -299,7 +301,7 @@ export class WikiDiscussionService {
       : false;
     const pageThreads = visibleThreads.slice(0, limit);
     const hasMore = visibleThreads.length > limit || hasUnscannedCandidates;
-    const canViewHidden = includePreview && Boolean(actor && await this.wikiPermissions.canManagePage({ actor, page }));
+    const canViewHidden = includePreview && Boolean(actor && await this.wikiPermissions.canModeratePage({ actor, page }));
     const previewData = includePreview
       ? await this.loadThreadPreviews(pageThreads.map((thread) => thread.id))
       : null;
@@ -575,6 +577,9 @@ export class WikiDiscussionService {
     const canManage = viewer && session
       ? await this.wikiPermissions.canManagePage({ actor: this.wikiPermissions.actorFromSession(session, viewer), page })
       : false;
+    const canModeratePage = viewer && session
+      ? await this.wikiPermissions.canModeratePage({ actor: this.wikiPermissions.actorFromSession(session, viewer), page })
+      : false;
     const canManageAcl = viewer && session
       ? (await this.wikiPermissions.canManageThreadAcl({
           actor: this.wikiPermissions.actorFromSession(session, viewer), thread, page
@@ -593,8 +598,8 @@ export class WikiDiscussionService {
         canReply = false;
       }
     }
-    const canModerate = Boolean(viewer && (thread.createdBy === viewer.id || canManage));
-    const moderationRows = canManage && displayComments.length > 0
+    const canModerate = Boolean(viewer && (thread.createdBy === viewer.id || canModeratePage));
+    const moderationRows = canModeratePage && displayComments.length > 0
       ? await this.prisma.wikiDiscussionModerationEvent.findMany({
           where: {
             commentId: { in: displayComments.map((comment) => comment.id) },
@@ -617,7 +622,7 @@ export class WikiDiscussionService {
     const pollByCommentId = await this.hydratePolls({
       comments: displayComments.filter((comment) => comment.entryType !== 'system'),
       viewerProfileId: viewer?.id ?? null,
-      canManagePage: Boolean(canManage),
+      canManagePage: Boolean(canModeratePage),
       canReply,
       threadStatus: thread.status
     });
@@ -838,7 +843,7 @@ export class WikiDiscussionService {
     const actor = this.wikiPermissions.actorFromSession(session, profile);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
     await this.wikiPermissions.assertCanWriteThreadComment({ actor, page, threadId: thread.id });
-    if (poll.createdBy !== profile.id && !(await this.wikiPermissions.canManagePage({ actor, page }))) {
+    if (poll.createdBy !== profile.id && !(await this.wikiPermissions.canModeratePage({ actor, page }))) {
       throw new ForbiddenException('Wiki discussion poll moderation is not allowed.');
     }
     const now = new Date();
@@ -898,6 +903,7 @@ export class WikiDiscussionService {
     const actor = this.wikiPermissions.actorFromSession(session, profile);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
     const canManagePage = await this.wikiPermissions.canManagePage({ actor, page });
+    const canModeratePage = await this.wikiPermissions.canModeratePage({ actor, page });
     await this.prisma.$transaction(async (tx) => {
       await this.lockDiscussionRows(tx, thread.id);
       const currentThread = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
@@ -906,7 +912,7 @@ export class WikiDiscussionService {
       }
       if (currentThread.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
       const requiresPageManager = status === 'paused' || currentThread.status === 'paused';
-      if ((requiresPageManager && !canManagePage) || (!requiresPageManager && currentThread.createdBy !== profile.id && !canManagePage)) {
+      if ((requiresPageManager && !canManagePage) || (!requiresPageManager && currentThread.createdBy !== profile.id && !canModeratePage)) {
         throw new ForbiddenException('Wiki discussion moderation is not allowed.');
       }
       if (currentThread.status === status) throw new ConflictException(`Wiki discussion thread is already ${status}.`);
@@ -1010,7 +1016,7 @@ export class WikiDiscussionService {
       if (!session) throw new NotFoundException('Wiki discussion comment not found.');
       const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
       const actor = this.wikiPermissions.actorFromSession(session, profile);
-      if (!(await this.wikiPermissions.canManagePage({ actor, page }))) {
+      if (!(await this.wikiPermissions.canModeratePage({ actor, page }))) {
         throw new NotFoundException('Wiki discussion comment not found.');
       }
     }
@@ -1054,8 +1060,8 @@ export class WikiDiscussionService {
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const actor = this.wikiPermissions.actorFromSession(session, profile);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
-    const canManagePage = await this.wikiPermissions.canManagePage({ actor, page });
-    if ((comment.status === 'hidden' || comment.createdBy !== profile.id) && !canManagePage) {
+    const canModeratePage = await this.wikiPermissions.canModeratePage({ actor, page });
+    if ((comment.status === 'hidden' || comment.createdBy !== profile.id) && !canModeratePage) {
       throw new ForbiddenException('Wiki discussion comment deletion is not allowed.');
     }
     await this.prisma.$transaction(async (tx) => {
@@ -1068,7 +1074,7 @@ export class WikiDiscussionService {
         throw new NotFoundException('Wiki discussion comment not found.');
       }
       if (currentThread.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
-      if (currentComment.status === 'hidden' && !canManagePage) {
+      if (currentComment.status === 'hidden' && !canModeratePage) {
         throw new ForbiddenException('Wiki discussion comment deletion is not allowed.');
       }
       const now = new Date();
@@ -1093,7 +1099,7 @@ export class WikiDiscussionService {
     status: 'normal' | 'hidden',
     reasonInput?: string
   ): Promise<WikiThreadDetail> {
-    const thread = await this.managedThread(session, threadId);
+    const thread = await this.reviewableThread(session, threadId);
     const commentIdValue = this.parseId(commentId, 'commentId');
     const comment = await this.prisma.wikiDiscussionComment.findUnique({ where: { id: commentIdValue } });
     if (!comment || comment.threadId !== thread.id || comment.entryType === 'system' || comment.status === 'deleted') {
@@ -1159,7 +1165,7 @@ export class WikiDiscussionService {
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const actor = this.wikiPermissions.actorFromSession(session, profile);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
-    if (thread.createdBy !== profile.id && !(await this.wikiPermissions.canManagePage({ actor, page }))) {
+    if (thread.createdBy !== profile.id && !(await this.wikiPermissions.canModeratePage({ actor, page }))) {
       throw new ForbiddenException('Wiki discussion moderation is not allowed.');
     }
     return { ...thread, profileId: profile.id };
@@ -1177,6 +1183,20 @@ export class WikiDiscussionService {
       throw new ForbiddenException('Wiki discussion administration is not allowed.');
     }
     return { ...thread, profileId: profile.id, actor };
+  }
+
+  private async reviewableThread(session: SessionPayload, threadId: string) {
+    const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: this.parseId(threadId, 'threadId') } });
+    if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
+    if (!page) throw new NotFoundException('Wiki page not found.');
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const actor = this.wikiPermissions.actorFromSession(session, profile);
+    await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
+    if (!(await this.wikiPermissions.canModeratePage({ actor, page }))) {
+      throw new ForbiddenException('Wiki discussion moderation is not allowed.');
+    }
+    return { ...thread, profileId: profile.id };
   }
 
   private async createPoll(
