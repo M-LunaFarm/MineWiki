@@ -30,4 +30,10 @@ export class WikiNotificationController {
   markRead(@Param('notificationId') notificationId: string, @CurrentSession() session: SessionPayload) {
     return this.notifications.markRead(session, notificationId);
   }
+
+  @Post(':notificationId/unread')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  markUnread(@Param('notificationId') notificationId: string, @CurrentSession() session: SessionPayload) {
+    return this.notifications.markUnread(session, notificationId);
+  }
 }

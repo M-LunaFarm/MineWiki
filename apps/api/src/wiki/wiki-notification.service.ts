@@ -184,6 +184,16 @@ export class WikiNotificationService {
     return { read: true };
   }
 
+  async markUnread(session: SessionPayload, notificationId: string): Promise<{ readonly read: false }> {
+    const profile = await this.profiles.ensureWikiProfile(session.userId);
+    const result = await this.prisma.wikiNotification.updateMany({
+      where: { id: this.id(notificationId, 'notificationId'), profileId: profile.id },
+      data: { readAt: null }
+    });
+    if (result.count !== 1) throw new NotFoundException('Wiki notification not found.');
+    return { read: false };
+  }
+
   async markAllRead(session: SessionPayload, throughId: string): Promise<{ readonly count: number }> {
     const profile = await this.profiles.ensureWikiProfile(session.userId);
     const result = await this.prisma.wikiNotification.updateMany({

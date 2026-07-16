@@ -27,6 +27,23 @@ test('notification inbox belongs to the authenticated wiki profile', async () =>
   assert.equal(result.items[0]?.id, '4');
 });
 
+test('notification read state updates stay scoped to the authenticated wiki profile', async () => {
+  const updates: Array<{ where: unknown; data: unknown }> = [];
+  const prisma = {
+    wikiNotification: {
+      async updateMany(args: { where: unknown; data: unknown }) { updates.push(args); return { count: 1 }; }
+    }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 8n }; } } as unknown as WikiProfileService;
+  const service = new WikiNotificationService(prisma, profiles, {} as WikiPermissionService);
+
+  assert.deepEqual(await service.markRead(session, '44'), { read: true });
+  assert.deepEqual(await service.markUnread(session, '44'), { read: false });
+  assert.deepEqual(updates[0]?.where, { id: 44n, profileId: 8n });
+  assert.ok((updates[0]?.data as { readAt?: unknown }).readAt instanceof Date);
+  assert.deepEqual(updates[1], { where: { id: 44n, profileId: 8n }, data: { readAt: null } });
+});
+
 test('notification inbox upgrades legacy server discussion links to canonical routes', async () => {
   const prisma = {
     wikiNotification: {
