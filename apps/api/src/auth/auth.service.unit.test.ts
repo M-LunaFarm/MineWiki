@@ -25,7 +25,7 @@ test('login performs password work even when the email is unknown', async () => 
   assert.ok(performance.now() - startedAt >= 5);
 });
 
-test('password change atomically clears pending reset tokens', async () => {
+test('password change atomically clears pending reset tokens and revokes other sessions', async () => {
   const accountId = randomUUID();
   const account = {
     id: accountId,
@@ -46,6 +46,7 @@ test('password change atomically clears pending reset tokens', async () => {
     lastLoginAt: null,
   };
   const operations: string[] = [];
+  let revokedSessionsInput: unknown;
   const prisma = {
     account: {
       findMany: async () => [{ id: accountId, canonicalAccountId: null }],
@@ -64,6 +65,13 @@ test('password change atomically clears pending reset tokens', async () => {
         return { kind: 'reset-tokens', input };
       },
     },
+    session: {
+      deleteMany: (input: unknown) => {
+        operations.push('sessions');
+        revokedSessionsInput = input;
+        return { kind: 'sessions', input };
+      },
+    },
     $queryRaw: async () => [{ id: accountId }],
     $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => {
       return callback(prisma);
@@ -78,9 +86,15 @@ test('password change atomically clears pending reset tokens', async () => {
     {} as never,
   );
 
-  await service.changePassword(accountId, 'CurrentPW1!', 'ChangedPW1!');
+  await service.changePassword(accountId, 'CurrentPW1!', 'ChangedPW1!', 'session-current');
 
-  assert.deepEqual(operations, ['password', 'reset-tokens']);
+  assert.deepEqual(operations, ['password', 'reset-tokens', 'sessions']);
+  assert.deepEqual(revokedSessionsInput, {
+    where: {
+      accountId: { in: [accountId] },
+      id: { not: 'session-current' },
+    },
+  });
 });
 
 test('password change rejects reusing the current password', async () => {
@@ -111,7 +125,7 @@ test('password change rejects reusing the current password', async () => {
   );
 
   await assert.rejects(
-    () => service.changePassword(accountId, currentPassword, currentPassword),
+    () => service.changePassword(accountId, currentPassword, currentPassword, 'session-current'),
     /새 비밀번호는 현재 비밀번호와 달라야 합니다/,
   );
   assert.equal(transactionCalled, false);

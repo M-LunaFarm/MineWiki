@@ -585,6 +585,7 @@ export class AuthService {
     accountId: string,
     currentPassword: string,
     newPassword: string,
+    currentSessionId: string,
   ): Promise<void> {
     const account = await this.accounts.getAccount(accountId);
     if (!account) {
@@ -604,9 +605,15 @@ export class AuthService {
       throw new BadRequestException('비밀번호는 8자 이상이며 대문자/특수문자를 포함해야 합니다.');
     }
     const passwordHash = await hash(newPassword, ARGON_OPTIONS);
-    await withActiveCanonicalAccountGroup(this.prisma, [account.id], async (tx) => {
+    await withActiveCanonicalAccountGroup(this.prisma, [account.id], async (tx, group) => {
       await tx.account.update({ where: { id: account.id }, data: { passwordHash } });
       await tx.passwordReset.deleteMany({ where: { accountId: account.id } });
+      await tx.session.deleteMany({
+        where: {
+          accountId: { in: [...group.accountIds] },
+          id: { not: currentSessionId },
+        },
+      });
     });
   }
 

@@ -315,7 +315,7 @@ if (!hasDatabase) {
     await service.requestPasswordReset(email);
     const resetToken = await getPasswordResetToken(registration.accountId);
 
-    await service.changePassword(registration.accountId, initialPassword, 'ChangedPW1!');
+    await service.changePassword(registration.accountId, initialPassword, 'ChangedPW1!', randomUUID());
 
     assert.equal(
       await prisma.passwordReset.count({ where: { accountId: registration.accountId } }),

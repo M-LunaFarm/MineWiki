@@ -362,13 +362,13 @@ test('changing a password revokes every other active session', async () => {
   const calls: string[] = [];
   const controller = new AuthController(
     {
-      async changePassword(accountId: string) {
-        calls.push(`password:${accountId}`);
+      async changePassword(accountId: string, _currentPassword: string, _newPassword: string, sessionId: string) {
+        calls.push(`password:${accountId}:${sessionId}`);
       },
     } as never,
     {
-      async revokeAllSessions(accountId: string, exceptSessionId: string) {
-        calls.push(`revoke:${accountId}:${exceptSessionId}`);
+      async revokeAllSessions() {
+        throw new Error('session revocation must be part of the password transaction');
       },
     } as never,
     {} as never,
@@ -386,8 +386,7 @@ test('changing a password revokes every other active session', async () => {
 
   assert.deepEqual(result, { success: true });
   assert.deepEqual(calls, [
-    `password:${session.userId}`,
-    `revoke:${session.userId}:${session.sessionId}`,
+    `password:${session.userId}:${session.sessionId}`,
   ]);
 });
 

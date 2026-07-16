@@ -410,8 +410,12 @@ export class AuthController {
     @Body() body: unknown,
   ) {
     const payload = passwordChangeRequestSchema.parse(body);
-    await this.auth.changePassword(session.userId, payload.currentPassword, payload.newPassword);
-    await this.sessions.revokeAllSessions(session.userId, session.sessionId);
+    await this.auth.changePassword(
+      session.userId,
+      payload.currentPassword,
+      payload.newPassword,
+      session.sessionId,
+    );
     return { success: true };
   }
 
