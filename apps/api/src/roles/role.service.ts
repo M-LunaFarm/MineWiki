@@ -25,7 +25,9 @@ export const BUILT_IN_PERMISSION_CODES = [
   'wiki.edit.locked',
   'wiki.admin',
   'wiki.acl.manage',
+  'wiki.user.block',
   'wiki.batch_rollback',
+  'wiki.report.moderate',
   'server.admin',
   'review.moderate',
   'vote.admin',
@@ -33,6 +35,7 @@ export const BUILT_IN_PERMISSION_CODES = [
   'support.admin',
   'file.admin',
   'admin.account.delete',
+  'admin.account.suspend',
 ] as const;
 
 export interface AccountAccess {

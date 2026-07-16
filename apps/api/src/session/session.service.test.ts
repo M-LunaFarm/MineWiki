@@ -2,6 +2,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
+  STEP_UP_PURPOSES,
   SessionService,
   assertFreshStepUp,
   hashSessionToken,
@@ -10,6 +11,10 @@ import { PrismaService } from '../common/prisma.service';
 import { CURRENT_POLICY_VERSIONS } from '@minewiki/schemas';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+test('account moderation is a recognized purpose-bound step-up operation', () => {
+  assert.ok(STEP_UP_PURPOSES.includes('account_moderation'));
+});
 
 if (!hasDatabase) {
   test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});

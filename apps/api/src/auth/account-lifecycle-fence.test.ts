@@ -4,7 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { hash } from '@node-rs/argon2';
 import { PrismaService } from '../common/prisma.service';
-import { withActiveCanonicalAccountGroup } from './account-lifecycle-fence';
+import {
+  withActiveCanonicalAccountGroup,
+  withCanonicalAccountGroups,
+} from './account-lifecycle-fence';
 import { AccountSeparationService } from './account-separation.service';
 import { AuthService } from './auth.service';
 import { OAuthFlowService } from './oauth-flow.service';
@@ -12,6 +15,55 @@ import { SessionService } from '../session/session.service';
 import { MinecraftService } from '../minecraft/minecraft.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+test('canonical group locking keeps distinct seeds separate while expanding linked aliases', async () => {
+  const accounts = [
+    { id: 'actor', canonicalAccountId: null },
+    { id: 'target', canonicalAccountId: null },
+    { id: 'alias', canonicalAccountId: 'target' },
+  ];
+  const links = [{ primaryAccountId: 'target', linkedAccountId: 'alias' }];
+  const tx = {
+    account: {
+      async findUnique(input: { where: { id: string } }) {
+        return accounts.find((account) => account.id === input.where.id) ?? null;
+      },
+      async findMany(input: { where: { OR: Array<Record<string, { in: string[] }>> } }) {
+        const ids = input.where.OR.flatMap((clause) => clause.id?.in ?? []);
+        const canonicalIds = input.where.OR.flatMap((clause) => clause.canonicalAccountId?.in ?? []);
+        return accounts.filter((account) =>
+          ids.includes(account.id) ||
+          Boolean(account.canonicalAccountId && canonicalIds.includes(account.canonicalAccountId)),
+        );
+      },
+    },
+    accountLink: {
+      async findMany(input: { where: { OR: Array<Record<string, { in: string[] }>> } }) {
+        const ids = input.where.OR.flatMap((clause) =>
+          clause.primaryAccountId?.in ?? clause.linkedAccountId?.in ?? [],
+        );
+        return links.filter((link) => ids.includes(link.primaryAccountId) || ids.includes(link.linkedAccountId));
+      },
+    },
+    async $queryRaw(query: { values: unknown[] }) {
+      return accounts.filter(({ id }) => query.values.includes(id)).map(({ id }) => ({ id }));
+    },
+  };
+  const prisma = {
+    async $transaction(callback: (store: typeof tx) => unknown) { return callback(tx); },
+  };
+
+  const groups = await withCanonicalAccountGroups(
+    prisma as never,
+    ['actor', 'alias'],
+    async (_store, resolved) => resolved,
+  );
+
+  assert.deepEqual(groups, [
+    { seedAccountId: 'actor', canonicalAccountId: 'actor', accountIds: ['actor'] },
+    { seedAccountId: 'alias', canonicalAccountId: 'target', accountIds: ['alias', 'target'] },
+  ]);
+});
 
 if (!hasDatabase) {
   test('database required', { skip: 'DATABASE_URL is not configured.' }, () => {});

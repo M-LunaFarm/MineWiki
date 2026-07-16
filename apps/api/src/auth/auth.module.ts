@@ -15,6 +15,8 @@ import { AccountDeletionAdminController } from './account-deletion-admin.control
 import { AccountDeletionInternalController } from './account-deletion-internal.controller';
 import { MfaController } from './mfa.controller';
 import { MfaService } from './mfa.service';
+import { AccountModerationController } from './account-moderation.controller';
+import { AccountModerationService } from './account-moderation.service';
 
 @Module({
   imports: [SessionModule, FileModule],
@@ -27,9 +29,10 @@ import { MfaService } from './mfa.service';
     DiscordMinecraftLinkRepository,
     GuildSettingsRepository,
     AccountDeletionService,
-    MfaService
+    MfaService,
+    AccountModerationService
   ],
-  controllers: [AuthController, MfaController, AccountConflictController, AccountDeletionController, AccountDeletionAdminController, AccountDeletionInternalController],
+  controllers: [AuthController, MfaController, AccountConflictController, AccountDeletionController, AccountDeletionAdminController, AccountDeletionInternalController, AccountModerationController],
   exports: [AuthService, AccountSeparationService, OAuthFlowService, EmailService]
 })
 export class AuthModule {}

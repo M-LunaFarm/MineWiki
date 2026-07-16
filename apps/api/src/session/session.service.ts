@@ -60,6 +60,7 @@ export const STEP_UP_PURPOSES = [
   'file_admin',
   'audit_read',
   'account_delete_admin',
+  'account_moderation',
   'mfa_manage',
 ] as const;
 export type StepUpPurpose = (typeof STEP_UP_PURPOSES)[number];

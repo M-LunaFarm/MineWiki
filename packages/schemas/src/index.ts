@@ -158,6 +158,89 @@ export const accountDeletionAdminActionSchema = z
   .object({ note: z.string().trim().max(1000).optional() })
   .strict();
 
+export const accountLifecycleStatusSchema = z.enum([
+  'active',
+  'suspended',
+  'deletion_pending',
+  'anonymized',
+]);
+
+export const accountModerationActionSchema = z
+  .object({
+    reason: z.string().trim().min(5).max(1000),
+    confirmation: z.string().uuid(),
+    expectedStatus: z.enum(['active', 'suspended']),
+  })
+  .strict();
+
+export const accountSuspendActionSchema = accountModerationActionSchema.extend({
+  expectedStatus: z.literal('active'),
+}).strict();
+
+export const accountRestoreActionSchema = accountModerationActionSchema.extend({
+  expectedStatus: z.literal('suspended'),
+}).strict();
+
+export const adminAccountListQuerySchema = z
+  .object({
+    q: z.string().trim().min(1).max(128).optional(),
+    status: accountLifecycleStatusSchema.optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .strict();
+
+export const adminAccountSummarySchema = z.object({
+  canonicalAccountId: z.string().uuid(),
+  confirmationValue: z.string().uuid(),
+  accountIds: z.array(z.string().uuid()).min(1),
+  linkedAccountCount: z.number().int().nonnegative(),
+  lifecycleStatus: z.union([accountLifecycleStatusSchema, z.literal('mixed')]),
+  email: z.string().email().nullable(),
+  displayName: z.string().nullable(),
+  providers: z.array(authProviderSchema),
+  roles: z.array(z.string()),
+  createdAt: z.string().datetime(),
+  lastLoginAt: z.string().datetime().nullable(),
+  suspendedAt: z.string().datetime().nullable(),
+  suspendedBy: z.string().nullable(),
+  suspensionReason: z.string().nullable(),
+});
+
+export const adminAccountMemberSchema = z.object({
+  id: z.string().uuid(),
+  provider: authProviderSchema,
+  email: z.string().email().nullable(),
+  displayName: z.string().nullable(),
+  lifecycleStatus: accountLifecycleStatusSchema,
+  createdAt: z.string().datetime(),
+  lastLoginAt: z.string().datetime().nullable(),
+});
+
+export const accountModerationHistoryEntrySchema = z.object({
+  id: z.string().uuid(),
+  action: z.enum(['account.suspended', 'account.restored']),
+  actorAccountId: z.string().nullable(),
+  reason: z.string().nullable(),
+  previousStatus: z.string().nullable(),
+  newStatus: z.string().nullable(),
+  createdAt: z.string().datetime(),
+});
+
+export const adminAccountDetailSchema = adminAccountSummarySchema.extend({
+  accounts: z.array(adminAccountMemberSchema).min(1),
+  moderationHistory: z.array(accountModerationHistoryEntrySchema),
+});
+
+export const adminAccountListResponseSchema = z.object({
+  accounts: z.array(adminAccountSummarySchema),
+});
+
+export const accountModerationResultSchema = z.object({
+  account: adminAccountDetailSchema,
+  revokedSessionCount: z.number().int().nonnegative(),
+  revokedWikiApiTokenCount: z.number().int().nonnegative(),
+});
+
 export const policyConsentAcceptRequestSchema = z
   .object({
     agreeTerms: z.literal(true),
@@ -684,6 +767,17 @@ export type PasswordResetRequest = z.infer<typeof passwordResetRequestSchema>;
 export type PasswordResetConfirmRequest = z.infer<typeof passwordResetConfirmRequestSchema>;
 export type AccountDeletionRequest = z.infer<typeof accountDeletionRequestSchema>;
 export type AccountDeletionCancel = z.infer<typeof accountDeletionCancelSchema>;
+export type AccountLifecycleStatus = z.infer<typeof accountLifecycleStatusSchema>;
+export type AccountModerationAction = z.infer<typeof accountModerationActionSchema>;
+export type AccountSuspendAction = z.infer<typeof accountSuspendActionSchema>;
+export type AccountRestoreAction = z.infer<typeof accountRestoreActionSchema>;
+export type AdminAccountListQuery = z.infer<typeof adminAccountListQuerySchema>;
+export type AdminAccountSummary = z.infer<typeof adminAccountSummarySchema>;
+export type AdminAccountMember = z.infer<typeof adminAccountMemberSchema>;
+export type AccountModerationHistoryEntry = z.infer<typeof accountModerationHistoryEntrySchema>;
+export type AdminAccountDetail = z.infer<typeof adminAccountDetailSchema>;
+export type AdminAccountListResponse = z.infer<typeof adminAccountListResponseSchema>;
+export type AccountModerationResult = z.infer<typeof accountModerationResultSchema>;
 export type EmailRegistrationResult = z.infer<typeof emailRegistrationResultSchema>;
 export type ResendVerificationResult = z.infer<typeof resendVerificationResultSchema>;
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;

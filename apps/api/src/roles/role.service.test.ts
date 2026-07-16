@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RoleService } from './role.service';
+import { BUILT_IN_PERMISSION_CODES, RoleService } from './role.service';
+
+test('built-in permissions include every delegated wiki moderation surface', () => {
+  assert.ok(BUILT_IN_PERMISSION_CODES.includes('wiki.user.block'));
+  assert.ok(BUILT_IN_PERMISSION_CODES.includes('wiki.batch_rollback'));
+  assert.ok(BUILT_IN_PERMISSION_CODES.includes('wiki.report.moderate'));
+});
 
 test('role service resolves role and permission codes for an account', async () => {
   const prisma = {

@@ -246,6 +246,7 @@ const permissions = [
   ['support.admin', 'Manage support tickets'],
   ['file.admin', 'Manage uploaded files'],
   ['admin.account.delete', 'Process account termination lifecycle requests'],
+  ['admin.account.suspend', 'Emergency suspend and restore canonical account groups'],
 ];
 
 const rolePermissions = {

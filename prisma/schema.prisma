@@ -119,6 +119,9 @@ model Account {
   lifecycleStatus     String       @default("active") @map("lifecycle_status") @db.VarChar(32)
   deletionRequestedAt DateTime?    @map("deletion_requested_at") @db.DateTime(3)
   anonymizedAt        DateTime?    @map("anonymized_at") @db.DateTime(3)
+  suspendedAt         DateTime?    @map("suspended_at") @db.DateTime(3)
+  suspendedBy         String?      @map("suspended_by") @db.VarChar(191)
+  suspensionReason    String?      @map("suspension_reason") @db.VarChar(1000)
 
   sessions                Session[]
   emailVerifications      EmailVerification[]
@@ -153,6 +156,7 @@ model Account {
   @@index([email])
   @@index([canonicalAccountId])
   @@index([lifecycleStatus, deletionRequestedAt])
+  @@index([lifecycleStatus, suspendedAt])
 }
 
 model AccountDeletionRequest {

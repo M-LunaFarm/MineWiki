@@ -22,8 +22,8 @@ const ADMIN_TOOLS: ReadonlyArray<{
   },
   {
     href: '/admin/users',
-    title: '사용자 및 역할',
-    description: '운영자, 위키 관리자, 서버 관리자와 지원 담당자 권한을 관리합니다.',
+    title: '사용자 및 계정 보안',
+    description: '계정 상태와 연결 로그인을 확인하고 역할 또는 긴급 정지·복구 조치를 관리합니다.',
     icon: UsersRound,
     accent: true,
   },

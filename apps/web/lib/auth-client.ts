@@ -83,6 +83,7 @@ export type MfaStepUpPurpose =
   | 'file_admin'
   | 'audit_read'
   | 'account_delete_admin'
+  | 'account_moderation'
   | 'mfa_manage';
 
 export interface MfaStatus {

@@ -20,7 +20,14 @@ export function AdminAccessGate({ children }: { readonly children: ReactNode }) 
     const isGlobalAdmin = Boolean(
       roles.includes('owner') || roles.includes('admin'),
     );
-    if (isGlobalAdmin || pathname === '/admin') return isGlobalAdmin || permissions.some((permission) => permission.endsWith('.admin'));
+    if (pathname.startsWith('/admin/users/') && pathname.endsWith('/security')) {
+      return permissions.includes('admin.account.suspend');
+    }
+    if (pathname.startsWith('/admin/users/') && pathname.endsWith('/roles')) return isGlobalAdmin;
+    if (pathname === '/admin/users') return isGlobalAdmin || permissions.includes('admin.account.suspend');
+    if (isGlobalAdmin || pathname === '/admin') {
+      return isGlobalAdmin || permissions.some((permission) => permission.endsWith('.admin')) || permissions.includes('admin.account.suspend');
+    }
     if (pathname.startsWith('/admin/support')) return roles.includes('support_agent') || permissions.includes('support.admin');
     if (pathname.startsWith('/admin/reviews')) return roles.includes('moderator') || permissions.includes('review.moderate');
     if (pathname.startsWith('/admin/account-deletions')) return permissions.includes('admin.account.delete');
@@ -30,7 +37,6 @@ export function AdminAccessGate({ children }: { readonly children: ReactNode }) 
     if (pathname.startsWith('/admin/wiki/acl')) return permissions.includes('wiki.acl.manage');
     if (pathname.startsWith('/admin/wiki')) return permissions.includes('wiki.admin');
     if (pathname.startsWith('/admin/audit')) return permissions.some((permission) => permission.endsWith('.admin'));
-    if (pathname.startsWith('/admin/users')) return false;
     return false;
   }, [account, pathname]);
 
@@ -81,7 +87,8 @@ export function AdminAccessGate({ children }: { readonly children: ReactNode }) 
 
 function adminStepUpPurpose(pathname: string): MfaStepUpPurpose | null {
   if (pathname.startsWith('/admin/wiki')) return 'wiki_admin';
-  if (pathname.startsWith('/admin/users')) return 'role_admin';
+  if (pathname.startsWith('/admin/users/') && pathname.endsWith('/roles')) return 'role_admin';
+  if (pathname.startsWith('/admin/users')) return 'account_moderation';
   if (pathname.startsWith('/admin/reviews')) return 'review_moderation';
   if (pathname.startsWith('/admin/account-deletions')) return 'account_delete_admin';
   if (pathname.startsWith('/admin/audit')) return 'audit_read';

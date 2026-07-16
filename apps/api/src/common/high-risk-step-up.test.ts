@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AccountDeletionAdminController } from '../auth/account-deletion-admin.controller';
+import { AccountModerationController } from '../auth/account-moderation.controller';
 import { AuditController } from '../events/audit.controller';
 import { ReviewModerationController } from '../review/review-moderation.controller';
 import { RoleAdminController } from '../roles/role-admin.controller';
@@ -22,6 +23,7 @@ const classPolicies = [
   [RoleAdminController, 'role_admin'],
   [AuditController, 'audit_read'],
   [AccountDeletionAdminController, 'account_delete_admin'],
+  [AccountModerationController, 'account_moderation'],
   [ReviewModerationController, 'review_moderation'],
   [VoteAdminController, 'vote_admin'],
   [VoteMonitorController, 'vote_admin'],

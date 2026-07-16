@@ -85,7 +85,9 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
 
   const hasAdminAccess = Boolean(
     account?.access?.roles.some((role) => role === 'admin' || role === 'owner') ||
-      account?.access?.permissions.some((permission) => permission.endsWith('.admin')),
+      account?.access?.permissions.some(
+        (permission) => permission.endsWith('.admin') || permission === 'admin.account.suspend',
+      ),
   );
 
   const visibleLinks = NAV_LINKS.filter((link) => {
