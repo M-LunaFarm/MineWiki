@@ -40,7 +40,7 @@
     "typecheck": "turbo run build --continue",
     "test:scripts": "node --test scripts/*.test.mjs",
     "test:unit": "pnpm test:scripts && turbo run test --continue",
-    "test:integration": "turbo run test --force --continue --filter=@minewiki/api --filter=@minewiki/bot",
+    "test:integration": "MINEWIKI_ALLOW_DB_TESTS=1 turbo run test --force --continue --filter=@minewiki/api --filter=@minewiki/bot",
     "lint": "turbo run lint --continue",
     "format": "pnpm lint -- --fix",
     "test": "pnpm test:scripts && turbo run test --continue",

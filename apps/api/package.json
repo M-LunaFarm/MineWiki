@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/apps/api/src/main.js",
     "lint": "eslint \"src/**/*.ts\"",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "tsx --require ./src/test/database-test-environment.cjs --test \"src/**/*.test.ts\"",
     "test:runtime": "node --test --test-force-exit \"runtime-tests/*.test.cjs\""
   },
   "dependencies": {
