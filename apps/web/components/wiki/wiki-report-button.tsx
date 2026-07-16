@@ -20,6 +20,7 @@ export function WikiReportButton({ targetType, targetId, returnTo, compact = fal
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const successRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [working, setWorking] = useState(false);
@@ -52,6 +53,8 @@ export function WikiReportButton({ targetType, targetId, returnTo, compact = fal
     };
   }, [account, open]);
 
+  useEffect(() => { if (success) successRef.current?.focus(); }, [success]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setWorking(true); setMessage(null);
@@ -71,12 +74,12 @@ export function WikiReportButton({ targetType, targetId, returnTo, compact = fal
       <Flag className="size-3.5" /> 신고
     </button>
     {open ? <div role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }} className="fixed inset-0 z-[80] grid place-items-center bg-black/70 p-4 backdrop-blur-sm">
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className="wiki-report-dialog surface-flat w-full max-w-lg p-5 shadow-2xl sm:p-6">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className="wiki-report-dialog surface-flat max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto p-5 shadow-2xl sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div><p className="wiki-report-eyebrow text-xs font-semibold uppercase tracking-[0.18em]">Safety report</p><h2 id={titleId} className="mt-2 text-xl font-bold text-white">{LABELS[targetType]} 신고</h2><p id={descriptionId} className="mt-2 text-sm leading-6 text-slate-400">운영진에게만 보이는 사유와 현재 콘텐츠 증거가 함께 보존됩니다.</p></div>
           <button type="button" onClick={close} aria-label="신고 창 닫기" className="grid size-10 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-white/5 hover:text-white"><X className="size-5" /></button>
         </div>
-        {!account ? <div className="wiki-report-warning mt-5 border p-4 text-sm leading-6"><AlertTriangle className="mr-2 inline size-4" />신고 이력의 악용을 막기 위해 로그인이 필요합니다. <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="font-semibold underline">로그인</Link></div> : success ? <div role="status" className="mt-5 border border-emerald-300/25 bg-emerald-300/[0.06] p-4 text-sm leading-6 text-emerald-100">{message}</div> : <form onSubmit={submit} className="mt-5 space-y-4">
+        {!account ? <div className="wiki-report-warning mt-5 border p-4 text-sm leading-6"><AlertTriangle className="mr-2 inline size-4" />신고 이력의 악용을 막기 위해 로그인이 필요합니다. <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="font-semibold underline">로그인</Link></div> : success ? <div ref={successRef} tabIndex={-1} role="status" className="mt-5 border border-emerald-300/25 bg-emerald-300/[0.06] p-4 text-sm leading-6 text-emerald-100 outline-none"><p>{message}</p><button type="button" onClick={close} className="chip chip-muted mt-4 min-h-11 px-3">확인하고 닫기</button></div> : <form onSubmit={submit} className="mt-5 space-y-4">
           <label className="block text-sm font-semibold text-slate-200">신고 사유<textarea ref={textareaRef} required minLength={3} maxLength={1000} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="문제가 되는 내용과 이유를 구체적으로 적어 주세요." className="mt-2 min-h-32 w-full rounded-lg border border-white/10 bg-black/20 p-3 font-normal leading-6 text-white outline-none focus:border-emerald-300/60" /></label>
           <div className="flex items-center justify-between gap-3"><span className="text-xs text-slate-500">{reason.length.toLocaleString('ko-KR')} / 1,000</span><button disabled={working || reason.trim().length < 3} className="btn-primary min-h-11 gap-2 disabled:opacity-40">{working ? <Loader2 className="size-4 animate-spin" /> : <Flag className="size-4" />} 신고 접수</button></div>
           {message ? <p role="alert" className="text-sm text-red-200">{message}</p> : null}
