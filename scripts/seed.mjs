@@ -247,6 +247,7 @@ const permissions = [
   ['file.admin', 'Manage uploaded files'],
   ['admin.account.delete', 'Process account termination lifecycle requests'],
   ['admin.account.suspend', 'Emergency suspend and restore canonical account groups'],
+  ['admin.audit.read', 'Read global security and operations audit events'],
 ];
 
 const rolePermissions = {

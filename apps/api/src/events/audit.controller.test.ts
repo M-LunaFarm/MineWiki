@@ -25,7 +25,22 @@ test('audit log rejects elevation without administrator authority', async () => 
   assert.equal(queried, false);
 });
 
-test('audit log accepts an explicit administrator permission', async () => {
+test('audit log rejects unrelated domain administrator permissions', async () => {
+  let queried = false;
+  const controller = new AuditController({
+    async listAuditEvents() { queried = true; return []; }
+  } as never);
+
+  for (const permission of ['support.admin', 'server.admin', 'file.admin', 'guild.admin', 'wiki.admin']) {
+    await assert.rejects(
+      () => controller.list({ ...elevatedUser, permissions: [permission] }),
+      (error: unknown) => error instanceof ForbiddenException
+    );
+  }
+  assert.equal(queried, false);
+});
+
+test('audit log accepts only global administrators or the explicit audit permission', async () => {
   const controller = new AuditController({
     async listAuditEvents() { return []; }
   } as never);
@@ -33,6 +48,8 @@ test('audit log accepts an explicit administrator permission', async () => {
   assert.deepEqual(await controller.list({
     ...elevatedUser,
     isElevated: false,
-    permissions: ['support.admin']
+    permissions: ['admin.audit.read']
   }), []);
+  assert.deepEqual(await controller.list({ ...elevatedUser, groups: ['admin'] }), []);
+  assert.deepEqual(await controller.list({ ...elevatedUser, groups: ['owner'] }), []);
 });

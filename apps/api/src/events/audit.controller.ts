@@ -25,10 +25,10 @@ export class AuditController {
   private assertAdmin(session: SessionPayload): void {
     const permissions = session.permissions ?? [];
     if (
-      session.groups?.includes('admin') !== true &&
-      !permissions.some((permission) => permission.endsWith('.admin') || permission === 'support.admin')
+      session.groups?.some((group) => group === 'owner' || group === 'admin') !== true &&
+      !permissions.includes('admin.audit.read')
     ) {
-      throw new ForbiddenException('Audit admin permission is required.');
+      throw new ForbiddenException('Audit read permission is required.');
     }
   }
 }

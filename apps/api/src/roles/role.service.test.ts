@@ -6,6 +6,7 @@ test('built-in permissions include every delegated wiki moderation surface', () 
   assert.ok(BUILT_IN_PERMISSION_CODES.includes('wiki.user.block'));
   assert.ok(BUILT_IN_PERMISSION_CODES.includes('wiki.batch_rollback'));
   assert.ok(BUILT_IN_PERMISSION_CODES.includes('wiki.report.moderate'));
+  assert.ok(BUILT_IN_PERMISSION_CODES.includes('admin.audit.read'));
 });
 
 test('role service resolves role and permission codes for an account', async () => {

@@ -37,3 +37,12 @@ test('wiki administration routes and navigation use their exact delegated permis
   assert.match(seed, /wiki_admin: \[[^\]]*'wiki\.user\.block'[^\]]*'wiki\.batch_rollback'/);
   assert.match(seed, /moderator: \[[^\]]*'wiki\.user\.block'[^\]]*'wiki\.batch_rollback'/);
 });
+
+test('global audit events require their dedicated permission instead of any domain admin permission', async () => {
+  const gate = await readFile(
+    new URL('../components/admin/admin-access-gate.tsx', import.meta.url),
+    'utf8',
+  );
+  assert.match(gate, /pathname\.startsWith\('\/admin\/audit'\)[^\n]+isGlobalAdmin \|\| permissions\.includes\('admin\.audit\.read'\)/u);
+  assert.doesNotMatch(gate, /pathname\.startsWith\('\/admin\/audit'\)[^\n]+endsWith\('\.admin'\)/u);
+});

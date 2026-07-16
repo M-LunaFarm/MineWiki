@@ -36,6 +36,7 @@ export const BUILT_IN_PERMISSION_CODES = [
   'file.admin',
   'admin.account.delete',
   'admin.account.suspend',
+  'admin.audit.read',
 ] as const;
 
 export interface AccountAccess {

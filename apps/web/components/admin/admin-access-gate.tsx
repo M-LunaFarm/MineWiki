@@ -36,7 +36,7 @@ export function AdminAccessGate({ children }: { readonly children: ReactNode }) 
     if (pathname.startsWith('/admin/wiki/reports')) return permissions.includes('wiki.report.moderate');
     if (pathname.startsWith('/admin/wiki/acl')) return permissions.includes('wiki.acl.manage');
     if (pathname.startsWith('/admin/wiki')) return permissions.includes('wiki.admin');
-    if (pathname.startsWith('/admin/audit')) return permissions.some((permission) => permission.endsWith('.admin'));
+    if (pathname.startsWith('/admin/audit')) return isGlobalAdmin || permissions.includes('admin.audit.read');
     return false;
   }, [account, pathname]);
 
