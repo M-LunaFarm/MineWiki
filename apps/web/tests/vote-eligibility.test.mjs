@@ -15,6 +15,8 @@ test('vote modals use the server eligibility contract and remain scrollable on s
   for (const source of [classic, modern]) {
     assert.match(source, /max-h-\[calc\(100dvh-2rem\)\]/);
     assert.match(source, /overflow-y-auto/);
+    assert.match(source, /z-\[100\]/);
+    assert.match(source, /createPortal/);
     assert.match(source, /eligibility\?\.eligible === false/);
     assert.match(source, /identityStatus === 'conflict'/);
     assert.doesNotMatch(source, /agreeTerms|agreePrivacy/);

@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { X, Shield, ChevronRight, Vote } from 'lucide-react';
 import { csrfHeaders } from '../../lib/csrf';
@@ -206,8 +207,8 @@ export function VoteModal({
         )}
       </button>
 
-      {isOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {isOpen ? createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/80 backdrop-blur-md"
@@ -384,7 +385,8 @@ export function VoteModal({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   );

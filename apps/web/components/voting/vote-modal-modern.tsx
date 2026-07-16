@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { motion, AnimatePresence } from 'framer-motion';
 import { csrfHeaders } from '../../lib/csrf';
@@ -208,13 +209,13 @@ export function VoteModalModern({
         </div>
       </motion.button>
 
-      <AnimatePresence>
+      {typeof document !== 'undefined' ? createPortal(<AnimatePresence>
         {isOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
           >
             {/* Backdrop */}
             <motion.div
@@ -473,7 +474,7 @@ export function VoteModalModern({
             </motion.div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body) : null}
     </>
   );
 }
