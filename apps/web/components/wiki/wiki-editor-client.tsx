@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { buildWikiFileMarkup } from '../../lib/wiki-file-markup.mjs';
+import { buildWikiEditorDraftKey, readWikiEditorDraft, removeWikiEditorDraft, writeWikiEditorDraft } from '../../lib/wiki-editor-draft.mjs';
 import { AlertTriangle, Eye, FileImage, ImagePlus, LayoutTemplate, Loader2, Save } from 'lucide-react';
-import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { type ChangeEvent, type MouseEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
 import { CaptchaChallenge, isCaptchaConfigured } from '../security/captcha-challenge';
 import { WikiEditorLoadError } from './wiki-editor-load-error';
@@ -38,10 +39,21 @@ interface WikiEditorClientProps {
   readonly presentationLoadFailed: boolean;
 }
 
+interface WikiEditorDraft {
+  readonly baseRevisionId: string | null;
+  readonly contentRaw: string;
+  readonly editSummary: string;
+  readonly isMinor: boolean;
+  readonly savedAt: number;
+}
+
 export function WikiEditorClient({ page, namespace, title, routePath, presentation, presentationLoadFailed }: WikiEditorClientProps) {
   const router = useRouter();
   const { account, loading } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const draftSourceTokenRef = useRef('');
+  const loadedSourceTokenRef = useRef('');
+  const sourceSnapshotRef = useRef({ contentRaw: '', editSummary: '', isMinor: false });
   const [contentRaw, setContentRaw] = useState('');
   const [editSummary, setEditSummary] = useState('');
   const [isMinor, setIsMinor] = useState(false);
@@ -75,6 +87,8 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaKey, setCaptchaKey] = useState(0);
   const [policyAccepted, setPolicyAccepted] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<WikiEditorDraft | null>(null);
+  const [draftStatus, setDraftStatus] = useState<'idle' | 'saved' | 'unavailable'>('idle');
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
   const fileSourceRequired = Boolean(fileLicense && fileLicense !== 'self-created');
@@ -103,6 +117,12 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
       : buildStandardWikiToolPath(routePath, 'edit');
   const loginReturnTo = sectionAnchor ? `${editorPath}?section=${encodeURIComponent(sectionAnchor)}` : editorPath;
   const loginHref = `/login?returnTo=${encodeURIComponent(loginReturnTo)}`;
+  const accountId = account?.id;
+  const draftContext = useMemo(() => accountId && sectionAnchor !== undefined
+    ? { accountId, routePath, sectionAnchor: sectionAnchor ?? '' }
+    : null, [accountId, routePath, sectionAnchor]);
+  const draftKey = useMemo(() => draftContext ? buildWikiEditorDraftKey(draftContext) : null, [draftContext]);
+  const draftSourceToken = draftKey ? `${draftKey}:${page?.revision.id ?? 'new'}` : null;
 
   useEffect(() => {
     const anchor = new URLSearchParams(window.location.search).get('section')?.trim();
@@ -115,9 +135,11 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
       if (sectionAnchor === undefined) return;
       setSourceReady(false);
       setSourceLoadError(null);
+      loadedSourceTokenRef.current = '';
       if (!page) {
         setContentRaw('');
         setLoadingRevision(false);
+        loadedSourceTokenRef.current = draftSourceToken ?? '';
         setSourceReady(true);
         return;
       }
@@ -135,6 +157,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             setBaseRevisionId(section.baseRevisionId);
             setBaseRevisionNo(page.revision.revisionNo);
             setEditConflict(null);
+            loadedSourceTokenRef.current = draftSourceToken ?? '';
             setSourceReady(true);
           }
         } else {
@@ -145,6 +168,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             setBaseRevisionId(revision.id);
             setBaseRevisionNo(revision.revisionNo);
             setEditConflict(null);
+            loadedSourceTokenRef.current = draftSourceToken ?? '';
             setSourceReady(true);
           }
         }
@@ -162,7 +186,51 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
     return () => {
       cancelled = true;
     };
-  }, [account, page, sectionAnchor, sourceReloadKey]);
+  }, [account, draftSourceToken, page, sectionAnchor, sourceReloadKey]);
+
+  useEffect(() => {
+    if (!sourceReady || !draftContext || !draftKey || !draftSourceToken || loadedSourceTokenRef.current !== draftSourceToken || draftSourceTokenRef.current === draftSourceToken) return;
+    draftSourceTokenRef.current = draftSourceToken;
+    sourceSnapshotRef.current = { contentRaw, editSummary: '', isMinor: false };
+    const draft = readWikiEditorDraft(window.localStorage, draftKey, draftContext) as WikiEditorDraft | null;
+    if (draft && (draft.contentRaw !== contentRaw || draft.editSummary || draft.isMinor)) {
+      setPendingDraft(draft);
+      setDraftStatus('saved');
+    } else {
+      setPendingDraft(null);
+      setDraftStatus('idle');
+    }
+  }, [contentRaw, draftContext, draftKey, draftSourceToken, sourceReady]);
+
+  useEffect(() => {
+    if (!sourceReady || !draftContext || !draftKey || draftSourceTokenRef.current !== draftSourceToken || pendingDraft) return;
+    const source = sourceSnapshotRef.current;
+    const dirty = contentRaw !== source.contentRaw || editSummary !== source.editSummary || isMinor !== source.isMinor;
+    if (!dirty) {
+      removeWikiEditorDraft(window.localStorage, draftKey);
+      setDraftStatus('idle');
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const saved = writeWikiEditorDraft(window.localStorage, draftKey, draftContext, {
+        baseRevisionId, contentRaw, editSummary, isMinor
+      });
+      setDraftStatus(saved ? 'saved' : 'unavailable');
+    }, 1_000);
+    return () => window.clearTimeout(timer);
+  }, [baseRevisionId, contentRaw, draftContext, draftKey, draftSourceToken, editSummary, isMinor, pendingDraft, sourceReady]);
+
+  useEffect(() => {
+    const source = sourceSnapshotRef.current;
+    const dirty = sourceReady && (contentRaw !== source.contentRaw || editSummary !== source.editSummary || isMinor !== source.isMinor);
+    if (!dirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [contentRaw, editSummary, isMinor, sourceReady]);
 
   useEffect(() => {
     if (!account || page) return;
@@ -186,6 +254,19 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   const canSubmit = useMemo(() => {
     return Boolean(account && sourceReady && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict && (!needsCaptcha || captchaToken) && policyReady);
   }, [account, sourceReady, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict, needsCaptcha, captchaToken, policyReady]);
+  const saveBlocker = blockingErrors.length > 0
+    ? '차단 오류를 먼저 해결해야 저장할 수 있습니다.'
+    : hasUnresolvedConflict
+      ? '동시 편집 충돌 표시를 모두 정리해야 저장할 수 있습니다.'
+      : !contentRaw.trim()
+        ? '문서 본문을 입력해 주세요.'
+        : !editSummary.trim()
+          ? '편집 요약을 입력해 주세요.'
+          : needsCaptcha && !captchaToken
+            ? '로봇 방지 확인을 완료해 주세요.'
+            : !policyReady
+              ? '서버 위키 기여 정책을 확인해 주세요.'
+              : null;
 
   function renderPreview() {
     setFeedback(null);
@@ -248,6 +329,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
           });
           router.push(routePath);
         }
+        if (draftKey) removeWikiEditorDraft(window.localStorage, draftKey);
         router.refresh();
       } catch (error) {
         if (needsCaptcha) { setCaptchaToken(null); setCaptchaKey((current) => current + 1); }
@@ -304,6 +386,9 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
         } else {
           await createWikiPageRequest({ namespace, title, contentRaw, editSummary, isMinor, captchaToken: captchaToken ?? undefined, policyAcceptance });
         }
+        if (draftKey) removeWikiEditorDraft(window.localStorage, draftKey);
+        sourceSnapshotRef.current = { contentRaw, editSummary, isMinor };
+        setDraftStatus('idle');
         setFeedback(page
           ? '편집 요청을 제출했습니다. 문서 관리자가 검토하면 실제 리비전으로 반영됩니다.'
           : '새 문서 작성 요청을 제출했습니다. 관리자가 승인하기 전까지 문서는 공개되지 않습니다.');
@@ -312,6 +397,33 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
         setFeedback(error instanceof Error ? error.message : '편집 요청을 제출하지 못했습니다.');
       }
     });
+  }
+
+  function restorePendingDraft() {
+    if (!pendingDraft) return;
+    setContentRaw(pendingDraft.contentRaw);
+    setEditSummary(pendingDraft.editSummary);
+    setIsMinor(pendingDraft.isMinor);
+    setBlockingErrors([]);
+    setPendingDraft(null);
+    setDraftStatus('saved');
+    setFeedback(pendingDraft.baseRevisionId && pendingDraft.baseRevisionId !== baseRevisionId
+      ? '이전 리비전에서 작성한 초안을 복원했습니다. 저장할 때 최신 판과 안전하게 병합합니다.'
+      : '브라우저에 저장된 초안을 복원했습니다.');
+  }
+
+  function discardPendingDraft() {
+    if (draftKey) removeWikiEditorDraft(window.localStorage, draftKey);
+    setPendingDraft(null);
+    setDraftStatus('idle');
+  }
+
+  function confirmEditorNavigation(event: MouseEvent<HTMLAnchorElement>) {
+    const source = sourceSnapshotRef.current;
+    const dirty = contentRaw !== source.contentRaw || editSummary !== source.editSummary || isMinor !== source.isMinor;
+    if (dirty && !window.confirm('저장하지 않은 편집 내용이 있습니다. 이 페이지를 나갈까요?')) {
+      event.preventDefault();
+    }
   }
 
   async function loadWikiFiles(search = fileSearch) {
@@ -388,8 +500,9 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
 
   if (loading) {
     return (
-      <div className="mx-auto flex min-h-[50vh] max-w-4xl items-center justify-center px-4">
+      <div className="mx-auto flex min-h-[50vh] max-w-4xl items-center justify-center gap-3 px-4 text-sm text-slate-300" role="status">
         <Loader2 className="h-6 w-6 animate-spin text-emerald-300" />
+        계정과 편집 권한을 확인하는 중입니다.
       </div>
     );
   }
@@ -432,7 +545,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <header className="border-b border-white/10 pb-5">
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
-          <Link href={routePath} className="hover:text-emerald-200">
+          <Link href={routePath} onClick={confirmEditorNavigation} className="hover:text-emerald-200">
             문서로 돌아가기
           </Link>
           <span>/</span>
@@ -444,16 +557,29 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
       </header>
 
       {feedback ? (
-        <div className="flex gap-3 rounded-lg border border-amber-300/25 bg-amber-500/10 p-4 text-sm text-amber-100">
+        <div className="flex gap-3 rounded-lg border border-amber-300/25 bg-amber-500/10 p-4 text-sm text-amber-100" role="status" aria-live="polite">
           <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
           <p className="whitespace-pre-wrap">{feedback}</p>
         </div>
       ) : null}
       {blockingErrors.length > 0 ? (
-        <div className="flex gap-3 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100">
+        <div className="flex gap-3 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100" role="alert">
           <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
           <p className="whitespace-pre-wrap">{blockingErrors.join('\n')}</p>
         </div>
+      ) : null}
+
+      {pendingDraft ? (
+        <section className="flex flex-col gap-3 rounded-lg border border-sky-300/25 bg-sky-500/10 p-4 text-sm text-sky-50 sm:flex-row sm:items-center sm:justify-between" aria-labelledby="wiki-saved-draft-title">
+          <div>
+            <p id="wiki-saved-draft-title" className="font-semibold" role="status" aria-live="polite">이 브라우저에 저장된 편집 초안이 있습니다.</p>
+            <p className="mt-1 text-xs text-sky-100/75">{new Date(pendingDraft.savedAt).toLocaleString('ko-KR')} 저장 · 현재 원문을 바꾸기 전까지 자동 저장을 멈춥니다.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={restorePendingDraft} className="btn-primary min-h-11">초안 복원</button>
+            <button type="button" onClick={discardPendingDraft} className="btn-secondary min-h-11">초안 삭제</button>
+          </div>
+        </section>
       ) : null}
 
       {presentationLoadFailed ? (
@@ -515,12 +641,16 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             className="min-h-[520px] w-full resize-y rounded-lg border border-white/10 bg-[#0d1219] p-4 font-mono text-sm leading-6 text-slate-100 outline-none transition focus:border-emerald-300/50"
             spellCheck={false}
           />
+          <p className="min-h-5 text-xs text-slate-500" role="status" aria-live="polite">
+            {draftStatus === 'saved' ? '이 브라우저에 초안을 자동 저장했습니다.' : draftStatus === 'unavailable' ? '브라우저 저장소를 사용할 수 없어 자동 저장하지 못했습니다.' : '내용을 수정하면 이 브라우저에 초안을 자동 저장합니다.'}
+          </p>
           {needsCaptcha ? <CaptchaChallenge resetKey={captchaKey} onTokenChange={setCaptchaToken} /> : null}
           <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
             <input
               aria-label="편집 요약"
               value={editSummary}
               onChange={(event) => setEditSummary(event.target.value)}
+              maxLength={500}
               placeholder="편집 요약"
               className="h-10 rounded-lg border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-300/50"
             />
@@ -537,12 +667,16 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
               type="button"
               onClick={submit}
               disabled={!canSubmit || saving || uploadingImage}
+              aria-describedby="wiki-save-requirement"
               className="btn-primary h-10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               저장
             </button>
           </div>
+          <p id="wiki-save-requirement" className={saveBlocker ? 'text-xs text-amber-200' : 'text-xs text-slate-500'} aria-live="polite">
+            {saveBlocker ?? '본문과 편집 요약이 준비되었습니다.'}
+          </p>
           {!sectionAnchor ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
               <p className="max-w-2xl text-xs leading-5 text-slate-400">{page ? '직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.' : '직접 생성할 수 없는 문서도 관리자가 검토하는 새 문서 요청으로 제출할 수 있습니다.'}</p>
