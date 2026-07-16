@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { PrismaService } from '../common/prisma.service';
+import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import { BusinessEventService } from '../events/business-event.service';
 import { SessionService, type SessionPayload } from '../session/session.service';
 
@@ -73,34 +74,49 @@ export class WikiApiTokenService {
       throw new BadRequestException('토큰 이름, 권한, 만료일 또는 Wiki 공간이 올바르지 않습니다.');
     }
     const input = parsed.data;
-    const accountGroup = await this.resolveActiveAccountGroup(session.userId);
     const scopes = [...new Set(input.scopes)];
     const spaceId = input.spaceId ? BigInt(input.spaceId) : null;
-    const space = spaceId
-      ? await this.prisma.wikiSpace.findFirst({
-          where: { id: spaceId, status: 'active' },
-          select: { id: true, name: true, rootPath: true },
-        })
-      : null;
-    if (spaceId && !space) throw new NotFoundException('사용 가능한 Wiki 공간을 찾을 수 없습니다.');
-
     const prefix = randomBytes(6).toString('hex');
     const token = `mwk_${prefix}_${randomBytes(32).toString('base64url')}`;
-    const created = await this.prisma.wikiApiToken.create({
-      data: {
-        accountId: accountGroup.canonicalAccountId,
-        name: input.name,
-        tokenPrefix: prefix,
-        secretHash: hashValue(token),
-        scopes,
-        spaceId,
-        expiresAt: new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000),
+    const { created, canonicalAccountId } = await withActiveCanonicalAccountGroup(
+      this.prisma,
+      [session.userId],
+      async (tx, group) => {
+        const seed = await tx.account.findUnique({
+          where: { id: session.userId },
+          select: { id: true, canonicalAccountId: true },
+        });
+        if (!seed) throw new UnauthorizedException('토큰 소유 계정이 활성 상태가 아닙니다.');
+        const canonicalAccountId = seed.canonicalAccountId ?? seed.id;
+        if (!group.accountIds.includes(canonicalAccountId)) {
+          throw new UnauthorizedException('대표 계정 연결 상태를 확인할 수 없습니다.');
+        }
+        const space = spaceId
+          ? await tx.wikiSpace.findFirst({
+              where: { id: spaceId, status: 'active' },
+              select: { id: true },
+            })
+          : null;
+        if (spaceId && !space) throw new NotFoundException('사용 가능한 Wiki 공간을 찾을 수 없습니다.');
+        const created = await tx.wikiApiToken.create({
+          data: {
+            accountId: canonicalAccountId,
+            name: input.name,
+            tokenPrefix: prefix,
+            secretHash: hashValue(token),
+            scopes,
+            spaceId,
+            expiresAt: new Date(Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000),
+          },
+          include: { space: { select: { id: true, name: true, rootPath: true } } },
+        });
+        return { created, canonicalAccountId };
       },
-      include: { space: { select: { id: true, name: true, rootPath: true } } },
-    });
+      { inactiveError: () => new UnauthorizedException('토큰 소유 계정이 활성 상태가 아닙니다.') },
+    );
     await this.events.audit('wiki.api_token.created', {
       category: 'wiki',
-      actorAccountId: accountGroup.canonicalAccountId,
+      actorAccountId: canonicalAccountId,
       subjectType: 'wiki_api_token',
       subjectId: created.id,
       ipAddress: session.requestIp ?? null,

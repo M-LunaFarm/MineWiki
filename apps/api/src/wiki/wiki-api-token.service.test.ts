@@ -30,10 +30,14 @@ function recentSession(userId = '00000000-0000-4000-8000-000000000001'): Session
 test('creation returns the raw token once while persisting only its hash', async () => {
   let persisted: Record<string, unknown> | null = null;
   const prisma = {
+    async $transaction(write: (tx: unknown) => Promise<unknown>) { return write(this); },
+    async $queryRaw() { return [{ id: recentSession().userId }]; },
     account: {
       async findUnique() { return { id: recentSession().userId, canonicalAccountId: recentSession().userId, lifecycleStatus: 'active' }; },
       async findMany() { return [{ id: recentSession().userId, lifecycleStatus: 'active' }]; },
+      async count() { return 1; },
     },
+    accountLink: { async findMany() { return []; } },
     wikiApiToken: {
       async create(input: { data: Record<string, unknown> }) {
         persisted = input.data;
