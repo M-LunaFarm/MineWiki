@@ -113,6 +113,11 @@ export function WikiAdminConsole({ view }: { readonly view: 'overview' | 'pages'
     );
   }
 
+  const permissions = account.access?.permissions ?? [];
+  const roles = account.access?.roles ?? [];
+  const isGlobalAdmin = roles.includes('owner') || roles.includes('admin');
+  const can = (permission: string) => isGlobalAdmin || permissions.includes(permission);
+
   return (
     <div className="space-y-6">
       <section className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
@@ -132,18 +137,10 @@ export function WikiAdminConsole({ view }: { readonly view: 'overview' | 'pages'
             <Link href="/admin/wiki/pages" className={`chip ${view === 'pages' ? 'chip-accent' : 'chip-muted'}`}>
               문서
             </Link>
-            <Link href="/admin/wiki/acl" className="chip chip-muted">
-              ACL
-            </Link>
-            <Link href="/admin/wiki/users" className="chip chip-muted">
-              사용자 차단
-            </Link>
-            <Link href="/admin/wiki/batch-rollback" className="chip chip-muted">
-              일괄 복구
-            </Link>
-            <Link href="/admin/wiki/reports" className="chip chip-muted">
-              신고 큐
-            </Link>
+            {can('wiki.acl.manage') ? <Link href="/admin/wiki/acl" className="chip chip-muted">ACL</Link> : null}
+            {can('wiki.user.block') ? <Link href="/admin/wiki/users" className="chip chip-muted">사용자 차단</Link> : null}
+            {can('wiki.batch_rollback') ? <Link href="/admin/wiki/batch-rollback" className="chip chip-muted">일괄 복구</Link> : null}
+            {can('wiki.report.moderate') ? <Link href="/admin/wiki/reports" className="chip chip-muted">신고 큐</Link> : null}
           </nav>
         </div>
       </section>

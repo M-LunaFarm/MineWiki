@@ -251,11 +251,11 @@ const permissions = [
 const rolePermissions = {
   owner: permissions.map(([code]) => code),
   admin: permissions.map(([code]) => code),
-  wiki_admin: ['wiki.admin', 'wiki.acl.manage', 'wiki.edit.locked', 'wiki.read.restricted', 'wiki.report.moderate'],
+  wiki_admin: ['wiki.admin', 'wiki.acl.manage', 'wiki.edit.locked', 'wiki.read.restricted', 'wiki.user.block', 'wiki.batch_rollback', 'wiki.report.moderate'],
   server_admin: ['server.admin', 'review.moderate'],
   vote_moderator: ['vote.admin'],
   support_agent: ['support.admin'],
-  moderator: ['wiki.edit.locked', 'wiki.read.restricted', 'wiki.report.moderate', 'review.moderate'],
+  moderator: ['wiki.edit.locked', 'wiki.read.restricted', 'wiki.user.block', 'wiki.batch_rollback', 'wiki.report.moderate', 'review.moderate'],
 };
 
 const siteSettings = [
