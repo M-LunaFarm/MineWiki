@@ -18,7 +18,8 @@ export function WikiNotificationBell({ paper = false }: { readonly paper?: boole
     const load = () => { void fetchWikiNotifications().then((result) => { if (active) setCount(result.unreadCount); }).catch(() => {}); };
     load();
     const interval = window.setInterval(load, 60_000);
-    return () => { active = false; window.clearInterval(interval); };
+    window.addEventListener('wiki-notifications-changed', load);
+    return () => { active = false; window.clearInterval(interval); window.removeEventListener('wiki-notifications-changed', load); };
   }, [account, pathname]);
 
   if (!account) return null;

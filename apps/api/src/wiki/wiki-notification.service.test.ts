@@ -44,6 +44,27 @@ test('notification read state updates stay scoped to the authenticated wiki prof
   assert.deepEqual(updates[1], { where: { id: 44n, profileId: 8n }, data: { readAt: null } });
 });
 
+test('notification inbox applies validated read-state filters in the database query', async () => {
+  const whereValues: unknown[] = [];
+  const prisma = {
+    wikiNotification: {
+      async findMany(args: { where: unknown }) { whereValues.push(args.where); return []; },
+      async count() { return 0; }
+    },
+    wikiProfile: { async findMany() { return []; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 8n }; } } as unknown as WikiProfileService;
+  const service = new WikiNotificationService(prisma, profiles, {} as WikiPermissionService);
+
+  await service.list(session, undefined, 30, 'unread');
+  await service.list(session, undefined, 30, 'read');
+  assert.deepEqual(whereValues, [
+    { profileId: 8n, readAt: null },
+    { profileId: 8n, readAt: { not: null } }
+  ]);
+  await assert.rejects(() => service.list(session, undefined, 30, 'unknown'), /state must be all, unread, or read/);
+});
+
 test('notification inbox upgrades legacy server discussion links to canonical routes', async () => {
   const prisma = {
     wikiNotification: {

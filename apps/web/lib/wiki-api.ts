@@ -347,6 +347,7 @@ export interface WikiNotificationListResponse {
   readonly unreadCount: number;
   readonly nextCursor: string | null;
 }
+export type WikiNotificationState = 'all' | 'unread' | 'read';
 
 export type WikiReportTargetType = 'page' | 'revision' | 'discussion' | 'comment';
 export type WikiReportStatus = 'open' | 'in_review' | 'resolved' | 'dismissed';
@@ -1201,14 +1202,14 @@ export async function reorderWikiThreadAclRules(
   return mutateWikiBrowser(`/v1/wiki/discussions/${encodeURIComponent(threadId)}/acl/order`, 'PATCH', input);
 }
 
-export async function fetchWikiNotifications(cursor?: string): Promise<WikiNotificationListResponse> {
-  const params = new URLSearchParams({ limit: '30' });
+export async function fetchWikiNotifications(cursor?: string, state: WikiNotificationState = 'all'): Promise<WikiNotificationListResponse> {
+  const params = new URLSearchParams({ limit: '30', state });
   if (cursor) params.set('cursor', cursor);
   return readWikiBrowser<WikiNotificationListResponse>(`/v1/wiki/notifications?${params.toString()}`);
 }
 
 export async function markWikiNotificationRead(notificationId: string): Promise<{ readonly read: true }> {
-  return mutateWikiBrowser<{ readonly read: true }>(`/v1/wiki/notifications/${encodeURIComponent(notificationId)}/read`, 'POST', {});
+  return mutateWikiBrowser<{ readonly read: true }>(`/v1/wiki/notifications/${encodeURIComponent(notificationId)}/read`, 'POST', {}, { keepalive: true });
 }
 
 export async function markWikiNotificationUnread(notificationId: string): Promise<{ readonly read: false }> {
@@ -1511,12 +1512,13 @@ async function readWikiBrowser<T>(path: string): Promise<T> {
   return body as T;
 }
 
-async function mutateWikiBrowser<T>(path: string, method: string, payload: Record<string, unknown>): Promise<T> {
+async function mutateWikiBrowser<T>(path: string, method: string, payload: Record<string, unknown>, options: { readonly keepalive?: boolean } = {}): Promise<T> {
   const response = await fetch(`${apiBaseUrl()}${path}`, {
     method,
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify(payload),
+    keepalive: options.keepalive,
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw wikiApiError(response, body, 'Wiki mutation failed.');

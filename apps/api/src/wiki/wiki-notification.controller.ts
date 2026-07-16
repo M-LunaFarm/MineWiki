@@ -14,9 +14,10 @@ export class WikiNotificationController {
   list(
     @CurrentSession() session: SessionPayload,
     @Query('cursor') cursor?: string,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('state') state?: string
   ) {
-    return this.notifications.list(session, cursor, limit ?? 30);
+    return this.notifications.list(session, cursor, limit ?? 30, state ?? 'all');
   }
 
   @Post('read-all')

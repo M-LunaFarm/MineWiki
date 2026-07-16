@@ -25,6 +25,8 @@ export interface WikiNotificationListResponse {
   readonly nextCursor: string | null;
 }
 
+export type WikiNotificationState = 'all' | 'unread' | 'read';
+
 interface PendingNotificationDelivery {
   readonly profileId: bigint;
   readonly type: string;
@@ -52,13 +54,18 @@ export class WikiNotificationService {
     private readonly permissions: WikiPermissionService
   ) {}
 
-  async list(session: SessionPayload, cursor?: string, requestedLimit = 30): Promise<WikiNotificationListResponse> {
+  async list(session: SessionPayload, cursor?: string, requestedLimit = 30, requestedState = 'all'): Promise<WikiNotificationListResponse> {
     const profile = await this.profiles.ensureWikiProfile(session.userId);
     await this.purgeUnreadDiscussionNotifications(session, profile.id);
     const limit = Math.min(Math.max(requestedLimit, 1), 50);
+    const state = parseNotificationState(requestedState);
     const cursorId = cursor ? this.id(cursor, 'cursor') : null;
     const rows = await this.prisma.wikiNotification.findMany({
-      where: { profileId: profile.id, ...(cursorId ? { id: { lt: cursorId } } : {}) },
+      where: {
+        profileId: profile.id,
+        ...(state === 'unread' ? { readAt: null } : state === 'read' ? { readAt: { not: null } } : {}),
+        ...(cursorId ? { id: { lt: cursorId } } : {})
+      },
       orderBy: [{ id: 'desc' }],
       take: limit + 1
     });
@@ -567,4 +574,9 @@ export class WikiNotificationService {
     if (!/^\d+$/.test(value)) throw new BadRequestException(`${label} must be an unsigned integer.`);
     return BigInt(value);
   }
+}
+
+function parseNotificationState(value: string): WikiNotificationState {
+  if (value === 'all' || value === 'unread' || value === 'read') return value;
+  throw new BadRequestException('state must be all, unread, or read.');
 }
