@@ -586,6 +586,7 @@ export class WikiReadService {
   async getBacklinks(input: {
     readonly pageId: string;
     readonly accountId?: string | null;
+    readonly sourceSpaceId?: bigint;
     readonly cursor?: string;
     readonly limit?: string | number;
   }): Promise<WikiBacklinkResponse> {
@@ -608,7 +609,12 @@ export class WikiReadService {
     });
     const pageIds = [...new Set(links.map((link) => link.sourcePageId))];
     const pages = pageIds.length > 0
-      ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } })
+      ? await this.prisma.wikiPage.findMany({
+          where: {
+            id: { in: pageIds },
+            ...(input.sourceSpaceId !== undefined ? { spaceId: input.sourceSpaceId } : {})
+          }
+        })
       : [];
     const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
     const namespaces = namespaceIds.length > 0
@@ -1519,6 +1525,8 @@ export class WikiReadService {
     readonly q?: string;
     readonly namespace?: string;
     readonly target?: string;
+    /** Internal tenant boundary used by credentialed API tokens. */
+    readonly spaceId?: bigint;
     readonly limit?: string | number;
     readonly cursor?: string;
     readonly accountId?: string | null;
@@ -1545,6 +1553,7 @@ export class WikiReadService {
     const currentMatchIds = await findCurrentSearchMatchIds(this.prisma, {
       query,
       namespaceId: namespace?.id ?? null,
+      spaceId: input.spaceId ?? null,
       cursor,
       limit: scanLimit + 1
     });
@@ -1556,7 +1565,7 @@ export class WikiReadService {
     const pageById = new Map(unorderedPages.map((page) => [page.id, page]));
     const pages = candidateIds.flatMap((id) => {
       const page = pageById.get(id);
-      return page ? [page] : [];
+      return page && (input.spaceId === undefined || page.spaceId === input.spaceId) ? [page] : [];
     });
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
     const revisionVisibility = currentRevisionIds.length > 0
@@ -2194,6 +2203,7 @@ async function findCurrentSearchMatchIds(
   input: {
     readonly query: string;
     readonly namespaceId: number | null;
+    readonly spaceId: bigint | null;
     readonly cursor: { readonly updatedAt: Date; readonly id: bigint } | null;
     readonly limit: number;
   }
@@ -2209,6 +2219,10 @@ async function findCurrentSearchMatchIds(
   if (input.namespaceId !== null) {
     where.push('p.namespace_id = ?');
     values.push(input.namespaceId);
+  }
+  if (input.spaceId !== null) {
+    where.push('p.space_id = ?');
+    values.push(input.spaceId);
   }
   if (input.cursor) {
     where.push('(p.updated_at < ? OR (p.updated_at = ? AND p.id < ?))');

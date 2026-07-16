@@ -1,7 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, HttpException } from '@nestjs/common';
+import { BadRequestException, HttpException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { parseMarkup } from '@minewiki/wiki-core';
 import {
@@ -178,6 +178,30 @@ test('revision diff rejects cross-page comparisons after authorizing both revisi
     (error: unknown) => error instanceof BadRequestException
   );
   assert.equal(authorizationChecks, 4);
+});
+
+test('revision diff enforces an API token space before returning revision source', async () => {
+  const revision = {
+    id: 11n, pageId: 7n, revisionNo: 1, parentRevisionId: null, contentRaw: '문서',
+    contentHash: 'a'.repeat(64), contentSize: 6, syntaxVersion: 'bwm-0.3', editSummary: null,
+    isMinor: false, createdBy: 3n, actorUserId: 3n, createdAt: new Date(), visibility: 'public'
+  };
+  const prisma = {
+    wikiPageRevision: { async findUnique() { return revision; } },
+    wikiPage: { async findUnique() { return { id: 7n, spaceId: 9n, title: '문서', protectionLevel: 'open', status: 'normal' }; } }
+  } as unknown as PrismaService;
+  let permissionChecks = 0;
+  const permissions = {
+    async assertCanReadPage() { permissionChecks += 1; },
+    async assertCanUsePageAction() { permissionChecks += 1; }
+  } as unknown as WikiPermissionService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, permissions);
+
+  await assert.rejects(
+    edits.getRevisionDiff('11', '11', 'account', { allowedSpaceId: 10n }),
+    NotFoundException
+  );
+  assert.equal(permissionChecks, 0);
 });
 
 test('explicit spaces cannot cross namespace boundaries', async () => {

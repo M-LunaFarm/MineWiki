@@ -103,6 +103,46 @@ test('raw Wiki API performs scope and space checks and passes the service space 
   ]);
 });
 
+test('read-only automation APIs preserve token scope and tenant boundaries', async () => {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const read = {
+    async search(input: unknown) { calls.push({ method: 'search', args: [input] }); return { items: [], nextCursor: null }; },
+    async getRevisions(...args: unknown[]) { calls.push({ method: 'revisions', args }); return { items: [], nextCursor: null }; },
+    async getBacklinks(input: unknown) { calls.push({ method: 'backlinks', args: [input] }); return { items: [], nextCursor: null }; },
+  } as unknown as WikiReadService;
+  const edit = {
+    async getRevisionDiff(...args: unknown[]) { calls.push({ method: 'diff', args }); return { left: {}, right: {}, hunks: [] }; },
+  } as unknown as WikiEditService;
+  const tokens = {
+    assertScope(...args: unknown[]) { calls.push({ method: 'scope', args }); },
+    async assertPageSpace(...args: unknown[]) { calls.push({ method: 'pageSpace', args }); },
+  } as unknown as WikiApiTokenService;
+  const controller = new WikiApiController(tokens, read, edit);
+
+  await controller.search('검색', 'server', 'title', '10', 'cursor', requestWithToken());
+  await controller.getPageRevisions('10', '20', '30', requestWithToken());
+  await controller.getPageBacklinks('10', '40', '50', requestWithToken());
+  await controller.getRevisionDiff('20', '21', requestWithToken());
+
+  assert.deepEqual(calls, [
+    { method: 'scope', args: [token, 'wiki:read'] },
+    { method: 'search', args: [{
+      q: '검색', namespace: 'server', target: 'title', limit: '10', cursor: 'cursor',
+      accountId: 'account-id', spaceId: 42n,
+    }] },
+    { method: 'scope', args: [token, 'wiki:read'] },
+    { method: 'pageSpace', args: [token, '10'] },
+    { method: 'revisions', args: ['10', 'account-id', '20', '30'] },
+    { method: 'scope', args: [token, 'wiki:read'] },
+    { method: 'pageSpace', args: [token, '10'] },
+    { method: 'backlinks', args: [{
+      pageId: '10', accountId: 'account-id', cursor: '40', limit: '50', sourceSpaceId: 42n,
+    }] },
+    { method: 'scope', args: [token, 'wiki:read'] },
+    { method: 'diff', args: ['20', '21', 'account-id', { allowedSpaceId: 42n }] },
+  ]);
+});
+
 test('create and update Wiki APIs require idempotent execution and pass allowedSpaceId', async () => {
   const calls: Array<{ method: string; args?: unknown[]; input?: Record<string, unknown> }> = [];
   const service = {

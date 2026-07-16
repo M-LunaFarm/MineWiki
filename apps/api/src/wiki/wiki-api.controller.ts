@@ -17,6 +17,7 @@ import {
   WikiEditService,
   type WikiMutationResponse,
   type WikiPageMutationRequest,
+  type WikiRevisionDiffResponse,
   type WikiRevisionResponse,
 } from './wiki-edit.service';
 import { WikiApiTokenGuard } from './wiki-api-token.guard';
@@ -24,7 +25,13 @@ import {
   WikiApiTokenService,
   type AuthenticatedWikiApiToken,
 } from './wiki-api-token.service';
-import { WikiReadService, type WikiPageResponse } from './wiki-read.service';
+import {
+  WikiReadService,
+  type WikiBacklinkResponse,
+  type WikiPageResponse,
+  type WikiRevisionListResponse,
+  type WikiSearchResponse,
+} from './wiki-read.service';
 
 export interface WikiApiPageSummary {
   readonly id: string;
@@ -75,6 +82,80 @@ export class WikiApiController {
       pageId,
       token.accountId,
       revisionId,
+      tokenSpaceOption(token),
+    );
+  }
+
+  @Get('search')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  search(
+    @Query('q') q: string | undefined,
+    @Query('namespace') namespace: string | undefined,
+    @Query('target') target: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @Query('cursor') cursor: string | undefined,
+    @Req() request: FastifyRequest,
+  ): Promise<WikiSearchResponse> {
+    const token = requireWikiApiToken(request);
+    this.tokens.assertScope(token, 'wiki:read');
+    return this.wikiRead.search({
+      q,
+      namespace,
+      target,
+      limit,
+      cursor,
+      accountId: token.accountId,
+      ...(token.spaceId ? { spaceId: BigInt(token.spaceId) } : {}),
+    });
+  }
+
+  @Get('pages/:id/revisions')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  async getPageRevisions(
+    @Param('id') pageId: string,
+    @Query('cursor') cursor: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @Req() request: FastifyRequest,
+  ): Promise<WikiRevisionListResponse> {
+    const token = requireWikiApiToken(request);
+    this.tokens.assertScope(token, 'wiki:read');
+    await this.tokens.assertPageSpace(token, pageId);
+    return this.wikiRead.getRevisions(pageId, token.accountId, cursor, limit);
+  }
+
+  @Get('pages/:id/backlinks')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  async getPageBacklinks(
+    @Param('id') pageId: string,
+    @Query('cursor') cursor: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @Req() request: FastifyRequest,
+  ): Promise<WikiBacklinkResponse> {
+    const token = requireWikiApiToken(request);
+    this.tokens.assertScope(token, 'wiki:read');
+    await this.tokens.assertPageSpace(token, pageId);
+    return this.wikiRead.getBacklinks({
+      pageId,
+      accountId: token.accountId,
+      cursor,
+      limit,
+      ...(token.spaceId ? { sourceSpaceId: BigInt(token.spaceId) } : {}),
+    });
+  }
+
+  @Get('revisions/:leftId/diff/:rightId')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  getRevisionDiff(
+    @Param('leftId') leftId: string,
+    @Param('rightId') rightId: string,
+    @Req() request: FastifyRequest,
+  ): Promise<WikiRevisionDiffResponse> {
+    const token = requireWikiApiToken(request);
+    this.tokens.assertScope(token, 'wiki:read');
+    return this.wikiEdit.getRevisionDiff(
+      leftId,
+      rightId,
+      token.accountId,
       tokenSpaceOption(token),
     );
   }

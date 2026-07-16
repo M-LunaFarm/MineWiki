@@ -236,8 +236,12 @@ test('wiki search target filters distinguish title and body matches', async () =
     }
   ];
   const bodies = new Map([[12n, '관계없는 본문'], [11n, '여기에 검색 본문이 있습니다']]);
+  const rawQueries: Array<{ sql: string; values: unknown[] }> = [];
   const prisma = {
-    async $queryRawUnsafe() { return pages.map((page) => ({ id: page.id })); },
+    async $queryRawUnsafe(sql: string, ...values: unknown[]) {
+      rawQueries.push({ sql, values });
+      return pages.map((page) => ({ id: page.id }));
+    },
     wikiPage: { async findMany() { return pages; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
     wikiPageRevision: {
@@ -252,12 +256,14 @@ test('wiki search target filters distinguish title and body matches', async () =
     async filterReadablePages({ pages: candidates }: { pages: typeof pages }) { return [...candidates]; }
   } as unknown as WikiPermissionService;
 
-  const titleResult = await new WikiReadService(prisma, permissions).search({ q: '검색', target: 'title' });
+  const titleResult = await new WikiReadService(prisma, permissions).search({ q: '검색', target: 'title', spaceId: 1n });
   const contentResult = await new WikiReadService(prisma, permissions).search({ q: '검색', target: 'content' });
 
   assert.deepEqual(titleResult.items.map((item) => item.pageId), ['2']);
   assert.deepEqual(contentResult.items.map((item) => item.pageId), ['1']);
   assert.deepEqual(contentResult.items[0]?.highlights.snippet, [[4, 2]]);
+  assert.match(rawQueries[0]!.sql, /p\.space_id = \?/u);
+  assert.equal(rawQueries[0]!.values.includes(1n), true);
   await assert.rejects(
     new WikiReadService(prisma, permissions).search({ q: '검색', target: 'invalid' }),
     /target must be all, title, or content/u

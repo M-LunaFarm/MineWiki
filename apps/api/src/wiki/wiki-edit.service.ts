@@ -1465,7 +1465,8 @@ export class WikiEditService {
   private async getRevisionForAction(
     revisionId: string,
     accountId: string | null,
-    action: 'raw' | 'history'
+    action: 'raw' | 'history',
+    options: { readonly allowedSpaceId?: bigint } = {}
   ): Promise<WikiRevisionResponse> {
     const id = this.parseBigIntId(revisionId, 'revisionId');
     const revision = await this.prisma.wikiPageRevision.findUnique({ where: { id } });
@@ -1473,6 +1474,9 @@ export class WikiEditService {
       throw new NotFoundException('Wiki revision not found.');
     }
     const page = await this.prisma.wikiPage.findUnique({ where: { id: revision.pageId } });
+    if (options.allowedSpaceId !== undefined && page?.spaceId !== options.allowedSpaceId) {
+      throw new NotFoundException('Wiki revision not found.');
+    }
     await this.wikiPermissions.assertCanReadPage({
       accountId,
       page,
@@ -1482,10 +1486,15 @@ export class WikiEditService {
     return this.toRevisionResponse(revision);
   }
 
-  async getRevisionDiff(leftId: string, rightId: string, accountId?: string | null): Promise<WikiRevisionDiffResponse> {
+  async getRevisionDiff(
+    leftId: string,
+    rightId: string,
+    accountId?: string | null,
+    options: { readonly allowedSpaceId?: bigint } = {}
+  ): Promise<WikiRevisionDiffResponse> {
     const [left, right] = await Promise.all([
-      this.getRevisionForAction(leftId, accountId ?? null, 'history'),
-      this.getRevisionForAction(rightId, accountId ?? null, 'history')
+      this.getRevisionForAction(leftId, accountId ?? null, 'history', options),
+      this.getRevisionForAction(rightId, accountId ?? null, 'history', options)
     ]);
     if (left.pageId !== right.pageId) {
       throw new BadRequestException('Wiki revisions must belong to the same page.');
