@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { AlertTriangle, FilePenLine, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { fetchWikiEditRequestQueue, type WikiEditRequestQueueItem, type WikiEditRequestQueueResponse } from '../../lib/wiki-api';
+import { WikiEditSummary } from './wiki-edit-summary';
 
 const EMPTY: WikiEditRequestQueueResponse = { items: [], viewerProfileId: null, nextCursor: null };
 
@@ -77,7 +78,7 @@ function QueueCard({ item, viewerProfileId }: { readonly item: WikiEditRequestQu
             {viewerProfileId === item.createdBy ? <span className="chip chip-muted">내 요청</span> : null}
           </div>
           <h2 className="mt-2 break-words text-lg font-semibold text-white"><Link href={item.detailPath} className="hover:text-emerald-200">{item.pageDisplayTitle}</Link></h2>
-          <p className="mt-2 break-words text-sm text-slate-300">{item.editSummary}</p>
+          <p className="mt-2 break-words text-sm text-slate-300"><WikiEditSummary summary={item.editSummary} hidden={item.editSummaryHidden} /></p>
           <p className="mt-2 text-xs text-slate-500">{item.createdByName} · {formatDate(item.createdAt)}</p>
         </div>
         <Link href={item.detailPath} className="btn-secondary min-h-11 flex-none gap-2"><FilePenLine className="size-4" /> 요청 검토</Link>

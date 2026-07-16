@@ -1309,27 +1309,32 @@ model WikiPage {
 }
 
 model WikiPageRevision {
-  id               BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
-  pageId           BigInt                @map("page_id") @db.UnsignedBigInt
-  revisionNo       Int                   @map("revision_no") @db.UnsignedInt
-  parentRevisionId BigInt?               @map("parent_revision_id") @db.UnsignedBigInt
-  contentRaw       String                @map("content_raw") @db.MediumText
-  contentAst       Json?                 @map("content_ast")
-  contentHash      String                @map("content_hash") @db.Char(64)
-  contentSize      Int                   @default(0) @map("content_size") @db.UnsignedInt
-  syntaxVersion    String                @default("bwm-0.3") @map("syntax_version") @db.VarChar(32)
-  editSummary      String?               @map("edit_summary") @db.VarChar(255)
-  isMinor          Boolean               @default(false) @map("is_minor")
-  editTags         Json?                 @map("edit_tags")
-  createdBy        BigInt?               @map("created_by") @db.UnsignedBigInt
-  actorType        String                @default("user") @map("actor_type") @db.VarChar(16)
-  actorUserId      BigInt?               @map("actor_user_id") @db.UnsignedBigInt
-  actorIp          Bytes?                @map("actor_ip") @db.VarBinary(16)
-  actorIpText      String?               @map("actor_ip_text") @db.VarChar(45)
-  actorIpHash      String?               @map("actor_ip_hash") @db.Char(64)
-  createdAt        DateTime              @map("created_at")
-  visibility       String                @default("public") @db.VarChar(32)
-  renderCaches     WikiPageRenderCache[]
+  id                           BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId                       BigInt                @map("page_id") @db.UnsignedBigInt
+  revisionNo                   Int                   @map("revision_no") @db.UnsignedInt
+  parentRevisionId             BigInt?               @map("parent_revision_id") @db.UnsignedBigInt
+  contentRaw                   String                @map("content_raw") @db.MediumText
+  contentAst                   Json?                 @map("content_ast")
+  contentHash                  String                @map("content_hash") @db.Char(64)
+  contentSize                  Int                   @default(0) @map("content_size") @db.UnsignedInt
+  syntaxVersion                String                @default("bwm-0.3") @map("syntax_version") @db.VarChar(32)
+  editSummary                  String?               @map("edit_summary") @db.VarChar(255)
+  editSummaryHidden            Boolean               @default(false) @map("edit_summary_hidden")
+  editSummaryModerationVersion Int                   @default(0) @map("edit_summary_moderation_version") @db.UnsignedInt
+  editSummaryModeratedBy       BigInt?               @map("edit_summary_moderated_by") @db.UnsignedBigInt
+  editSummaryModeratedAt       DateTime?             @map("edit_summary_moderated_at") @db.DateTime(3)
+  editSummaryModerationReason  String?               @map("edit_summary_moderation_reason") @db.VarChar(500)
+  isMinor                      Boolean               @default(false) @map("is_minor")
+  editTags                     Json?                 @map("edit_tags")
+  createdBy                    BigInt?               @map("created_by") @db.UnsignedBigInt
+  actorType                    String                @default("user") @map("actor_type") @db.VarChar(16)
+  actorUserId                  BigInt?               @map("actor_user_id") @db.UnsignedBigInt
+  actorIp                      Bytes?                @map("actor_ip") @db.VarBinary(16)
+  actorIpText                  String?               @map("actor_ip_text") @db.VarChar(45)
+  actorIpHash                  String?               @map("actor_ip_hash") @db.Char(64)
+  createdAt                    DateTime              @map("created_at")
+  visibility                   String                @default("public") @db.VarChar(32)
+  renderCaches                 WikiPageRenderCache[]
 
   @@unique([id, pageId], map: "uk_page_revisions_id_page")
   @@unique([pageId, revisionNo])

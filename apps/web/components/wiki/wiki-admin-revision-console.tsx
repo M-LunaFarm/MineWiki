@@ -7,6 +7,7 @@ import {
   fetchWikiAdminPageRevisions,
   fetchWikiAdminRevision,
   rollbackWikiAdminPage,
+  updateWikiAdminRevisionEditSummary,
   updateWikiAdminRevisionVisibility,
   type WikiAdminRevisionDetail,
   type WikiAdminRevisionPage,
@@ -72,7 +73,7 @@ export function WikiAdminRevisionList({ pageId }: { readonly pageId: string }) {
             {data.items.map((revision) => (
               <tr key={revision.id}>
                 <td className="px-4 py-3"><Link className="font-semibold text-emerald-200 hover:text-emerald-100" href={adminRevisionHref(revision.id, routePath)}>r{revision.revisionNo}</Link>{revision.isCurrent ? <span className="ml-2 chip chip-accent">현재</span> : null}</td>
-                <td className="px-4 py-3"><Visibility value={revision.visibility} /></td>
+                <td className="px-4 py-3"><div className="flex flex-wrap gap-2"><Visibility value={revision.visibility} /><SummaryVisibility hidden={revision.editSummaryHidden} /></div></td>
                 <td className="px-4 py-3">{revision.createdByName}</td>
                 <td className="max-w-sm truncate px-4 py-3">{revision.editSummary || '요약 없음'}</td>
                 <td className="whitespace-nowrap px-4 py-3">{formatDate(revision.createdAt)}</td>
@@ -91,8 +92,10 @@ export function WikiAdminRevisionDetailConsole({ revisionId }: { readonly revisi
   const [revision, setRevision] = useState<WikiAdminRevisionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState('');
+  const [summaryReason, setSummaryReason] = useState('');
+  const [summaryConfirmed, setSummaryConfirmed] = useState(false);
   const [confirmText, setConfirmText] = useState('');
-  const [working, setWorking] = useState<'visibility' | 'rollback' | null>(null);
+  const [working, setWorking] = useState<'visibility' | 'summary' | 'rollback' | null>(null);
 
   const load = useCallback(async () => {
     setRevision(await fetchWikiAdminRevision(revisionId));
@@ -102,6 +105,7 @@ export function WikiAdminRevisionDetailConsole({ revisionId }: { readonly revisi
   const routePath = revision.page.routePath;
   const requiredConfirmation = `r${revision.revisionNo}`;
   const reasonValid = reason.trim().length >= 5;
+  const summaryReasonValid = summaryReason.trim().length >= 5 && summaryReason.trim().length <= 500;
 
   async function changeVisibility() {
     if (!reasonValid) return;
@@ -109,6 +113,19 @@ export function WikiAdminRevisionDetailConsole({ revisionId }: { readonly revisi
     try {
       await updateWikiAdminRevisionVisibility({ revisionId, visibility: revision.visibility === 'public' ? 'hidden' : 'public', reason: reason.trim() });
       await load(); setReason('');
+    } catch (cause) { setError(errorMessage(cause)); } finally { setWorking(null); }
+  }
+  async function changeEditSummaryVisibility() {
+    if (!summaryReasonValid || !summaryConfirmed) return;
+    setWorking('summary'); setError(null);
+    try {
+      await updateWikiAdminRevisionEditSummary({
+        revisionId,
+        hidden: !revision.editSummaryHidden,
+        expectedVersion: revision.editSummaryModerationVersion,
+        reason: summaryReason.trim()
+      });
+      await load(); setSummaryReason(''); setSummaryConfirmed(false);
     } catch (cause) { setError(errorMessage(cause)); } finally { setWorking(null); }
   }
   async function rollback() {
@@ -124,12 +141,39 @@ export function WikiAdminRevisionDetailConsole({ revisionId }: { readonly revisi
     <main className="mx-auto w-full max-w-5xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
       <header className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
         <Link href={adminPageRevisionsHref(revision.pageId, routePath)} className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-emerald-200"><ArrowLeft className="h-4 w-4" /> 판 목록</Link>
-        <div className="mt-4 flex flex-wrap items-center gap-2"><h1 className="text-2xl font-semibold text-white">{revision.page.displayTitle} r{revision.revisionNo}</h1>{revision.isCurrent ? <span className="chip chip-accent">현재</span> : null}<Visibility value={revision.visibility} /></div>
+        <div className="mt-4 flex flex-wrap items-center gap-2"><h1 className="text-2xl font-semibold text-white">{revision.page.displayTitle} r{revision.revisionNo}</h1>{revision.isCurrent ? <span className="chip chip-accent">현재</span> : null}<Visibility value={revision.visibility} /><SummaryVisibility hidden={revision.editSummaryHidden} /></div>
         <p className="mt-2 text-sm text-slate-400">{revision.createdByName} · {formatDate(revision.createdAt)} · {formatBytes(revision.contentSize)}</p>
-        <p className="mt-1 text-sm text-slate-300">{revision.editSummary || '편집 요약 없음'}</p>
+        <p className="mt-1 text-sm text-slate-300"><span className="font-semibold text-slate-200">원본 편집 요약 (관리자 전용):</span> {revision.editSummary || '편집 요약 없음'}</p>
         {routePath ? <div className="mt-4 flex flex-col gap-2 sm:flex-row">{revision.visibility === 'public' ? <Link href={buildWikiRevisionPath(revision.id, routePath)} className="btn-secondary min-h-11 w-full sm:w-auto">공개 판 화면</Link> : null}<Link href={routePath} className="btn-secondary min-h-11 w-full sm:w-auto">현재 문서</Link></div> : null}
       </header>
       {error ? <ErrorNotice message={error} /> : null}
+      <section className="rounded-lg border border-amber-300/20 bg-amber-500/[0.05] p-5" aria-labelledby="edit-summary-moderation-title">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="edit-summary-moderation-title" className="text-lg font-semibold text-white">편집 요약 공개 설정</h2>
+            <p id="edit-summary-moderation-help" className="mt-1 text-sm text-slate-400">판 내용과 공개 상태는 그대로 두고 편집 요약만 숨기거나 복원합니다. 사유는 5~500자로 감사 기록에 보존됩니다.</p>
+          </div>
+          <SummaryVisibility hidden={revision.editSummaryHidden} />
+        </div>
+        {revision.editSummaryModeration ? (
+          <dl className="mt-4 grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-sm sm:grid-cols-[9rem_1fr]">
+            <dt className="text-slate-500">마지막 조치</dt><dd className="text-slate-200">{revision.editSummaryModeration.action === 'hidden' ? '요약 숨김' : '요약 복원'}</dd>
+            <dt className="text-slate-500">처리자</dt><dd className="text-slate-200">{revision.editSummaryModeration.moderatorName} (#{revision.editSummaryModeration.moderatorProfileId})</dd>
+            <dt className="text-slate-500">처리 시각</dt><dd className="text-slate-200">{formatDate(revision.editSummaryModeration.moderatedAt)}</dd>
+            <dt className="text-slate-500">사유</dt><dd className="break-words text-slate-200">{revision.editSummaryModeration.reason}</dd>
+          </dl>
+        ) : null}
+        <label htmlFor="edit-summary-moderation-reason" className="mt-4 block text-sm font-semibold text-slate-200">요약 공개 설정 사유</label>
+        <textarea id="edit-summary-moderation-reason" value={summaryReason} onChange={(event) => setSummaryReason(event.target.value)} maxLength={500} rows={3} aria-describedby="edit-summary-moderation-help" className="mt-2 w-full rounded-md border border-white/10 bg-[#0d131b] p-3 font-normal text-white outline-none focus:border-emerald-300/50" />
+        <label className="mt-3 flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-white/10 bg-black/10 px-3 text-sm text-slate-200">
+          <input type="checkbox" checked={summaryConfirmed} onChange={(event) => setSummaryConfirmed(event.target.checked)} className="size-4 accent-emerald-400" />
+          r{revision.revisionNo}의 편집 요약만 {revision.editSummaryHidden ? '복원' : '숨김'} 처리함을 확인합니다.
+        </label>
+        <button type="button" disabled={!summaryReasonValid || !summaryConfirmed || working !== null} onClick={() => void changeEditSummaryVisibility()} aria-describedby="edit-summary-moderation-help" className="btn-secondary mt-3 min-h-11 w-full sm:w-auto">
+          {working === 'summary' ? <Loader2 className="h-4 w-4 animate-spin" /> : revision.editSummaryHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+          {revision.editSummaryHidden ? '편집 요약 복원' : '편집 요약 숨김'}
+        </button>
+      </section>
       <section className="rounded-lg border border-white/10 bg-[#111821] p-4"><h2 className="mb-3 text-sm font-semibold text-white">원문</h2><pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-200">{revision.contentRaw}</pre></section>
       <section className="rounded-lg border border-amber-300/20 bg-amber-500/[0.05] p-5">
         <h2 className="text-lg font-semibold text-white">관리 작업</h2>
@@ -149,9 +193,10 @@ export function WikiAdminRevisionDetailConsole({ revisionId }: { readonly revisi
 }
 
 function RevisionCard({ revision, routePath }: { revision: WikiAdminRevisionSummary; routePath?: string }) {
-  return <Link href={adminRevisionHref(revision.id, routePath)} className="rounded-lg border border-white/10 bg-[#111821] p-4"><div className="flex items-center justify-between gap-3"><span className="font-semibold text-emerald-200">r{revision.revisionNo}</span><div className="flex gap-2">{revision.isCurrent ? <span className="chip chip-accent">현재</span> : null}<Visibility value={revision.visibility} /></div></div><p className="mt-3 line-clamp-2 text-sm text-slate-200">{revision.editSummary || '요약 없음'}</p><p className="mt-2 text-xs text-slate-500">{revision.createdByName} · {formatDate(revision.createdAt)} · {formatBytes(revision.contentSize)}</p></Link>;
+  return <Link href={adminRevisionHref(revision.id, routePath)} className="rounded-lg border border-white/10 bg-[#111821] p-4"><div className="flex items-center justify-between gap-3"><span className="font-semibold text-emerald-200">r{revision.revisionNo}</span><div className="flex flex-wrap gap-2">{revision.isCurrent ? <span className="chip chip-accent">현재</span> : null}<Visibility value={revision.visibility} /><SummaryVisibility hidden={revision.editSummaryHidden} /></div></div><p className="mt-3 line-clamp-2 text-sm text-slate-200">{revision.editSummary || '요약 없음'}</p><p className="mt-2 text-xs text-slate-500">{revision.createdByName} · {formatDate(revision.createdAt)} · {formatBytes(revision.contentSize)}</p></Link>;
 }
 function Visibility({ value }: { value: string }) { return <span className={value === 'public' ? 'chip chip-muted' : 'chip border-red-300/30 bg-red-500/10 text-red-100'}>{value}</span>; }
+function SummaryVisibility({ hidden }: { hidden: boolean }) { return <span className={hidden ? 'chip border-amber-300/30 bg-amber-500/10 text-amber-100' : 'chip chip-muted'}>{hidden ? '편집 요약 숨김' : '편집 요약 공개'}</span>; }
 function Loading() { return <div className="flex min-h-[40vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-emerald-300" /></div>; }
 function ErrorNotice({ message }: { message: string }) { return <div className="mx-auto flex max-w-5xl gap-3 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-100"><AlertTriangle className="h-4 w-4 flex-none" /><p>{message}</p></div>; }
 function adminPageRevisionsHref(pageId: string, routePath?: string) { const base = `/admin/wiki/pages/${encodeURIComponent(pageId)}/revisions`; return routePath ? `${base}?returnTo=${encodeURIComponent(routePath)}` : base; }

@@ -7,6 +7,7 @@ import { fetchWikiRevisions, type WikiRevisionListResponse } from '../../lib/wik
 import { buildWikiDiffPath, buildWikiRevisionPath } from '../../lib/wiki-routes.mjs';
 import { WikiRevertButton } from './wiki-revert-button';
 import { WikiReportButton } from './wiki-report-button';
+import { WikiEditSummary } from './wiki-edit-summary';
 
 type Revision = WikiRevisionListResponse['items'][number];
 type SelectionKind = 'older' | 'newer';
@@ -83,7 +84,7 @@ export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, in
                 <td className="px-3 py-2"><RevisionChoice revision={revision} kind="older" selected={olderId === revision.id} onSelect={select} suffix="desktop" /></td>
                 <td className="px-3 py-2"><RevisionChoice revision={revision} kind="newer" selected={newerId === revision.id} onSelect={select} suffix="desktop" /></td>
                 <td className="px-4 py-3 font-semibold text-white">rev {revision.revisionNo}<SizeDelta revision={revision} /></td>
-                <td className="px-4 py-3">{revision.isMinor ? <span className="chip chip-muted mr-2">minor</span> : null}{revision.editSummary ?? '요약 없음'}</td>
+                <td className="px-4 py-3">{revision.isMinor ? <span className="chip chip-muted mr-2">minor</span> : null}<WikiEditSummary summary={revision.editSummary} hidden={revision.editSummaryHidden} /></td>
                 <td className="px-4 py-3"><Editor revision={revision} /></td>
                 <td className="px-4 py-3">{formatDate(revision.createdAt)}</td>
                 <td className="px-4 py-3"><Actions revision={revision} previous={revisions[index + 1]} pageId={pageId} currentRevisionId={currentRevisionId} routePath={routePath} /></td>
@@ -98,7 +99,7 @@ export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, in
 }
 
 function HistoryCard({ revision, previous, pageId, currentRevisionId, routePath, olderId, newerId, onSelect }: { revision: Revision; previous?: Revision; pageId: string; currentRevisionId: string; routePath: string; olderId: string | null; newerId: string | null; onSelect: (kind: SelectionKind, revision: Revision) => void }) {
-  return <article className="border border-white/10 bg-[#111821] p-4"><div className="flex items-center justify-between gap-3"><strong className="text-white">rev {revision.revisionNo}</strong><time className="text-xs text-slate-500">{formatDate(revision.createdAt)}</time></div><SizeDelta revision={revision} /><fieldset className="mt-3 flex gap-4"><legend className="sr-only">rev {revision.revisionNo} 비교 위치</legend><RevisionChoice revision={revision} kind="older" selected={olderId === revision.id} onSelect={onSelect} suffix="mobile" /><RevisionChoice revision={revision} kind="newer" selected={newerId === revision.id} onSelect={onSelect} suffix="mobile" /></fieldset><p className="mt-3 break-words text-sm text-slate-300">{revision.editSummary ?? '요약 없음'}</p><p className="mt-2 text-xs text-slate-500">편집자 <Editor revision={revision} />{revision.isMinor ? ' · minor' : ''}</p><div className="mt-4"><Actions revision={revision} previous={previous} pageId={pageId} currentRevisionId={currentRevisionId} routePath={routePath} /></div></article>;
+  return <article className="border border-white/10 bg-[#111821] p-4"><div className="flex items-center justify-between gap-3"><strong className="text-white">rev {revision.revisionNo}</strong><time className="text-xs text-slate-500">{formatDate(revision.createdAt)}</time></div><SizeDelta revision={revision} /><fieldset className="mt-3 flex gap-4"><legend className="sr-only">rev {revision.revisionNo} 비교 위치</legend><RevisionChoice revision={revision} kind="older" selected={olderId === revision.id} onSelect={onSelect} suffix="mobile" /><RevisionChoice revision={revision} kind="newer" selected={newerId === revision.id} onSelect={onSelect} suffix="mobile" /></fieldset><p className="mt-3 break-words text-sm text-slate-300"><WikiEditSummary summary={revision.editSummary} hidden={revision.editSummaryHidden} /></p><p className="mt-2 text-xs text-slate-500">편집자 <Editor revision={revision} />{revision.isMinor ? ' · minor' : ''}</p><div className="mt-4"><Actions revision={revision} previous={previous} pageId={pageId} currentRevisionId={currentRevisionId} routePath={routePath} /></div></article>;
 }
 
 function RevisionChoice({ revision, kind, selected, onSelect, suffix }: { revision: Revision; kind: SelectionKind; selected: boolean; onSelect: (kind: SelectionKind, revision: Revision) => void; suffix: string }) {

@@ -3,6 +3,7 @@ import { ServerWikiWorkspace } from '../../../../components/wiki/server-wiki-wor
 import { WikiDynamicTimeHydrator } from '../../../../components/wiki/wiki-dynamic-time-hydrator';
 import { buildWikiHistoryPath, safeWikiReturnTo } from '../../../../lib/wiki-routes.mjs';
 import { fetchWikiPageByPath, fetchWikiRenderedRevision } from '../../../../lib/wiki-server-api';
+import { WikiEditSummary } from '../../../../components/wiki/wiki-edit-summary';
 
 interface PageProps {
   readonly params: Promise<{ revisionId: string }>;
@@ -34,7 +35,7 @@ export default async function WikiRevisionPage({ params, searchParams }: PagePro
         </div>
         <h1 className="text-3xl font-bold text-white">{page.displayTitle} <span className="text-slate-500">rev {revision.revisionNo}</span></h1>
         <p className="mt-3 text-sm text-slate-400">
-          {formatDate(revision.createdAt)} · {revision.editSummary ?? '편집 요약 없음'} · {formatBytes(revision.contentSize)}
+          {formatDate(revision.createdAt)} · <WikiEditSummary summary={revision.editSummary} hidden={revision.editSummaryHidden} emptyLabel="편집 요약 없음" /> · {formatBytes(revision.contentSize)}
         </p>
         {context ? (
           <div className="mt-5 flex flex-col gap-2 sm:flex-row">

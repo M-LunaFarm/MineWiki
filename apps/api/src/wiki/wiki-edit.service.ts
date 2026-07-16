@@ -15,6 +15,7 @@ import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiNotificationService } from './wiki-notification.service';
+import { publicWikiRevisionEditSummary } from './wiki-revision-summary';
 import { hasWikiConflictMarkers, mergeWikiSource, WikiMergeLimitError } from './wiki-merge';
 import {
   WikiContributionPolicyService,
@@ -162,6 +163,7 @@ export interface WikiRevisionResponse {
   readonly contentSize: number;
   readonly syntaxVersion: string;
   readonly editSummary: string | null;
+  readonly editSummaryHidden: boolean;
   readonly isMinor: boolean;
   readonly createdBy: string | null;
   readonly actorUserId: string | null;
@@ -1943,12 +1945,14 @@ export class WikiEditService {
     contentSize: number;
     syntaxVersion: string;
     editSummary: string | null;
+    editSummaryHidden?: boolean | null;
     isMinor: boolean;
     createdBy: bigint | null;
     actorUserId: bigint | null;
     createdAt: Date;
     visibility: string;
   }): WikiRevisionResponse {
+    const publicSummary = publicWikiRevisionEditSummary(revision);
     return {
       id: revision.id.toString(),
       pageId: revision.pageId.toString(),
@@ -1958,7 +1962,7 @@ export class WikiEditService {
       contentHash: revision.contentHash,
       contentSize: revision.contentSize,
       syntaxVersion: revision.syntaxVersion,
-      editSummary: revision.editSummary,
+      ...publicSummary,
       isMinor: revision.isMinor,
       createdBy: revision.createdBy?.toString() ?? null,
       actorUserId: revision.actorUserId?.toString() ?? null,

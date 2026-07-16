@@ -87,3 +87,54 @@ test('wiki batch rollback requires its dedicated permission', async () => {
   );
   assert.deepEqual(result, { candidates: [] });
 });
+
+test('edit-summary moderation never treats elevation alone as revision authority', async () => {
+  let mutated = false;
+  const controller = new WikiAdminController(
+    {
+      async setRevisionEditSummaryHidden() {
+        mutated = true;
+        return {};
+      }
+    } as unknown as WikiAdminService,
+    {} as WikiProfileService,
+    {} as never
+  );
+
+  await assert.rejects(
+    controller.setRevisionEditSummaryHidden(
+      '101',
+      { hidden: true, expectedVersion: 0, reason: '권한 없는 숨김 요청' },
+      { sessionId: 's1', userId: 'account-1', isElevated: true, permissions: [], groups: [] }
+    ),
+    ForbiddenException
+  );
+  assert.equal(mutated, false);
+});
+
+test('edit-summary moderation forwards the explicit state, version, reason, and moderator profile', async () => {
+  let received: unknown;
+  const controller = new WikiAdminController(
+    {
+      async setRevisionEditSummaryHidden(input: unknown) {
+        received = input;
+        return {
+          revisionId: '101', editSummaryHidden: true, editSummaryModerationVersion: 4,
+          moderatedBy: '99', moderatedAt: '2026-07-17T00:00:00.000Z', reason: '민감 정보 제거'
+        };
+      }
+    } as unknown as WikiAdminService,
+    { async ensureWikiProfile() { return { id: 99n }; } } as unknown as WikiProfileService,
+    {} as never
+  );
+
+  const result = await controller.setRevisionEditSummaryHidden(
+    '101',
+    { hidden: true, expectedVersion: 3, reason: '민감 정보 제거' },
+    { sessionId: 's2', userId: 'account-2', isElevated: false, permissions: ['wiki.admin'], groups: [] }
+  );
+  assert.deepEqual(received, {
+    revisionId: '101', hidden: true, expectedVersion: 3, actorProfileId: 99n, reason: '민감 정보 제거'
+  });
+  assert.equal(result.editSummaryModerationVersion, 4);
+});

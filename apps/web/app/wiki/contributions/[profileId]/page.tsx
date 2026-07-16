@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { fetchWikiContributions, fetchWikiPublicProfile } from '../../../../lib/wiki-server-api';
 import { WikiUserProfileHeader } from '../../../../components/wiki/wiki-user-profile-header';
 import { GitMerge } from 'lucide-react';
+import { WikiEditSummary } from '../../../../components/wiki/wiki-edit-summary';
 
 interface PageProps {
   readonly params: Promise<{ profileId: string }>;
@@ -43,7 +44,7 @@ export default async function WikiContributionsPage({ params, searchParams }: Pa
               {item.isMinor ? <span className="chip chip-muted">사소한 편집</span> : null}
               <Link href={item.href} className="font-semibold text-emerald-200 hover:underline">{item.title}</Link>
             </div>
-            <p className="mt-3 text-sm text-slate-300">{item.summary ?? '요약 없음'}</p>
+            <p className="mt-3 text-sm text-slate-300"><WikiEditSummary summary={item.summary} hidden={item.summaryHidden} /></p>
             <p className="mt-2 text-xs text-slate-500">{formatDate(item.createdAt)} · {item.namespace}</p>
           </article>
         ))}

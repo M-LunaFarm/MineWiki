@@ -9,7 +9,8 @@ import {
   type WikiAdminPageSummary,
   type WikiAdminRecentChange,
   type WikiAdminRevisionDetail,
-  type WikiAdminRevisionPage
+  type WikiAdminRevisionPage,
+  type WikiRevisionEditSummaryModerationResult
 } from './wiki-admin.service';
 import { WikiModerationService } from './wiki-moderation.service';
 import { WikiProfileService } from './wiki-profile.service';
@@ -200,6 +201,23 @@ export class WikiAdminController {
     });
   }
 
+  @Patch('revisions/:id/edit-summary')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  async setRevisionEditSummaryHidden(
+    @Param('id') revisionId: string,
+    @Body() body: { hidden?: boolean; expectedVersion?: number | string; reason?: string },
+    @CurrentSession() session: SessionPayload
+  ): Promise<WikiRevisionEditSummaryModerationResult> {
+    const actor = await this.assertRevisionSummaryModerator(session);
+    return this.wikiAdmin.setRevisionEditSummaryHidden({
+      revisionId,
+      hidden: body.hidden,
+      expectedVersion: body.expectedVersion,
+      actorProfileId: actor.id,
+      reason: body.reason
+    });
+  }
+
   @Post('pages/:id/rollback')
   @Throttle({ default: { limit: 6, ttl: 60 } })
   async rollback(
@@ -274,6 +292,16 @@ export class WikiAdminController {
       session.groups?.some((group) => group === 'owner' || group === 'admin') !== true
     ) {
       throw new ForbiddenException('Wiki batch rollback permission is required.');
+    }
+    return this.wikiProfiles.ensureWikiProfile(session.userId);
+  }
+
+  private async assertRevisionSummaryModerator(session: SessionPayload): Promise<{ id: bigint }> {
+    if (
+      session.permissions?.includes('wiki.admin') !== true
+      && session.groups?.some((group) => group === 'owner' || group === 'admin') !== true
+    ) {
+      throw new ForbiddenException('Wiki revision moderation permission is required.');
     }
     return this.wikiProfiles.ensureWikiProfile(session.userId);
   }

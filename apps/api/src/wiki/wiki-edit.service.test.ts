@@ -269,7 +269,8 @@ test('revision source requires raw ACL while diff requires history ACL', async (
     contentHash: 'a'.repeat(64),
     contentSize: 13,
     syntaxVersion: 'bwm-0.3',
-    editSummary: null,
+    editSummary: '숨겨진 원본 요약',
+    editSummaryHidden: true,
     isMinor: false,
     createdBy: 3n,
     actorUserId: 3n,
@@ -278,7 +279,7 @@ test('revision source requires raw ACL while diff requires history ACL', async (
   };
   const prisma = {
     wikiPageRevision: { async findUnique() { return revision; } },
-    wikiPage: { async findUnique() { return { id: 7n, spaceId: 1n, title: '문서', protectionLevel: 'open', status: 'normal' }; } }
+    wikiPage: { async findUnique() { return { id: 7n, spaceId: 1n, title: '문서', protectionLevel: 'open', status: 'normal', currentRevisionId: 11n }; } }
   } as unknown as PrismaService;
   const permissions = {
     async assertCanReadPage() {},
@@ -286,10 +287,17 @@ test('revision source requires raw ACL while diff requires history ACL', async (
   } as unknown as WikiPermissionService;
   const edits = new WikiEditService(prisma, {} as WikiProfileService, permissions);
 
-  await edits.getRevision('11');
-  await edits.getRevisionDiff('11', '11');
+  const source = await edits.getRevision('11');
+  const raw = await edits.getRawPage('7', undefined, '11');
+  const diff = await edits.getRevisionDiff('11', '11');
 
-  assert.deepEqual(actions, ['raw', 'history', 'history']);
+  assert.deepEqual(actions, ['raw', 'raw', 'history', 'history']);
+  for (const response of [source, raw, diff.left, diff.right]) {
+    assert.equal(response.editSummary, null);
+    assert.equal(response.editSummaryHidden, true);
+    assert.equal(response.contentRaw, '문서 내용');
+    assert.equal(response.contentHash, 'a'.repeat(64));
+  }
 });
 
 test('raw revision and diff reads preserve browser session ACL claims and request address', async () => {

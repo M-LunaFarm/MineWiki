@@ -23,6 +23,7 @@ import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiIncludeService } from './wiki-include.service';
 import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath, WikiRoutePathResolver, type WikiRoutePathBatch } from './wiki-route-path.resolver';
 import { matchCommonLines } from './wiki-line-diff';
+import { publicWikiRecentChangeSummary, publicWikiRevisionEditSummary } from './wiki-revision-summary';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -90,6 +91,7 @@ export interface WikiRenderedRevisionResponse extends WikiPageResponse {
   readonly revision: WikiPageResponse['revision'] & {
     readonly parentRevisionId: string | null;
     readonly editSummary: string | null;
+    readonly editSummaryHidden: boolean;
     readonly isMinor: boolean;
     readonly contentSize: number;
     readonly syntaxVersion: string;
@@ -102,6 +104,7 @@ export interface WikiRevisionSummary {
   readonly id: string;
   readonly revisionNo: number;
   readonly editSummary: string | null;
+  readonly editSummaryHidden: boolean;
   readonly isMinor: boolean;
   readonly createdBy: string | null;
   readonly createdByName: string | null;
@@ -123,6 +126,7 @@ export interface WikiRecentChangeSummary {
   readonly namespaceCode: string;
   readonly routePath: string;
   readonly summary: string | null;
+  readonly summaryHidden: boolean;
   readonly isMinor: boolean;
   readonly createdAt: string;
 }
@@ -193,6 +197,7 @@ export interface WikiContributionItem {
   readonly routePath: string;
   readonly href: string;
   readonly summary: string | null;
+  readonly summaryHidden: boolean;
   readonly isMinor: boolean;
   readonly status: string | null;
   readonly createdAt: string;
@@ -547,6 +552,7 @@ export class WikiReadService {
       revisionId: revision.id
     });
     const routePaths = await this.routePaths.preload([page], new Map([[namespace.id, namespace.code]]));
+    const publicSummary = publicWikiRevisionEditSummary(revision);
     return {
       ...rendered,
       routePath: routePaths.routePath(page, namespace.code),
@@ -558,7 +564,7 @@ export class WikiReadService {
       revision: {
         ...rendered.revision,
         parentRevisionId: revision.parentRevisionId?.toString() ?? null,
-        editSummary: revision.editSummary,
+        ...publicSummary,
         isMinor: revision.isMinor,
         contentSize: revision.contentSize,
         syntaxVersion: revision.syntaxVersion,
@@ -598,10 +604,11 @@ export class WikiReadService {
     const profileById = await this.canonicalProfileViews(profileIds);
     const items = pageRows.map((revision, index) => {
       const previous = revisions[index + 1];
+      const publicSummary = publicWikiRevisionEditSummary(revision);
       return {
         id: revision.id.toString(),
         revisionNo: revision.revisionNo,
-        editSummary: revision.editSummary,
+        ...publicSummary,
         isMinor: revision.isMinor,
         createdBy: revision.createdBy?.toString() ?? null,
         createdByName: revision.createdBy ? profileById.get(revision.createdBy)?.displayName ?? null : null,
@@ -647,6 +654,9 @@ export class WikiReadService {
       orderBy: [{ id: 'desc' }],
       take: scanLimit
     });
+    const hiddenByRevisionId = await this.summaryHiddenByRevisionId(
+      changes.flatMap((change) => change.revisionId === null ? [] : [change.revisionId])
+    );
     const pageIds = [...new Set(changes.flatMap((change) => change.pageId ? [change.pageId] : []))];
     const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
@@ -674,6 +684,11 @@ export class WikiReadService {
         }
         if (!readable) continue;
       }
+      const publicSummary = publicWikiRecentChangeSummary({
+        summary: change.summary,
+        revisionId: change.revisionId,
+        hiddenByRevisionId
+      });
       visible.push({
         id: change.id.toString(),
         pageId: change.pageId?.toString() ?? null,
@@ -685,7 +700,7 @@ export class WikiReadService {
         routePath: change.pageId && pageById.has(change.pageId)
           ? routePaths.routePath(pageById.get(change.pageId)!, change.namespaceCode)
           : wikiUrl(change.namespaceCode as Parameters<typeof wikiUrl>[0], change.title),
-        summary: change.summary,
+        ...publicSummary,
         isMinor: change.isMinor,
         createdAt: change.createdAt.toISOString()
       });
@@ -1091,6 +1106,9 @@ export class WikiReadService {
       orderBy: [{ id: 'desc' }],
       take: Math.min(limit * 4 + 1, 401)
     });
+    const hiddenByRevisionId = await this.summaryHiddenByRevisionId(
+      changes.flatMap((change) => change.revisionId === null ? [] : [change.revisionId])
+    );
     const pageIds = [...new Set(changes.flatMap((change) => change.pageId ? [change.pageId] : []))];
     const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
     const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
@@ -1113,6 +1131,11 @@ export class WikiReadService {
         continue;
       }
       const namespace = namespaceById.get(page.namespaceId) ?? change.namespaceCode;
+      const publicSummary = publicWikiRecentChangeSummary({
+        summary: change.summary,
+        revisionId: change.revisionId,
+        hiddenByRevisionId
+      });
       items.push({
         id: change.id.toString(),
         kind: 'document',
@@ -1123,7 +1146,7 @@ export class WikiReadService {
         namespace,
         routePath: routePaths.routePath(page, namespace),
         href: change.revisionId ? `/wiki/revision/${change.revisionId.toString()}` : routePaths.routePath(page, namespace),
-        summary: change.summary,
+        ...publicSummary,
         isMinor: change.isMinor,
         status: null,
         createdAt: change.createdAt.toISOString()
@@ -1207,6 +1230,7 @@ export class WikiReadService {
         summary: comment.entryType === 'system'
           ? this.discussionEventSummary(comment.eventType, comment.eventBefore, comment.eventAfter)
           : comment.status === 'normal' ? comment.content.slice(0, 255) : '삭제된 댓글', isMinor: false,
+        summaryHidden: false,
         status: thread.status, createdAt: comment.createdAt.toISOString()
       });
       if (items.length >= input.limit) break;
@@ -1245,6 +1269,9 @@ export class WikiReadService {
       orderBy: [{ id: 'desc' }],
       take: scanLimit
     });
+    const hiddenByRevisionId = await this.summaryHiddenByRevisionId(
+      requests.flatMap((request) => request.acceptedRevisionId === null ? [] : [request.acceptedRevisionId])
+    );
     const pageIds = [...new Set(requests.map((request) => request.pageId))];
     const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
     const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
@@ -1261,13 +1288,21 @@ export class WikiReadService {
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
       const routePath = routePaths.routePath(page, namespace);
       const serverSlug = namespace === 'server' ? routePaths.serverSlug(page) : undefined;
+      const copiedSummary = publicWikiRecentChangeSummary({
+        summary: request.editSummary,
+        revisionId: request.acceptedRevisionId,
+        hiddenByRevisionId
+      });
+      const publicSummary = reviews && request.reviewNote
+        ? { summary: request.reviewNote, summaryHidden: false }
+        : copiedSummary;
       items.push({
         id: request.id.toString(), kind: reviews ? 'review' : 'edit_request', pageId: page.id.toString(), revisionId: request.acceptedRevisionId?.toString() ?? null,
         changeType: reviews ? 'review' : 'edit_request', title: page.displayTitle, namespace, routePath,
         href: serverSlug
           ? `${buildServerWikiToolPath(serverSlug, page.localPath, 'requests')}?request=${request.id.toString()}`
           : `/wiki/edit-requests/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&request=${request.id.toString()}`,
-        summary: reviews ? request.reviewNote ?? request.editSummary : request.editSummary,
+        ...publicSummary,
         isMinor: request.isMinor, status: request.status,
         createdAt: (reviews ? request.reviewedAt ?? request.updatedAt : request.createdAt).toISOString()
       });
@@ -2224,6 +2259,16 @@ export class WikiReadService {
       if (target) direct.set(alias.sourceProfileId, target);
     }
     return direct;
+  }
+
+  private async summaryHiddenByRevisionId(revisionIds: readonly bigint[]): Promise<Map<bigint, boolean>> {
+    const uniqueIds = [...new Set(revisionIds)];
+    if (uniqueIds.length === 0) return new Map();
+    const revisions = await this.prisma.wikiPageRevision.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true, editSummaryHidden: true }
+    });
+    return new Map(revisions.map((revision) => [revision.id, revision.editSummaryHidden]));
   }
 
   private parseBigIntId(value: string, label: string): bigint {

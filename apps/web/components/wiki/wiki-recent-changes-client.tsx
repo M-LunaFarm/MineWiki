@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { fetchWikiRecent, type WikiRecentChangeListResponse, type WikiRecentChangeSummary } from '../../lib/wiki-api';
+import { WikiEditSummary } from './wiki-edit-summary';
 
 interface WikiRecentChangesClientProps {
   readonly initial: WikiRecentChangeListResponse;
@@ -50,7 +51,7 @@ function RecentChange({ change }: { readonly change: WikiRecentChangeSummary }) 
         {change.isMinor ? <span className="chip chip-muted">사소한 편집</span> : null}
       </div>
       <h2 className="truncate text-base font-semibold text-white"><Link href={change.routePath} className="hover:text-emerald-200">{change.title}</Link></h2>
-      <p className="mt-1 break-words text-sm text-slate-400">{change.summary ?? '요약 없음'}</p>
+      <p className="mt-1 break-words text-sm text-slate-400"><WikiEditSummary summary={change.summary} hidden={change.summaryHidden} /></p>
     </div>
     <div className="flex flex-wrap items-center gap-2 text-sm text-slate-400 md:justify-end">
       <time>{formatDate(change.createdAt)}</time>

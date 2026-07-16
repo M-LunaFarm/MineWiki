@@ -10,6 +10,7 @@ import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService, type WikiPermissionActor, type WikiPermissionPage } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
+import { publicWikiRevisionEditSummary } from './wiki-revision-summary';
 
 export const WIKI_REPORT_TARGET_TYPES = ['page', 'revision', 'discussion', 'comment'] as const;
 export type WikiReportTargetType = (typeof WIKI_REPORT_TARGET_TYPES)[number];
@@ -326,10 +327,12 @@ function revisionSnapshot(revision: {
   contentHash: string;
   contentSize: number;
   editSummary: string | null;
+  editSummaryHidden?: boolean | null;
   createdBy: bigint | null;
   createdAt: Date;
   visibility: string;
 }) {
+  const publicSummary = publicWikiRevisionEditSummary(revision);
   return {
     id: revision.id.toString(),
     pageId: revision.pageId.toString(),
@@ -337,7 +340,7 @@ function revisionSnapshot(revision: {
     contentExcerpt: boundedExcerpt(revision.contentRaw),
     contentHash: revision.contentHash,
     contentSize: revision.contentSize,
-    editSummary: revision.editSummary,
+    ...publicSummary,
     createdBy: revision.createdBy?.toString() ?? null,
     createdAt: revision.createdAt.toISOString(),
     visibility: revision.visibility,

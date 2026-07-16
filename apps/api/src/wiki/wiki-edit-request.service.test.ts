@@ -164,7 +164,8 @@ test('accepting a new-page request delegates atomic page creation and preserves 
   let acceptedId: bigint | null = null;
   const prisma = {
     wikiEditRequest: { async findUnique() { return createRequest; } },
-    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }, { id: 20n, displayName: '검토자' }]; } }
+    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }, { id: 20n, displayName: '검토자' }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 66n, editSummaryHidden: false }]; } }
   } as unknown as PrismaService;
   const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
   const edits = {
@@ -205,6 +206,23 @@ test('edit request detail enforces page visibility and returns the exact request
   assert.equal(result.createdByName, '작성자');
   assert.equal(readChecked, true);
   assert.equal(rawChecked, true);
+});
+
+test('accepted edit request payloads derive summary redaction from their source revision', async () => {
+  const accepted = { ...request, status: 'accepted', acceptedRevisionId: 31n, reviewedBy: 20n, reviewedAt: new Date() };
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiEditRequest: { async findUnique() { return accepted; } },
+    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }, { id: 20n, displayName: '검토자' }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 31n, editSummaryHidden: true }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {}, async assertCanUsePageAction() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiEditRequestService(prisma, {} as WikiProfileService, permissions, {} as WikiEditService).get('40');
+  assert.equal(result.editSummary, null);
+  assert.equal(result.editSummaryHidden, true);
+  assert.equal(result.acceptedRevisionId, '31');
+  assert.equal(result.proposedContent, 'next');
 });
 
 test('global edit request queue resolves readable pages and reviewer capability', async () => {

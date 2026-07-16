@@ -19,6 +19,7 @@ import {
   type WikiEditRequestListResponse,
   type WikiEditRequestSummary
 } from '../../lib/wiki-api';
+import { WikiEditSummary } from './wiki-edit-summary';
 
 const EMPTY: WikiEditRequestListResponse = { items: [], canReview: false, viewerProfileId: null, nextCursor: null, currentRevisionId: null };
 
@@ -104,14 +105,14 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
         ? await rebaseWikiEditRequest(editing.id, {
             contentRaw: editing.proposedContent,
             currentRevisionId: rebaseConflict.currentRevisionId,
-            editSummary: editing.editSummary,
+            editSummary: editing.editSummary ?? '',
             isMinor: editing.isMinor
           })
         : await updateWikiEditRequest({
             requestId: editing.id,
             baseRevisionId: editing.baseRevisionId ?? undefined,
             contentRaw: editing.proposedContent,
-            editSummary: editing.editSummary,
+            editSummary: editing.editSummary ?? '',
             isMinor: editing.isMinor
           });
       replace(updated);
@@ -185,7 +186,7 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
         : false;
       return <article id={`edit-request-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedRequestId || undefined} key={item.id} className="border border-white/10 bg-[#111821] p-4 outline-none data-[highlighted=true]:border-emerald-300/60 data-[highlighted=true]:bg-emerald-300/[0.06] sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="font-semibold text-white">{item.editSummary}</h2><p className="mt-2 text-xs text-slate-500">{item.requestKind === 'create' ? '새 문서 요청 · ' : ''}{item.createdByName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</p></div>
+          <div><h2 className="font-semibold text-white"><WikiEditSummary summary={item.editSummary} hidden={item.editSummaryHidden} /></h2><p className="mt-2 text-xs text-slate-500">{item.requestKind === 'create' ? '새 문서 요청 · ' : ''}{item.createdByName} · {formatDate(item.createdAt)} · {statusLabel(item.status)}</p></div>
           <div className="flex flex-wrap gap-2">
             {data.canReview && item.status === 'pending' && !isStale ? <Action disabled={Boolean(working)} onClick={() => void review(item.id, 'accept')} accent icon={<Check />}>승인</Action> : null}
             {data.canReview && item.status === 'pending' ? <Action disabled={Boolean(working)} onClick={() => void review(item.id, 'reject')} icon={<X />}>반려</Action> : null}
@@ -198,7 +199,7 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
         {isStale ? <div className="mt-4 flex gap-3 border border-amber-300/25 bg-amber-400/10 p-3 text-sm text-amber-100" role="status"><AlertTriangle className="mt-0.5 size-4 flex-none" /><p>이 요청은 현재 문서보다 오래된 판을 기준으로 합니다. 승인하거나 수정하기 전에 작성자가 최신 판으로 재배치해야 합니다.</p></div> : null}
         {editing?.id === item.id ? <form onSubmit={(event) => void saveEdit(event)} className="mt-4 grid gap-3 border border-emerald-300/20 bg-black/20 p-4">
           {resolvingConflict ? <div role="alert" className="flex gap-3 border border-amber-300/30 bg-amber-400/10 p-3 text-sm text-amber-100"><AlertTriangle className="mt-0.5 size-4 flex-none" /><div className="space-y-1"><p className="font-semibold">겹치는 변경 {rebaseConflict.conflictCount}개를 직접 정리해 주세요.</p><p className="text-xs leading-5 text-amber-100/80"><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; 내 편집</code>, <code>=======</code>, <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt; 최신 판</code> 표시를 모두 제거하면 재배치 저장이 활성화됩니다.</p></div></div> : null}
-          <label className="grid gap-2 text-sm text-slate-300">요약<input name="editSummary" value={editing.editSummary} onChange={(event) => setEditing({ ...editing, editSummary: event.target.value })} maxLength={255} required className="input min-h-11" /></label>
+          <label className="grid gap-2 text-sm text-slate-300">요약<input name="editSummary" value={editing.editSummary ?? ''} onChange={(event) => setEditing({ ...editing, editSummary: event.target.value })} maxLength={255} required className="input min-h-11" /></label>
           <label className="grid gap-2 text-sm text-slate-300">제안 원문<textarea name="contentRaw" value={editing.proposedContent} onChange={(event) => setEditing({ ...editing, proposedContent: event.target.value })} required rows={12} className="input min-h-64 resize-y overflow-x-auto font-mono text-xs [overflow-wrap:anywhere]" /></label>
           <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300"><input name="isMinor" type="checkbox" checked={editing.isMinor} onChange={(event) => setEditing({ ...editing, isMinor: event.target.checked })} /> 사소한 편집</label>
           <div className="flex flex-wrap gap-2"><button type="submit" disabled={Boolean(working) || unresolvedMarkers} className="chip chip-accent inline-flex min-h-11 items-center gap-1"><Save className="size-4" /> {resolvingConflict ? '충돌 해결 후 재배치' : '저장'}</button><button type="button" onClick={cancelEditing} className="chip chip-muted min-h-11">취소</button></div>

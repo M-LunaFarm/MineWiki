@@ -402,7 +402,7 @@ test('revision history uses a stable revision number cursor beyond the first pag
   const now = new Date('2026-07-13T00:00:00Z');
   let revisionWhere: unknown;
   const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'doc', slug: 'doc', title: '문서', displayTitle: '문서', currentRevisionId: 4n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
-  const makeRevision = (revisionNo: number) => ({ id: BigInt(revisionNo), pageId: 1n, revisionNo, editSummary: null, isMinor: false, createdBy: 1n, createdAt: now, contentHash: String(revisionNo), contentSize: revisionNo });
+  const makeRevision = (revisionNo: number) => ({ id: BigInt(revisionNo), pageId: 1n, revisionNo, editSummary: `요약 ${revisionNo}`, editSummaryHidden: revisionNo === 3, isMinor: false, createdBy: 1n, createdAt: now, contentHash: String(revisionNo), contentSize: revisionNo });
   const prisma = {
     wikiPage: { async findUnique() { return page; } },
     wikiPageRevision: { async findMany(args: { where: unknown }) { revisionWhere = args.where; return [makeRevision(4), makeRevision(3), makeRevision(2)]; } },
@@ -414,13 +414,14 @@ test('revision history uses a stable revision number cursor beyond the first pag
   assert.deepEqual(result.items.map((item) => item.revisionNo), [4, 3]);
   assert.deepEqual(result.items.map((item) => item.previousPublicRevisionId), ['3', '2']);
   assert.deepEqual(result.items.map((item) => item.sizeDelta), [1, 1]);
+  assert.deepEqual(result.items.map((item) => [item.editSummary, item.editSummaryHidden]), [['요약 4', false], [null, true]]);
   assert.equal(result.nextCursor, '3');
 });
 
 test('historical revision rendering keeps raw source private and applies read plus history ACLs', async () => {
   const now = new Date('2026-07-16T00:00:00Z');
   const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'history', slug: 'history', title: 'History', displayTitle: 'History', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
-  const revision = { id: 11n, pageId: 1n, revisionNo: 3, parentRevisionId: 10n, contentRaw: '= Historical =\nRendered body', contentHash: 'hash', contentSize: 28, syntaxVersion: 'bwm-0.3', editSummary: 'old copy', isMinor: true, editTags: null, contentAst: null, createdBy: 2n, actorType: 'user', actorUserId: 2n, actorIp: null, actorIpText: null, actorIpHash: null, createdAt: now, visibility: 'public' };
+  const revision = { id: 11n, pageId: 1n, revisionNo: 3, parentRevisionId: 10n, contentRaw: '= Historical =\nRendered body', contentHash: 'hash', contentSize: 28, syntaxVersion: 'bwm-0.3', editSummary: 'old copy', editSummaryHidden: false, isMinor: true, editTags: null, contentAst: null, createdBy: 2n, actorType: 'user', actorUserId: 2n, actorIp: null, actorIpText: null, actorIpHash: null, createdAt: now, visibility: 'public' };
   const prisma = {
     wikiPage: { async findUnique() { return page; }, async findFirst() { return { namespaceId: 1 }; } },
     wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
@@ -439,6 +440,7 @@ test('historical revision rendering keeps raw source private and applies read pl
   assert.equal(result.id, '1');
   assert.equal(result.revision.id, '11');
   assert.equal(result.revision.editSummary, 'old copy');
+  assert.equal(result.revision.editSummaryHidden, false);
   assert.equal(result.revision.isCurrent, false);
   assert.equal(result.currentRevisionId, '12');
   assert.equal(result.routePath, '/wiki/History');
@@ -447,6 +449,11 @@ test('historical revision rendering keeps raw source private and applies read pl
   assert.equal('contentRaw' in (result as unknown as Record<string, unknown>), false);
   assert.equal(readRevisionId, 11n);
   assert.deepEqual(actions, ['history']);
+
+  revision.editSummaryHidden = true;
+  const redacted = await new WikiReadService(prisma, permissions).getRenderedRevision('11');
+  assert.equal(redacted.revision.editSummary, null);
+  assert.equal(redacted.revision.editSummaryHidden, true);
 });
 
 test('historical revision rendering conceals non-public revisions before ACL evaluation', async () => {
@@ -473,6 +480,11 @@ test('recent changes use filters, a stable cursor, and one page visibility check
       async findMany(args: unknown) {
         recentQuery = args;
         return [change(10n, 1n, '공개 문서'), change(9n, 2n, '비공개 문서'), change(8n, 1n, '공개 문서')];
+      }
+    },
+    wikiPageRevision: {
+      async findMany(args: { where: { id: { in: bigint[] } } }) {
+        return args.where.id.in.map((id) => ({ id, editSummaryHidden: false }));
       }
     },
     wikiPage: {
@@ -506,6 +518,29 @@ test('recent changes use filters, a stable cursor, and one page visibility check
   assert.deepEqual(result.items.map((item) => item.id), ['10', '8']);
   assert.equal(result.items[0]?.routePath, '/server/alpha/%EA%B3%B5%EA%B0%9C_%EB%AC%B8%EC%84%9C');
   assert.equal(result.nextCursor, '8');
+});
+
+test('recent changes redact stale denormalized summaries from hidden or missing source revisions', async () => {
+  const now = new Date('2026-07-17T00:00:00Z');
+  const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: '문서', slug: '문서', title: '문서', displayTitle: '문서', currentRevisionId: 110n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
+  const prisma = {
+    wikiRecentChange: {
+      async findMany() {
+        return [
+          { id: 10n, pageId: 1n, revisionId: 110n, actorId: 3n, changeType: 'edit', title: '문서', namespaceCode: 'main', summary: '숨겨진 복사본', isMinor: false, createdAt: now },
+          { id: 9n, pageId: 1n, revisionId: 109n, actorId: 3n, changeType: 'edit', title: '문서', namespaceCode: 'main', summary: '고아 복사본', isMinor: false, createdAt: now }
+        ];
+      }
+    },
+    wikiPageRevision: { async findMany() { return [{ id: 110n, editSummaryHidden: true }]; } },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getRecent({ limit: 10 });
+
+  assert.deepEqual(result.items.map((item) => [item.summary, item.summaryHidden]), [[null, true], [null, true]]);
 });
 
 test('blocked profiles keep their public contribution ledger', async () => {
@@ -843,6 +878,7 @@ test('contributions resolve public changes to stable document routes', async () 
         return [{ id: 9n, pageId: 20n, revisionId: 200n, changeType: 'edit', namespaceCode: 'main', summary: '보강', isMinor: false, createdAt: now }];
       }
     },
+    wikiPageRevision: { async findMany() { return [{ id: 200n, editSummaryHidden: false }]; } },
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
   } as unknown as PrismaService;
@@ -853,6 +889,28 @@ test('contributions resolve public changes to stable document routes', async () 
   assert.equal(result.profile.displayName, '편집자');
   assert.equal(result.items[0]?.routePath, '/wiki/%EA%B8%B0%EC%97%AC_%EB%AC%B8%EC%84%9C');
   assert.equal(result.items[0]?.summary, '보강');
+  assert.equal(result.items[0]?.summaryHidden, false);
+});
+
+test('contributions redact a hidden revision summary even when the activity copy still contains it', async () => {
+  const now = new Date('2026-07-17T00:00:00Z');
+  const page = {
+    id: 20n, namespaceId: 1, spaceId: 1n, slug: '기여_문서', title: '기여 문서', displayTitle: '기여 문서',
+    currentRevisionId: 200n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 5n, createdAt: now, updatedAt: now, localPath: '기여_문서'
+  };
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; } },
+    wikiRecentChange: { async findMany() { return [{ id: 9n, pageId: 20n, revisionId: 200n, changeType: 'edit', namespaceCode: 'main', summary: '유출되면 안 되는 요약', isMinor: false, createdAt: now }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 200n, editSummaryHidden: true }]; } },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5' });
+  assert.equal(result.items[0]?.summary, null);
+  assert.equal(result.items[0]?.summaryHidden, true);
 });
 
 test('contribution tabs expose discussion, edit-request, and reviewer ledgers', async () => {
@@ -872,6 +930,7 @@ test('contribution tabs expose discussion, edit-request, and reviewer ledgers', 
     wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '토론 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
     wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '문서 방향', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
     wikiEditRequest: { async findMany() { return [editRequest]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 201n, editSummaryHidden: true }]; } },
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
   } as unknown as PrismaService;
@@ -889,11 +948,13 @@ test('contribution tabs expose discussion, edit-request, and reviewer ledgers', 
   const requests = await service.getContributions({ profileId: '5', activity: 'edit-requests' });
   assert.equal(requests.items[0]?.kind, 'edit_request');
   assert.equal(requests.items[0]?.status, 'accepted');
-  assert.equal(requests.items[0]?.summary, '수정 제안');
+  assert.equal(requests.items[0]?.summary, null);
+  assert.equal(requests.items[0]?.summaryHidden, true);
 
   const reviews = await service.getContributions({ profileId: '5', activity: 'reviews' });
   assert.equal(reviews.items[0]?.kind, 'review');
   assert.equal(reviews.items[0]?.summary, '승인함');
+  assert.equal(reviews.items[0]?.summaryHidden, false);
   assert.equal(reviews.items[0]?.createdAt, now.toISOString());
 });
 
@@ -909,6 +970,7 @@ test('server wiki discussion contributions keep the canonical workspace route', 
     wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '토론 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
     wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '문서 방향', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
     wikiEditRequest: { async findMany() { return [{ id: 31n, pageId: 20n, baseRevisionId: 200n, proposedContent: '내용', editSummary: '수정 제안', isMinor: false, status: 'accepted', createdBy: 5n, reviewedBy: 5n, reviewNote: '승인함', acceptedRevisionId: 201n, createdAt: now, updatedAt: now, reviewedAt: now }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 201n, editSummaryHidden: false }]; } },
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
     serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna' }]; } }

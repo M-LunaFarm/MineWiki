@@ -93,6 +93,7 @@ export interface WikiRenderedRevisionResponse extends WikiPageResponse {
   readonly revision: WikiPageResponse['revision'] & {
     readonly parentRevisionId: string | null;
     readonly editSummary: string | null;
+    readonly editSummaryHidden: boolean;
     readonly isMinor: boolean;
     readonly contentSize: number;
     readonly syntaxVersion: string;
@@ -144,6 +145,7 @@ export interface WikiRevisionResponse {
   readonly contentSize: number;
   readonly syntaxVersion: string;
   readonly editSummary: string | null;
+  readonly editSummaryHidden: boolean;
   readonly isMinor: boolean;
   readonly createdBy: string | null;
   readonly actorUserId: string | null;
@@ -174,6 +176,7 @@ export interface WikiRevisionSummary {
   readonly id: string;
   readonly revisionNo: number;
   readonly editSummary: string | null;
+  readonly editSummaryHidden: boolean;
   readonly isMinor: boolean;
   readonly createdBy: string | null;
   readonly createdByName: string | null;
@@ -227,6 +230,7 @@ export interface WikiRecentChangeSummary {
   readonly namespaceCode: string;
   readonly routePath: string;
   readonly summary: string | null;
+  readonly summaryHidden: boolean;
   readonly isMinor: boolean;
   readonly createdAt: string;
 }
@@ -453,6 +457,7 @@ export interface WikiContributionResponse {
     readonly routePath: string;
     readonly href: string;
     readonly summary: string | null;
+    readonly summaryHidden: boolean;
     readonly isMinor: boolean;
     readonly status: string | null;
     readonly createdAt: string;
@@ -753,6 +758,7 @@ export interface WikiEditRequestSummary {
   readonly targetDisplayTitle: string | null;
   readonly proposedContent: string;
   readonly editSummary: string | null;
+  readonly editSummaryHidden: boolean;
   readonly isMinor: boolean;
   readonly status: string;
   readonly createdBy: string;
@@ -839,7 +845,9 @@ export interface WikiAdminRevisionSummary {
   readonly revisionNo: number;
   readonly parentRevisionId: string | null;
   readonly contentSize: number;
-  readonly editSummary: string;
+  readonly editSummary: string | null;
+  readonly editSummaryHidden: boolean;
+  readonly editSummaryModerationVersion: number;
   readonly isMinor: boolean;
   readonly createdBy: string | null;
   readonly createdByName: string;
@@ -859,6 +867,13 @@ export interface WikiAdminRevisionDetail extends WikiAdminRevisionSummary {
   readonly contentHash: string;
   readonly syntaxVersion: string;
   readonly page: WikiAdminPageSummary;
+  readonly editSummaryModeration: {
+    readonly action: 'hidden' | 'restored';
+    readonly moderatorProfileId: string;
+    readonly moderatorName: string;
+    readonly moderatedAt: string;
+    readonly reason: string;
+  } | null;
 }
 
 export interface WikiAdminUserSummary {
@@ -1637,6 +1652,29 @@ export async function updateWikiAdminRevisionVisibility(input: {
   return fetchWikiAdminJson(`/revisions/${encodeURIComponent(input.revisionId)}/visibility`, {
     method: 'PATCH',
     body: JSON.stringify({ visibility: input.visibility, reason: input.reason })
+  });
+}
+
+export async function updateWikiAdminRevisionEditSummary(input: {
+  revisionId: string;
+  hidden: boolean;
+  expectedVersion: number;
+  reason: string;
+}): Promise<{
+  revisionId: string;
+  editSummaryHidden: boolean;
+  editSummaryModerationVersion: number;
+  moderatedBy: string;
+  moderatedAt: string;
+  reason: string;
+}> {
+  return fetchWikiAdminJson(`/revisions/${encodeURIComponent(input.revisionId)}/edit-summary`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      hidden: input.hidden,
+      expectedVersion: input.expectedVersion,
+      reason: input.reason
+    })
   });
 }
 

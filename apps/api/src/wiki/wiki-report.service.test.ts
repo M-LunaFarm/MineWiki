@@ -102,6 +102,20 @@ test('blocked wiki profiles cannot create reports', async () => {
   );
 });
 
+test('report evidence cannot re-expose a hidden revision summary', async () => {
+  const store = reportStore({ revisionSummaryHidden: true });
+  await createService(store).report(reporter('account-1'), {
+    targetType: 'revision', targetId: '11', reason: '숨겨진 요약이 있는 판 신고'
+  });
+  const [storedCase] = [...store.cases.values()];
+  const snapshot = storedCase?.evidenceSnapshot as {
+    revision?: { editSummary?: string | null; editSummaryHidden?: boolean; contentExcerpt?: string };
+  };
+  assert.equal(snapshot.revision?.editSummary, null);
+  assert.equal(snapshot.revision?.editSummaryHidden, true);
+  assert.equal(snapshot.revision?.contentExcerpt, '신고 대상 판 내용');
+});
+
 interface ReportCaseRow {
   id: string;
   targetType: 'page' | 'revision' | 'discussion' | 'comment';
@@ -122,7 +136,7 @@ interface ReportCaseRow {
   updatedAt: Date;
 }
 
-function reportStore(options: { pageExists?: boolean; denyRead?: boolean; hiddenComment?: boolean } = {}) {
+function reportStore(options: { pageExists?: boolean; denyRead?: boolean; hiddenComment?: boolean; revisionSummaryHidden?: boolean } = {}) {
   const cases = new Map<string, ReportCaseRow>();
   const submissions = new Map<string, { id: string; caseId: string; reporterProfileId: bigint }>();
   const transactionIsolationLevels: string[] = [];
@@ -130,6 +144,11 @@ function reportStore(options: { pageExists?: boolean; denyRead?: boolean; hidden
   let nextSubmission = 1;
   const thread = { id: 40n, pageId: 10n, title: '토론', status: 'open', createdBy: 1n, createdAt: now, updatedAt: now, pinnedCommentId: null };
   const comment = { id: 50n, threadId: 40n, content: '신고 대상 댓글', status: options.hiddenComment ? 'hidden' : 'normal', createdBy: 1n, createdAt: now, updatedAt: null, entryType: 'comment', eventType: null, eventBefore: null, eventAfter: null };
+  const revision = {
+    id: 11n, pageId: 10n, revisionNo: 1, contentRaw: '신고 대상 판 내용', contentHash: 'a'.repeat(64), contentSize: 24,
+    editSummary: '숨겨진 신고 대상 요약', editSummaryHidden: options.revisionSummaryHidden === true,
+    createdBy: 1n, createdAt: now, visibility: 'public'
+  };
 
   const transaction = {
     wikiReportCase: {
@@ -178,7 +197,7 @@ function reportStore(options: { pageExists?: boolean; denyRead?: boolean; hidden
     transactionIsolationLevels,
     denyRead: options.denyRead === true,
     wikiPage: { async findUnique() { return options.pageExists === false ? null : page; } },
-    wikiPageRevision: { async findUnique() { return null; } },
+    wikiPageRevision: { async findUnique() { return options.revisionSummaryHidden === undefined ? null : revision; } },
     wikiDiscussionThread: { async findUnique() { return thread; } },
     wikiDiscussionComment: {
       async findUnique() { return comment; },

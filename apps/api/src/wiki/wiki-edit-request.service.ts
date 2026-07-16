@@ -10,6 +10,7 @@ import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
 import { buildCanonicalServerWikiToolPath, WikiRoutePathResolver } from './wiki-route-path.resolver';
+import { publicWikiRecentChangeSummary } from './wiki-revision-summary';
 import {
   WikiContributionPolicyService,
   type WikiPolicyAcceptance,
@@ -25,7 +26,8 @@ export interface WikiEditRequestSummary {
   readonly targetTitle: string | null;
   readonly targetDisplayTitle: string | null;
   readonly proposedContent: string;
-  readonly editSummary: string;
+  readonly editSummary: string | null;
+  readonly editSummaryHidden: boolean;
   readonly isMinor: boolean;
   readonly status: string;
   readonly createdBy: string;
@@ -922,22 +924,42 @@ export class WikiEditRequestService {
 
   private async present(requests: readonly WikiEditRequest[]): Promise<WikiEditRequestSummary[]> {
     const ids = [...new Set(requests.flatMap((request) => [request.createdBy, request.reviewedBy].filter((id): id is bigint => typeof id === 'bigint')))];
-    const profiles = ids.length > 0 ? await this.prisma.wikiProfile.findMany({ where: { id: { in: ids } }, select: { id: true, displayName: true } }) : [];
-    const names = new Map(profiles.map((profile) => [profile.id, profile.displayName]));
-    return requests.map((request) => ({
-      id: request.id.toString(), requestKind: request.requestKind === 'create' ? 'create' : 'edit',
-      pageId: request.pageId?.toString() ?? null, baseRevisionId: request.baseRevisionId?.toString() ?? null,
-      targetNamespace: request.targetNamespaceCode,
-      targetSpaceId: request.targetSpaceId?.toString() ?? null,
-      targetTitle: request.targetTitle,
-      targetDisplayTitle: request.targetDisplayTitle,
-      proposedContent: request.proposedContent, editSummary: request.editSummary, isMinor: request.isMinor, status: request.status,
-      createdBy: request.createdBy.toString(), createdByName: names.get(request.createdBy) ?? '알 수 없는 사용자',
-      reviewedBy: request.reviewedBy?.toString() ?? null, reviewedByName: request.reviewedBy ? names.get(request.reviewedBy) ?? '알 수 없는 사용자' : null,
-      reviewNote: request.reviewNote, acceptedRevisionId: request.acceptedRevisionId?.toString() ?? null,
-      contributionPolicyVersion: request.contributionPolicyVersion,
-      createdAt: request.createdAt.toISOString(), updatedAt: request.updatedAt.toISOString(), reviewedAt: request.reviewedAt?.toISOString() ?? null
-    }));
+    const acceptedRevisionIds = [...new Set(requests.flatMap((request) => request.acceptedRevisionId === null ? [] : [request.acceptedRevisionId]))];
+    const [profiles, acceptedRevisions] = await Promise.all([
+      ids.length > 0 ? this.prisma.wikiProfile.findMany({ where: { id: { in: ids } }, select: { id: true, displayName: true } }) : [],
+      acceptedRevisionIds.length > 0
+        ? this.prisma.wikiPageRevision.findMany({
+            where: { id: { in: acceptedRevisionIds } },
+            select: { id: true, editSummaryHidden: true }
+          })
+        : []
+    ]);
+    const names = new Map<bigint, string>(profiles.map((profile): [bigint, string] => [profile.id, profile.displayName]));
+    const hiddenByRevisionId = new Map<bigint, boolean>(
+      acceptedRevisions.map((revision): [bigint, boolean] => [revision.id, revision.editSummaryHidden])
+    );
+    return requests.map((request) => {
+      const publicSummary = publicWikiRecentChangeSummary({
+        summary: request.editSummary,
+        revisionId: request.acceptedRevisionId,
+        hiddenByRevisionId
+      });
+      return {
+        id: request.id.toString(), requestKind: request.requestKind === 'create' ? 'create' : 'edit',
+        pageId: request.pageId?.toString() ?? null, baseRevisionId: request.baseRevisionId?.toString() ?? null,
+        targetNamespace: request.targetNamespaceCode,
+        targetSpaceId: request.targetSpaceId?.toString() ?? null,
+        targetTitle: request.targetTitle,
+        targetDisplayTitle: request.targetDisplayTitle,
+        proposedContent: request.proposedContent, editSummary: publicSummary.summary, editSummaryHidden: publicSummary.summaryHidden,
+        isMinor: request.isMinor, status: request.status,
+        createdBy: request.createdBy.toString(), createdByName: names.get(request.createdBy) ?? '알 수 없는 사용자',
+        reviewedBy: request.reviewedBy?.toString() ?? null, reviewedByName: request.reviewedBy ? names.get(request.reviewedBy) ?? '알 수 없는 사용자' : null,
+        reviewNote: request.reviewNote, acceptedRevisionId: request.acceptedRevisionId?.toString() ?? null,
+        contributionPolicyVersion: request.contributionPolicyVersion,
+        createdAt: request.createdAt.toISOString(), updatedAt: request.updatedAt.toISOString(), reviewedAt: request.reviewedAt?.toISOString() ?? null
+      };
+    });
   }
 
   private required(value: string | undefined, label: string) { const result = value?.trim(); if (!result) throw new BadRequestException(`${label} is required.`); return result; }

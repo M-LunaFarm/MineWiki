@@ -512,3 +512,201 @@ test('wiki admin rollback does not persist viewer-dependent include HTML', async
 
   assert.equal(renderCaches.length, 0);
 });
+
+function createEditSummaryModerationFixture(options: { failAudit?: boolean } = {}) {
+  const now = new Date('2026-07-17T00:00:00.000Z');
+  const page = {
+    id: 10n, namespaceId: 1, spaceId: 20n, localPath: '대문', slug: '대문', title: '대문', displayTitle: '대문',
+    currentRevisionId: 101n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n,
+    createdAt: now, updatedAt: now
+  };
+  const revision = {
+    id: 101n, pageId: 10n, revisionNo: 2, parentRevisionId: 100n,
+    contentRaw: '변경하지 말아야 할 원문', contentAst: { type: 'root' }, contentHash: 'b'.repeat(64), contentSize: 32,
+    syntaxVersion: 'bwm-0.3', editSummary: '보존할 원본 요약', editSummaryHidden: false,
+    editSummaryModerationVersion: 0, editSummaryModeratedBy: null as bigint | null,
+    editSummaryModeratedAt: null as Date | null, editSummaryModerationReason: null as string | null,
+    isMinor: false, editTags: { source: 'test' }, createdBy: 1n, actorUserId: 1n, createdAt: now, visibility: 'public'
+  };
+  const recentChanges = [{ id: 1n, revisionId: 101n, summary: '보존할 원본 요약' }];
+  const renderCaches = [{ id: 1n, pageId: 10n, revisionId: 101n, html: '<p>cached</p>' }];
+  const audits: Array<Record<string, unknown>> = [];
+  const isolationLevels: string[] = [];
+  let transactionCount = 0;
+  const tx = {
+    wikiPageRevision: {
+      async findUnique(args: { where: { id: bigint } }) {
+        return args.where.id === revision.id ? revision : null;
+      },
+      async updateMany(args: {
+        where: { id: bigint; editSummaryHidden: boolean; editSummaryModerationVersion: number };
+        data: {
+          editSummaryHidden: boolean;
+          editSummaryModerationVersion: { increment: number };
+          editSummaryModeratedBy: bigint;
+          editSummaryModeratedAt: Date;
+          editSummaryModerationReason: string;
+        };
+      }) {
+        if (
+          args.where.id !== revision.id
+          || args.where.editSummaryHidden !== revision.editSummaryHidden
+          || args.where.editSummaryModerationVersion !== revision.editSummaryModerationVersion
+        ) return { count: 0 };
+        revision.editSummaryHidden = args.data.editSummaryHidden;
+        revision.editSummaryModerationVersion += args.data.editSummaryModerationVersion.increment;
+        revision.editSummaryModeratedBy = args.data.editSummaryModeratedBy;
+        revision.editSummaryModeratedAt = args.data.editSummaryModeratedAt;
+        revision.editSummaryModerationReason = args.data.editSummaryModerationReason;
+        return { count: 1 };
+      }
+    },
+    auditEvent: {
+      async create(args: { data: Record<string, unknown> }) {
+        if (options.failAudit) throw new Error('audit write failed');
+        audits.push(args.data);
+        return args.data;
+      }
+    }
+  };
+  const prisma = {
+    wikiPageRevision: tx.wikiPageRevision,
+    wikiPage: { async findUnique() { return page; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiProfile: {
+      async findMany() {
+        return [{ id: 1n, displayName: '편집자' }, { id: 99n, displayName: '요약 관리자' }];
+      }
+    },
+    async $transaction<T>(callback: (store: typeof tx) => Promise<T>, config: { isolationLevel: string }) {
+      transactionCount += 1;
+      isolationLevels.push(config.isolationLevel);
+      const beforeRevision = { ...revision };
+      const beforeAudits = audits.length;
+      try {
+        return await callback(tx);
+      } catch (error) {
+        Object.assign(revision, beforeRevision);
+        audits.splice(beforeAudits);
+        throw error;
+      }
+    }
+  };
+  return {
+    service: new WikiAdminService(prisma as unknown as PrismaService),
+    revision, page, recentChanges, renderCaches, audits, isolationLevels,
+    transactionCount: () => transactionCount
+  };
+}
+
+test('edit-summary hide and restore preserve revision content, pointers, visibility, rollback source, and render cache', async () => {
+  const fixture = createEditSummaryModerationFixture();
+  const immutableRevision = {
+    editSummary: fixture.revision.editSummary,
+    contentRaw: fixture.revision.contentRaw,
+    contentAst: fixture.revision.contentAst,
+    contentHash: fixture.revision.contentHash,
+    contentSize: fixture.revision.contentSize,
+    parentRevisionId: fixture.revision.parentRevisionId,
+    visibility: fixture.revision.visibility
+  };
+  const pointer = fixture.page.currentRevisionId;
+  const recentSnapshot = structuredClone(fixture.recentChanges);
+  const cacheSnapshot = structuredClone(fixture.renderCaches);
+
+  const hidden = await fixture.service.setRevisionEditSummaryHidden({
+    revisionId: '101', hidden: true, expectedVersion: 0, actorProfileId: 99n, reason: '  개인정보가 포함된 요약  '
+  });
+
+  assert.equal(hidden.editSummaryHidden, true);
+  assert.equal(hidden.editSummaryModerationVersion, 1);
+  assert.equal(fixture.revision.editSummary, '보존할 원본 요약');
+  assert.deepEqual({
+    editSummary: fixture.revision.editSummary,
+    contentRaw: fixture.revision.contentRaw,
+    contentAst: fixture.revision.contentAst,
+    contentHash: fixture.revision.contentHash,
+    contentSize: fixture.revision.contentSize,
+    parentRevisionId: fixture.revision.parentRevisionId,
+    visibility: fixture.revision.visibility
+  }, immutableRevision);
+  assert.equal(fixture.page.currentRevisionId, pointer);
+  assert.deepEqual(fixture.recentChanges, recentSnapshot);
+  assert.deepEqual(fixture.renderCaches, cacheSnapshot);
+  assert.deepEqual(fixture.isolationLevels, [Prisma.TransactionIsolationLevel.Serializable]);
+  assert.equal(fixture.audits[0]?.action, 'wiki.revision_edit_summary.hide');
+  assert.deepEqual((fixture.audits[0]?.metadata as Record<string, unknown>)?.originalEditSummary, '보존할 원본 요약');
+  assert.deepEqual((fixture.audits[0]?.metadata as Record<string, unknown>)?.reason, '개인정보가 포함된 요약');
+
+  const restored = await fixture.service.setRevisionEditSummaryHidden({
+    revisionId: '101', hidden: false, expectedVersion: 1, actorProfileId: 99n, reason: '검토 완료 후 요약 복원'
+  });
+  assert.equal(restored.editSummaryHidden, false);
+  assert.equal(restored.editSummaryModerationVersion, 2);
+  assert.equal(fixture.revision.editSummary, '보존할 원본 요약');
+  assert.equal(fixture.page.currentRevisionId, pointer);
+  assert.deepEqual(fixture.recentChanges, recentSnapshot);
+  assert.deepEqual(fixture.renderCaches, cacheSnapshot);
+  assert.equal(fixture.audits[1]?.action, 'wiki.revision_edit_summary.restore');
+});
+
+test('edit-summary moderation rejects stale concurrent versions without a second audit', async () => {
+  const fixture = createEditSummaryModerationFixture();
+  await fixture.service.setRevisionEditSummaryHidden({
+    revisionId: '101', hidden: true, expectedVersion: 0, actorProfileId: 99n, reason: '첫 번째 숨김 처리'
+  });
+
+  await assert.rejects(
+    fixture.service.setRevisionEditSummaryHidden({
+      revisionId: '101', hidden: false, expectedVersion: 0, actorProfileId: 99n, reason: '오래된 화면에서 복원'
+    }),
+    ConflictException
+  );
+  assert.equal(fixture.revision.editSummaryHidden, true);
+  assert.equal(fixture.revision.editSummaryModerationVersion, 1);
+  assert.equal(fixture.audits.length, 1);
+});
+
+test('edit-summary moderation rolls back the state change when durable audit persistence fails', async () => {
+  const fixture = createEditSummaryModerationFixture({ failAudit: true });
+  await assert.rejects(
+    fixture.service.setRevisionEditSummaryHidden({
+      revisionId: '101', hidden: true, expectedVersion: 0, actorProfileId: 99n, reason: '감사 실패 원자성 확인'
+    }),
+    /audit write failed/u
+  );
+  assert.equal(fixture.revision.editSummaryHidden, false);
+  assert.equal(fixture.revision.editSummaryModerationVersion, 0);
+  assert.equal(fixture.revision.editSummaryModeratedBy, null);
+  assert.equal(fixture.audits.length, 0);
+});
+
+test('edit-summary moderation requires a bounded reason and explicit optimistic version', async () => {
+  const fixture = createEditSummaryModerationFixture();
+  for (const input of [
+    { hidden: true, expectedVersion: 0, reason: '짧음' },
+    { hidden: true, expectedVersion: 0, reason: '가'.repeat(501) },
+    { hidden: true, expectedVersion: undefined, reason: '충분히 긴 사유' }
+  ]) {
+    await assert.rejects(
+      fixture.service.setRevisionEditSummaryHidden({ revisionId: '101', actorProfileId: 99n, ...input }),
+      BadRequestException
+    );
+  }
+  assert.equal(fixture.transactionCount(), 0);
+});
+
+test('privileged revision detail exposes original summary and latest moderator metadata', async () => {
+  const fixture = createEditSummaryModerationFixture();
+  await fixture.service.setRevisionEditSummaryHidden({
+    revisionId: '101', hidden: true, expectedVersion: 0, actorProfileId: 99n, reason: '관리자 상세 표시 확인'
+  });
+  const detail = await fixture.service.getRevision('101');
+  assert.equal(detail.editSummary, '보존할 원본 요약');
+  assert.equal(detail.editSummaryHidden, true);
+  assert.equal(detail.editSummaryModerationVersion, 1);
+  assert.equal(detail.editSummaryModeration?.action, 'hidden');
+  assert.equal(detail.editSummaryModeration?.moderatorProfileId, '99');
+  assert.equal(detail.editSummaryModeration?.moderatorName, '요약 관리자');
+  assert.equal(detail.editSummaryModeration?.reason, '관리자 상세 표시 확인');
+});

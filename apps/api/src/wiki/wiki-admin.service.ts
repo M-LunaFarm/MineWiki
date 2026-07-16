@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException, 
 import { hashContent, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
-import { BusinessEventService } from '../events/business-event.service';
+import { BusinessEventService, toAuditJson } from '../events/business-event.service';
 import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiRoutePathResolver } from './wiki-route-path.resolver';
@@ -23,6 +23,8 @@ const ACL_TARGET_TYPES = new Set(['site', 'namespace', 'space', 'page']);
 const ACL_ACTIONS = new Set(['read', 'edit', 'create', 'move', 'delete', 'revert', 'history', 'raw', 'discuss', 'create_thread', 'write_thread_comment', 'upload_file', 'acl']);
 const ACL_EFFECTS = new Set(['allow', 'deny']);
 const ACL_SUBJECT_TYPES = new Set(['perm', 'user', 'group', 'aclgroup', 'role']);
+const EDIT_SUMMARY_REASON_MIN_LENGTH = 5;
+const EDIT_SUMMARY_REASON_MAX_LENGTH = 500;
 
 export interface WikiAdminRecentChange {
   readonly id: string;
@@ -57,6 +59,8 @@ export interface WikiAdminRevisionSummary {
   readonly parentRevisionId: string | null;
   readonly contentSize: number;
   readonly editSummary: string | null;
+  readonly editSummaryHidden: boolean;
+  readonly editSummaryModerationVersion: number;
   readonly isMinor: boolean;
   readonly createdBy: string | null;
   readonly createdByName: string;
@@ -76,6 +80,22 @@ export interface WikiAdminRevisionDetail extends WikiAdminRevisionSummary {
   readonly contentHash: string;
   readonly syntaxVersion: string;
   readonly page: WikiAdminPageSummary;
+  readonly editSummaryModeration: {
+    readonly action: 'hidden' | 'restored';
+    readonly moderatorProfileId: string;
+    readonly moderatorName: string;
+    readonly moderatedAt: string;
+    readonly reason: string;
+  } | null;
+}
+
+export interface WikiRevisionEditSummaryModerationResult {
+  readonly revisionId: string;
+  readonly editSummaryHidden: boolean;
+  readonly editSummaryModerationVersion: number;
+  readonly moderatedBy: string;
+  readonly moderatedAt: string;
+  readonly reason: string;
 }
 
 export interface WikiAdminUserSummary {
@@ -181,7 +201,18 @@ export class WikiAdminService {
       contentRaw: revision.contentRaw,
       contentHash: revision.contentHash,
       syntaxVersion: revision.syntaxVersion,
-      page: (await this.toPageSummaries([page]))[0]
+      page: (await this.toPageSummaries([page]))[0],
+      editSummaryModeration: typeof revision.editSummaryModeratedBy === 'bigint'
+        && revision.editSummaryModeratedAt instanceof Date
+        && typeof revision.editSummaryModerationReason === 'string'
+        ? {
+            action: revision.editSummaryHidden ? 'hidden' : 'restored',
+            moderatorProfileId: revision.editSummaryModeratedBy.toString(),
+            moderatorName: names.get(revision.editSummaryModeratedBy) ?? '알 수 없는 사용자',
+            moderatedAt: revision.editSummaryModeratedAt.toISOString(),
+            reason: revision.editSummaryModerationReason
+          }
+        : null
     };
   }
 
@@ -609,6 +640,91 @@ export class WikiAdminService {
     return (await this.toPageSummaries([updated]))[0];
   }
 
+  async setRevisionEditSummaryHidden(input: {
+    readonly revisionId: string;
+    readonly hidden?: boolean;
+    readonly expectedVersion?: number | string;
+    readonly actorProfileId: bigint;
+    readonly reason?: string | null;
+  }): Promise<WikiRevisionEditSummaryModerationResult> {
+    const revisionId = this.parseBigIntId(input.revisionId, 'revisionId');
+    if (typeof input.hidden !== 'boolean') {
+      throw new BadRequestException('hidden must be a boolean.');
+    }
+    const hidden = input.hidden;
+    const expectedVersion = this.parseEditSummaryModerationVersion(input.expectedVersion);
+    const reason = this.requiredEditSummaryModerationReason(input.reason);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const revision = await tx.wikiPageRevision.findUnique({ where: { id: revisionId } });
+        if (!revision) throw new NotFoundException('Wiki revision not found.');
+        if (
+          revision.editSummaryModerationVersion !== expectedVersion
+          || revision.editSummaryHidden === hidden
+        ) {
+          throw editSummaryModerationConflict();
+        }
+
+        const moderatedAt = new Date();
+        const changed = await tx.wikiPageRevision.updateMany({
+          where: {
+            id: revisionId,
+            editSummaryHidden: !hidden,
+            editSummaryModerationVersion: expectedVersion
+          },
+          data: {
+            editSummaryHidden: hidden,
+            editSummaryModerationVersion: { increment: 1 },
+            editSummaryModeratedBy: input.actorProfileId,
+            editSummaryModeratedAt: moderatedAt,
+            editSummaryModerationReason: reason
+          }
+        });
+        if (changed.count !== 1) throw editSummaryModerationConflict();
+
+        const nextVersion = expectedVersion + 1;
+        await tx.auditEvent.create({
+          data: {
+            category: 'wiki',
+            action: hidden
+              ? 'wiki.revision_edit_summary.hide'
+              : 'wiki.revision_edit_summary.restore',
+            severity: hidden ? 'warning' : 'info',
+            actorProfileId: input.actorProfileId,
+            subjectType: 'wiki_revision',
+            subjectId: revision.id.toString(),
+            metadata: toAuditJson({
+              pageId: revision.pageId.toString(),
+              revisionId: revision.id.toString(),
+              revisionNo: revision.revisionNo,
+              originalEditSummary: revision.editSummary,
+              previousHidden: revision.editSummaryHidden,
+              hidden,
+              previousVersion: expectedVersion,
+              version: nextVersion,
+              reason
+            })
+          }
+        });
+
+        return {
+          revisionId: revision.id.toString(),
+          editSummaryHidden: hidden,
+          editSummaryModerationVersion: nextVersion,
+          moderatedBy: input.actorProfileId.toString(),
+          moderatedAt: moderatedAt.toISOString(),
+          reason
+        };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+        throw editSummaryModerationConflict();
+      }
+      throw error;
+    }
+  }
+
   async updateRevisionVisibility(input: {
     readonly revisionId: string;
     readonly visibility?: string;
@@ -936,8 +1052,16 @@ export class WikiAdminService {
     }));
   }
 
-  private async revisionAuthorNames(revisions: readonly { createdBy: bigint | null }[]): Promise<ReadonlyMap<bigint, string>> {
-    const profileIds = [...new Set(revisions.flatMap((revision) => revision.createdBy === null ? [] : [revision.createdBy]))];
+  private async revisionAuthorNames(revisions: readonly {
+    createdBy: bigint | null;
+    editSummaryModeratedBy?: bigint | null;
+  }[]): Promise<ReadonlyMap<bigint, string>> {
+    const profileIds = [...new Set(revisions.flatMap((revision) => [
+      ...(revision.createdBy === null ? [] : [revision.createdBy]),
+      ...(revision.editSummaryModeratedBy === null || revision.editSummaryModeratedBy === undefined
+        ? []
+        : [revision.editSummaryModeratedBy])
+    ]))];
     if (profileIds.length === 0) return new Map();
     const profiles = await this.prisma.wikiProfile.findMany({
       where: { id: { in: profileIds } },
@@ -960,6 +1084,30 @@ export class WikiAdminService {
     }
     return reason;
   }
+
+  private requiredEditSummaryModerationReason(value?: string | null): string {
+    const reason = value?.trim() ?? '';
+    if (reason.length < EDIT_SUMMARY_REASON_MIN_LENGTH || reason.length > EDIT_SUMMARY_REASON_MAX_LENGTH) {
+      throw new BadRequestException(
+        `Edit summary moderation reason must be between ${EDIT_SUMMARY_REASON_MIN_LENGTH} and ${EDIT_SUMMARY_REASON_MAX_LENGTH} characters.`
+      );
+    }
+    return reason;
+  }
+
+  private parseEditSummaryModerationVersion(value?: number | string): number {
+    const normalized = typeof value === 'string' && /^\d+$/.test(value.trim())
+      ? Number(value.trim())
+      : value;
+    if (typeof normalized !== 'number' || !Number.isSafeInteger(normalized) || normalized < 0 || normalized > 4_294_967_295) {
+      throw new BadRequestException('expectedVersion must be an unsigned integer.');
+    }
+    return normalized;
+  }
+}
+
+function editSummaryModerationConflict(): ConflictException {
+  return new ConflictException('The edit summary moderation state changed. Refresh and try again.');
 }
 
 function toPageSummary(page: {
@@ -994,6 +1142,8 @@ function toRevisionSummary(
     parentRevisionId: bigint | null;
     contentSize: number;
     editSummary: string | null;
+    editSummaryHidden?: boolean | null;
+    editSummaryModerationVersion?: number | null;
     isMinor: boolean;
     createdBy: bigint | null;
     createdAt: Date;
@@ -1009,6 +1159,8 @@ function toRevisionSummary(
     parentRevisionId: revision.parentRevisionId?.toString() ?? null,
     contentSize: revision.contentSize,
     editSummary: revision.editSummary,
+    editSummaryHidden: revision.editSummaryHidden === true,
+    editSummaryModerationVersion: revision.editSummaryModerationVersion ?? 0,
     isMinor: revision.isMinor,
     createdBy: revision.createdBy?.toString() ?? null,
     createdByName: revision.createdBy === null ? '시스템' : authorNames.get(revision.createdBy) ?? '알 수 없는 사용자',
