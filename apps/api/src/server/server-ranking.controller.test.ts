@@ -24,6 +24,7 @@ test('ranking controller normalizes filters and pagination', async () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   const result = await controller.rankings(
@@ -54,6 +55,7 @@ test('ranking controller normalizes filters and pagination', async () => {
 
 test('ranking controller rejects oversized page sizes and unknown sorts', () => {
   const controller = new ServerController(
+    {} as never,
     {} as never,
     {} as never,
     {} as never,

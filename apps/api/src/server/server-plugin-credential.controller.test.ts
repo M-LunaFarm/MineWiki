@@ -49,6 +49,7 @@ test('elevation without server authority cannot create a server wiki', async () 
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   await assert.rejects(
@@ -72,6 +73,11 @@ test('elevation without server authority cannot read layout entitlements or upda
     {} as never,
     {} as never,
     {} as never,
+    {
+      async authorizeContentSettings() {
+        throw new ForbiddenException('Wiki content settings permission is required.');
+      },
+    } as never,
   );
   const elevated = { ...session, isElevated: true };
 
@@ -91,6 +97,69 @@ test('elevation without server authority cannot read layout entitlements or upda
   assert.equal(layoutsRead, false);
   assert.equal(settingsRead, false);
   assert.equal(settingsUpdated, false);
+});
+
+test('server wiki managers receive content-only settings access through their canonical account', async () => {
+  let updatedBy = '';
+  const controller = new ServerController(
+    {
+      async getWikiContentSettings() { return { version: 3 }; },
+      async updateWikiContentSettings(_serverId: string, _input: unknown, actorAccountId: string) {
+        updatedBy = actorAccountId;
+        return { version: 4 };
+      },
+    } as never,
+    { async isOwner() { return false; } } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {
+      async authorizeContentSettings() {
+        return { accountId: 'canonical-manager', kind: 'manager' as const };
+      },
+    } as never,
+  );
+
+  const read = await controller.wikiSettings('server-1', session);
+  assert.deepEqual(read, {
+    version: 3,
+    access: {
+      canManageContentSettings: true,
+      canManageLayout: false,
+      canManageCollaborators: false,
+    },
+  });
+  const updated = await controller.updateWikiSettings('server-1', {
+    expectedVersion: 3,
+    contributionPolicySource: null,
+    editHelpSource: null,
+    topNoticeSource: null,
+    bottomNoticeSource: null,
+    requireContributionPolicyAck: false,
+  }, session);
+  assert.equal(updatedBy, 'canonical-manager');
+  assert.equal(updated.access.canManageLayout, false);
+  assert.equal(updated.access.canManageCollaborators, false);
+});
+
+test('server owner and global admin settings responses retain owner-only tabs', async () => {
+  for (const kind of ['owner', 'server_admin'] as const) {
+    const controller = new ServerController(
+      { async getWikiContentSettings() { return { version: 3 }; } } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        async authorizeContentSettings() {
+          return { accountId: 'canonical-owner', kind };
+        },
+      } as never,
+    );
+    const read = await controller.wikiSettings('server-1', session);
+    assert.equal(read.access.canManageLayout, true);
+    assert.equal(read.access.canManageCollaborators, true);
+  }
 });
 
 test('plugin credential creation binds only an accessible guild', async () => {
@@ -224,5 +293,6 @@ function createController(
     {} as never,
     pluginCredentials as never,
     guildAccess as never,
+    {} as never,
   );
 }

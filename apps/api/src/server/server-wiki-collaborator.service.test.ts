@@ -41,6 +41,7 @@ interface FixtureOptions {
   readonly roles?: TestRole[];
   readonly failAudit?: boolean;
   readonly mismatchedWiki?: boolean;
+  readonly mismatchedRootPage?: boolean;
 }
 
 function wikiProfile(input: Partial<WikiProfile> & Pick<WikiProfile, 'id' | 'username' | 'displayName'>): WikiProfile {
@@ -105,6 +106,7 @@ function createFixture(options: FixtureOptions = {}) {
     id: serverId,
     ownerAccountId,
     wikiSpaceId: 77n,
+    wikiPageId: 99n,
     wikiSlug: 'test-server',
   };
   const serverWiki = {
@@ -114,7 +116,13 @@ function createFixture(options: FixtureOptions = {}) {
     slug: 'test-server',
     status: 'active',
   };
-  const space = { id: 77n, slug: 'test-server', spaceType: 'server_wiki', status: 'active' };
+  const space = {
+    id: 77n,
+    slug: 'test-server',
+    spaceType: 'server_wiki',
+    status: 'active',
+    rootPageId: options.mismatchedRootPage ? 100n : 99n,
+  };
 
   const tx = {
     async $queryRaw(strings: TemplateStringsArray) {
@@ -250,6 +258,7 @@ function createFixture(options: FixtureOptions = {}) {
     lockQueries,
     isolationLevels,
     profiles,
+    accounts,
     server,
     serverWiki,
     space,
@@ -299,6 +308,84 @@ test('elevation and subwiki manager state never replace explicit server owner or
   await assert.doesNotReject(
     fixture.service.list(serverId, { accountId: targetAccountId, permissions: ['server.admin'] }),
   );
+});
+
+test('only an unambiguous active manager receives bounded content-settings authority', async () => {
+  const manager = createFixture({
+    roles: [role({ id: 10n, userId: 2n, role: 'manager', status: 'active' })],
+  });
+  assert.deepEqual(
+    await manager.service.authorizeContentSettings(serverId, { accountId: targetAccountId }),
+    { accountId: targetAccountId, kind: 'manager' },
+  );
+
+  for (const roles of [
+    [role({ id: 10n, userId: 2n, role: 'manager', status: 'revoked' })],
+    [role({ id: 10n, userId: 2n, role: 'editor', status: 'active' })],
+    [role({ id: 10n, userId: 2n, role: 'reviewer', status: 'active' })],
+    [
+      role({ id: 10n, userId: 2n, role: 'manager', status: 'active' }),
+      role({ id: 11n, userId: 2n, role: 'editor', status: 'active' }),
+    ],
+  ]) {
+    const denied = createFixture({ roles });
+    await assert.rejects(
+      denied.service.authorizeContentSettings(serverId, { accountId: targetAccountId }),
+      (error: unknown) => error instanceof ForbiddenException || error instanceof ConflictException,
+    );
+  }
+});
+
+test('content-settings authority canonicalizes aliases and retains owner and global admin access', async () => {
+  const manager = createFixture({
+    roles: [role({ id: 10n, userId: 2n, role: 'manager', status: 'active' })],
+  });
+  const alias = manager.accounts.find((account) => account.id === aliasAccountId);
+  assert.ok(alias);
+  alias.canonicalAccountId = targetAccountId;
+  assert.deepEqual(
+    await manager.service.authorizeContentSettings(serverId, { accountId: aliasAccountId }),
+    { accountId: targetAccountId, kind: 'manager' },
+  );
+
+  const owner = createFixture();
+  assert.equal((await owner.service.authorizeContentSettings(serverId, ownerActor)).kind, 'owner');
+  assert.equal((await owner.service.authorizeContentSettings(serverId, {
+    accountId: targetAccountId,
+    permissions: ['server.admin'],
+  })).kind, 'server_admin');
+});
+
+test('content-settings authority fails closed on broken links and canonical account chains', async () => {
+  for (const fixture of [
+    createFixture({ mismatchedWiki: true }),
+    createFixture({ mismatchedRootPage: true }),
+  ]) {
+    await assert.rejects(
+      fixture.service.authorizeContentSettings(serverId, { accountId: targetAccountId }),
+      ConflictException,
+    );
+  }
+
+  for (const mode of ['missing', 'cycle'] as const) {
+    const fixture = createFixture({
+      roles: [role({ id: 10n, userId: 2n, role: 'manager', status: 'active' })],
+    });
+    const target = fixture.accounts.find((account) => account.id === targetAccountId);
+    assert.ok(target);
+    target.canonicalAccountId = mode === 'missing'
+      ? 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+      : aliasAccountId;
+    if (mode === 'cycle') {
+      const alias = fixture.accounts.find((account) => account.id === aliasAccountId);
+      assert.ok(alias);
+      alias.canonicalAccountId = targetAccountId;
+    }
+    await assert.rejects(
+      fixture.service.authorizeContentSettings(serverId, { accountId: targetAccountId }),
+      (error: unknown) => error instanceof ForbiddenException || error instanceof ConflictException,
+    );
+  }
 });
 
 test('a linked alias session is compared through its canonical owner account', async () => {
@@ -646,6 +733,7 @@ if (!hasDatabase) {
           name: 'Collaborator integration wiki',
           slug,
           spaceType: 'server_wiki',
+          rootPageId: 99n,
           rootNamespaceCode: 'server',
           rootPath: `/server/${slug}`,
           status: 'active',
@@ -660,6 +748,7 @@ if (!hasDatabase) {
         data: {
           ownerAccountId: ownerId,
           wikiSpaceId: space.id,
+          wikiPageId: 99n,
           wikiSlug: slug,
           name: `Collaborator ${suffix}`,
           joinHost: `${slug}.example.com`,

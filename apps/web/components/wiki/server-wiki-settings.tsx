@@ -22,13 +22,18 @@ interface ContentSettings {
   readonly requireContributionPolicyAck: boolean;
   readonly updatedAt: string | null;
   readonly updatedByProfileId: string | null;
+  readonly access: SettingsAccess;
+}
+
+interface SettingsAccess {
+  readonly canManageContentSettings: true;
+  readonly canManageLayout: boolean;
+  readonly canManageCollaborators: boolean;
 }
 
 type SourceField = 'contributionPolicySource' | 'editHelpSource' | 'topNoticeSource' | 'bottomNoticeSource';
 type FormState = Pick<ContentSettings, SourceField | 'requireContributionPolicyAck'>;
 type SettingsTab = 'content' | 'layout' | 'collaborators';
-
-const SETTINGS_TABS: readonly SettingsTab[] = ['content', 'layout', 'collaborators'];
 
 const FIELD_LIMITS: Record<SourceField, number> = {
   contributionPolicySource: 8 * 1024,
@@ -50,7 +55,7 @@ export function ServerWikiSettings({ serverId }: { readonly serverId: string }) 
     <PrivilegedActionGate
       purpose="server_admin"
       title="서버 위키 설정 잠금 해제"
-      description="기여 정책, 문서 안내, 협업자 권한과 유료 레이아웃을 변경하려면 다중 인증으로 서버 관리 권한을 다시 확인해 주세요."
+      description="허용된 서버 위키 설정을 변경하려면 다중 인증으로 계정 권한을 다시 확인해 주세요."
     >
       <ServerWikiSettingsContent serverId={serverId} />
     </PrivilegedActionGate>
@@ -59,8 +64,19 @@ export function ServerWikiSettings({ serverId }: { readonly serverId: string }) 
 
 function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) {
   const [tab, setTab] = useState<SettingsTab>('content');
+  const [access, setAccess] = useState<SettingsAccess | null>(null);
   const tabIdPrefix = useId();
   const tabButtons = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
+  const settingsTabs = useMemo<readonly SettingsTab[]>(() => {
+    const allowed: SettingsTab[] = ['content'];
+    if (access?.canManageLayout) allowed.push('layout');
+    if (access?.canManageCollaborators) allowed.push('collaborators');
+    return allowed;
+  }, [access]);
+
+  useEffect(() => {
+    if (!settingsTabs.includes(tab)) setTab('content');
+  }, [settingsTabs, tab]);
 
   function tabId(value: SettingsTab): string {
     return `${tabIdPrefix}-${value}-tab`;
@@ -71,29 +87,29 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
   }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: SettingsTab) {
-    const currentIndex = SETTINGS_TABS.indexOf(current);
+    const currentIndex = settingsTabs.indexOf(current);
     let nextIndex: number;
     switch (event.key) {
       case 'ArrowRight':
       case 'ArrowDown':
-        nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
+        nextIndex = (currentIndex + 1) % settingsTabs.length;
         break;
       case 'ArrowLeft':
       case 'ArrowUp':
-        nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+        nextIndex = (currentIndex - 1 + settingsTabs.length) % settingsTabs.length;
         break;
       case 'Home':
         nextIndex = 0;
         break;
       case 'End':
-        nextIndex = SETTINGS_TABS.length - 1;
+        nextIndex = settingsTabs.length - 1;
         break;
       default:
         return;
     }
 
     event.preventDefault();
-    const nextTab = SETTINGS_TABS[nextIndex];
+    const nextTab = settingsTabs[nextIndex];
     setTab(nextTab);
     tabButtons.current[nextTab]?.focus();
   }
@@ -103,9 +119,9 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
       <header>
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">Server Wiki Settings</p>
         <h1 className="mt-3 text-3xl font-extrabold text-white">서버 위키 설정</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">GitBook처럼 문서 전체에 적용할 운영 정책과 안내, 협업자 권한을 관리하고 서버 브랜드에 맞는 레이아웃을 선택합니다.</p>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">{access?.canManageLayout || access?.canManageCollaborators ? 'GitBook처럼 문서 전체에 적용할 운영 정책과 안내, 협업자 권한을 관리하고 서버 브랜드에 맞는 레이아웃을 선택합니다.' : '문서 전체에 적용할 기여 정책, 편집 도움말과 상단·하단 안내를 관리합니다.'}</p>
       </header>
-      <div className="grid grid-cols-3 rounded-xl border border-white/10 bg-white/[0.025] p-1" role="tablist" aria-label="서버 위키 설정 분류">
+      <div className="grid rounded-xl border border-white/10 bg-white/[0.025] p-1" style={{ gridTemplateColumns: `repeat(${settingsTabs.length}, minmax(0, 1fr))` }} role="tablist" aria-label="서버 위키 설정 분류">
         <Tab
           id={tabId('content')}
           controls={panelId('content')}
@@ -117,7 +133,7 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
         >
           정책·문서 안내
         </Tab>
-        <Tab
+        {access?.canManageLayout ? <Tab
           id={tabId('layout')}
           controls={panelId('layout')}
           active={tab === 'layout'}
@@ -127,8 +143,8 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
           icon={<LayoutTemplate className="size-4" aria-hidden="true" />}
         >
           레이아웃·요금제
-        </Tab>
-        <Tab
+        </Tab> : null}
+        {access?.canManageCollaborators ? <Tab
           id={tabId('collaborators')}
           controls={panelId('collaborators')}
           active={tab === 'collaborators'}
@@ -138,22 +154,22 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
           icon={<Users className="size-4" aria-hidden="true" />}
         >
           협업자
-        </Tab>
+        </Tab> : null}
       </div>
       <TabPanel id={panelId('content')} labelledBy={tabId('content')} active={tab === 'content'}>
-        {tab === 'content' ? <ContentSettingsForm serverId={serverId} /> : null}
+        {tab === 'content' ? <ContentSettingsForm serverId={serverId} onAccessLoaded={setAccess} /> : null}
       </TabPanel>
-      <TabPanel id={panelId('layout')} labelledBy={tabId('layout')} active={tab === 'layout'}>
+      {access?.canManageLayout ? <TabPanel id={panelId('layout')} labelledBy={tabId('layout')} active={tab === 'layout'}>
         {tab === 'layout' ? <ServerWikiLayoutPlansContent serverId={serverId} /> : null}
-      </TabPanel>
-      <TabPanel id={panelId('collaborators')} labelledBy={tabId('collaborators')} active={tab === 'collaborators'}>
+      </TabPanel> : null}
+      {access?.canManageCollaborators ? <TabPanel id={panelId('collaborators')} labelledBy={tabId('collaborators')} active={tab === 'collaborators'}>
         {tab === 'collaborators' ? <ServerWikiCollaboratorsContent serverId={serverId} /> : null}
-      </TabPanel>
+      </TabPanel> : null}
     </div>
   );
 }
 
-function ContentSettingsForm({ serverId }: { readonly serverId: string }) {
+function ContentSettingsForm({ serverId, onAccessLoaded }: { readonly serverId: string; readonly onAccessLoaded: (access: SettingsAccess) => void }) {
   const baseUrl = normalizeApiBaseUrl();
   const [settings, setSettings] = useState<ContentSettings | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -176,7 +192,8 @@ function ContentSettingsForm({ serverId }: { readonly serverId: string }) {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.message ?? '서버 위키 설정을 불러오지 못했습니다.');
       const next = body as ContentSettings;
-      setSettings(next); setForm(toForm(next));
+      const nextAccess = settingsAccess(next);
+      setSettings(next); setForm(toForm(next)); onAccessLoaded(nextAccess);
     } catch (value) { setError(value instanceof Error ? value.message : '서버 위키 설정을 불러오지 못했습니다.'); }
     finally { setLoading(false); }
   };
@@ -203,7 +220,8 @@ function ContentSettingsForm({ serverId }: { readonly serverId: string }) {
         throw new Error(body.message ?? '서버 위키 설정을 저장하지 못했습니다.');
       }
       const next = body as ContentSettings;
-      setSettings(next); setForm(toForm(next)); setNotice('서버 위키 설정을 저장했습니다. 공개 문서와 편집기에 즉시 반영됩니다.');
+      const nextAccess = settingsAccess(next);
+      setSettings(next); setForm(toForm(next)); onAccessLoaded(nextAccess); setNotice('서버 위키 설정을 저장했습니다. 공개 문서와 편집기에 즉시 반영됩니다.');
     } catch (value) { setError(value instanceof Error ? value.message : '서버 위키 설정을 저장하지 못했습니다.'); }
     finally { setSaving(false); }
   }
@@ -255,3 +273,11 @@ function toForm(settings: ContentSettings): FormState { return { contributionPol
 function normalizeForm(form: FormState): FormState { const clean = (value: string | null) => value?.trim() ? value.replaceAll('\r\n', '\n').trim() : null; const contributionPolicySource = clean(form.contributionPolicySource); return { contributionPolicySource, editHelpSource: clean(form.editHelpSource), topNoticeSource: clean(form.topNoticeSource), bottomNoticeSource: clean(form.bottomNoticeSource), requireContributionPolicyAck: Boolean(contributionPolicySource && form.requireContributionPolicyAck) }; }
 function serializeForm(form: FormState): string { return JSON.stringify(normalizeForm(form)); }
 function bytes(value: string): number { return new TextEncoder().encode(value).byteLength; }
+function settingsAccess(settings: ContentSettings): SettingsAccess {
+  if (settings.access?.canManageContentSettings !== true) throw new Error('서버 위키 설정 권한 응답이 올바르지 않습니다.');
+  return {
+    canManageContentSettings: true,
+    canManageLayout: settings.access.canManageLayout === true,
+    canManageCollaborators: settings.access.canManageCollaborators === true,
+  };
+}

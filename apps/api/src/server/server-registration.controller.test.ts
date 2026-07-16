@@ -29,6 +29,7 @@ test('public registration records a pending registrant without granting ownershi
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   await controller.register(

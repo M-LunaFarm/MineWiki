@@ -25,6 +25,11 @@ export interface ServerWikiCollaboratorActor {
   readonly groups?: readonly string[];
 }
 
+export interface ServerWikiContentSettingsAuthority {
+  readonly accountId: string;
+  readonly kind: 'server_admin' | 'owner' | 'manager';
+}
+
 export interface ServerWikiCollaboratorItem {
   readonly profileId: string;
   readonly username: string;
@@ -113,6 +118,49 @@ export class ServerWikiCollaboratorService {
       const context = await this.lockServerWiki(tx, serverId, actor);
       await this.lockSpaceRoleRows(tx, context.spaceId);
       return this.roster(tx, context);
+    });
+  }
+
+  async authorizeContentSettings(
+    serverIdInput: string,
+    actor: ServerWikiCollaboratorActor,
+  ): Promise<ServerWikiContentSettingsAuthority> {
+    const serverId = parseServerId(serverIdInput);
+    return this.serializable(async (tx) => {
+      const context = await this.lockServerWiki(tx, serverId, actor, undefined, false);
+      if (actor.permissions?.includes('server.admin') === true) {
+        return { accountId: context.actorAccountId, kind: 'server_admin' };
+      }
+      if (context.ownerAccountId !== null && context.ownerAccountId === context.actorAccountId) {
+        return { accountId: context.actorAccountId, kind: 'owner' };
+      }
+
+      await tx.$queryRaw<Array<{ id: bigint }>>`
+        SELECT id FROM users WHERE account_id = ${context.actorAccountId} FOR UPDATE
+      `;
+      const profile = await tx.wikiProfile.findUnique({
+        where: { accountId: context.actorAccountId },
+      });
+      if (
+        !profile
+        || profile.status !== 'active'
+        || profile.mergedIntoProfileId !== null
+      ) {
+        throw contentSettingsForbidden();
+      }
+      const alias = await tx.wikiProfileAlias.findUnique({
+        where: { sourceProfileId: profile.id },
+        select: { targetProfileId: true },
+      });
+      if (alias) throw invalidProfileAlias();
+
+      const roles = this.assertUnambiguousMutationRoles(
+        await this.lockTargetRoleRows(tx, context.spaceId, profile.id),
+      );
+      if (roles.length !== 1 || roles[0]?.role !== 'manager') {
+        throw contentSettingsForbidden();
+      }
+      return { accountId: context.actorAccountId, kind: 'manager' };
     });
   }
 
@@ -252,7 +300,10 @@ export class ServerWikiCollaboratorService {
     });
     if (!server) throw new NotFoundException('Server not found.');
     const accountId = await this.resolveCanonicalActorAccount(actor.accountId);
-    assertRosterAuthority(server.ownerAccountId, accountId, actor.permissions);
+    const ownerAccountId = server.ownerAccountId
+      ? await this.resolveCanonicalActorAccount(server.ownerAccountId)
+      : null;
+    assertRosterAuthority(ownerAccountId, accountId, actor.permissions);
     const profile = await this.wikiProfiles.ensureWikiProfile(accountId);
     return { accountId, profile };
   }
@@ -262,6 +313,7 @@ export class ServerWikiCollaboratorService {
     serverId: string,
     actor: ServerWikiCollaboratorActor,
     expectedActorAccountId?: string,
+    requireRosterAuthority = true,
   ): Promise<LockedServerWiki> {
     await tx.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM \`Server\` WHERE id = ${serverId} FOR UPDATE
@@ -272,6 +324,7 @@ export class ServerWikiCollaboratorService {
         id: true,
         ownerAccountId: true,
         wikiSpaceId: true,
+        wikiPageId: true,
         wikiSlug: true,
       },
     });
@@ -280,8 +333,13 @@ export class ServerWikiCollaboratorService {
     if (expectedActorAccountId && actorAccountId !== expectedActorAccountId) {
       throw canonicalActorConflict();
     }
-    assertRosterAuthority(server.ownerAccountId, actorAccountId, actor.permissions);
-    if (!server.wikiSpaceId || !server.wikiSlug) {
+    const ownerAccountId = server.ownerAccountId
+      ? await this.lockCanonicalActorAccount(tx, server.ownerAccountId)
+      : null;
+    if (requireRosterAuthority) {
+      assertRosterAuthority(ownerAccountId, actorAccountId, actor.permissions);
+    }
+    if (!server.wikiSpaceId || !server.wikiPageId || !server.wikiSlug) {
       throw new NotFoundException('An active server wiki is not linked to this server.');
     }
 
@@ -327,20 +385,21 @@ export class ServerWikiCollaboratorService {
     `;
     const space = await tx.wikiSpace.findUnique({
       where: { id: serverWiki.spaceId },
-      select: { id: true, slug: true, spaceType: true, status: true },
+      select: { id: true, slug: true, spaceType: true, status: true, rootPageId: true },
     });
     if (!space) throw new NotFoundException('The linked server wiki space was not found.');
     if (
       space.status !== 'active'
       || space.spaceType !== 'server_wiki'
       || space.slug !== serverWiki.slug
+      || space.rootPageId !== server.wikiPageId
     ) {
       throw serverWikiMismatch();
     }
 
     return {
       serverId: server.id,
-      ownerAccountId: server.ownerAccountId,
+      ownerAccountId,
       actorAccountId,
       serverWikiId: serverWiki.id,
       spaceId: space.id,
@@ -804,6 +863,10 @@ function assertRosterAuthority(
   if (permissions?.includes('server.admin') === true) return;
   if (ownerAccountId !== null && ownerAccountId === actorAccountId) return;
   throw new ForbiddenException('서버 소유자 또는 전역 서버 관리자만 위키 협업자를 관리할 수 있습니다.');
+}
+
+function contentSettingsForbidden(): ForbiddenException {
+  return new ForbiddenException('활성 서버 위키 관리자만 콘텐츠 설정을 관리할 수 있습니다.');
 }
 
 function actorAccountUnavailable(): ForbiddenException {

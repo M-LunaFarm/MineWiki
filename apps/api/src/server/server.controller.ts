@@ -39,6 +39,10 @@ import { serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schema
 import { PluginCredentialService } from './plugin-credential.service';
 import { GuildAccessService } from '../verify/guild-access.service';
 import type { ServerWikiContentSettingsInput } from './server-wiki-content-settings';
+import {
+  ServerWikiCollaboratorService,
+  type ServerWikiContentSettingsAuthority,
+} from './server-wiki-collaborator.service';
 
 const votifierPayloadSchema = z.object({
   targets: z.array(votifierTargetSchema).min(1)
@@ -101,7 +105,8 @@ export class ServerController {
     private readonly claimService: ClaimService,
     private readonly files: FileService,
     private readonly pluginCredentials: PluginCredentialService,
-    private readonly guildAccess: GuildAccessService
+    private readonly guildAccess: GuildAccessService,
+    private readonly wikiCollaborators: ServerWikiCollaboratorService,
   ) {}
 
   @Get()
@@ -179,8 +184,9 @@ export class ServerController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @CurrentSession() session: SessionPayload
   ) {
-    await this.assertCanManageServer(id, session);
-    return this.serverService.getWikiContentSettings(id);
+    const authority = await this.authorizeWikiContentSettings(id, session);
+    const settings = await this.serverService.getWikiContentSettings(id);
+    return withWikiSettingsAccess(settings, authority);
   }
 
   @RequireStepUp('server_admin')
@@ -192,9 +198,10 @@ export class ServerController {
     @Body() body: unknown,
     @CurrentSession() session: SessionPayload
   ) {
-    await this.assertCanManageServer(id, session);
+    const authority = await this.authorizeWikiContentSettings(id, session);
     const payload = serverWikiContentSettingsPayloadSchema.parse(body) as ServerWikiContentSettingsInput;
-    return this.serverService.updateWikiContentSettings(id, payload, session.userId);
+    const settings = await this.serverService.updateWikiContentSettings(id, payload, authority.accountId);
+    return withWikiSettingsAccess(settings, authority);
   }
 
   @RequireStepUp('server_admin')
@@ -490,4 +497,35 @@ export class ServerController {
       throw new ForbiddenException('해당 서버의 관리 설정을 변경할 권한이 없습니다.');
     }
   }
+
+  private authorizeWikiContentSettings(
+    id: string,
+    session: SessionPayload,
+  ): Promise<ServerWikiContentSettingsAuthority> {
+    return this.wikiCollaborators.authorizeContentSettings(id, {
+      accountId: session.userId,
+      permissions: session.permissions,
+    });
+  }
+}
+
+function withWikiSettingsAccess<T extends object>(
+  settings: T,
+  authority: ServerWikiContentSettingsAuthority,
+): T & {
+  readonly access: {
+    readonly canManageContentSettings: true;
+    readonly canManageLayout: boolean;
+    readonly canManageCollaborators: boolean;
+  };
+} {
+  const hasFullServerAuthority = authority.kind !== 'manager';
+  return {
+    ...settings,
+    access: {
+      canManageContentSettings: true,
+      canManageLayout: hasFullServerAuthority,
+      canManageCollaborators: hasFullServerAuthority,
+    },
+  };
 }
