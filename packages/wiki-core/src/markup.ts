@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.16.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.17.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -222,7 +222,8 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
   if (foldingDepth > MAX_FOLDING_DEPTH) {
     return rejectedDocument('접기 블록 중첩 제한을 초과했습니다.');
   }
-  const lines = raw.replace(/\r\n/g, '\n').split('\n');
+  const source = maskWikiCommentLines(raw.replace(/\r\n/g, '\n'));
+  const lines = source.split('\n');
   const ast: AstNode[] = [];
   const links = new Set<string>();
   const categories = new Set<string>();
@@ -233,7 +234,8 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
   const footnotes: string[] = [];
   let redirectTarget: string | null = null;
 
-  const firstRealLine = lines.find((line) => line.trim().length > 0)?.trim() ?? '';
+  const redirectLineIndex = lines.findIndex((line) => line.trim().length > 0);
+  const firstRealLine = redirectLineIndex < 0 ? '' : (lines[redirectLineIndex]?.trim() ?? '');
   const redirect = firstRealLine.match(/^#(?:넘겨주기|REDIRECT)\s+\[\[(.+?)\]\]/i);
   if (redirect) {
     redirectTarget = redirect[1];
@@ -243,7 +245,7 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
   for (let i = 0; i < lines.length; i += 1) {
     let line = lines[i] ?? '';
     if (!line.trim()) continue;
-    if (i === 0 && redirectTarget) continue;
+    if (i === redirectLineIndex && redirectTarget) continue;
 
     const wikiStyle = line.match(/^\s*\{\{\{#!wiki(?:\s+(.*?))?\s*$/i);
     if (wikiStyle) {
@@ -500,7 +502,7 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
       errors.push('정보 컴포넌트가 없습니다.');
     }
   }
-  if (/<\s*(script|style|iframe|object|embed|img)\b/i.test(raw) || /\son[a-z]+\s*=/i.test(raw)) {
+  if (/<\s*(script|style|iframe|object|embed|img)\b/i.test(source) || /\son[a-z]+\s*=/i.test(source)) {
     blockingErrors.push('허용되지 않은 HTML이 포함되어 있습니다.');
   }
   if (countMathNodes(ast) > MAX_MATH_NODES) {
@@ -522,7 +524,7 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
     })),
     footnotes,
     redirectTarget,
-    plainText: raw
+    plainText: source
       .replace(/^\s*\{\{\{#!wiki[^\r\n]*(?:\r?\n|$)/gimu, ' ')
       .replace(/^\s*\}\}\}\s*$/gmu, ' ')
       .replace(/\{\{[\s\S]*?\}\}/g, ' ')
@@ -535,6 +537,31 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
     errors,
     blockingErrors
   };
+}
+
+function maskWikiCommentLines(source: string): string {
+  let literalDepth = 0;
+  return source.split('\n').map((line) => {
+    if (literalDepth === 0 && line.startsWith('##')) return '';
+    for (let index = 0; index <= line.length - 3; index += 1) {
+      if (isEscapedAt(line, index)) continue;
+      const marker = line.slice(index, index + 3);
+      if (marker === '{{{') {
+        if (literalDepth > 0 || !line.slice(index + 3).startsWith('#!')) literalDepth += 1;
+        index += 2;
+      } else if (marker === '}}}' && literalDepth > 0) {
+        literalDepth -= 1;
+        index += 2;
+      }
+    }
+    return line;
+  }).join('\n');
+}
+
+function isEscapedAt(value: string, index: number): boolean {
+  let slashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor -= 1) slashes += 1;
+  return slashes % 2 === 1;
 }
 
 function parseWikiHeadingLine(line: string): { level: number; text: string; folded: boolean } | null {
@@ -1367,7 +1394,7 @@ function parseInline(
   nestingDepth = 0
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
-  const pattern = /(?<file>\[\[파일:(?<fileBody>[^\]]+)\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>[^\]]+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
+  const pattern = /(?<file>\[\[파일:(?<fileBody>[^\]]+)\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>[^\]]+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<literal>\{\{\{(?<literalText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)|(?<escape>\\(?<escapedChar>[\s\S]))/gu;
   const nested = (value: string): InlineNode[] => nestingDepth >= MAX_INLINE_NESTING
     ? [{ type: 'text', text: value }]
     : parseInline(value, links, errors, blockingErrors, footnotes, linkResolution, nestingDepth + 1);
@@ -1396,6 +1423,8 @@ function parseInline(
       nodes.push({ type: 'color', color: normalizeInlineColor(group.colorValue ?? ''), children: nested(group.colorText ?? '') });
     } else if (group.size !== undefined) {
       nodes.push({ type: 'size', delta: normalizeInlineSize(group.sizeValue ?? ''), children: nested(group.sizeText ?? '') });
+    } else if (group.literal !== undefined) {
+      nodes.push({ type: 'code', code: group.literalText ?? '' });
     } else if (group.externalWiki !== undefined) {
       const href = group.externalWikiHref ?? '';
       nodes.push({ type: 'external_link', href, label: group.externalWikiLabel ?? href });
@@ -1434,6 +1463,8 @@ function parseInline(
       nodes.push({ type: 'sup', children: nested(group.supText ?? '') });
     } else if (group.sub !== undefined) {
       nodes.push({ type: 'sub', children: nested(group.subText ?? '') });
+    } else if (group.escape !== undefined) {
+      nodes.push({ type: 'text', text: group.escapedChar ?? '' });
     }
     last = match.index! + match[0].length;
   }

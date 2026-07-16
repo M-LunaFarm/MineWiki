@@ -79,6 +79,33 @@ test('keeps literal HTML escaped inside nested inline markup', () => {
   assert.equal(parsed.blockingErrors.some((error) => error.includes('허용되지 않은 HTML')), true);
 });
 
+test('skips canonical full-line comments without hiding comment text inside literal blocks', () => {
+  const parsed = parseMarkup([
+    '## [[숨은 링크]] <script>alert(1)</script>',
+    '#REDIRECT [[공개 문서]]',
+    '{{{',
+    '## 리터럴 본문',
+    '}}}',
+  ].join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.redirectTarget, '공개 문서');
+  assert.deepEqual(parsed.links, []);
+  assert.equal(parsed.plainText.includes('숨은 링크'), false);
+  assert.equal(parsed.blockingErrors.some((error) => error.includes('허용되지 않은 HTML')), false);
+  assert.match(html, /<pre class="codeblock"[^>]*><code>## 리터럴 본문<\/code><\/pre>/u);
+});
+
+test('renders triple-brace spans literally and honors canonical backslash escapes', () => {
+  const parsed = parseMarkup(String.raw`{{{'''그대로''' [[링크 아님]]}}} \[[링크 아님]] \[br] \\ 끝`);
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.links, []);
+  assert.match(html, /<code>'''그대로''' \[\[링크 아님\]\]<\/code>/u);
+  assert.match(html, /\[\[링크 아님\]\] \[br\] \\ 끝/u);
+  assert.equal(html.includes('<br>'), false);
+});
+
 test('collects internal links introduced by expanded nested AST containers', () => {
   const parent = parseMarkup('[[직접 링크]]');
   const included = parseMarkup('본문 [[포함 링크]]');
