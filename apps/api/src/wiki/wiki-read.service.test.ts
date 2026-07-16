@@ -826,6 +826,7 @@ function createReadService(options: {
   readonly includeService?: WikiIncludeService;
   readonly denyLinkedPage?: boolean;
   readonly existingLinkSlugs?: readonly string[];
+  readonly onIndexWrite?: () => void;
 }) {
   const now = new Date('2026-07-05T00:00:00.000Z');
   const prisma = {
@@ -931,10 +932,22 @@ function createReadService(options: {
   return new WikiReadService(
     prisma as unknown as PrismaService,
     permissions as unknown as WikiPermissionService,
-    undefined,
+    { async replaceForRevision() { options.onIndexWrite?.(); } } as never,
     options.includeService
   );
 }
+
+test('wiki reads never rewrite link or search indexes', async () => {
+  let indexWrites = 0;
+  const service = createReadService({
+    contentRaw: '[[연결 문서]] [[분류:가이드]]',
+    onIndexWrite() { indexWrites += 1; }
+  });
+
+  await service.getPage('main', '대문');
+
+  assert.equal(indexWrites, 0);
+});
 
 test('wiki read uses matching renderer cache version', async () => {
   let lookupWhere: unknown;

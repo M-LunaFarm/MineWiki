@@ -321,7 +321,7 @@ export class WikiReadService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly wikiPermissions: WikiPermissionService,
-    @Optional() private readonly wikiLinks?: WikiLinkIndexService,
+    @Optional() _wikiLinks?: WikiLinkIndexService,
     @Optional() private readonly wikiIncludes?: WikiIncludeService,
     @Optional() private readonly injectedRoutePaths?: WikiRoutePathResolver
   ) {}
@@ -1765,15 +1765,6 @@ export class WikiReadService {
       revision
     });
     const parsed = parseMarkup(revision.contentRaw);
-    await this.wikiLinks?.replaceForRevision(
-      this.prisma,
-      page.id,
-      revision.id,
-      parsed.links,
-      parsed.categories,
-      parsed.includes,
-      { contentSize: revision.contentSize, contentRaw: revision.contentRaw }
-    ).catch(() => undefined);
     if (parsed.redirectTarget && options.followRedirects) {
       const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
       const redirected = await this.getPageInternal(target.namespace, target.title, accountId, {
