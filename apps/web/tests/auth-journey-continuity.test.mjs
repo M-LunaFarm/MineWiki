@@ -10,10 +10,10 @@ test('OAuth handoff preserves the login form instead of replacing it with a seco
 
   assert.doesNotMatch(source, /if \(oauthPendingProvider\) \{[\s\S]*min-h-\[420px\]/u);
   assert.match(source, /aria-busy=\{oauthPendingProvider !== null\}/u);
+  assert.match(source, /<OAuthFlowStatus/u);
   assert.match(source, /보안 로그인으로 연결 중/u);
-  assert.match(source, /state=\{oauthPendingProvider === 'discord'/u);
-  assert.match(source, /state=\{oauthPendingProvider === 'naver'/u);
-  assert.match(source, /min-h-\[3\.75rem\]/u);
+  assert.match(source, /state=\{oauthPendingProvider \? 'pending' : 'idle'\}/u);
+  assert.match(source, /onProviderSelect/u);
 });
 
 test('OAuth callback keeps the same provider-card language as the login screen', async () => {
@@ -27,6 +27,19 @@ test('OAuth callback keeps the same provider-card language as the login screen',
   assert.doesNotMatch(source, /OAuthJourney/u);
   assert.doesNotMatch(source, /progressWidth/u);
   assert.match(source, /MineWiki 보안 연결/u);
+});
+
+test('login, callback, and first signup share one fixed OAuth panel geometry', async () => {
+  const source = await readFile(
+    new URL('../components/auth/oauth-flow-status.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(source, /간편 로그인·가입/u);
+  assert.match(source, /min-h-\[3\.75rem\]/u);
+  assert.match(source, /state === 'idle'/u);
+  assert.match(source, /onProviderSelect/u);
+  assert.doesNotMatch(source, /min-h-\[5\.5rem\]/u);
 });
 
 test('first OAuth signup keeps the callback provider stage and login shell', async () => {

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Check, Eye, EyeOff, Loader2, Minus } from 'lucide-react';
+import { Check, Eye, EyeOff, Minus } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useAuth } from '../providers/auth-context';
 import {
@@ -9,7 +9,7 @@ import {
   type OAuthProviderAvailability,
 } from '../../lib/auth-client';
 import type { OAuthProvider } from '@minewiki/schemas';
-import { OAuthProviderChoice } from './oauth-provider-choice';
+import { OAuthFlowStatus } from './oauth-flow-status';
 
 export function AuthForms() {
   const {
@@ -264,43 +264,23 @@ export function AuthForms() {
 
   return (
     <div className="space-y-6" aria-busy={oauthPendingProvider !== null}>
-      {mode !== 'verify' ? <div>
-        <p className="mb-2 text-xs font-semibold text-slate-400">간편 로그인·가입</p>
-        <div className="grid grid-cols-2 gap-3">
-          <OAuthProviderChoice
-            provider="discord"
-            state={oauthPendingProvider === 'discord' ? 'pending' : oauthPendingProvider ? 'inactive' : 'idle'}
-            disabled={loading || oauthPendingProvider !== null || !oauthAvailability.discord}
-            onClick={() => void handleOAuth('discord')}
-          />
-          <OAuthProviderChoice
-            provider="naver"
-            state={oauthPendingProvider === 'naver' ? 'pending' : oauthPendingProvider ? 'inactive' : 'idle'}
-            disabled={loading || oauthPendingProvider !== null || !oauthAvailability.naver}
-            onClick={() => void handleOAuth('naver')}
-          />
-        </div>
-        <div className="mt-2 min-h-[3.75rem]" aria-live="polite">
-          {oauthPendingProvider ? (
-          <div
-            className="flex min-h-[3.75rem] items-center gap-3 rounded-lg border border-[#35e5b7]/25 bg-[#35e5b7]/[0.07] px-3.5 py-2.5"
-            role="status"
-          >
-            <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[#35e5b7] motion-reduce:animate-none" aria-hidden />
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-white">
-                {PROVIDER_LABEL[oauthPendingProvider]} 보안 로그인으로 연결 중
-              </p>
-              <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
-                인증 후 이 화면의 다음 단계로 돌아옵니다.
-              </p>
-            </div>
-          </div>
-          ) : (
-            <p className="text-[11px] leading-5 text-slate-500">기존 계정은 바로 로그인합니다. 처음 만드는 계정만 외부 인증 후 MineWiki에서 약관을 확인합니다.</p>
-          )}
-        </div>
-      </div> : null}
+      {mode !== 'verify' ? (
+        <OAuthFlowStatus
+          provider={oauthPendingProvider}
+          state={oauthPendingProvider ? 'pending' : 'idle'}
+          title={oauthPendingProvider ? `${PROVIDER_LABEL[oauthPendingProvider]} 보안 로그인으로 연결 중` : undefined}
+          description={
+            oauthPendingProvider
+              ? '인증 후 이 화면의 다음 단계로 돌아옵니다.'
+              : '기존 계정은 바로 로그인합니다. 처음 만드는 계정만 외부 인증 후 MineWiki에서 약관을 확인합니다.'
+          }
+          onProviderSelect={(provider) => void handleOAuth(provider)}
+          providerDisabled={{
+            discord: loading || oauthPendingProvider !== null || !oauthAvailability.discord,
+            naver: loading || oauthPendingProvider !== null || !oauthAvailability.naver,
+          }}
+        />
+      ) : null}
 
       {!oauthAvailability.discord || !oauthAvailability.naver ? (
         <p className="rounded-lg border border-amber-300/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
