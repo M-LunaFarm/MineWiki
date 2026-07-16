@@ -1,11 +1,13 @@
 'use client';
 
-import { AlertTriangle, FileText, LayoutTemplate, Loader2, Save } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, FileText, LayoutTemplate, Loader2, Save, Users } from 'lucide-react';
+import type { KeyboardEvent, ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { csrfHeaders } from '../../lib/csrf';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { PrivilegedActionGate } from '../auth/privileged-action-gate';
+import { ServerWikiCollaboratorsContent } from './server-wiki-collaborators';
 import { ServerWikiLayoutPlansContent } from './server-wiki-layout-plans';
 
 interface ContentSettings {
@@ -24,6 +26,9 @@ interface ContentSettings {
 
 type SourceField = 'contributionPolicySource' | 'editHelpSource' | 'topNoticeSource' | 'bottomNoticeSource';
 type FormState = Pick<ContentSettings, SourceField | 'requireContributionPolicyAck'>;
+type SettingsTab = 'content' | 'layout' | 'collaborators';
+
+const SETTINGS_TABS: readonly SettingsTab[] = ['content', 'layout', 'collaborators'];
 
 const FIELD_LIMITS: Record<SourceField, number> = {
   contributionPolicySource: 8 * 1024,
@@ -45,7 +50,7 @@ export function ServerWikiSettings({ serverId }: { readonly serverId: string }) 
     <PrivilegedActionGate
       purpose="server_admin"
       title="서버 위키 설정 잠금 해제"
-      description="기여 정책, 문서 안내와 유료 레이아웃을 변경하려면 다중 인증으로 서버 관리 권한을 다시 확인해 주세요."
+      description="기여 정책, 문서 안내, 협업자 권한과 유료 레이아웃을 변경하려면 다중 인증으로 서버 관리 권한을 다시 확인해 주세요."
     >
       <ServerWikiSettingsContent serverId={serverId} />
     </PrivilegedActionGate>
@@ -53,19 +58,97 @@ export function ServerWikiSettings({ serverId }: { readonly serverId: string }) 
 }
 
 function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) {
-  const [tab, setTab] = useState<'content' | 'layout'>('content');
+  const [tab, setTab] = useState<SettingsTab>('content');
+  const tabIdPrefix = useId();
+  const tabButtons = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
+
+  function tabId(value: SettingsTab): string {
+    return `${tabIdPrefix}-${value}-tab`;
+  }
+
+  function panelId(value: SettingsTab): string {
+    return `${tabIdPrefix}-${value}-panel`;
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, current: SettingsTab) {
+    const currentIndex = SETTINGS_TABS.indexOf(current);
+    let nextIndex: number;
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = SETTINGS_TABS.length - 1;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    const nextTab = SETTINGS_TABS[nextIndex];
+    setTab(nextTab);
+    tabButtons.current[nextTab]?.focus();
+  }
+
   return (
     <div className="space-y-8">
       <header>
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">Server Wiki Settings</p>
         <h1 className="mt-3 text-3xl font-extrabold text-white">서버 위키 설정</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">GitBook처럼 문서 전체에 적용할 운영 정책과 안내를 관리하고, 서버 브랜드에 맞는 레이아웃을 선택합니다.</p>
+        <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">GitBook처럼 문서 전체에 적용할 운영 정책과 안내, 협업자 권한을 관리하고 서버 브랜드에 맞는 레이아웃을 선택합니다.</p>
       </header>
-      <div className="grid grid-cols-2 rounded-xl border border-white/10 bg-white/[0.025] p-1" role="tablist" aria-label="서버 위키 설정 분류">
-        <Tab active={tab === 'content'} onClick={() => setTab('content')} icon={<FileText className="size-4" />}>정책·문서 안내</Tab>
-        <Tab active={tab === 'layout'} onClick={() => setTab('layout')} icon={<LayoutTemplate className="size-4" />}>레이아웃·요금제</Tab>
+      <div className="grid grid-cols-3 rounded-xl border border-white/10 bg-white/[0.025] p-1" role="tablist" aria-label="서버 위키 설정 분류">
+        <Tab
+          id={tabId('content')}
+          controls={panelId('content')}
+          active={tab === 'content'}
+          onClick={() => setTab('content')}
+          onKeyDown={(event) => handleTabKeyDown(event, 'content')}
+          buttonRef={(node) => { tabButtons.current.content = node; }}
+          icon={<FileText className="size-4" aria-hidden="true" />}
+        >
+          정책·문서 안내
+        </Tab>
+        <Tab
+          id={tabId('layout')}
+          controls={panelId('layout')}
+          active={tab === 'layout'}
+          onClick={() => setTab('layout')}
+          onKeyDown={(event) => handleTabKeyDown(event, 'layout')}
+          buttonRef={(node) => { tabButtons.current.layout = node; }}
+          icon={<LayoutTemplate className="size-4" aria-hidden="true" />}
+        >
+          레이아웃·요금제
+        </Tab>
+        <Tab
+          id={tabId('collaborators')}
+          controls={panelId('collaborators')}
+          active={tab === 'collaborators'}
+          onClick={() => setTab('collaborators')}
+          onKeyDown={(event) => handleTabKeyDown(event, 'collaborators')}
+          buttonRef={(node) => { tabButtons.current.collaborators = node; }}
+          icon={<Users className="size-4" aria-hidden="true" />}
+        >
+          협업자
+        </Tab>
       </div>
-      {tab === 'content' ? <ContentSettingsForm serverId={serverId} /> : <ServerWikiLayoutPlansContent serverId={serverId} />}
+      <TabPanel id={panelId('content')} labelledBy={tabId('content')} active={tab === 'content'}>
+        {tab === 'content' ? <ContentSettingsForm serverId={serverId} /> : null}
+      </TabPanel>
+      <TabPanel id={panelId('layout')} labelledBy={tabId('layout')} active={tab === 'layout'}>
+        {tab === 'layout' ? <ServerWikiLayoutPlansContent serverId={serverId} /> : null}
+      </TabPanel>
+      <TabPanel id={panelId('collaborators')} labelledBy={tabId('collaborators')} active={tab === 'collaborators'}>
+        {tab === 'collaborators' ? <ServerWikiCollaboratorsContent serverId={serverId} /> : null}
+      </TabPanel>
     </div>
   );
 }
@@ -156,8 +239,12 @@ function SourceEditor({ label, description, field, value, bytes: size, onChange,
   return <label className="block rounded-xl border border-white/10 bg-white/[0.025] p-4"><span className="flex items-center justify-between gap-3"><strong className="text-sm text-white">{label}</strong><span className={`text-[11px] ${size > limit ? 'text-red-300' : 'text-slate-500'}`}>{size.toLocaleString()} / {limit.toLocaleString()} bytes</span></span><span className="mt-1 block text-xs leading-5 text-slate-400">{description}</span><textarea value={value ?? ''} onChange={(event) => onChange(event.target.value)} spellCheck={false} className={`${compact ? 'min-h-32' : 'min-h-56'} mt-4 w-full resize-y rounded-lg border border-white/10 bg-[#0d1219] p-3 font-mono text-sm leading-6 text-slate-100 outline-none focus:border-emerald-300/50`} placeholder="MineWiki 마크업으로 입력하세요." /></label>;
 }
 
-function Tab({ active, onClick, icon, children }: { readonly active: boolean; readonly onClick: () => void; readonly icon: React.ReactNode; readonly children: React.ReactNode }) {
-  return <button type="button" role="tab" aria-selected={active} onClick={onClick} className={`flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition ${active ? 'bg-emerald-400/10 text-emerald-300' : 'text-slate-400 hover:text-white'}`}>{icon}{children}</button>;
+function Tab({ id, controls, active, onClick, onKeyDown, buttonRef, icon, children }: { readonly id: string; readonly controls: string; readonly active: boolean; readonly onClick: () => void; readonly onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void; readonly buttonRef: (node: HTMLButtonElement | null) => void; readonly icon: ReactNode; readonly children: ReactNode }) {
+  return <button ref={buttonRef} id={id} type="button" role="tab" aria-controls={controls} aria-selected={active} tabIndex={active ? 0 : -1} onClick={onClick} onKeyDown={onKeyDown} className={`flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold leading-5 transition sm:gap-2 sm:px-3 sm:text-sm ${active ? 'bg-emerald-400/10 text-emerald-300' : 'text-slate-400 hover:text-white'}`}>{icon}<span>{children}</span></button>;
+}
+
+function TabPanel({ id, labelledBy, active, children }: { readonly id: string; readonly labelledBy: string; readonly active: boolean; readonly children: ReactNode }) {
+  return <div id={id} role="tabpanel" aria-labelledby={labelledBy} hidden={!active} tabIndex={active ? 0 : -1} className="outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60 focus-visible:ring-offset-4 focus-visible:ring-offset-[#0d1219]">{children}</div>;
 }
 
 function Message({ tone, children }: { readonly tone: 'error' | 'success'; readonly children: React.ReactNode }) {

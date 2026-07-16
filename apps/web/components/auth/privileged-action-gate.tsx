@@ -1,6 +1,8 @@
 'use client';
 
-import { KeyRound, ShieldCheck } from 'lucide-react';
+import { KeyRound, Loader2, LogIn, ShieldCheck } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { MfaStepUpPurpose } from '../../lib/auth-client';
@@ -22,7 +24,8 @@ export function PrivilegedActionGate({
   readonly className?: string;
   readonly onUnlocked?: () => void | Promise<void>;
 }) {
-  const { account } = useAuth();
+  const { account, loading } = useAuth();
+  const pathname = usePathname();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [localStepUpExpiresAt, setLocalStepUpExpiresAt] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -51,6 +54,32 @@ export function PrivilegedActionGate({
   }, [onUnlocked, unlocked]);
 
   if (unlocked) return children;
+
+  if (loading) {
+    return (
+      <section className={`surface-card mx-auto max-w-xl p-6 text-center sm:p-8 ${className ?? ''}`} role="status" aria-live="polite">
+        <Loader2 className="mx-auto size-8 animate-spin text-emerald-300" aria-hidden="true" />
+        <p className="mt-4 text-sm text-slate-300">로그인 상태를 확인하는 중입니다.</p>
+      </section>
+    );
+  }
+
+  if (!account) {
+    const returnTo = pathname || '/';
+    return (
+      <section className={`surface-card mx-auto max-w-xl p-6 text-center sm:p-8 ${className ?? ''}`}>
+        <LogIn className="mx-auto size-10 text-emerald-300" aria-hidden="true" />
+        <h2 className="mt-4 text-xl font-extrabold text-white">로그인이 필요합니다</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-400">계정 권한을 먼저 확인한 뒤 다중 인증을 요청합니다.</p>
+        <Link
+          href={`/login?returnTo=${encodeURIComponent(returnTo)}`}
+          className="btn-primary mt-5 min-h-11 gap-2"
+        >
+          <LogIn className="size-4" aria-hidden="true" /> 로그인하고 계속
+        </Link>
+      </section>
+    );
+  }
 
   return (
     <section className={`surface-card mx-auto max-w-xl p-6 text-center sm:p-8 ${className ?? ''}`}>

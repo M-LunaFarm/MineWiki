@@ -11,11 +11,13 @@ import { EventsModule } from '../events/events.module';
 import { PluginCredentialService } from './plugin-credential.service';
 import { VerifyModule } from '../verify/verify.module';
 import { ServerWikiPresentationController } from './server-wiki-presentation.controller';
+import { ServerWikiCollaboratorController } from './server-wiki-collaborator.controller';
+import { ServerWikiCollaboratorService } from './server-wiki-collaborator.service';
 
 @Module({
   imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
-  providers: [ServerService, PluginCredentialService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController],
+  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController],
   exports: [ServerService]
 })
 export class ServerModule {}

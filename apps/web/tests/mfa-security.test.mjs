@@ -47,6 +47,10 @@ test('privileged UI gates bind session expiry and sensitive surfaces to the matc
   assert.match(gate, /stepUpPurpose === purpose/u);
   assert.match(gate, /expiryMs > now/u);
   assert.match(gate, /purpose=\{purpose\}/u);
+  assert.match(gate, /if \(loading\)/u);
+  assert.match(gate, /if \(!account\)/u);
+  assert.match(gate, /\/login\?returnTo=/u);
+  assert.ok(gate.indexOf('if (!account)') < gate.indexOf('다중 인증으로 계속'));
 
   const protectedSurfaces = [
     ['../components/servers/server-owner-controls.tsx', 'server_admin'],
