@@ -18,7 +18,6 @@ import {
 import { useAuth } from '../../../../components/providers/auth-context';
 import {
   CallbackShell,
-  OAuthJourney,
 } from '../../../../components/auth/callback-shell';
 
 interface OAuthCallbackClientProps {
@@ -164,7 +163,6 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
       : status === 'success'
         ? 'text-[#35e5b7]'
         : 'text-[#f43f5e]';
-  const progressWidth = status === 'pending' ? '66%' : '100%';
   const title =
     status === 'pending'
       ? `${providerLabel} 로그인을 확인하고 있습니다.`
@@ -221,10 +219,9 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
       <div
         role={status === 'error' ? 'alert' : 'status'}
         aria-live={status === 'error' ? 'assertive' : 'polite'}
-        className="space-y-5"
+        className="space-y-4"
       >
-        <OAuthJourney providerLabel={providerLabel} currentStep={3} />
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-4 py-3">
+        <div className="auth-provider-button flex min-h-14 items-center justify-between gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-3.5 py-3 text-left">
           <div className="min-w-0">
             <p
               className={`truncate text-xs font-black tracking-[0.02em] ${
@@ -235,7 +232,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
             </p>
             <p className="mt-0.5 text-[10px] font-medium text-slate-500">
               {status === 'pending'
-                ? 'MineWiki로 돌아오는 중'
+                ? '계정 확인 중'
                 : flowMode === 'link'
                   ? '로그인 수단 연결'
                   : '간편 로그인'}
@@ -253,37 +250,31 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
           />
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.025]">
-          <div className="h-1 w-full bg-white/[0.06]">
-            <div
-              className={`h-full transition-all duration-300 ${
-                status === 'error' ? 'bg-rose-400' : 'bg-[#35e5b7]'
-              }`}
-              style={{ width: progressWidth }}
-            />
-          </div>
-          <div className="flex items-start gap-3.5 p-4 sm:p-5">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/10">
+        <div className={`flex items-start gap-3 rounded-lg border px-3.5 py-3 ${
+          status === 'error'
+            ? 'border-rose-400/30 bg-rose-500/10'
+            : 'border-[#35e5b7]/25 bg-[#35e5b7]/[0.07]'
+        }`}>
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/10">
               {status === 'pending' ? (
-                <Loader2 className={`h-5 w-5 animate-spin ${statusTone}`} aria-hidden />
+                <Loader2 className={`h-4 w-4 animate-spin ${statusTone}`} aria-hidden />
               ) : status === 'success' ? (
-                <CheckCircle2 className={`h-5 w-5 ${statusTone}`} aria-hidden />
+                <CheckCircle2 className={`h-4 w-4 ${statusTone}`} aria-hidden />
               ) : (
-                <XCircle className={`h-5 w-5 ${statusTone}`} aria-hidden />
+                <XCircle className={`h-4 w-4 ${statusTone}`} aria-hidden />
               )}
             </div>
             <div className="min-w-0 text-left">
-              <h2 className="text-base font-bold tracking-tight text-white sm:text-lg">
+              <h2 className="text-sm font-semibold text-white">
                 {detailTitle}
               </h2>
-              <p className="mt-1.5 text-xs leading-5 text-slate-400 sm:text-sm sm:leading-6">
+              <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
                 {detailBody}
               </p>
             </div>
-          </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/10 px-3.5 py-3 text-xs">
+        <div className="flex items-center justify-between gap-3 px-0.5 text-[11px]">
           <span className="flex min-w-0 items-center gap-2 text-slate-400">
             <ShieldCheck className="h-4 w-4 flex-shrink-0 text-[#35e5b7]" aria-hidden />
             MineWiki 보안 연결
@@ -296,7 +287,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
         <button
           type="button"
           disabled={status === 'pending'}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#35e5b7] px-6 py-3.5 text-sm font-bold text-[#07100e] transition hover:bg-[#5bedc8] disabled:cursor-not-allowed disabled:border disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-slate-500"
+          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#35e5b7] px-5 text-sm font-bold text-[#07100e] transition hover:bg-[#5bedc8] disabled:cursor-not-allowed disabled:border disabled:border-white/10 disabled:bg-white/[0.04] disabled:text-slate-500"
           onClick={() => {
             if (flowMode === 'link' && status === 'success') {
               if (linkCompletionTarget === 'redirect') {

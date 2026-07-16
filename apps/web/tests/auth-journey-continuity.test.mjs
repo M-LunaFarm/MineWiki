@@ -15,6 +15,18 @@ test('OAuth handoff preserves the login form instead of replacing it with a seco
   assert.match(source, /pending=\{oauthPendingProvider === 'naver'\}/u);
 });
 
+test('OAuth callback keeps the same provider-card language as the login screen', async () => {
+  const source = await readFile(
+    new URL('../app/auth/callback/[provider]/callback-client.tsx', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(source, /auth-provider-button/u);
+  assert.doesNotMatch(source, /OAuthJourney/u);
+  assert.doesNotMatch(source, /progressWidth/u);
+  assert.match(source, /MineWiki 보안 연결/u);
+});
+
 test('OAuth signup consent stays separate from email signup consent copy', async () => {
   const loginSource = await readFile(
     new URL('../components/auth/auth-forms.tsx', import.meta.url),
