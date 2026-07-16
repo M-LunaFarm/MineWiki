@@ -503,8 +503,8 @@ model Server {
   ownerAccountId          String?
   registrantAccountId     String?
   registrationEndpointKey String?           @unique @db.Char(64)
-  wikiSpaceId             BigInt?           @db.UnsignedBigInt
-  wikiPageId              BigInt?           @db.UnsignedBigInt
+  wikiSpaceId             BigInt?           @unique @db.UnsignedBigInt
+  wikiPageId              BigInt?           @unique @db.UnsignedBigInt
   wikiSlug                String?
   name                    String
   joinHost                String
@@ -543,6 +543,8 @@ model Server {
   votifierTargets      VotifierTarget[]
   rankSnapshots        ServerRankSnapshot[]
   supportTickets       SupportTicket[]
+  wikiSpace            WikiSpace?            @relation("ServerLinkedWikiSpace", fields: [wikiSpaceId], references: [id], onDelete: SetNull)
+  wikiPage             WikiPage?             @relation("ServerLinkedWikiPage", fields: [wikiPageId], references: [id], onDelete: SetNull)
 
   @@index([ownerAccountId])
   @@index([registrantAccountId])
@@ -1197,7 +1199,7 @@ model WikiSpace {
   slug              String?        @unique @db.VarChar(255)
   spaceType         String         @default("basic") @map("space_type") @db.VarChar(32)
   parentSpaceId     BigInt?        @map("parent_space_id") @db.UnsignedBigInt
-  rootPageId        BigInt?        @map("root_page_id") @db.UnsignedBigInt
+  rootPageId        BigInt?        @unique @map("root_page_id") @db.UnsignedBigInt
   rootNamespaceCode String         @map("root_namespace_code") @db.VarChar(32)
   rootPath          String         @unique @map("root_path") @db.VarChar(128)
   description       String?        @db.Text
@@ -1208,6 +1210,9 @@ model WikiSpace {
   createdAt         DateTime       @map("created_at")
   updatedAt         DateTime       @map("updated_at")
   apiTokens         WikiApiToken[]
+  serverWiki        ServerWiki?    @relation("ServerWikiSpace")
+  linkedServer      Server?        @relation("ServerLinkedWikiSpace")
+  rootPage          WikiPage?      @relation("WikiSpaceRootPage", fields: [rootPageId], references: [id], onDelete: SetNull)
 
   @@index([spaceType, status])
   @@index([parentSpaceId])
@@ -1291,6 +1296,8 @@ model WikiPage {
   updatedAt            DateTime              @map("updated_at")
   searchDocument       WikiSearchDocument?
   renderCaches         WikiPageRenderCache[]
+  linkedServer         Server?               @relation("ServerLinkedWikiPage")
+  rootOfSpace          WikiSpace?            @relation("WikiSpaceRootPage")
 
   @@unique([namespaceId, slug])
   @@unique([spaceId, localPath])
@@ -1722,7 +1729,7 @@ model WikiRecentChange {
 
 model ServerWiki {
   id                           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  spaceId                      BigInt    @map("space_id") @db.UnsignedBigInt
+  spaceId                      BigInt    @unique @map("space_id") @db.UnsignedBigInt
   voteServerId                 String?   @unique @map("vote_server_id") @db.Char(36)
   serverName                   String    @map("server_name") @db.VarChar(255)
   slug                         String    @unique @db.VarChar(255)
@@ -1748,8 +1755,8 @@ model ServerWiki {
   createdBy                    BigInt?   @map("created_by") @db.UnsignedBigInt
   createdAt                    DateTime  @map("created_at")
   updatedAt                    DateTime  @map("updated_at")
+  space                        WikiSpace @relation("ServerWikiSpace", fields: [spaceId], references: [id], onDelete: Restrict)
 
-  @@index([spaceId])
   @@index([status])
   @@index([verifiedStatus])
   @@map("server_wikis")
