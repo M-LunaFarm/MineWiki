@@ -197,7 +197,48 @@ if (!hasDatabase) {
       await prisma.subwikiRole.createMany({
         data: [
           { spaceId: testSpace.id, userId: source.id, role: 'maintainer', status: 'active', grantedAt: now },
-          { spaceId: testSpace.id, userId: target.id, role: 'maintainer', status: 'revoked', grantedAt: now, revokedAt: now }
+          {
+            spaceId: testSpace.id,
+            userId: target.id,
+            role: 'maintainer',
+            status: 'revoked',
+            grantedAt: new Date(now.getTime() - 4_000),
+            revokedAt: new Date(now.getTime() - 3_000),
+            revokedBy: target.id
+          },
+          {
+            spaceId: testSpace.id,
+            userId: source.id,
+            role: 'editor',
+            status: 'active',
+            grantedBy: source.id,
+            grantedAt: new Date(now.getTime() - 2_000)
+          },
+          {
+            spaceId: testSpace.id,
+            userId: target.id,
+            role: 'editor',
+            status: 'active',
+            grantedBy: target.id,
+            grantedAt: new Date(now.getTime() - 5_000)
+          },
+          {
+            spaceId: testSpace.id,
+            userId: source.id,
+            role: 'reviewer',
+            status: 'active',
+            grantedBy: source.id,
+            grantedAt: new Date(now.getTime() - 1_000)
+          },
+          {
+            spaceId: testSpace.id,
+            userId: source.id,
+            role: 'trusted',
+            status: 'revoked',
+            grantedAt: new Date(now.getTime() - 6_000),
+            revokedAt: new Date(now.getTime() - 5_000),
+            revokedBy: source.id
+          }
         ]
       });
       const aclGroup = await prisma.aclGroup.create({
@@ -239,7 +280,7 @@ if (!hasDatabase) {
       assert.equal(preview.candidates[0]?.counts.current.ownedSpaces, 1);
       assert.equal(preview.candidates[0]?.counts.current.pendingUserDocuments, 1);
       assert.equal(preview.candidates[0]?.counts.current.watches, 1);
-      assert.equal(preview.candidates[0]?.counts.current.subwikiRoles, 1);
+      assert.equal(preview.candidates[0]?.counts.current.subwikiRoles, 3);
       assert.equal(preview.candidates[0]?.counts.current.aclMemberships, 1);
       assert.equal(preview.candidates[0]?.counts.current.wikiGroups, 1);
 
@@ -300,7 +341,7 @@ if (!hasDatabase) {
       assert.equal(completed.transferred.ownedSpaces, 1);
       assert.equal(completed.transferred.pendingUserDocuments, 1);
       assert.equal(completed.transferred.watches, 1);
-      assert.equal(completed.transferred.subwikiRoles, 1);
+      assert.equal(completed.transferred.subwikiRoles, 3);
       assert.equal(completed.transferred.aclMemberships, 1);
       assert.equal(completed.transferred.wikiGroups, 1);
 
@@ -332,8 +373,25 @@ if (!hasDatabase) {
       assert.equal(pendingDocument?.createdBy, source.id);
       assert.equal(await prisma.wikiPageWatch.count({ where: { profileId: target.id, pageId: testPage.id } }), 1);
       assert.equal(await prisma.wikiPageWatch.count({ where: { profileId: source.id, pageId: testPage.id } }), 0);
-      assert.equal((await prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: target.id, role: 'maintainer' } } }))?.status, 'active');
-      assert.equal((await prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: source.id, role: 'maintainer' } } }))?.status, 'revoked');
+      const [revokedTargetRole, activeTargetRole, inheritedTargetRole, absentRevokedTargetRole, revokedSourceRole] = await Promise.all([
+        prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: target.id, role: 'maintainer' } } }),
+        prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: target.id, role: 'editor' } } }),
+        prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: target.id, role: 'reviewer' } } }),
+        prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: target.id, role: 'trusted' } } }),
+        prisma.subwikiRole.findUnique({ where: { spaceId_userId_role: { spaceId: testSpace.id, userId: source.id, role: 'maintainer' } } })
+      ]);
+      assert.equal(revokedTargetRole?.status, 'revoked');
+      assert.equal(revokedTargetRole?.revokedAt?.getTime(), now.getTime() - 3_000);
+      assert.equal(revokedTargetRole?.revokedBy, target.id);
+      assert.equal(activeTargetRole?.status, 'active');
+      assert.equal(activeTargetRole?.grantedBy, target.id);
+      assert.equal(activeTargetRole?.grantedAt.getTime(), now.getTime() - 5_000);
+      assert.equal(inheritedTargetRole?.status, 'active');
+      assert.equal(inheritedTargetRole?.grantedBy, source.id);
+      assert.equal(inheritedTargetRole?.grantedAt.getTime(), now.getTime() - 1_000);
+      assert.equal(absentRevokedTargetRole, null);
+      assert.equal(revokedSourceRole?.status, 'revoked');
+      assert.equal(revokedSourceRole?.revokedBy, target.id);
       assert.equal(await prisma.aclGroupMember.count({ where: { groupId: aclGroup.id, userId: target.id, removedAt: null } }), 1);
       assert.equal(await prisma.aclGroupMember.count({ where: { groupId: aclGroup.id, userId: source.id, removedAt: null } }), 0);
       assert.equal(await prisma.wikiUserGroup.count({ where: { userId: target.id, groupId: wikiGroup.id } }), 1);

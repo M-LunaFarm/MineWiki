@@ -521,33 +521,7 @@ export class WikiProfileMergeService {
     const notifications = await tx.wikiNotification.updateMany({ where: { profileId: sourceId }, data: { profileId: targetId } });
     const pushSubscriptions = await tx.wikiPushSubscription.updateMany({ where: { profileId: sourceId }, data: { profileId: targetId } });
 
-    const activeRoles = await tx.subwikiRole.findMany({ where: { userId: sourceId, status: 'active' } });
-    for (const source of activeRoles) {
-      const target = await tx.subwikiRole.findUnique({
-        where: { spaceId_userId_role: { spaceId: source.spaceId, userId: targetId, role: source.role } }
-      });
-      if (target) {
-        await tx.subwikiRole.update({
-          where: { id: target.id },
-          data: { status: 'active', revokedAt: null, revokedBy: null }
-        });
-      } else {
-        await tx.subwikiRole.create({
-          data: {
-            spaceId: source.spaceId,
-            userId: targetId,
-            role: source.role,
-            status: 'active',
-            grantedBy: source.grantedBy,
-            grantedAt: source.grantedAt
-          }
-        });
-      }
-      await tx.subwikiRole.update({
-        where: { id: source.id },
-        data: { status: 'revoked', revokedAt: now, revokedBy: actorProfileId }
-      });
-    }
+    const subwikiRoles = await this.transferSubwikiRoles(tx, sourceId, targetId, actorProfileId, now);
 
     const activeAclMemberships = await tx.aclGroupMember.findMany({
       where: {
@@ -609,11 +583,50 @@ export class WikiProfileMergeService {
       pollVotes,
       notifications: notifications.count,
       pushSubscriptions: pushSubscriptions.count,
-      subwikiRoles: activeRoles.length,
+      subwikiRoles,
       aclMemberships: activeAclMemberships.length,
       directAclRules: directAclRules.count,
       wikiGroups: sourceGroups.length
     };
+  }
+
+  private async transferSubwikiRoles(
+    tx: Prisma.TransactionClient,
+    sourceId: bigint,
+    targetId: bigint,
+    actorProfileId: bigint,
+    now: Date
+  ): Promise<number> {
+    await tx.$queryRaw<Array<{ id: bigint }>>`
+      SELECT id
+      FROM subwiki_roles
+      WHERE user_id IN (${sourceId}, ${targetId})
+      ORDER BY id
+      FOR UPDATE
+    `;
+    const activeRoles = await tx.subwikiRole.findMany({ where: { userId: sourceId, status: 'active' } });
+    for (const source of activeRoles) {
+      const target = await tx.subwikiRole.findUnique({
+        where: { spaceId_userId_role: { spaceId: source.spaceId, userId: targetId, role: source.role } }
+      });
+      if (!target) {
+        await tx.subwikiRole.create({
+          data: {
+            spaceId: source.spaceId,
+            userId: targetId,
+            role: source.role,
+            status: 'active',
+            grantedBy: source.grantedBy,
+            grantedAt: source.grantedAt
+          }
+        });
+      }
+      await tx.subwikiRole.update({
+        where: { id: source.id },
+        data: { status: 'revoked', revokedAt: now, revokedBy: actorProfileId }
+      });
+    }
+    return activeRoles.length;
   }
 
   private async transferUniqueCurrentRows(
