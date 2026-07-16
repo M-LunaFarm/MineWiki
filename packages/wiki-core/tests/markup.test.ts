@@ -716,6 +716,29 @@ test('preserves dynamic macro markers while applying include parameters safely',
   assert.equal(html.includes('2022-03-04'), false);
 });
 
+test('renders footnote and Korean footnote markers at their document positions without duplicate ids', () => {
+  const parsed = parseMarkup('첫 문장[* 첫 각주]\n[footnote]\n둘째 문장[* 둘째 각주]\n[각주]');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.errors.some((error) => error.includes('지원되지 않는 매크로')), false);
+  assert.equal((html.match(/<section class="footnotes">/g) ?? []).length, 2);
+  assert.equal((html.match(/id="fn-1"/g) ?? []).length, 1);
+  assert.equal((html.match(/id="fn-2"/g) ?? []).length, 1);
+  assert.match(html, /id="fn-1">첫 각주<\/li><\/ol><\/section>\n<p>둘째 문장/);
+  assert.match(html, /<ol start="2"><li id="fn-2">둘째 각주<\/li>/);
+  assert.ok(html.indexOf('id="fn-1"') < html.indexOf('둘째 문장'));
+  assert.ok(html.indexOf('둘째 문장') < html.indexOf('id="fn-2"'));
+});
+
+test('keeps an early footnote marker empty and appends later notes once', () => {
+  const parsed = parseMarkup('[각주]\n나중 각주[* 뒤에서 추가]');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal((html.match(/<section class="footnotes">/g) ?? []).length, 1);
+  assert.equal((html.match(/id="fn-1"/g) ?? []).length, 1);
+  assert.ok(html.indexOf('나중 각주') < html.indexOf('id="fn-1"'));
+});
+
 test('renders safe static NamuMark macros without falling back to warnings', () => {
   const parsed = parseMarkup('첫 줄[br]둘째 줄[clearfix][anchor(문단 1)][ruby(한자,ruby=漢字,color=#336699)]');
   const html = renderDocument(parsed.ast);

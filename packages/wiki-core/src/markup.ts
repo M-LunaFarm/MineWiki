@@ -13,7 +13,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.9.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.10.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -256,6 +256,13 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
     const toc = line.trim().match(/^\[(?:목차|tableofcontents)(?:\((hide)\))?\]$/i);
     if (toc) {
       ast.push({ type: 'toc', collapsed: Boolean(toc[1]) });
+      continue;
+    }
+
+    if (/^\[(?:각주|footnote)\]$/iu.test(line.trim())) {
+      const marker = { type: 'component' as const, name: 'references', props: {} };
+      ast.push(marker);
+      components.push({ name: marker.name, props: marker.props });
       continue;
     }
 
@@ -1263,6 +1270,7 @@ export interface RenderOptions {
 
 export function renderDocument(ast: AstNode[], options: RenderOptions = {}): string {
   const footnotes: string[] = [];
+  let emittedFootnotes = 0;
   const tocHeadings = options.tocHeadings ?? collectTocHeadings(ast);
   const renderOptions: RenderOptions = {
     ...options,
@@ -1345,17 +1353,17 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         output.push(`<pre class="codeblock" data-lang="${escapeAttr(node.lang ?? '')}"><code>${escapeHtml(node.code)}</code></pre>`);
         continue;
       }
+      if (node.name === 'references') {
+        output.push(renderFootnoteSection(footnotes, emittedFootnotes));
+        emittedFootnotes = footnotes.length;
+        continue;
+      }
       output.push(renderComponent(node.name, node.props, renderOptions));
     }
     return output.join('\n');
   };
   const html = renderNodes(ast);
-  const footnoteHtml =
-    footnotes.length > 0
-      ? `<section class="footnotes"><h2>각주</h2><ol>${footnotes
-          .map((note, index) => `<li id="fn-${index + 1}">${escapeHtml(note)}</li>`)
-          .join('')}</ol></section>`
-      : '';
+  const footnoteHtml = renderFootnoteSection(footnotes, emittedFootnotes);
   return sanitizeHtml(`${html}${footnoteHtml}`, {
     allowedTags,
     allowedAttributes: {
@@ -1393,7 +1401,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       details: ['class', 'open'],
       ul: ['class'],
       ol: ['class', 'start', 'type'],
-      li: ['class'],
+      li: ['class', 'id'],
       summary: ['class'],
       iframe: ['class', 'src', 'title', 'loading', 'allow', 'allowfullscreen', 'referrerpolicy', 'sandbox'],
       math: ['xmlns', 'display'],
@@ -1461,6 +1469,16 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       }
     }
   });
+}
+
+function renderFootnoteSection(footnotes: readonly string[], startIndex: number): string {
+  if (startIndex >= footnotes.length) return '';
+  const listStart = startIndex > 0 ? ` start="${startIndex + 1}"` : '';
+  const items = footnotes
+    .slice(startIndex)
+    .map((note, index) => `<li id="fn-${startIndex + index + 1}">${escapeHtml(note)}</li>`)
+    .join('');
+  return `<section class="footnotes"><h2>각주</h2><ol${listStart}>${items}</ol></section>`;
 }
 
 function collectTocHeadings(ast: readonly AstNode[]): Array<{ level: number; text: string; id: string }> {
