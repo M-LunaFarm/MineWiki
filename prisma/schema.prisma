@@ -47,6 +47,20 @@ enum ReviewReportStatus {
   dismissed
 }
 
+enum WikiReportTargetType {
+  page
+  revision
+  discussion
+  comment
+}
+
+enum WikiReportStatus {
+  open
+  in_review
+  resolved
+  dismissed
+}
+
 enum ClaimMethod {
   plugin
   dns
@@ -1473,6 +1487,48 @@ model WikiDiscussionModerationEvent {
   @@index([threadId, id], map: "idx_wiki_comment_moderation_thread")
   @@index([actorProfileId, createdAt], map: "idx_wiki_comment_moderation_actor")
   @@map("wiki_discussion_moderation_events")
+}
+
+model WikiReportCase {
+  id                String                 @id @default(uuid()) @db.Char(36)
+  targetType        WikiReportTargetType   @map("target_type")
+  targetId          BigInt                 @map("target_id") @db.UnsignedBigInt
+  pageId            BigInt                 @map("page_id") @db.UnsignedBigInt
+  status            WikiReportStatus       @default(open)
+  activeKey         String?                @unique(map: "uk_wiki_report_cases_active_key") @map("active_key") @db.VarChar(191)
+  reportCount       Int                    @default(1) @map("report_count") @db.UnsignedInt
+  evidenceSnapshot  Json                   @map("evidence_snapshot")
+  assigneeProfileId BigInt?                @map("assignee_profile_id") @db.UnsignedBigInt
+  assignedAt        DateTime?              @map("assigned_at") @db.DateTime(3)
+  resolution        String?                @db.VarChar(1000)
+  version           Int                    @default(1) @db.UnsignedInt
+  statusUpdatedAt   DateTime               @default(now()) @map("status_updated_at") @db.DateTime(3)
+  resolvedAt        DateTime?              @map("resolved_at") @db.DateTime(3)
+  dismissedAt       DateTime?              @map("dismissed_at") @db.DateTime(3)
+  createdAt         DateTime               @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime               @updatedAt @map("updated_at") @db.DateTime(3)
+  submissions       WikiReportSubmission[]
+
+  @@index([status, createdAt, id], map: "idx_wiki_report_cases_queue")
+  @@index([assigneeProfileId, status, createdAt, id], map: "idx_wiki_report_cases_assignee_queue")
+  @@index([targetType, targetId, createdAt], map: "idx_wiki_report_cases_target_history")
+  @@index([pageId, createdAt], map: "idx_wiki_report_cases_page")
+  @@map("wiki_report_cases")
+}
+
+model WikiReportSubmission {
+  id                String         @id @default(uuid()) @db.Char(36)
+  caseId            String         @map("case_id") @db.Char(36)
+  reporterProfileId BigInt         @map("reporter_profile_id") @db.UnsignedBigInt
+  reason            String         @db.VarChar(1000)
+  evidenceSnapshot  Json           @map("evidence_snapshot")
+  createdAt         DateTime       @default(now()) @map("created_at") @db.DateTime(3)
+  reportCase        WikiReportCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, reporterProfileId], map: "uk_wiki_report_submissions_reporter")
+  @@index([reporterProfileId, createdAt], map: "idx_wiki_report_submissions_reporter")
+  @@index([caseId, createdAt, id], map: "idx_wiki_report_submissions_case")
+  @@map("wiki_report_submissions")
 }
 
 model WikiPageWatch {

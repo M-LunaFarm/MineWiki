@@ -238,6 +238,7 @@ const permissions = [
   ['wiki.acl.manage', 'Manage wiki ACL groups and memberships'],
   ['wiki.user.block', 'Block and unblock wiki contributors'],
   ['wiki.batch_rollback', 'Preview and execute bounded wiki vandalism rollback'],
+  ['wiki.report.moderate', 'Moderate aggregated wiki abuse reports'],
   ['server.admin', 'Manage server administration'],
   ['review.moderate', 'Moderate review reports and review visibility'],
   ['vote.admin', 'Invalidate abusive votes and manage vote integrity'],
@@ -250,11 +251,11 @@ const permissions = [
 const rolePermissions = {
   owner: permissions.map(([code]) => code),
   admin: permissions.map(([code]) => code),
-  wiki_admin: ['wiki.admin', 'wiki.acl.manage', 'wiki.edit.locked', 'wiki.read.restricted'],
+  wiki_admin: ['wiki.admin', 'wiki.acl.manage', 'wiki.edit.locked', 'wiki.read.restricted', 'wiki.report.moderate'],
   server_admin: ['server.admin', 'review.moderate'],
   vote_moderator: ['vote.admin'],
   support_agent: ['support.admin'],
-  moderator: ['wiki.edit.locked', 'wiki.read.restricted', 'review.moderate'],
+  moderator: ['wiki.edit.locked', 'wiki.read.restricted', 'wiki.report.moderate', 'review.moderate'],
 };
 
 const siteSettings = [
