@@ -37,11 +37,11 @@ try {
         id: { in: pages.map((page) => page.currentRevisionId) },
         visibility: 'public'
       },
-      select: { id: true, contentRaw: true }
+      select: { id: true, pageId: true, contentRaw: true }
     });
-    const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
+    const revisionByPage = new Map(revisions.map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
     const documents = pages.flatMap((page) => {
-      const revision = revisionById.get(page.currentRevisionId);
+      const revision = revisionByPage.get(`${page.id}:${page.currentRevisionId}`);
       if (!revision) return [];
       return [{
         pageId: page.id,
@@ -71,6 +71,7 @@ try {
     WHERE p.id IS NULL
        OR p.current_revision_id IS NULL
        OR r.id IS NULL
+       OR r.page_id <> p.id
        OR p.current_revision_id <> sd.revision_id
        OR p.status NOT IN ('normal', 'active', 'published')
        OR r.visibility <> 'public'

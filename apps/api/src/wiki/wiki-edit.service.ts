@@ -1231,9 +1231,22 @@ export class WikiEditService {
       if (!namespace) {
         throw new NotFoundException('Wiki namespace not found.');
       }
+      const latestPublic = status === 'normal'
+        ? await tx.wikiPageRevision.findFirst({
+            where: { pageId: page.id, visibility: 'public' },
+            orderBy: [{ revisionNo: 'desc' }]
+          })
+        : null;
+      if (status === 'normal' && !latestPublic) {
+        throw new ConflictException('A wiki page without a public revision cannot be restored.');
+      }
       const updated = await tx.wikiPage.update({
         where: { id: page.id },
-        data: { status, updatedAt: now }
+        data: {
+          status,
+          ...(latestPublic ? { currentRevisionId: latestPublic.id } : {}),
+          updatedAt: now
+        }
       });
       await this.insertRecentChange(tx, {
         pageId: updated.id,

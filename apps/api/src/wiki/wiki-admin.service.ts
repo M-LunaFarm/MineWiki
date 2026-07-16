@@ -638,19 +638,28 @@ export class WikiAdminService {
         where: { id: revisionId },
         data: { visibility }
       });
-      if (page.currentRevisionId === revisionId && visibility !== 'public') {
-        const fallback = await tx.wikiPageRevision.findFirst({
-          where: {
-            pageId: revision.pageId,
-            visibility: 'public',
-            id: { not: revisionId }
-          },
+      const current = page.currentRevisionId
+        ? await tx.wikiPageRevision.findUnique({ where: { id: page.currentRevisionId } })
+        : null;
+      const mustReconcile = (page.currentRevisionId === revisionId && visibility !== 'public')
+        || (visibility === 'public' && (
+          !current
+          || current.pageId !== page.id
+          || current.visibility !== 'public'
+          || revision.revisionNo > current.revisionNo
+        ));
+      if (mustReconcile) {
+        const latestPublic = await tx.wikiPageRevision.findFirst({
+          where: { pageId: revision.pageId, visibility: 'public' },
           orderBy: [{ revisionNo: 'desc' }]
         });
         await tx.wikiPage.update({
           where: { id: revision.pageId },
           data: {
-            currentRevisionId: fallback?.id ?? null,
+            currentRevisionId: latestPublic?.id ?? null,
+            ...(!latestPublic && page.status !== 'deleted' && page.status !== 'hidden'
+              ? { status: 'hidden' }
+              : {}),
             updatedAt: new Date()
           }
         });
@@ -800,25 +809,38 @@ export class WikiAdminService {
     readonly reason?: string | null;
   }): Promise<WikiAdminPageSummary> {
     const pageId = this.parseBigIntId(input.pageId, 'pageId');
-    const page = await this.prisma.wikiPage.findUnique({ where: { id: pageId } });
-    if (!page) {
-      throw new NotFoundException('Wiki page not found.');
-    }
-    const updated = await this.prisma.wikiPage.update({
-      where: { id: pageId },
-      data: {
-        status: input.status,
-        updatedAt: new Date()
+    const { page, updated } = await this.prisma.$transaction(async (tx) => {
+      await this.lockPageForRevision(tx, pageId);
+      const page = await tx.wikiPage.findUnique({ where: { id: pageId } });
+      if (!page) throw new NotFoundException('Wiki page not found.');
+      const latestPublic = input.status === 'normal'
+        ? await tx.wikiPageRevision.findFirst({
+            where: { pageId, visibility: 'public' },
+            orderBy: [{ revisionNo: 'desc' }]
+          })
+        : null;
+      if (input.status === 'normal' && !latestPublic) {
+        throw new ConflictException('A wiki page without a public revision cannot be restored.');
       }
-    });
-    await this.insertRecentChange({
-      pageId: updated.id,
-      revisionId: updated.currentRevisionId,
-      actorId: input.actorProfileId,
-      changeType: input.status === 'deleted' ? 'delete' : 'restore',
-      title: updated.title,
-      namespaceCode: await this.namespaceCode(updated.namespaceId),
-      summary: input.reason?.trim() || (input.status === 'deleted' ? '관리자 삭제' : '관리자 복구')
+      const updated = await tx.wikiPage.update({
+        where: { id: pageId },
+        data: {
+          status: input.status,
+          ...(latestPublic ? { currentRevisionId: latestPublic.id } : {}),
+          updatedAt: new Date()
+        }
+      });
+      const namespace = await tx.wikiNamespace.findUnique({ where: { id: updated.namespaceId } });
+      await this.insertRecentChange({
+        pageId: updated.id,
+        revisionId: updated.currentRevisionId,
+        actorId: input.actorProfileId,
+        changeType: input.status === 'deleted' ? 'delete' : 'restore',
+        title: updated.title,
+        namespaceCode: namespace?.code ?? 'main',
+        summary: input.reason?.trim() || (input.status === 'deleted' ? '관리자 삭제' : '관리자 복구')
+      }, tx);
+      return { page, updated };
     });
     await this.auditAdmin(input.status === 'deleted' ? 'wiki.delete' : 'wiki.restore', {
       actorProfileId: input.actorProfileId,

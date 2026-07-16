@@ -51,13 +51,13 @@ if (summary.errors > 0) {
 
 async function runValidation() {
   await errorIfRows(
-    'WikiPage.currentRevisionId exists',
+    'WikiPage.currentRevisionId belongs to page',
     `
       SELECT p.id
       FROM pages p
       LEFT JOIN page_revisions r ON r.id = p.current_revision_id
       WHERE p.current_revision_id IS NOT NULL
-        AND r.id IS NULL
+        AND (r.id IS NULL OR r.page_id <> p.id)
       LIMIT ${args.sampleLimit}
     `,
   );
@@ -91,7 +91,7 @@ async function runValidation() {
       FROM pages p
       LEFT JOIN page_revisions r ON r.id = p.current_revision_id
       WHERE p.status NOT IN ('hidden', 'deleted')
-        AND (p.current_revision_id IS NULL OR r.id IS NULL OR r.visibility <> 'public')
+        AND (p.current_revision_id IS NULL OR r.id IS NULL OR r.page_id <> p.id OR r.visibility <> 'public')
       LIMIT ${args.sampleLimit}
     `,
   );
@@ -101,7 +101,7 @@ async function runValidation() {
     `
       SELECT p.id
       FROM pages p
-      JOIN page_revisions r ON r.id = p.current_revision_id
+      JOIN page_revisions r ON r.id = p.current_revision_id AND r.page_id = p.id
       LEFT JOIN wiki_search_documents sd
         ON sd.page_id = p.id
        AND sd.revision_id = p.current_revision_id
@@ -736,7 +736,7 @@ async function validateRenderCache() {
     `
       SELECT p.id AS pageId, r.id AS revisionId, r.content_raw AS contentRaw
       FROM pages p
-      JOIN page_revisions r ON r.id = p.current_revision_id
+      JOIN page_revisions r ON r.id = p.current_revision_id AND r.page_id = p.id
       LEFT JOIN page_render_cache c
         ON c.revision_id = r.id
        AND c.renderer_version = ?

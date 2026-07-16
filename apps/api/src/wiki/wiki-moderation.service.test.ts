@@ -43,6 +43,7 @@ function revision(id: number, pageId: number, revisionNo: number, createdBy: num
 }
 
 function fixture(options: { failLinks?: boolean; targetStatus?: string } = {}) {
+  const lockQueries: string[] = [];
   const state = {
     target: {
       id: 9n, accountId: 'target-account', username: 'target_user',
@@ -77,7 +78,7 @@ function fixture(options: { failLinks?: boolean; targetStatus?: string } = {}) {
         throw error;
       }
     },
-    async $queryRaw() { return []; },
+    async $queryRaw(strings: TemplateStringsArray) { lockQueries.push(strings.join('?')); return []; },
     wikiProfile: { async findUnique() { return state.target; } },
     accountRole: { async findMany() { return []; } },
     wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
@@ -134,7 +135,8 @@ function fixture(options: { failLinks?: boolean; targetStatus?: string } = {}) {
     state,
     service: new WikiModerationService(store as unknown as PrismaService, links, notifications),
     linkCalls: () => linkCalls,
-    notificationCalls: () => notificationCalls
+    notificationCalls: () => notificationCalls,
+    lockQueries
   };
 }
 
@@ -165,7 +167,7 @@ test('batch rollback requires a blocked target and exact username confirmation',
 });
 
 test('batch rollback hides the target suffix and appends an attributed recovery revision', async () => {
-  const { service, state, linkCalls, notificationCalls } = fixture();
+  const { service, state, linkCalls, notificationCalls, lockQueries } = fixture();
   const response = await service.execute({
     targetProfileId: '9', sinceMinutes: 60, reason: '반복적인 문서 훼손', confirmUsername: 'target_user',
     candidates: [{ pageId: '1', expectedCurrentRevisionId: '3' }], actorProfileId: 2n
@@ -182,6 +184,8 @@ test('batch rollback hides the target suffix and appends an attributed recovery 
   assert.equal(state.pages[0]?.currentRevisionId, recovery.id);
   assert.equal(linkCalls(), 1);
   assert.equal(notificationCalls(), 1);
+  assert.ok(lockQueries.some((query) => query.includes('FROM users')));
+  assert.equal(lockQueries.some((query) => query.includes('wiki_profiles')), false);
 });
 
 test('batch rollback skips a page whose current revision changed after preview', async () => {

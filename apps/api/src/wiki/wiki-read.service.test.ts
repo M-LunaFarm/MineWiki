@@ -11,7 +11,8 @@ test('public pagecount filters revisions, ACLs, and namespaces without request-s
   const pages = [
     { id: 1n, namespaceId: 1, spaceId: 10n, title: '공개', protectionLevel: 'open', status: 'normal', currentRevisionId: 11n },
     { id: 2n, namespaceId: 1, spaceId: 10n, title: '비공개 리비전', protectionLevel: 'open', status: 'normal', currentRevisionId: 12n },
-    { id: 3n, namespaceId: 1, spaceId: 10n, title: 'ACL 차단', protectionLevel: 'open', status: 'normal', currentRevisionId: 13n }
+    { id: 3n, namespaceId: 1, spaceId: 10n, title: 'ACL 차단', protectionLevel: 'open', status: 'normal', currentRevisionId: 13n },
+    { id: 4n, namespaceId: 1, spaceId: 10n, title: '교차 연결', protectionLevel: 'open', status: 'normal', currentRevisionId: 14n }
   ];
   const pageQueries: unknown[] = [];
   const prisma = {
@@ -22,7 +23,7 @@ test('public pagecount filters revisions, ACLs, and namespaces without request-s
       async findMany(input: unknown) { pageQueries.push(input); return pages; }
     },
     wikiPageRevision: {
-      async findMany() { return [{ id: 11n }, { id: 13n }]; }
+      async findMany() { return [{ id: 11n, pageId: 1n }, { id: 13n, pageId: 3n }, { id: 14n, pageId: 999n }]; }
     }
   } as unknown as PrismaService;
   let permissionInput: unknown;
@@ -248,8 +249,8 @@ test('wiki search batches current revisions and returns a continuation cursor', 
         revisionQueryCount += 1;
         revisionSelects.push(args.select);
         return args.select?.contentRaw
-          ? pages.map((page) => ({ id: page.currentRevisionId, contentRaw: `본문 검색 ${page.id}` }))
-          : pages.map((page) => ({ id: page.currentRevisionId, visibility: 'public' }));
+          ? pages.map((page) => ({ id: page.currentRevisionId, pageId: page.id, contentRaw: `본문 검색 ${page.id}` }))
+          : pages.map((page) => ({ id: page.currentRevisionId, pageId: page.id, visibility: 'public' }));
       }
     }
   } as unknown as PrismaService;
@@ -295,8 +296,8 @@ test('wiki search target filters distinguish title and body matches', async () =
     wikiPageRevision: {
       async findMany(input: { select?: { contentRaw?: boolean } }) {
         return input.select?.contentRaw
-          ? [...bodies].map(([id, contentRaw]) => ({ id, contentRaw }))
-          : [...bodies.keys()].map((id) => ({ id, visibility: 'public' }));
+          ? [...bodies].map(([id, contentRaw]) => ({ id, pageId: pages.find((page) => page.currentRevisionId === id)!.id, contentRaw }))
+          : [...bodies.keys()].map((id) => ({ id, pageId: pages.find((page) => page.currentRevisionId === id)!.id, visibility: 'public' }));
       }
     }
   } as unknown as PrismaService;
@@ -340,8 +341,8 @@ test('wiki search never uses matching historical revisions as current-document c
     wikiPageRevision: {
       async findMany(args: { select?: { contentRaw?: boolean } }) {
         return args.select?.contentRaw
-          ? [{ id: 70n, contentRaw: '현재 본문 검색어' }]
-          : [{ id: 70n, visibility: 'public' }];
+          ? [{ id: 70n, pageId: 7n, contentRaw: '현재 본문 검색어' }]
+          : [{ id: 70n, pageId: 7n, visibility: 'public' }];
       }
     }
   } as unknown as PrismaService;

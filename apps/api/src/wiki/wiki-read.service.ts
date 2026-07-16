@@ -417,11 +417,11 @@ export class WikiReadService {
       const revisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
       const publicRevisions = await this.prisma.wikiPageRevision.findMany({
         where: { id: { in: revisionIds }, visibility: 'public' },
-        select: { id: true }
+        select: { id: true, pageId: true }
       });
-      const publicRevisionIds = new Set(publicRevisions.map((revision) => revision.id));
+      const publicRevisionKeys = new Set(publicRevisions.map((revision) => `${revision.pageId}:${revision.id}`));
       const publicCandidates = pages.filter((page) =>
-        page.currentRevisionId !== null && publicRevisionIds.has(page.currentRevisionId)
+        page.currentRevisionId !== null && publicRevisionKeys.has(`${page.id}:${page.currentRevisionId}`)
       );
       const readable = await this.wikiPermissions.filterReadablePages({
         actor: null,
@@ -1636,11 +1636,11 @@ export class WikiReadService {
             id: { in: currentRevisionIds },
             visibility: 'public'
           },
-          select: { id: true, visibility: true }
+          select: { id: true, pageId: true, visibility: true }
         })
       : [];
-    const publicRevisionIds = new Set(revisionVisibility.map((revision) => revision.id));
-    let publicPages = pages.filter((page) => page.currentRevisionId && publicRevisionIds.has(page.currentRevisionId));
+    const publicRevisionKeys = new Set(revisionVisibility.map((revision) => `${revision.pageId}:${revision.id}`));
+    let publicPages = pages.filter((page) => page.currentRevisionId && publicRevisionKeys.has(`${page.id}:${page.currentRevisionId}`));
     if (target === 'title') {
       publicPages = publicPages.filter((page) => wikiSearchTextMatches(
         [page.title, page.displayTitle, page.slug, page.localPath].join(' '),
@@ -1650,12 +1650,12 @@ export class WikiReadService {
       const candidateRevisionIds = publicPages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
       const candidateRevisions = await this.prisma.wikiPageRevision.findMany({
         where: { id: { in: candidateRevisionIds }, visibility: 'public' },
-        select: { id: true, contentRaw: true }
+        select: { id: true, pageId: true, contentRaw: true }
       });
       const matchingRevisionIds = new Set(candidateRevisions
         .filter((revision) => wikiSearchTextMatches(revision.contentRaw, query))
-        .map((revision) => revision.id));
-      publicPages = publicPages.filter((page) => page.currentRevisionId && matchingRevisionIds.has(page.currentRevisionId));
+        .map((revision) => `${revision.pageId}:${revision.id}`));
+      publicPages = publicPages.filter((page) => page.currentRevisionId && matchingRevisionIds.has(`${page.id}:${page.currentRevisionId}`));
     }
     const access = await resolveWikiAccessContext(
       this.prisma,
@@ -1677,13 +1677,13 @@ export class WikiReadService {
     const revisions = resultRevisionIds.length > 0
       ? await this.prisma.wikiPageRevision.findMany({
           where: { id: { in: resultRevisionIds }, visibility: 'public' },
-          select: { id: true, contentRaw: true }
+          select: { id: true, pageId: true, contentRaw: true }
         })
       : [];
-    const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
+    const revisionByPage = new Map(revisions.map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
     const items: WikiSearchResult[] = [];
     for (const page of resultPages) {
-      const revision = page.currentRevisionId ? revisionById.get(page.currentRevisionId) : null;
+      const revision = page.currentRevisionId ? revisionByPage.get(`${page.id}:${page.currentRevisionId}`) : null;
       if (!revision) continue;
       const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
       const snippet = makeSearchSnippet(revision.contentRaw, query);
@@ -2305,7 +2305,7 @@ async function findCurrentSearchMatchIds(
       FROM pages AS p
       INNER JOIN wiki_search_documents AS sd
         ON sd.page_id = p.id AND sd.revision_id = p.current_revision_id
-      INNER JOIN page_revisions AS r ON r.id = p.current_revision_id
+      INNER JOIN page_revisions AS r ON r.id = p.current_revision_id AND r.page_id = p.id
       WHERE ${where.join('\n        AND ')}
       ORDER BY p.updated_at DESC, p.id DESC
       LIMIT ${limit}

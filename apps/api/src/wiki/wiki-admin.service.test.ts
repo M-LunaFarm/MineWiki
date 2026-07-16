@@ -409,6 +409,44 @@ test('wiki admin service hides current revision and falls back to previous publi
   assert.ok(operations.indexOf('page:update') < operations.indexOf('recent:create'));
 });
 
+test('wiki admin hides a page when its sole public revision is hidden', async () => {
+  const { service, page, revisions } = createService();
+  revisions.get(100n)!.visibility = 'hidden';
+
+  await service.updateRevisionVisibility({
+    revisionId: '101', visibility: 'hidden', actorProfileId: 99n, reason: '법적 요청으로 전체 숨김'
+  });
+
+  assert.equal(page.currentRevisionId, null);
+  assert.equal(page.status, 'hidden');
+});
+
+test('wiki admin promotes a restored newer public revision back to current', async () => {
+  const { service, page, revisions } = createService();
+  page.currentRevisionId = 100n;
+  revisions.get(101n)!.visibility = 'hidden';
+
+  await service.updateRevisionVisibility({
+    revisionId: '101', visibility: 'public', actorProfileId: 99n, reason: '검토 완료 후 공개 복구'
+  });
+
+  assert.equal(page.currentRevisionId, 101n);
+  assert.equal(page.status, 'normal');
+});
+
+test('wiki admin refuses to restore a page without a public revision', async () => {
+  const { service, page, revisions } = createService();
+  page.status = 'deleted';
+  revisions.get(100n)!.visibility = 'hidden';
+  revisions.get(101n)!.visibility = 'hidden';
+
+  await assert.rejects(
+    service.setPageStatus({ pageId: '10', status: 'normal', actorProfileId: 99n, reason: '복구 시도' }),
+    ConflictException
+  );
+  assert.equal(page.status, 'deleted');
+});
+
 test('wiki admin visibility change never overwrites a newer current revision', async () => {
   const { service, page, revisions, operations } = createService();
   page.currentRevisionId = 999n;

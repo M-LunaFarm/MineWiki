@@ -150,7 +150,7 @@ export class WikiModerationService {
     readonly since: Date;
     readonly reason: string;
   }): Promise<WikiBatchRollbackResult> {
-    await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM wiki_profiles WHERE id = ${input.targetId} FOR UPDATE`;
+    await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM users WHERE id = ${input.targetId} FOR UPDATE`;
     await this.assertTargetEligible(tx, input.targetId);
     await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM pages WHERE id = ${input.pageId} FOR UPDATE`;
     const plan = await this.planPage(tx, input.pageId, input.targetId, input.since);
