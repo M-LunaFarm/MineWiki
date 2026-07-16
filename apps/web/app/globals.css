@@ -395,6 +395,11 @@ html[data-theme='light'] .wiki-rendered .wiki-footnote-backlinks {
   color: #637168;
 }
 
+html[data-theme='light'] .wiki-rendered .wiki-theme-dark,
+html[data-theme='dark'] .wiki-rendered .wiki-theme-light {
+  display: none;
+}
+
 html[data-theme='light'] .support-surface {
   background: #f4f5f2;
   color: #202820;
@@ -739,6 +744,12 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered .wiki-file img {
     @apply h-auto max-w-full rounded-lg;
   }
+  .wiki-rendered .wiki-file-frame {
+    @apply inline-flex max-w-full overflow-hidden align-middle;
+  }
+  .wiki-rendered .wiki-file-frame .wiki-file-image {
+    @apply block max-h-full max-w-full;
+  }
   .wiki-rendered .wiki-file-inline {
     @apply mx-1 inline-flex max-w-full items-center gap-1.5 align-middle;
   }
@@ -747,8 +758,27 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   }
   .wiki-rendered .wiki-file small,
   .wiki-rendered .wiki-file figcaption,
-  .wiki-rendered .wiki-file-inline > span {
+  .wiki-rendered .wiki-file-inline > span:not(.wiki-file-frame) {
     @apply text-xs text-slate-400;
+  }
+  .wiki-rendered .wiki-file-align-center:not(.wiki-file-inline) {
+    @apply mx-auto text-center;
+  }
+  .wiki-rendered .wiki-file-align-right:not(.wiki-file-inline) {
+    @apply ml-auto text-right;
+  }
+  .wiki-rendered .wiki-file-align-left:not(.wiki-file-inline) {
+    @apply mr-auto text-left;
+  }
+  .wiki-rendered .wiki-file-inline.wiki-file-align-top {
+    vertical-align: top;
+  }
+  .wiki-rendered .wiki-file-inline.wiki-file-align-middle,
+  .wiki-rendered .wiki-file-inline.wiki-file-align-center {
+    vertical-align: middle;
+  }
+  .wiki-rendered .wiki-file-inline.wiki-file-align-bottom {
+    vertical-align: bottom;
   }
   .wiki-rendered .missing-file {
     @apply rounded-md border border-dashed border-amber-300/30 bg-amber-300/[0.06] px-2 py-1 text-xs text-amber-200;

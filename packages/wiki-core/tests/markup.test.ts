@@ -613,7 +613,7 @@ test('parses and safely renders advanced NamuMark table controls', () => {
   assert.match(html, /class="component-table wiki-table" style="width:100%;color:black;background-color:#f5f5f5;border:2px solid #336699"/);
   assert.match(html, /colspan="2" rowspan="2"/);
   assert.match(html, /style="width:120px;height:40px;color:white;background-color:#112233;text-align:center;vertical-align:top"/);
-  assert.match(html, /<span class="wiki-file wiki-file-inline thumb"><img src="\/v1\/files\/public\/server\.png\/raw"/);
+  assert.match(html, /<span class="wiki-file wiki-file-inline thumb"><span class="wiki-file-frame"><img class="wiki-file-image" src="\/v1\/files\/public\/server\.png\/raw"/);
   assert.equal(html.includes('&lt;width=120&gt;'), false);
 });
 
@@ -840,6 +840,87 @@ test('supports inline file markup in prose and table cells without creating docu
   assert.match(html, /alt="표 아이콘"/);
   assert.match(html, /<p>아이콘 <span class="wiki-file wiki-file-inline">/);
   assert.equal(html.includes('<p>아이콘 <figure'), false);
+});
+
+test('supports bounded thetree-compatible file display options', () => {
+  const parsed = parseMarkup('[[파일:scene.webp|섬네일|width=640&height=360&align=center&bgcolor=%23112233&border-radius=24&rendering=high-quality&object-fit=cover&theme=dark&alt=%EC%95%BC%EA%B0%84+%EC%9E%A5%EB%A9%B4&caption=%EB%8C%80%ED%91%9C+%ED%99%94%EB%A9%B4]]');
+  const html = renderDocument(parsed.ast, {
+    files: {
+      'scene.webp': { url: '/files/scene.webp', mimeType: 'image/webp', originalName: 'scene.webp' }
+    }
+  });
+
+  assert.equal(parsed.blockingErrors.length, 0);
+  assert.equal(parsed.errors.some((error) => error.includes('파일 옵션')), false);
+  const fileNode = parsed.ast[0];
+  assert.equal(fileNode?.type, 'file');
+  if (fileNode?.type !== 'file') return;
+  assert.deepEqual(fileNode.display, {
+    width: '640px', height: '360px', align: 'center', backgroundColor: '#112233', borderRadius: '24px',
+    rendering: 'high-quality', objectFit: 'cover', theme: 'dark', alt: '야간 장면'
+  });
+  assert.match(html, /class="wiki-file thumb wiki-file-align-center wiki-theme-dark"/);
+  assert.match(html, /class="wiki-file-frame" style="width:640px;height:360px;background-color:#112233"/);
+  assert.match(html, /class="wiki-file-image"[^>]+alt="야간 장면"[^>]+style="width:100%;height:100%;border-radius:24px;image-rendering:high-quality;object-fit:cover"/);
+  assert.match(html, /<figcaption>대표 화면<\/figcaption>/);
+});
+
+test('bounds duplicate and excessive file option input without throwing', () => {
+  const extras = Array.from({ length: 20 }, (_, index) => `unknown${index}=x`).join('&');
+  const parsed = parseMarkup(`[[파일:safe.png|width=320&width=640&${extras}]]`);
+  const html = renderDocument(parsed.ast, {
+    files: { 'safe.png': { url: '/safe.png', mimeType: 'image/png', originalName: 'safe.png' } }
+  });
+
+  assert.equal(parsed.errors.includes('파일 옵션이 중복되었습니다: width'), true);
+  assert.equal(parsed.errors.includes('파일 옵션은 16개까지 사용할 수 있습니다.'), true);
+  assert.match(html, /style="width:320px"/);
+  assert.equal(html.includes('640px'), false);
+});
+
+test('keeps legacy captions while safely decoding explicit caption delimiters', () => {
+  const legacy = renderDocument(parseMarkup('[[파일:safe.png|Rock & Roll = Live]]').ast, {
+    files: { 'safe.png': { url: '/safe.png', mimeType: 'image/png', originalName: 'safe.png' } }
+  });
+  const explicit = renderDocument(parseMarkup('[[파일:safe.png|caption=Rock+%26+Roll+%3D+Live&alt=A%7CB%5DC]]').ast, {
+    files: { 'safe.png': { url: '/safe.png', mimeType: 'image/png', originalName: 'safe.png' } }
+  });
+
+  assert.match(legacy, /Rock &amp; Roll = Live/);
+  assert.match(explicit, /alt="A\|B\]C"/);
+  assert.match(explicit, /Rock &amp; Roll = Live/);
+});
+
+test('drops unsafe or excessive file display values without leaking CSS', () => {
+  const parsed = parseMarkup('[[파일:safe.png|width=999999&height=expression(alert(1))&align=fixed&bgcolor=url(javascript:alert(1))&border-radius=9999&rendering=evil&object-fit=javascript&theme=system&alt=<img src=x>]]');
+  const html = renderDocument(parsed.ast, {
+    files: {
+      'safe.png': { url: '/files/safe.png', mimeType: 'image/png', originalName: 'safe.png' }
+    }
+  });
+
+  assert.equal(parsed.errors.filter((error) => error.includes('파일 옵션 값이 올바르지 않습니다')).length, 8);
+  assert.equal(html.includes('javascript:'), false);
+  assert.equal(html.includes('expression('), false);
+  assert.equal(html.includes('999999'), false);
+  assert.match(html, /alt="&lt;img src=x&gt;"/);
+});
+
+test('interpolates file display options through includes and revalidates them', () => {
+  const source = parseMarkup('[[파일:@파일@|width=@너비@&align=@정렬@&object-fit=@맞춤@&alt=@대체@|@캡션@]]');
+  const expanded = applyIncludeParametersToAst(source.ast, {
+    파일: 'safe.png', 너비: '320', 정렬: 'right', 맞춤: 'contain', 대체: '안전 이미지', 캡션: '설명'
+  }, 'inc-');
+  const html = renderDocument(expanded, {
+    files: {
+      'safe.png': { url: '/files/safe.png', mimeType: 'image/png', originalName: 'safe.png' }
+    }
+  });
+
+  assert.match(html, /wiki-file-align-right/);
+  assert.match(html, /style="width:320px"/);
+  assert.match(html, /alt="안전 이미지"/);
+  assert.match(html, /<figcaption>설명<\/figcaption>/);
 });
 
 test('collects file dependencies from every block and inline container', () => {

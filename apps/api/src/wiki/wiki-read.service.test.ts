@@ -1273,7 +1273,7 @@ test('wiki read ignores persistent render caches for file-dependent revisions', 
   let createdCache = false;
   const service = createReadService({
     cacheHtml: '<p>파일 없음: logo.png</p>',
-    contentRaw: '[[파일:logo.png|섬네일|서버 로고]]',
+    contentRaw: '[[파일:logo.png|섬네일|width=320&align=center&object-fit=contain&caption=서버+로고]]',
     files: [{ filename: 'logo.png', publicPath: '/files/logo.png', mimeType: 'image/png', originalName: 'logo.png' }],
     onCacheLookup() { lookedUpCache = true; },
     onCacheCreate() { createdCache = true; }
@@ -1281,7 +1281,9 @@ test('wiki read ignores persistent render caches for file-dependent revisions', 
   const page = await service.getPage('main', '대문');
   assert.equal(lookedUpCache, false);
   assert.equal(createdCache, false);
-  assert.match(page.html, /<img src="\/files\/logo\.png"/);
+  assert.match(page.html, /<img class="wiki-file-image" src="\/files\/logo\.png"/);
+  assert.match(page.html, /wiki-file-align-center/);
+  assert.match(page.html, /style="width:320px"/);
   assert.equal(page.html.includes('파일 없음'), false);
 });
 
@@ -1293,7 +1295,7 @@ test('wiki read resolves inline files inside prose, lists, and table cells', asy
 
   const page = await service.getPage('main', '대문');
 
-  assert.equal((page.html.match(/<img src="\/files\/logo\.png"/g) ?? []).length, 3);
+  assert.equal((page.html.match(/<img class="wiki-file-image" src="\/files\/logo\.png"/g) ?? []).length, 3);
   assert.equal(page.html.includes('파일 없음'), false);
 });
 

@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService, toAuditJson } from '../events/business-event.service';
 import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
+import { astContainsFile } from './wiki-edit.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiRoutePathResolver } from './wiki-route-path.resolver';
 
@@ -866,7 +867,7 @@ export class WikiAdminService {
           visibility: 'public'
         }
       });
-      if (parsed.includes.length === 0) {
+      if (!astContainsFile(parsed.ast) && parsed.includes.length === 0) {
         await tx.wikiPageRenderCache.create({
           data: {
             pageId: page.id,

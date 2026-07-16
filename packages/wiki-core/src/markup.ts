@@ -4,6 +4,7 @@ import type {
   AstNode,
   InlineNode,
   ParsedDocument,
+  WikiFileDisplayOptions,
   WikiListKind,
   WikiListNode,
   WikiTableCell,
@@ -19,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.15.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.16.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -32,6 +33,8 @@ const MAX_MATH_SOURCE_BYTES = 4096;
 const MAX_MATH_NODES = 50;
 const MAX_INLINE_NESTING = 16;
 const MAX_FOOTNOTE_NAME_LENGTH = 64;
+const MAX_FILE_OPTION_VALUE_LENGTH = 256;
+const MAX_FILE_OPTIONS = 16;
 const INCLUDE_PARAM_KEY = /^[A-Za-z0-9가-힣_]+$/u;
 
 const componentNameMap: Record<string, string> = {
@@ -455,13 +458,9 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
       continue;
     }
 
-    const file = line.match(/^\[\[파일:([^|\]]+)(?:\|([^|\]]+))?(?:\|([^|\]]+))?\]\]$/);
+    const file = line.match(/^\[\[파일:([^\]]+)\]\]$/);
     if (file) {
-      const fileName = file[1].trim();
-      validateWikiFileName(fileName, blockingErrors);
-      const thumbnail = file[2]?.trim() === '섬네일';
-      const caption = file[3]?.trim() || (!thumbnail ? file[2]?.trim() : '') || null;
-      ast.push({ type: 'file', fileName, thumbnail, caption });
+      ast.push(parseWikiFileMarkup(file[1] ?? '', errors, blockingErrors));
       continue;
     }
 
@@ -1058,8 +1057,182 @@ function normalizeTableColorPair(value: string): { light: string; dark?: string 
   return { light, ...(dark ? { dark } : {}) };
 }
 
+const WIKI_FILE_OPTION_KEYS = new Set([
+  'width',
+  'height',
+  'align',
+  'bgcolor',
+  'border-radius',
+  'rendering',
+  'object-fit',
+  'theme',
+  'alt',
+  'caption'
+]);
+const CSS_NAMED_COLORS = new Set('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato transparent turquoise violet wheat white whitesmoke yellow yellowgreen'.split(' '));
+
+function parseWikiFileMarkup(
+  body: string,
+  errors: string[],
+  blockingErrors: string[]
+): Extract<AstNode, { type: 'file' }> | Extract<InlineNode, { type: 'file' }> {
+  const [rawFileName = '', ...parts] = body.split('|');
+  const fileName = rawFileName.trim();
+  validateWikiFileName(fileName, blockingErrors);
+  let thumbnail = false;
+  let caption: string | null = null;
+  const display: WikiFileDisplayOptions = {};
+  const seenOptions = new Set<string>();
+  let optionCount = 0;
+
+  for (const rawPart of parts) {
+    const part = rawPart.trim();
+    if (!part) continue;
+    if (part === '섬네일') {
+      thumbnail = true;
+      continue;
+    }
+    const rawOptionPairs = part.split('&');
+    const hasKnownOption = rawOptionPairs.some((pair) => {
+      const separator = pair.indexOf('=');
+      if (separator < 0) return false;
+      try {
+        return WIKI_FILE_OPTION_KEYS.has(decodeURIComponent(pair.slice(0, separator).replace(/\+/g, ' ')).trim());
+      } catch {
+        return false;
+      }
+    });
+    if (!hasKnownOption) {
+      caption ??= part;
+      continue;
+    }
+    for (const pair of rawOptionPairs) {
+      optionCount += 1;
+      if (optionCount > MAX_FILE_OPTIONS) {
+        addWikiFileOptionWarning(errors, `파일 옵션은 ${MAX_FILE_OPTIONS}개까지 사용할 수 있습니다.`);
+        break;
+      }
+      const separator = pair.indexOf('=');
+      const key = decodeWikiFileOptionComponent(separator < 0 ? pair : pair.slice(0, separator), errors, '이름');
+      const value = decodeWikiFileOptionComponent(separator < 0 ? '' : pair.slice(separator + 1), errors, key || '값');
+      if (key === null || value === null) continue;
+      if (!WIKI_FILE_OPTION_KEYS.has(key)) {
+        addWikiFileOptionWarning(errors, `지원하지 않는 파일 옵션입니다: ${key || '(빈 옵션)'}`);
+        continue;
+      }
+      if (seenOptions.has(key)) {
+        addWikiFileOptionWarning(errors, `파일 옵션이 중복되었습니다: ${key}`);
+        continue;
+      }
+      seenOptions.add(key);
+      if (!value || value.length > MAX_FILE_OPTION_VALUE_LENGTH) {
+        addWikiFileOptionWarning(errors, `파일 옵션 값이 올바르지 않습니다: ${key}`);
+        continue;
+      }
+      if (key === 'caption') caption = value;
+      else if (key === 'width') display.width = value;
+      else if (key === 'height') display.height = value;
+      else if (key === 'align') display.align = value;
+      else if (key === 'bgcolor') display.backgroundColor = value;
+      else if (key === 'border-radius') display.borderRadius = value;
+      else if (key === 'rendering') display.rendering = value;
+      else if (key === 'object-fit') display.objectFit = value;
+      else if (key === 'theme') display.theme = value;
+      else if (key === 'alt') display.alt = value;
+    }
+  }
+
+  validateWikiFileDisplayOptions(display, errors);
+  const normalizedDisplay = normalizeWikiFileDisplayOptions(display, true);
+  return {
+    type: 'file',
+    fileName,
+    thumbnail,
+    caption,
+    ...(Object.keys(normalizedDisplay).length > 0 ? { display: normalizedDisplay } : {})
+  };
+}
+
+function decodeWikiFileOptionComponent(value: string, errors: string[], label: string): string | null {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' ')).trim();
+  } catch {
+    addWikiFileOptionWarning(errors, `파일 옵션 인코딩이 올바르지 않습니다: ${label}`);
+    return null;
+  }
+}
+
+function addWikiFileOptionWarning(errors: string[], warning: string) {
+  if (!errors.includes(warning)) errors.push(warning);
+}
+
+function isIncludeParameterValue(value: string) {
+  return /^@[A-Za-z0-9가-힣_]+(?:=[^@\n]*)?@$/u.test(value);
+}
+
+function normalizeWikiFileSize(value: string | undefined, kind: 'dimension' | 'radius'): string | null {
+  if (!value) return null;
+  const match = value.match(/^(\d+)(%|px)?$/u);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2] ?? 'px';
+  const maximum = unit === '%' ? (kind === 'radius' ? 50 : 100) : (kind === 'radius' ? 256 : 4096);
+  const minimum = kind === 'radius' ? 0 : 1;
+  return Number.isSafeInteger(amount) && amount >= minimum && amount <= maximum ? `${amount}${unit}` : null;
+}
+
+function normalizeWikiFileDisplayOptions(raw: WikiFileDisplayOptions | undefined, preserveIncludeParameters = false): WikiFileDisplayOptions {
+  if (!raw) return {};
+  const preserve = (value: string | undefined) => preserveIncludeParameters && value && isIncludeParameterValue(value) ? value : null;
+  const width = preserve(raw.width) ?? normalizeWikiFileSize(raw.width, 'dimension');
+  const height = preserve(raw.height) ?? normalizeWikiFileSize(raw.height, 'dimension');
+  const borderRadius = preserve(raw.borderRadius) ?? normalizeWikiFileSize(raw.borderRadius, 'radius');
+  const align = preserve(raw.align) ?? (raw.align && ['bottom', 'center', 'left', 'middle', 'normal', 'right', 'top'].includes(raw.align) ? raw.align : null);
+  const rawColor = raw.backgroundColor?.toLowerCase();
+  const backgroundColor = preserve(raw.backgroundColor) ?? (rawColor && (/^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(rawColor) || CSS_NAMED_COLORS.has(rawColor)) ? rawColor : null);
+  const rendering = preserve(raw.rendering) ?? (raw.rendering && ['auto', 'smooth', 'high-quality', 'pixelated', 'crisp-edges'].includes(raw.rendering) ? raw.rendering : null);
+  const objectFit = preserve(raw.objectFit) ?? (raw.objectFit && ['fill', 'contain', 'cover', 'none', 'scale-down'].includes(raw.objectFit) ? raw.objectFit : null);
+  const theme = preserve(raw.theme) ?? (raw.theme && ['light', 'dark'].includes(raw.theme) ? raw.theme : null);
+  const alt = preserve(raw.alt) ?? (raw.alt?.trim().slice(0, MAX_FILE_OPTION_VALUE_LENGTH) || null);
+  return {
+    ...(width ? { width } : {}),
+    ...(height ? { height } : {}),
+    ...(align ? { align } : {}),
+    ...(backgroundColor ? { backgroundColor } : {}),
+    ...(borderRadius ? { borderRadius } : {}),
+    ...(rendering ? { rendering } : {}),
+    ...(objectFit ? { objectFit } : {}),
+    ...(theme ? { theme } : {}),
+    ...(alt ? { alt } : {})
+  };
+}
+
+function validateWikiFileDisplayOptions(raw: WikiFileDisplayOptions, errors: string[]) {
+  const normalized = normalizeWikiFileDisplayOptions(raw, true);
+  const pairs: Array<[keyof WikiFileDisplayOptions, string]> = [
+    ['width', 'width'], ['height', 'height'], ['align', 'align'], ['backgroundColor', 'bgcolor'],
+    ['borderRadius', 'border-radius'], ['rendering', 'rendering'], ['objectFit', 'object-fit'], ['theme', 'theme']
+  ];
+  for (const [property, label] of pairs) {
+    const value = raw[property];
+    if (value && !isIncludeParameterValue(value) && !normalized[property]) {
+      addWikiFileOptionWarning(errors, `파일 옵션 값이 올바르지 않습니다: ${label}`);
+    }
+  }
+}
+
+function replaceWikiFileDisplayOptions(
+  display: WikiFileDisplayOptions | undefined,
+  replace: (value: string) => string
+): WikiFileDisplayOptions | undefined {
+  if (!display) return undefined;
+  const replaced = Object.fromEntries(Object.entries(display).map(([key, value]) => [key, replace(value)])) as WikiFileDisplayOptions;
+  const normalized = normalizeWikiFileDisplayOptions(replaced);
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 function validateWikiFileName(fileName: string, blockingErrors: string[]) {
-  if (!fileName || !/^[^<>:"|?*\\/]+$/.test(fileName)) {
+  if (!fileName || !/^[^<>:"|?*\\/\[\]]+$/.test(fileName)) {
     const warning = `파일명에 금지 문자가 포함되어 있습니다: ${fileName || '(빈 파일명)'}`;
     if (!blockingErrors.includes(warning)) blockingErrors.push(warning);
   }
@@ -1095,7 +1268,8 @@ export function applyIncludeParametersToAst(
     if (node.type === 'file') return {
       ...node,
       fileName: replace(node.fileName),
-      caption: node.caption === null ? null : replace(node.caption)
+      caption: node.caption === null ? null : replace(node.caption),
+      display: replaceWikiFileDisplayOptions(node.display, replace)
     };
     if (node.type === 'unsupported_macro') return { ...node };
     if (node.type === 'dynamic_time') return { ...node };
@@ -1164,7 +1338,8 @@ export function applyIncludeParametersToAst(
     if (node.type === 'file') return {
       ...node,
       fileName: replace(node.fileName),
-      caption: node.caption === null ? null : replace(node.caption)
+      caption: node.caption === null ? null : replace(node.caption),
+      display: replaceWikiFileDisplayOptions(node.display, replace)
     };
     if (node.type === 'redirect') return { ...node, target: replace(node.target) };
     if (node.type === 'math_block') {
@@ -1192,7 +1367,7 @@ function parseInline(
   nestingDepth = 0
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
-  const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>[^\]]+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
+  const pattern = /(?<file>\[\[파일:(?<fileBody>[^\]]+)\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>[^\]]+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
   const nested = (value: string): InlineNode[] => nestingDepth >= MAX_INLINE_NESTING
     ? [{ type: 'text', text: value }]
     : parseInline(value, links, errors, blockingErrors, footnotes, linkResolution, nestingDepth + 1);
@@ -1201,11 +1376,7 @@ function parseInline(
     if (match.index! > last) nodes.push({ type: 'text', text: input.slice(last, match.index) });
     const group = match.groups ?? {};
     if (group.file !== undefined) {
-      const fileName = group.fileName?.trim() ?? '';
-      validateWikiFileName(fileName, blockingErrors);
-      const thumbnail = group.fileOption?.trim() === '섬네일';
-      const caption = group.fileCaption?.trim() || (!thumbnail ? group.fileOption?.trim() : '') || null;
-      nodes.push({ type: 'file', fileName, thumbnail, caption });
+      nodes.push(parseWikiFileMarkup(group.fileBody ?? '', errors, blockingErrors));
     } else if (group.refXmlReuse !== undefined || group.refXml !== undefined || group.refShort !== undefined) {
       const rawName = group.refXmlReuseName ?? group.refXmlName ?? group.refName;
       const name = rawName === undefined ? null : normalizeFootnoteName(rawName);
@@ -1504,7 +1675,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       }
       if (node.type === 'category') continue;
       if (node.type === 'file') {
-        output.push(renderFile(node.fileName, node.thumbnail, node.caption, renderOptions));
+        output.push(renderFile(node.fileName, node.thumbnail, node.caption, node.display, renderOptions));
         continue;
       }
       if (node.type === 'redirect') {
@@ -1554,7 +1725,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       div: ['class', 'data-*', 'style'],
       aside: ['class'],
       figure: ['class'],
-      img: ['src', 'alt', 'loading'],
+      img: ['src', 'alt', 'loading', 'class', 'style'],
       figcaption: ['class'],
       section: ['class'],
       nav: ['class', 'aria-label'],
@@ -1590,11 +1761,15 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
     allowedStyles: {
       span: {
         color: [/^#[0-9a-f]{3,8}$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/i, /^[a-z]+$/i],
+        'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'font-size': [/^\d+(\.\d+)?em$/],
+        'border-radius': [/^\d+(?:px|%)$/],
         'max-width': [/^\d+px$/],
         'aspect-ratio': [/^\d+ \/ \d+$/],
-        height: [/^-?\d+(?:\.\d+)?em$/],
-        width: [/^-?\d+(?:\.\d+)?em$/],
+        height: [/^-?\d+(?:\.\d+)?(?:em|px|%)$/],
+        width: [/^-?\d+(?:\.\d+)?(?:em|px|%)$/],
+        'image-rendering': [/^(?:auto|smooth|high-quality|pixelated|crisp-edges)$/],
+        'object-fit': [/^(?:fill|contain|cover|none|scale-down)$/],
         top: [/^-?\d+(?:\.\d+)?em$/],
         'vertical-align': [/^-?\d+(?:\.\d+)?em$/],
         'margin-left': [/^-?\d+(?:\.\d+)?em$/],
@@ -1602,6 +1777,13 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         'padding-left': [/^-?\d+(?:\.\d+)?em$/],
         'min-width': [/^-?\d+(?:\.\d+)?em$/],
         'border-bottom-width': [/^-?\d+(?:\.\d+)?em$/]
+      },
+      img: {
+        width: [/^100%$/],
+        height: [/^100%$/],
+        'border-radius': [/^\d+(?:px|%)$/],
+        'image-rendering': [/^(?:auto|smooth|high-quality|pixelated|crisp-edges)$/],
+        'object-fit': [/^(?:fill|contain|cover|none|scale-down)$/]
       },
       div: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
@@ -1766,7 +1948,7 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
         return `<a href="${escapeAttr(node.href)}" rel="nofollow noopener" target="_blank">${escapeHtml(node.label)}</a>`;
       }
       if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options, node.fragment);
-      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options, true);
+      if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, node.display, options, true);
       if (node.type === 'video') {
         const query = new URLSearchParams();
         if (node.start !== null) query.set('start', String(node.start));
@@ -2085,13 +2267,24 @@ function componentTitle(name: string, props: Record<string, string>) {
   return escapeHtml(`${props['이름'] ?? props['명령어'] ?? ''} ${label[name] ?? name}`.trim());
 }
 
-function renderFile(fileName: string, thumbnail: boolean, caption: string | null, options: RenderOptions, inline = false) {
+function renderFile(
+  fileName: string,
+  thumbnail: boolean,
+  caption: string | null,
+  rawDisplay: WikiFileDisplayOptions | undefined,
+  options: RenderOptions,
+  inline = false
+) {
+  const display = normalizeWikiFileDisplayOptions(rawDisplay);
+  const alignmentClass = display.align ? ` wiki-file-align-${display.align}` : '';
+  const themeClass = display.theme ? ` wiki-theme-${display.theme}` : '';
+  const outerClass = `wiki-file${inline ? ' wiki-file-inline' : ''}${thumbnail ? ' thumb' : ''}${alignmentClass}${themeClass}`;
   const file = options.files?.[fileName];
   if (!file) {
     if (inline) {
-      return `<span class="${thumbnail ? 'wiki-file wiki-file-inline thumb missing-file' : 'wiki-file wiki-file-inline missing-file'}">파일 없음: ${escapeHtml(fileName)}</span>`;
+      return `<span class="${outerClass} missing-file">파일 없음: ${escapeHtml(fileName)}</span>`;
     }
-    return `<figure class="${thumbnail ? 'wiki-file thumb missing-file' : 'wiki-file missing-file'}"><figcaption>파일 없음: ${escapeHtml(fileName)}</figcaption></figure>`;
+    return `<figure class="${outerClass} missing-file"><figcaption>파일 없음: ${escapeHtml(fileName)}</figcaption></figure>`;
   }
   const license = file.license ? `라이선스: ${wikiFileLicenseLabel(file.license)}` : '';
   const sourceLabel = file.sourceText?.trim() || '원본 출처';
@@ -2101,10 +2294,24 @@ function renderFile(fileName: string, thumbnail: boolean, caption: string | null
       ? `출처: ${escapeHtml(file.sourceText)}`
       : '';
   const metaHtml = license || source ? `<small>${license ? escapeHtml(license) : ''}${license && source ? ' · ' : ''}${source}</small>` : '';
+  const frameStyles = styleAttribute({
+    width: display.width,
+    height: display.height,
+    'background-color': display.backgroundColor
+  });
+  const imageStyles = styleAttribute({
+    width: display.width ? '100%' : undefined,
+    height: display.height ? '100%' : undefined,
+    'border-radius': display.borderRadius,
+    'image-rendering': display.rendering,
+    'object-fit': display.objectFit
+  });
+  const alt = display.alt ?? caption ?? file.originalName;
+  const imageHtml = `<span class="wiki-file-frame"${frameStyles}><img class="wiki-file-image" src="${escapeAttr(file.url)}" alt="${escapeAttr(alt)}" loading="lazy"${imageStyles}></span>`;
   if (inline) {
-    return `<span class="${thumbnail ? 'wiki-file wiki-file-inline thumb' : 'wiki-file wiki-file-inline'}"><img src="${escapeAttr(file.url)}" alt="${escapeAttr(caption ?? file.originalName)}" loading="lazy">${caption ? `<span>${escapeHtml(caption)}</span>` : ''}${metaHtml}</span>`;
+    return `<span class="${outerClass}">${imageHtml}${caption ? `<span>${escapeHtml(caption)}</span>` : ''}${metaHtml}</span>`;
   }
-  return `<figure class="${thumbnail ? 'wiki-file thumb' : 'wiki-file'}"><img src="${escapeAttr(file.url)}" alt="${escapeAttr(caption ?? file.originalName)}" loading="lazy">${caption ? `<figcaption>${escapeHtml(caption)}${metaHtml}</figcaption>` : metaHtml}</figure>`;
+  return `<figure class="${outerClass}">${imageHtml}${caption ? `<figcaption>${escapeHtml(caption)}${metaHtml}</figcaption>` : metaHtml}</figure>`;
 }
 
 function wikiFileLicenseLabel(value: string): string {

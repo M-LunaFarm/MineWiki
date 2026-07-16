@@ -67,6 +67,18 @@ export interface WikiTableOptions {
   darkBorderColor?: string;
 }
 
+export interface WikiFileDisplayOptions {
+  width?: string;
+  height?: string;
+  align?: string;
+  backgroundColor?: string;
+  borderRadius?: string;
+  rendering?: string;
+  objectFit?: string;
+  theme?: string;
+  alt?: string;
+}
+
 export type AstNode =
   | { type: 'heading'; level: number; text: string; id: string; folded?: boolean; startLine?: number; endLine?: number }
   | { type: 'paragraph'; children: InlineNode[] }
@@ -90,7 +102,7 @@ export type AstNode =
     }
   | { type: 'component'; name: string; props: Record<string, string> }
   | { type: 'category'; title: string }
-  | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null }
+  | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null; display?: WikiFileDisplayOptions }
   | { type: 'redirect'; target: string }
   | { type: 'math_block'; source: string; error: string | null }
   | { type: 'codeblock'; lang: string | null; code: string };
@@ -115,7 +127,7 @@ export type InlineNode =
   | { type: 'size'; delta: number; children: InlineNode[] }
   | { type: 'internal_link'; target: string; label: string; fragment?: string | null }
   | { type: 'external_link'; href: string; label: string }
-  | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null }
+  | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null; display?: WikiFileDisplayOptions }
   | { type: 'unsupported_macro'; name: string }
   | { type: 'code'; code: string }
   | { type: 'ref'; name: string | null; text: string | null };

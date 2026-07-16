@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { buildWikiFileMarkup } from '../../lib/wiki-file-markup.mjs';
 import { AlertTriangle, Eye, FileImage, ImagePlus, LayoutTemplate, Loader2, Save } from 'lucide-react';
 import { type ChangeEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
@@ -52,6 +53,10 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   const [fileSearch, setFileSearch] = useState('');
   const [wikiFiles, setWikiFiles] = useState<UploadedFileMetadata[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [fileDisplayWidth, setFileDisplayWidth] = useState('');
+  const [fileDisplayAlign, setFileDisplayAlign] = useState('normal');
+  const [fileDisplayFit, setFileDisplayFit] = useState('contain');
+  const [fileDisplayAlt, setFileDisplayAlt] = useState('');
   const [fileLicense, setFileLicense] = useState('');
   const [fileSourceUrl, setFileSourceUrl] = useState('');
   const [fileSourceText, setFileSourceText] = useState('');
@@ -323,8 +328,10 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   }
 
   function insertFileMarkup(filename: string, caption?: string | null) {
-    const cleanCaption = caption?.trim() || filename;
-    setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${filename}|섬네일|${cleanCaption}]]\n`);
+    const markup = buildWikiFileMarkup({
+      filename, caption, width: fileDisplayWidth, align: fileDisplayAlign, objectFit: fileDisplayFit, alt: fileDisplayAlt
+    });
+    setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}${markup}\n`);
     setFilePickerOpen(false);
     setBlockingErrors([]);
   }
@@ -364,7 +371,10 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
         sourceText: fileSourceText.trim() || undefined,
       });
       const alt = normalizeAltText(file.name);
-      setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}[[파일:${uploaded.filename}|섬네일|${alt}]]\n`);
+      const markup = buildWikiFileMarkup({
+        filename: uploaded.filename, caption: alt, width: fileDisplayWidth, align: fileDisplayAlign, objectFit: fileDisplayFit, alt: fileDisplayAlt
+      });
+      setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}${markup}\n`);
       setBlockingErrors([]);
       setFeedback(uploaded.wikiDocumentPath
         ? `이미지를 삽입했습니다. 파일 문서: ${uploaded.wikiDocumentPath}`
@@ -597,6 +607,29 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
           </div>
           {filePickerOpen ? (
             <section className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <fieldset className="mb-4 grid gap-3 rounded-lg border border-white/10 bg-[#0d1219]/70 p-3 sm:grid-cols-2 lg:grid-cols-4">
+                <legend className="px-1 text-xs font-semibold text-slate-300">파일 표시 설정</legend>
+                <label className="grid gap-1.5 text-xs text-slate-400">
+                  너비(px)
+                  <input type="number" min={1} max={4096} value={fileDisplayWidth} onChange={(event) => setFileDisplayWidth(event.target.value)} placeholder="원본 크기" className="h-9 rounded-md border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-300/50" />
+                </label>
+                <label className="grid gap-1.5 text-xs text-slate-400">
+                  정렬
+                  <select value={fileDisplayAlign} onChange={(event) => setFileDisplayAlign(event.target.value)} className="h-9 rounded-md border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100">
+                    <option value="normal">기본</option><option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option>
+                  </select>
+                </label>
+                <label className="grid gap-1.5 text-xs text-slate-400">
+                  이미지 맞춤
+                  <select value={fileDisplayFit} onChange={(event) => setFileDisplayFit(event.target.value)} className="h-9 rounded-md border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100">
+                    <option value="contain">전체 표시</option><option value="cover">영역 채우기</option><option value="fill">늘려 채우기</option><option value="scale-down">자동 축소</option>
+                  </select>
+                </label>
+                <label className="grid gap-1.5 text-xs text-slate-400">
+                  대체 텍스트
+                  <input value={fileDisplayAlt} maxLength={256} onChange={(event) => setFileDisplayAlt(event.target.value)} placeholder="비우면 캡션 사용" className="h-9 rounded-md border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-300/50" />
+                </label>
+              </fieldset>
               <div className="flex flex-col gap-3 sm:flex-row">
                 <input
                   value={fileSearch}

@@ -513,6 +513,22 @@ test('wiki admin rollback does not persist viewer-dependent include HTML', async
   assert.equal(renderCaches.length, 0);
 });
 
+test('wiki admin rollback does not persist file-dependent HTML', async () => {
+  const { service, revisions, renderCaches } = createService();
+  const source = revisions.get(100n);
+  assert.ok(source);
+  source.contentRaw = '[[파일:logo.png|width=320&caption=%EB%A1%9C%EA%B3%A0]]';
+
+  await service.rollback({
+    pageId: '10',
+    revisionId: '100',
+    actorProfileId: 99n,
+    reason: '파일 복구'
+  });
+
+  assert.equal(renderCaches.length, 0);
+});
+
 function createEditSummaryModerationFixture(options: { failAudit?: boolean } = {}) {
   const now = new Date('2026-07-17T00:00:00.000Z');
   const page = {
