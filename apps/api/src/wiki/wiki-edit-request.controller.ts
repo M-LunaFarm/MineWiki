@@ -25,6 +25,13 @@ export class WikiEditRequestController {
     return this.requests.listGlobal(request.sessionPayload ?? null, { status, scope, namespace, cursor, limit });
   }
 
+  @Get('edit-requests/reviewable-summary')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  reviewableSummary(@CurrentSession() session: SessionPayload) {
+    return this.requests.reviewableSummary(session);
+  }
+
   @Get('pages/:pageId/edit-requests')
   @UseGuards(OptionalSessionGuard)
   list(@Param('pageId') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string) {

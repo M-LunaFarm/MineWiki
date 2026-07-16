@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { AlertTriangle, FilePenLine, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { fetchWikiEditRequestQueue, type WikiEditRequestQueueItem, type WikiEditRequestQueueResponse } from '../../lib/wiki-api';
-import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 
 const EMPTY: WikiEditRequestQueueResponse = { items: [], viewerProfileId: null, nextCursor: null };
 
@@ -66,11 +65,6 @@ export function WikiEditRequestQueueClient({
 }
 
 function QueueCard({ item, viewerProfileId }: { readonly item: WikiEditRequestQueueItem; readonly viewerProfileId: string | null }) {
-  const detailPath = item.pageId === null
-    ? `/wiki/edit-requests/request/${encodeURIComponent(item.id)}?returnTo=${encodeURIComponent(item.routePath)}`
-    : item.routePath.startsWith('/server/')
-    ? `${buildServerWikiToolPath(item.routePath, 'requests')}?request=${encodeURIComponent(item.id)}`
-    : `/wiki/edit-requests/${encodeURIComponent(item.pageId)}?returnTo=${encodeURIComponent(item.routePath)}&request=${encodeURIComponent(item.id)}`;
   return (
     <article className="surface-flat p-4 sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -82,11 +76,11 @@ function QueueCard({ item, viewerProfileId }: { readonly item: WikiEditRequestQu
             {item.canReview ? <span className="chip chip-accent">검토 가능</span> : null}
             {viewerProfileId === item.createdBy ? <span className="chip chip-muted">내 요청</span> : null}
           </div>
-          <h2 className="mt-2 break-words text-lg font-semibold text-white"><Link href={detailPath} className="hover:text-emerald-200">{item.pageDisplayTitle}</Link></h2>
+          <h2 className="mt-2 break-words text-lg font-semibold text-white"><Link href={item.detailPath} className="hover:text-emerald-200">{item.pageDisplayTitle}</Link></h2>
           <p className="mt-2 break-words text-sm text-slate-300">{item.editSummary}</p>
           <p className="mt-2 text-xs text-slate-500">{item.createdByName} · {formatDate(item.createdAt)}</p>
         </div>
-        <Link href={detailPath} className="btn-secondary min-h-11 flex-none gap-2"><FilePenLine className="size-4" /> 요청 검토</Link>
+        <Link href={item.detailPath} className="btn-secondary min-h-11 flex-none gap-2"><FilePenLine className="size-4" /> 요청 검토</Link>
       </div>
       {item.isStale ? <p className="mt-4 flex gap-2 border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100"><AlertTriangle className="mt-0.5 size-4 flex-none" /> 기준 판이 바뀌어 재배치가 필요합니다.</p> : null}
     </article>

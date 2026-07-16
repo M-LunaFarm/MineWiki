@@ -9,7 +9,7 @@ import { assertWikiSourceBounds, hasWikiConflictMarkers, mergeWikiSource, WikiMe
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
-import { WikiRoutePathResolver } from './wiki-route-path.resolver';
+import { buildCanonicalServerWikiToolPath, WikiRoutePathResolver } from './wiki-route-path.resolver';
 
 export interface WikiEditRequestSummary {
   readonly id: string;
@@ -54,6 +54,7 @@ export interface WikiEditRequestQueueItem extends WikiEditRequestSummary {
   readonly pageDisplayTitle: string;
   readonly namespace: string;
   readonly routePath: string;
+  readonly detailPath: string;
   readonly currentRevisionId: string | null;
   readonly canReview: boolean;
   readonly isStale: boolean;
@@ -63,6 +64,23 @@ export interface WikiEditRequestQueueResponse {
   readonly items: WikiEditRequestQueueItem[];
   readonly viewerProfileId: string | null;
   readonly nextCursor: string | null;
+}
+
+export interface WikiEditRequestReviewableSummary {
+  readonly count: number;
+  readonly capped: boolean;
+}
+
+interface WikiEditRequestQueueCandidate {
+  readonly request: WikiEditRequest;
+  readonly canReview: boolean;
+  readonly namespace: string;
+  readonly pageTitle: string;
+  readonly pageDisplayTitle: string;
+  readonly routePath: string;
+  readonly detailPath: string;
+  readonly currentRevisionId: string | null;
+  readonly isStale: boolean;
 }
 
 @Injectable()
@@ -91,7 +109,7 @@ export class WikiEditRequestService {
     const allowedStatuses = new Set(['open', 'all', 'pending', 'reviewing', 'stale', 'accepted', 'rejected', 'closed']);
     if (!allowedStatuses.has(status)) throw new BadRequestException('Unsupported edit request status filter.');
     const scope = input.scope?.trim() || 'all';
-    if (!['all', 'mine'].includes(scope)) throw new BadRequestException('Unsupported edit request scope.');
+    if (!['all', 'mine', 'reviewable'].includes(scope)) throw new BadRequestException('Unsupported edit request scope.');
     const namespaceFilter = input.namespace?.trim() || null;
     if (namespaceFilter && !/^[a-z][a-z0-9_-]{0,31}$/u.test(namespaceFilter)) {
       throw new BadRequestException('Invalid namespace filter.');
@@ -99,105 +117,40 @@ export class WikiEditRequestService {
     const limit = Math.min(Math.max(Number(input.limit) || 30, 1), 50);
     const cursor = input.cursor ? this.id(input.cursor, 'cursor') : null;
     const profile = session ? await this.profiles.ensureWikiProfile(session.userId) : null;
-    if (scope === 'mine' && !profile) throw new ForbiddenException('Sign in to view your edit requests.');
+    if ((scope === 'mine' || scope === 'reviewable') && !profile) {
+      throw new ForbiddenException('Sign in to view scoped edit requests.');
+    }
     const statusFilter = status === 'all'
       ? undefined
       : status === 'open'
         ? { in: ['pending', 'reviewing', 'stale'] }
         : status;
-    const scanLimit = Math.min(Math.max(limit * 4, 40), 100);
-    const requests = await this.prisma.wikiEditRequest.findMany({
-      where: {
-        ...(statusFilter ? { status: statusFilter } : {}),
-        ...(scope === 'mine' && profile ? { createdBy: profile.id } : {}),
-        ...(cursor ? { id: { lt: cursor } } : {})
-      },
-      orderBy: [{ id: 'desc' }],
-      take: scanLimit
-    });
-    const pageIds = [...new Set(requests.flatMap((request) => request.pageId === null ? [] : [request.pageId]))];
-    const pages = pageIds.length > 0
-      ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds }, status: { not: 'deleted' } } })
-      : [];
-    const pageById = new Map(pages.map((page) => [page.id, page]));
-    const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
-    const namespaces = namespaceIds.length > 0
-      ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } }, select: { id: true, code: true } })
-      : [];
-    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    const routes = await this.routePaths?.preload(pages, namespaceById);
-    const visible: Array<{
-      request: WikiEditRequest;
-      page: typeof pages[number] | null;
-      canReview: boolean;
-      namespace: string;
-      pageTitle: string;
-      pageDisplayTitle: string;
-      routePath: string;
-      currentRevisionId: string | null;
-      isStale: boolean;
-    }> = [];
-    for (const request of requests) {
-      const page = request.pageId === null ? null : pageById.get(request.pageId) ?? null;
-      const namespace = page ? namespaceById.get(page.namespaceId) : null;
-      if (page && namespace) {
-        if (namespaceFilter && namespace !== namespaceFilter) continue;
-        try {
-          await this.permissions.assertCanReadPage({ accountId: session?.userId ?? null, page });
-          await this.permissions.assertCanUsePageAction({ accountId: session?.userId ?? null, action: 'raw', page });
-        } catch {
-          continue;
-        }
-        const canReview = Boolean(session && profile && await this.permissions.canManagePage({
-          actor: this.permissions.actorFromSession(session, profile),
-          page
-        }));
-        visible.push({
-          request,
-          page,
-          canReview,
-          namespace,
-          pageTitle: page.title,
-          pageDisplayTitle: page.displayTitle,
-          routePath: routes?.routePath(page, namespace) ?? wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title),
-          currentRevisionId: page.currentRevisionId?.toString() ?? null,
-          isStale: ['pending', 'reviewing', 'stale'].includes(request.status) && page.currentRevisionId !== request.baseRevisionId
-        });
-      } else if (this.hasCreateTarget(request)) {
-        if (namespaceFilter && request.targetNamespaceCode !== namespaceFilter) continue;
-        try {
-          await this.permissions.assertCanReadCreateTarget({
-            accountId: session?.userId ?? null,
-            namespaceId: request.targetNamespaceId,
-            namespaceCode: request.targetNamespaceCode,
-            spaceId: request.targetSpaceId,
-            title: request.targetTitle
-          });
-        } catch {
-          continue;
-        }
-        const canReview = Boolean(session && profile && await this.permissions.canManageCreateTarget({
-          actor: this.permissions.actorFromSession(session, profile),
-          namespaceId: request.targetNamespaceId,
-          namespaceCode: request.targetNamespaceCode,
-          spaceId: request.targetSpaceId,
-          title: request.targetTitle
-        }));
-        visible.push({
-          request,
-          page: null,
-          canReview,
-          namespace: request.targetNamespaceCode,
-          pageTitle: request.targetTitle,
-          pageDisplayTitle: request.targetDisplayTitle,
-          routePath: wikiUrl(request.targetNamespaceCode as Parameters<typeof wikiUrl>[0], request.targetTitle),
-          currentRevisionId: null,
-          isStale: false
-        });
+    const baseWhere: Prisma.WikiEditRequestWhereInput = {
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(scope === 'mine' && profile ? { createdBy: profile.id } : {})
+    };
+    const visible: WikiEditRequestQueueCandidate[] = [];
+    let scanCursor = cursor;
+    let exhausted = false;
+    while (visible.length <= limit && !exhausted) {
+      const batch = await this.scanGlobalQueueBatch({
+        session,
+        profile,
+        baseWhere,
+        namespaceFilter,
+        reviewableOnly: scope === 'reviewable',
+        cursor: scanCursor,
+        maxVisible: limit + 1 - visible.length
+      });
+      visible.push(...batch.visible);
+      exhausted = batch.exhausted;
+      if (batch.lastScannedId === null) {
+        exhausted = true;
+      } else if (scanCursor === batch.lastScannedId) {
+        throw new ConflictException('Edit request queue cursor did not advance.');
       } else {
-        continue;
+        scanCursor = batch.lastScannedId;
       }
-      if (visible.length > limit) break;
     }
     const returned = visible.slice(0, limit);
     const summaries = new Map((await this.present(returned.map((item) => item.request))).map((item) => [item.id, item]));
@@ -210,16 +163,152 @@ export class WikiEditRequestService {
         pageDisplayTitle: item.pageDisplayTitle,
         namespace: item.namespace,
         routePath: item.routePath,
+        detailPath: item.detailPath,
         currentRevisionId: item.currentRevisionId,
         canReview: item.canReview,
         isStale: item.isStale
       }];
     });
-    const hasMore = visible.length > limit || requests.length === scanLimit;
-    const nextCursor = hasMore
-      ? (returned.at(-1)?.request.id ?? requests.at(-1)?.id)?.toString() ?? null
-      : null;
+    const nextCursor = visible.length > limit ? returned.at(-1)?.request.id.toString() ?? null : null;
     return { items, viewerProfileId: profile?.id.toString() ?? null, nextCursor };
+  }
+
+  async reviewableSummary(session: SessionPayload): Promise<WikiEditRequestReviewableSummary> {
+    let cursor: string | undefined;
+    let count = 0;
+    const seenCursors = new Set<string>();
+
+    while (count < 100) {
+      const page = await this.listGlobal(session, {
+        status: 'open',
+        scope: 'reviewable',
+        cursor,
+        limit: 50
+      });
+      count += page.items.length;
+      if (!page.nextCursor) return { count, capped: false };
+      if (seenCursors.has(page.nextCursor)) {
+        return { count: Math.min(count, 100), capped: true };
+      }
+      seenCursors.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+
+    return { count: 100, capped: true };
+  }
+
+  private async scanGlobalQueueBatch(input: {
+    readonly session: SessionPayload | null;
+    readonly profile: Awaited<ReturnType<WikiProfileService['ensureWikiProfile']>> | null;
+    readonly baseWhere: Prisma.WikiEditRequestWhereInput;
+    readonly namespaceFilter: string | null;
+    readonly reviewableOnly: boolean;
+    readonly cursor: bigint | null;
+    readonly maxVisible: number;
+  }): Promise<{
+    readonly visible: WikiEditRequestQueueCandidate[];
+    readonly lastScannedId: bigint | null;
+    readonly exhausted: boolean;
+  }> {
+    const take = 100;
+    const requests = await this.prisma.wikiEditRequest.findMany({
+      where: {
+        ...input.baseWhere,
+        ...(input.cursor ? { id: { lt: input.cursor } } : {})
+      },
+      orderBy: [{ id: 'desc' }],
+      take
+    });
+    const pageIds = [...new Set(requests.flatMap((request) => request.pageId === null ? [] : [request.pageId]))];
+    const pages = pageIds.length > 0
+      ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds }, status: { not: 'deleted' } } })
+      : [];
+    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
+    const namespaces = namespaceIds.length > 0
+      ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } }, select: { id: true, code: true } })
+      : [];
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const routes = await this.routePaths?.preload(pages, namespaceById);
+    const visible: WikiEditRequestQueueCandidate[] = [];
+    let lastScannedId: bigint | null = null;
+    let processed = 0;
+
+    for (const request of requests) {
+      processed += 1;
+      lastScannedId = request.id;
+      const page = request.pageId === null ? null : pageById.get(request.pageId) ?? null;
+      const namespace = page ? namespaceById.get(page.namespaceId) : null;
+      if (page && namespace) {
+        if (input.namespaceFilter && namespace !== input.namespaceFilter) continue;
+        try {
+          await this.permissions.assertCanReadPage({ accountId: input.session?.userId ?? null, page });
+          await this.permissions.assertCanUsePageAction({ accountId: input.session?.userId ?? null, action: 'raw', page });
+        } catch {
+          continue;
+        }
+        const canReview = Boolean(input.session && input.profile && await this.permissions.canManagePage({
+          actor: this.permissions.actorFromSession(input.session, input.profile),
+          page
+        }));
+        if (input.reviewableOnly && !canReview) continue;
+        const routePath = routes?.routePath(page, namespace) ?? wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
+        const serverSlug = namespace === 'server' ? routes?.serverSlug(page) : undefined;
+        visible.push({
+          request,
+          canReview,
+          namespace,
+          pageTitle: page.title,
+          pageDisplayTitle: page.displayTitle,
+          routePath,
+          detailPath: serverSlug
+            ? `${buildCanonicalServerWikiToolPath(serverSlug, page.localPath, 'requests')}?request=${request.id.toString()}`
+            : `/wiki/edit-requests/${page.id.toString()}?request=${request.id.toString()}&returnTo=${encodeURIComponent(routePath)}`,
+          currentRevisionId: page.currentRevisionId?.toString() ?? null,
+          isStale: ['pending', 'reviewing', 'stale'].includes(request.status) && page.currentRevisionId !== request.baseRevisionId
+        });
+      } else if (this.hasCreateTarget(request)) {
+        if (input.namespaceFilter && request.targetNamespaceCode !== input.namespaceFilter) continue;
+        try {
+          await this.permissions.assertCanReadCreateTarget({
+            accountId: input.session?.userId ?? null,
+            namespaceId: request.targetNamespaceId,
+            namespaceCode: request.targetNamespaceCode,
+            spaceId: request.targetSpaceId,
+            title: request.targetTitle
+          });
+        } catch {
+          continue;
+        }
+        const canReview = Boolean(input.session && input.profile && await this.permissions.canManageCreateTarget({
+          actor: this.permissions.actorFromSession(input.session, input.profile),
+          namespaceId: request.targetNamespaceId,
+          namespaceCode: request.targetNamespaceCode,
+          spaceId: request.targetSpaceId,
+          title: request.targetTitle
+        }));
+        if (input.reviewableOnly && !canReview) continue;
+        const routePath = wikiUrl(request.targetNamespaceCode as Parameters<typeof wikiUrl>[0], request.targetTitle);
+        visible.push({
+          request,
+          canReview,
+          namespace: request.targetNamespaceCode,
+          pageTitle: request.targetTitle,
+          pageDisplayTitle: request.targetDisplayTitle,
+          routePath,
+          detailPath: `/wiki/edit-requests/request/${request.id.toString()}?returnTo=${encodeURIComponent(routePath)}`,
+          currentRevisionId: null,
+          isStale: false
+        });
+      }
+      if (visible.length >= input.maxVisible) break;
+    }
+
+    return {
+      visible,
+      lastScannedId,
+      exhausted: processed === requests.length && requests.length < take
+    };
   }
 
   async list(pageId: string, session: SessionPayload | null, cursor?: string, requestedLimit: string | number = 30): Promise<WikiEditRequestListResponse> {

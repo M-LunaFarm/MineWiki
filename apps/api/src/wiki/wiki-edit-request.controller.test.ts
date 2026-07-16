@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import type { FastifyRequest } from 'fastify';
 import type { SessionPayload } from '../session/session.service';
+import { SessionGuard } from '../session/session.guard';
 import { WikiEditRequestController } from './wiki-edit-request.controller';
 import type { WikiEditRequestService } from './wiki-edit-request.service';
 import type { WikiCaptchaService } from './wiki-captcha.service';
@@ -60,4 +62,25 @@ test('request context controller preserves the optional viewer session', async (
   await controller.context('71', { sessionPayload: session } as FastifyRequest);
 
   assert.deepEqual(received, { requestId: '71', receivedSession: session });
+});
+
+test('reviewable summary controller uses the authenticated session', async () => {
+  let received: SessionPayload | undefined;
+  const service = {
+    async reviewableSummary(receivedSession: SessionPayload) {
+      received = receivedSession;
+      return { count: 3, capped: false };
+    }
+  } as unknown as WikiEditRequestService;
+  const controller = new WikiEditRequestController(service, captchaStub);
+
+  const result = await controller.reviewableSummary(session);
+
+  assert.equal(received, session);
+  assert.deepEqual(result, { count: 3, capped: false });
+  const guards = Reflect.getMetadata(
+    GUARDS_METADATA,
+    WikiEditRequestController.prototype.reviewableSummary,
+  ) as unknown[] | undefined;
+  assert.ok(guards?.includes(SessionGuard));
 });

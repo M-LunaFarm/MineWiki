@@ -8,6 +8,7 @@ import { AccountDropdown } from '../account/account-dropdown';
 import { useAuth } from '../providers/auth-context';
 import { ThemeToggle } from './theme-toggle';
 import { WikiNotificationBell } from './wiki-notification-bell';
+import { WikiReviewQueueBadge } from './wiki-review-queue-badge';
 import { fetchWikiSuggestions, type WikiSearchResult } from '../../lib/wiki-api';
 
 type NavigationLink = {
@@ -147,6 +148,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
 
             <HeaderSearch value={currentSearch} onChange={setCurrentSearch} variant={variant} className="hidden xl:block" />
 
+            <WikiReviewQueueBadge paper={variant === 'paper'} />
             <WikiNotificationBell paper={variant === 'paper'} />
             <AccountDropdown />
             <ThemeToggle paper={variant === 'paper'} />

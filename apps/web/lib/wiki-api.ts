@@ -703,6 +703,7 @@ export interface WikiEditRequestQueueItem extends WikiEditRequestSummary {
   readonly pageDisplayTitle: string;
   readonly namespace: string;
   readonly routePath: string;
+  readonly detailPath: string;
   readonly currentRevisionId: string | null;
   readonly canReview: boolean;
   readonly isStale: boolean;
@@ -712,6 +713,11 @@ export interface WikiEditRequestQueueResponse {
   readonly items: WikiEditRequestQueueItem[];
   readonly viewerProfileId: string | null;
   readonly nextCursor: string | null;
+}
+
+export interface WikiEditRequestReviewableSummary {
+  readonly count: number;
+  readonly capped: boolean;
 }
 
 export interface WikiEditRequestDiffResponse {
@@ -1330,6 +1336,10 @@ export async function fetchWikiEditRequestQueue(input: {
   if (input.namespace) params.set('namespace', input.namespace);
   if (input.cursor) params.set('cursor', input.cursor);
   return readWikiBrowser<WikiEditRequestQueueResponse>(`/v1/wiki/edit-requests?${params.toString()}`);
+}
+
+export async function fetchWikiEditRequestReviewableSummary(): Promise<WikiEditRequestReviewableSummary> {
+  return readWikiBrowser<WikiEditRequestReviewableSummary>('/v1/wiki/edit-requests/reviewable-summary');
 }
 
 export async function fetchWikiEditRequest(requestId: string): Promise<WikiEditRequestSummary> {

@@ -189,22 +189,29 @@ test('edit request detail enforces page visibility and returns the exact request
 });
 
 test('global edit request queue resolves readable pages and reviewer capability', async () => {
+  let namespaceCode = 'guide';
   const prisma = {
     wikiEditRequest: { async findMany() { return [request]; } },
     wikiPage: { async findMany() { return [page]; } },
-    wikiNamespace: { async findMany() { return [{ id: 1, code: 'guide' }]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: namespaceCode }]; } },
     wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }]; } }
   } as unknown as PrismaService;
   const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
   const actions: string[] = [];
+  let reviewAllowed = true;
   const permissions = {
     async assertCanReadPage() { actions.push('read'); },
     async assertCanUsePageAction(input: { action: string }) { actions.push(input.action); },
     actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
-    async canManagePage() { return true; }
+    async canManagePage() { return reviewAllowed; }
   } as unknown as WikiPermissionService;
   const routes = {
-    async preload() { return { routePath() { return '/guide/guide'; } }; }
+    async preload() {
+      return {
+        routePath() { return namespaceCode === 'server' ? '/server/luna/guide' : '/guide/guide'; },
+        serverSlug() { return namespaceCode === 'server' ? 'luna' : undefined; }
+      };
+    }
   } as unknown as WikiRoutePathResolver;
   const service = new WikiEditRequestService(
     prisma,
@@ -220,10 +227,152 @@ test('global edit request queue resolves readable pages and reviewer capability'
 
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0]?.routePath, '/guide/guide');
+  assert.equal(result.items[0]?.detailPath, '/wiki/edit-requests/10?request=40&returnTo=%2Fguide%2Fguide');
   assert.equal(result.items[0]?.canReview, true);
   assert.equal(result.items[0]?.namespace, 'guide');
   assert.equal(result.viewerProfileId, '20');
   assert.deepEqual(actions, ['read', 'raw']);
+
+  const reviewable = await service.listGlobal(session, { status: 'open', scope: 'reviewable' });
+  assert.equal(reviewable.items.length, 1);
+  assert.equal(reviewable.items[0]?.id, request.id.toString());
+
+  reviewAllowed = false;
+  const hidden = await service.listGlobal(session, { status: 'open', scope: 'reviewable' });
+  assert.equal(hidden.items.length, 0);
+
+  reviewAllowed = true;
+  namespaceCode = 'server';
+  const serverQueue = await service.listGlobal(session, { status: 'open', scope: 'reviewable' });
+  assert.equal(serverQueue.items[0]?.detailPath, '/server/luna/_tools/requests/guide?request=40');
+});
+
+test('reviewable summary follows the permission-filtered queue until it is exhausted', async () => {
+  const service = createService();
+  const cursors: Array<string | undefined> = [];
+  service.listGlobal = async (_session, input) => {
+    cursors.push(input.cursor);
+    if (!input.cursor) {
+      return {
+        items: Array.from({ length: 50 }, (_, index) => ({ id: `${index + 1}` })) as never,
+        viewerProfileId: '20',
+        nextCursor: '50'
+      };
+    }
+    return {
+      items: [{ id: '51' }, { id: '52' }] as never,
+      viewerProfileId: '20',
+      nextCursor: null
+    };
+  };
+
+  const result = await service.reviewableSummary(session);
+
+  assert.deepEqual(result, { count: 52, capped: false });
+  assert.deepEqual(cursors, [undefined, '50']);
+});
+
+test('reviewable queue scans past a full non-reviewable batch before returning an eligible request', async () => {
+  const hiddenRequests = Array.from({ length: 100 }, (_, index) => ({
+    ...request,
+    id: BigInt(300 - index),
+    pageId: BigInt(300 - index)
+  }));
+  const eligibleRequest = { ...request, id: 100n, pageId: 999n };
+  const prisma = {
+    wikiEditRequest: {
+      async findMany(args: { where: { id?: { lt?: bigint } } }) {
+        return args.where.id?.lt ? [eligibleRequest] : hiddenRequests;
+      }
+    },
+    wikiPage: {
+      async findMany(args: { where: { id: { in: bigint[] } } }) {
+        return args.where.id.in.map((id) => ({ ...page, id, title: `Page ${id}`, displayTitle: `Page ${id}` }));
+      }
+    },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'guide' }]; } },
+    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }]; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    async assertCanReadPage() {},
+    async assertCanUsePageAction() {},
+    actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
+    async canManagePage({ page: target }: { page: { id: bigint } }) { return target.id === 999n; }
+  } as unknown as WikiPermissionService;
+  const service = new WikiEditRequestService(prisma, profiles, permissions, {} as WikiEditService);
+
+  const result = await service.listGlobal(session, { status: 'open', scope: 'reviewable', limit: 1 });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.id, '100');
+  assert.equal(result.nextCursor, null);
+});
+
+test('reviewable summary distinguishes exact counts from a capped result', async () => {
+  for (const [total, expected] of [
+    [99, { count: 99, capped: false }],
+    [100, { count: 100, capped: false }],
+    [101, { count: 100, capped: true }]
+  ] as const) {
+    const service = createService();
+    service.listGlobal = async (_session, input) => {
+      const offset = Number(input.cursor ?? 0);
+      const count = Math.min(50, total - offset);
+      const nextOffset = offset + count;
+      return {
+        items: Array.from({ length: count }, (_, index) => ({ id: `${offset + index + 1}` })) as never,
+        viewerProfileId: '20',
+        nextCursor: nextOffset < total ? nextOffset.toString() : null
+      };
+    };
+
+    assert.deepEqual(await service.reviewableSummary(session), expected);
+  }
+});
+
+test('reviewable queue requires an authenticated wiki profile', async () => {
+  await assert.rejects(
+    createService().listGlobal(null, { status: 'open', scope: 'reviewable' }),
+    ForbiddenException
+  );
+});
+
+test('reviewable queue includes an authorized new-page request with its canonical detail link', async () => {
+  const createRequest = {
+    ...request,
+    id: 71n,
+    requestKind: 'create',
+    pageId: null,
+    baseRevisionId: null,
+    targetNamespaceId: 7,
+    targetNamespaceCode: 'server',
+    targetSpaceId: 8n,
+    targetTitle: 'luna/규칙',
+    targetSlug: 'luna/규칙',
+    targetDisplayTitle: '규칙',
+    targetPageType: 'server',
+    targetOwnerProfileId: null
+  };
+  const prisma = {
+    wikiEditRequest: { async findMany() { return [createRequest]; } },
+    wikiPage: { async findMany() { return []; } },
+    wikiNamespace: { async findMany() { return []; } },
+    wikiProfile: { async findMany() { return [{ id: 99n, displayName: '작성자' }]; } }
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
+    async assertCanReadCreateTarget() {},
+    async canManageCreateTarget() { return true; }
+  } as unknown as WikiPermissionService;
+  const service = new WikiEditRequestService(prisma, profiles, permissions, {} as WikiEditService);
+
+  const result = await service.listGlobal(session, { status: 'open', scope: 'reviewable' });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.requestKind, 'create');
+  assert.equal(result.items[0]?.detailPath, '/wiki/edit-requests/request/71?returnTo=%2Fserver%2Fluna%2F%25EA%25B7%259C%25EC%25B9%2599');
 });
 
 test('only a page manager can reject an edit request', async () => {

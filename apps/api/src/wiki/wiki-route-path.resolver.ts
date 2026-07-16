@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { slugifyTitle, wikiUrl } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 
@@ -93,4 +93,11 @@ export function buildCanonicalServerWikiPath(serverSlug: string, localPath: stri
     .map((segment) => encodeURIComponent(segment))
     .join('/');
   return encodedRelativePath ? `/server/${encodedSlug}/${encodedRelativePath}` : `/server/${encodedSlug}`;
+}
+
+export function buildCanonicalServerWikiToolPath(serverSlug: string, localPath: string, tool: string): string {
+  if (!/^[a-z][a-z0-9-]{1,31}$/u.test(tool)) throw new BadRequestException('Invalid server wiki tool.');
+  const rootPath = buildCanonicalServerWikiPath(serverSlug, serverSlug);
+  const pagePath = buildCanonicalServerWikiPath(serverSlug, localPath);
+  return `${rootPath}/_tools/${tool}${pagePath.slice(rootPath.length)}`;
 }

@@ -19,7 +19,7 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiIncludeService } from './wiki-include.service';
-import { buildCanonicalServerWikiPath, WikiRoutePathResolver, type WikiRoutePathBatch } from './wiki-route-path.resolver';
+import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath, WikiRoutePathResolver, type WikiRoutePathBatch } from './wiki-route-path.resolver';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -1959,11 +1959,7 @@ export function buildServerWikiPagePath(serverSlug: string, localPath: string): 
 }
 
 export function buildServerWikiToolPath(serverSlug: string, localPath: string, tool: string): string {
-  if (!/^[a-z][a-z0-9-]{1,31}$/.test(tool)) throw new BadRequestException('Invalid server wiki tool.');
-  const rootPath = buildServerWikiPagePath(serverSlug, serverSlug);
-  const pagePath = buildServerWikiPagePath(serverSlug, localPath);
-  const relativePath = pagePath.slice(rootPath.length);
-  return `${rootPath}/_tools/${tool}${relativePath}`;
+  return buildCanonicalServerWikiToolPath(serverSlug, localPath, tool);
 }
 
 export function serverWikiNavigationDepth(serverSlug: string, localPath: string): number {

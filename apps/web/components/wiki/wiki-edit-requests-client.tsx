@@ -75,6 +75,7 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
   function replace(updated: WikiEditRequestSummary) {
     setData((current) => ({ ...current, items: current.items.map((item) => item.id === updated.id ? updated : item) }));
     setDiffs((current) => { const next = { ...current }; delete next[updated.id]; return next; });
+    window.dispatchEvent(new Event('wiki:edit-request-changed'));
   }
 
   async function review(requestId: string, action: 'accept' | 'reject') {

@@ -14,6 +14,7 @@ test('missing-document editor exposes the reviewed creation mutation', () => {
 });
 
 test('new-page queue items use a request identity route without a synthetic page id', () => {
-  assert.match(queue, /item\.pageId === null/u);
-  assert.match(queue, /\/wiki\/edit-requests\/request\/\$\{encodeURIComponent\(item\.id\)\}/u);
+  assert.match(api, /readonly detailPath: string/u);
+  assert.match(queue, /href=\{item\.detailPath\}/u);
+  assert.doesNotMatch(queue, /item\.pageId === null/u);
 });
