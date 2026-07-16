@@ -253,3 +253,35 @@ test('caps the aggregate included source size at one MiB', async () => {
   assert.equal(result.ast[1]?.type === 'include' ? result.ast[1].state : null, 'unavailable');
   assert.ok(result.includedSourceBytes <= 1024 * 1024);
 });
+
+test('expands includes inside wiki style blocks and injects non-overridable calleeTitle', async () => {
+  const template: FixturePage = {
+    ...basePage,
+    id: 31n,
+    namespaceId: 2,
+    localPath: '호출자',
+    slug: '호출자',
+    title: '호출자',
+    currentRevisionId: 310n,
+    contentRaw: '@calleeTitle@ / @값@'
+  };
+  const { service } = createFixture([template]);
+  const parent = parseMarkup([
+    '{{{#!wiki style="writing-mode:vertical-rl"',
+    '[include(틀:호출자,calleeTitle=위조,값=정상)]',
+    '}}}'
+  ].join('\n'));
+  const result = await service.expand({
+    ast: parent.ast,
+    accountId: null,
+    sourcePageId: 1n,
+    sourceNamespace: 'server',
+    sourceLocalPath: 'luna/대문'
+  });
+  const html = renderDocument(result.ast);
+
+  assert.match(html, /class="wiki-style" style="writing-mode:vertical-rl"/);
+  assert.match(html, /서버:luna\/대문 \/ 정상/);
+  assert.equal(html.includes('위조'), false);
+  assert.equal(html.includes('저장한 뒤'), false);
+});

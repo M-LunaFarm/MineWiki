@@ -75,6 +75,11 @@ export type AstNode =
   | { type: 'hr' }
   | { type: 'wiki_table'; caption: InlineNode[]; rows: WikiTableRow[]; options: WikiTableOptions }
   | { type: 'folding'; title: InlineNode[]; children: AstNode[] }
+  | {
+      type: 'wiki_style';
+      writingMode: 'horizontal-tb' | 'vertical-rl' | 'vertical-lr' | null;
+      children: AstNode[];
+    }
   | { type: 'toc'; collapsed: boolean }
   | {
       type: 'include';

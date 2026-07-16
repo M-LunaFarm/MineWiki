@@ -828,3 +828,96 @@ test('interpolates include parameters through nested lists and advanced table ce
   assert.match(html, /'''문법 아님'''/);
   assert.match(html, /alt="&lt;b&gt;설명&lt;\/b&gt;"/);
 });
+
+test('parses wiki style blocks before generic components and renders only writing-mode', () => {
+  for (const writingMode of ['horizontal-tb', 'vertical-rl', 'vertical-lr'] as const) {
+    const parsed = parseMarkup(`{{{#!wiki style="writing-mode: ${writingMode};"\n세로 본문\n}}}`);
+    const node = parsed.ast[0];
+    assert.equal(node?.type, 'wiki_style');
+    if (node?.type !== 'wiki_style') continue;
+    assert.equal(node.writingMode, writingMode);
+    assert.equal(node.children[0]?.type, 'paragraph');
+    assert.equal(parsed.errors.filter((error) => error === '문서 상태 컴포넌트가 없습니다.').length, 1);
+    assert.match(renderDocument(parsed.ast), new RegExp(`<div class="wiki-style" style="writing-mode:${writingMode}"><p>세로 본문</p></div>`));
+  }
+});
+
+test('wiki style blocks preserve recursive links, categories, includes, files and searchable text', () => {
+  const parsed = parseMarkup([
+    '{{{#!wiki style="writing-mode:vertical-rl"',
+    '[[가이드|링크]] [[분류:안내]]',
+    '[include(틀:안내)]',
+    '[[파일:inside.png]]',
+    '}}}'
+  ].join('\n'));
+
+  assert.deepEqual(parsed.links, ['가이드']);
+  assert.deepEqual(parsed.categories, ['안내']);
+  assert.deepEqual(parsed.includes, ['틀:안내']);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['가이드']);
+  assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['inside.png']);
+  assert.match(parsed.plainText, /링크/);
+  const style = parsed.ast[0];
+  assert.equal(style?.type, 'wiki_style');
+  if (style?.type === 'wiki_style') {
+    assert.ok(style.children.some((node) => node.type === 'include'));
+  }
+});
+
+test('wiki style ignores arbitrary CSS and tag, class, onclick and dark-style attributes', () => {
+  const sources = [
+    '{{{#!wiki style="position:fixed;writing-mode:vertical-rl" tag="a" class="admin" onclick="alert(1)"\n본문\n}}}',
+    '{{{#!wiki dark-style="writing-mode:vertical-lr"\n본문\n}}}',
+    '{{{#!wiki style="writing-mode:sideways-rl"\n본문\n}}}',
+    '{{{#!wiki style="writing-mode:vertical-rl;background:url(javascript:alert(1))"\n본문\n}}}'
+  ];
+  for (const source of sources) {
+    const parsed = parseMarkup(source);
+    const html = renderDocument(parsed.ast);
+    assert.match(html, /^<div class="wiki-style"><p>본문<\/p><\/div>$/);
+    assert.equal(html.includes('position:'), false);
+    assert.equal(html.includes('javascript:'), false);
+    assert.equal(html.includes('onclick'), false);
+    assert.equal(html.includes('dark-style'), false);
+    assert.equal(html.includes('class="admin"'), false);
+    assert.equal(html.includes('<a'), false);
+  }
+});
+
+test('wiki style safely preserves malformed, unclosed and nested block bodies', () => {
+  const unclosed = parseMarkup('{{{#!wiki style="writing-mode:vertical-lr"\n[[남은 본문]]');
+  assert.deepEqual(unclosed.links, ['남은 본문']);
+  assert.match(renderDocument(unclosed.ast), /남은 본문/);
+  assert.ok(unclosed.errors.some((error) => error.includes('닫히지 않은')));
+
+  const nested = parseMarkup([
+    '{{{#!wiki style="writing-mode:vertical-rl"',
+    '바깥',
+    '{{{#!wiki style="writing-mode:horizontal-tb"',
+    '[[안쪽]]',
+    '}}}',
+    '끝',
+    '}}}'
+  ].join('\n'));
+  const outer = nested.ast[0];
+  assert.equal(outer?.type, 'wiki_style');
+  if (outer?.type === 'wiki_style') assert.ok(outer.children.some((node) => node.type === 'wiki_style'));
+  assert.deepEqual(nested.links, ['안쪽']);
+  assert.match(renderDocument(nested.ast), /writing-mode:vertical-rl[^]*writing-mode:horizontal-tb/);
+});
+
+test('include interpolation reaches wiki style children while reserved calleeTitle wins', () => {
+  const parsed = parseMarkup('{{{#!wiki style="writing-mode:vertical-rl"\n@calleeTitle@ · @값@ · [[@대상@]]\n}}}');
+  const expanded = applyIncludeParametersToAst(parsed.ast, {
+    calleeTitle: '사용자 위조',
+    값: '<script>값</script>',
+    대상: '안내'
+  }, 'inc-', { calleeTitle: '서버:루나/대문' });
+  const html = renderDocument(expanded);
+
+  assert.match(html, /서버:루나\/대문/);
+  assert.equal(html.includes('사용자 위조'), false);
+  assert.match(html, /&lt;script&gt;값&lt;\/script&gt;/);
+  assert.match(html, /href="\/wiki\/%EC%95%88%EB%82%B4"/);
+  assert.equal(html.includes('<script>'), false);
+});

@@ -13,7 +13,7 @@ import type {
 import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.11.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.12.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -148,6 +148,53 @@ const allowedTags = [
   'path'
 ];
 
+function readNestedTripleBraceBlock(lines: readonly string[], startIndex: number) {
+  const body: string[] = [];
+  let depth = 1;
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    const trimmed = line.trim();
+    if (trimmed === '}}}') {
+      depth -= 1;
+      if (depth === 0) return { body, endIndex: index, closed: true };
+      body.push(line);
+      continue;
+    }
+    if (trimmed.startsWith('{{{') && !trimmed.endsWith('}}}')) depth += 1;
+    body.push(line);
+  }
+  return { body, endIndex: Math.max(startIndex, lines.length - 1), closed: false };
+}
+
+function parseWikiStyleWritingMode(attributes: string): Extract<AstNode, { type: 'wiki_style' }>['writingMode'] {
+  const styleAttributes = [...attributes.matchAll(/(?:^|\s)style\s*=\s*"([^"]*)"/giu)];
+  if (styleAttributes.length !== 1) return null;
+  const declaration = styleAttributes[0]?.[1]?.trim() ?? '';
+  const match = declaration.match(/^writing-mode\s*:\s*(horizontal-tb|vertical-rl|vertical-lr)\s*;?$/iu);
+  return (match?.[1]?.toLowerCase() as Extract<AstNode, { type: 'wiki_style' }>['writingMode']) ?? null;
+}
+
+function mergeNestedMetadata(
+  nested: ParsedDocument,
+  target: {
+    links: Set<string>;
+    categories: Set<string>;
+    includes: string[];
+    components: Array<{ name: string; props: Record<string, string> }>;
+    footnotes: string[];
+    errors: string[];
+    blockingErrors: string[];
+  }
+) {
+  nested.links.forEach((link) => target.links.add(link));
+  nested.categories.forEach((category) => target.categories.add(category));
+  target.includes.push(...nested.includes);
+  target.components.push(...nested.components);
+  target.footnotes.push(...nested.footnotes);
+  target.errors.push(...nested.errors);
+  target.blockingErrors.push(...nested.blockingErrors);
+}
+
 export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
   if (Buffer.byteLength(raw, 'utf8') > MAX_DOCUMENT_BYTES) {
     return rejectedDocument('문서 크기 제한을 초과했습니다.');
@@ -177,6 +224,21 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
     let line = lines[i] ?? '';
     if (!line.trim()) continue;
     if (i === 0 && redirectTarget) continue;
+
+    const wikiStyle = line.match(/^\s*\{\{\{#!wiki(?:\s+(.*?))?\s*$/i);
+    if (wikiStyle) {
+      const block = readNestedTripleBraceBlock(lines, i);
+      const nested = parseMarkup(block.body.join('\n'), foldingDepth + 1);
+      mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
+      const writingMode = parseWikiStyleWritingMode(wikiStyle[1] ?? '');
+      if ((wikiStyle[1] ?? '').trim() && writingMode === null) {
+        errors.push('지원되지 않는 wiki style 속성을 무시했습니다.');
+      }
+      if (!block.closed) errors.push('닫히지 않은 wiki style 블록을 문서 끝까지 처리했습니다.');
+      ast.push({ type: 'wiki_style', writingMode, children: nested.ast });
+      i = block.endIndex;
+      continue;
+    }
 
     const mathBlock = line.match(/^\{\{\{#!latex\s*$/i);
     if (mathBlock) {
@@ -411,14 +473,16 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
     seenHeadings.add(heading.id);
   });
 
-  if (!components.some((component) => component.name === 'document_status')) {
-    errors.push('문서 상태 컴포넌트가 없습니다.');
-  }
-  if (categories.size === 0 && !redirectTarget) {
-    errors.push('분류가 없습니다.');
-  }
-  if (!components.some((component) => ['mob_info', 'item_info', 'block_info', 'mod_info', 'server_info', 'api_info', 'packet_info', 'data_type_info', 'develop_status'].includes(component.name))) {
-    errors.push('정보 컴포넌트가 없습니다.');
+  if (foldingDepth === 0) {
+    if (!components.some((component) => component.name === 'document_status')) {
+      errors.push('문서 상태 컴포넌트가 없습니다.');
+    }
+    if (categories.size === 0 && !redirectTarget) {
+      errors.push('분류가 없습니다.');
+    }
+    if (!components.some((component) => ['mob_info', 'item_info', 'block_info', 'mod_info', 'server_info', 'api_info', 'packet_info', 'data_type_info', 'develop_status'].includes(component.name))) {
+      errors.push('정보 컴포넌트가 없습니다.');
+    }
   }
   if (/<\s*(script|style|iframe|object|embed|img)\b/i.test(raw) || /\son[a-z]+\s*=/i.test(raw)) {
     blockingErrors.push('허용되지 않은 HTML이 포함되어 있습니다.');
@@ -443,6 +507,8 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
     footnotes,
     redirectTarget,
     plainText: raw
+      .replace(/^\s*\{\{\{#!wiki[^\r\n]*(?:\r?\n|$)/gimu, ' ')
+      .replace(/^\s*\}\}\}\s*$/gmu, ' ')
       .replace(/\{\{[\s\S]*?\}\}/g, ' ')
       .replace(/\[\[분류:.+?\]\]/g, ' ')
       .replace(/\[\[(.+?)(?:\|(.+?))?\]\]/g, '$2$1')
@@ -987,11 +1053,16 @@ function validateWikiFileName(fileName: string, blockingErrors: string[]) {
 export function applyIncludeParametersToAst(
   ast: readonly AstNode[],
   params: Readonly<Record<string, string>>,
-  headingPrefix: string
+  headingPrefix: string,
+  reservedParams: Readonly<{ calleeTitle?: string }> = {}
 ): AstNode[] {
   const replace = (value: string) => value.replace(
     /@([A-Za-z0-9가-힣_]+)(?:=([^@\n]*))?@/gu,
-    (_match, key: string, fallback: string | undefined) => params[key] ?? fallback ?? ''
+    (_match, key: string, fallback: string | undefined) => (
+      key === 'calleeTitle' && reservedParams.calleeTitle !== undefined
+        ? reservedParams.calleeTitle
+        : params[key] ?? fallback ?? ''
+    )
   );
   const inline = (nodes: readonly InlineNode[]): InlineNode[] => nodes.map((node) => {
     if (node.type === 'internal_link') return { ...node, target: replace(node.target), label: replace(node.label) };
@@ -1040,7 +1111,11 @@ export function applyIncludeParametersToAst(
     if (node.type === 'folding') return {
       ...node,
       title: inline(node.title),
-      children: applyIncludeParametersToAst(node.children, params, headingPrefix)
+      children: applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams)
+    };
+    if (node.type === 'wiki_style') return {
+      ...node,
+      children: applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams)
     };
     if (node.type === 'component') return {
       ...node,
@@ -1061,7 +1136,7 @@ export function applyIncludeParametersToAst(
       ...node,
       target: replace(node.target),
       params: Object.fromEntries(Object.entries(node.params).map(([key, value]) => [key, replace(value)])),
-      children: node.children ? applyIncludeParametersToAst(node.children, params, headingPrefix) : undefined
+      children: node.children ? applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams) : undefined
     };
     // Literal code blocks deliberately do not interpolate include parameters.
     return { ...node };
@@ -1323,6 +1398,11 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         output.push(`<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, renderOptions)}</summary>${renderDocument(node.children, { ...renderOptions, tocHeadings })}</details>`);
         continue;
       }
+      if (node.type === 'wiki_style') {
+        const style = node.writingMode ? ` style="writing-mode:${node.writingMode}"` : '';
+        output.push(`<div class="wiki-style"${style}>${renderDocument(node.children, { ...renderOptions, tocHeadings })}</div>`);
+        continue;
+      }
       if (node.type === 'toc') {
         output.push(renderTableOfContents(tocHeadings, node.collapsed));
         continue;
@@ -1437,7 +1517,8 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       div: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
         'margin-left': [/^auto$/],
-        'margin-right': [/^auto$/]
+        'margin-right': [/^auto$/],
+        'writing-mode': [/^(?:horizontal-tb|vertical-rl|vertical-lr)$/]
       },
       table: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
@@ -1494,7 +1575,7 @@ function collectTocHeadings(ast: readonly AstNode[]): Array<{ level: number; tex
     if (node.type === 'heading') headings.push(node);
     // Included headings belong to their own heading scope and must not leak into
     // the caller's table of contents.
-    if (node.type === 'folding') headings.push(...collectTocHeadings(node.children));
+    if (node.type === 'folding' || node.type === 'wiki_style') headings.push(...collectTocHeadings(node.children));
   }
   return headings;
 }
@@ -1636,6 +1717,7 @@ function countMathNodes(ast: readonly AstNode[]): number {
       );
     }
     if (node.type === 'folding') return count + countInline(node.title) + countMathNodes(node.children);
+    if (node.type === 'wiki_style') return count + countMathNodes(node.children);
     if (node.type === 'include' && node.children) return count + countMathNodes(node.children);
     return count;
   }, 0);
@@ -1661,7 +1743,7 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
     else if (node.type === 'wiki_table') {
       collectInline(node.caption);
       for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
-    } else if (node.type === 'folding' || (node.type === 'include' && node.children)) {
+    } else if (node.type === 'folding' || node.type === 'wiki_style' || (node.type === 'include' && node.children)) {
       collectWikiFileNames(node.children, output);
     }
   }
@@ -1689,6 +1771,8 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
       for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
     } else if (node.type === 'folding') {
       collectInline(node.title);
+      collectWikiLinkTargets(node.children, output);
+    } else if (node.type === 'wiki_style') {
       collectWikiLinkTargets(node.children, output);
     } else if (node.type === 'include' && node.children) {
       collectWikiLinkTargets(node.children, output);

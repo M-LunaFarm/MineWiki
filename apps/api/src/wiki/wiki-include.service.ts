@@ -50,6 +50,9 @@ export class WikiIncludeService {
       if (node.type === 'folding') {
         return { ...node, children: await expandNodes(node.children) };
       }
+      if (node.type === 'wiki_style') {
+        return { ...node, children: await expandNodes(node.children) };
+      }
       if (node.type !== 'include') return node;
 
       occurrence += 1;
@@ -84,7 +87,12 @@ export class WikiIncludeService {
       }
       includedSourceBytes += source.bytes;
       const children = disableNestedIncludes(
-        applyIncludeParametersToAst(source.ast, node.params, `inc-${includeIndex}-`)
+        applyIncludeParametersToAst(
+          source.ast,
+          node.params,
+          `inc-${includeIndex}-`,
+          { calleeTitle: callerFullTitle(input.sourceNamespace, input.sourceLocalPath) }
+        )
       );
       return { ...node, state: 'resolved', children };
     }));
@@ -151,8 +159,19 @@ function disableNestedIncludes(nodes: readonly AstNode[]): AstNode[] {
   return nodes.map((node): AstNode => {
     if (node.type === 'include') return unavailable(node);
     if (node.type === 'folding') return { ...node, children: disableNestedIncludes(node.children) };
+    if (node.type === 'wiki_style') return { ...node, children: disableNestedIncludes(node.children) };
     return node;
   });
+}
+
+function callerFullTitle(namespace: string, localPath: string) {
+  if (namespace === 'main') return localPath;
+  const displayName = ({
+    mod: '모드', modpack: '모드팩', server: '서버', dev: '개발', guide: '가이드',
+    data: '데이터', help: '도움말', project: '프로젝트', template: '틀', user: '사용자',
+    category: '분류', file: '파일'
+  } as Record<string, string>)[namespace];
+  return displayName ? `${displayName}:${localPath}` : localPath;
 }
 
 function resolveContextualTarget(namespace: string, localPath: string, target: string) {
