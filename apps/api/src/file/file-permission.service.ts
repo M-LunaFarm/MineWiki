@@ -16,6 +16,18 @@ export interface LinkedFileResource {
   readonly id: string;
 }
 
+export type FileReadDecision = 'allow' | 'linked' | 'deny' | 'missing';
+
+export function fileReadDecision(
+  file: FilePermissionSubject | null,
+  identity?: { readonly accountId?: string | null; readonly permissions?: readonly string[] }
+): FileReadDecision {
+  if (!file || file.status === 'deleted') return 'missing';
+  if (file.visibility === 'public' || file.visibility === 'unlisted' || !file.visibility) return 'allow';
+  if (identity?.permissions?.includes('file.admin') === true || (identity?.accountId && file.ownerAccountId === identity.accountId)) return 'allow';
+  return file.visibility === 'restricted' ? 'linked' : 'deny';
+}
+
 @Injectable()
 export class FilePermissionService {
   constructor(
@@ -27,16 +39,12 @@ export class FilePermissionService {
     file: FilePermissionSubject | null,
     session?: SessionPayload | null
   ): Promise<void> {
-    if (!file || file.status === 'deleted') {
-      throw new NotFoundException('File not found.');
-    }
-    if (file.visibility === 'public' || file.visibility === 'unlisted' || !file.visibility) {
-      return;
-    }
-    if (this.isOwnerOrAdmin(file, session)) {
-      return;
-    }
-    if (file.visibility === 'restricted') {
+    const decision = fileReadDecision(file, {
+      accountId: session?.userId,
+      permissions: session?.permissions
+    });
+    if (decision === 'allow') return;
+    if (decision === 'linked' && file) {
       await this.assertCanReadLinkedResource(file, session);
       return;
     }
@@ -114,10 +122,20 @@ export class FilePermissionService {
     if (!id || !/^\d+$/.test(id)) {
       throw new NotFoundException('File not found.');
     }
+    const actorBase = session ? await this.wikiPermissions.resolveActor(session.userId) : null;
+    const actor = actorBase && session ? {
+      ...actorBase,
+      isElevated: session.isElevated,
+      permissions: session.permissions,
+      groups: session.groups,
+      requestIp: session.requestIp
+    } : null;
     if (file.linkedResourceType === 'wiki_page') {
       const page = await this.prisma.wikiPage.findUnique({ where: { id: BigInt(id) } });
       await this.wikiPermissions.assertCanReadPage({
         accountId: session?.userId ?? null,
+        actor,
+        requestIp: session?.requestIp,
         page
       });
       return;
@@ -125,6 +143,8 @@ export class FilePermissionService {
     if (file.linkedResourceType === 'wiki_space') {
       await this.wikiPermissions.assertCanReadSpace({
         accountId: session?.userId ?? null,
+        actor,
+        requestIp: session?.requestIp,
         spaceId: BigInt(id)
       });
       return;

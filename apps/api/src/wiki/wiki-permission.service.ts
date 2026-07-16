@@ -192,6 +192,8 @@ export class WikiPermissionService {
 
   async assertCanReadSpace(input: {
     readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
+    readonly requestIp?: string | null;
     readonly spaceId: bigint;
     readonly store?: WikiPermissionStore;
   }): Promise<void> {
@@ -200,13 +202,13 @@ export class WikiPermissionService {
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) {
       throw new NotFoundException('Wiki space not found.');
     }
-    const actor = await this.resolveActor(input.accountId, store);
+    const actor = input.actor ?? await this.resolveActor(input.accountId, store);
     const acl = await this.evaluateAcl('read', actor, {
       spaceId: space.id,
       namespaceCode: space.rootNamespaceCode,
       title: space.title,
       createdBy: space.createdBy
-    }, store);
+    }, store, input.requestIp);
     if (acl.matched && !acl.allowed) {
       throw new NotFoundException('Wiki space not found.');
     }

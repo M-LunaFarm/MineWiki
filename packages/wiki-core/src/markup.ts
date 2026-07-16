@@ -1668,6 +1668,35 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
   return output;
 }
 
+export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set<string>()): Set<string> {
+  const collectInline = (nodes: readonly InlineNode[]) => {
+    for (const node of nodes) {
+      if (node.type === 'internal_link') output.add(node.target);
+    }
+  };
+  const collectList = (list: WikiListNode) => {
+    for (const item of list.items) {
+      collectInline(item.children);
+      for (const nested of item.nested) collectList(nested);
+    }
+  };
+
+  for (const node of ast) {
+    if (node.type === 'paragraph' || node.type === 'blockquote') collectInline(node.children);
+    else if (node.type === 'list') collectList(node);
+    else if (node.type === 'wiki_table') {
+      collectInline(node.caption);
+      for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
+    } else if (node.type === 'folding') {
+      collectInline(node.title);
+      collectWikiLinkTargets(node.children, output);
+    } else if (node.type === 'include' && node.children) {
+      collectWikiLinkTargets(node.children, output);
+    }
+  }
+  return output;
+}
+
 function renderInternalLink(target: string, label: string, options: RenderOptions = {}) {
   const parsed = parseLinkTarget(target);
   const missing = options.missingLinks?.has(wikiLinkKey(target));

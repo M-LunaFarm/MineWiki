@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FilePermissionService } from './file-permission.service';
+import { fileReadDecision, FilePermissionService } from './file-permission.service';
 import { FileService } from './file.service';
 
 interface TestFile {
@@ -29,6 +29,14 @@ interface TestFile {
   createdAt: Date;
   updatedAt: Date;
 }
+
+test('shared file read policy treats owners and file administrators identically', () => {
+  const privateFile = { ownerAccountId: 'owner', visibility: 'private', status: 'active' };
+  assert.equal(fileReadDecision(privateFile, { accountId: 'owner' }), 'allow');
+  assert.equal(fileReadDecision(privateFile, { accountId: 'admin', permissions: ['file.admin'] }), 'allow');
+  assert.equal(fileReadDecision(privateFile, { accountId: 'stranger' }), 'deny');
+  assert.equal(fileReadDecision({ ...privateFile, visibility: 'restricted' }, { accountId: 'stranger' }), 'linked');
+});
 
 interface VisibilityCondition {
   visibility?: { in: string[] };

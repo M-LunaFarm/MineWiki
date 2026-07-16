@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyIncludeParametersToAst, collectWikiFileNames, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
+import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
 import { resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
@@ -52,6 +52,14 @@ test('parses links, categories, components, and safe HTML', () => {
   const html = renderDocument(parsed.ast, { missingLinks: new Set([wikiLinkKey('엔더 진주')]) });
   assert.equal(html.includes('<script>'), false);
   assert.equal(html.includes('class="wiki-link missing"'), true);
+});
+
+test('collects internal links introduced by expanded nested AST containers', () => {
+  const parent = parseMarkup('[[직접 링크]]');
+  const included = parseMarkup('본문 [[포함 링크]]');
+  const ast = [...parent.ast, { type: 'include', target: '틀:링크', params: {}, state: 'resolved', children: included.ast } as const];
+
+  assert.deepEqual([...collectWikiLinkTargets(ast)], ['직접 링크', '포함 링크']);
 });
 
 test('renders inline, block, and legacy math with accessible KaTeX output', () => {

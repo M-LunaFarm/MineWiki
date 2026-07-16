@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
+import { parseMarkup, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import type { WikiPermissionService } from './wiki-permission.service';
@@ -1031,6 +1031,13 @@ function createReadService(options: {
           createdBy: 40n,
           visibility: 'public'
         };
+      },
+      async findMany() {
+        return (options.existingLinkSlugs ?? []).map((_, index) => ({
+          id: BigInt(200 + index),
+          pageId: BigInt(100 + index),
+          visibility: 'public'
+        }));
       }
     },
     wikiPageRenderCache: {
@@ -1195,6 +1202,27 @@ test('wiki read marks only readable missing links and bypasses shared render cac
   assert.equal(createdCache, false);
   assert.match(page.html, /class="wiki-link" href="\/wiki\/%EC%9E%88%EB%8A%94_%EB%AC%B8%EC%84%9C"/);
   assert.match(page.html, /class="wiki-link missing" href="\/wiki\/%EC%97%86%EB%8A%94_%EB%AC%B8%EC%84%9C" title="문서 없음"/);
+});
+
+test('wiki read applies missing-link ACL state to links introduced by includes', async () => {
+  const included = parseMarkup('포함 본문 [[없는 포함 링크]]');
+  const includeService = {
+    async expand() {
+      return {
+        ast: [{ type: 'include' as const, target: '틀:링크', params: {}, state: 'resolved' as const, children: included.ast }],
+        includedSourceBytes: 32
+      };
+    }
+  } as unknown as WikiIncludeService;
+  const service = createReadService({
+    contentRaw: '[include(틀:링크)]',
+    includeService
+  });
+
+  const page = await service.getPage('main', '대문');
+
+  assert.deepEqual(page.links, ['없는 포함 링크']);
+  assert.match(page.html, /class="wiki-link missing"[^>]+title="문서 없음"/u);
 });
 
 test('wiki read exposes attribution only for files readable through their linked resource', async () => {

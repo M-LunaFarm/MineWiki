@@ -5,6 +5,7 @@ import {
   type AstNode,
   buildWikiSearchBooleanQuery,
   collectWikiFileNames,
+  collectWikiLinkTargets,
   parseLinkTarget,
   parseMarkup,
   renderDocument,
@@ -15,6 +16,7 @@ import {
   WIKI_RENDERER_VERSION
 } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
+import { fileReadDecision } from '../file/file-permission.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService, type WikiPermissionActor } from './wiki-permission.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
@@ -1891,9 +1893,18 @@ export class WikiReadService {
           status: { not: 'deleted' }
         }
       });
+      const currentRevisionIds = pages.flatMap((targetPage) => targetPage.currentRevisionId ? [targetPage.currentRevisionId] : []);
+      const revisions = currentRevisionIds.length > 0
+        ? await this.prisma.wikiPageRevision.findMany({
+            where: { id: { in: currentRevisionIds }, visibility: 'public' }
+          })
+        : [];
+      const revisionByPageId = new Map(revisions.map((revision) => [revision.pageId, revision]));
       for (const targetPage of pages) {
+        const revision = revisionByPageId.get(targetPage.id);
+        if (!revision || revision.id !== targetPage.currentRevisionId) continue;
         try {
-          await this.wikiPermissions.assertCanReadPage({ ...access, page: targetPage });
+          await this.wikiPermissions.assertCanReadPage({ ...access, page: targetPage, revision });
           readableTargets.add(`${namespace.code}:${targetPage.slug}`);
         } catch {
           // Restricted targets must be indistinguishable from missing pages.
@@ -1989,9 +2000,10 @@ export class WikiReadService {
           sourceLocalPath: page.localPath
         })
       : { ast: parsed.ast, includedSourceBytes: 0 };
+    const links = [...collectWikiLinkTargets(expanded.ast)];
     const hasFileDependencies = collectWikiFileNames(expanded.ast).size > 0;
     const hasIncludeDependencies = parsed.includes.length > 0;
-    const hasLinkDependencies = parsed.links.length > 0;
+    const hasLinkDependencies = links.length > 0;
     const cache = hasFileDependencies || hasIncludeDependencies || hasLinkDependencies
       ? null
       : await this.prisma.wikiPageRenderCache.findUnique({
@@ -2004,7 +2016,7 @@ export class WikiReadService {
         });
     const files = cache ? {} : await this.findRenderableFiles(expanded.ast, access);
     const missingLinks = hasLinkDependencies
-      ? await this.findMissingLinks(namespace, page.localPath, parsed.links, access)
+      ? await this.findMissingLinks(namespace, page.localPath, links, access)
       : new Set<string>();
     const html = cache?.html ?? renderDocument(expanded.ast, {
       files,
@@ -2046,7 +2058,7 @@ export class WikiReadService {
         createdBy: revision.createdBy?.toString() ?? null
       },
       html,
-      links: parsed.links,
+      links,
       categories: parsed.categories,
       headings: parsed.headings.map(({ level, title, anchor }) => ({ level, title, anchor })),
       redirectTarget: parsed.redirectTarget,
@@ -2140,23 +2152,24 @@ export class WikiReadService {
     });
     const visibleFiles = [];
     for (const file of files) {
-      if (file.visibility === 'public' || file.visibility === 'unlisted') {
+      const decision = fileReadDecision(file, {
+        accountId: access.accountId,
+        permissions: access.actor?.permissions
+      });
+      if (decision === 'allow') {
         visibleFiles.push(file);
         continue;
       }
-      if (file.visibility === 'private') {
-        if (access.accountId && file.ownerAccountId === access.accountId) visibleFiles.push(file);
-        continue;
-      }
+      if (decision !== 'linked') continue;
       const linkedId = file.linkedResourceId?.trim();
-      if (file.visibility !== 'restricted' || !linkedId || !/^\d+$/.test(linkedId)) continue;
+      if (!linkedId || !/^\d+$/.test(linkedId)) continue;
       try {
         if (file.linkedResourceType === 'wiki_page') {
           const linkedPage = await this.prisma.wikiPage.findUnique({ where: { id: BigInt(linkedId) } });
           await this.wikiPermissions.assertCanReadPage({ ...access, page: linkedPage });
           visibleFiles.push(file);
         } else if (file.linkedResourceType === 'wiki_space') {
-          await this.wikiPermissions.assertCanReadSpace({ accountId: access.accountId, spaceId: BigInt(linkedId) });
+          await this.wikiPermissions.assertCanReadSpace({ ...access, spaceId: BigInt(linkedId) });
           visibleFiles.push(file);
         }
       } catch {
