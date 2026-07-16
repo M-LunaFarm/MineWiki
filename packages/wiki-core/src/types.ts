@@ -113,7 +113,7 @@ export type InlineNode =
   | { type: 'sub'; text: string }
   | { type: 'color'; color: string; text: string }
   | { type: 'size'; delta: number; text: string }
-  | { type: 'internal_link'; target: string; label: string }
+  | { type: 'internal_link'; target: string; label: string; fragment?: string | null }
   | { type: 'external_link'; href: string; label: string }
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null }
   | { type: 'unsupported_macro'; name: string }

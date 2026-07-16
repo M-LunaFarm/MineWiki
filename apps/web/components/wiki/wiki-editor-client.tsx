@@ -187,7 +187,10 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
     setBlockingErrors([]);
     startPreviewTransition(async () => {
       try {
-        const preview = await previewWikiMarkup(contentRaw);
+        const preview = await previewWikiMarkup(contentRaw, {
+          namespace,
+          localPath: page?.slug ?? title,
+        });
         setPreviewHtml(preview.html);
         setBlockingErrors(preview.blockingErrors);
         if (preview.blockingErrors.length > 0) {

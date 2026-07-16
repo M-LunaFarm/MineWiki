@@ -1,7 +1,14 @@
 import crypto from 'node:crypto';
 
 export function normalizeTitle(input: string) {
-  return decodeURIComponent(input)
+  let decoded = input;
+  try {
+    decoded = decodeURIComponent(input);
+  } catch {
+    // A literal or malformed percent sign is still valid document text. Keep
+    // it verbatim so link rendering can encode it safely instead of throwing.
+  }
+  return decoded
     .replaceAll('_', ' ')
     .replace(/\s+/g, ' ')
     .trim();

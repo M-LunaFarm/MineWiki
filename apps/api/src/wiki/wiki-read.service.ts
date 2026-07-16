@@ -25,6 +25,7 @@ import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath, WikiRou
 import { matchCommonLines } from './wiki-line-diff';
 import { resolveEffectiveServerWikiLayout } from '../server/server-wiki-layout-policy';
 import { publicWikiRecentChangeSummary, publicWikiRevisionEditSummary } from './wiki-revision-summary';
+import { wikiLinkResolutionContext } from './wiki-link-context';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -2007,7 +2008,8 @@ export class WikiReadService {
       page,
       revision
     });
-    const parsed = parseMarkup(revision.contentRaw);
+    const linkResolution = wikiLinkResolutionContext(namespace, page.localPath);
+    const parsed = parseMarkup(revision.contentRaw, { linkResolution });
     if (parsed.redirectTarget && options.followRedirects) {
       const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
       const redirected = await this.getPageInternal(target.namespace, target.title, access, {
@@ -2058,6 +2060,7 @@ export class WikiReadService {
       files,
       missingLinks,
       internalLinkBasePath: serverWiki ? `/server/${encodeURIComponent(serverWiki.context.slug)}` : undefined,
+      linkResolution,
     });
     if (Buffer.byteLength(html, 'utf8') > 2 * 1024 * 1024) {
       throw new BadRequestException('Rendered wiki document exceeds the size limit.');

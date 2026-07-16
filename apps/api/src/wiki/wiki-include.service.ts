@@ -8,6 +8,7 @@ import {
 } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { WikiPermissionService, type WikiPermissionActor } from './wiki-permission.service';
+import { wikiLinkResolutionContext } from './wiki-link-context';
 
 const MAX_INCLUDE_OCCURRENCES = 20;
 const MAX_UNIQUE_INCLUDE_TARGETS = 20;
@@ -136,7 +137,9 @@ export class WikiIncludeService {
       });
       if (!revision) return null;
       await this.wikiPermissions.assertCanReadPage({ ...access, page, revision });
-      const parsed = parseMarkup(revision.contentRaw);
+      const parsed = parseMarkup(revision.contentRaw, {
+        linkResolution: wikiLinkResolutionContext(namespaceCode, page.localPath),
+      });
       if (parsed.blockingErrors.length > 0 || parsed.redirectTarget) return null;
       return {
         pageId: page.id,

@@ -10,10 +10,16 @@ import type {
   WikiTableOptions,
   WikiTableRow
 } from './types.js';
-import { parseLinkTarget, wikiLinkKey, wikiUrl } from './namespaces.js';
+import {
+  parseLinkTarget,
+  resolveWikiLinkTarget,
+  wikiLinkKey,
+  wikiUrl,
+  type WikiLinkResolutionContext
+} from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.12.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.13.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -195,7 +201,16 @@ function mergeNestedMetadata(
   target.blockingErrors.push(...nested.blockingErrors);
 }
 
-export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
+export interface ParseMarkupOptions {
+  linkResolution?: WikiLinkResolutionContext;
+}
+
+export function parseMarkup(raw: string, options: ParseMarkupOptions | number = {}): ParsedDocument {
+  if (typeof options === 'number') return parseMarkupDocument(raw, {}, options);
+  return parseMarkupDocument(raw, options, 0);
+}
+
+function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDepth: number): ParsedDocument {
   if (Buffer.byteLength(raw, 'utf8') > MAX_DOCUMENT_BYTES) {
     return rejectedDocument('문서 크기 제한을 초과했습니다.');
   }
@@ -228,7 +243,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
     const wikiStyle = line.match(/^\s*\{\{\{#!wiki(?:\s+(.*?))?\s*$/i);
     if (wikiStyle) {
       const block = readNestedTripleBraceBlock(lines, i);
-      const nested = parseMarkup(block.body.join('\n'), foldingDepth + 1);
+      const nested = parseMarkupDocument(block.body.join('\n'), options, foldingDepth + 1);
       mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
       const writingMode = parseWikiStyleWritingMode(wikiStyle[1] ?? '');
       if ((wikiStyle[1] ?? '').trim() && writingMode === null) {
@@ -286,7 +301,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
         bodyLines.push(lines[i] ?? '');
         i += 1;
       }
-      const nested = parseMarkup(bodyLines.join('\n'), foldingDepth + 1);
+      const nested = parseMarkupDocument(bodyLines.join('\n'), options, foldingDepth + 1);
       nested.links.forEach((link) => links.add(link));
       nested.categories.forEach((categoryTitle) => categories.add(categoryTitle));
       nested.includes.forEach((target) => includes.push(target));
@@ -294,7 +309,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
       nested.footnotes.forEach((note) => footnotes.push(note));
       nested.errors.forEach((error) => errors.push(error));
       nested.blockingErrors.forEach((error) => blockingErrors.push(error));
-      ast.push({ type: 'folding', title: parseInline(foldingBlock[1]?.trim() || '펼치기', links, errors, blockingErrors, footnotes), children: nested.ast });
+      ast.push({ type: 'folding', title: parseInline(foldingBlock[1]?.trim() || '펼치기', links, errors, blockingErrors, footnotes, options.linkResolution), children: nested.ast });
       continue;
     }
 
@@ -411,7 +426,7 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
         i += 1;
       }
       i -= 1;
-      ast.push({ type: 'blockquote', children: parseInline(quoteLines.join('\n'), links, errors, blockingErrors, footnotes) });
+      ast.push({ type: 'blockquote', children: parseInline(quoteLines.join('\n'), links, errors, blockingErrors, footnotes, options.linkResolution) });
       continue;
     }
 
@@ -422,14 +437,14 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
       const tableParseState = createWikiTableParseState();
       const caption = tableStart.caption === null
         ? []
-        : parseInline(tableStart.caption, links, errors, blockingErrors, footnotes);
+        : parseInline(tableStart.caption, links, errors, blockingErrors, footnotes, options.linkResolution);
       if (tableStart.firstRow !== null) {
-        const row = parseWikiTableRow(tableStart.firstRow, tableOptions, tableParseState, links, errors, blockingErrors, footnotes);
+        const row = parseWikiTableRow(tableStart.firstRow, tableOptions, tableParseState, links, errors, blockingErrors, footnotes, options.linkResolution);
         if (row.cells.length > 0) rows.push(row);
       }
       if (tableStart.consumeNextLine) i += 1;
       while (i < lines.length && lines[i]?.trim().startsWith('||')) {
-        const row = parseWikiTableRow(lines[i] ?? '', tableOptions, tableParseState, links, errors, blockingErrors, footnotes);
+        const row = parseWikiTableRow(lines[i] ?? '', tableOptions, tableParseState, links, errors, blockingErrors, footnotes, options.linkResolution);
         if (row.cells.length > 0) rows.push(row);
         i += 1;
       }
@@ -455,11 +470,11 @@ export function parseMarkup(raw: string, foldingDepth = 0): ParsedDocument {
         i += 1;
       }
       i -= 1;
-      ast.push(...parseWikiListBlock(listBlock, links, errors, blockingErrors, footnotes));
+      ast.push(...parseWikiListBlock(listBlock, links, errors, blockingErrors, footnotes, options.linkResolution));
       continue;
     }
 
-    ast.push({ type: 'paragraph', children: parseInline(line, links, errors, blockingErrors, footnotes) });
+    ast.push({ type: 'paragraph', children: parseInline(line, links, errors, blockingErrors, footnotes, options.linkResolution) });
   }
 
   const headings = ast.filter((node): node is Extract<AstNode, { type: 'heading' }> => node.type === 'heading');
@@ -665,7 +680,8 @@ function parseWikiListBlock(
   links: Set<string>,
   errors: string[],
   blockingErrors: string[],
-  footnotes: string[]
+  footnotes: string[],
+  linkResolution?: WikiLinkResolutionContext
 ): WikiListNode[] {
   const entries = lines.map(parseWikiListLine).filter((entry): entry is ParsedWikiListLine => entry !== null);
   if (entries.length === 0) return [];
@@ -700,7 +716,7 @@ function parseWikiListBlock(
         const current = entries[index]!;
         if (current.indent !== indent || current.kind !== list.kind) break;
         const item = {
-          children: parseInline(current.content, links, errors, blockingErrors, footnotes),
+          children: parseInline(current.content, links, errors, blockingErrors, footnotes, linkResolution),
           nested: [] as WikiListNode[]
         };
         list.items.push(item);
@@ -726,7 +742,8 @@ function parseWikiTableRow(
   links: Set<string>,
   errors: string[],
   blockingErrors: string[],
-  footnotes: string[]
+  footnotes: string[],
+  linkResolution?: WikiLinkResolutionContext
 ): WikiTableRow {
   const row: WikiTableRow = { cells: [] };
   const cells: WikiTableCell[] = [];
@@ -759,7 +776,7 @@ function parseWikiTableRow(
       else if (startsWithSpace) cell.align = 'right';
       else if (endsWithSpace) cell.align = 'left';
     }
-    cell.children = parseInline(content.trim(), links, errors, blockingErrors, footnotes);
+    cell.children = parseInline(content.trim(), links, errors, blockingErrors, footnotes, linkResolution);
     const placement = findWikiTableVisualColumn(
       occupiedSpans,
       occupiedSpanCursor,
@@ -1065,7 +1082,12 @@ export function applyIncludeParametersToAst(
     )
   );
   const inline = (nodes: readonly InlineNode[]): InlineNode[] => nodes.map((node) => {
-    if (node.type === 'internal_link') return { ...node, target: replace(node.target), label: replace(node.label) };
+    if (node.type === 'internal_link') return {
+      ...node,
+      target: replace(node.target),
+      label: replace(node.label),
+      fragment: node.fragment === undefined || node.fragment === null ? node.fragment : replace(node.fragment)
+    };
     if (node.type === 'external_link') return { ...node, href: replace(node.href), label: replace(node.label) };
     if (node.type === 'code') return { ...node, code: replace(node.code) };
     if (node.type === 'file') return {
@@ -1148,7 +1170,8 @@ function parseInline(
   links: Set<string>,
   errors: string[],
   blockingErrors: string[],
-  footnotes: string[]
+  footnotes: string[],
+  linkResolution?: WikiLinkResolutionContext
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
   const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXml><ref>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?\s*(?<refShortText>[^\]]+?)\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
@@ -1182,9 +1205,21 @@ function parseInline(
       const href = group.externalWikiHref ?? '';
       nodes.push({ type: 'external_link', href, label: group.externalWikiLabel ?? href });
     } else if (group.internal !== undefined) {
-      const target = normalizeTitle(group.internalTarget ?? '');
-      links.add(target);
-      nodes.push({ type: 'internal_link', target, label: group.internalLabel ?? target });
+      const rawTarget = group.internalTarget ?? '';
+      const label = group.internalLabel ?? normalizeTitle(rawTarget);
+      const resolved = resolveWikiLinkTarget(rawTarget, linkResolution);
+      if ('error' in resolved) {
+        if (!blockingErrors.includes(resolved.error)) blockingErrors.push(resolved.error);
+        nodes.push({ type: 'text', text: label });
+      } else {
+        if (resolved.target) links.add(resolved.target);
+        nodes.push({
+          type: 'internal_link',
+          target: resolved.target,
+          label,
+          ...(resolved.fragment === null ? {} : { fragment: resolved.fragment })
+        });
+      }
     } else if (group.external !== undefined) {
       const href = group.externalHref ?? '';
       nodes.push({ type: 'external_link', href, label: group.externalLabel ?? href });
@@ -1340,6 +1375,8 @@ export interface RenderOptions {
   missingLinks?: Set<string>;
   /** Route prefix used for unqualified links inside an isolated subwiki. */
   internalLinkBasePath?: string;
+  /** Current document context used to resolve persisted relative-link ASTs. */
+  linkResolution?: WikiLinkResolutionContext;
   files?: Record<string, { url: string; mimeType: string; originalName: string; license?: string | null; sourceUrl?: string | null; sourceText?: string | null }>;
   officialAreas?: Record<string, { status: string; lastModifiedAt?: string | null; renewalRequiredAt?: string | null }>;
   dataTables?: Record<string, { caption: string; headers: string[]; rows: string[][] }>;
@@ -1639,7 +1676,7 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
       if (node.type === 'external_link') {
         return `<a href="${escapeAttr(node.href)}" rel="nofollow noopener" target="_blank">${escapeHtml(node.label)}</a>`;
       }
-      if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options);
+      if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options, node.fragment);
       if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, options, true);
       if (node.type === 'video') {
         const query = new URLSearchParams();
@@ -1753,7 +1790,9 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
 export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set<string>()): Set<string> {
   const collectInline = (nodes: readonly InlineNode[]) => {
     for (const node of nodes) {
-      if (node.type === 'internal_link') output.add(node.target);
+      if (node.type !== 'internal_link') continue;
+      const resolved = resolveWikiLinkTarget(node.target);
+      if (!('error' in resolved) && resolved.target) output.add(resolved.target);
     }
   };
   const collectList = (list: WikiListNode) => {
@@ -1781,19 +1820,37 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
   return output;
 }
 
-function renderInternalLink(target: string, label: string, options: RenderOptions = {}) {
-  const parsed = parseLinkTarget(target);
-  const missing = options.missingLinks?.has(wikiLinkKey(target));
+function renderInternalLink(
+  target: string,
+  label: string,
+  options: RenderOptions = {},
+  storedFragment?: string | null
+) {
+  const resolved = !target && storedFragment
+    ? { target: '', fragment: storedFragment }
+    : resolveWikiLinkTarget(target, options.linkResolution);
+  if ('error' in resolved) return escapeHtml(label);
+  const resolvedTarget = resolved.target;
+  const fragment = storedFragment ?? resolved.fragment;
+  const fragmentId = fragment ? makeHeadingId(fragment) : '';
+  if (!resolvedTarget) {
+    return fragmentId
+      ? `<a class="wiki-link" href="#${encodeURIComponent(fragmentId)}">${escapeHtml(label)}</a>`
+      : escapeHtml(label);
+  }
+  const parsed = parseLinkTarget(resolvedTarget);
+  const missing = options.missingLinks?.has(wikiLinkKey(resolvedTarget));
   const className = missing ? 'wiki-link missing' : 'wiki-link';
   const titleAttr = missing ? ' title="문서 없음"' : '';
-  const unqualified = parsed.namespace === 'main' && !target.includes(':');
+  const unqualified = parsed.namespace === 'main' && !resolvedTarget.includes(':');
   const href = unqualified && options.internalLinkBasePath
     ? `${options.internalLinkBasePath.replace(/\/$/, '')}/${slugifyTitle(parsed.title)
         .split('/')
         .map((part) => encodeURIComponent(part))
         .join('/')}`
     : wikiUrl(parsed.namespace, parsed.title);
-  return `<a class="${className}" href="${href}"${titleAttr}>${escapeHtml(label)}</a>`;
+  const fragmentSuffix = fragmentId ? `#${encodeURIComponent(fragmentId)}` : '';
+  return `<a class="${className}" href="${escapeAttr(`${href}${fragmentSuffix}`)}"${titleAttr}>${escapeHtml(label)}</a>`;
 }
 
 function renderComponent(name: string, props: Record<string, string>, options: RenderOptions = {}) {

@@ -117,3 +117,21 @@ test('server wiki links without a namespace stay in the current server space', a
     ]
   );
 });
+
+test('link index resolves parent, child, and fragment targets in the source page context', async () => {
+  const { store, calls } = createStore('server', 'mine-server/가이드/설치');
+  await new WikiLinkIndexService().replaceForRevision(
+    store,
+    10n,
+    20n,
+    ['../규칙', '/문제 해결', '#설치'],
+  );
+
+  assert.deepEqual(
+    calls.map((item) => [item.targetNamespaceCode, item.targetSlug]),
+    [
+      ['server', 'mine-server/가이드/규칙'],
+      ['server', 'mine-server/가이드/설치/문제_해결'],
+    ],
+  );
+});

@@ -15,6 +15,7 @@ import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiNotificationService } from './wiki-notification.service';
+import { wikiLinkResolutionContext } from './wiki-link-context';
 import { publicWikiRevisionEditSummary } from './wiki-revision-summary';
 import { hasWikiConflictMarkers, mergeWikiSource, WikiMergeLimitError } from './wiki-merge';
 import {
@@ -332,6 +333,7 @@ export class WikiEditService {
         title: page.displayTitle,
         namespaceCode,
         pageTitle: page.title,
+        pageLocalPath: page.localPath,
         createdAt: now
       });
       await tx.wikiPage.update({
@@ -585,6 +587,7 @@ export class WikiEditService {
         title: page.displayTitle,
         namespaceCode: namespace.code,
         pageTitle: page.title,
+        pageLocalPath: page.localPath,
         createdAt: now,
         editTags: autoMerged
           ? {
@@ -715,6 +718,7 @@ export class WikiEditService {
         title: page.displayTitle,
         namespaceCode: namespace.code,
         pageTitle: page.title,
+        pageLocalPath: page.localPath,
         createdAt: now
       });
       await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
@@ -844,6 +848,7 @@ export class WikiEditService {
         title: page.displayTitle,
         namespaceCode: namespace.code,
         pageTitle: page.title,
+        pageLocalPath: page.localPath,
         createdAt: now
       });
       await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
@@ -1120,6 +1125,7 @@ export class WikiEditService {
           title: redirect.displayTitle,
           namespaceCode: namespace.code,
           pageTitle: redirect.title,
+          pageLocalPath: redirect.localPath,
           createdAt: now
         });
         await tx.wikiPage.update({
@@ -1254,6 +1260,7 @@ export class WikiEditService {
         title: page.displayTitle,
         namespaceCode: namespace.code,
         pageTitle: page.title,
+        pageLocalPath: page.localPath,
         createdAt: now
       });
       await tx.wikiPage.update({
@@ -1638,10 +1645,16 @@ export class WikiEditService {
     };
   }
 
-  preview(contentRaw: string | undefined): WikiPreviewResponse {
-    const parsed = parseMarkup(contentRaw ?? '');
+  preview(
+    contentRaw: string | undefined,
+    context?: { readonly namespace?: string; readonly localPath?: string },
+  ): WikiPreviewResponse {
+    const linkResolution = context?.namespace && context.localPath !== undefined
+      ? wikiLinkResolutionContext(context.namespace, context.localPath)
+      : undefined;
+    const parsed = parseMarkup(contentRaw ?? '', linkResolution ? { linkResolution } : {});
     return {
-      html: renderDocument(parsed.ast),
+      html: renderDocument(parsed.ast, linkResolution ? { linkResolution } : {}),
       links: parsed.links,
       categories: parsed.categories,
       errors: parsed.errors,
@@ -1807,11 +1820,13 @@ export class WikiEditService {
       title: string;
       namespaceCode: string;
       pageTitle: string;
+      pageLocalPath: string;
       createdAt: Date;
       editTags?: Prisma.InputJsonValue | null;
     }
   ) {
-    const parsed = parseMarkup(input.contentRaw);
+    const linkResolution = wikiLinkResolutionContext(input.namespaceCode, input.pageLocalPath);
+    const parsed = parseMarkup(input.contentRaw, { linkResolution });
     if (parsed.blockingErrors.length > 0) {
       throw new BadRequestException(`Wiki markup contains blocking errors: ${parsed.blockingErrors.join(', ')}`);
     }
@@ -1847,7 +1862,7 @@ export class WikiEditService {
           pageId: input.pageId,
           revisionId: revision.id,
           rendererVersion: WIKI_RENDERER_VERSION,
-          html: renderDocument(parsed.ast),
+          html: renderDocument(parsed.ast, { linkResolution }),
           createdAt: input.createdAt
         }
       });

@@ -1837,12 +1837,15 @@ async function fetchWikiAdminJson<T>(path: string, init?: RequestInit): Promise<
   return response.json();
 }
 
-export async function previewWikiMarkup(contentRaw: string): Promise<{ html: string; errors: string[]; blockingErrors: string[] }> {
+export async function previewWikiMarkup(
+  contentRaw: string,
+  context?: { readonly namespace: string; readonly localPath: string },
+): Promise<{ html: string; errors: string[]; blockingErrors: string[] }> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/preview`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
-    body: JSON.stringify({ contentRaw }),
+    body: JSON.stringify({ contentRaw, ...context }),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

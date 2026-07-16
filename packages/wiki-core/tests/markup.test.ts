@@ -153,6 +153,173 @@ test('resolves unqualified links inside a server subwiki', () => {
   assert.match(html, /href="\/help\/%EB%AC%B8%EB%B2%95"/);
 });
 
+test('resolves NamuMark parent and child links against a main-wiki document', () => {
+  const linkResolution = {
+    currentDocumentPath: '가이드/설치/리눅스',
+    namespace: 'main' as const,
+  };
+  const parsed = parseMarkup(
+    '[[../윈도우]] · [[/문제 해결|해결하기]] · [[절대/문서]] · [[도움말:문법]]',
+    { linkResolution },
+  );
+  const html = renderDocument(parsed.ast, {
+    missingLinks: new Set([wikiLinkKey('가이드/설치/리눅스/문제 해결')]),
+  });
+
+  assert.deepEqual(parsed.links, [
+    '가이드/설치/윈도우',
+    '가이드/설치/리눅스/문제 해결',
+    '절대/문서',
+    '도움말:문법',
+  ]);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], parsed.links);
+  assert.match(html, /href="\/wiki\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EC%84%A4%EC%B9%98\/%EC%9C%88%EB%8F%84%EC%9A%B0">\.\.\/윈도우<\/a>/);
+  assert.match(html, /class="wiki-link missing" href="\/wiki\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EC%84%A4%EC%B9%98\/%EB%A6%AC%EB%88%85%EC%8A%A4\/%EB%AC%B8%EC%A0%9C_%ED%95%B4%EA%B2%B0" title="문서 없음">해결하기<\/a>/);
+  assert.match(html, /href="\/wiki\/%EC%A0%88%EB%8C%80\/%EB%AC%B8%EC%84%9C">절대\/문서<\/a>/);
+  assert.match(html, /href="\/help\/%EB%AC%B8%EB%B2%95">도움말:문법<\/a>/);
+});
+
+test('inherits non-main namespaces only for relative links', () => {
+  const parsed = parseMarkup('[[../윈도우]] · [[main:대문]] · [[도움말:문법]]', {
+    linkResolution: {
+      currentDocumentPath: '설치/리눅스',
+      namespace: 'guide',
+    },
+  });
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.links, ['guide:설치/윈도우', 'main:대문', '도움말:문법']);
+  assert.match(html, /href="\/guide\/%EC%84%A4%EC%B9%98\/%EC%9C%88%EB%8F%84%EC%9A%B0"/);
+  assert.match(html, /href="\/wiki\/%EB%8C%80%EB%AC%B8"/);
+  assert.match(html, /href="\/help\/%EB%AC%B8%EB%B2%95"/);
+});
+
+test('keeps relative links inside an isolated server-wiki route base', () => {
+  const linkResolution = {
+    currentDocumentPath: '가이드/설치',
+    namespace: 'main' as const,
+  };
+  const parsed = parseMarkup('[[../규칙]] · [[/문제 해결]] · [[공지]] · [[도움말:문법]]', {
+    linkResolution,
+  });
+  const options = {
+    internalLinkBasePath: '/server/luna-main',
+    linkResolution,
+    missingLinks: new Set([wikiLinkKey('가이드/규칙')]),
+  };
+  const html = renderDocument(parsed.ast, options);
+
+  assert.deepEqual(parsed.links, ['가이드/규칙', '가이드/설치/문제 해결', '공지', '도움말:문법']);
+  assert.match(html, /class="wiki-link missing" href="\/server\/luna-main\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EA%B7%9C%EC%B9%99"/);
+  assert.match(html, /href="\/server\/luna-main\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EC%84%A4%EC%B9%98\/%EB%AC%B8%EC%A0%9C_%ED%95%B4%EA%B2%B0"/);
+  assert.match(html, /href="\/server\/luna-main\/%EA%B3%B5%EC%A7%80"/);
+  assert.match(html, /href="\/help\/%EB%AC%B8%EB%B2%95"/);
+
+  const persisted = parseMarkup('[[../규칙|이전 AST]]');
+  assert.match(renderDocument(persisted.ast, options), /href="\/server\/luna-main\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EA%B7%9C%EC%B9%99"[^>]*>이전 AST<\/a>/);
+
+  const root = parseMarkup('[[/규칙]] · [[../탈출|차단]]', {
+    linkResolution: { currentDocumentPath: '', namespace: 'main' },
+  });
+  assert.deepEqual(root.links, ['규칙']);
+  assert.equal(root.blockingErrors.includes('상대 링크가 문서 루트를 벗어날 수 없습니다.'), true);
+});
+
+test('renders fragments without indexing same-page anchors as page links', () => {
+  const parsed = parseMarkup('[[#Anchor]] · [[#설치 안내|안내]] · [[다른 문서#세부 항목]]');
+  const html = renderDocument(parsed.ast, {
+    missingLinks: new Set([wikiLinkKey(''), wikiLinkKey('#Anchor'), wikiLinkKey('다른 문서')]),
+  });
+
+  assert.deepEqual(parsed.links, ['다른 문서']);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['다른 문서']);
+  assert.match(html, /class="wiki-link" href="#Anchor">#Anchor<\/a>/);
+  assert.match(html, /class="wiki-link" href="#%EC%84%A4%EC%B9%98-%EC%95%88%EB%82%B4">안내<\/a>/);
+  assert.match(html, /class="wiki-link missing" href="\/wiki\/%EB%8B%A4%EB%A5%B8_%EB%AC%B8%EC%84%9C#%EC%84%B8%EB%B6%80-%ED%95%AD%EB%AA%A9" title="문서 없음">다른 문서#세부 항목<\/a>/);
+  assert.equal((html.match(/class="wiki-link missing"/g) ?? []).length, 1);
+
+  const persisted = [{
+    type: 'paragraph' as const,
+    children: [{ type: 'internal_link' as const, target: '#Anchor', label: '이전 앵커' }],
+  }];
+  assert.deepEqual([...collectWikiLinkTargets(persisted)], []);
+  assert.match(renderDocument(persisted), /href="#Anchor">이전 앵커<\/a>/);
+});
+
+test('rejects relative root escapes while allowing the bounded root edge', () => {
+  const parsed = parseMarkup([
+    '[[../../../secret|escape]]',
+    '[[..\\..\\..\\secret|backslash escape]]',
+    '[[%2E%2E%2F%2E%2E%2F%2E%2E%2Fsecret|encoded escape]]',
+    '[[../../Sibling|root sibling]]',
+  ].join(' · '), {
+    linkResolution: {
+      currentDocumentPath: 'Root/Page',
+      namespace: 'main',
+    },
+  });
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.links, ['Sibling']);
+  assert.equal(parsed.blockingErrors.includes('상대 링크가 문서 루트를 벗어날 수 없습니다.'), true);
+  assert.equal(html.includes('/secret'), false);
+  assert.match(html, /escape · backslash escape · encoded escape/);
+  assert.match(html, /href="\/wiki\/Sibling">root sibling<\/a>/);
+});
+
+test('bounds link resolution contexts and rejects nested encoded traversal', () => {
+  const oversizedContext = parseMarkup('[[/Child|bounded]]', {
+    linkResolution: {
+      currentDocumentPath: 'A'.repeat(4097),
+      namespace: 'main',
+    },
+  });
+  const deepTarget = parseMarkup(`[[/${Array.from({ length: 65 }, () => 'Child').join('/')}|deep]]`, {
+    linkResolution: {
+      currentDocumentPath: 'Root',
+      namespace: 'main',
+    },
+  });
+  const nestedEncoding = parseMarkup('[[%252E%252E%252Fsecret|encoded twice]]', {
+    linkResolution: {
+      currentDocumentPath: 'Root/Page',
+      namespace: 'main',
+    },
+  });
+
+  assert.deepEqual(oversizedContext.links, []);
+  assert.deepEqual(deepTarget.links, []);
+  assert.deepEqual(nestedEncoding.links, []);
+  assert.equal(oversizedContext.blockingErrors.includes('상대 링크 해석 기준이 올바르지 않습니다.'), true);
+  assert.equal(deepTarget.blockingErrors.includes('상대 링크 경로가 너무 깊습니다.'), true);
+  assert.equal(nestedEncoding.blockingErrors.includes('중첩된 경로 인코딩은 내부 링크에 사용할 수 없습니다.'), true);
+  assert.equal(renderDocument(nestedEncoding.ast).includes('href='), false);
+});
+
+test('encodes percent and special characters without double-decoding or markup injection', () => {
+  const parsed = parseMarkup([
+    '[[../100%25_%26_%3Ctag%3E_%22quote%22|safe <label>]]',
+    '[[/100% ready]]',
+    '[[#A%26B%3Cscript%3E|safe anchor]]',
+  ].join(' · '), {
+    linkResolution: {
+      currentDocumentPath: '%EA%B0%80%EC%9D%B4%EB%93%9C/%EC%84%A4%EC%B9%98',
+      namespace: 'main',
+    },
+  });
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.links, [
+    '가이드/100% & <tag> "quote"',
+    '가이드/설치/100% ready',
+  ]);
+  assert.match(html, /href="\/wiki\/%EA%B0%80%EC%9D%B4%EB%93%9C\/100%25_%26_%3Ctag%3E_%22quote%22">safe &lt;label&gt;<\/a>/);
+  assert.match(html, /href="\/wiki\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EC%84%A4%EC%B9%98\/100%25_ready">\/100% ready<\/a>/);
+  assert.match(html, /href="#ABscript">safe anchor<\/a>/);
+  assert.equal(html.includes('<script>'), false);
+  assert.equal(normalizeTitle('100% ready'), '100% ready');
+});
+
 test('rejects oversized documents before parsing their contents', () => {
   const parsed = parseMarkup('가'.repeat(400_000));
 

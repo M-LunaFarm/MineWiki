@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { buildWikiSearchVector, parseLinkTarget, slugifyTitle } from '@minewiki/wiki-core';
+import { buildWikiSearchVector, parseLinkTarget, resolveWikiLinkTarget, slugifyTitle } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
+import { wikiLinkResolutionContext } from './wiki-link-context';
 
 type WikiLinkStore = Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPageLink' | 'wikiSearchDocument'>;
 
@@ -109,7 +110,11 @@ function containsIncludePlaceholder(value: string) {
 }
 
 function resolveTarget(namespaceCode: string, localPath: string, target: string) {
-  const parsed = parseLinkTarget(target);
+  const resolved = resolveWikiLinkTarget(target, wikiLinkResolutionContext(namespaceCode, localPath));
+  if ('error' in resolved || !resolved.target) {
+    return { targetNamespaceCode: '', targetSlug: '' };
+  }
+  const parsed = parseLinkTarget(resolved.target);
   if (namespaceCode === 'server' && parsed.namespace === 'main' && !target.includes(':')) {
     const [serverSlug] = slugifyTitle(localPath).split('/');
     return {
