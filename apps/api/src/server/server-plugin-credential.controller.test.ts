@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ForbiddenException } from '@nestjs/common';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { ServerController } from './server.controller';
+import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 
 const session: SessionPayload = {
@@ -11,6 +13,11 @@ const session: SessionPayload = {
   permissions: [],
   groups: [],
 };
+
+test('server wiki layout entitlements require an authenticated session', () => {
+  const guards = Reflect.getMetadata(GUARDS_METADATA, ServerController.prototype.wikiLayouts) ?? [];
+  assert.ok(guards.includes(SessionGuard));
+});
 
 interface PluginCredentialStub {
   create(serverId: string, input: { guildId: string }, actor: string): Promise<unknown>;
@@ -51,11 +58,13 @@ test('elevation without server authority cannot create a server wiki', async () 
   assert.equal(created, false);
 });
 
-test('elevation without server authority cannot read or update server wiki settings', async () => {
+test('elevation without server authority cannot read layout entitlements or update server wiki settings', async () => {
+  let layoutsRead = false;
   let settingsRead = false;
   let settingsUpdated = false;
   const controller = new ServerController(
     {
+      async getWikiLayoutSettings() { layoutsRead = true; return {}; },
       async getWikiContentSettings() { settingsRead = true; return {}; },
       async updateWikiContentSettings() { settingsUpdated = true; return {}; },
     } as never,
@@ -66,6 +75,7 @@ test('elevation without server authority cannot read or update server wiki setti
   );
   const elevated = { ...session, isElevated: true };
 
+  await assert.rejects(() => controller.wikiLayouts('server-1', elevated), ForbiddenException);
   await assert.rejects(() => controller.wikiSettings('server-1', elevated), ForbiddenException);
   await assert.rejects(
     () => controller.updateWikiSettings('server-1', {
@@ -78,6 +88,7 @@ test('elevation without server authority cannot read or update server wiki setti
     }, elevated),
     ForbiddenException,
   );
+  assert.equal(layoutsRead, false);
   assert.equal(settingsRead, false);
   assert.equal(settingsUpdated, false);
 });

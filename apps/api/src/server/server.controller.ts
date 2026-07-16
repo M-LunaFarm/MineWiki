@@ -163,8 +163,13 @@ export class ServerController {
     return this.serverService.getServerWikiLink(id);
   }
 
+  @UseGuards(SessionGuard)
   @Get(':id/wiki-layouts')
-  async wikiLayouts(@Param('id', new ParseUUIDPipe()) id: string) {
+  async wikiLayouts(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
     return this.serverService.getWikiLayoutSettings(id);
   }
 
