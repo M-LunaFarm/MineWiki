@@ -83,7 +83,8 @@ function service(options: {
     },
     async assertCanWriteThreadComment() { options.onWriteThreadComment?.(); },
     async canManagePage() { return options.canManage ?? false; },
-    async assertCanReadPage() {}
+    async assertCanReadPage() {},
+    async assertCanReadThread() {}
   } as unknown as WikiPermissionService;
   return new WikiDiscussionService(store as unknown as PrismaService, profiles, permissions);
 }
@@ -290,6 +291,29 @@ test('non-author without page management cannot delete another comment', async (
     discussions.deleteComment(session, thread.id.toString(), '40'),
     ForbiddenException
   );
+});
+
+test('comment author cannot erase content after a moderator hides it', async () => {
+  let updated = false;
+  const discussions = service({
+    comment: {
+      id: 40n,
+      threadId: thread.id,
+      content: 'moderation evidence',
+      status: 'hidden',
+      createdBy: 20n,
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: null
+    },
+    canManage: false,
+    onCommentUpdate: () => { updated = true; }
+  });
+
+  await assert.rejects(
+    discussions.deleteComment(session, thread.id.toString(), '40'),
+    ForbiddenException
+  );
+  assert.equal(updated, false);
 });
 
 test('thread author without page management cannot move or delete the whole discussion', async () => {

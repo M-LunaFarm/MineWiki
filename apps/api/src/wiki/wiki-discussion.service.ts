@@ -983,7 +983,8 @@ export class WikiDiscussionService {
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const actor = this.wikiPermissions.actorFromSession(session, profile);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
-    if (comment.createdBy !== profile.id && !(await this.wikiPermissions.canManagePage({ actor, page }))) {
+    const canManagePage = await this.wikiPermissions.canManagePage({ actor, page });
+    if ((comment.status === 'hidden' || comment.createdBy !== profile.id) && !canManagePage) {
       throw new ForbiddenException('Wiki discussion comment deletion is not allowed.');
     }
     await this.prisma.$transaction(async (tx) => {
@@ -996,6 +997,9 @@ export class WikiDiscussionService {
         throw new NotFoundException('Wiki discussion comment not found.');
       }
       if (currentThread.pageId !== thread.pageId) throw new ConflictException('Wiki discussion was moved concurrently.');
+      if (currentComment.status === 'hidden' && !canManagePage) {
+        throw new ForbiddenException('Wiki discussion comment deletion is not allowed.');
+      }
       const now = new Date();
       await tx.wikiDiscussionComment.update({ where: { id: comment.id }, data: { status: 'deleted', content: '', updatedAt: now } });
       if (currentThread.pinnedCommentId === comment.id) {
