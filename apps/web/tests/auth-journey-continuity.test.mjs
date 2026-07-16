@@ -26,6 +26,7 @@ test('OAuth callback keeps the same provider-card language as the login screen',
   assert.match(source, /provider=\$\{normalizedProvider\}/u);
   assert.doesNotMatch(source, /OAuthJourney/u);
   assert.doesNotMatch(source, /progressWidth/u);
+  assert.match(source, /eyebrow=\{flowMode === 'link' \? '계정 연결' : undefined\}/u);
   assert.match(source, /MineWiki 보안 연결/u);
 });
 

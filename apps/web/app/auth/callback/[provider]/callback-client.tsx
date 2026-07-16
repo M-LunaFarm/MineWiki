@@ -205,7 +205,7 @@ export function OAuthCallbackClient({ provider }: OAuthCallbackClientProps) {
   const providerState = status === 'pending' ? 'pending' : status === 'success' ? 'success' : 'error';
   return (
     <CallbackShell
-      eyebrow={flowMode === 'link' ? '계정 연결' : '간편 로그인'}
+      eyebrow={flowMode === 'link' ? '계정 연결' : undefined}
       title={title}
       subtitle={subtitle}
       shellTitle={flowMode === 'link' ? '로그인 수단 연결' : '로그인'}

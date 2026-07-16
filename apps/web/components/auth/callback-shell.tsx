@@ -3,7 +3,7 @@ import { CheckCircle2, ShieldCheck, XCircle } from 'lucide-react';
 import { AuthShellLayout } from './auth-shell-layout';
 
 interface CallbackShellProps {
-  readonly eyebrow: string;
+  readonly eyebrow?: string;
   readonly title: string;
   readonly subtitle: string;
   readonly shellTitle?: string;
@@ -68,10 +68,12 @@ export function CallbackShell({
       title={shellTitle ?? title}
       description={shellDescription ?? subtitle}
     >
-      <div className={`mb-4 inline-flex items-center gap-2 text-xs font-semibold ${tone.text}`}>
-        <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
-        {eyebrow}
-      </div>
+      {eyebrow ? (
+        <div className={`mb-4 inline-flex items-center gap-2 text-xs font-semibold ${tone.text}`}>
+          <span className={`h-2 w-2 rounded-full ${tone.dot}`} />
+          {eyebrow}
+        </div>
+      ) : null}
       <div>{children}</div>
       {aside ? <aside className="mt-4 grid grid-cols-3 gap-2">{aside}</aside> : null}
     </AuthShellLayout>

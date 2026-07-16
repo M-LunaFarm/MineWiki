@@ -32,7 +32,6 @@ export default function OAuthCallbackPage({ params }: PageProps) {
 function CallbackFallback() {
   return (
     <CallbackShell
-      eyebrow="계정 인증"
       title="계정 인증 응답을 확인하고 있습니다."
       subtitle="콜백 파라미터를 읽고 세션 처리를 준비하는 중입니다."
       shellTitle="로그인"
