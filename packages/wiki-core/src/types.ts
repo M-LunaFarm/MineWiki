@@ -118,7 +118,7 @@ export type InlineNode =
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null }
   | { type: 'unsupported_macro'; name: string }
   | { type: 'code'; code: string }
-  | { type: 'ref'; text: string };
+  | { type: 'ref'; name: string | null; text: string | null };
 
 export interface ParsedDocument {
   ast: AstNode[];

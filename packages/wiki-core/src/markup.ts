@@ -19,7 +19,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.14.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.15.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -31,6 +31,7 @@ const MAX_INCLUDE_PARAM_BYTES = 32 * 1024;
 const MAX_MATH_SOURCE_BYTES = 4096;
 const MAX_MATH_NODES = 50;
 const MAX_INLINE_NESTING = 16;
+const MAX_FOOTNOTE_NAME_LENGTH = 64;
 const INCLUDE_PARAM_KEY = /^[A-Za-z0-9가-힣_]+$/u;
 
 const componentNameMap: Record<string, string> = {
@@ -1107,6 +1108,11 @@ export function applyIncludeParametersToAst(
     if (node.type === 'line_break' || node.type === 'clearfix') return { ...node };
     if (node.type === 'anchor') return { ...node, id: normalizeMacroAnchor(replace(node.id)) };
     if (node.type === 'ruby') return { ...node, text: replace(node.text), ruby: replace(node.ruby) };
+    if (node.type === 'ref') return {
+      ...node,
+      name: node.name === null ? null : normalizeFootnoteName(replace(node.name)),
+      text: node.text === null ? null : replace(node.text)
+    };
     if (
       node.type === 'bold'
       || node.type === 'italic'
@@ -1186,7 +1192,7 @@ function parseInline(
   nestingDepth = 0
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
-  const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXml><ref>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?\s*(?<refShortText>[^\]]+?)\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
+  const pattern = /(?<file>\[\[파일:(?<fileName>[^|\]]+)(?:\|(?<fileOption>[^|\]]+))?(?:\|(?<fileCaption>[^|\]]+))?\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>[^\]]+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)/gu;
   const nested = (value: string): InlineNode[] => nestingDepth >= MAX_INLINE_NESTING
     ? [{ type: 'text', text: value }]
     : parseInline(value, links, errors, blockingErrors, footnotes, linkResolution, nestingDepth + 1);
@@ -1200,11 +1206,14 @@ function parseInline(
       const thumbnail = group.fileOption?.trim() === '섬네일';
       const caption = group.fileCaption?.trim() || (!thumbnail ? group.fileOption?.trim() : '') || null;
       nodes.push({ type: 'file', fileName, thumbnail, caption });
-    } else if (group.refXml !== undefined || group.refShort !== undefined) {
-      const note = group.refXmlText ?? group.refShortText ?? '';
-      if (!note.trim()) errors.push('빈 각주가 있습니다.');
-      footnotes.push(note);
-      nodes.push({ type: 'ref', text: note });
+    } else if (group.refXmlReuse !== undefined || group.refXml !== undefined || group.refShort !== undefined) {
+      const rawName = group.refXmlReuseName ?? group.refXmlName ?? group.refName;
+      const name = rawName === undefined ? null : normalizeFootnoteName(rawName);
+      const text = group.refXmlReuse !== undefined ? null : (group.refXmlText ?? group.refShortText ?? null);
+      if (rawName !== undefined && name === null) errors.push('각주 이름은 64자 이하의 문자, 숫자, 점, 밑줄, 콜론, 하이픈만 사용할 수 있습니다.');
+      if (name === null && !text?.trim()) errors.push('빈 각주가 있습니다.');
+      if (text !== null) footnotes.push(text);
+      nodes.push({ type: 'ref', name, text });
     } else if (group.legacyMath !== undefined) {
       const source = (group.legacyMathText ?? '').trim();
       const error = validateMathSource(source);
@@ -1259,6 +1268,12 @@ function parseInline(
   }
   if (last < input.length) nodes.push({ type: 'text', text: input.slice(last) });
   return nodes;
+}
+
+function normalizeFootnoteName(value: string): string | null {
+  const normalized = value.normalize('NFKC').trim();
+  if (!normalized || normalized.length > MAX_FOOTNOTE_NAME_LENGTH) return null;
+  return /^[\p{Letter}\p{Number}_.:-]+$/u.test(normalized) ? normalized : null;
 }
 
 function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors: string[]): InlineNode {
@@ -1401,9 +1416,26 @@ export interface RenderOptions {
   disableMathRendering?: boolean;
 }
 
+interface RenderedFootnote {
+  name: string | null;
+  text: string;
+  referenceIds: string[];
+}
+
+interface FootnoteRenderState {
+  entries: RenderedFootnote[];
+  namedIndexes: Map<string, number>;
+  definitions: Map<string, string>;
+}
+
 export function renderDocument(ast: AstNode[], options: RenderOptions = {}): string {
-  const footnotes: string[] = [];
+  const footnotes: FootnoteRenderState = {
+    entries: [],
+    namedIndexes: new Map(),
+    definitions: collectNamedFootnoteDefinitions(ast)
+  };
   let emittedFootnotes = 0;
+  const footnoteMarkers: Array<{ token: string; startIndex: number; endIndex: number }> = [];
   const tocHeadings = options.tocHeadings ?? collectTocHeadings(ast);
   const renderOptions: RenderOptions = {
     ...options,
@@ -1492,20 +1524,25 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         continue;
       }
       if (node.name === 'references') {
-        output.push(renderFootnoteSection(footnotes, emittedFootnotes));
-        emittedFootnotes = footnotes.length;
+        const token = `__MINEWIKI_FOOTNOTES_${footnoteMarkers.length}__`;
+        footnoteMarkers.push({ token, startIndex: emittedFootnotes, endIndex: footnotes.entries.length });
+        output.push(token);
+        emittedFootnotes = footnotes.entries.length;
         continue;
       }
       output.push(renderComponent(node.name, node.props, renderOptions));
     }
     return output.join('\n');
   };
-  const html = renderNodes(ast);
+  let html = renderNodes(ast);
+  for (const marker of footnoteMarkers) {
+    html = html.replace(marker.token, renderFootnoteSection(footnotes, marker.startIndex, marker.endIndex));
+  }
   const footnoteHtml = renderFootnoteSection(footnotes, emittedFootnotes);
   return sanitizeHtml(`${html}${footnoteHtml}`, {
     allowedTags,
     allowedAttributes: {
-      a: ['href', 'class', 'rel', 'target', 'title'],
+      a: ['href', 'class', 'rel', 'target', 'title', 'aria-label'],
       h1: ['id'],
       h2: ['id'],
       h3: ['id'],
@@ -1523,7 +1560,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       nav: ['class', 'aria-label'],
       blockquote: ['class'],
       caption: ['class'],
-      span: ['class', 'style', 'title', 'id', 'aria-hidden'],
+      span: ['class', 'style', 'title', 'id', 'aria-hidden', 'aria-label'],
       time: ['class', 'datetime', 'data-wiki-time', 'data-wiki-date'],
       output: ['class', 'data-wiki-stat', 'data-wiki-namespace', 'aria-label'],
       ruby: ['class'],
@@ -1531,7 +1568,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       rp: ['class'],
       s: ['class'],
       u: ['class'],
-      sup: ['class'],
+      sup: ['class', 'id'],
       sub: ['class'],
       table: ['class', 'data-table-key', 'style'],
       tr: ['style'],
@@ -1611,14 +1648,51 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
   });
 }
 
-function renderFootnoteSection(footnotes: readonly string[], startIndex: number): string {
-  if (startIndex >= footnotes.length) return '';
+function renderFootnoteSection(footnotes: FootnoteRenderState, startIndex: number, endIndex = footnotes.entries.length): string {
+  if (startIndex >= endIndex) return '';
   const listStart = startIndex > 0 ? ` start="${startIndex + 1}"` : '';
-  const items = footnotes
-    .slice(startIndex)
-    .map((note, index) => `<li id="fn-${startIndex + index + 1}">${escapeHtml(note)}</li>`)
+  const items = footnotes.entries
+    .slice(startIndex, endIndex)
+    .map((note, index) => {
+      const number = startIndex + index + 1;
+      const backlinks = note.referenceIds.length === 0 ? '' : `<span class="wiki-footnote-backlinks" aria-label="각주 ${number} 참조로 돌아가기">${note.referenceIds
+        .map((referenceId, referenceIndex) => `<a href="#${referenceId}" aria-label="각주 ${number}의 ${referenceIndex + 1}번째 참조로 돌아가기">↩${note.referenceIds.length > 1 ? referenceIndex + 1 : ''}</a>`)
+        .join(' ')}</span>`;
+      const text = note.text || `정의되지 않은 각주: ${note.name ?? number}`;
+      return `<li id="fn-${number}">${escapeHtml(text)}${backlinks ? ` ${backlinks}` : ''}</li>`;
+    })
     .join('');
   return `<section class="footnotes"><h2>각주</h2><ol${listStart}>${items}</ol></section>`;
+}
+
+function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, string> {
+  const definitions = new Map<string, string>();
+  const collectInline = (nodes: readonly InlineNode[]) => {
+    for (const node of nodes) {
+      if (node.type === 'ref' && node.name !== null && node.text?.trim() && !definitions.has(node.name)) {
+        definitions.set(node.name, node.text);
+      } else if ('children' in node) {
+        collectInline(node.children);
+      }
+    }
+  };
+  const collectList = (list: WikiListNode) => {
+    for (const item of list.items) {
+      collectInline(item.children);
+      item.nested.forEach(collectList);
+    }
+  };
+  for (const node of ast) {
+    if (node.type === 'paragraph' || node.type === 'blockquote') collectInline(node.children);
+    else if (node.type === 'list') collectList(node);
+    else if (node.type === 'wiki_table') {
+      collectInline(node.caption);
+      for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
+    } else if (node.type === 'folding') {
+      collectInline(node.title);
+    }
+  }
+  return definitions;
 }
 
 function collectTocHeadings(ast: readonly AstNode[]): Array<{ level: number; text: string; id: string }> {
@@ -1651,7 +1725,7 @@ function renderTableOfContents(
   return `<nav class="wiki-toc" aria-label="문서 목차"><details${collapsed ? '' : ' open'}><summary>목차</summary><ol>${items}</ol></details></nav>`;
 }
 
-export function renderInline(nodes: InlineNode[], footnotes: string[], options: RenderOptions = {}) {
+export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState, options: RenderOptions = {}) {
   const disableMathRendering = options.disableMathRendering
     ?? nodes.filter((node) => node.type === 'math').length > MAX_MATH_NODES;
   return nodes
@@ -1710,8 +1784,30 @@ export function renderInline(nodes: InlineNode[], footnotes: string[], options: 
       if (node.type === 'unsupported_macro') {
         return `<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: [${escapeHtml(node.name)}]</span>`;
       }
-      const index = footnotes.push(node.text);
-      return `<sup><a href="#fn-${index}">[${index}]</a></sup>`;
+      let index: number;
+      if (node.name !== null) {
+        const existing = footnotes.namedIndexes.get(node.name);
+        if (existing !== undefined) {
+          index = existing;
+          const entry = footnotes.entries[index - 1];
+          if (entry && !entry.text && node.text?.trim()) entry.text = node.text;
+        } else {
+          index = footnotes.entries.length + 1;
+          footnotes.namedIndexes.set(node.name, index);
+          footnotes.entries.push({
+            name: node.name,
+            text: node.text?.trim() ? node.text : (footnotes.definitions.get(node.name) ?? ''),
+            referenceIds: []
+          });
+        }
+      } else {
+        index = footnotes.entries.length + 1;
+        footnotes.entries.push({ name: null, text: node.text ?? '', referenceIds: [] });
+      }
+      const entry = footnotes.entries[index - 1]!;
+      const referenceId = `fnref-${index}-${entry.referenceIds.length + 1}`;
+      entry.referenceIds.push(referenceId);
+      return `<sup class="wiki-footnote-ref" id="${referenceId}"><a href="#fn-${index}" aria-label="각주 ${index}">[${index}]</a></sup>`;
     })
     .join('');
 }
@@ -2079,7 +2175,7 @@ function renderVersionHistory(props: Record<string, string>) {
     .join('')}</tbody></table>`);
 }
 
-function renderWikiList(node: WikiListNode, footnotes: string[], options: RenderOptions): string {
+function renderWikiList(node: WikiListNode, footnotes: FootnoteRenderState, options: RenderOptions): string {
   const ordered = node.kind !== 'unordered';
   const tag = ordered ? 'ol' : 'ul';
   const className = {
@@ -2110,7 +2206,7 @@ function renderWikiTable(
   caption: InlineNode[],
   rows: WikiTableRow[],
   tableOptions: WikiTableOptions,
-  footnotes: string[],
+  footnotes: FootnoteRenderState,
   options: RenderOptions
 ) {
   const tableStyles = styleAttribute({

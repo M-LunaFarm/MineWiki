@@ -933,8 +933,8 @@ test('renders footnote and Korean footnote markers at their document positions w
   assert.equal((html.match(/<section class="footnotes">/g) ?? []).length, 2);
   assert.equal((html.match(/id="fn-1"/g) ?? []).length, 1);
   assert.equal((html.match(/id="fn-2"/g) ?? []).length, 1);
-  assert.match(html, /id="fn-1">첫 각주<\/li><\/ol><\/section>\n<p>둘째 문장/);
-  assert.match(html, /<ol start="2"><li id="fn-2">둘째 각주<\/li>/);
+  assert.match(html, /id="fn-1">첫 각주 <span class="wiki-footnote-backlinks"[^>]*><a href="#fnref-1-1"[^>]*>↩<\/a><\/span><\/li><\/ol><\/section>\n<p>둘째 문장/);
+  assert.match(html, /<ol start="2"><li id="fn-2">둘째 각주 <span class="wiki-footnote-backlinks"/);
   assert.ok(html.indexOf('id="fn-1"') < html.indexOf('둘째 문장'));
   assert.ok(html.indexOf('둘째 문장') < html.indexOf('id="fn-2"'));
 });
@@ -946,6 +946,46 @@ test('keeps an early footnote marker empty and appends later notes once', () => 
   assert.equal((html.match(/<section class="footnotes">/g) ?? []).length, 1);
   assert.equal((html.match(/id="fn-1"/g) ?? []).length, 1);
   assert.ok(html.indexOf('나중 각주') < html.indexOf('id="fn-1"'));
+});
+
+test('reuses named footnotes with one note and a backlink for every reference', () => {
+  const parsed = parseMarkup('첫 참조[*source 공식 문서]와 재참조[*source]\n[각주]');
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.footnotes, ['공식 문서']);
+  assert.equal((html.match(/id="fn-1"/g) ?? []).length, 1);
+  assert.equal((html.match(/href="#fn-1"/g) ?? []).length, 2);
+  assert.match(html, /id="fnref-1-1"/);
+  assert.match(html, /id="fnref-1-2"/);
+  assert.match(html, /href="#fnref-1-1"[^>]*>↩1<\/a> <a href="#fnref-1-2"[^>]*>↩2<\/a>/);
+});
+
+test('updates backlinks when a named footnote is reused after an in-document marker', () => {
+  const parsed = parseMarkup('첫 참조[*source 공식 문서]\n[각주]\n표시 뒤 재참조[*source]');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal((html.match(/<section class="footnotes">/g) ?? []).length, 1);
+  assert.match(html, /id="fn-1">공식 문서[^<]*<span class="wiki-footnote-backlinks"[^>]*><a href="#fnref-1-1"[^>]*>↩1<\/a> <a href="#fnref-1-2"[^>]*>↩2<\/a>/);
+  assert.ok(html.indexOf('id="fn-1"') < html.indexOf('표시 뒤 재참조'));
+});
+
+test('resolves forward named references and XML-style reusable notes safely', () => {
+  const parsed = parseMarkup('먼저[*later] XML<ref name="xml" />\n정의[*later 나중 정의] <ref name="xml">XML 정의</ref>');
+  const html = renderDocument(parsed.ast);
+
+  assert.match(html, /id="fn-1">나중 정의/);
+  assert.match(html, /id="fn-2">XML 정의/);
+  assert.equal((html.match(/href="#fn-1"/g) ?? []).length, 2);
+  assert.equal((html.match(/href="#fn-2"/g) ?? []).length, 2);
+  assert.equal(html.includes('<ref'), false);
+});
+
+test('renders an explicit safe label for an undefined named footnote', () => {
+  const parsed = parseMarkup('미정의 참조[*missing]');
+  const html = renderDocument(parsed.ast);
+
+  assert.match(html, /id="fn-1">정의되지 않은 각주: missing/);
+  assert.equal(html.includes('undefined'), false);
 });
 
 test('renders safe static NamuMark macros without falling back to warnings', () => {

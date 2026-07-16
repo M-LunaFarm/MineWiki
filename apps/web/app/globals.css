@@ -386,6 +386,15 @@ html[data-theme='light'] .wiki-rendered .wiki-heading-summary:hover {
   background: rgba(37, 49, 41, 0.035);
 }
 
+html[data-theme='light'] .wiki-rendered .footnotes {
+  border-color: rgba(37, 49, 41, 0.16);
+  color: #4b574f;
+}
+
+html[data-theme='light'] .wiki-rendered .wiki-footnote-backlinks {
+  color: #637168;
+}
+
 html[data-theme='light'] .support-surface {
   background: #f4f5f2;
   color: #202820;
@@ -784,6 +793,28 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   }
   .wiki-rendered .wiki-anchor {
     scroll-margin-top: 6rem;
+  }
+  .wiki-rendered .wiki-footnote-ref {
+    @apply ml-0.5 text-xs font-semibold;
+    scroll-margin-top: 6rem;
+  }
+  .wiki-rendered .footnotes {
+    @apply mt-10 border-t border-white/10 pt-5 text-sm text-slate-300;
+  }
+  .wiki-rendered .footnotes h2 {
+    @apply mt-0 border-0 pb-0 text-base font-semibold;
+  }
+  .wiki-rendered .footnotes ol {
+    @apply mt-3 space-y-1.5;
+  }
+  .wiki-rendered .footnotes li {
+    scroll-margin-top: 6rem;
+  }
+  .wiki-rendered .wiki-footnote-backlinks {
+    @apply ml-1 inline-flex gap-1 text-xs text-slate-400;
+  }
+  .wiki-rendered .wiki-footnote-backlinks a {
+    @apply no-underline;
   }
 
   .server-wiki-rendered {
