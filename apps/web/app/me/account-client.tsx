@@ -21,6 +21,7 @@ import type { MinecraftIdentity, OAuthProvider } from '@minewiki/schemas';
 import { SessionList } from '../../components/account/session-list';
 import { MfaSecurityPanel } from '../../components/account/mfa-security-panel';
 import { WikiProfileMergePanel } from '../../components/account/wiki-profile-merge-panel';
+import { AuthShellLayout } from '../../components/auth/auth-shell-layout';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
 import { useAuth } from '../../components/providers/auth-context';
 import { SiteHeader } from '../../components/layout/site-header';
@@ -148,6 +149,8 @@ export function AccountClientPage() {
   const [minecraftAvatarIndex, setMinecraftAvatarIndex] = useState(0);
   const [linkConflicts, setLinkConflicts] = useState<AccountLinkConflict[]>([]);
   const [loadingConflicts, setLoadingConflicts] = useState(false);
+  const [conflictsResolved, setConflictsResolved] = useState(false);
+  const [conflictInterstitialDismissed, setConflictInterstitialDismissed] = useState(false);
   const [mergeRequestMessage, setMergeRequestMessage] = useState('');
   const [mergeRequestTicketId, setMergeRequestTicketId] = useState<string | null>(null);
   const [mergeRequestFeedback, setMergeRequestFeedback] = useState<FeedbackState | null>(null);
@@ -170,6 +173,8 @@ export function AccountClientPage() {
   useEffect(() => {
     let cancelled = false;
     setLinkConflicts([]);
+    setConflictsResolved(false);
+    setConflictInterstitialDismissed(false);
     setMergeRequestTicketId(null);
 
     const loadConflicts = async () => {
@@ -193,6 +198,7 @@ export function AccountClientPage() {
       } finally {
         if (!cancelled) {
           setLoadingConflicts(false);
+          setConflictsResolved(true);
         }
       }
     };
@@ -677,6 +683,51 @@ export function AccountClientPage() {
     );
   }
 
+  if (!conflictsResolved) {
+    return (
+      <AuthShellLayout
+        title="계정 연결 확인"
+        description="로그인 수단과 기존 MineWiki 기록이 안전하게 연결되어 있는지 확인합니다."
+      >
+        <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-[#0d1416] px-4 py-4 text-sm text-slate-300" role="status" aria-live="polite">
+          <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-[#35e5b7] motion-reduce:animate-none" aria-hidden />
+          계정 연결 상태를 확인하고 있습니다.
+        </div>
+      </AuthShellLayout>
+    );
+  }
+
+  if (linkConflicts.length > 0 && !conflictInterstitialDismissed) {
+    return (
+      <AuthShellLayout
+        title="계정 연결을 확인해 주세요"
+        description="동일한 사용자로 보이는 기존 기록을 찾았습니다. 자동 병합하지 않고 사용자가 직접 확인하도록 보호합니다."
+      >
+        <AccountConflictPanel
+          conflicts={linkConflicts}
+          loading={loadingConflicts}
+          message={mergeRequestMessage}
+          feedback={mergeRequestFeedback}
+          ticketId={mergeRequestTicketId}
+          submitting={creatingMergeRequest}
+          presentation="auth"
+          onMessageChange={setMergeRequestMessage}
+          onCreateRequest={() => void handleCreateMergeRequest()}
+        />
+        <button
+          type="button"
+          className="mt-3 w-full rounded-lg border border-white/10 bg-white/[0.035] px-4 py-3 text-xs font-semibold text-slate-300 transition hover:border-[#35e5b7]/35 hover:text-[#35e5b7]"
+          onClick={() => setConflictInterstitialDismissed(true)}
+        >
+          나중에 처리하고 계정 설정으로 계속
+        </button>
+        <p className="mt-3 text-center text-[11px] leading-5 text-slate-500">
+          건너뛰어도 계정은 자동 병합되지 않으며, 계정 설정에서 다시 확인할 수 있습니다.
+        </p>
+      </AuthShellLayout>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#121212] text-white">
       <SiteHeader />
@@ -722,7 +773,6 @@ export function AccountClientPage() {
               <div className="mb-6 flex items-center gap-4">
                 <div className="relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border border-[#3b4248] bg-[#23272b] text-2xl font-bold text-white">
                   {avatarImageSrc ? (
-                    // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={avatarImageSrc}
                       alt={`${displayIdentity} 프로필`}
@@ -1172,6 +1222,7 @@ function AccountConflictPanel({
   feedback,
   ticketId,
   submitting,
+  presentation = 'settings',
   onMessageChange,
   onCreateRequest,
 }: {
@@ -1181,6 +1232,7 @@ function AccountConflictPanel({
   readonly feedback: FeedbackState | null;
   readonly ticketId: string | null;
   readonly submitting: boolean;
+  readonly presentation?: 'settings' | 'auth';
   readonly onMessageChange: (message: string) => void;
   readonly onCreateRequest: () => void;
 }) {
@@ -1189,7 +1241,9 @@ function AccountConflictPanel({
   }
 
   return (
-    <section className="mb-6 rounded-lg border border-[#30363d] bg-[#181a1d] p-6 shadow-sm">
+    <section className={presentation === 'auth'
+      ? 'rounded-xl border border-amber-300/20 bg-amber-300/[0.045] p-4 sm:p-5'
+      : 'mb-6 rounded-lg border border-[#30363d] bg-[#181a1d] p-6 shadow-sm'}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-3xl">
           <h3 className="flex items-center gap-2 text-lg font-bold text-white">
