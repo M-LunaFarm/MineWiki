@@ -83,7 +83,7 @@ export type AstNode =
   | { type: 'heading'; level: number; text: string; id: string; folded?: boolean; startLine?: number; endLine?: number }
   | { type: 'paragraph'; children: InlineNode[] }
   | WikiListNode
-  | { type: 'blockquote'; children: InlineNode[] }
+  | { type: 'blockquote'; children: AstNode[] }
   | { type: 'hr' }
   | { type: 'wiki_table'; caption: InlineNode[]; rows: WikiTableRow[]; options: WikiTableOptions }
   | { type: 'folding'; title: InlineNode[]; children: AstNode[] }

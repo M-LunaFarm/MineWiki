@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.17.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.18.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -215,12 +215,19 @@ export function parseMarkup(raw: string, options: ParseMarkupOptions | number = 
   return parseMarkupDocument(raw, options, 0);
 }
 
-function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDepth: number): ParsedDocument {
+function parseMarkupDocument(
+  raw: string,
+  options: ParseMarkupOptions,
+  foldingDepth: number,
+  nestingKind: 'folding' | 'blockquote' = 'folding'
+): ParsedDocument {
   if (Buffer.byteLength(raw, 'utf8') > MAX_DOCUMENT_BYTES) {
     return rejectedDocument('문서 크기 제한을 초과했습니다.');
   }
   if (foldingDepth > MAX_FOLDING_DEPTH) {
-    return rejectedDocument('접기 블록 중첩 제한을 초과했습니다.');
+    return rejectedDocument(nestingKind === 'blockquote'
+      ? '인용문 중첩 제한을 초과했습니다.'
+      : '접기 블록 중첩 제한을 초과했습니다.');
   }
   const source = maskWikiCommentLines(raw.replace(/\r\n/g, '\n'));
   const lines = source.split('\n');
@@ -433,7 +440,9 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
         i += 1;
       }
       i -= 1;
-      ast.push({ type: 'blockquote', children: parseInline(quoteLines.join('\n'), links, errors, blockingErrors, footnotes, options.linkResolution) });
+      const nested = parseMarkupDocument(quoteLines.join('\n'), options, foldingDepth + 1, 'blockquote');
+      mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
+      ast.push({ type: 'blockquote', children: nested.ast });
       continue;
     }
 
@@ -477,7 +486,17 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
       continue;
     }
 
-    ast.push({ type: 'paragraph', children: parseInline(line, links, errors, blockingErrors, footnotes, options.linkResolution) });
+    const paragraphLines = [line];
+    while (i + 1 < lines.length && !startsMarkupBlock(lines, i + 1)) {
+      paragraphLines.push(lines[i + 1] ?? '');
+      i += 1;
+    }
+    const children: InlineNode[] = [];
+    paragraphLines.forEach((paragraphLine, index) => {
+      if (index > 0) children.push({ type: 'line_break' });
+      children.push(...parseInline(paragraphLine, links, errors, blockingErrors, footnotes, options.linkResolution));
+    });
+    ast.push({ type: 'paragraph', children });
   }
 
   const headings = ast.filter((node): node is Extract<AstNode, { type: 'heading' }> => node.type === 'heading');
@@ -537,6 +556,29 @@ function parseMarkupDocument(raw: string, options: ParseMarkupOptions, foldingDe
     errors,
     blockingErrors
   };
+}
+
+function startsMarkupBlock(lines: readonly string[], index: number): boolean {
+  const line = lines[index] ?? '';
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  if (/^#(?:넘겨주기|REDIRECT)\s+\[\[.+?\]\]/iu.test(trimmed)) return true;
+  if (/^\s*\{\{\{#!wiki(?:\s|$)/iu.test(line)) return true;
+  if (/^\{\{\{#!(?:latex|syntax|highlight|folding)(?:\s|$)/iu.test(line)) return true;
+  if (trimmed === '{{{') return true;
+  if (parseIncludeLine(line)) return true;
+  if (/^\[(?:목차|tableofcontents)(?:\(hide\))?\]$/iu.test(trimmed)) return true;
+  if (/^\[(?:각주|footnote)\]$/iu.test(trimmed)) return true;
+  if (/^<codeblock(?:\s+lang="[^"]+")?>$/u.test(line)) return true;
+  if (/^\{\{[^|}\n]+\s*$/u.test(line)) return true;
+  if (!line.startsWith('{{{') && /^\{\{.+?\}\}$/u.test(line)) return true;
+  if (/\[\[분류:[^\]]+\]\]/u.test(line)) return true;
+  if (parseWikiHeadingLine(line)) return true;
+  if (/^-{4,}$/u.test(trimmed)) return true;
+  if (line.startsWith('>')) return true;
+  if (parseWikiTableStart(line, lines[index + 1])) return true;
+  if (/^\[\[파일:[^\]]+\]\]$/u.test(line)) return true;
+  return Boolean(parseWikiListLine(line));
 }
 
 function maskWikiCommentLines(source: string): string {
@@ -1338,7 +1380,11 @@ export function applyIncludeParametersToAst(
       const text = replace(node.text);
       return { ...node, text, id: `${headingPrefix}${makeHeadingId(text)}` };
     }
-    if (node.type === 'paragraph' || node.type === 'blockquote') return { ...node, children: inline(node.children) };
+    if (node.type === 'paragraph') return { ...node, children: inline(node.children) };
+    if (node.type === 'blockquote') return {
+      ...node,
+      children: applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams)
+    };
     if (node.type === 'list') return list(node);
     if (node.type === 'wiki_table') return {
       ...node,
@@ -1669,7 +1715,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         continue;
       }
       if (node.type === 'blockquote') {
-        output.push(`<blockquote class="wiki-quote">${renderInline(node.children, footnotes, renderOptions)}</blockquote>`);
+        output.push(`<blockquote class="wiki-quote">${renderNodes(node.children)}</blockquote>`);
         continue;
       }
       if (node.type === 'hr') {
@@ -1896,7 +1942,12 @@ function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, s
     }
   };
   for (const node of ast) {
-    if (node.type === 'paragraph' || node.type === 'blockquote') collectInline(node.children);
+    if (node.type === 'paragraph') collectInline(node.children);
+    else if (node.type === 'blockquote') {
+      for (const [name, text] of collectNamedFootnoteDefinitions(node.children)) {
+        if (!definitions.has(name)) definitions.set(name, text);
+      }
+    }
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
       collectInline(node.caption);
@@ -1914,7 +1965,9 @@ function collectTocHeadings(ast: readonly AstNode[]): Array<{ level: number; tex
     if (node.type === 'heading') headings.push(node);
     // Included headings belong to their own heading scope and must not leak into
     // the caller's table of contents.
-    if (node.type === 'folding' || node.type === 'wiki_style') headings.push(...collectTocHeadings(node.children));
+    if (node.type === 'folding' || node.type === 'wiki_style' || node.type === 'blockquote') {
+      headings.push(...collectTocHeadings(node.children));
+    }
   }
   return headings;
 }
@@ -2069,7 +2122,8 @@ function countMathNodes(ast: readonly AstNode[]): number {
   );
   return ast.reduce((count, node) => {
     if (node.type === 'math_block') return count + 1;
-    if (node.type === 'paragraph' || node.type === 'blockquote') return count + countInline(node.children);
+    if (node.type === 'paragraph') return count + countInline(node.children);
+    if (node.type === 'blockquote') return count + countMathNodes(node.children);
     if (node.type === 'list') return count + countList(node);
     if (node.type === 'wiki_table') {
       return count + countInline(node.caption) + node.rows.reduce(
@@ -2100,7 +2154,8 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
 
   for (const node of ast) {
     if (node.type === 'file') output.add(node.fileName);
-    else if (node.type === 'paragraph' || node.type === 'blockquote') collectInline(node.children);
+    else if (node.type === 'paragraph') collectInline(node.children);
+    else if (node.type === 'blockquote') collectWikiFileNames(node.children, output);
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
       collectInline(node.caption);
@@ -2129,7 +2184,8 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
   };
 
   for (const node of ast) {
-    if (node.type === 'paragraph' || node.type === 'blockquote') collectInline(node.children);
+    if (node.type === 'paragraph') collectInline(node.children);
+    else if (node.type === 'blockquote') collectWikiLinkTargets(node.children, output);
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
       collectInline(node.caption);

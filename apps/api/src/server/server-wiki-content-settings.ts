@@ -134,8 +134,12 @@ function findInvalidNode(nodes: readonly AstNode[], mode: 'document' | 'notice')
     ) {
       return node.type;
     }
-    if (node.type === 'paragraph' || node.type === 'blockquote') {
+    if (node.type === 'paragraph') {
       const invalid = findInvalidInline(node.children);
+      if (invalid) return invalid;
+    }
+    if (node.type === 'blockquote') {
+      const invalid = findInvalidNode(node.children, mode);
       if (invalid) return invalid;
     }
     if (node.type === 'list') {

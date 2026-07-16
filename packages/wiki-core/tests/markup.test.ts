@@ -70,6 +70,36 @@ test('renders nested inline markup and collects dependencies inside wrappers', (
   assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['아이콘.png']);
 });
 
+test('groups consecutive source lines into one paragraph with explicit line breaks', () => {
+  const parsed = parseMarkup('첫 줄\n둘째 줄\n\n셋째 문단');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.ast.filter((node) => node.type === 'paragraph').length, 2);
+  assert.match(html, /^<p>첫 줄<br \/>둘째 줄<\/p>\n<p>셋째 문단<\/p>/u);
+});
+
+test('parses blockquotes recursively and preserves nested block metadata', () => {
+  const parsed = parseMarkup([
+    '> 바깥 [[가이드]]',
+    '>> 안쪽 [[파일:inside.png]] [*note 인용 각주]',
+    '>>  * 목록',
+    '> 끝',
+  ].join('\n'));
+  const html = renderDocument(parsed.ast, {
+    files: {
+      'inside.png': { url: '/files/inside.png', originalName: 'inside.png' },
+    },
+  });
+
+  assert.equal(parsed.ast[0]?.type, 'blockquote');
+  assert.equal((html.match(/<blockquote class="wiki-quote">/g) ?? []).length, 2);
+  assert.match(html, /<blockquote class="wiki-quote"><p>바깥 <a[^>]+>가이드<\/a><\/p>\n<blockquote/u);
+  assert.match(html, /<ul class="wiki-list">[^]*<li>목록<\/li>[^]*<\/ul>/u);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['가이드']);
+  assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['inside.png']);
+  assert.match(html, /<section class="footnotes">/u);
+});
+
 test('keeps literal HTML escaped inside nested inline markup', () => {
   const parsed = parseMarkup("'''안전 ''<img src=x onerror=alert(1)>''''' ");
   const html = renderDocument(parsed.ast);
@@ -385,6 +415,12 @@ test('limits recursive folding blocks', () => {
   assert.equal(parsed.blockingErrors.includes('접기 블록 중첩 제한을 초과했습니다.'), true);
 });
 
+test('limits recursive blockquotes independently', () => {
+  const parsed = parseMarkup(`${'>'.repeat(32)} 너무 깊은 인용`);
+
+  assert.equal(parsed.blockingErrors.includes('인용문 중첩 제한을 초과했습니다.'), true);
+});
+
 test('duplicate heading anchors are blocking markup errors', () => {
   const parsed = parseMarkup('== Intro ==\n첫 번째\n\n===== Intro =====\n두 번째');
 
@@ -459,7 +495,7 @@ test('folded headings remain in the table of contents and reject malformed marke
   assert.deepEqual(parsed.headings.map((heading) => heading.title), ['최상위 접기']);
   assert.match(html, /wiki-toc-level-1[^]*?최상위 접기/);
   assert.equal(html.includes('<h2 id="한쪽만">'), false);
-  assert.match(html, /<p>==# 한쪽만 ==<\/p>/);
+  assert.match(html, /<p>본문<br \/>==# 한쪽만 ==<\/p>/);
 });
 
 test('does not promote malformed or unsupported heading delimiters', () => {

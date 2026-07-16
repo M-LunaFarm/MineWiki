@@ -52,6 +52,20 @@ test('server wiki presentation rejects active and document-level markup', () => 
     }),
     hasErrorCode('SERVER_WIKI_CONTENT_UNSUPPORTED_MARKUP'),
   );
+  assert.throws(
+    () => normalizeServerWikiContentSettings({
+      ...emptySettings,
+      contributionPolicySource: '> [[파일:secret.png]]',
+    }),
+    hasErrorCode('SERVER_WIKI_CONTENT_UNSUPPORTED_MARKUP'),
+  );
+  assert.throws(
+    () => normalizeServerWikiContentSettings({
+      ...emptySettings,
+      topNoticeSource: '>  * 공지에서는 목록 금지',
+    }),
+    hasErrorCode('SERVER_WIKI_CONTENT_UNSUPPORTED_MARKUP'),
+  );
 });
 
 function hasErrorCode(code: string) {

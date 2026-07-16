@@ -39,6 +39,7 @@ test('file dependencies are detected across block and inline containers', () => 
   assert.equal(astContainsFile(parseMarkup('문장 [[파일:inline.png|아이콘]]').ast), true);
   assert.equal(astContainsFile(parseMarkup(' * 목록 [[파일:list.png]]').ast), true);
   assert.equal(astContainsFile(parseMarkup('||셀 [[파일:table.png]]||').ast), true);
+  assert.equal(astContainsFile(parseMarkup('>> [[파일:quote.png]]').ast), true);
 });
 
 test('category documents cannot list themselves as a parent', () => {

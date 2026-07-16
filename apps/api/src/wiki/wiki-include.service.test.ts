@@ -285,3 +285,27 @@ test('expands includes inside wiki style blocks and injects non-overridable call
   assert.equal(html.includes('위조'), false);
   assert.equal(html.includes('저장한 뒤'), false);
 });
+
+test('expands includes inside recursive blockquotes', async () => {
+  const template: FixturePage = {
+    ...basePage,
+    id: 32n,
+    namespaceId: 2,
+    localPath: '인용',
+    slug: '인용',
+    title: '인용',
+    currentRevisionId: 320n,
+    contentRaw: '포함된 인용 본문',
+  };
+  const { service } = createFixture([template]);
+  const result = await service.expand({
+    ast: parseMarkup('>> [include(틀:인용)]').ast,
+    accountId: null,
+    sourcePageId: 1n,
+    sourceNamespace: 'main',
+    sourceLocalPath: '대문',
+  });
+
+  assert.match(renderDocument(result.ast), /<blockquote[^]*<blockquote[^]*포함된 인용 본문/u);
+  assert.equal(result.includedSourceBytes, Buffer.byteLength(template.contentRaw, 'utf8'));
+});
