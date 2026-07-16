@@ -21,8 +21,8 @@ export class WikiApiTokenController {
   }
 
   @Get('spaces')
-  listSpaces(): Promise<WikiApiSpaceView[]> {
-    return this.tokens.listSpaces();
+  listSpaces(@CurrentSession() session: SessionPayload): Promise<WikiApiSpaceView[]> {
+    return this.tokens.listSpaces(session);
   }
 
   @Post()

@@ -851,6 +851,29 @@ test('space ownership grants review authority for a new-page edit request target
   assert.equal(await unrelatedService.canManageCreateTarget({ actor: actor({ profileId: 200n }), ...input }), false);
 });
 
+test('space management preserves active owner, subwiki, server, mod, and admin authority', async () => {
+  const spaceId = 10n;
+
+  assert.equal(await createService({
+    space: { id: spaceId, status: 'active', ownerUserId: 100n, createdBy: 300n }
+  }).canManageSpace({ actor: actor(), spaceId }), true);
+  assert.equal(await createService({ roles: ['manager'] }).canManageSpace({ actor: actor(), spaceId }), true);
+  assert.equal(await createService({
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n },
+    server: { ownerAccountId: 'account-1' }
+  }).canManageSpace({ actor: actor({ profileId: 200n }), spaceId }), true);
+  assert.equal(await createService({
+    modWiki: { verifiedBy: 100n }
+  }).canManageSpace({ actor: actor(), spaceId }), true);
+  assert.equal(await createService().canManageSpace({
+    actor: actor({ profileId: 200n, permissions: ['wiki.admin'] }), spaceId
+  }), true);
+  assert.equal(await createService().canManageSpace({ actor: actor({ profileId: 200n }), spaceId }), false);
+  assert.equal(await createService({
+    space: { id: spaceId, status: 'deleted', ownerUserId: 100n, createdBy: 100n }
+  }).canManageSpace({ actor: actor({ permissions: ['wiki.admin'] }), spaceId }), false);
+});
+
 test('target-specific read ACL hides a new-page request before the page exists', async () => {
   const service = createService({
     acl: {

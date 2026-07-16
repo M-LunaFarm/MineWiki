@@ -13,6 +13,7 @@ import { PrismaService } from '../common/prisma.service';
 import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import { BusinessEventService } from '../events/business-event.service';
 import { SessionService, type SessionPayload } from '../session/session.service';
+import { WikiPermissionService, type WikiPermissionActor } from './wiki-permission.service';
 
 export const WIKI_API_SCOPES = ['wiki:read', 'wiki:create', 'wiki:edit'] as const;
 export type WikiApiScope = (typeof WIKI_API_SCOPES)[number];
@@ -65,6 +66,7 @@ export class WikiApiTokenService {
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
     private readonly events: BusinessEventService,
+    private readonly permissions: WikiPermissionService,
   ) {}
 
   async create(session: SessionPayload, rawBody: unknown): Promise<WikiApiTokenCreated> {
@@ -98,6 +100,11 @@ export class WikiApiTokenService {
             })
           : null;
         if (spaceId && !space) throw new NotFoundException('사용 가능한 Wiki 공간을 찾을 수 없습니다.');
+        if (spaceId) {
+          const actor = await this.permissionActor(session, tx);
+          const canManage = await this.permissions.canManageSpace({ actor, spaceId, store: tx });
+          if (!canManage) throw new NotFoundException('사용 가능한 Wiki 공간을 찾을 수 없습니다.');
+        }
         const created = await tx.wikiApiToken.create({
           data: {
             accountId: canonicalAccountId,
@@ -136,14 +143,19 @@ export class WikiApiTokenService {
     return rows.map((row) => this.toView(row));
   }
 
-  async listSpaces(): Promise<WikiApiSpaceView[]> {
+  async listSpaces(session: SessionPayload): Promise<WikiApiSpaceView[]> {
+    const actor = await this.permissionActor(session);
     const rows = await this.prisma.wikiSpace.findMany({
       where: { status: 'active' },
       select: { id: true, name: true, rootPath: true, spaceType: true },
       orderBy: [{ spaceType: 'asc' }, { name: 'asc' }],
       take: 200,
     });
-    return rows.map((row) => ({
+    const manageable = await Promise.all(rows.map(async (row) => ({
+      row,
+      allowed: await this.permissions.canManageSpace({ actor, spaceId: row.id }),
+    })));
+    return manageable.filter(({ allowed }) => allowed).map(({ row }) => ({
       id: row.id.toString(),
       name: row.name,
       path: row.rootPath,
@@ -258,6 +270,16 @@ export class WikiApiTokenService {
     if (token.spaceId && token.spaceId !== requestedSpaceId) {
       throw new ForbiddenException('공간 제한 토큰은 지정된 서버 Wiki에만 문서를 만들 수 있습니다.');
     }
+  }
+
+  private async permissionActor(
+    session: SessionPayload,
+    store: Parameters<WikiPermissionService['resolveActor']>[1] = this.prisma,
+  ): Promise<WikiPermissionActor | null> {
+    const actor = await this.permissions.resolveActor(session.userId, store);
+    return actor
+      ? this.permissions.actorFromSession(session, { id: actor.profileId, status: actor.status })
+      : null;
   }
 
   async idempotent<T extends object>(input: {

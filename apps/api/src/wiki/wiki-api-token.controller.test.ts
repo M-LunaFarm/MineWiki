@@ -36,12 +36,12 @@ test('Wiki API token management delegates list, create, and revoke to the token 
   const body = { name: 'CI', scopes: ['wiki:read'], expiresInDays: 30 };
 
   assert.deepEqual(await controller.list(session), []);
-  assert.deepEqual(await controller.listSpaces(), [{ id: '9', name: '서버 Wiki', path: '/server/test', type: 'server_wiki' }]);
+  assert.deepEqual(await controller.listSpaces(session), [{ id: '9', name: '서버 Wiki', path: '/server/test', type: 'server_wiki' }]);
   assert.deepEqual(await controller.create(body, session), { id: 'created-token' });
   assert.deepEqual(await controller.revoke('token-id', session), { revoked: true });
   assert.deepEqual(calls, [
     { method: 'list', args: ['account-id'] },
-    { method: 'listSpaces', args: [] },
+    { method: 'listSpaces', args: [session] },
     { method: 'create', args: [session, body] },
     { method: 'revoke', args: [session, 'token-id'] },
   ]);

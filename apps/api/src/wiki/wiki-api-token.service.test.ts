@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { SessionPayload } from '../session/session.service';
 import { WikiApiTokenService } from './wiki-api-token.service';
@@ -56,6 +56,7 @@ test('creation returns the raw token once while persisting only its hash', async
     prisma as never,
     {} as never,
     { async audit() {} } as never,
+    {} as never,
   );
 
   const created = await service.create(recentSession(), {
@@ -69,6 +70,90 @@ test('creation returns the raw token once while persisting only its hash', async
   assert.notEqual(persisted?.secretHash, created.token);
   assert.equal('token' in (persisted ?? {}), false);
   assert.deepEqual(persisted?.scopes, ['wiki:read', 'wiki:edit']);
+});
+
+test('space listing only returns active spaces manageable by the browser session', async () => {
+  let findManyInput: unknown;
+  const checkedSpaceIds: bigint[] = [];
+  let actorRequestIp: string | null | undefined;
+  const prisma = {
+    wikiSpace: {
+      async findMany(input: unknown) {
+        findManyInput = input;
+        return [
+          { id: 10n, name: '관리 공간', rootPath: '/managed', spaceType: 'server_wiki' },
+          { id: 11n, name: '다른 공간', rootPath: '/other', spaceType: 'mod_wiki' },
+        ];
+      },
+    },
+  };
+  const permissions = {
+    async resolveActor() { return { accountId: recentSession().userId, profileId: 100n, status: 'active' }; },
+    actorFromSession(session: SessionPayload, profile: { id: bigint; status: string }) {
+      actorRequestIp = session.requestIp;
+      return { accountId: session.userId, profileId: profile.id, status: profile.status };
+    },
+    async canManageSpace(input: { spaceId: bigint }) {
+      checkedSpaceIds.push(input.spaceId);
+      return input.spaceId === 10n;
+    },
+  };
+  const service = new WikiApiTokenService(
+    prisma as never,
+    {} as never,
+    {} as never,
+    permissions as never,
+  );
+
+  assert.deepEqual(await service.listSpaces(recentSession()), [
+    { id: '10', name: '관리 공간', path: '/managed', type: 'server_wiki' },
+  ]);
+  assert.deepEqual(findManyInput, {
+    where: { status: 'active' },
+    select: { id: true, name: true, rootPath: true, spaceType: true },
+    orderBy: [{ spaceType: 'asc' }, { name: 'asc' }],
+    take: 200,
+  });
+  assert.deepEqual(checkedSpaceIds, [10n, 11n]);
+  assert.equal(actorRequestIp, '192.0.2.10');
+});
+
+test('creation rejects a selected active space the browser session cannot manage', async () => {
+  let tokenCreateCalled = false;
+  const session = { ...recentSession(), permissions: [], groups: ['member'] };
+  const prisma = {
+    async $transaction(write: (tx: unknown) => Promise<unknown>) { return write(this); },
+    async $queryRaw() { return [{ id: session.userId }]; },
+    account: {
+      async findUnique() { return { id: session.userId, canonicalAccountId: session.userId, lifecycleStatus: 'active' }; },
+      async findMany() { return [{ id: session.userId, lifecycleStatus: 'active' }]; },
+      async count() { return 1; },
+    },
+    accountLink: { async findMany() { return []; } },
+    wikiSpace: { async findFirst() { return { id: 10n }; } },
+    wikiApiToken: {
+      async create() { tokenCreateCalled = true; throw new Error('must not create'); },
+    },
+  };
+  const permissions = {
+    async resolveActor() { return { accountId: session.userId, profileId: 100n, status: 'active' }; },
+    actorFromSession() { return { accountId: session.userId, profileId: 100n, status: 'active' }; },
+    async canManageSpace() { return false; },
+  };
+  const service = new WikiApiTokenService(
+    prisma as never,
+    {} as never,
+    { async audit() {} } as never,
+    permissions as never,
+  );
+
+  await assert.rejects(service.create(session, {
+    name: '권한 없는 공간',
+    scopes: ['wiki:read'],
+    spaceId: '10',
+    expiresInDays: 30,
+  }), NotFoundException);
+  assert.equal(tokenCreateCalled, false);
 });
 
 test('authentication never inherits browser elevation, roles, or recent-auth state', async () => {
@@ -101,6 +186,7 @@ test('authentication never inherits browser elevation, roles, or recent-auth sta
   const service = new WikiApiTokenService(
     prisma as never,
     { async getPolicyConsentStatus() { return policyConsent; } } as never,
+    {} as never,
     {} as never,
   );
 
@@ -138,6 +224,7 @@ test('linked alias tokens stay visible and revocable from the canonical account'
     prisma as never,
     {} as never,
     { async audit() {} } as never,
+    {} as never,
   );
 
   assert.deepEqual(await service.list(canonicalId), []);
@@ -173,7 +260,7 @@ test('a token bound to an inactive space fails closed', async () => {
       },
     },
   };
-  const service = new WikiApiTokenService(prisma as never, {} as never, {} as never);
+  const service = new WikiApiTokenService(prisma as never, {} as never, {} as never, {} as never);
 
   await assert.rejects(
     service.authenticate(rawToken),
@@ -209,7 +296,7 @@ test('idempotency deduplicates the same mutation even when a client changes its 
       },
     },
   };
-  const service = new WikiApiTokenService(prisma as never, {} as never, {} as never);
+  const service = new WikiApiTokenService(prisma as never, {} as never, {} as never, {} as never);
 
   const replay = await service.idempotent({
     tokenId: 'token-id',
@@ -257,7 +344,7 @@ test('expired processing idempotency records become indeterminate instead of rer
       async updateMany() { markedIndeterminate = true; return { count: 1 }; },
     },
   };
-  const service = new WikiApiTokenService(prisma as never, {} as never, {} as never);
+  const service = new WikiApiTokenService(prisma as never, {} as never, {} as never, {} as never);
 
   await assert.rejects(
     service.idempotent({

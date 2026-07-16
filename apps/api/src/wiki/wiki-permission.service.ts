@@ -735,6 +735,30 @@ export class WikiPermissionService {
     return this.canManagePageArea(input.store ?? this.prisma, input.actor, input.page);
   }
 
+  async canManageSpace(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly spaceId: bigint;
+    readonly store?: WikiPermissionStore;
+  }): Promise<boolean> {
+    const store = input.store ?? this.prisma;
+    const actor = input.actor;
+    if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status)) return false;
+    const space = await store.wikiSpace.findUnique({
+      where: { id: input.spaceId },
+      select: { id: true, status: true, ownerUserId: true, createdBy: true }
+    });
+    if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) return false;
+    if (space.ownerUserId === actor.profileId || space.createdBy === actor.profileId) return true;
+    return this.canManagePageArea(store, actor, {
+      id: 0n,
+      spaceId: space.id,
+      title: '',
+      protectionLevel: 'open',
+      status: 'normal',
+      createdBy: null
+    });
+  }
+
   async canManageCreateTarget(input: {
     readonly actor: WikiPermissionActor | null;
     readonly namespaceId: number;
