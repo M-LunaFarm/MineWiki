@@ -32,6 +32,9 @@ test('server wiki uses its own documentation shell and enriches the root documen
   assert.match(wikiHeader, /Documentation/u);
   assert.match(wikiHeader, /서버 문서 검색/u);
   assert.match(wikiHeader, /서버 정보/u);
+  assert.match(wikiHeader, /<details className="group relative lg:hidden">/u);
+  assert.match(wikiHeader, /bg-white\/95/u);
+  assert.match(wiki, /max-w-\[1440px\]/u);
   assert.match(appShell, /const isServerWikiPage/u);
   assert.match(appShell, /if \(isServerWikiPage\)/u);
   assert.doesNotMatch(appShell.slice(appShell.indexOf('if (isServerWikiPage)'), appShell.indexOf('if (isWikiPage)')), /SiteHeader/u);
