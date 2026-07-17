@@ -213,6 +213,30 @@ test('grant locks and writes entitlement plus immutable old/new audit in one ser
     () => fixture.service.grant(serverId, { ...input, layoutKey: 'brand' }, actorAccountId),
     ConflictException,
   );
+  await assert.rejects(
+    () => fixture.service.grant(serverId, { ...input, externalRef: 'paddle:sandbox:subscription:sub_fake' }, actorAccountId),
+    /reserved billing provider prefix/,
+  );
+});
+
+test('manual administration cannot extend or revoke provider-owned Paddle entitlements', async () => {
+  const paddle = entitlement(1n, {
+    source: 'paddle',
+    externalReference: 'paddle:sandbox:subscription:sub_test',
+    expiresAt: null,
+  });
+  const fixture = createFixture({ entitlements: [paddle] });
+  await assert.rejects(
+    () => fixture.service.extend(serverId, '1', {
+      expiresAt: '2028-07-01T00:00:00.000Z',
+      reason: 'manual override forbidden',
+    }, actorAccountId),
+    /managed only by verified billing events/,
+  );
+  await assert.rejects(
+    () => fixture.service.revoke(serverId, '1', { reason: 'manual override forbidden' }, actorAccountId),
+    /managed only by verified billing events/,
+  );
 });
 
 test('grant and extend enforce premium layouts, bounded dates, increasing expiry, and active state', async () => {

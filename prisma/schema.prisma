@@ -1874,6 +1874,7 @@ model PaddleSubscriptionShadow {
   billingSubject         PaddleBillingSubject? @relation(fields: [billingSubjectId], references: [id], onDelete: Restrict)
 
   @@unique([environment, providerSubscriptionId], map: "uq_paddle_subscription_environment_id")
+  @@unique([environment, providerTransactionId], map: "uq_paddle_subscription_environment_transaction")
   @@index([billingSubjectId, status], map: "idx_paddle_subscription_subject_status")
   @@index([projectionStatus, updatedAt], map: "idx_paddle_subscription_projection")
   @@index([status, updatedAt], map: "idx_paddle_subscription_status_updated")

@@ -186,6 +186,7 @@ export class ServerWikiLayoutEntitlementAdminService {
         const context = await this.lockLinkedServerWiki(tx, serverId);
         const rows = await this.lockEntitlements(tx, context.serverWikiId);
         const current = requireEntitlement(rows, entitlementId);
+        assertManuallyManagedEntitlement(current);
         if (current.status !== 'active') {
           throw new ConflictException('Only an active entitlement can be extended.');
         }
@@ -234,6 +235,7 @@ export class ServerWikiLayoutEntitlementAdminService {
         const context = await this.lockLinkedServerWiki(tx, serverId);
         const rows = await this.lockEntitlements(tx, context.serverWikiId);
         const current = requireEntitlement(rows, entitlementId);
+        assertManuallyManagedEntitlement(current);
         if (current.status !== 'active') {
           throw new ConflictException('Only an active entitlement can be revoked.');
         }
@@ -546,6 +548,9 @@ function parseExternalReference(value: string | undefined): string | null {
   ) {
     throw new BadRequestException('externalRef must contain 1 to 191 normalized printable ASCII characters without spaces.');
   }
+  if (externalRef.toLowerCase().startsWith('paddle:')) {
+    throw new BadRequestException('externalRef uses a reserved billing provider prefix.');
+  }
   return externalRef;
 }
 
@@ -576,6 +581,12 @@ function isCurrentlyActive(entitlement: ServerWikiLayoutEntitlement, now: Date):
   return entitlement.status === 'active'
     && entitlement.startsAt.getTime() <= now.getTime()
     && (entitlement.expiresAt === null || entitlement.expiresAt.getTime() > now.getTime());
+}
+
+function assertManuallyManagedEntitlement(entitlement: ServerWikiLayoutEntitlement): void {
+  if (entitlement.source === 'paddle' || entitlement.externalReference?.toLowerCase().startsWith('paddle:')) {
+    throw new ConflictException('Paddle entitlements are managed only by verified billing events.');
+  }
 }
 
 function toItem(entitlement: ServerWikiLayoutEntitlement): ServerWikiLayoutEntitlementItem {

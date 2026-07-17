@@ -28,7 +28,7 @@ test('Paddle event parser rejects malformed envelopes and preserves canonical id
 
 test('shadow inbox deduplicates event ids and refuses out-of-order subscription rollback', async () => {
   const state = createPrismaState();
-  const service = new PaddleWebhookService(state.prisma as never, config() as never);
+  const service = new PaddleWebhookService(state.prisma as never, config() as never, {} as never);
   const current = eventBody('evt_current', new Date().toISOString());
   const currentTimestamp = Math.floor(Date.now() / 1000);
 
@@ -50,6 +50,33 @@ test('shadow inbox deduplicates event ids and refuses out-of-order subscription 
     status: 'stale',
   });
   assert.equal(state.subscription?.status, 'active');
+});
+
+test('equal occurred_at events converge by event-id tie-break regardless of arrival order', async () => {
+  const occurredAt = new Date().toISOString();
+  const timestamp = Math.floor(Date.now() / 1000);
+  for (const order of [
+    [['evt_b', 'active'], ['evt_a', 'canceled']],
+    [['evt_a', 'canceled'], ['evt_b', 'active']],
+  ] as const) {
+    const state = createPrismaState();
+    const service = new PaddleWebhookService(state.prisma as never, config() as never, {} as never);
+    for (const [eventId, status] of order) {
+      const body = eventBody(eventId, occurredAt, status);
+      await service.ingest(body, signature(body, timestamp));
+    }
+    assert.equal(state.subscription?.status, 'active');
+    assert.equal(state.subscription?.lastEventId, 'evt_b');
+  }
+});
+
+test('serializable transaction conflicts are retried without duplicating the webhook event', async () => {
+  const state = createPrismaState({ serializationFailures: 2 });
+  const service = new PaddleWebhookService(state.prisma as never, config() as never, {} as never);
+  const body = eventBody('evt_retry', new Date().toISOString());
+  const result = await service.ingest(body, signature(body, Math.floor(Date.now() / 1000)));
+  assert.equal(result.status, 'processed');
+  assert.equal(state.transactionAttempts, 3);
 });
 
 function config() {
@@ -94,10 +121,12 @@ function signature(raw: Buffer, timestamp: number): string {
   return `ts=${timestamp};h1=${digest}`;
 }
 
-function createPrismaState() {
+function createPrismaState(options: { serializationFailures?: number } = {}) {
   const events = new Map<string, { id: bigint; status: string }>();
-  let subscription: { status: string; lastEventOccurredAt: Date } | null = null;
+  let subscription: { status: string; lastEventId: string; lastEventOccurredAt: Date } | null = null;
   let nextId = 1n;
+  let remainingSerializationFailures = options.serializationFailures ?? 0;
+  let transactionAttempts = 0;
   const transaction = {
     paddleWebhookEvent: {
       async create({ data }: { data: { providerEventId: string } }) {
@@ -115,15 +144,25 @@ function createPrismaState() {
       },
     },
     paddleSubscriptionShadow: {
-      async findUnique() { return subscription ? { lastEventOccurredAt: subscription.lastEventOccurredAt } : null; },
-      async upsert({ update }: { update: { status: string; lastEventOccurredAt: Date } }) {
-        subscription = { status: update.status, lastEventOccurredAt: update.lastEventOccurredAt };
+      async findUnique() { return subscription ? { ...subscription, billingSubjectId: null, providerTransactionId: null } : null; },
+      async upsert({ update }: { update: { status: string; lastEventId: string; lastEventOccurredAt: Date } }) {
+        subscription = { status: update.status, lastEventId: update.lastEventId, lastEventOccurredAt: update.lastEventOccurredAt };
         return subscription;
       },
     },
   };
   const prisma = {
-    async $transaction(callback: (value: typeof transaction) => unknown) { return callback(transaction); },
+    async $transaction(callback: (value: typeof transaction) => unknown) {
+      transactionAttempts += 1;
+      if (remainingSerializationFailures > 0) {
+        remainingSerializationFailures -= 1;
+        throw new Prisma.PrismaClientKnownRequestError('serialization conflict', {
+          code: 'P2034',
+          clientVersion: 'test',
+        });
+      }
+      return callback(transaction);
+    },
     paddleWebhookEvent: {
       async findUnique({ where }: { where: { environment_providerEventId: { providerEventId: string } } }) {
         const row = events.get(where.environment_providerEventId.providerEventId);
@@ -131,5 +170,9 @@ function createPrismaState() {
       },
     },
   };
-  return { prisma, get subscription() { return subscription; } };
+  return {
+    prisma,
+    get subscription() { return subscription; },
+    get transactionAttempts() { return transactionAttempts; },
+  };
 }
