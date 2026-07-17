@@ -74,6 +74,43 @@ if (!hasDatabase) {
       providerUserId: `naver-${randomUUID()}`,
     });
     const request = await service.createLinkRequest(first.id, second.id);
+    const suffix = randomUUID();
+    const ownedServer = await prisma.server.create({
+      data: {
+        ownerAccountId: second.id,
+        name: `Linked owner ${suffix}`,
+        joinHost: `owner-${suffix}.example.com`,
+        joinPort: 25565,
+        edition: 'java',
+        supportedVersions: ['1.21'],
+        tags: ['test'],
+        shortDescription: 'linked owner',
+        longDescription: 'linked owner server',
+      },
+    });
+    const pendingServer = await prisma.server.create({
+      data: {
+        registrantAccountId: second.id,
+        name: `Linked registrant ${suffix}`,
+        joinHost: `registrant-${suffix}.example.com`,
+        joinPort: 25565,
+        edition: 'java',
+        supportedVersions: ['1.21'],
+        tags: ['test'],
+        shortDescription: 'linked registrant',
+        longDescription: 'linked registrant server',
+      },
+    });
+    const claim = await prisma.serverClaimMethod.create({
+      data: {
+        serverId: pendingServer.id,
+        accountId: second.id,
+        method: 'dns',
+        token: randomUUID(),
+        issuedAt: new Date(),
+        status: 'pending',
+      },
+    });
 
     try {
       await prisma.minecraftIdentity.createMany({
@@ -83,6 +120,7 @@ if (!hasDatabase) {
             uuid: randomUUID(),
             playerName: 'FirstPlayer',
             msOwned: true,
+            isPrimary: true,
             lastVerifiedAt: new Date(),
           },
           {
@@ -90,6 +128,7 @@ if (!hasDatabase) {
             uuid: randomUUID(),
             playerName: 'SecondPlayer',
             msOwned: true,
+            isPrimary: true,
             lastVerifiedAt: new Date(),
           },
         ],
@@ -109,10 +148,70 @@ if (!hasDatabase) {
       );
       const identities = await prisma.minecraftIdentity.findMany({
         where: { accountId: { in: [first.id, second.id] } },
-        select: { uuid: true },
+        select: { accountId: true, isPrimary: true, uuid: true },
       });
       assert.equal(identities.length, 2);
+      assert.equal(identities.filter((identity) => identity.isPrimary).length, 1);
+      assert.equal(identities.find((identity) => identity.isPrimary)?.accountId, first.id);
+
+      const [storedOwnedServer, storedPendingServer, storedClaim] = await Promise.all([
+        prisma.server.findUniqueOrThrow({ where: { id: ownedServer.id } }),
+        prisma.server.findUniqueOrThrow({ where: { id: pendingServer.id } }),
+        prisma.serverClaimMethod.findUniqueOrThrow({ where: { id: claim.id } }),
+      ]);
+      assert.equal(storedOwnedServer.ownerAccountId, first.id);
+      assert.equal(storedPendingServer.registrantAccountId, first.id);
+      assert.equal(storedClaim.accountId, first.id);
     } finally {
+      await prisma.server.deleteMany({ where: { id: { in: [ownedServer.id, pendingServer.id] } } });
+      await prisma.account.deleteMany({ where: { id: { in: [first.id, second.id] } } });
+    }
+  });
+
+  test('direct OAuth account linking canonicalizes pending server ownership', async () => {
+    const first = await service.registerAccount({
+      provider: 'discord',
+      providerUserId: `discord-${randomUUID()}`,
+    });
+    const second = await service.registerAccount({
+      provider: 'naver',
+      providerUserId: `naver-${randomUUID()}`,
+    });
+    const suffix = randomUUID();
+    const server = await prisma.server.create({
+      data: {
+        registrantAccountId: second.id,
+        name: `OAuth registrant ${suffix}`,
+        joinHost: `oauth-${suffix}.example.com`,
+        joinPort: 25565,
+        edition: 'java',
+        supportedVersions: ['1.21'],
+        tags: ['test'],
+        shortDescription: 'OAuth linked registrant',
+        longDescription: 'OAuth linked registrant server',
+      },
+    });
+    const claim = await prisma.serverClaimMethod.create({
+      data: {
+        serverId: server.id,
+        accountId: second.id,
+        method: 'motd',
+        token: randomUUID(),
+        issuedAt: new Date(),
+        status: 'pending',
+      },
+    });
+
+    try {
+      await service.linkActiveAccounts(first.id, second.id);
+      const [storedServer, storedClaim] = await Promise.all([
+        prisma.server.findUniqueOrThrow({ where: { id: server.id } }),
+        prisma.serverClaimMethod.findUniqueOrThrow({ where: { id: claim.id } }),
+      ]);
+      assert.equal(storedServer.registrantAccountId, first.id);
+      assert.equal(storedClaim.accountId, first.id);
+    } finally {
+      await prisma.server.delete({ where: { id: server.id } }).catch(() => undefined);
       await prisma.account.deleteMany({ where: { id: { in: [first.id, second.id] } } });
     }
   });
