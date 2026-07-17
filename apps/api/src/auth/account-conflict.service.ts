@@ -133,13 +133,15 @@ export class AccountConflictService {
     if (!accountIds.includes(accountId)) {
       accountIds.unshift(accountId);
     }
-    const [minecraftIdentity, discordUserIds] = await Promise.all([
-      this.prisma.minecraftIdentity.findFirst({
+    const [minecraftIdentities, discordUserIds] = await Promise.all([
+      this.prisma.minecraftIdentity.findMany({
         where: { accountId: { in: accountIds } },
         select: { uuid: true },
+        orderBy: { id: 'asc' },
       }),
       this.resolveDiscordUserIds(accountIds, accounts),
     ]);
+    const minecraftUuids = new Set(minecraftIdentities.map((identity) => identity.uuid));
 
     const conflicts: AccountLinkConflict[] = [];
     const verifiedEmails = accounts
@@ -194,7 +196,7 @@ export class AccountConflictService {
         });
       }
     }
-    if (minecraftIdentity) {
+    for (const minecraftIdentity of minecraftIdentities) {
       const duplicateIdentity = await this.prisma.minecraftIdentity.findFirst({
         where: {
           uuid: minecraftIdentity.uuid,
@@ -264,8 +266,8 @@ export class AccountConflictService {
       }
       if (
         linkedMinecraft &&
-        minecraftIdentity &&
-        linkedMinecraft.minecraftUuid !== minecraftIdentity.uuid
+        minecraftUuids.size > 0 &&
+        !minecraftUuids.has(linkedMinecraft.minecraftUuid)
       ) {
         conflicts.push({
           id: `discord-minecraft:${discordUserId}:${linkedMinecraft.minecraftUuid}`,
