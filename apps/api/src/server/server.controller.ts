@@ -14,7 +14,7 @@
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
-import { ServerService } from './server.service';
+import { ServerService, type ServerProfileUpdateInput } from './server.service';
 import type {
   ServerDetail,
   ServerRankingResponse,
@@ -77,6 +77,16 @@ const serverWikiContentSettingsPayloadSchema = z.object({
   bottomNoticeSource: z.string().nullable(),
   requireContributionPolicyAck: z.boolean(),
 });
+export const serverProfilePayloadSchema = z.object({
+  name: z.string().trim().min(3).max(32),
+  tags: z.array(z.string().trim().min(1).max(32)).max(12).transform((tags) => [
+    ...new Set(tags),
+  ]),
+  shortDescription: z.string().trim().min(1).max(160),
+  longDescription: z.string().trim().min(1).max(20_000),
+  websiteUrl: z.string().trim().url().nullable(),
+  discordUrl: z.string().trim().url().nullable(),
+}).strict();
 
 const rankingQuerySchema = z.object({
   edition: z.enum(['java', 'bedrock']).optional(),
@@ -264,6 +274,20 @@ export class ServerController {
       ...payload,
       registrantAccountId: session.userId
     });
+  }
+
+  @RequireStepUp('server_admin')
+  @UseGuards(SessionGuard)
+  @Patch(':id/profile')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  async updateProfile(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload
+  ): Promise<ServerDetail> {
+    await this.assertCanManageServer(id, session);
+    const payload = serverProfilePayloadSchema.parse(body) as ServerProfileUpdateInput;
+    return this.serverService.updateProfile(id, payload, session.userId);
   }
 
   @RequireStepUp('server_admin')

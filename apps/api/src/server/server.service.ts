@@ -65,6 +65,15 @@ const RESERVED_SERVER_WIKI_SITE_SLUGS = new Set([
   'www',
 ]);
 
+export interface ServerProfileUpdateInput {
+  readonly name: string;
+  readonly tags: string[];
+  readonly shortDescription: string;
+  readonly longDescription: string;
+  readonly websiteUrl: string | null;
+  readonly discordUrl: string | null;
+}
+
 @Injectable()
 export class ServerService {
   private readonly telemetry: Pick<FirestoreTelemetryService, 'record'>;
@@ -1103,6 +1112,44 @@ export class ServerService {
       );
       throw error;
     }
+  }
+
+  async updateProfile(
+    id: string,
+    input: ServerProfileUpdateInput,
+    actorAccountId: string,
+  ): Promise<ServerDetail> {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const server = await tx.server.update({
+        where: { id },
+        data: {
+          name: input.name,
+          tags: input.tags,
+          shortDescription: input.shortDescription,
+          longDescription: input.longDescription,
+          websiteUrl: input.websiteUrl,
+          discordUrl: input.discordUrl,
+        },
+      });
+      await tx.serverWiki.updateMany({
+        where: { voteServerId: id },
+        data: { serverName: input.name, updatedAt: new Date() },
+      });
+      return server;
+    });
+    await this.events?.audit('server.profile.update', {
+      category: 'server',
+      actorAccountId,
+      subjectType: 'server',
+      subjectId: id,
+      metadata: {
+        name: input.name,
+        tagCount: input.tags.length,
+        hasWebsite: input.websiteUrl !== null,
+        hasDiscord: input.discordUrl !== null,
+      },
+    });
+    return toDetail(updated, ALL_METHODS);
   }
 
   async uploadContentImage(accountId: string, upload: FileImageUploadRequest): Promise<FileImageUploadResponse> {

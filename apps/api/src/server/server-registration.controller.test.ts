@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ServerController } from './server.controller';
+import { ServerController, serverProfilePayloadSchema } from './server.controller';
 import { normalizeMinecraftServerHost } from '@minewiki/minecraft';
 
 test('Minecraft server hosts are canonicalized without accepting URLs or embedded ports', () => {
@@ -53,4 +53,48 @@ test('public registration records a pending registrant without granting ownershi
     '11111111-1111-4111-8111-111111111111',
   );
   assert.equal('ownerAccountId' in (registration ?? {}), false);
+});
+
+test('server profile updates are owner-scoped, strict, trimmed, and bounded', async () => {
+  const serverId = '22222222-2222-4222-8222-222222222222';
+  const accountId = '11111111-1111-4111-8111-111111111111';
+  let update: Record<string, unknown> | null = null;
+  const controller = new ServerController(
+    {
+      updateProfile: async (_id: string, payload: Record<string, unknown>) => {
+        update = payload;
+        return { id: serverId };
+      },
+    } as never,
+    { isOwner: async () => true } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  await controller.updateProfile(serverId, {
+    name: '  Updated Server  ',
+    tags: ['survival', 'survival', 'economy'],
+    shortDescription: '  Updated summary  ',
+    longDescription: '  Updated body  ',
+    websiteUrl: null,
+    discordUrl: 'https://discord.gg/example',
+  }, { userId: accountId, permissions: [] } as never);
+
+  assert.deepEqual(update, {
+    name: 'Updated Server',
+    tags: ['survival', 'economy'],
+    shortDescription: 'Updated summary',
+    longDescription: 'Updated body',
+    websiteUrl: null,
+    discordUrl: 'https://discord.gg/example',
+  });
+  assert.throws(() => serverProfilePayloadSchema.parse({
+    ...(update ?? {}),
+    unexpected: true,
+  }));
+  assert.throws(() => serverProfilePayloadSchema.parse({
+    ...(update ?? {}),
+    longDescription: 'x'.repeat(20_001),
+  }));
 });

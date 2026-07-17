@@ -14,6 +14,95 @@ test('server stats downsampling preserves the seven-day range endpoints', () => 
   assert.equal(new Set(downsampled).size, downsampled.length);
 });
 
+test('server profile updates sync linked wiki identity and write a bounded audit summary', async () => {
+  const serverId = randomUUID();
+  const actorAccountId = randomUUID();
+  const now = new Date('2026-07-17T00:00:00.000Z');
+  const wikiUpdates: Array<Record<string, unknown>> = [];
+  const audits: Array<Record<string, unknown>> = [];
+  const current = {
+    id: serverId,
+    shortCode: 'profile',
+    wikiSpaceId: 3n,
+    wikiPageId: 4n,
+    wikiSlug: 'profile-server',
+    name: 'Before Server',
+    joinHost: 'play.example.test',
+    joinPort: 25565,
+    edition: 'java' as const,
+    supportedVersions: ['1.21'],
+    tags: ['survival'],
+    shortDescription: 'Before summary',
+    longDescription: 'Before body',
+    bannerUrl: null,
+    websiteUrl: null,
+    discordUrl: null,
+    voteCooldownHours: 24,
+    verificationGrade: 'Unverified' as const,
+    verifiedAt: null,
+    votes24h: 0,
+    votesMonthly: 0,
+    reviewsCount: 0,
+    voteRequiresOwnership: false,
+    createdAt: now,
+    updatedAt: now,
+    playersOnline: null,
+    playersMax: null,
+    playersLastUpdatedAt: null,
+    isOnline: null,
+    latencyMs: null,
+  };
+  const prisma = {
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) {
+      return callback(prisma);
+    },
+    server: {
+      async update({ data }: { data: Record<string, unknown> }) {
+        return { ...current, ...data };
+      },
+    },
+    serverWiki: {
+      async updateMany(input: Record<string, unknown>) {
+        wikiUpdates.push(input);
+        return { count: 1 };
+      },
+    },
+  };
+  const events = {
+    async audit(_name: string, input: Record<string, unknown>) {
+      audits.push(input);
+    },
+  };
+  const service = new ServerService(
+    {} as never,
+    prisma as never,
+    {} as never,
+    undefined,
+    events as never,
+  );
+  const updated = await service.updateProfile(serverId, {
+    name: 'After Server',
+    tags: ['survival', 'economy'],
+    shortDescription: 'After summary',
+    longDescription: 'After body with practical joining information.',
+    websiteUrl: 'https://example.test',
+    discordUrl: null,
+  }, actorAccountId);
+
+  assert.equal(updated.name, 'After Server');
+  assert.equal(updated.longDescription, 'After body with practical joining information.');
+  assert.deepEqual(wikiUpdates[0]?.where, { voteServerId: serverId });
+  const wikiData = wikiUpdates[0]?.data as { serverName: string; updatedAt: Date };
+  assert.equal(wikiData.serverName, 'After Server');
+  assert.ok(wikiData.updatedAt instanceof Date);
+  assert.deepEqual(audits[0]?.metadata, {
+    name: 'After Server',
+    tagCount: 2,
+    hasWebsite: true,
+    hasDiscord: false,
+  });
+});
+
 test('server wiki public slug is tenant-owned, validated, and audited independently of content paths', async () => {
   let storedSiteSlug: string | null = 'old-docs';
   const audits: Array<Record<string, unknown>> = [];
