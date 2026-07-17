@@ -41,7 +41,7 @@ export class PaddleWebhookService {
   ) {}
 
   async ingest(rawBody: Buffer | undefined, signature: string | undefined) {
-    if (this.config.get('PADDLE_MODE', 'off') !== 'shadow') {
+    if (!['shadow', 'live'].includes(this.config.get('PADDLE_MODE', 'off'))) {
       throw new NotFoundException('Webhook endpoint is not enabled.');
     }
     if (!rawBody || rawBody.length === 0 || rawBody.length > MAX_WEBHOOK_BYTES) {

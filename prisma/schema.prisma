@@ -1778,35 +1778,36 @@ model WikiRecentChange {
 }
 
 model ServerWiki {
-  id                           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  spaceId                      BigInt    @unique @map("space_id") @db.UnsignedBigInt
-  voteServerId                 String?   @unique @map("vote_server_id") @db.Char(36)
-  serverName                   String    @map("server_name") @db.VarChar(255)
-  slug                         String    @unique @db.VarChar(255)
-  siteSlug                     String?   @unique @map("site_slug") @db.VarChar(80)
-  host                         String?   @db.VarChar(255)
-  port                         Int?      @db.UnsignedInt
-  edition                      String    @default("unknown") @db.VarChar(16)
-  supportedVersions            String?   @map("supported_versions") @db.VarChar(255)
-  genres                       String?   @db.VarChar(255)
-  verifiedStatus               String    @default("none") @map("verified_status") @db.VarChar(32)
-  status                       String    @default("active") @db.VarChar(32)
-  layoutKey                    String    @default("docs") @map("layout_key") @db.VarChar(32)
-  layoutUpdatedAt              DateTime? @map("layout_updated_at")
-  layoutUpdatedBy              BigInt?   @map("layout_updated_by") @db.UnsignedBigInt
-  contributionPolicySource     String?   @map("contribution_policy_source") @db.Text
-  editHelpSource               String?   @map("edit_help_source") @db.Text
-  topNoticeSource              String?   @map("top_notice_source") @db.Text
-  bottomNoticeSource           String?   @map("bottom_notice_source") @db.Text
-  requireContributionPolicyAck Boolean   @default(false) @map("require_contribution_policy_ack")
-  contributionPolicyVersion    Int       @default(0) @map("contribution_policy_version") @db.UnsignedInt
-  contentSettingsVersion       Int       @default(0) @map("content_settings_version") @db.UnsignedInt
-  contentSettingsUpdatedAt     DateTime? @map("content_settings_updated_at")
-  contentSettingsUpdatedBy     BigInt?   @map("content_settings_updated_by") @db.UnsignedBigInt
-  createdBy                    BigInt?   @map("created_by") @db.UnsignedBigInt
-  createdAt                    DateTime  @map("created_at")
-  updatedAt                    DateTime  @map("updated_at")
-  space                        WikiSpace @relation("ServerWikiSpace", fields: [spaceId], references: [id], onDelete: Restrict)
+  id                           BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId                      BigInt                @unique @map("space_id") @db.UnsignedBigInt
+  voteServerId                 String?               @unique @map("vote_server_id") @db.Char(36)
+  serverName                   String                @map("server_name") @db.VarChar(255)
+  slug                         String                @unique @db.VarChar(255)
+  siteSlug                     String?               @unique @map("site_slug") @db.VarChar(80)
+  host                         String?               @db.VarChar(255)
+  port                         Int?                  @db.UnsignedInt
+  edition                      String                @default("unknown") @db.VarChar(16)
+  supportedVersions            String?               @map("supported_versions") @db.VarChar(255)
+  genres                       String?               @db.VarChar(255)
+  verifiedStatus               String                @default("none") @map("verified_status") @db.VarChar(32)
+  status                       String                @default("active") @db.VarChar(32)
+  layoutKey                    String                @default("docs") @map("layout_key") @db.VarChar(32)
+  layoutUpdatedAt              DateTime?             @map("layout_updated_at")
+  layoutUpdatedBy              BigInt?               @map("layout_updated_by") @db.UnsignedBigInt
+  contributionPolicySource     String?               @map("contribution_policy_source") @db.Text
+  editHelpSource               String?               @map("edit_help_source") @db.Text
+  topNoticeSource              String?               @map("top_notice_source") @db.Text
+  bottomNoticeSource           String?               @map("bottom_notice_source") @db.Text
+  requireContributionPolicyAck Boolean               @default(false) @map("require_contribution_policy_ack")
+  contributionPolicyVersion    Int                   @default(0) @map("contribution_policy_version") @db.UnsignedInt
+  contentSettingsVersion       Int                   @default(0) @map("content_settings_version") @db.UnsignedInt
+  contentSettingsUpdatedAt     DateTime?             @map("content_settings_updated_at")
+  contentSettingsUpdatedBy     BigInt?               @map("content_settings_updated_by") @db.UnsignedBigInt
+  createdBy                    BigInt?               @map("created_by") @db.UnsignedBigInt
+  createdAt                    DateTime              @map("created_at")
+  updatedAt                    DateTime              @map("updated_at")
+  space                        WikiSpace             @relation("ServerWikiSpace", fields: [spaceId], references: [id], onDelete: Restrict)
+  billingSubject               PaddleBillingSubject?
 
   @@index([status])
   @@index([verifiedStatus])
@@ -1851,24 +1852,65 @@ model PaddleWebhookEvent {
 }
 
 model PaddleSubscriptionShadow {
-  id                     BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  environment            String    @db.VarChar(16)
-  providerSubscriptionId String    @map("provider_subscription_id") @db.VarChar(64)
-  providerCustomerId     String?   @map("provider_customer_id") @db.VarChar(64)
-  status                 String    @db.VarChar(32)
-  nextBilledAt           DateTime? @map("next_billed_at")
-  currentPeriodStartsAt  DateTime? @map("current_period_starts_at")
-  currentPeriodEndsAt    DateTime? @map("current_period_ends_at")
-  scheduledChange        Json?     @map("scheduled_change")
-  lastEventId            String    @map("last_event_id") @db.VarChar(64)
-  lastEventOccurredAt    DateTime  @map("last_event_occurred_at")
-  lastPayload            Json      @map("last_payload")
-  createdAt              DateTime  @default(now()) @map("created_at")
-  updatedAt              DateTime  @updatedAt @map("updated_at")
+  id                     BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  billingSubjectId       String?               @map("billing_subject_id") @db.Char(36)
+  environment            String                @db.VarChar(16)
+  providerSubscriptionId String                @map("provider_subscription_id") @db.VarChar(64)
+  providerCustomerId     String?               @map("provider_customer_id") @db.VarChar(64)
+  providerTransactionId  String?               @map("provider_transaction_id") @db.VarChar(64)
+  status                 String                @db.VarChar(32)
+  nextBilledAt           DateTime?             @map("next_billed_at")
+  currentPeriodStartsAt  DateTime?             @map("current_period_starts_at")
+  currentPeriodEndsAt    DateTime?             @map("current_period_ends_at")
+  scheduledChange        Json?                 @map("scheduled_change")
+  lastEventId            String                @map("last_event_id") @db.VarChar(64)
+  lastEventOccurredAt    DateTime              @map("last_event_occurred_at")
+  lastPayload            Json                  @map("last_payload")
+  projectionStatus       String                @default("unprojected") @map("projection_status") @db.VarChar(24)
+  projectionError        String?               @map("projection_error") @db.Text
+  projectedAt            DateTime?             @map("projected_at")
+  createdAt              DateTime              @default(now()) @map("created_at")
+  updatedAt              DateTime              @updatedAt @map("updated_at")
+  billingSubject         PaddleBillingSubject? @relation(fields: [billingSubjectId], references: [id], onDelete: Restrict)
 
   @@unique([environment, providerSubscriptionId], map: "uq_paddle_subscription_environment_id")
+  @@index([billingSubjectId, status], map: "idx_paddle_subscription_subject_status")
+  @@index([projectionStatus, updatedAt], map: "idx_paddle_subscription_projection")
   @@index([status, updatedAt], map: "idx_paddle_subscription_status_updated")
   @@map("paddle_subscription_shadows")
+}
+
+model PaddleBillingSubject {
+  id                 String                     @id @default(uuid()) @db.Char(36)
+  serverWikiId       BigInt                     @unique @map("server_wiki_id") @db.UnsignedBigInt
+  createdByAccountId String                     @map("created_by_account_id") @db.VarChar(191)
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+  serverWiki         ServerWiki                 @relation(fields: [serverWikiId], references: [id], onDelete: Restrict)
+  checkoutIntents    PaddleCheckoutIntent[]
+  subscriptions      PaddleSubscriptionShadow[]
+
+  @@index([createdByAccountId], map: "idx_paddle_billing_subject_creator")
+  @@map("paddle_billing_subjects")
+}
+
+model PaddleCheckoutIntent {
+  id                    String               @id @default(uuid()) @db.Char(36)
+  billingSubjectId      String               @map("billing_subject_id") @db.Char(36)
+  environment           String               @db.VarChar(16)
+  layoutKey             String               @map("layout_key") @db.VarChar(32)
+  configuredPriceId     String               @map("configured_price_id") @db.VarChar(64)
+  status                String               @default("pending") @db.VarChar(24)
+  providerTransactionId String?              @map("provider_transaction_id") @db.VarChar(64)
+  expiresAt             DateTime             @map("expires_at")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+  billingSubject        PaddleBillingSubject @relation(fields: [billingSubjectId], references: [id], onDelete: Restrict)
+
+  @@unique([environment, providerTransactionId], map: "uq_paddle_checkout_environment_transaction")
+  @@index([billingSubjectId, status], map: "idx_paddle_checkout_subject_status")
+  @@index([status, expiresAt], map: "idx_paddle_checkout_status_expiry")
+  @@map("paddle_checkout_intents")
 }
 
 model ModWiki {
@@ -1913,16 +1955,16 @@ model SubwikiRole {
 }
 
 model AclGroup {
-  id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  groupKey      String   @map("group_key") @db.VarChar(64)
-  scopeType     String   @default("site") @map("scope_type") @db.VarChar(16)
-  spaceId       BigInt?  @map("space_id") @db.UnsignedBigInt
-  title         String   @db.VarChar(255)
-  description   String?  @db.Text
-  status        String   @default("active") @db.VarChar(32)
-  selfRemovable Boolean  @default(false) @map("self_removable")
-  createdAt     DateTime @map("created_at")
-  updatedAt     DateTime @map("updated_at")
+  id            BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+  groupKey      String     @map("group_key") @db.VarChar(64)
+  scopeType     String     @default("site") @map("scope_type") @db.VarChar(16)
+  spaceId       BigInt?    @map("space_id") @db.UnsignedBigInt
+  title         String     @db.VarChar(255)
+  description   String?    @db.Text
+  status        String     @default("active") @db.VarChar(32)
+  selfRemovable Boolean    @default(false) @map("self_removable")
+  createdAt     DateTime   @map("created_at")
+  updatedAt     DateTime   @map("updated_at")
   space         WikiSpace? @relation(fields: [spaceId], references: [id], onDelete: Restrict)
 
   @@unique([groupKey], map: "uk_acl_groups_key")

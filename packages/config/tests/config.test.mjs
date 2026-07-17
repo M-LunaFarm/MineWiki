@@ -55,6 +55,29 @@ test('Paddle shadow mode requires a webhook secret only when enabled', () => {
   assert.equal(new ConfigService(shadow).get('PADDLE_MODE'), 'shadow');
 });
 
+test('Paddle live mode requires the complete private billing configuration', () => {
+  const live = validProductionEnv();
+  live.PADDLE_MODE = 'live';
+  assert.throws(
+    () => new ConfigService(live),
+    /PADDLE_WEBHOOK_SECRET is required.*PADDLE_API_KEY is required.*PADDLE_PRICE_HANDBOOK is required.*PADDLE_PRICE_BRAND is required.*PADDLE_CHECKOUT_URL is required/s,
+  );
+
+  Object.assign(live, validPaddleLiveEnv());
+  const config = new ConfigService(live);
+  assert.equal(config.get('PADDLE_MODE'), 'live');
+  assert.equal(config.get('PADDLE_ENV'), 'sandbox');
+});
+
+test('Paddle live mode rejects a price id shared by two layouts', () => {
+  const live = {
+    ...validProductionEnv(),
+    ...validPaddleLiveEnv(),
+    PADDLE_PRICE_BRAND: 'pri_handbook',
+  };
+  assert.throws(() => new ConfigService(live), /PADDLE_PRICE_HANDBOOK and PADDLE_PRICE_BRAND must be distinct/);
+});
+
 test('WebAuthn config requires an exact validated origin and related RP ID', () => {
   assert.throws(
     () => new ConfigService({ WEBAUTHN_ORIGIN: 'https://login.minewiki.kr' }),
@@ -279,5 +302,17 @@ function validProductionEnv() {
     SMTP_HOST: 'smtp.example.com',
     SMTP_FROM: 'MineWiki <no-reply@minewiki.kr>',
     APP_ENCRYPTION_KEY: 'base64-production-key'
+  };
+}
+
+function validPaddleLiveEnv() {
+  return {
+    PADDLE_MODE: 'live',
+    PADDLE_ENV: 'sandbox',
+    PADDLE_WEBHOOK_SECRET: 'paddle-endpoint-secret',
+    PADDLE_API_KEY: 'paddle-api-key',
+    PADDLE_PRICE_HANDBOOK: 'pri_handbook',
+    PADDLE_PRICE_BRAND: 'pri_brand',
+    PADDLE_CHECKOUT_URL: 'https://minewiki.kr/server/billing/checkout',
   };
 }

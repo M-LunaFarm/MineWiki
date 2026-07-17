@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AccountDeletionAdminController } from '../auth/account-deletion-admin.controller';
 import { AccountModerationController } from '../auth/account-moderation.controller';
+import { PaddleBillingController } from '../billing/paddle-billing.controller';
 import { AuditController } from '../events/audit.controller';
 import { ReviewModerationController } from '../review/review-moderation.controller';
 import { RoleAdminController } from '../roles/role-admin.controller';
@@ -40,6 +41,8 @@ const methodPolicies = [
   [VoteDispatchController, 'list', 'server_admin'],
   [VoteDispatchController, 'replay', 'server_admin'],
   [VoteDiagnosticsController, 'runDiagnostics', 'server_admin'],
+  [PaddleBillingController, 'createCheckout', 'server_admin'],
+  [PaddleBillingController, 'createPortal', 'server_admin'],
   [ServerController, 'updateWikiLayout', 'server_admin'],
   [ServerController, 'listPluginCredentials', 'server_admin'],
   [ServerController, 'listPluginCredentialEvents', 'server_admin'],

@@ -71,10 +71,14 @@ const envSchema = z.object({
   ACCOUNT_LINKING_ENABLED: z.string().optional(),
   APP_ENCRYPTION_KEY: z.string().optional(),
   WEB_PUSH_ENABLED: z.string().optional(),
-  PADDLE_MODE: z.enum(['off', 'shadow']).default('off'),
+  PADDLE_MODE: z.enum(['off', 'shadow', 'live']).default('off'),
   PADDLE_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
   PADDLE_WEBHOOK_SECRET: z.string().optional(),
   PADDLE_WEBHOOK_TOLERANCE_SECONDS: z.coerce.number().int().min(1).max(300).default(5),
+  PADDLE_API_KEY: z.string().optional(),
+  PADDLE_PRICE_HANDBOOK: z.string().optional(),
+  PADDLE_PRICE_BRAND: z.string().optional(),
+  PADDLE_CHECKOUT_URL: optionalUrl,
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().optional(),
@@ -271,6 +275,26 @@ function validateProductionEnvironment(env: EnvSchema): void {
     validateOptionalGroup(env, ['SMTP_USER', 'SMTP_PASS'], 'SMTP authentication', failures);
     if (env.PADDLE_MODE === 'shadow' && isBlank(env.PADDLE_WEBHOOK_SECRET)) {
       failures.push('PADDLE_WEBHOOK_SECRET is required when PADDLE_MODE is shadow');
+    }
+    if (env.PADDLE_MODE === 'live') {
+      validateRequiredGroup(
+        env,
+        [
+          'PADDLE_WEBHOOK_SECRET',
+          'PADDLE_API_KEY',
+          'PADDLE_PRICE_HANDBOOK',
+          'PADDLE_PRICE_BRAND',
+          'PADDLE_CHECKOUT_URL',
+        ],
+        'Paddle live billing',
+        failures,
+      );
+      if (
+        !isBlank(env.PADDLE_PRICE_HANDBOOK)
+        && env.PADDLE_PRICE_HANDBOOK === env.PADDLE_PRICE_BRAND
+      ) {
+        failures.push('PADDLE_PRICE_HANDBOOK and PADDLE_PRICE_BRAND must be distinct');
+      }
     }
   }
 
