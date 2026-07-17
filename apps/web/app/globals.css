@@ -1927,6 +1927,38 @@ html[data-theme='dark'] .server-wiki-layout[class~='bg-white'] {
   color: #dce5ee;
 }
 
+/* Rendered documentation declares a light-theme ink color directly, so the
+   layout's inherited dark color cannot reach paragraphs, lists, or table cells. */
+html[data-theme='dark'] .server-wiki-layout .wiki-rendered {
+  color: #dce5ee;
+}
+
+html[data-theme='dark'] .server-wiki-layout .wiki-rendered :is(h1, h2, h3, h4, h5, h6) {
+  border-color: #405166;
+  color: #f4f7fa;
+}
+
+html[data-theme='dark'] .server-wiki-layout .wiki-rendered blockquote {
+  border-color: #5577a6;
+  color: #c4d0dc;
+}
+
+html[data-theme='dark'] .server-wiki-layout .wiki-rendered code {
+  background-color: #1a2633;
+  color: #e8eef5;
+}
+
+html[data-theme='dark'] .server-wiki-layout .wiki-rendered pre,
+html[data-theme='dark'] .server-wiki-layout .wiki-rendered th {
+  border-color: #405166;
+  background-color: #151f2a;
+  color: #edf3f8;
+}
+
+html[data-theme='dark'] .server-wiki-layout .wiki-rendered :is(th, td) {
+  border-color: #536274;
+}
+
 html[data-theme='dark'] .server-wiki-layout [class~='bg-white'],
 html[data-theme='dark'] .server-wiki-layout [class~='bg-white/95'] {
   background-color: #0f1720;
