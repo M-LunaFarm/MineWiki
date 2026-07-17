@@ -172,7 +172,11 @@ test('memoizes duplicate targets but accounts for each included source occurrenc
   const headingIds = result.ast.map((node) => node.type === 'include' && node.children?.[0]?.type === 'heading'
     ? node.children[0].id
     : null);
-  assert.deepEqual(headingIds, ['inc-1-공통', 'inc-2-공통']);
+  const legacyHeadingIds = result.ast.map((node) => node.type === 'include' && node.children?.[0]?.type === 'heading'
+    ? node.children[0].legacyId
+    : null);
+  assert.deepEqual(headingIds, ['inc-1-s-1', 'inc-2-s-1']);
+  assert.deepEqual(legacyHeadingIds, ['inc-1-공통', 'inc-2-공통']);
 });
 
 test('resolves unqualified includes inside the caller server subwiki', async () => {
@@ -308,4 +312,60 @@ test('expands includes inside recursive blockquotes', async () => {
 
   assert.match(renderDocument(result.ast), /<blockquote[^]*<blockquote[^]*포함된 인용 본문/u);
   assert.equal(result.includedSourceBytes, Buffer.byteLength(template.contentRaw, 'utf8'));
+});
+
+test('expands readable includes inside indentation while concealing denied and nested targets', async () => {
+  const readable: FixturePage = {
+    ...basePage,
+    id: 33n,
+    namespaceId: 2,
+    localPath: '들여쓰기',
+    slug: '들여쓰기',
+    title: '들여쓰기',
+    currentRevisionId: 330n,
+    contentRaw: '포함된 @값@\n [include(틀:중첩)]',
+  };
+  const privateTemplate: FixturePage = {
+    ...basePage,
+    id: 34n,
+    namespaceId: 2,
+    localPath: '비공개 들여쓰기',
+    slug: '비공개_들여쓰기',
+    title: '비공개 들여쓰기',
+    currentRevisionId: 340n,
+    contentRaw: '숨겨진 본문',
+  };
+  const { service } = createFixture([readable, privateTemplate], new Set([privateTemplate.id]));
+  const result = await service.expand({
+    ast: parseMarkup([
+      ' [include(틀:들여쓰기,값=정상)]',
+      ' [include(틀:비공개 들여쓰기)]',
+    ].join('\n')).ast,
+    accountId: null,
+    sourcePageId: 1n,
+    sourceNamespace: 'main',
+    sourceLocalPath: '대문',
+  });
+  const indent = result.ast[0];
+
+  assert.equal(indent?.type, 'indent');
+  if (indent?.type !== 'indent') return;
+  const [resolved, denied] = indent.children;
+  assert.equal(resolved?.type === 'include' ? resolved.state : null, 'resolved');
+  assert.equal(denied?.type === 'include' ? denied.state : null, 'unavailable');
+  if (resolved?.type !== 'include' || resolved.state !== 'resolved') return;
+  const nestedIndent = resolved.children?.find((node) => node.type === 'indent');
+  assert.equal(nestedIndent?.type, 'indent');
+  if (nestedIndent?.type === 'indent') {
+    const nested = nestedIndent.children.find((node) => node.type === 'include');
+    assert.equal(nested?.type === 'include' ? nested.state : null, 'unavailable');
+  }
+
+  const html = renderDocument(result.ast);
+  assert.match(html, /^<div class="wiki-indent">[^]*포함된 정상/u);
+  assert.equal((html.match(/포함 문서를 불러올 수 없습니다\./gu) ?? []).length, 2);
+  assert.equal(html.includes('중첩'), false);
+  assert.equal(html.includes('비공개 들여쓰기'), false);
+  assert.equal(html.includes('숨겨진 본문'), false);
+  assert.equal(result.includedSourceBytes, Buffer.byteLength(readable.contentRaw, 'utf8'));
 });

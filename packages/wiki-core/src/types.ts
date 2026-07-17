@@ -83,6 +83,7 @@ export interface WikiFileDisplayOptions {
 export type AstNode =
   | { type: 'heading'; level: number; text: string; id: string; legacyId?: string; folded?: boolean; startLine?: number; endLine?: number }
   | { type: 'paragraph'; children: InlineNode[] }
+  | { type: 'indent'; children: AstNode[] }
   | WikiListNode
   | { type: 'blockquote'; children: AstNode[] }
   | { type: 'hr' }

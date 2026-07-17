@@ -941,6 +941,19 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   .wiki-rendered .wiki-list .wiki-list {
     @apply mt-1;
   }
+  .wiki-rendered .wiki-indent {
+    @apply mt-4 min-w-0 border-l border-white/10;
+    margin-inline-start: clamp(0.125rem, 1vw, 0.75rem);
+    padding-inline-start: clamp(0.5rem, 2vw, 1rem);
+    overflow-wrap: anywhere;
+  }
+  .wiki-rendered .wiki-indent > :first-child {
+    @apply mt-0;
+  }
+  .wiki-rendered .wiki-indent .wiki-indent {
+    margin-inline-start: 0;
+    padding-inline-start: clamp(0.375rem, 1.5vw, 0.75rem);
+  }
   .wiki-rendered blockquote {
     @apply border-l-2 border-emerald-300/40 pl-4 text-slate-300;
   }

@@ -48,6 +48,9 @@ export class WikiIncludeService {
     const memo = new Map<string, Promise<IncludeSource | null>>();
 
     const expandNodes = async (nodes: readonly AstNode[]): Promise<AstNode[]> => Promise.all(nodes.map(async (node): Promise<AstNode> => {
+      if (node.type === 'indent') {
+        return { ...node, children: await expandNodes(node.children) };
+      }
       if (node.type === 'folding') {
         return { ...node, children: await expandNodes(node.children) };
       }
@@ -164,6 +167,7 @@ function unavailable(node: Extract<AstNode, { type: 'include' }>): AstNode {
 function disableNestedIncludes(nodes: readonly AstNode[]): AstNode[] {
   return nodes.map((node): AstNode => {
     if (node.type === 'include') return unavailable(node);
+    if (node.type === 'indent') return { ...node, children: disableNestedIncludes(node.children) };
     if (node.type === 'folding') return { ...node, children: disableNestedIncludes(node.children) };
     if (node.type === 'wiki_style') return { ...node, children: disableNestedIncludes(node.children) };
     if (node.type === 'blockquote') return { ...node, children: disableNestedIncludes(node.children) };

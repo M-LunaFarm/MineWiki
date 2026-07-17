@@ -20,9 +20,10 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.22.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.23.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
+const MAX_INDENT_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
 const MAX_INCLUDE_OCCURRENCES = 20;
 const MAX_INCLUDE_PARAMS = 32;
@@ -223,7 +224,7 @@ function parseMarkupDocument(
   raw: string,
   options: ParseMarkupOptions,
   foldingDepth: number,
-  nestingKind: 'folding' | 'blockquote' = 'folding'
+  nestingKind: 'folding' | 'blockquote' | 'indent' = 'folding'
 ): ParsedDocument {
   if (Buffer.byteLength(raw, 'utf8') > MAX_DOCUMENT_BYTES) {
     return rejectedDocument('문서 크기 제한을 초과했습니다.');
@@ -231,7 +232,9 @@ function parseMarkupDocument(
   if (foldingDepth > MAX_FOLDING_DEPTH) {
     return rejectedDocument(nestingKind === 'blockquote'
       ? '인용문 중첩 제한을 초과했습니다.'
-      : '접기 블록 중첩 제한을 초과했습니다.');
+      : nestingKind === 'indent'
+        ? `들여쓰기는 ${MAX_INDENT_DEPTH}단계까지 사용할 수 있습니다.`
+        : '접기 블록 중첩 제한을 초과했습니다.');
   }
   const source = maskWikiCommentLines(raw.replace(/\r\n/g, '\n'), options.gitBookMarkdown === true);
   const lines = source.split('\n');
@@ -257,6 +260,37 @@ function parseMarkupDocument(
     let line = lines[i] ?? '';
     if (!line.trim()) continue;
     if (i === redirectLineIndex && redirectTarget) continue;
+
+    // NamuMark lists also begin with whitespace, so they must win before the
+    // ordinary leading-space indentation block is considered.
+    if (parseWikiListLine(line)) {
+      const listBlock: string[] = [];
+      while (i < lines.length && parseWikiListLine(lines[i] ?? '')) {
+        listBlock.push(lines[i] ?? '');
+        i += 1;
+      }
+      i -= 1;
+      ast.push(...parseWikiListBlock(listBlock, links, errors, blockingErrors, footnotes, options.linkResolution));
+      continue;
+    }
+
+    if (line.startsWith(' ')) {
+      if (foldingDepth >= MAX_INDENT_DEPTH) {
+        const warning = `들여쓰기는 ${MAX_INDENT_DEPTH}단계까지 사용할 수 있습니다.`;
+        if (!blockingErrors.includes(warning)) blockingErrors.push(warning);
+      } else {
+        const indentLines: string[] = [];
+        while (i < lines.length && (lines[i] ?? '').startsWith(' ')) {
+          indentLines.push((lines[i] ?? '').slice(1));
+          i += 1;
+        }
+        i -= 1;
+        const nested = parseMarkupDocument(indentLines.join('\n'), options, foldingDepth + 1, 'indent');
+        mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
+        ast.push({ type: 'indent', children: nested.ast });
+        continue;
+      }
+    }
 
     const wikiStyle = line.match(/^\s*\{\{\{#!wiki(?:\s+(.*?))?\s*$/i);
     if (wikiStyle) {
@@ -516,17 +550,6 @@ function parseMarkupDocument(
       continue;
     }
 
-    if (parseWikiListLine(line)) {
-      const listBlock: string[] = [];
-      while (i < lines.length && parseWikiListLine(lines[i] ?? '')) {
-        listBlock.push(lines[i] ?? '');
-        i += 1;
-      }
-      i -= 1;
-      ast.push(...parseWikiListBlock(listBlock, links, errors, blockingErrors, footnotes, options.linkResolution));
-      continue;
-    }
-
     const paragraphLines = [line];
     while (i + 1 < lines.length && !startsMarkupBlock(lines, i + 1)) {
       paragraphLines.push(lines[i + 1] ?? '');
@@ -617,7 +640,8 @@ function startsMarkupBlock(lines: readonly string[], index: number): boolean {
   if (/^<table(?:\s|>)/iu.test(trimmed)) return true;
   if (parseWikiTableStart(line, lines[index + 1])) return true;
   if (/^\[\[파일:[^\]]+\]\]$/u.test(line)) return true;
-  return Boolean(parseWikiListLine(line));
+  if (parseWikiListLine(line)) return true;
+  return line.startsWith(' ');
 }
 
 function maskWikiCommentLines(source: string, gitBookMarkdown = false): string {
@@ -1642,6 +1666,10 @@ export function applyIncludeParametersToAst(
       };
     }
     if (node.type === 'paragraph') return { ...node, children: inline(node.children) };
+    if (node.type === 'indent') return {
+      ...node,
+      children: applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams)
+    };
     if (node.type === 'blockquote') return {
       ...node,
       children: applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams)
@@ -2033,6 +2061,7 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
     if (node.type === 'heading') return [{ type: 'paragraph', children: [{ type: 'text', text: node.text }] }];
     if (node.type === 'paragraph') return [{ ...node, children: restrictInline(node.children) }];
     if (node.type === 'list') return [restrictList(node)];
+    if (node.type === 'indent') return [{ ...node, children: restrictAst(node.children) }];
     if (node.type === 'blockquote') return [{ ...node, children: restrictAst(node.children) }];
     if (node.type === 'hr' || node.type === 'codeblock') return [node];
     if (node.type === 'wiki_table') {
@@ -2108,6 +2137,10 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       }
       if (node.type === 'blockquote') {
         output.push(`<blockquote class="wiki-quote">${renderNodes(node.children)}</blockquote>`);
+        continue;
+      }
+      if (node.type === 'indent') {
+        output.push(`<div class="wiki-indent">${renderNodes(node.children)}</div>`);
         continue;
       }
       if (node.type === 'hr') {
@@ -2338,6 +2371,11 @@ function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, s
   };
   for (const node of ast) {
     if (node.type === 'paragraph') collectInline(node.children);
+    else if (node.type === 'indent') {
+      for (const [name, text] of collectNamedFootnoteDefinitions(node.children)) {
+        if (!definitions.has(name)) definitions.set(name, text);
+      }
+    }
     else if (node.type === 'blockquote') {
       for (const [name, text] of collectNamedFootnoteDefinitions(node.children)) {
         if (!definitions.has(name)) definitions.set(name, text);
@@ -2360,7 +2398,7 @@ function collectTocHeadings(ast: readonly AstNode[]): Array<{ level: number; tex
     if (node.type === 'heading') headings.push(node);
     // Included headings belong to their own heading scope and must not leak into
     // the caller's table of contents.
-    if (node.type === 'folding' || node.type === 'wiki_style' || node.type === 'blockquote') {
+    if (node.type === 'folding' || node.type === 'wiki_style' || node.type === 'blockquote' || node.type === 'indent') {
       headings.push(...collectTocHeadings(node.children));
     }
   }
@@ -2566,6 +2604,7 @@ function countMathNodes(ast: readonly AstNode[]): number {
   return ast.reduce((count, node) => {
     if (node.type === 'math_block') return count + 1;
     if (node.type === 'paragraph') return count + countInline(node.children);
+    if (node.type === 'indent') return count + countMathNodes(node.children);
     if (node.type === 'blockquote') return count + countMathNodes(node.children);
     if (node.type === 'list') return count + countList(node);
     if (node.type === 'wiki_table') {
@@ -2598,6 +2637,7 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
   for (const node of ast) {
     if (node.type === 'file') output.add(node.fileName);
     else if (node.type === 'paragraph') collectInline(node.children);
+    else if (node.type === 'indent') collectWikiFileNames(node.children, output);
     else if (node.type === 'blockquote') collectWikiFileNames(node.children, output);
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
@@ -2628,6 +2668,7 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
 
   for (const node of ast) {
     if (node.type === 'paragraph') collectInline(node.children);
+    else if (node.type === 'indent') collectWikiLinkTargets(node.children, output);
     else if (node.type === 'blockquote') collectWikiLinkTargets(node.children, output);
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {

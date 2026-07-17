@@ -115,6 +115,100 @@ test('parses blockquotes recursively and preserves nested block metadata', () =>
   assert.match(html, /<section class="footnotes">/u);
 });
 
+test('parses canonical indentation as recursive blocks with shared render metadata and state', () => {
+  const parsed = parseMarkup([
+    ' 바깥 [[가이드]] [*note 들여쓴 각주] [math(x)]',
+    '  안쪽 [[파일:inside.png|파일]]',
+    '  * 안쪽 목록',
+    ' > 인용 [[인용 문서]]',
+    ' [include(틀:안내)]',
+    ' [각주]',
+    ' [목차]',
+    ' == 들여쓴 제목 ==',
+    ' [[분류:들여쓰기]]',
+    '들여쓰기 뒤 본문',
+  ].join('\n'));
+  const indent = parsed.ast[0];
+
+  assert.equal(indent?.type, 'indent');
+  if (indent?.type !== 'indent') return;
+  assert.equal(indent.children[0]?.type, 'paragraph');
+  assert.equal(indent.children[1]?.type, 'indent');
+  if (indent.children[1]?.type === 'indent') {
+    assert.deepEqual(indent.children[1].children.map((node) => node.type), ['paragraph', 'list']);
+  }
+  assert.deepEqual(indent.children.slice(2).map((node) => node.type), [
+    'blockquote',
+    'include',
+    'component',
+    'toc',
+    'heading',
+    'category',
+  ]);
+  assert.equal(parsed.ast[1]?.type, 'paragraph');
+  assert.deepEqual(parsed.links, ['가이드', '인용 문서']);
+  assert.deepEqual(parsed.categories, ['들여쓰기']);
+  assert.deepEqual(parsed.includes, ['틀:안내']);
+  assert.deepEqual(parsed.footnotes, ['들여쓴 각주']);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['가이드', '인용 문서']);
+  assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['inside.png']);
+
+  const html = renderDocument(parsed.ast);
+  assert.match(html, /^<div class="wiki-indent"><p>바깥/u);
+  assert.match(html, /<div class="wiki-indent"><p>안쪽[^]*<ul class="wiki-list"><li>안쪽 목록/u);
+  assert.match(html, /<blockquote class="wiki-quote"><p>인용/u);
+  assert.match(html, /wiki-toc[^]*들여쓴 제목/u);
+  assert.match(html, /<section class="footnotes">[^]*들여쓴 각주[^]*<\/section>/u);
+  assert.ok(html.indexOf('<section class="footnotes">') < html.indexOf('<nav class="wiki-toc"'));
+  assert.match(html, /<\/div>\n<p>들여쓰기 뒤 본문<\/p>$/u);
+});
+
+test('keeps list syntax ahead of indentation and interpolates indent children as plain data', () => {
+  const list = parseMarkup(' * 목록 우선');
+  const template = parseMarkup(' @값@ [[@문서@]]');
+  const expanded = applyIncludeParametersToAst(template.ast, {
+    값: '<script>안전</script>',
+    문서: '가이드',
+  }, 'inc-');
+  const html = renderDocument(expanded);
+
+  assert.equal(list.ast[0]?.type, 'list');
+  assert.equal(expanded[0]?.type, 'indent');
+  assert.match(html, /^<div class="wiki-indent"><p>&lt;script&gt;안전&lt;\/script&gt; <a[^>]+>가이드<\/a><\/p><\/div>$/u);
+  assert.equal(html.includes('<script>'), false);
+});
+
+test('bounds deep indentation without dropping leaf or trailing content and escapes it safely', () => {
+  const parsed = parseMarkup(`${' '.repeat(40)}깊은 <img src=x onerror=alert(1)>\n들여쓰기 뒤`);
+  let cursor = parsed.ast[0];
+  let depth = 0;
+  while (cursor?.type === 'indent') {
+    depth += 1;
+    cursor = cursor.children[0];
+  }
+
+  assert.equal(depth, 16);
+  assert.equal(cursor?.type, 'paragraph');
+  if (cursor?.type === 'paragraph') {
+    assert.match(cursor.children[0]?.type === 'text' ? cursor.children[0].text : '', /^\s+깊은/u);
+  }
+  assert.equal(parsed.ast[1]?.type, 'paragraph');
+  assert.equal(parsed.blockingErrors.includes('들여쓰기는 16단계까지 사용할 수 있습니다.'), true);
+  const html = renderDocument(parsed.ast);
+  assert.match(html, /깊은 &lt;img src=x onerror=alert\(1\)&gt;/u);
+  assert.match(html, /들여쓰기 뒤/u);
+  assert.equal(html.includes('<img src=x'), false);
+});
+
+test('counts math recursively inside indentation before rendering', () => {
+  const parsed = parseMarkup(Array.from({ length: 51 }, () => ' [math(x)]').join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.blockingErrors.includes('수식은 문서당 50개까지 사용할 수 있습니다.'), true);
+  assert.equal(html.includes('class="katex"'), false);
+  assert.match(html, /수식 문법 오류/u);
+});
+
 test('keeps literal HTML escaped inside nested inline markup', () => {
   const parsed = parseMarkup("'''안전 ''<img src=x onerror=alert(1)>''''' ");
   const html = renderDocument(parsed.ast);
