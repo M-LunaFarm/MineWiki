@@ -18,6 +18,7 @@ import {
   type WikiPageMutationRequest
 } from './wiki-edit.service';
 import { WikiPermissionService } from './wiki-permission.service';
+import { WikiAclService } from './wiki-acl.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiReadService } from './wiki-read.service';
 import type { WikiNotificationService } from './wiki-notification.service';
@@ -102,21 +103,32 @@ test('user, file, and server move invariants preserve identity and wiki boundari
   }), null);
 });
 
-test('namespace-aware moves update a whole subtree and rebuild every current index', async () => {
+test('subtree move redirects clone page ACLs atomically and keep raw old paths restricted', async () => {
   const sourceRoot = {
     id: 7n, namespaceId: 1, spaceId: 10n, localPath: 'old', slug: 'old', title: 'Old',
     displayTitle: 'Old', currentRevisionId: 71n, pageType: 'article', protectionLevel: 'open',
-    status: 'normal', createdBy: 3n, ownerProfileId: null
+    status: 'normal', createdBy: 3n, ownerProfileId: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'), updatedAt: new Date('2026-01-01T00:00:00.000Z')
   };
   const sourceChild = {
     ...sourceRoot, id: 8n, localPath: 'old/child', slug: 'old/child', title: 'Old/Child',
     displayTitle: 'Child', currentRevisionId: 81n
   };
-  const pages = new Map([[sourceRoot.id, sourceRoot], [sourceChild.id, sourceChild]]);
-  const revisions = new Map([
-    [71n, { id: 71n, pageId: 7n, revisionNo: 1, visibility: 'public', contentRaw: '[[도움말:Root]]', contentSize: 21 }],
-    [81n, { id: 81n, pageId: 8n, revisionNo: 1, visibility: 'public', contentRaw: '[[분류:Child]]', contentSize: 20 }]
+  const pages = new Map<bigint, Record<string, unknown>>([[sourceRoot.id, sourceRoot], [sourceChild.id, sourceChild]]);
+  const revisions = new Map<bigint, Record<string, unknown>>([
+    [71n, { id: 71n, pageId: 7n, revisionNo: 1, parentRevisionId: null, visibility: 'public', contentRaw: '[[도움말:Root]]', contentHash: 'a'.repeat(64), contentSize: 21, syntaxVersion: 'bwm-0.3', editSummary: null, isMinor: false, createdBy: 3n, actorUserId: 3n, actorIpText: null, createdAt: new Date('2026-01-01T00:00:00.000Z') }],
+    [81n, { id: 81n, pageId: 8n, revisionNo: 1, parentRevisionId: null, visibility: 'public', contentRaw: '[[분류:Child]]', contentHash: 'b'.repeat(64), contentSize: 20, syntaxVersion: 'bwm-0.3', editSummary: null, isMinor: false, createdBy: 3n, actorUserId: 3n, actorIpText: null, createdAt: new Date('2026-01-01T00:00:00.000Z') }]
   ]);
+  const sourceRuleCreatedAt = new Date('2026-01-02T00:00:00.000Z');
+  const sourceRuleUpdatedAt = new Date('2026-01-03T00:00:00.000Z');
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+  const sourceAclRules = [
+    { id: 501n, targetType: 'page', targetId: 7n, action: 'read', effect: 'allow', subjectType: 'user', subjectValue: '3', sortOrder: 10, reason: 'source owner may read', expiresAt: null, createdBy: 3n, createdAt: sourceRuleCreatedAt, updatedAt: sourceRuleUpdatedAt },
+    { id: 502n, targetType: 'page', targetId: 7n, action: 'read', effect: 'deny', subjectType: 'perm', subjectValue: 'any', sortOrder: 20, reason: 'hide moved target', expiresAt, createdBy: 3n, createdAt: sourceRuleCreatedAt, updatedAt: sourceRuleUpdatedAt },
+    { id: 503n, targetType: 'page', targetId: 7n, action: 'raw', effect: 'deny', subjectType: 'perm', subjectValue: 'guest', sortOrder: 10, reason: 'hide raw redirect', expiresAt: null, createdBy: 3n, createdAt: sourceRuleCreatedAt, updatedAt: sourceRuleUpdatedAt },
+    { id: 504n, targetType: 'page', targetId: 8n, action: 'read', effect: 'deny', subjectType: 'perm', subjectValue: 'guest', sortOrder: 10, reason: 'hide child redirect', expiresAt, createdBy: 3n, createdAt: sourceRuleCreatedAt, updatedAt: sourceRuleUpdatedAt }
+  ];
+  const aclRules = [...sourceAclRules];
   const updates: Array<{ readonly id: bigint; readonly data: Record<string, unknown> }> = [];
   const recent: Array<Record<string, unknown>> = [];
   const indexed: Array<{ readonly pageId: bigint; readonly revisionId: bigint }> = [];
@@ -130,8 +142,16 @@ test('namespace-aware moves update a whole subtree and rebuild every current ind
     { id: 10n, status: 'active', spaceType: 'basic', rootNamespaceCode: 'main', rootPageId: null },
     { id: 20n, status: 'active', spaceType: 'basic', rootNamespaceCode: 'guide', rootPageId: null }
   ];
+  let nextPageId = 101n;
+  let nextRevisionId = 1001n;
+  let nextAclRuleId = 2001n;
+  let failAclClone = true;
+  let inTransaction = false;
   const tx = {
     async $queryRaw() { return []; },
+    wikiProfile: {
+      async findUnique() { return { id: 3n, status: 'active' }; }
+    },
     wikiNamespace: {
       async findUnique(input: { where: { id?: number; code?: string } }) {
         return namespaces.find((item) => item.id === input.where.id || item.code === input.where.code) ?? null;
@@ -144,13 +164,22 @@ test('namespace-aware moves update a whole subtree and rebuild every current ind
     },
     serverWiki: { async findFirst() { return null; } },
     wikiPage: {
-      async findUnique(input: { where: { id: bigint } }) { return pages.get(input.where.id) ?? null; },
+      async findUnique(input: { where: { id?: bigint; namespaceId_slug?: { namespaceId: number; slug: string } } }) {
+        if (input.where.id !== undefined) return pages.get(input.where.id) ?? null;
+        const key = input.where.namespaceId_slug;
+        return [...pages.values()].find((item) => item.namespaceId === key?.namespaceId && item.slug === key.slug) ?? null;
+      },
       async findMany(input: { where: { status?: unknown } }) {
         return input.where.status ? [...pages.values()] : [];
       },
+      async create(input: { data: Record<string, unknown> }) {
+        const created = { id: nextPageId++, currentRevisionId: null, ...input.data };
+        pages.set(created.id, created);
+        return created;
+      },
       async update(input: { where: { id: bigint }; data: Record<string, unknown> }) {
         updates.push({ id: input.where.id, data: input.data });
-        const updated = { ...pages.get(input.where.id)!, ...input.data } as typeof sourceRoot;
+        const updated = { ...pages.get(input.where.id)!, ...input.data };
         pages.set(input.where.id, updated);
         return updated;
       }
@@ -159,6 +188,34 @@ test('namespace-aware moves update a whole subtree and rebuild every current ind
       async findUnique(input: { where: { id: bigint } }) { return revisions.get(input.where.id) ?? null; },
       async findFirst(input: { where: { pageId: bigint } }) {
         return [...revisions.values()].find((item) => item.pageId === input.where.pageId) ?? null;
+      },
+      async create(input: { data: Record<string, unknown> }) {
+        const created = { id: nextRevisionId++, ...input.data };
+        revisions.set(created.id, created);
+        return created;
+      }
+    },
+    wikiPageRenderCache: {
+      async create(input: { data: Record<string, unknown> }) { return input.data; }
+    },
+    aclRule: {
+      async findMany(input: { where?: Record<string, unknown> }) {
+        const where = input.where ?? {};
+        const targetIds = (where.targetId as { in?: bigint[] } | undefined)?.in;
+        const targets = where.OR as Array<{ targetType: string; targetId: bigint | null }> | undefined;
+        return aclRules.filter((rule) =>
+          (where.targetType === undefined || rule.targetType === where.targetType) &&
+          (where.action === undefined || rule.action === where.action) &&
+          (!targetIds || targetIds.includes(rule.targetId)) &&
+          (!targets || targets.some((target) => target.targetType === rule.targetType && target.targetId === rule.targetId))
+        );
+      },
+      async create(input: { data: Omit<(typeof sourceAclRules)[number], 'id'> }) {
+        assert.equal(inTransaction, true);
+        if (failAclClone) throw new Error('acl clone failed');
+        const created = { id: nextAclRuleId++, ...input.data };
+        aclRules.push(created);
+        return created;
       }
     },
     wikiRecentChange: {
@@ -167,7 +224,33 @@ test('namespace-aware moves update a whole subtree and rebuild every current ind
   };
   const prisma = {
     ...tx,
-    async $transaction<T>(callback: (store: typeof tx) => Promise<T>) { return callback(tx); }
+    async $transaction<T>(callback: (store: typeof tx) => Promise<T>) {
+      const pageSnapshot = new Map([...pages].map(([id, page]) => [id, { ...page }]));
+      const revisionSnapshot = new Map([...revisions].map(([id, revision]) => [id, { ...revision }]));
+      const lengths = {
+        aclRules: aclRules.length, updates: updates.length, recent: recent.length,
+        indexed: indexed.length, permissionChecks: permissionChecks.length
+      };
+      const ids = { nextPageId, nextRevisionId, nextAclRuleId };
+      inTransaction = true;
+      try {
+        return await callback(tx);
+      } catch (error) {
+        pages.clear();
+        for (const [id, page] of pageSnapshot) pages.set(id, page);
+        revisions.clear();
+        for (const [id, revision] of revisionSnapshot) revisions.set(id, revision);
+        aclRules.length = lengths.aclRules;
+        updates.length = lengths.updates;
+        recent.length = lengths.recent;
+        indexed.length = lengths.indexed;
+        permissionChecks.length = lengths.permissionChecks;
+        ({ nextPageId, nextRevisionId, nextAclRuleId } = ids);
+        throw error;
+      } finally {
+        inTransaction = false;
+      }
+    }
   } as unknown as PrismaService;
   const profiles = {
     async ensureWikiProfile() { return { id: 3n, status: 'active' }; }
@@ -189,8 +272,22 @@ test('namespace-aware moves update a whole subtree and rebuild every current ind
   } as unknown as WikiLinkIndexService;
   const edits = new WikiEditService(prisma, profiles, permissions, events, links);
 
+  await assert.rejects(
+    edits.movePage(session('account'), '7', {
+      namespace: 'guide', spaceId: '20', title: 'New', leaveRedirect: true, reason: 'reorganize'
+    }),
+    /acl clone failed/
+  );
+  assert.equal(pages.get(7n)?.title, 'Old');
+  assert.equal(pages.get(8n)?.title, 'Old/Child');
+  assert.equal([...pages.values()].some((item) => item.pageType === 'redirect'), false);
+  assert.equal(aclRules.length, sourceAclRules.length);
+  assert.equal(recent.length, 0);
+  assert.equal(auditMetadata, null);
+
+  failAclClone = false;
   const result = await edits.movePage(session('account'), '7', {
-    namespace: 'guide', spaceId: '20', title: 'New', leaveRedirect: false, reason: 'reorganize'
+    namespace: 'guide', spaceId: '20', title: 'New', leaveRedirect: true, reason: 'reorganize'
   });
 
   assert.equal(result.namespace, 'guide');
@@ -198,9 +295,12 @@ test('namespace-aware moves update a whole subtree and rebuild every current ind
   assert.equal(result.previousSpaceId, '10');
   assert.equal(result.spaceId, '20');
   assert.equal(result.movedPageCount, 2);
-  assert.deepEqual(indexed, [{ pageId: 7n, revisionId: 71n }, { pageId: 8n, revisionId: 81n }]);
-  assert.equal(updates.every((update) => update.data.namespaceId === 2 && update.data.spaceId === 20n), true);
-  assert.equal(updates.every((update) => update.data.pageType === 'article' && update.data.ownerProfileId === null), true);
+  assert.deepEqual(indexed.filter((item) => item.pageId === 7n || item.pageId === 8n), [
+    { pageId: 7n, revisionId: 71n }, { pageId: 8n, revisionId: 81n }
+  ]);
+  const sourceUpdates = updates.filter((update) => update.id === 7n || update.id === 8n);
+  assert.equal(sourceUpdates.every((update) => update.data.namespaceId === 2 && update.data.spaceId === 20n), true);
+  assert.equal(sourceUpdates.every((update) => update.data.pageType === 'article' && update.data.ownerProfileId === null), true);
   assert.equal(pages.get(7n)?.title, 'New');
   assert.equal(pages.get(8n)?.title, 'New/Child');
   assert.equal(pages.get(7n)?.currentRevisionId, 71n);
@@ -209,9 +309,54 @@ test('namespace-aware moves update a whole subtree and rebuild every current ind
   assert.equal(permissionChecks.filter((check) => check.type === 'create').length, 2);
   assert.equal(recent.length, 2);
   assert.equal(recent.every((change) => String(change.summary).includes('[main@10 -> guide@20]')), true);
+  const redirects = [...pages.values()].filter((page) => page.pageType === 'redirect');
+  const rootRedirect = redirects.find((page) => page.localPath === 'old');
+  const childRedirect = redirects.find((page) => page.localPath === 'old/child');
+  assert.ok(rootRedirect);
+  assert.ok(childRedirect);
+
+  const orderedPolicy = (rule: (typeof aclRules)[number]) => ({
+    action: rule.action,
+    effect: rule.effect,
+    subjectType: rule.subjectType,
+    subjectValue: rule.subjectValue,
+    sortOrder: rule.sortOrder,
+    reason: rule.reason,
+    expiresAt: rule.expiresAt?.toISOString() ?? null,
+    createdBy: rule.createdBy
+  });
+  const sortRules = (rules: typeof aclRules) => [...rules].sort((left, right) =>
+    left.action.localeCompare(right.action) || left.sortOrder - right.sortOrder || (left.id < right.id ? -1 : 1)
+  );
+  for (const [sourceId, redirect] of [[7n, rootRedirect], [8n, childRedirect]] as const) {
+    const sourceRules = sortRules(sourceAclRules.filter((rule) => rule.targetId === sourceId));
+    const clonedRules = sortRules(aclRules.filter((rule) => rule.targetId === redirect.id));
+    assert.deepEqual(clonedRules.map(orderedPolicy), sourceRules.map(orderedPolicy));
+    assert.equal(clonedRules.every((rule) => !sourceAclRules.some((source) => source.id === rule.id)), true);
+    assert.equal(clonedRules.every((rule) => rule.createdAt.getTime() > sourceRuleUpdatedAt.getTime()), true);
+    assert.equal(clonedRules.every((rule) => rule.createdAt.getTime() === rule.updatedAt.getTime()), true);
+  }
+
+  const aclPermissions = new WikiPermissionService(prisma, new WikiAclService(prisma));
+  const aclReads = new WikiReadService(prisma, aclPermissions);
+  const aclEdits = new WikiEditService(prisma, profiles, aclPermissions);
+  await assert.rejects(
+    aclReads.getPage('main', 'Old', undefined, { followRedirects: false }),
+    /Wiki page not found/
+  );
+  await assert.rejects(
+    aclReads.getPage('main', 'Old/Child', undefined, { followRedirects: false }),
+    /Wiki page not found/
+  );
+  await assert.rejects(
+    aclEdits.getRawPage(String(rootRedirect.id), undefined),
+    /Wiki page not found/
+  );
+  const allowedRaw = await aclEdits.getRawPage(String(rootRedirect.id), session('account'));
+  assert.equal(allowedRaw.contentRaw, '#넘겨주기 [[guide:New]]');
   assert.deepEqual(auditMetadata, {
     previousTitle: 'Old', title: 'New', previousNamespace: 'main', namespace: 'guide',
-    previousSpaceId: '10', spaceId: '20', movedPageCount: 2, redirectPageId: null, reason: 'reorganize'
+    previousSpaceId: '10', spaceId: '20', movedPageCount: 2, redirectPageId: String(rootRedirect.id), reason: 'reorganize'
   });
 });
 

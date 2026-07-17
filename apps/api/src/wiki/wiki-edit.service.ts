@@ -1102,6 +1102,23 @@ export class WikiEditService {
         await this.rebuildCurrentRevisionIndexes(tx, move.source.id, revision);
       }
 
+      const sourcePageAclRules = request.leaveRedirect !== false
+        ? await tx.aclRule.findMany({
+            where: {
+              targetType: 'page',
+              targetId: { in: moves.map((move) => move.source.id) }
+            },
+            orderBy: [{ targetId: 'asc' }, { action: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }]
+          })
+        : [];
+      const aclRulesBySourcePage = new Map<bigint, Array<(typeof sourcePageAclRules)[number]>>();
+      for (const rule of sourcePageAclRules) {
+        if (rule.targetId === null) continue;
+        const rules = aclRulesBySourcePage.get(rule.targetId);
+        if (rules) rules.push(rule);
+        else aclRulesBySourcePage.set(rule.targetId, [rule]);
+      }
+
       let redirectPageId: bigint | null = null;
       if (request.leaveRedirect !== false) for (const move of moves) {
         const redirect = await tx.wikiPage.create({
@@ -1121,6 +1138,24 @@ export class WikiEditService {
             updatedAt: now
           }
         });
+        for (const rule of aclRulesBySourcePage.get(move.source.id) ?? []) {
+          await tx.aclRule.create({
+            data: {
+              targetType: 'page',
+              targetId: redirect.id,
+              action: rule.action,
+              effect: rule.effect,
+              subjectType: rule.subjectType,
+              subjectValue: rule.subjectValue,
+              sortOrder: rule.sortOrder,
+              reason: rule.reason,
+              expiresAt: rule.expiresAt,
+              createdBy: rule.createdBy,
+              createdAt: now,
+              updatedAt: now
+            }
+          });
+        }
         const redirectRevision = await this.createRevision(tx, {
           pageId: redirect.id,
           revisionNo: 1,
