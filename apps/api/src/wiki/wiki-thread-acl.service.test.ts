@@ -84,18 +84,28 @@ test('thread ACL rejects a group scoped to another wiki space', async () => {
   }), /this wiki space/i);
 });
 
-test('thread readers do not receive the manager-only ACL subject catalog', async () => {
+test('thread readers do not receive manager-only ACL rules, subjects, reasons, hashes, or catalog', async () => {
   let catalogQueried = false;
+  let rulesQueried = false;
   const prisma = {
     wikiDiscussionThread: { async findUnique() { return thread; } },
     wikiPage: { async findUnique() { return page; } },
-    aclRule: { async findMany() { return []; } },
+    aclRule: {
+      async findMany() { rulesQueried = true; return [{ subjectValue: 'private-user-42', reason: 'internal incident' }]; },
+      async findFirst() { return { id: 91n }; }
+    },
     wikiGroup: { async findMany() { catalogQueried = true; return []; } },
     aclGroup: { async findMany() { catalogQueried = true; return []; } }
   } as unknown as PrismaService;
   const service = new WikiThreadAclService(prisma, profileService(), permissionService({ manage: false }));
   const result = await service.getThreadAcl('30', null);
   assert.equal(catalogQueried, false);
+  assert.equal(rulesQueried, false);
+  assert.deepEqual(result.rules, []);
+  assert.equal(result.ruleSetHash, null);
+  assert.equal(result.manageReason, 'insufficient_permission');
+  assert.equal(result.inheritance.writeThreadComment, 'thread-closed');
+  assert.doesNotMatch(JSON.stringify(result), /private-user-42|internal incident|[a-f0-9]{64}/);
   assert.deepEqual(result.catalog.groups, []);
   assert.deepEqual(result.catalog.aclGroups, []);
   assert.deepEqual(result.catalog.roles, []);

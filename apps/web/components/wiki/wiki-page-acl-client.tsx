@@ -170,16 +170,16 @@ export function WikiPageAclClient({
       {error ? <p role="alert" className="flex items-start gap-2 rounded-lg border border-red-300/30 bg-red-500/10 p-4 text-sm text-red-200"><AlertTriangle className="mt-0.5 size-4 shrink-0" /> {error}</p> : null}
 
       {data ? <>
-        <div className="overflow-x-auto border-b border-white/10" role="tablist" aria-label="ACL 동작">
+        {data.canManage ? <div className="overflow-x-auto border-b border-white/10" role="tablist" aria-label="ACL 동작">
           <div className="flex min-w-max gap-1 pb-2">
             {data.actions.map((action) => {
               const count = data.rules.filter((rule) => rule.action === action).length;
               return <button key={action} type="button" role="tab" aria-selected={activeAction === action} onClick={() => setActiveAction(action)} className={`rounded-md px-3 py-2 text-xs font-semibold transition ${activeAction === action ? 'bg-emerald-300/15 text-emerald-200' : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'}`}>{ACTION_LABELS[action] ?? action}{count ? ` ${count}` : ''}</button>;
             })}
           </div>
-        </div>
+        </div> : null}
 
-        <section className="surface-flat overflow-hidden">
+        {data.canManage ? <section className="surface-flat overflow-hidden">
           <div className="border-b border-white/10 p-4 sm:p-5"><h2 className="text-base font-bold text-white">{ACTION_LABELS[activeAction] ?? activeAction} 규칙</h2><p className="mt-1 text-xs leading-5 text-slate-400">가장 위에 있는 일치 규칙 하나가 적용됩니다. 문서 규칙이 없으면 공간·네임스페이스·사이트 정책을 상속합니다.</p></div>
           <div className="divide-y divide-white/10">
             {rules.map((rule, index) => <article key={rule.id} className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-5">
@@ -195,7 +195,7 @@ export function WikiPageAclClient({
             </article>)}
             {rules.length === 0 ? <p className="p-6 text-sm leading-6 text-slate-400">이 동작에 대한 문서 규칙이 없습니다. 상위 ACL과 기본 보호 정책이 적용됩니다.</p> : null}
           </div>
-        </section>
+        </section> : <section className="surface-flat p-5"><h2 className="text-base font-bold text-white">적용 중인 문서 정책</h2><p className="mt-2 text-sm leading-6 text-slate-400">이 문서를 읽을 수 있는지 여부만 확인되었습니다. 사용자·그룹 식별자와 운영 사유가 포함된 상세 ACL 규칙은 권한이 있는 관리자에게만 표시됩니다.</p></section>}
 
         {data.canManage ? <form onSubmit={submit} className="surface-flat grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
           <div className="lg:col-span-2"><h2 className="flex items-center gap-2 text-base font-bold text-white"><Plus className="size-4 text-emerald-300" /> {ACTION_LABELS[activeAction]} 규칙 추가</h2><p className="mt-1 text-xs text-slate-400">특정 사용자·그룹·서버 역할을 선택해 문서 범위에서만 허용하거나 거부합니다.</p></div>
@@ -205,7 +205,7 @@ export function WikiPageAclClient({
           <Field label="만료 시각 (선택)"><input type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} className="wiki-acl-input" /></Field>
           <Field label="운영 사유 (선택)" wide><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={1000} placeholder="이 규칙이 필요한 이유" className="wiki-acl-input" /></Field>
           <div className="lg:col-span-2"><button type="submit" disabled={working || !subjectValue} className="btn-primary gap-2 disabled:opacity-50">{working ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}규칙 추가</button></div>
-        </form> : <p className="surface-flat p-4 text-sm leading-6 text-slate-400">규칙은 누구나 확인할 수 있지만 변경은 문서 작성자, 공간 관리자, 서버 소유자 또는 ACL로 위임받은 사용자만 가능합니다. <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="font-semibold text-emerald-200 hover:underline">로그인</Link></p>}
+        </form> : <p className="surface-flat p-4 text-sm leading-6 text-slate-400">상세 규칙의 열람과 변경은 문서 작성자, 공간 관리자, 서버 소유자 또는 ACL로 위임받은 사용자만 가능합니다. <Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="font-semibold text-emerald-200 hover:underline">로그인</Link></p>}
       </> : null}
     </div>
   );

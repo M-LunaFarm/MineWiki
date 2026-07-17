@@ -179,16 +179,16 @@ export function WikiThreadAclClient({ threadId, returnTo }: { readonly threadId:
           <PolicyNote title="규칙이 있으면 폐쇄형 평가">현재 동작에 유효한 규칙이 하나라도 있으면 위에서부터 첫 일치 규칙을 적용하며, 아무 규칙에도 일치하지 않으면 거부합니다.</PolicyNote>
         </section>
 
-        <div className="overflow-x-auto border-b border-white/10" role="tablist" aria-label="토론 ACL 동작">
+        {data.canManage ? <div className="overflow-x-auto border-b border-white/10" role="tablist" aria-label="토론 ACL 동작">
           <div className="flex min-w-max gap-1 pb-2">
             {data.actions.map((action) => {
               const count = data.rules.filter((rule) => rule.action === action).length;
               return <button key={action} type="button" role="tab" aria-selected={activeAction === action} onClick={() => setActiveAction(action)} className={`min-h-11 rounded-md px-3 py-2 text-xs font-semibold transition ${activeAction === action ? 'bg-emerald-300/15 text-emerald-200' : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'}`}>{ACTION_LABELS[action]}{count ? ` ${count}` : ''}</button>;
             })}
           </div>
-        </div>
+        </div> : null}
 
-        <section className="surface-flat overflow-hidden">
+        {data.canManage ? <section className="surface-flat overflow-hidden">
           <div className="border-b border-white/10 p-4 sm:p-5">
             <h2 className="text-base font-bold text-white">{ACTION_LABELS[activeAction]} 규칙</h2>
             <p className="mt-1 text-xs leading-5 text-slate-400">{rules.length === 0 ? '토론 규칙이 없어 문서 ACL을 그대로 상속합니다.' : '첫 일치 규칙이 적용됩니다. allow 목록에 없는 사용자는 기본 거부됩니다.'}</p>
@@ -207,7 +207,7 @@ export function WikiThreadAclClient({ threadId, returnTo }: { readonly threadId:
             </article>)}
             {rules.length === 0 ? <p className="p-6 text-sm leading-6 text-slate-400">상속 상태입니다. 제한을 시작하려면 필요한 허용 대상을 모두 포함한 규칙 집합을 구성하세요.</p> : null}
           </div>
-        </section>
+        </section> : <section className="surface-flat p-5"><h2 className="text-base font-bold text-white">적용 중인 토론 정책</h2><p className="mt-2 text-sm leading-6 text-slate-400">문서 읽기 정책을 경계로 이 토론에 접근할 수 있는지만 확인되었습니다. 사용자·그룹 식별자와 운영 사유가 포함된 상세 규칙은 ACL 관리자에게만 표시됩니다.</p></section>}
 
         {data.canManage ? <form onSubmit={submit} className="surface-flat grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
           <div className="lg:col-span-2"><h2 className="flex items-center gap-2 text-base font-bold text-white"><Plus className="size-4 text-emerald-300" /> {ACTION_LABELS[activeAction]} 규칙 추가</h2><p className="mt-1 text-xs leading-5 text-slate-400">차단 목록은 거부 규칙 뒤에 <code>perm:any</code> 허용 규칙을 두어야 나머지 사용자가 접근할 수 있습니다.</p></div>
@@ -217,7 +217,7 @@ export function WikiThreadAclClient({ threadId, returnTo }: { readonly threadId:
           <Field label="만료 시각 (선택)"><input type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} className="wiki-acl-input" /></Field>
           <Field label="운영 사유" wide><input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={1000} required placeholder="제한 또는 허용이 필요한 이유" className="wiki-acl-input" /></Field>
           <div className="lg:col-span-2"><button type="submit" disabled={working || !subjectValue || !reason.trim()} className="btn-primary min-h-11 gap-2 disabled:opacity-50">{working ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}규칙 추가</button></div>
-        </form> : <p className="surface-flat p-4 text-sm leading-6 text-slate-400">규칙은 열람할 수 있지만 변경은 문서 ACL 관리자·공간/서버 소유자·전역 위키 관리자만 가능합니다. 관리 작업에는 최근 보안 인증이 필요합니다.</p>}
+        </form> : <p className="surface-flat p-4 text-sm leading-6 text-slate-400">상세 규칙의 열람과 변경은 문서 ACL 관리자·공간/서버 소유자·전역 위키 관리자만 가능합니다. 관리 작업에는 최근 보안 인증이 필요합니다.</p>}
       </> : null}
     </div>
   );
