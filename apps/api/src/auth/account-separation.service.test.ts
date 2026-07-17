@@ -64,7 +64,7 @@ if (!hasDatabase) {
     );
   });
 
-  test('rejects linking account groups that each own a Minecraft identity', async () => {
+  test('links account groups that each own a distinct Minecraft identity', async () => {
     const first = await service.registerAccount({
       provider: 'discord',
       providerUserId: `discord-${randomUUID()}`,
@@ -95,12 +95,7 @@ if (!hasDatabase) {
         ],
       });
 
-      await assert.rejects(
-        () => service.confirmLink(request.id, request.verificationCode),
-        (error: unknown) =>
-          error instanceof ConflictException &&
-          error.message.includes('서로 다른 Minecraft 계정'),
-      );
+      await service.confirmLink(request.id, request.verificationCode);
       assert.equal(
         await prisma.accountLink.count({
           where: {
@@ -110,8 +105,13 @@ if (!hasDatabase) {
             ],
           },
         }),
-        0,
+        2,
       );
+      const identities = await prisma.minecraftIdentity.findMany({
+        where: { accountId: { in: [first.id, second.id] } },
+        select: { uuid: true },
+      });
+      assert.equal(identities.length, 2);
     } finally {
       await prisma.account.deleteMany({ where: { id: { in: [first.id, second.id] } } });
     }
