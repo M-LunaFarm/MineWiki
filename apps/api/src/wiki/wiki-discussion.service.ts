@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { wikiUrl } from '@minewiki/wiki-core';
+import { renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
 import { Prisma, type WikiDiscussionThread } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
@@ -10,6 +10,7 @@ import { WikiNotificationService } from './wiki-notification.service';
 import { buildServerWikiPagePath, buildServerWikiToolPath } from './wiki-read.service';
 import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
 import { extractDiscussionMentions, uniqueDiscussionMentionUsernames } from './wiki-discussion-mention';
+import { wikiLinkResolutionContext } from './wiki-link-context';
 
 export interface WikiThreadSummary {
   readonly id: string;
@@ -93,6 +94,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
       readonly afterRedacted: boolean;
     } | null;
     readonly content: string | null;
+    readonly contentHtml: string | null;
     readonly status: string;
     readonly createdBy: string | null;
     readonly createdByName: string;
@@ -480,6 +482,7 @@ export class WikiDiscussionService {
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
     const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null);
+    const markupContext = await this.discussionMarkupContext(page);
     const viewerActor = await this.viewerActor(session);
     await this.wikiPermissions.assertCanReadThread({
       accountId: session?.userId ?? null,
@@ -646,21 +649,31 @@ export class WikiDiscussionService {
       }).map((comment) => {
         const concealed = comment.entryType !== 'system'
           && (comment.status === 'deleted' || (comment.status === 'hidden' && !canManage));
+        const mentions = concealed || comment.entryType === 'system'
+          ? []
+          : (mentionOccurrencesByComment.get(comment.id) ?? []).flatMap((mention) => {
+              const target = mentionProfileByUsername.get(mention.username.toLocaleLowerCase('en-US'));
+              return target ? [{ username: target.username, profileId: target.id.toString(), start: mention.start, end: mention.end }] : [];
+            });
         return {
         id: comment.id.toString(),
         entryType: comment.entryType === 'system' ? 'system' as const : 'comment' as const,
         systemEvent: comment.entryType === 'system' ? systemEvents.get(comment.id) ?? null : null,
         content: concealed || comment.entryType === 'system' ? null : comment.content,
+        contentHtml: concealed || comment.entryType === 'system'
+          ? null
+          : renderDiscussionMarkup(comment.content, {
+              ...markupContext,
+              mentions: mentions.map((mention) => ({
+                username: mention.username,
+                href: `/user/${encodeURIComponent(mention.username)}`,
+              })),
+            }),
         status: concealed ? 'hidden' : comment.status,
         createdBy: concealed ? null : comment.createdBy.toString(),
         createdByName: concealed ? '비공개 사용자' : profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
         createdByUsername: concealed ? null : usernameByProfileId.get(comment.createdBy) ?? null,
-        mentions: concealed || comment.entryType === 'system'
-          ? []
-          : (mentionOccurrencesByComment.get(comment.id) ?? []).flatMap((mention) => {
-              const target = mentionProfileByUsername.get(mention.username.toLocaleLowerCase('en-US'));
-              return target ? [{ username: target.username, profileId: target.id.toString(), start: mention.start, end: mention.end }] : [];
-            }),
+        mentions,
         createdAt: concealed ? null : comment.createdAt.toISOString(),
         canDelete: Boolean(comment.entryType !== 'system' && comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
         canChangeVisibility: Boolean(comment.entryType !== 'system' && canManage && comment.status !== 'deleted'),
@@ -1158,6 +1171,28 @@ export class WikiDiscussionService {
     if (!page) throw new NotFoundException('Wiki page not found.');
     await this.wikiPermissions.assertCanReadPage({ accountId, page });
     return page;
+  }
+
+  private async discussionMarkupContext(page: { namespaceId: number; spaceId: bigint; localPath: string }) {
+    const stores = this.prisma as unknown as {
+      wikiNamespace?: { findUnique?: (args: unknown) => Promise<{ code: string } | null> };
+      serverWiki?: { findUnique?: (args: unknown) => Promise<{ slug: string; status: string } | null> };
+    };
+    const namespace = stores.wikiNamespace?.findUnique
+      ? await stores.wikiNamespace.findUnique({ where: { id: page.namespaceId }, select: { code: true } })
+      : null;
+    const namespaceCode = namespace?.code ?? 'main';
+    const linkResolution = wikiLinkResolutionContext(namespaceCode, page.localPath);
+    if (namespaceCode !== 'server' || !stores.serverWiki?.findUnique) return { linkResolution };
+    const serverWiki = await stores.serverWiki.findUnique({
+      where: { spaceId: page.spaceId },
+      select: { slug: true, status: true },
+    });
+    if (!serverWiki || serverWiki.status === 'disabled') return { linkResolution };
+    return {
+      linkResolution,
+      internalLinkBasePath: buildServerWikiPagePath(serverWiki.slug, serverWiki.slug),
+    };
   }
 
   private async moderatableThread(session: SessionPayload, threadId: string) {

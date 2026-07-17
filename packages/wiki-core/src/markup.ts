@@ -1771,6 +1771,99 @@ export interface RenderOptions {
   disableMathRendering?: boolean;
 }
 
+export interface DiscussionMarkupMention {
+  readonly username: string;
+  readonly href: string;
+}
+
+export interface DiscussionMarkupOptions extends RenderOptions {
+  /** Mentions already validated against active wiki profiles by the caller. */
+  mentions?: readonly DiscussionMarkupMention[];
+}
+
+/** Render the deliberately small NamuMark subset supported inside discussions. */
+export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOptions = {}): string {
+  const { mentions = [], ...renderOptions } = options;
+  const parsed = parseMarkup(raw, { linkResolution: renderOptions.linkResolution });
+  const mentionByUsername = new Map(mentions
+    .filter((mention) => /^[A-Za-z0-9_]{3,16}$/u.test(mention.username) && /^\/user\/[A-Za-z0-9_%._~-]+$/u.test(mention.href))
+    .map((mention) => [mention.username.toLocaleLowerCase('en-US'), mention]));
+
+  const injectMentions = (value: string): InlineNode[] => {
+    if (mentionByUsername.size === 0 || !value.includes('@')) return [{ type: 'text', text: value }];
+    const output: InlineNode[] = [];
+    let plainStart = 0;
+    let cursor = 0;
+    while (cursor < value.length) {
+      if (value[cursor] !== '@' || (cursor > 0 && /[A-Za-z0-9_]/u.test(value[cursor - 1] ?? ''))) {
+        cursor += 1;
+        continue;
+      }
+      const match = value.slice(cursor + 1).match(/^[A-Za-z0-9_]{3,16}/u);
+      const username = match?.[0] ?? '';
+      const next = value[cursor + 1 + username.length] ?? '';
+      const mention = username && !/[A-Za-z0-9_]/u.test(next)
+        ? mentionByUsername.get(username.toLocaleLowerCase('en-US'))
+        : undefined;
+      if (!mention) {
+        cursor += 1;
+        continue;
+      }
+      if (cursor > plainStart) output.push({ type: 'text', text: value.slice(plainStart, cursor) });
+      output.push({ type: 'external_link', href: mention.href, label: value.slice(cursor, cursor + username.length + 1) });
+      cursor += username.length + 1;
+      plainStart = cursor;
+    }
+    if (plainStart < value.length) output.push({ type: 'text', text: value.slice(plainStart) });
+    return output.length > 0 ? output : [{ type: 'text', text: value }];
+  };
+
+  const restrictInline = (nodes: readonly InlineNode[]): InlineNode[] => nodes.flatMap((node): InlineNode[] => {
+    if (node.type === 'text') return injectMentions(node.text);
+    if (node.type === 'line_break' || node.type === 'code' || node.type === 'internal_link' || node.type === 'external_link') return [node];
+    if (node.type === 'ruby') return [{ type: 'text', text: node.text }];
+    if (node.type === 'bold' || node.type === 'italic' || node.type === 'strike'
+      || node.type === 'underline' || node.type === 'sup' || node.type === 'sub') {
+      return [{ ...node, children: restrictInline(node.children) }];
+    }
+    if (node.type === 'color' || node.type === 'size') return restrictInline(node.children);
+    return [];
+  });
+
+  const restrictList = (list: WikiListNode): WikiListNode => ({
+    ...list,
+    items: list.items.map((item) => ({
+      children: restrictInline(item.children),
+      nested: item.nested.map(restrictList),
+    })),
+  });
+  const restrictAst = (nodes: readonly AstNode[]): AstNode[] => nodes.flatMap((node): AstNode[] => {
+    if (node.type === 'heading') return [{ type: 'paragraph', children: [{ type: 'text', text: node.text }] }];
+    if (node.type === 'paragraph') return [{ ...node, children: restrictInline(node.children) }];
+    if (node.type === 'list') return [restrictList(node)];
+    if (node.type === 'blockquote') return [{ ...node, children: restrictAst(node.children) }];
+    if (node.type === 'hr' || node.type === 'codeblock') return [node];
+    if (node.type === 'wiki_table') {
+      return [{
+        ...node,
+        caption: restrictInline(node.caption),
+        rows: node.rows.map((row) => ({
+          ...row,
+          cells: row.cells.map((cell) => ({ ...cell, children: restrictInline(cell.children) })),
+        })),
+      }];
+    }
+    if (node.type === 'folding') {
+      const title = restrictInline(node.title);
+      return [...(title.length > 0 ? [{ type: 'paragraph' as const, children: title }] : []), ...restrictAst(node.children)];
+    }
+    if (node.type === 'wiki_style') return restrictAst(node.children);
+    return [];
+  });
+
+  return renderDocument(restrictAst(parsed.ast), renderOptions);
+}
+
 interface RenderedFootnote {
   name: string | null;
   text: string;
@@ -2139,7 +2232,9 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
       if (node.type === 'size') return `<span class="wiki-size" style="font-size: ${inlineSizeEm(node.delta)}em">${renderInline(node.children, footnotes, options)}</span>`;
       if (node.type === 'code') return `<code>${escapeHtml(node.code)}</code>`;
       if (node.type === 'external_link') {
-        return `<a href="${escapeAttr(node.href)}" rel="nofollow noopener" target="_blank">${escapeHtml(node.label)}</a>`;
+        const external = /^https?:\/\//iu.test(node.href);
+        const attributes = external ? ' rel="nofollow noopener" target="_blank"' : '';
+        return `<a href="${escapeAttr(node.href)}"${attributes}>${escapeHtml(node.label)}</a>`;
       }
       if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options, node.fragment);
       if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, node.display, options, true);

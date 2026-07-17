@@ -914,9 +914,17 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                       ) : null}
                     </span>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-200">
-                    {item.content ? <DiscussionCommentContent content={item.content} mentions={item.mentions ?? []} /> : (item.status === 'hidden' ? '비공개 처리된 댓글입니다.' : '삭제된 댓글입니다.')}
-                  </p>
+                  <div className="mt-3 [overflow-wrap:anywhere] text-sm leading-6 text-slate-200">
+                    {item.content ? (
+                      <DiscussionCommentContent
+                        content={item.content}
+                        contentHtml={item.contentHtml}
+                        mentions={item.mentions ?? []}
+                      />
+                    ) : (
+                      <p>{item.status === 'hidden' ? '비공개 처리된 댓글입니다.' : '삭제된 댓글입니다.'}</p>
+                    )}
+                  </div>
                   {item.poll ? (
                     <DiscussionPollCard
                       poll={item.poll}
@@ -1005,16 +1013,21 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
 
 function DiscussionCommentContent({
   content,
+  contentHtml,
   mentions,
 }: {
   readonly content: string;
+  readonly contentHtml?: string | null;
   readonly mentions: WikiThreadDetail['comments'][number]['mentions'];
 }) {
+  if (contentHtml) {
+    return <div className="wiki-rendered wiki-discussion-markup" dangerouslySetInnerHTML={{ __html: contentHtml }} />;
+  }
   const valid = [...mentions]
     .filter((mention) => Number.isInteger(mention.start) && Number.isInteger(mention.end) && mention.start >= 0 && mention.end <= content.length && mention.start < mention.end && content.slice(mention.start, mention.end).toLocaleLowerCase('en-US') === `@${mention.username}`.toLocaleLowerCase('en-US'))
     .sort((left, right) => left.start - right.start || left.end - right.end)
     .filter((mention, index, all) => index === 0 || mention.start >= all[index - 1]!.end);
-  if (valid.length === 0) return content;
+  if (valid.length === 0) return <p className="whitespace-pre-wrap">{content}</p>;
   const parts: ReactNode[] = [];
   let cursor = 0;
   for (const mention of valid) {
@@ -1027,7 +1040,7 @@ function DiscussionCommentContent({
     cursor = mention.end;
   }
   if (cursor < content.length) parts.push(content.slice(cursor));
-  return parts;
+  return <p className="whitespace-pre-wrap">{parts}</p>;
 }
 
 function userDocumentHref(username: string | null, profileId: string): string {

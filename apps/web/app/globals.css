@@ -729,6 +729,25 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered .wiki-table-caption {
     @apply caption-top px-3 pb-2 text-left text-sm font-semibold text-slate-300;
   }
+  .wiki-rendered.wiki-discussion-markup {
+    @apply border-0 bg-transparent p-0 text-sm leading-6;
+  }
+  .wiki-rendered.wiki-discussion-markup > :first-child {
+    @apply mt-0;
+  }
+  .wiki-rendered.wiki-discussion-markup .table-scroll {
+    @apply max-w-full overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .wiki-rendered.wiki-discussion-markup .table-scroll table {
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
+  }
+  .wiki-rendered.wiki-discussion-markup :is(th, td) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   html[data-theme='dark'] .wiki-rendered [style*='--wiki-dark-color'] {
     color: var(--wiki-dark-color) !important;
   }
