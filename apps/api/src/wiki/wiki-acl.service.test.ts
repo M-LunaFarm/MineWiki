@@ -539,3 +539,43 @@ test('expired thread rules are ignored and preserve page inheritance', async () 
   });
   assert.deepEqual(decisions.get(30n), { matched: false, allowed: false, reason: 'thread_acl_inherit' });
 });
+
+test('unknown ACL subjects fail closed instead of falling through to a later allow rule', async () => {
+  const rules = [
+    { targetType: 'page', targetId: 1n, action: 'read', effect: 'allow', subjectType: 'future_subject', subjectValue: 'anything', sortOrder: 10 },
+    { targetType: 'page', targetId: 1n, action: 'read', effect: 'allow', subjectType: 'perm', subjectValue: 'any', sortOrder: 20 }
+  ];
+  const { service, store } = createService({ rules });
+
+  const decision = await service.evaluate({
+    actor: null,
+    action: 'read',
+    resource: { pageId: 1n, spaceId: 10n },
+    store: store as unknown as PrismaService
+  });
+  const batch = await service.evaluateReadBatch({
+    actor: null,
+    resources: [{ pageId: 1n, spaceId: 10n }],
+    store: store as unknown as PrismaService
+  });
+
+  assert.deepEqual(decision, { matched: true, allowed: false, reason: 'acl_unsupported_subject' });
+  assert.deepEqual(batch.get(1n), { matched: true, allowed: false, reason: 'acl_unsupported_subject' });
+});
+
+test('unknown thread ACL subjects fail closed', async () => {
+  const { service, store } = createService({
+    rules: [
+      { targetType: 'thread', targetId: 30n, action: 'read', effect: 'allow', subjectType: 'future_subject', subjectValue: 'anything', sortOrder: 10 },
+      { targetType: 'thread', targetId: 30n, action: 'read', effect: 'allow', subjectType: 'perm', subjectValue: 'any', sortOrder: 20 }
+    ]
+  });
+  const decisions = await service.evaluateThreadBatch({
+    actor: null,
+    action: 'read',
+    resources: [{ threadId: 30n, pageId: 1n, spaceId: 10n }],
+    store: store as unknown as PrismaService
+  });
+
+  assert.deepEqual(decisions.get(30n), { matched: true, allowed: false, reason: 'acl_unsupported_subject' });
+});

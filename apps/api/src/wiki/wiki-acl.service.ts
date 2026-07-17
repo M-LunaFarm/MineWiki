@@ -62,6 +62,7 @@ const ROLE_GROUPS = {
   trusted: new Set(['trusted', 'moderator', 'admin', 'developer']),
   autoconfirmed: new Set(['autoconfirmed', 'trusted', 'moderator', 'admin', 'developer'])
 };
+const SUPPORTED_ACL_SUBJECT_TYPES = new Set(['perm', 'user', 'aclgroup', 'role', 'group']);
 
 @Injectable()
 export class WikiAclService {
@@ -114,6 +115,10 @@ export class WikiAclService {
       }
       let decision: WikiAclDecision = { matched: true, allowed: false, reason: 'thread_acl_closed' };
       for (const rule of threadRules) {
+        if (!isSupportedAclSubjectType(rule.subjectType)) {
+          decision = { matched: true, allowed: false, reason: 'acl_unsupported_subject' };
+          break;
+        }
         const cacheKey = batchSubjectCacheKey(rule, resource);
         let matched = matches.get(cacheKey);
         if (!matched) {
@@ -177,6 +182,10 @@ export class WikiAclService {
       scopeLoop: for (const scope of scopes) {
         if (scope.targetType !== 'site' && scope.targetId === null) continue;
         for (const rule of rulesByTarget.get(`${scope.targetType}:${scope.targetId?.toString() ?? ''}`) ?? []) {
+          if (!isSupportedAclSubjectType(rule.subjectType)) {
+            decision = { matched: true, allowed: false, reason: 'acl_unsupported_subject' };
+            break scopeLoop;
+          }
           const cacheKey = batchSubjectCacheKey(rule, resource);
           let matched = matches.get(cacheKey);
           if (!matched) {
@@ -260,6 +269,9 @@ export class WikiAclService {
         )
         .sort((left, right) => left.sortOrder - right.sortOrder);
       for (const rule of scopedRules) {
+        if (!isSupportedAclSubjectType(rule.subjectType)) {
+          return { matched: true, allowed: false, reason: 'acl_unsupported_subject' };
+        }
         if (!(await this.subjectMatches(
           store,
           rule,
@@ -554,6 +566,10 @@ export class WikiAclService {
     });
     return Boolean(role);
   }
+}
+
+function isSupportedAclSubjectType(value: string): boolean {
+  return SUPPORTED_ACL_SUBJECT_TYPES.has(value);
 }
 
 function normalizeRequestIp(value: string | null): { readonly address: string; readonly family: 4 | 6 } | null {
