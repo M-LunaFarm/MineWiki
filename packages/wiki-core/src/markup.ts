@@ -458,6 +458,25 @@ function parseMarkupDocument(
       continue;
     }
 
+    const markdownTable = parseMarkdownTableStart(lines, i);
+    if (markdownTable) {
+      const rows: WikiTableRow[] = [
+        markdownTable.headers,
+        ...markdownTable.bodyRows
+      ].map((cells, rowIndex) => ({
+        cells: cells.map((content, columnIndex) => ({
+          children: parseInline(content, links, errors, blockingErrors, footnotes, options.linkResolution),
+          colspan: 1,
+          rowspan: 1,
+          ...(rowIndex === 0 ? { header: true } : {}),
+          ...(markdownTable.alignments[columnIndex] ? { align: markdownTable.alignments[columnIndex] } : {})
+        }))
+      }));
+      i += markdownTable.consumedLineCount - 1;
+      ast.push({ type: 'wiki_table', caption: [], rows, options: {} });
+      continue;
+    }
+
     const tableStart = parseWikiTableStart(line, lines[i + 1]);
     if (tableStart) {
       const rows: WikiTableRow[] = [];
@@ -962,6 +981,82 @@ interface WikiTableStart {
   caption: string | null;
   firstRow: string | null;
   consumeNextLine: boolean;
+}
+
+interface MarkdownTableStart {
+  headers: string[];
+  alignments: Array<'left' | 'center' | 'right' | undefined>;
+  bodyRows: string[][];
+  consumedLineCount: number;
+}
+
+function parseMarkdownTableStart(lines: readonly string[], startIndex: number): MarkdownTableStart | null {
+  const line = lines[startIndex] ?? '';
+  const separatorLine = lines[startIndex + 1];
+  if (!separatorLine || !line.includes('|') || !separatorLine.includes('|')) return null;
+  const headers = splitMarkdownTableRow(line);
+  const separators = splitMarkdownTableRow(separatorLine);
+  if (headers.length === 0 || headers.length !== separators.length) return null;
+  if (!separators.every((cell) => /^:?-{3,}:?$/u.test(cell.trim()))) return null;
+
+  const alignments = separators.map((cell) => {
+    const marker = cell.trim();
+    if (marker.startsWith(':') && marker.endsWith(':')) return 'center' as const;
+    if (marker.endsWith(':')) return 'right' as const;
+    if (marker.startsWith(':')) return 'left' as const;
+    return undefined;
+  });
+  const bodyRows: string[][] = [];
+  let lineOffset = startIndex + 2;
+  while (lineOffset < lines.length) {
+    const candidate = lines[lineOffset];
+    if (!candidate?.includes('|') || !candidate.trim()) break;
+    const cells = splitMarkdownTableRow(candidate);
+    if (cells.length === 0) break;
+    bodyRows.push(Array.from({ length: headers.length }, (_, index) => cells[index] ?? ''));
+    lineOffset += 1;
+  }
+  return { headers, alignments, bodyRows, consumedLineCount: lineOffset - startIndex };
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  const trimmed = line.trim();
+  const start = trimmed.startsWith('|') ? 1 : 0;
+  const end = trimmed.endsWith('|') && !trimmed.endsWith('\\|') ? trimmed.length - 1 : trimmed.length;
+  const cells: string[] = [];
+  let cell = '';
+  let escaped = false;
+  let codeFenceLength = 0;
+  for (let index = start; index < end; index += 1) {
+    const character = trimmed[index]!;
+    if (escaped) {
+      cell += character;
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (character === '`') {
+      let runLength = 1;
+      while (trimmed[index + runLength] === '`') runLength += 1;
+      if (codeFenceLength === 0) codeFenceLength = runLength;
+      else if (codeFenceLength === runLength) codeFenceLength = 0;
+      cell += '`'.repeat(runLength);
+      index += runLength - 1;
+      continue;
+    }
+    if (character === '|' && codeFenceLength === 0) {
+      cells.push(cell.trim());
+      cell = '';
+      continue;
+    }
+    cell += character;
+  }
+  if (escaped) cell += '\\';
+  cells.push(cell.trim());
+  return cells;
 }
 
 function parseWikiTableStart(line: string, nextLine: string | undefined): WikiTableStart | null {
