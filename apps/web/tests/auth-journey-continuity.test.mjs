@@ -84,7 +84,7 @@ test('account conflicts use the auth shell before the settings dashboard', async
   const conflictGate = source.indexOf(
     'if (linkConflicts.length > 0 && !conflictInterstitialDismissed)',
   );
-  const settingsDashboard = source.indexOf('return (\n    <div className="min-h-screen bg-[#121212]');
+  const settingsDashboard = source.indexOf('return (\n    <div className="account-surface min-h-screen bg-[#121212]');
 
   assert.ok(conflictGate >= 0, 'account conflict interstitial should exist');
   assert.ok(settingsDashboard > conflictGate, 'conflict interstitial should render before settings');
