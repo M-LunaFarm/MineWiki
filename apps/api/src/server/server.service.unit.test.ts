@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { downsamplePingSamples, ServerService } from './server.service';
+import { buildOrder, downsamplePingSamples, ServerService } from './server.service';
 
 test('server stats downsampling preserves the seven-day range endpoints', () => {
   const samples = Array.from({ length: 901 }, (_, index) => index);
@@ -88,6 +88,15 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
     () => service.register({ ...base, joinHost: '192.168.1.10', joinPort: 25566 }),
     /사설망, 루프백 또는 예약된 IP 주소/,
   );
+});
+
+test('default vote ranking uses the same tie breakers as the rank aggregator', () => {
+  assert.deepEqual(buildOrder('votes24h_desc'), [
+    { votes24h: 'desc' },
+    { stats: { votesLast7d: 'desc' } },
+    { reviewsCount: 'desc' },
+    { name: 'asc' },
+  ]);
 });
 
 test('server list exposes the aggregated global rank metadata', async () => {
