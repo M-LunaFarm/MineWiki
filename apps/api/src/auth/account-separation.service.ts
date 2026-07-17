@@ -220,7 +220,12 @@ export class AccountSeparationService {
           ],
           skipDuplicates: true,
         });
-        await this.stabilizeCanonicalAccountInTransaction(tx, fresh.primaryAccountId, group.accountIds);
+        const canonicalAccountId = await this.stabilizeCanonicalAccountInTransaction(
+          tx,
+          fresh.primaryAccountId,
+          group.accountIds,
+        );
+        await this.finalizeCanonicalAccountMerge(tx, canonicalAccountId, group.accountIds);
         await this.rehomeWebAuthnForCanonicalMerge(tx, fresh.primaryAccountId, group.accountIds);
         await this.synchronizeWikiProfileBlocksForAccountLink(tx, group.accountIds);
         await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
@@ -252,7 +257,12 @@ export class AccountSeparationService {
           ],
           skipDuplicates: true,
         });
-        await this.stabilizeCanonicalAccountInTransaction(tx, primaryAccountId, group.accountIds);
+        const canonicalAccountId = await this.stabilizeCanonicalAccountInTransaction(
+          tx,
+          primaryAccountId,
+          group.accountIds,
+        );
+        await this.finalizeCanonicalAccountMerge(tx, canonicalAccountId, group.accountIds);
         await this.rehomeWebAuthnForCanonicalMerge(tx, primaryAccountId, group.accountIds);
         await this.synchronizeWikiProfileBlocksForAccountLink(tx, group.accountIds);
         await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
@@ -334,7 +344,7 @@ export class AccountSeparationService {
     tx: import('@prisma/client').Prisma.TransactionClient,
     primaryAccountId: string,
     accountIds: readonly string[],
-  ): Promise<void> {
+  ): Promise<string> {
     const primary = await tx.account.findUnique({
       where: { id: primaryAccountId },
       select: { canonicalAccountId: true },
@@ -346,6 +356,54 @@ export class AccountSeparationService {
     await tx.account.updateMany({
       where: { id: { in: [...accountIds] } },
       data: { canonicalAccountId },
+    });
+    return canonicalAccountId;
+  }
+
+  private async finalizeCanonicalAccountMerge(
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    canonicalAccountId: string,
+    accountIds: readonly string[],
+  ): Promise<void> {
+    if (!accountIds.includes(canonicalAccountId)) {
+      throw new ConflictException('대표 계정이 연결 계정 그룹과 일치하지 않습니다.');
+    }
+
+    const accountIdFilter = { in: [...accountIds], not: canonicalAccountId };
+    await tx.server.updateMany({
+      where: { ownerAccountId: accountIdFilter },
+      data: { ownerAccountId: canonicalAccountId },
+    });
+    await tx.server.updateMany({
+      where: { registrantAccountId: accountIdFilter },
+      data: { registrantAccountId: canonicalAccountId },
+    });
+    await tx.serverClaimMethod.updateMany({
+      where: { accountId: accountIdFilter },
+      data: { accountId: canonicalAccountId },
+    });
+
+    const identities = await tx.minecraftIdentity.findMany({
+      where: { accountId: { in: [...accountIds] } },
+      select: { id: true, accountId: true, isPrimary: true },
+      orderBy: { id: 'asc' },
+    });
+    if (identities.length === 0) return;
+
+    const primaryIdentity = identities.find(
+      (identity) => identity.accountId === canonicalAccountId && identity.isPrimary,
+    ) ?? identities.find((identity) => identity.isPrimary)
+      ?? identities.find((identity) => identity.accountId === canonicalAccountId)
+      ?? identities[0];
+    if (!primaryIdentity) return;
+
+    await tx.minecraftIdentity.updateMany({
+      where: { accountId: { in: [...accountIds] }, isPrimary: true },
+      data: { isPrimary: false },
+    });
+    await tx.minecraftIdentity.update({
+      where: { id: primaryIdentity.id },
+      data: { isPrimary: true },
     });
   }
 
