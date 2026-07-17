@@ -150,6 +150,26 @@ export function ServerDetailShowcase({
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
             <section id="server-overview" className="min-w-0 xl:col-start-1 xl:row-start-1">
               <ServerOverviewCard detail={detail} />
+              {wikiHref ? (
+                <section className="mt-6 overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/[0.09] via-[#111821] to-[#10161e] p-5 sm:p-6" aria-labelledby="server-documentation-title">
+                  <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-start gap-4">
+                      <span className="grid size-12 shrink-0 place-items-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 text-emerald-200">
+                        <BookOpen className="size-5" aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-300">Server Documentation</p>
+                        <h2 id="server-documentation-title" className="mt-1 text-xl font-bold text-white">{detail.name} 서버 위키</h2>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">랭킹·투표 정보에서 이어지는 독립 문서 공간입니다. 접속 방법, 서버 규칙, 시작 가이드와 운영 공지를 GitBook처럼 문서별로 확인할 수 있습니다.</p>
+                      </div>
+                    </div>
+                    <Link href={wikiHref} className="btn-primary min-h-11 shrink-0 px-5">
+                      서버 위키 열기
+                      <ExternalLink className="size-4" aria-hidden="true" />
+                    </Link>
+                  </div>
+                </section>
+              ) : null}
             </section>
 
             <aside className="space-y-4 xl:sticky xl:top-24 xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:self-start xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:pr-1">
@@ -209,7 +229,7 @@ export function ServerDetailShowcase({
                       className="flex items-center justify-between rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2.5 text-sm font-semibold text-emerald-100 transition hover:border-emerald-300/70 hover:bg-emerald-400/15"
                       href={wikiHref}
                     >
-                      위키 보기
+                      서버 위키 열기
                       <BookOpen className="h-4 w-4 text-emerald-200" />
                     </a>
                   ) : null}

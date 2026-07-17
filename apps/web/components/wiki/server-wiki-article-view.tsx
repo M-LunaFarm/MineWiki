@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import {
   ArrowLeft,
+  ArrowRight,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
   List,
@@ -45,6 +47,10 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
       ? 'lg:grid-cols-[292px_minmax(0,1fr)] 2xl:grid-cols-[292px_minmax(0,1fr)_292px]'
       : 'lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_292px]';
   const editPath = buildServerWikiToolPath(routePath, 'edit');
+  const isWikiHome = currentIndex === 0;
+  const startHereDocuments = isWikiHome
+    ? wiki.navigation.filter((item) => !item.current).slice(0, 6)
+    : [];
 
   return (
     <main className="server-wiki-layout min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
@@ -53,9 +59,9 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-            <Link href="/wiki/%EB%8C%80%EB%AC%B8" className="hover:text-emerald-300">MineWiki</Link>
+            <Link href={page.serverDirectoryPath ?? '/servers'} className="hover:text-emerald-300">서버 상세</Link>
             <span>/</span>
-            <span>server</span>
+            <Link href={`/server/${encodeURIComponent(wiki.slug)}`} className="hover:text-emerald-300">{wiki.name} 위키</Link>
             <span>/</span>
             <span className="text-slate-300">{page.displayTitle}</span>
           </nav>
@@ -83,7 +89,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               </div>
             </div>
             <p className="mt-5 text-sm text-slate-500">{routePath} · 최근 수정 {updatedAt}</p>
-            {isHandbook ? <Link href={page.serverDirectoryPath ?? '/servers'} className="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-emerald-300 hover:text-emerald-200"><ArrowLeft className="size-4" />서버 목록으로 돌아가기</Link> : null}
+            <Link href={page.serverDirectoryPath ?? '/servers'} className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm font-semibold text-slate-300 transition hover:border-emerald-300/40 hover:text-emerald-200"><ArrowLeft className="size-4" />랭킹 서버 상세로 돌아가기</Link>
           </header>
 
           {address && !isHandbook ? (
@@ -125,6 +131,28 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
 
           <div id={contentId} className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: page.html }} />
           <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
+
+          {startHereDocuments.length > 0 ? (
+            <section className="mt-10 border-t border-white/10 pt-8" aria-labelledby="server-wiki-start-here-title">
+              <div className="flex items-start gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-emerald-300"><BookOpen className="size-4" aria-hidden="true" /></span>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-300">Start here</p>
+                  <h2 id="server-wiki-start-here-title" className="mt-1 text-2xl font-bold text-white">{wiki.name} 문서에서 찾기</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-500">서버에 참여하기 전에 필요한 공식 안내를 문서별로 확인하세요.</p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {startHereDocuments.map((item, index) => (
+                  <Link key={item.id} href={item.path} className="group flex min-h-24 items-center gap-4 rounded-xl border border-white/10 bg-white/[0.025] p-4 transition hover:border-emerald-300/35 hover:bg-emerald-400/[0.05]">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/[0.04] text-xs font-bold text-slate-500 group-hover:text-emerald-300">{String(index + 1).padStart(2, '0')}</span>
+                    <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-slate-200 group-hover:text-white">{item.title}</span><span className="mt-1 block text-xs text-slate-600">서버 운영 문서</span></span>
+                    <ArrowRight className="size-4 shrink-0 text-slate-600 group-hover:text-emerald-300" aria-hidden="true" />
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {presentation?.bottomNoticeHtml ? (
             <aside

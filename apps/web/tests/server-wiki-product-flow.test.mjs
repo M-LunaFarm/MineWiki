@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFile } from 'node:fs/promises';
+
+const detail = await readFile(new URL('../components/servers/server-detail-showcase.tsx', import.meta.url), 'utf8');
+const wiki = await readFile(new URL('../components/wiki/server-wiki-article-view.tsx', import.meta.url), 'utf8');
+
+test('server detail promotes linked documentation as a first-class child experience', () => {
+  const overview = detail.indexOf('<ServerOverviewCard detail={detail} />');
+  const documentation = detail.indexOf('id="server-documentation-title"');
+  const reviews = detail.indexOf('id="server-reviews"');
+
+  assert.ok(overview > 0);
+  assert.ok(documentation > overview);
+  assert.ok(reviews > documentation);
+  assert.match(detail.slice(documentation, reviews), /서버 위키 열기/u);
+  assert.match(detail.slice(documentation, reviews), /GitBook처럼 문서별로/u);
+});
+
+test('server wiki keeps a clear return boundary and enriches the root document with navigation', () => {
+  const breadcrumb = wiki.indexOf('랭킹 서버 상세로 돌아가기');
+  const article = wiki.indexOf('id={contentId}');
+  const startHere = wiki.indexOf('id="server-wiki-start-here-title"');
+
+  assert.ok(breadcrumb > 0);
+  assert.ok(article > breadcrumb);
+  assert.ok(startHere > article);
+  assert.match(wiki, /const isWikiHome = currentIndex === 0/u);
+  assert.match(wiki, /wiki\.navigation\.filter\(\(item\) => !item\.current\)\.slice\(0, 6\)/u);
+  assert.match(wiki, /href=\{page\.serverDirectoryPath \?\? '\/servers'\}/u);
+});

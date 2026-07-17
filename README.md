@@ -73,6 +73,13 @@ curl -L https://minewiki.kr/og -o minewiki-open-graph-1200x630.png
 - `/uploads/*`: permission-aware file reads through `apps/api`
 - Discord verification and Minecraft account linking: `apps/api`, `apps/bot`, and `apps/worker`
 
+## Design Previews
+
+Product design drafts live on isolated, no-index pages so they can be reviewed without changing the production user journey.
+
+- [Server wiki concepts](https://minewiki.kr/design/server-wiki) — three GitBook-style directions for server documentation
+- [Paper directory concepts](https://minewiki.kr/design/home-paper) — three paper-texture directions for the server directory home
+
 ## App Boundaries
 
 - `apps/web`: unified Next.js UI for wiki, server ranking, accounts, support, and guild management
