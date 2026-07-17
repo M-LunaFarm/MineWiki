@@ -278,6 +278,14 @@ export interface WikiSpecialDocumentResponse {
   readonly isStale?: boolean;
 }
 
+interface ParsedWikiSpecialSnapshotItem extends WikiSpecialDocumentItem {
+  readonly sourceContributions: ReadonlyArray<{
+    readonly pageId: string;
+    readonly count: number;
+  }>;
+  readonly sourceContributionsComplete: boolean;
+}
+
 export interface WikiPublicBlockEvent {
   readonly id: string;
   readonly target: {
@@ -1612,22 +1620,44 @@ export class WikiReadService {
       return { type, items: [], generation: null, generatedAt: null, isRebuilding: true, isStale: true };
     }
     const snapshotItems = parseSpecialSnapshotItems(snapshot.items);
-    const pageIds = snapshotItems.flatMap((item) => item.pageId ? [BigInt(item.pageId)] : []);
-    const pages = pageIds.length > 0
-      ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } })
+    const aggregateType = type === 'wanted' || type === 'categories';
+    const identifiedViewer = access.accountId !== null;
+    const eligibleSnapshotItems = aggregateType && identifiedViewer
+      ? snapshotItems.filter((item) => item.sourceContributionsComplete)
+      : snapshotItems;
+    const pageIds = eligibleSnapshotItems.flatMap((item) => item.pageId ? [BigInt(item.pageId)] : []);
+    const sourcePageIds = aggregateType && identifiedViewer
+      ? eligibleSnapshotItems.flatMap((item) => item.sourceContributions.map((source) => BigInt(source.pageId)))
+      : [];
+    const candidatePageIds = [...new Set([...pageIds, ...sourcePageIds])];
+    const pages = candidatePageIds.length > 0
+      ? await this.prisma.wikiPage.findMany({ where: { id: { in: candidatePageIds } } })
       : [];
     const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages });
     const readablePageIds = new Set(readablePages.map((page) => page.id.toString()));
     const items: WikiSpecialDocumentItem[] = [];
-    for (const item of snapshotItems) {
+    for (const item of eligibleSnapshotItems) {
       if (item.pageId && !readablePageIds.has(item.pageId)) continue;
-      items.push(item);
-      if (items.length >= limit) break;
+      if (aggregateType && identifiedViewer) {
+        const value = item.sourceContributions.reduce(
+          (total, source) => total + (readablePageIds.has(source.pageId) ? source.count : 0),
+          0
+        );
+        if (value === 0) continue;
+        items.push(publicSpecialSnapshotItem(item, value));
+      } else {
+        items.push(publicSpecialSnapshotItem(item));
+      }
+    }
+    if (aggregateType && identifiedViewer) {
+      items.sort((left, right) =>
+        (right.value ?? 0) - (left.value ?? 0) || left.id.localeCompare(right.id, 'ko')
+      );
     }
     const stale = Date.now() - snapshot.generatedAt.getTime() > 30 * 60 * 1000;
     return {
       type,
-      items,
+      items: items.slice(0, limit),
       generation: snapshot.generation,
       generatedAt: snapshot.generatedAt.toISOString(),
       isRebuilding: false,
@@ -2603,9 +2633,11 @@ function randomBigIntBetween(minimum: bigint, maximum: bigint): bigint {
   return minimum + (randomBytes(8).readBigUInt64BE() % span);
 }
 
-function parseSpecialSnapshotItems(value: unknown): WikiSpecialDocumentItem[] {
+const SPECIAL_SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT = 500;
+
+function parseSpecialSnapshotItems(value: unknown): ParsedWikiSpecialSnapshotItem[] {
   if (!Array.isArray(value)) return [];
-  const items: WikiSpecialDocumentItem[] = [];
+  const items: ParsedWikiSpecialSnapshotItem[] = [];
   for (const candidate of value.slice(0, 500)) {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
     const item = candidate as Record<string, unknown>;
@@ -2623,6 +2655,38 @@ function parseSpecialSnapshotItems(value: unknown): WikiSpecialDocumentItem[] {
       valueNumber === undefined ||
       updatedAt === undefined
     ) continue;
+    const rawSourceContributions = item.sourceContributions;
+    const sourceContributions: Array<{ pageId: string; count: number }> = [];
+    let validSourceContributions = Array.isArray(rawSourceContributions) &&
+      rawSourceContributions.length <= SPECIAL_SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT;
+    if (Array.isArray(rawSourceContributions) && validSourceContributions) {
+      const seenPageIds = new Set<string>();
+      for (const rawContribution of rawSourceContributions) {
+        if (!rawContribution || typeof rawContribution !== 'object' || Array.isArray(rawContribution)) {
+          validSourceContributions = false;
+          break;
+        }
+        const contribution = rawContribution as Record<string, unknown>;
+        if (
+          typeof contribution.pageId !== 'string' ||
+          !/^\d+$/.test(contribution.pageId) ||
+          seenPageIds.has(contribution.pageId) ||
+          typeof contribution.count !== 'number' ||
+          !Number.isSafeInteger(contribution.count) ||
+          contribution.count < 1
+        ) {
+          validSourceContributions = false;
+          break;
+        }
+        seenPageIds.add(contribution.pageId);
+        sourceContributions.push({ pageId: contribution.pageId, count: contribution.count });
+      }
+    }
+    const sourceContributionTotal = sourceContributions.reduce((total, contribution) => total + contribution.count, 0);
+    const sourceContributionsComplete = item.sourceContributionsComplete === true &&
+      validSourceContributions &&
+      valueNumber !== null &&
+      sourceContributionTotal === valueNumber;
     items.push({
       id: item.id,
       pageId,
@@ -2631,10 +2695,28 @@ function parseSpecialSnapshotItems(value: unknown): WikiSpecialDocumentItem[] {
       displayTitle: item.displayTitle,
       routePath: item.routePath,
       value: valueNumber,
-      updatedAt
+      updatedAt,
+      sourceContributions,
+      sourceContributionsComplete
     });
   }
   return items;
+}
+
+function publicSpecialSnapshotItem(
+  item: ParsedWikiSpecialSnapshotItem,
+  value: number | null = item.value
+): WikiSpecialDocumentItem {
+  return {
+    id: item.id,
+    pageId: item.pageId,
+    namespace: item.namespace,
+    title: item.title,
+    displayTitle: item.displayTitle,
+    routePath: item.routePath,
+    value,
+    updatedAt: item.updatedAt
+  };
 }
 
 function makeSearchSnippet(content: string, query: string): string {

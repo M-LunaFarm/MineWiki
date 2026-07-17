@@ -78,3 +78,35 @@ test('page-specific guest allow overrides a broader site deny in public snapshot
   const orphaned = rows.find((row) => row.type === 'orphaned' && row.namespaceCode === '');
   assert.deepEqual(orphaned?.items.map((item) => item.pageId), ['10']);
 });
+
+test('aggregate snapshots persist bounded per-source counts for viewer ACL recomputation', () => {
+  const pages = Array.from({ length: 501 }, (_, index) =>
+    page(BigInt(index + 1), 1, `출처_${index + 1}`, BigInt(index + 1001))
+  );
+  const rows = buildWikiSpecialSnapshotRows({
+    pages,
+    links: pages.map((source) => ({
+      sourcePageId: source.id,
+      sourceRevisionId: source.currentRevisionId!,
+      targetNamespaceCode: 'main',
+      targetSlug: '공통_대상',
+      linkType: 'link'
+    })),
+    namespaces: [{ id: 1, code: 'main' }],
+    activeSpaceIds: new Set([1n]),
+    rootPageIds: new Set(),
+    serverSlugBySpaceId: new Map(),
+    aclRules: [],
+    generatedAt: now,
+    generation: 'bounded-generation'
+  });
+
+  const wanted = rows.find((row) => row.type === 'wanted' && row.namespaceCode === '');
+  assert.equal(wanted?.items[0]?.value, 501);
+  assert.equal(wanted?.items[0]?.sourceContributions?.length, 500);
+  assert.equal(wanted?.items[0]?.sourceContributionsComplete, false);
+  assert.deepEqual(wanted?.items[0]?.sourceContributions?.slice(0, 2), [
+    { pageId: '1', count: 1 },
+    { pageId: '2', count: 1 }
+  ]);
+});

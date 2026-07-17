@@ -786,6 +786,112 @@ test('special category list counts only current categories from readable documen
   assert.equal(linkReads, 0);
 });
 
+test('identified special snapshot reads remove denied source contributions from wanted and category aggregates', async () => {
+  const now = new Date('2026-07-17T00:00:00Z');
+  const sourcePage = (id: bigint, title: string) => ({
+    id, namespaceId: 1, spaceId: 1n, localPath: title, slug: title, title, displayTitle: title,
+    currentRevisionId: id + 1000n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 1n, createdAt: now, updatedAt: now
+  });
+  const readableSource = sourcePage(901n, '읽기 가능');
+  const deniedSource = sourcePage(902n, '그룹 ACL 차단');
+  const snapshotItem = (
+    type: 'wanted' | 'categories',
+    title: string,
+    value: number,
+    sourceContributions: ReadonlyArray<{ pageId: string; count: number }>
+  ) => ({
+    id: `${type}:${title}`,
+    pageId: null,
+    namespace: type === 'categories' ? 'category' : 'main',
+    title,
+    displayTitle: title,
+    routePath: type === 'categories' ? `/wiki/category/${title}` : `/wiki/${title}`,
+    value,
+    updatedAt: null,
+    sourceContributions,
+    sourceContributionsComplete: true
+  });
+  const snapshots = {
+    wanted: [
+      snapshotItem('wanted', '읽을_수_있는_대상', 3, [{ pageId: '901', count: 1 }, { pageId: '902', count: 2 }]),
+      snapshotItem('wanted', '숨겨진_대상', 1, [{ pageId: '902', count: 1 }])
+    ],
+    categories: [
+      snapshotItem('categories', '공개_분류', 2, [{ pageId: '901', count: 1 }, { pageId: '902', count: 1 }]),
+      snapshotItem('categories', '비밀_분류', 1, [{ pageId: '902', count: 1 }])
+    ]
+  };
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 77n, status: 'active' }; } },
+    wikiNamespace: { async findUnique() { return null; } },
+    wikiSpecialSnapshot: {
+      async findUnique(args: { where: { type_namespaceCode: { type: 'wanted' | 'categories' } } }) {
+        return {
+          generation: `generation-${args.where.type_namespaceCode.type}`,
+          generatedAt: now,
+          items: snapshots[args.where.type_namespaceCode.type]
+        };
+      }
+    },
+    wikiPage: { async findMany() { return [readableSource, deniedSource]; } }
+  } as unknown as PrismaService;
+  const actor = { accountId: 'account-77', profileId: 77n, status: 'active', groups: ['restricted'] };
+  const permissions = {
+    actorFromSession() { return actor; },
+    async filterReadablePages({ pages, actor: receivedActor }: { pages: typeof readableSource[]; actor: typeof actor }) {
+      assert.equal(receivedActor, actor);
+      return pages.filter((candidate) => candidate.id === readableSource.id);
+    }
+  } as unknown as WikiPermissionService;
+  const viewer = {
+    sessionId: 'session-77', userId: 'account-77', tokenVersion: 1, isElevated: false,
+    authenticatedAt: now.toISOString(), groups: ['restricted']
+  } satisfies SessionPayload;
+  const service = new WikiReadService(prisma, permissions);
+
+  const wanted = await service.getSpecialDocuments({ type: 'wanted', viewer });
+  const categories = await service.getSpecialDocuments({ type: 'categories', viewer });
+
+  assert.deepEqual(wanted.items.map((item) => [item.title, item.value]), [['읽을_수_있는_대상', 1]]);
+  assert.deepEqual(categories.items.map((item) => [item.title, item.value]), [['공개_분류', 1]]);
+  assert.equal(JSON.stringify([wanted, categories]).includes('sourceContributions'), false);
+  assert.equal(JSON.stringify([wanted, categories]).includes('902'), false);
+});
+
+test('identified special snapshot reads fail closed for legacy or truncated aggregate metadata', async () => {
+  const now = new Date('2026-07-17T00:00:00Z');
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 7n, status: 'active' }; } },
+    wikiNamespace: { async findUnique() { return null; } },
+    wikiSpecialSnapshot: { async findUnique() { return {
+      generation: 'legacy-generation', generatedAt: now, items: [
+        { id: 'wanted:legacy', pageId: null, namespace: 'main', title: 'legacy', displayTitle: 'legacy', routePath: '/wiki/legacy', value: 9, updatedAt: null },
+        {
+          id: 'wanted:truncated', pageId: null, namespace: 'main', title: 'truncated', displayTitle: 'truncated',
+          routePath: '/wiki/truncated', value: 9, updatedAt: null,
+          sourceContributions: [{ pageId: '1', count: 1 }], sourceContributionsComplete: false
+        }
+      ]
+    }; } },
+    wikiPage: { async findMany() { throw new Error('incomplete metadata must not be queried'); } }
+  } as unknown as PrismaService;
+  const permissions = {
+    actorFromSession() { return { accountId: 'account-7', profileId: 7n, status: 'active' }; },
+    async filterReadablePages() { return []; }
+  } as unknown as WikiPermissionService;
+  const viewer = {
+    sessionId: 'session-7', userId: 'account-7', tokenVersion: 1, isElevated: false,
+    authenticatedAt: now.toISOString()
+  } satisfies SessionPayload;
+
+  const result = await new WikiReadService(prisma, permissions).getSpecialDocuments({ type: 'wanted', viewer });
+
+  assert.deepEqual(result.items, []);
+  assert.equal(result.generation, 'legacy-generation');
+  assert.equal(result.generatedAt, now.toISOString());
+});
+
 test('blame keeps attribution for lines preserved across later revisions', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'doc', slug: 'doc', title: '문서', displayTitle: '문서', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };

@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { slugifyTitle, wikiUrl, type NamespaceCode } from '@minewiki/wiki-core';
 
 const SNAPSHOT_ITEM_LIMIT = 500;
+const SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT = 500;
 const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published']);
 const PUBLIC_READ_PROTECTION_LEVELS = new Set([
   'open', 'login_required', 'review_required', 'autoconfirmed_only', 'trusted_only',
@@ -52,6 +53,12 @@ export interface SnapshotItem {
   readonly routePath: string;
   readonly value: number | null;
   readonly updatedAt: string | null;
+  /** Internal ACL-recomputation metadata. The API strips this from responses. */
+  readonly sourceContributions?: ReadonlyArray<{
+    readonly pageId: string;
+    readonly count: number;
+  }>;
+  readonly sourceContributionsComplete?: boolean;
 }
 
 export interface SnapshotRow {
@@ -254,7 +261,13 @@ function wantedItems(
   existingPageKeys: ReadonlySet<string>,
   serverSlugBySpaceId: ReadonlyMap<bigint, string>
 ): SnapshotItem[] {
-  const counts = new Map<string, { namespace: string; slug: string; count: number; sourcePage: SnapshotPage }>();
+  const counts = new Map<string, {
+    namespace: string;
+    slug: string;
+    count: number;
+    sourcePage: SnapshotPage;
+    sourceCounts: Map<bigint, number>;
+  }>();
   for (const link of links) {
     if (link.linkType !== 'link') continue;
     const sourcePage = pageById.get(link.sourcePageId);
@@ -262,12 +275,18 @@ function wantedItems(
     const key = pageKey(link.targetNamespaceCode, link.targetSlug, sourcePage.spaceId);
     if (existingPageKeys.has(key)) continue;
     const current = counts.get(key);
-    counts.set(key, {
-      namespace: link.targetNamespaceCode,
-      slug: link.targetSlug,
-      count: (current?.count ?? 0) + 1,
-      sourcePage
-    });
+    if (current) {
+      current.count += 1;
+      current.sourceCounts.set(sourcePage.id, (current.sourceCounts.get(sourcePage.id) ?? 0) + 1);
+    } else {
+      counts.set(key, {
+        namespace: link.targetNamespaceCode,
+        slug: link.targetSlug,
+        count: 1,
+        sourcePage,
+        sourceCounts: new Map([[sourcePage.id, 1]])
+      });
+    }
   }
   return [...counts.entries()]
     .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0], 'ko'))
@@ -279,28 +298,50 @@ function wantedItems(
       displayTitle: (target.slug.split('/').at(-1) ?? target.slug).replace(/_/g, ' '),
       routePath: targetRoutePath(target.namespace, target.slug, target.sourcePage, serverSlugBySpaceId),
       value: target.count,
-      updatedAt: null
+      updatedAt: null,
+      ...sourceContributionMetadata(target.sourceCounts)
     }));
 }
 
 function categoryItems(links: readonly SnapshotLink[]): SnapshotItem[] {
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { count: number; sourceCounts: Map<bigint, number> }>();
   for (const link of links) {
     if (link.linkType !== 'category' || link.targetNamespaceCode !== 'category') continue;
-    counts.set(link.targetSlug, (counts.get(link.targetSlug) ?? 0) + 1);
+    const current = counts.get(link.targetSlug);
+    if (current) {
+      current.count += 1;
+      current.sourceCounts.set(link.sourcePageId, (current.sourceCounts.get(link.sourcePageId) ?? 0) + 1);
+    } else {
+      counts.set(link.targetSlug, { count: 1, sourceCounts: new Map([[link.sourcePageId, 1]]) });
+    }
   }
   return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'ko'))
-    .map(([slug, count]) => ({
+    .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0], 'ko'))
+    .map(([slug, aggregate]) => ({
       id: `category:${slug}`,
       pageId: null,
       namespace: 'category',
       title: slug,
       displayTitle: slug.replace(/_/g, ' '),
       routePath: wikiUrl('category', slug),
-      value: count,
-      updatedAt: null
+      value: aggregate.count,
+      updatedAt: null,
+      ...sourceContributionMetadata(aggregate.sourceCounts)
     }));
+}
+
+function sourceContributionMetadata(sourceCounts: ReadonlyMap<bigint, number>): Pick<
+  SnapshotItem,
+  'sourceContributions' | 'sourceContributionsComplete'
+> {
+  const contributions = [...sourceCounts.entries()]
+    .sort((left, right) => compareBigInt(left[0], right[0]));
+  return {
+    sourceContributions: contributions
+      .slice(0, SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT)
+      .map(([pageId, count]) => ({ pageId: pageId.toString(), count })),
+    sourceContributionsComplete: contributions.length <= SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT
+  };
 }
 
 function orphanedCategoryItems(
