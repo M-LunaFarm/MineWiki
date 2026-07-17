@@ -16,13 +16,13 @@ interface WikiArticleViewProps {
 export function WikiArticleView({ page, routePath, beforeContent, afterContent }: WikiArticleViewProps) {
   const contentId = `wiki-content-${page.id}`;
   const isCategoryDocument = routePath.startsWith('/wiki/category/');
-  const editPath = routePath.startsWith('/server/')
+  const editPath = routePath.startsWith('/server/') || routePath.startsWith('/serverWiki/')
     ? buildServerWikiToolPath(routePath, 'edit')
     : isCategoryDocument
       ? buildCategoryWikiToolPath(routePath, 'edit')
       : buildStandardWikiToolPath(routePath, 'edit');
   const historyPath = buildWikiHistoryPath(routePath);
-  const discussionPath = routePath.startsWith('/server/')
+  const discussionPath = routePath.startsWith('/server/') || routePath.startsWith('/serverWiki/')
     ? buildServerWikiToolPath(routePath, 'discuss')
     : `/wiki/discuss/${encodeURIComponent(page.id)}?returnTo=${encodeURIComponent(routePath)}`;
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
@@ -32,7 +32,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
   }).format(new Date(page.updatedAt));
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-8 sm:px-6 lg:px-8">
       <nav aria-label="문서 경로" className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
         <Link href="/wiki/%EB%8C%80%EB%AC%B8" className="hover:text-emerald-200">
           MineWiki
@@ -93,7 +93,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
         ) : null}
         <article
           id={contentId}
-          className="wiki-rendered min-w-0"
+          className="wiki-rendered wiki-mobile-full min-w-0"
           dangerouslySetInnerHTML={{ __html: page.html }}
         />
         <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />

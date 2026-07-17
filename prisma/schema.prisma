@@ -1783,6 +1783,7 @@ model ServerWiki {
   voteServerId                 String?   @unique @map("vote_server_id") @db.Char(36)
   serverName                   String    @map("server_name") @db.VarChar(255)
   slug                         String    @unique @db.VarChar(255)
+  siteSlug                     String?   @unique @map("site_slug") @db.VarChar(80)
   host                         String?   @db.VarChar(255)
   port                         Int?      @db.UnsignedInt
   edition                      String    @default("unknown") @db.VarChar(16)

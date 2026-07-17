@@ -15,7 +15,7 @@ export function AppShell({ children }: AppShellProps) {
     pathname === '/servers' ||
     (pathname.startsWith('/servers/') && pathname !== '/servers/register');
   const isSupportPage = pathname === '/support' || pathname.startsWith('/support/');
-  const isServerWikiPage = pathname === '/server' || pathname.startsWith('/server/');
+  const isServerWikiPage = pathname === '/server' || pathname.startsWith('/server/') || pathname.startsWith('/serverWiki/');
   const isWikiPage =
     pathname === '/wiki' || pathname.startsWith('/wiki/') ||
     pathname === '/mod' || pathname.startsWith('/mod/') ||

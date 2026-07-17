@@ -14,6 +14,30 @@ test('server stats downsampling preserves the seven-day range endpoints', () => 
   assert.equal(new Set(downsampled).size, downsampled.length);
 });
 
+test('server wiki public slug is tenant-owned, validated, and audited independently of content paths', async () => {
+  let storedSiteSlug: string | null = 'old-docs';
+  const audits: Array<Record<string, unknown>> = [];
+  const prisma = {
+    serverWiki: {
+      async findUnique() { return { id: 9n, siteSlug: storedSiteSlug }; },
+      async update({ data }: { data: { siteSlug: string } }) {
+        storedSiteSlug = data.siteSlug;
+        return { id: 9n, siteSlug: storedSiteSlug };
+      },
+    },
+  };
+  const events = { async audit(_name: string, input: Record<string, unknown>) { audits.push(input); } };
+  const service = new ServerService({} as never, prisma as never, {} as never, undefined, events as never);
+
+  const result = await service.updateWikiSiteSlug(randomUUID(), 'Luna-Farm', randomUUID());
+
+  assert.deepEqual(result, { siteSlug: 'luna-farm', wikiUrl: '/serverWiki/luna-farm' });
+  assert.equal(storedSiteSlug, 'luna-farm');
+  assert.equal(audits.length, 1);
+  await assert.rejects(() => service.updateWikiSiteSlug(randomUUID(), 'api'), /예약된 사이트 주소/u);
+  await assert.rejects(() => service.updateWikiSiteSlug(randomUUID(), 'bad_slug'), /3~63자/u);
+});
+
 test('registration canonicalizes endpoints and rejects disguised duplicates', async () => {
   let storedEndpointKey: string | null = null;
   let storedHost: string | null = null;

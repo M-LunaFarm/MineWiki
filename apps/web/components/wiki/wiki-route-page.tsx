@@ -8,7 +8,7 @@ import { WikiUserProfileHeader, WikiUserProfileHub } from './wiki-user-profile-h
 import { WikiDocumentContext } from './wiki-document-context';
 
 interface WikiRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'serverWiki' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
   readonly segments?: string[];
 }
 
@@ -31,7 +31,7 @@ export async function WikiRoutePage({ prefix, segments = [] }: WikiRoutePageProp
   if (!page) {
     notFound();
   }
-  if (prefix === 'server' && page.serverWiki) {
+  if ((prefix === 'server' || prefix === 'serverWiki') && page.serverWiki) {
     return <ServerWikiArticleView page={page} routePath={routePath} />;
   }
   if (page.title === '대문' && isStandardFrontPagePrefix(prefix)) {

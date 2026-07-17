@@ -6,12 +6,15 @@ import { ServerWikiWorkspace } from './server-wiki-workspace';
 
 export async function ServerWikiSearchPage({
   slug,
+  routePrefix = 'server',
   searchParams,
 }: {
   readonly slug: string;
+  readonly routePrefix?: 'server' | 'serverWiki';
   readonly searchParams: { q?: string; target?: string; cursor?: string };
 }) {
-  const page = await fetchWikiPageByPath(`/server/${slug}`);
+  const rootPath = `/${routePrefix}/${encodeURIComponent(slug)}`;
+  const page = await fetchWikiPageByPath(rootPath);
   if (!page?.serverWiki) notFound();
   const query = searchParams.q?.trim().slice(0, 100) ?? '';
   const target = searchParams.target === 'title' || searchParams.target === 'content'
@@ -30,7 +33,7 @@ export async function ServerWikiSearchPage({
         <p className="mt-3 text-sm leading-6 text-[#777]">이 서버 위키의 문서만 검색합니다.</p>
       </header>
 
-      <form action={`/server/${encodeURIComponent(slug)}/_search`} className="mt-7 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
+      <form action={`${rootPath}/_search`} className="mt-7 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-[#888]" aria-hidden="true" />
           <span className="sr-only">검색어</span>
@@ -57,7 +60,7 @@ export async function ServerWikiSearchPage({
             {result.items.length === 0 ? <p className="py-8 text-sm text-[#777]">일치하는 문서가 없습니다.</p> : null}
           </div>
           {result.nextCursor ? (
-            <Link href={`/server/${encodeURIComponent(slug)}/_search?q=${encodeURIComponent(query)}&target=${encodeURIComponent(target)}&cursor=${encodeURIComponent(result.nextCursor)}`} className="mt-5 inline-flex min-h-11 items-center rounded-lg border border-[#dedede] px-4 text-sm font-semibold text-[#346ddb] hover:border-[#9ab5ef]">다음 결과</Link>
+            <Link href={`${rootPath}/_search?q=${encodeURIComponent(query)}&target=${encodeURIComponent(target)}&cursor=${encodeURIComponent(result.nextCursor)}`} className="mt-5 inline-flex min-h-11 items-center rounded-lg border border-[#dedede] px-4 text-sm font-semibold text-[#346ddb] hover:border-[#9ab5ef]">다음 결과</Link>
           ) : null}
         </section>
       ) : null}

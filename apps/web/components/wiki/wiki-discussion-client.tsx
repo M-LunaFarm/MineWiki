@@ -1242,7 +1242,7 @@ function selectedThreadPath(pageId: string, returnTo: string, threadId: string) 
   return `${locationPath(pageId, returnTo)}&thread=${encodeURIComponent(threadId)}`;
 }
 function discussionHref(target: WikiSearchResult, threadId: string) {
-  return target.routePath.startsWith('/server/') ? `${buildServerWikiToolPath(target.routePath, 'discuss')}?thread=${encodeURIComponent(threadId)}` : `/wiki/discuss/${encodeURIComponent(target.pageId)}?returnTo=${encodeURIComponent(target.routePath)}&thread=${encodeURIComponent(threadId)}`;
+  return target.routePath.startsWith('/server/') || target.routePath.startsWith('/serverWiki/') ? `${buildServerWikiToolPath(target.routePath, 'discuss')}?thread=${encodeURIComponent(threadId)}` : `/wiki/discuss/${encodeURIComponent(target.pageId)}?returnTo=${encodeURIComponent(target.routePath)}&thread=${encodeURIComponent(threadId)}`;
 }
 function setThreadInUrl(threadId: string | null, commentId?: string) {
   const url = new URL(window.location.href);

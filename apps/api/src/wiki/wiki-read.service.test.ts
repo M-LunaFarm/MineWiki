@@ -188,6 +188,7 @@ test('public server wiki rendering fails closed when a persisted premium layout 
           voteServerId: null,
           serverName: 'Luna',
           slug: 'luna',
+          siteSlug: 'luna-docs',
           host: 'play.example.test',
           port: 25565,
           edition: 'java',
@@ -219,6 +220,7 @@ test('public server wiki rendering fails closed when a persisted premium layout 
       voteServerId: true,
       serverName: true,
       slug: true,
+      siteSlug: true,
       host: true,
       port: true,
       edition: true,
@@ -242,6 +244,27 @@ test('server wiki navigation removes the duplicated space slug', () => {
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main'), '/server/luna-main');
   assert.equal(buildServerWikiPagePath('luna-main', 'luna-main/규칙'), '/server/luna-main/%EA%B7%9C%EC%B9%99');
   assert.equal(buildServerWikiPagePath('luna-main', 'FAQ'), '/server/luna-main/FAQ');
+});
+
+test('server wiki site routes resolve the public site slug to the internal content root', async () => {
+  const prisma = {
+    serverWiki: {
+      async findUnique() {
+        return { slug: 'internal-luna-root', status: 'active' };
+      },
+    },
+  } as unknown as PrismaService;
+  const service = new WikiReadService(prisma, {} as WikiPermissionService);
+  let resolved: unknown[] = [];
+  (service as unknown as { getPage: (...args: unknown[]) => Promise<unknown> }).getPage = async (...args: unknown[]) => {
+    resolved = args;
+    return { id: '1' };
+  };
+
+  await service.getPageByPath('/serverWiki/lunafarm/%EA%B0%80%EC%9D%B4%EB%93%9C');
+
+  assert.equal(resolved[0], 'server');
+  assert.equal(resolved[1], 'internal-luna-root/가이드');
 });
 
 test('server wiki navigation derives a stable document tree depth', () => {
@@ -294,7 +317,7 @@ test('server wiki search resolves the slug to a mandatory tenant space filter', 
   const rawQueries: Array<{ sql: string; values: unknown[] }> = [];
   const prisma = {
     serverWiki: {
-      async findUnique() { return { spaceId: 5643n, status: 'active' }; },
+      async findFirst() { return { spaceId: 5643n, status: 'active' }; },
     },
     wikiNamespace: {
       async findUnique() { return { id: 7, code: 'server' }; },
@@ -614,7 +637,7 @@ test('recent changes use filters, a stable cursor, and one page visibility check
   assert.equal(pageQueryCount, 1);
   assert.deepEqual([...checked.entries()], [[1n, 1], [2n, 1]]);
   assert.deepEqual(result.items.map((item) => item.id), ['10', '8']);
-  assert.equal(result.items[0]?.routePath, '/server/alpha/%EA%B3%B5%EA%B0%9C_%EB%AC%B8%EC%84%9C');
+  assert.equal(result.items[0]?.routePath, '/serverWiki/alpha/%EA%B3%B5%EA%B0%9C_%EB%AC%B8%EC%84%9C');
   assert.equal(result.nextCursor, '8');
 });
 
@@ -1071,7 +1094,7 @@ test('server wiki discussion contributions keep the canonical workspace route', 
     wikiPageRevision: { async findMany() { return [{ id: 201n, editSummaryHidden: false }]; } },
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
-    serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna' }]; } }
+    serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna', siteSlug: 'luna-docs' }]; } }
   } as unknown as PrismaService;
   const permissions = {
     async assertCanReadPage() {},
@@ -1080,12 +1103,12 @@ test('server wiki discussion contributions keep the canonical workspace route', 
 
   const result = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5', activity: 'discussions' });
 
-  assert.equal(result.items[0]?.routePath, '/server/luna/API/requests');
-  assert.equal(result.items[0]?.href, '/server/luna/_tools/discuss/API/requests?thread=40&comment=41');
+  assert.equal(result.items[0]?.routePath, '/serverWiki/luna-docs/API/requests');
+  assert.equal(result.items[0]?.href, '/serverWiki/luna-docs/_tools/discuss/API/requests?thread=40&comment=41');
 
   const requests = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5', activity: 'edit-requests' });
-  assert.equal(requests.items[0]?.routePath, '/server/luna/API/requests');
-  assert.equal(requests.items[0]?.href, '/server/luna/_tools/requests/API/requests?request=31');
+  assert.equal(requests.items[0]?.routePath, '/serverWiki/luna-docs/API/requests');
+  assert.equal(requests.items[0]?.href, '/serverWiki/luna-docs/_tools/requests/API/requests?request=31');
 });
 
 test('discussion contributions omit threads hidden by thread ACL in one batch', async () => {

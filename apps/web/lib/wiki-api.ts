@@ -63,6 +63,7 @@ export interface WikiPageResponse {
   readonly serverWiki?: {
     readonly name: string;
     readonly slug: string;
+    readonly contentSlug: string;
     readonly host: string | null;
     readonly port: number | null;
     readonly edition: string;

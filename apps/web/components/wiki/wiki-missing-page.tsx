@@ -63,7 +63,7 @@ export function missingWikiEditPath(pathname: string): string | null {
   if (pathname.includes('/_tools/')) return null;
   try {
     if (pathname.startsWith('/wiki/category/')) return buildCategoryWikiToolPath(pathname, 'edit');
-    if (pathname.startsWith('/server/')) return buildServerWikiToolPath(pathname, 'edit');
+    if (pathname.startsWith('/server/') || pathname.startsWith('/serverWiki/')) return buildServerWikiToolPath(pathname, 'edit');
     if (STANDARD_WIKI_PATH.test(pathname)) return buildStandardWikiToolPath(pathname, 'edit');
   } catch {
     return null;

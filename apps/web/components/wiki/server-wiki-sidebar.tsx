@@ -7,12 +7,13 @@ import { ServerWikiNavigation } from './server-wiki-navigation';
 export function ServerWikiSidebar({ page }: { readonly page: WikiPageResponse }) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
+  const rootPath = `/serverWiki/${encodeURIComponent(wiki.slug)}`;
   const address = wiki.host ? `${wiki.host}${wiki.port && wiki.port !== 25565 ? `:${wiki.port}` : ''}` : null;
 
   return (
     <aside className="hidden min-w-0 border-[#e8e8e8] bg-[#fbfbfb] lg:sticky lg:top-16 lg:block lg:h-[calc(100vh-4rem)] lg:border-r">
       <div className="border-b border-[#e8e8e8] px-6 py-6">
-        <Link href={`/server/${encodeURIComponent(wiki.slug)}`} className="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30">
+        <Link href={rootPath} className="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30">
           <span className="rounded-lg bg-[#eef3ff] p-2 text-[#346ddb]">
             <BookOpen className="size-5" />
           </span>

@@ -318,6 +318,7 @@ function isActive(pathname: string | null, key: NavigationLink['key']): boolean 
       pathname === '/wiki' ||
       pathname.startsWith('/wiki/') ||
       pathname.startsWith('/server/') ||
+      pathname.startsWith('/serverWiki/') ||
       pathname.startsWith('/mod/') ||
       pathname.startsWith('/modpack/') ||
       pathname.startsWith('/guide/') ||

@@ -11,12 +11,14 @@ import { ServerWikiWorkspace } from './server-wiki-workspace';
 
 export async function ServerWikiToolRoutePage({
   segments,
+  routePrefix = 'server',
   tool
 }: {
   readonly segments: string[];
+  readonly routePrefix?: 'server' | 'serverWiki';
   readonly tool: 'raw' | 'backlinks' | 'discuss' | 'requests' | 'blame' | 'acl';
 }) {
-  const routePath = buildWikiRoutePath('server', segments);
+  const routePath = buildWikiRoutePath(routePrefix, segments);
   const page = await fetchWikiPageByPath(routePath);
   if (!page?.serverWiki) notFound();
 

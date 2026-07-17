@@ -13,7 +13,7 @@ export function ServerWikiCreateLink({ serverSlug }: { readonly serverSlug: stri
     event.preventDefault();
     const normalized = title.trim().replace(/\s+/g, '_');
     if (!normalized) return;
-    const routePath = `/server/${encodeURIComponent(serverSlug)}/${encodeURIComponent(normalized)}`;
+    const routePath = `/serverWiki/${encodeURIComponent(serverSlug)}/${encodeURIComponent(normalized)}`;
     router.push(buildServerWikiToolPath(routePath, 'edit'));
   }
 

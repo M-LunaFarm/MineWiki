@@ -20,7 +20,7 @@ export function ServerWikiWorkspace({
         <ServerWikiSidebar page={page} />
         <section className="min-w-0 px-5 py-8 sm:px-8 lg:px-12 lg:py-10 xl:px-16">
           <nav className="mb-6 flex flex-wrap items-center gap-2 text-sm text-[#777]" aria-label="현재 위치">
-            <Link href={`/server/${encodeURIComponent(page.serverWiki?.slug ?? '')}`} className="hover:text-[#346ddb]">{page.serverWiki?.name}</Link>
+            <Link href={`/serverWiki/${encodeURIComponent(page.serverWiki?.slug ?? '')}`} className="hover:text-[#346ddb]">{page.serverWiki?.name}</Link>
             <span>/</span>
             <Link href={serverDocumentPath(page)} className="hover:text-[#346ddb]">{page.displayTitle}</Link>
             <span>/</span>
@@ -35,5 +35,5 @@ export function ServerWikiWorkspace({
 
 function serverDocumentPath(page: WikiPageResponse): string {
   return page.serverWiki?.navigation.find((item) => item.current)?.path
-    ?? `/server/${encodeURIComponent(page.serverWiki?.slug ?? '')}`;
+    ?? `/serverWiki/${encodeURIComponent(page.serverWiki?.slug ?? '')}`;
 }

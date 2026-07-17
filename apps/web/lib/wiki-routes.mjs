@@ -100,12 +100,12 @@ export function buildServerWikiToolPath(routePath, tool) {
   if (!SERVER_WIKI_TOOLS.includes(tool)) {
     throw new TypeError(`Unknown server wiki tool: ${tool}`);
   }
-  const match = /^\/server\/([^/]+)(?:\/(.*))?$/.exec(routePath);
+  const match = /^\/(server|serverWiki)\/([^/]+)(?:\/(.*))?$/.exec(routePath);
   if (!match) {
     throw new TypeError(`Not a server wiki route: ${routePath}`);
   }
-  const documentPath = match[2] ? `/${match[2]}` : '';
-  return `/server/${match[1]}/_tools/${tool}${documentPath}`;
+  const documentPath = match[3] ? `/${match[3]}` : '';
+  return `/${match[1]}/${match[2]}/_tools/${tool}${documentPath}`;
 }
 
 export function buildWikiRevisionPath(revisionId, returnTo) {
@@ -113,7 +113,7 @@ export function buildWikiRevisionPath(revisionId, returnTo) {
 }
 
 export function buildWikiHistoryPath(routePath) {
-  if (routePath.startsWith('/server/')) return buildServerWikiToolPath(routePath, 'history');
+  if (routePath.startsWith('/server/') || routePath.startsWith('/serverWiki/')) return buildServerWikiToolPath(routePath, 'history');
   if (routePath.startsWith('/wiki/category/')) return buildCategoryWikiToolPath(routePath, 'history');
   return buildStandardWikiToolPath(routePath, 'history');
 }

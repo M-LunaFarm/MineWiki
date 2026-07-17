@@ -63,6 +63,7 @@ export interface WikiPageResponse {
   readonly serverWiki?: {
     readonly name: string;
     readonly slug: string;
+    readonly contentSlug: string;
     readonly host: string | null;
     readonly port: number | null;
     readonly edition: string;
@@ -518,11 +519,25 @@ export class WikiReadService {
     return this.renderPage(namespace.code, page, access, options);
   }
 
-  getPageByPath(
+  async getPageByPath(
     path: string,
     viewer?: WikiAccessViewer,
     options: { readonly followRedirects?: boolean } = {}
   ): Promise<WikiPageResponse> {
+    const siteRoute = parseServerWikiSitePath(path);
+    if (siteRoute) {
+      const serverWiki = await this.prisma.serverWiki.findUnique({
+        where: { siteSlug: siteRoute.siteSlug },
+        select: { slug: true, status: true }
+      });
+      if (!serverWiki || serverWiki.status !== 'active') {
+        throw new NotFoundException('Server wiki not found.');
+      }
+      const title = siteRoute.relativePath
+        ? `${serverWiki.slug}/${siteRoute.relativePath}`
+        : serverWiki.slug;
+      return this.getPage('server', title, viewer, options);
+    }
     const resolved = resolveWikiPath(path);
     return this.getPage(resolved.namespace, resolved.title, viewer, options);
   }
@@ -1221,13 +1236,13 @@ export class WikiReadService {
       const page = pageById.get(thread.pageId);
       if (!page) continue;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
-      const serverSlug = namespace === 'server' ? routePaths.serverSlug(page) : undefined;
+      const serverWikiRoute = namespace === 'server' ? routePaths.serverWiki(page) : undefined;
       const routePath = routePaths.routePath(page, namespace);
       items.push({
         id: comment.id.toString(), kind: 'discussion', pageId: page.id.toString(), revisionId: null,
         changeType: comment.entryType === 'system' ? comment.eventType ?? 'discussion_event' : 'comment', title: thread.title, namespace, routePath,
-        href: serverSlug
-          ? `${buildServerWikiToolPath(serverSlug, page.localPath, 'discuss')}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`
+        href: serverWikiRoute
+          ? `${buildCanonicalServerWikiToolPath(serverWikiRoute.siteSlug, page.localPath, 'discuss', serverWikiRoute.slug, '/serverWiki')}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`
           : `/wiki/discuss/${page.id.toString()}?thread=${thread.id.toString()}&comment=${comment.id.toString()}`,
         summary: comment.entryType === 'system'
           ? this.discussionEventSummary(comment.eventType, comment.eventBefore, comment.eventAfter)
@@ -1289,7 +1304,7 @@ export class WikiReadService {
       if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
       const routePath = routePaths.routePath(page, namespace);
-      const serverSlug = namespace === 'server' ? routePaths.serverSlug(page) : undefined;
+      const serverWikiRoute = namespace === 'server' ? routePaths.serverWiki(page) : undefined;
       const copiedSummary = publicWikiRecentChangeSummary({
         summary: request.editSummary,
         revisionId: request.acceptedRevisionId,
@@ -1301,8 +1316,8 @@ export class WikiReadService {
       items.push({
         id: request.id.toString(), kind: reviews ? 'review' : 'edit_request', pageId: page.id.toString(), revisionId: request.acceptedRevisionId?.toString() ?? null,
         changeType: reviews ? 'review' : 'edit_request', title: page.displayTitle, namespace, routePath,
-        href: serverSlug
-          ? `${buildServerWikiToolPath(serverSlug, page.localPath, 'requests')}?request=${request.id.toString()}`
+        href: serverWikiRoute
+          ? `${buildCanonicalServerWikiToolPath(serverWikiRoute.siteSlug, page.localPath, 'requests', serverWikiRoute.slug, '/serverWiki')}?request=${request.id.toString()}`
           : `/wiki/edit-requests/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&request=${request.id.toString()}`,
         ...publicSummary,
         isMinor: request.isMinor, status: request.status,
@@ -1721,8 +1736,9 @@ export class WikiReadService {
     let spaceId = input.spaceId;
     let namespaceCode = input.namespace?.trim() || undefined;
     if (input.serverSlug?.trim()) {
-      const serverWiki = await this.prisma.serverWiki.findUnique({
-        where: { slug: input.serverSlug.trim() },
+      const requestedSlug = input.serverSlug.trim();
+      const serverWiki = await this.prisma.serverWiki.findFirst({
+        where: { OR: [{ siteSlug: requestedSlug }, { slug: requestedSlug }] },
         select: { spaceId: true, status: true },
       });
       if (!serverWiki || serverWiki.status !== 'active') {
@@ -2079,7 +2095,7 @@ export class WikiReadService {
     const html = cache?.html ?? renderDocument(expanded.ast, {
       files,
       missingLinks,
-      internalLinkBasePath: serverWiki ? `/server/${encodeURIComponent(serverWiki.context.slug)}` : undefined,
+      internalLinkBasePath: serverWiki ? `/serverWiki/${encodeURIComponent(serverWiki.context.slug)}` : undefined,
       linkResolution,
     });
     if (Buffer.byteLength(html, 'utf8') > 2 * 1024 * 1024) {
@@ -2138,6 +2154,7 @@ export class WikiReadService {
         voteServerId: true,
         serverName: true,
         slug: true,
+        siteSlug: true,
         host: true,
         port: true,
         edition: true,
@@ -2192,12 +2209,20 @@ export class WikiReadService {
     const publicPages = pages.filter((page) => page.currentRevisionId !== null
       && publicRevisionKeys.has(`${page.id}:${page.currentRevisionId}`));
     const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
-    const navigation = buildServerWikiNavigation(serverWiki.slug, readablePages, currentPageId);
+    const siteSlug = serverWiki.siteSlug ?? serverWiki.slug;
+    const navigation = buildServerWikiNavigation(
+      serverWiki.slug,
+      readablePages,
+      currentPageId,
+      siteSlug,
+      '/serverWiki'
+    );
     return {
       directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
       context: {
         name: serverWiki.serverName,
-        slug: serverWiki.slug,
+        slug: siteSlug,
+        contentSlug: serverWiki.slug,
         host: serverWiki.host,
         port: serverWiki.port,
         edition: serverWiki.edition,
@@ -2348,7 +2373,9 @@ export function serverWikiNavigationDepth(serverSlug: string, localPath: string)
 export function buildServerWikiNavigation(
   serverSlug: string,
   pages: ReadonlyArray<{ id: bigint; localPath: string; displayTitle: string }>,
-  currentPageId: bigint
+  currentPageId: bigint,
+  routeSlug = serverSlug,
+  routePrefix: '/server' | '/serverWiki' = '/server'
 ) {
   const navigationPages = [...pages].sort((left, right) => {
     const leftRoot = serverWikiRelativePath(serverSlug, left.localPath) ? 0 : -1;
@@ -2367,7 +2394,7 @@ export function buildServerWikiNavigation(
     return {
       id: item.id.toString(),
       title: serverWikiNavigationTitle(serverSlug, item.displayTitle),
-      path: buildServerWikiPagePath(serverSlug, item.localPath),
+      path: buildCanonicalServerWikiPath(routeSlug, item.localPath, serverSlug, routePrefix),
       current: item.id === currentPageId,
       depth: serverWikiNavigationDepth(serverSlug, item.localPath),
       hasChildren: parentPaths.has(relativePath)
@@ -2388,6 +2415,31 @@ function serverWikiRelativePath(serverSlug: string, localPath: string): string {
   return normalizedPath.startsWith(`${normalizedSlug}/`)
     ? normalizedPath.slice(normalizedSlug.length + 1)
     : normalizedPath;
+}
+
+function parseServerWikiSitePath(path: string): { siteSlug: string; relativePath: string } | null {
+  const match = /^\/serverWiki\/([^/]+)(?:\/(.*))?\/?$/u.exec(path.trim());
+  if (!match) return null;
+  const decode = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      throw new BadRequestException('Invalid server wiki path encoding.');
+    }
+  };
+  const siteSlug = decode(match[1] ?? '').trim();
+  if (!/^[A-Za-z0-9가-힣][A-Za-z0-9가-힣_-]{1,79}$/u.test(siteSlug)) {
+    throw new BadRequestException('Invalid server wiki site slug.');
+  }
+  const relativePath = (match[2] ?? '')
+    .split('/')
+    .filter(Boolean)
+    .map(decode)
+    .join('/');
+  if (relativePath.split('/').some((segment) => segment === '.' || segment === '..')) {
+    throw new BadRequestException('Invalid server wiki path.');
+  }
+  return { siteSlug, relativePath };
 }
 
 function resolveContextualLinkTarget(namespace: string, localPath: string, target: string) {

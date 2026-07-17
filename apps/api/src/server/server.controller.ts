@@ -63,6 +63,12 @@ const pluginCredentialStatusSchema = z.object({ enabled: z.boolean() });
 const serverWikiLayoutPayloadSchema = z.object({
   layoutKey: z.enum(['docs', 'handbook', 'brand'])
 });
+const serverWikiSiteSlugPayloadSchema = z.object({
+  siteSlug: z.string().trim().toLowerCase().regex(
+    /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/,
+    '사이트 주소는 영문 소문자, 숫자, 하이픈 조합으로 3~63자여야 합니다.',
+  ),
+});
 const serverWikiContentSettingsPayloadSchema = z.object({
   expectedVersion: z.number().int().min(0),
   contributionPolicySource: z.string().nullable(),
@@ -216,6 +222,20 @@ export class ServerController {
     await this.assertCanManageServer(id, session);
     const payload = serverWikiLayoutPayloadSchema.parse(body);
     return this.serverService.updateWikiLayout(id, payload.layoutKey, session.userId);
+  }
+
+  @RequireStepUp('server_admin')
+  @UseGuards(SessionGuard)
+  @Patch(':id/wiki-site-slug')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  async updateWikiSiteSlug(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload
+  ) {
+    await this.assertCanManageServer(id, session);
+    const payload = serverWikiSiteSlugPayloadSchema.parse(body);
+    return this.serverService.updateWikiSiteSlug(id, payload.siteSlug, session.userId);
   }
 
   @Get(':id/stats')

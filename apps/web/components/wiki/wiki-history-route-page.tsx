@@ -6,7 +6,7 @@ import { ServerWikiWorkspace } from './server-wiki-workspace';
 import { WikiHistoryListClient } from './wiki-history-list-client';
 
 interface WikiHistoryRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'serverWiki' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
   readonly segments?: string[];
 }
 
@@ -20,6 +20,6 @@ export async function WikiHistoryRoutePage({ prefix, segments = [] }: WikiHistor
     <header className="border-b border-white/10 pb-6"><h1 className="text-3xl font-bold text-white">{page.displayTitle} 역사</h1><p className="mt-3 text-sm text-slate-400">{routePath}</p></header>
     <WikiHistoryListClient pageId={page.id} currentRevisionId={page.revision.id} routePath={routePath} initial={revisions} />
   </div>;
-  if (prefix === 'server' && page.serverWiki) return <ServerWikiWorkspace page={page} section="역사">{history}</ServerWikiWorkspace>;
+  if ((prefix === 'server' || prefix === 'serverWiki') && page.serverWiki) return <ServerWikiWorkspace page={page} section="역사">{history}</ServerWikiWorkspace>;
   return <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">{history}</main>;
 }

@@ -25,7 +25,7 @@ interface ServerWikiArticleViewProps {
 export async function ServerWikiArticleView({ page, routePath }: ServerWikiArticleViewProps) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
-  const presentation = await fetchServerWikiPresentation(wiki.slug);
+  const presentation = await fetchServerWikiPresentation(wiki.contentSlug);
   const contentId = `wiki-content-${page.id}`;
 
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
@@ -58,7 +58,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-[#777]">
-            <Link href={`/server/${encodeURIComponent(wiki.slug)}`} className="hover:text-[#346ddb]">{wiki.name} 위키</Link>
+            <Link href={`/serverWiki/${encodeURIComponent(wiki.slug)}`} className="hover:text-[#346ddb]">{wiki.name} 위키</Link>
             <span>/</span>
             <span className="text-[#333]">{page.displayTitle}</span>
           </nav>
