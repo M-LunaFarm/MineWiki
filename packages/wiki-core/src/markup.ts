@@ -1848,6 +1848,32 @@ function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors:
     if (start !== null && end !== null && end <= start) return invalidYouTubeMacro(errors);
     return { type: 'video', provider: 'youtube', videoId, width, height, start, end };
   }
+  if ((normalizedName === 'navertv' || normalizedName === 'nicovideo') && rawArgs !== undefined) {
+    const [rawVideoId = '', ...parameters] = splitMacroArguments(rawArgs);
+    const videoId = normalizedName === 'navertv'
+      ? (/^[0-9]{1,20}$/u.test(rawVideoId) ? rawVideoId : null)
+      : normalizeNicoVideoId(rawVideoId);
+    if (!videoId) return invalidVideoMacro(normalizedName, errors);
+    let width = normalizedName === 'navertv' ? 640 : 720;
+    let height = normalizedName === 'navertv' ? 360 : 480;
+    for (const parameter of parameters) {
+      const separator = parameter.indexOf('=');
+      if (separator < 1) continue;
+      const key = parameter.slice(0, separator).trim().toLowerCase();
+      const value = parameter.slice(separator + 1).trim();
+      if (key !== 'width' && key !== 'height') continue;
+      if (!/^[0-9]+$/u.test(value)) return invalidVideoMacro(normalizedName, errors);
+      const parsed = Number(value);
+      if (key === 'width') {
+        if (parsed < 200 || parsed > 1200) return invalidVideoMacro(normalizedName, errors);
+        width = parsed;
+      } else {
+        if (parsed < 112 || parsed > 900) return invalidVideoMacro(normalizedName, errors);
+        height = parsed;
+      }
+    }
+    return { type: 'video', provider: normalizedName, videoId, width, height, start: null, end: null };
+  }
   const warning = `지원되지 않는 매크로입니다: ${name}`;
   if (!errors.includes(warning)) errors.push(warning);
   return { type: 'unsupported_macro', name };
@@ -1876,6 +1902,18 @@ function invalidYouTubeMacro(errors: string[]): InlineNode {
   const warning = 'YouTube 매크로의 동영상 ID 또는 옵션이 올바르지 않습니다.';
   if (!errors.includes(warning)) errors.push(warning);
   return { type: 'unsupported_macro', name: 'youtube' };
+}
+
+function normalizeNicoVideoId(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+  if (/^[0-9]{1,16}$/u.test(normalized)) return `sm${normalized}`;
+  return /^(?:sm|so)[0-9]{1,16}$/u.test(normalized) ? normalized : null;
+}
+
+function invalidVideoMacro(name: 'navertv' | 'nicovideo', errors: string[]): InlineNode {
+  const warning = `${name} 매크로의 동영상 ID 또는 옵션이 올바르지 않습니다.`;
+  if (!errors.includes(warning)) errors.push(warning);
+  return { type: 'unsupported_macro', name };
 }
 
 function splitMacroArguments(value: string) {
@@ -2189,7 +2227,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       path: ['d']
     },
     allowedSchemes: ['http', 'https', 'mailto'],
-    allowedIframeHostnames: ['www.youtube-nocookie.com'],
+    allowedIframeHostnames: ['www.youtube-nocookie.com', 'tv.naver.com', 'embed.nicovideo.jp'],
     allowedStyles: {
       span: {
         color: [/^#[0-9a-f]{3,8}$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/i, /^[a-z]+$/i],
@@ -2391,11 +2429,7 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
       if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options, node.fragment);
       if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, node.display, options, true);
       if (node.type === 'video') {
-        const query = new URLSearchParams();
-        if (node.start !== null) query.set('start', String(node.start));
-        if (node.end !== null) query.set('end', String(node.end));
-        const suffix = query.size > 0 ? `?${query.toString()}` : '';
-        return `<span class="wiki-media-wrapper" style="max-width:${node.width}px;aspect-ratio:${node.width} / ${node.height}"><iframe class="wiki-media" src="https://www.youtube-nocookie.com/embed/${escapeAttr(node.videoId)}${suffix}" title="YouTube 동영상" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></span>`;
+        return renderVideo(node);
       }
       if (node.type === 'math') {
         return renderMath(
@@ -2433,6 +2467,28 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
       return `<sup class="wiki-footnote-ref" id="${referenceId}"><a href="#fn-${index}" aria-label="각주 ${index}">[${index}]</a></sup>`;
     })
     .join('');
+}
+
+function renderVideo(node: Extract<InlineNode, { type: 'video' }>): string {
+  let src: string;
+  let title: string;
+  let allow = 'fullscreen';
+  if (node.provider === 'youtube') {
+    const query = new URLSearchParams();
+    if (node.start !== null) query.set('start', String(node.start));
+    if (node.end !== null) query.set('end', String(node.end));
+    const suffix = query.size > 0 ? `?${query.toString()}` : '';
+    src = `https://www.youtube-nocookie.com/embed/${node.videoId}${suffix}`;
+    title = 'YouTube 동영상';
+    allow = 'encrypted-media; picture-in-picture; fullscreen';
+  } else if (node.provider === 'navertv') {
+    src = `https://tv.naver.com/embed/${node.videoId}`;
+    title = '네이버TV 동영상';
+  } else {
+    src = `https://embed.nicovideo.jp/watch/${node.videoId}`;
+    title = '니코니코 동영상';
+  }
+  return `<span class="wiki-media-wrapper" style="max-width:${node.width}px;aspect-ratio:${node.width} / ${node.height}"><iframe class="wiki-media" src="${escapeAttr(src)}" title="${title}" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" allow="${allow}" allowfullscreen></iframe></span>`;
 }
 
 function validateMathSource(source: string): string | null {

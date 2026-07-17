@@ -1138,14 +1138,13 @@ test('collects file dependencies from every block and inline container', () => {
 });
 
 test('renders explicit safe placeholders for unsupported macros', () => {
-  const parsed = parseMarkup('영상은 [navertv(123)], 선택은 [vote(항목)]이고 [[문서]]와 [https://example.com 외부]는 링크다.');
+  const parsed = parseMarkup('선택은 [vote(항목)]이고 [[문서]]와 [https://example.com 외부]는 링크다.');
   const html = renderDocument(parsed.ast);
 
   assert.deepEqual(
     parsed.errors.filter((error) => error.startsWith('지원되지 않는 매크로입니다:')),
-    ['지원되지 않는 매크로입니다: navertv', '지원되지 않는 매크로입니다: vote']
+    ['지원되지 않는 매크로입니다: vote']
   );
-  assert.match(html, /<span class="wiki-macro-warning" title="지원되지 않는 매크로">지원하지 않는 매크로: \[navertv\]<\/span>/);
   assert.match(html, />지원하지 않는 매크로: \[vote\]<\/span>/);
   assert.match(html, /class="wiki-link"/);
   assert.match(html, /href="https:\/\/example\.com"/);
@@ -1299,6 +1298,36 @@ test('keeps malformed or unsafe YouTube macros inert', () => {
     const html = renderDocument(parsed.ast);
     assert.match(parsed.errors.join('\n'), /YouTube 매크로/u);
     assert.match(html, /지원하지 않는 매크로: \[youtube\]/u);
+    assert.equal(html.includes('<iframe'), false);
+    assert.equal(html.includes('javascript:'), false);
+    assert.equal(html.includes('<script>'), false);
+  }
+});
+
+test('renders bounded thetree-compatible Naver TV and Niconico video macros', () => {
+  const parsed = parseMarkup('[navertv(123456,width=800,height=450)] [nicovideo(7654321,width=720,height=480)] [nicovideo(so987654)]');
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.errors.filter((error) => error.includes('매크로')), []);
+  assert.match(html, /src="https:\/\/tv\.naver\.com\/embed\/123456"/u);
+  assert.match(html, /title="네이버TV 동영상"/u);
+  assert.match(html, /max-width:800px;aspect-ratio:800 \/ 450/u);
+  assert.match(html, /src="https:\/\/embed\.nicovideo\.jp\/watch\/sm7654321"/u);
+  assert.match(html, /src="https:\/\/embed\.nicovideo\.jp\/watch\/so987654"/u);
+  assert.equal((html.match(/sandbox="allow-scripts allow-same-origin allow-presentation"/gu) ?? []).length, 3);
+});
+
+test('keeps malformed or unsafe Naver TV and Niconico macros inert', () => {
+  for (const input of [
+    '[navertv(javascript:alert(1))]',
+    '[navertv(123,width=99999)]',
+    '[nicovideo(sm123,height=<script>)]',
+    '[nicovideo(https://example.com)]'
+  ]) {
+    const parsed = parseMarkup(input);
+    const html = renderDocument(parsed.ast);
+    assert.match(parsed.errors.join('\n'), /매크로의 동영상 ID 또는 옵션/u);
+    assert.match(html, /지원하지 않는 매크로/u);
     assert.equal(html.includes('<iframe'), false);
     assert.equal(html.includes('javascript:'), false);
     assert.equal(html.includes('<script>'), false);

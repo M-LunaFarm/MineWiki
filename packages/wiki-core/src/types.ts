@@ -116,7 +116,15 @@ export type InlineNode =
   | { type: 'ruby'; text: string; ruby: string; color: string | null }
   | { type: 'dynamic_time'; mode: 'datetime' | 'age' | 'dday'; date: string | null }
   | { type: 'dynamic_stat'; stat: 'pagecount'; namespace: string | null }
-  | { type: 'video'; provider: 'youtube'; videoId: string; width: number; height: number; start: number | null; end: number | null }
+  | {
+      type: 'video';
+      provider: 'youtube' | 'navertv' | 'nicovideo';
+      videoId: string;
+      width: number;
+      height: number;
+      start: number | null;
+      end: number | null;
+    }
   | { type: 'math'; source: string; error: string | null }
   | { type: 'bold'; children: InlineNode[] }
   | { type: 'italic'; children: InlineNode[] }
