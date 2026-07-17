@@ -1260,6 +1260,97 @@ test('contribution tabs expose discussion, edit-request, and reviewer ledgers', 
   assert.equal(reviews.items[0]?.createdAt, now.toISOString());
 });
 
+test('create-page requests remain visible in author and reviewer contribution ledgers', async () => {
+  const now = new Date('2026-07-17T00:00:00Z');
+  const createRequest = (input: {
+    id: bigint;
+    title: string;
+    status: string;
+    createdBy: bigint;
+    reviewedBy?: bigint | null;
+    reviewNote?: string | null;
+  }) => ({
+    id: input.id,
+    requestKind: 'create',
+    pageId: null,
+    baseRevisionId: null,
+    targetNamespaceId: 1,
+    targetNamespaceCode: 'main',
+    targetSpaceId: 1n,
+    targetTitle: input.title,
+    targetSlug: input.title,
+    targetDisplayTitle: input.title.replaceAll('_', ' '),
+    targetPageType: 'article',
+    targetOwnerProfileId: null,
+    proposedContent: '새 문서 본문',
+    editSummary: `${input.title} 제안`,
+    isMinor: false,
+    status: input.status,
+    createdBy: input.createdBy,
+    reviewedBy: input.reviewedBy ?? null,
+    reviewNote: input.reviewNote ?? null,
+    acceptedRevisionId: null,
+    createdAt: now,
+    updatedAt: now,
+    reviewedAt: input.reviewedBy ? now : null,
+    contributionPolicyVersion: null
+  });
+  const hidden = createRequest({ id: 33n, title: '숨김_대상', status: 'pending', createdBy: 5n });
+  const visible = createRequest({ id: 32n, title: '공개_대상', status: 'pending', createdBy: 5n });
+  const rejected = createRequest({
+    id: 31n,
+    title: '거절된_대상',
+    status: 'rejected',
+    createdBy: 9n,
+    reviewedBy: 5n,
+    reviewNote: '정책에 맞지 않음'
+  });
+  const prisma = {
+    wikiProfile: {
+      async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active', mergedIntoProfileId: null }; }
+    },
+    wikiEditRequest: {
+      async findMany(args: { where: { reviewedBy?: unknown } }) {
+        return args.where.reviewedBy ? [rejected] : [hidden, visible];
+      }
+    },
+    wikiPageRevision: { async findMany() { return []; } },
+    wikiPage: { async findMany() { return []; } },
+    wikiNamespace: { async findMany() { return []; } }
+  } as unknown as PrismaService;
+  const permissions = {
+    async assertCanReadCreateTarget(input: { title: string }) {
+      if (input.title === hidden.targetTitle) throw new Error('hidden target');
+    }
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const requests = await service.getContributions({ profileId: '5', activity: 'edit-requests' });
+  assert.equal(requests.items.length, 1, 'the scan must continue past a denied target');
+  assert.deepEqual(requests.items[0], {
+    id: '32',
+    kind: 'edit_request',
+    pageId: null,
+    revisionId: null,
+    changeType: 'edit_request',
+    title: '공개 대상',
+    namespace: 'main',
+    routePath: '/wiki/%EA%B3%B5%EA%B0%9C_%EB%8C%80%EC%83%81',
+    href: '/wiki/edit-requests/request/32?returnTo=%2Fwiki%2F%25EA%25B3%25B5%25EA%25B0%259C_%25EB%258C%2580%25EC%2583%2581',
+    summary: '공개_대상 제안',
+    summaryHidden: false,
+    isMinor: false,
+    status: 'pending',
+    createdAt: now.toISOString()
+  });
+
+  const reviews = await service.getContributions({ profileId: '5', activity: 'reviews' });
+  assert.equal(reviews.items[0]?.pageId, null);
+  assert.equal(reviews.items[0]?.status, 'rejected');
+  assert.equal(reviews.items[0]?.summary, '정책에 맞지 않음');
+  assert.equal(reviews.items[0]?.href.startsWith('/wiki/edit-requests/request/31?'), true);
+});
+
 test('server wiki discussion contributions keep the canonical workspace route', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const page = {

@@ -205,7 +205,7 @@ export type WikiBacklinkType = 'link' | 'file' | 'include' | 'redirect';
 export interface WikiContributionItem {
   readonly id: string;
   readonly kind: 'document' | 'discussion' | 'edit_request' | 'review';
-  readonly pageId: string;
+  readonly pageId: string | null;
   readonly revisionId: string | null;
   readonly changeType: string;
   readonly title: string;
@@ -1365,7 +1365,7 @@ export class WikiReadService {
     const hiddenByRevisionId = await this.summaryHiddenByRevisionId(
       requests.flatMap((request) => request.acceptedRevisionId === null ? [] : [request.acceptedRevisionId])
     );
-    const pageIds = [...new Set(requests.map((request) => request.pageId))];
+    const pageIds = [...new Set(requests.flatMap((request) => request.pageId === null ? [] : [request.pageId]))];
     const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
     const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
@@ -1376,11 +1376,55 @@ export class WikiReadService {
     let lastScannedId: bigint | null = null;
     for (const request of requests) {
       lastScannedId = request.id;
-      const page = pageById.get(request.pageId);
-      if (!page || !(await this.canReadContributionPage(page, input.accountId, readable))) continue;
-      const namespace = namespaceById.get(page.namespaceId) ?? 'main';
-      const routePath = routePaths.routePath(page, namespace);
-      const serverWikiRoute = namespace === 'server' ? routePaths.serverWiki(page) : undefined;
+      const page = request.pageId === null ? null : pageById.get(request.pageId) ?? null;
+      let pageId: string | null;
+      let namespace: string;
+      let title: string;
+      let routePath: string;
+      let href: string;
+      if (page) {
+        if (!(await this.canReadContributionPage(page, input.accountId, readable))) continue;
+        pageId = page.id.toString();
+        namespace = namespaceById.get(page.namespaceId) ?? 'main';
+        title = page.displayTitle;
+        routePath = routePaths.routePath(page, namespace);
+        const serverWikiRoute = namespace === 'server' ? routePaths.serverWiki(page) : undefined;
+        href = serverWikiRoute
+          ? `${buildCanonicalServerWikiToolPath(serverWikiRoute.siteSlug, page.localPath, 'requests', serverWikiRoute.slug, '/serverWiki')}?request=${request.id.toString()}`
+          : `/wiki/edit-requests/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&request=${request.id.toString()}`;
+      } else {
+        const {
+          targetNamespaceId,
+          targetNamespaceCode,
+          targetSpaceId,
+          targetTitle,
+          targetDisplayTitle
+        } = request;
+        if (
+          request.requestKind !== 'create' ||
+          targetNamespaceId === null ||
+          targetNamespaceCode === null ||
+          targetSpaceId === null ||
+          targetTitle === null ||
+          targetDisplayTitle === null
+        ) continue;
+        try {
+          await this.wikiPermissions.assertCanReadCreateTarget({
+            accountId: input.accountId,
+            namespaceId: targetNamespaceId,
+            namespaceCode: targetNamespaceCode,
+            spaceId: targetSpaceId,
+            title: targetTitle
+          });
+        } catch {
+          continue;
+        }
+        pageId = null;
+        namespace = targetNamespaceCode;
+        title = targetDisplayTitle;
+        routePath = wikiUrl(targetNamespaceCode as Parameters<typeof wikiUrl>[0], targetTitle);
+        href = `/wiki/edit-requests/request/${request.id.toString()}?returnTo=${encodeURIComponent(routePath)}`;
+      }
       const copiedSummary = publicWikiRecentChangeSummary({
         summary: request.editSummary,
         revisionId: request.acceptedRevisionId,
@@ -1390,11 +1434,8 @@ export class WikiReadService {
         ? { summary: request.reviewNote, summaryHidden: false }
         : copiedSummary;
       items.push({
-        id: request.id.toString(), kind: reviews ? 'review' : 'edit_request', pageId: page.id.toString(), revisionId: request.acceptedRevisionId?.toString() ?? null,
-        changeType: reviews ? 'review' : 'edit_request', title: page.displayTitle, namespace, routePath,
-        href: serverWikiRoute
-          ? `${buildCanonicalServerWikiToolPath(serverWikiRoute.siteSlug, page.localPath, 'requests', serverWikiRoute.slug, '/serverWiki')}?request=${request.id.toString()}`
-          : `/wiki/edit-requests/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&request=${request.id.toString()}`,
+        id: request.id.toString(), kind: reviews ? 'review' : 'edit_request', pageId, revisionId: request.acceptedRevisionId?.toString() ?? null,
+        changeType: reviews ? 'review' : 'edit_request', title, namespace, routePath, href,
         ...publicSummary,
         isMinor: request.isMinor, status: request.status,
         createdAt: (reviews ? request.reviewedAt ?? request.updatedAt : request.createdAt).toISOString()

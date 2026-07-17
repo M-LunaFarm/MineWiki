@@ -303,7 +303,7 @@ export interface WikiSpecialDocumentResponse {
 export interface WikiCategoryResponse {
   readonly category: string;
   readonly document: {
-    readonly pageId: string;
+    readonly pageId: string | null;
     readonly routePath: string;
   } | null;
   readonly parents: ReadonlyArray<{
