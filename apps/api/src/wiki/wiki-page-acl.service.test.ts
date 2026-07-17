@@ -182,11 +182,12 @@ test('page ACL rejects a group scoped to another wiki space', async () => {
   assert.equal(created, false);
 });
 
-test('page readers do not receive the manager-only ACL subject catalog', async () => {
+test('page readers do not receive manager-only ACL rules, subjects, reasons, or catalog', async () => {
   let catalogQueried = false;
+  let rulesQueried = false;
   const prisma = {
     wikiPage: { async findUnique() { return page(); } },
-    aclRule: { async findMany() { return []; } },
+    aclRule: { async findMany() { rulesQueried = true; return [{ subjectValue: 'private-user-42', reason: 'internal incident' }]; } },
     wikiGroup: { async findMany() { catalogQueried = true; return []; } },
     aclGroup: { async findMany() { catalogQueried = true; return []; } }
   };
@@ -203,5 +204,9 @@ test('page readers do not receive the manager-only ACL subject catalog', async (
 
   const result = await service.getPageAcl('7', null);
   assert.equal(catalogQueried, false);
+  assert.equal(rulesQueried, false);
+  assert.deepEqual(result.rules, []);
+  assert.doesNotMatch(JSON.stringify(result), /private-user-42|internal incident/);
+  assert.equal(result.manageReason, 'insufficient_permission');
   assert.deepEqual(result.catalog, { groups: [], aclGroups: [], roles: [] });
 });

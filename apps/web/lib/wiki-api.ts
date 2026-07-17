@@ -1082,7 +1082,7 @@ export interface WikiThreadAclResponse {
   };
   readonly actions: readonly ['read', 'write_thread_comment'];
   readonly rules: readonly WikiAclRuleSummary[];
-  readonly ruleSetHash: string;
+  readonly ruleSetHash: string | null;
   readonly canManage: boolean;
   readonly manageReason: string;
   readonly inheritance: {

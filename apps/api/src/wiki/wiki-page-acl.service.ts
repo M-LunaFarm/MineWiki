@@ -47,10 +47,10 @@ export class WikiPageAclService {
     const actor = await this.actorForSession(session);
     const management = await this.permissions.canManagePageAcl({ actor, page });
     const [rules, groups, aclGroups] = await Promise.all([
-      this.prisma.aclRule.findMany({
+      management.allowed ? this.prisma.aclRule.findMany({
         where: { targetType: 'page', targetId: page.id },
         orderBy: [{ action: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }]
-      }),
+      }) : Promise.resolve([]),
       management.allowed ? this.prisma.wikiGroup.findMany({
         orderBy: [{ displayName: 'asc' }],
         select: { code: true, displayName: true }
@@ -73,7 +73,7 @@ export class WikiPageAclService {
       actions: ACL_ACTIONS,
       rules: rules.map(toRuleSummary),
       canManage: management.allowed,
-      manageReason: management.reason,
+      manageReason: management.allowed ? management.reason : 'insufficient_permission',
       catalog: {
         groups: groups.map((group) => ({ code: group.code, name: group.displayName })),
         aclGroups: aclGroups.map((group) => ({ key: group.groupKey, name: group.title })),

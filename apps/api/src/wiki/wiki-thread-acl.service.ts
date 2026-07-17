@@ -45,8 +45,18 @@ export class WikiThreadAclService {
         page
       });
     }
-    const [rules, groups, aclGroups] = await Promise.all([
-      this.rulesForThread(thread.id),
+    const now = new Date();
+    const [rules, activeWriteRule, groups, aclGroups] = await Promise.all([
+      management.allowed ? this.rulesForThread(thread.id) : Promise.resolve([]),
+      management.allowed ? Promise.resolve(null) : this.prisma.aclRule.findFirst({
+        where: {
+          targetType: 'thread',
+          targetId: thread.id,
+          action: 'write_thread_comment',
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }]
+        },
+        select: { id: true }
+      }),
       management.allowed ? this.prisma.wikiGroup.findMany({
         orderBy: [{ displayName: 'asc' }],
         select: { code: true, displayName: true }
@@ -57,10 +67,9 @@ export class WikiThreadAclService {
         select: { groupKey: true, title: true }
       }) : Promise.resolve([])
     ]);
-    const now = Date.now();
-    const activeWriteRules = rules.some((rule) =>
-      rule.action === 'write_thread_comment' && (!rule.expiresAt || rule.expiresAt.getTime() > now)
-    );
+    const activeWriteRules = management.allowed ? rules.some((rule) =>
+      rule.action === 'write_thread_comment' && (!rule.expiresAt || rule.expiresAt.getTime() > now.getTime())
+    ) : Boolean(activeWriteRule);
     return {
       thread: { id: thread.id.toString(), pageId: thread.pageId.toString(), title: thread.title, status: thread.status },
       page: {
@@ -69,9 +78,9 @@ export class WikiThreadAclService {
       },
       actions: THREAD_ACL_ACTIONS,
       rules: rules.map(toRuleSummary),
-      ruleSetHash: ruleSetHash(rules),
+      ruleSetHash: management.allowed ? ruleSetHash(rules) : null,
       canManage: management.allowed,
-      manageReason: management.reason,
+      manageReason: management.allowed ? management.reason : 'insufficient_permission',
       inheritance: {
         read: 'page-boundary' as const,
         writeThreadComment: activeWriteRules ? 'thread-closed' as const : 'page' as const
