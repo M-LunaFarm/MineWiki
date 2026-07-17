@@ -26,6 +26,7 @@ import { matchCommonLines } from './wiki-line-diff';
 import { resolveEffectiveServerWikiLayout } from '../server/server-wiki-layout-policy';
 import { publicWikiRecentChangeSummary, publicWikiRevisionEditSummary } from './wiki-revision-summary';
 import { wikiLinkResolutionContext } from './wiki-link-context';
+import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -2514,31 +2515,6 @@ export function buildServerWikiToolPath(serverSlug: string, localPath: string, t
 export function serverWikiNavigationDepth(serverSlug: string, localPath: string): number {
   const relativePath = serverWikiRelativePath(serverSlug, localPath);
   return relativePath ? relativePath.split('/').filter(Boolean).length : 0;
-}
-
-export function serverWikiIdentityConflicts(
-  wiki: { serverName: string; host: string | null },
-  server: { name: string; joinHost: string },
-): boolean {
-  const wikiName = normalizeServerIdentityValue(wiki.serverName);
-  const serverName = normalizeServerIdentityValue(server.name);
-  const wikiHost = normalizeServerHost(wiki.host);
-  const serverHost = normalizeServerHost(server.joinHost);
-  return wikiName.length > 0
-    && serverName.length > 0
-    && wikiHost.length > 0
-    && serverHost.length > 0
-    && wikiName !== serverName
-    && wikiHost !== serverHost;
-}
-
-function normalizeServerIdentityValue(value: string): string {
-  return value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
-}
-
-function normalizeServerHost(value: string | null): string {
-  if (!value) return '';
-  return normalizeServerIdentityValue(value).replace(/\.+$/u, '');
 }
 
 export function buildServerWikiNavigation(

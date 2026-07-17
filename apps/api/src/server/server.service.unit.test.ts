@@ -103,6 +103,67 @@ test('server profile updates sync linked wiki identity and write a bounded audit
   });
 });
 
+test('server detail hides a stale cross-brand wiki link', async () => {
+  const now = new Date('2026-07-17T00:00:00.000Z');
+  const server = {
+    id: randomUUID(),
+    shortCode: 'foreign',
+    wikiSpaceId: 3n,
+    wikiPageId: 4n,
+    wikiSlug: 'foreign-docs',
+    name: 'MineWiki Server',
+    joinHost: 'play.minewiki.test',
+    joinPort: 25565,
+    edition: 'java' as const,
+    supportedVersions: ['1.21'],
+    tags: ['survival'],
+    shortDescription: 'MineWiki server',
+    longDescription: 'MineWiki server details',
+    bannerUrl: null,
+    websiteUrl: null,
+    discordUrl: null,
+    voteCooldownHours: 24,
+    verificationGrade: 'Unverified' as const,
+    verifiedAt: null,
+    votes24h: 0,
+    votesMonthly: 0,
+    reviewsCount: 0,
+    voteRequiresOwnership: false,
+    createdAt: now,
+    updatedAt: now,
+    playersOnline: null,
+    playersMax: null,
+    playersLastUpdatedAt: null,
+    isOnline: null,
+    latencyMs: null,
+    stats: null,
+  };
+  const prisma = {
+    server: { async findUnique() { return server; } },
+    serverClaimMethod: { async findMany() { return []; } },
+    serverWiki: {
+      async findUnique() {
+        return {
+          id: 9n,
+          voteServerId: server.id,
+          spaceId: server.wikiSpaceId,
+          slug: server.wikiSlug,
+          status: 'active',
+          serverName: 'Unrelated Brand',
+          host: 'play.unrelated.test',
+        };
+      },
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const detail = await service.detail(server.id);
+
+  assert.equal(detail.wikiSpaceId, null);
+  assert.equal(detail.wikiPageId, null);
+  assert.equal(detail.wikiSlug, null);
+});
+
 test('server wiki public slug is tenant-owned, validated, and audited independently of content paths', async () => {
   let storedSiteSlug: string | null = 'old-docs';
   const audits: Array<Record<string, unknown>> = [];

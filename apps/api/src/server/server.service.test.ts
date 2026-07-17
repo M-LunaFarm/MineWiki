@@ -189,6 +189,18 @@ if (!hasDatabase) {
         where: { voteServerId: server.id }
       });
       assert.equal(serverWiki?.slug, link.wikiSlug);
+
+      await prisma.serverWiki.update({
+        where: { voteServerId: server.id },
+        data: {
+          serverName: `Foreign ${unique}`,
+          host: `foreign-${unique}.example.net`,
+        },
+      });
+      const conflictingDetail = await service.detail(server.id);
+      assert.equal(conflictingDetail.wikiSpaceId, null);
+      assert.equal(conflictingDetail.wikiPageId, null);
+      assert.equal(conflictingDetail.wikiSlug, null);
     } finally {
       if (serverId) {
         await prisma.server.update({

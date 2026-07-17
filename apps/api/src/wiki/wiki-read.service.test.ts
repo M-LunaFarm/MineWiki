@@ -11,10 +11,10 @@ import {
   buildServerWikiToolPath,
   encodeWikiSearchCursor,
   parseWikiSearchCursor,
-  serverWikiIdentityConflicts,
   serverWikiNavigationDepth,
   WikiReadService,
 } from './wiki-read.service';
+import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
 
 test('public pagecount filters revisions, ACLs, and namespaces without request-specific address context', async () => {
   const pages = [

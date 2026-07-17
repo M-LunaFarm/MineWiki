@@ -43,6 +43,7 @@ import {
   resolveEffectiveServerWikiLayout,
   type ServerWikiLayoutKey,
 } from './server-wiki-layout-policy';
+import { serverWikiIdentityConflicts } from './server-wiki-identity';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
@@ -223,16 +224,30 @@ export class ServerService {
       if (!server) {
         throw new NotFoundException(`Server ${idOrShortCode} not found`);
       }
-      const methods = await this.prisma.serverClaimMethod.findMany({
-        where: { serverId: server.id },
-        select: { method: true },
-      });
+      const [methods, serverWiki] = await Promise.all([
+        this.prisma.serverClaimMethod.findMany({
+          where: { serverId: server.id },
+          select: { method: true },
+        }),
+        server.wikiSlug || server.wikiSpaceId
+          ? this.findServerWikiForServer(server.id, server.wikiSpaceId)
+          : Promise.resolve(null),
+      ]);
       const verificationMethods = methods
         .map((method) => method.method)
         .filter(isSupportedClaimMethod)
         .filter((method, index, array) => array.indexOf(method) === index);
+      const hasPublicWiki = Boolean(
+        serverWiki
+        && serverWiki.status === 'active'
+        && serverWiki.slug === server.wikiSlug
+        && serverWiki.spaceId === server.wikiSpaceId
+        && !serverWikiIdentityConflicts(serverWiki, server),
+      );
       const detail = toDetail(
-        server,
+        hasPublicWiki
+          ? server
+          : { ...server, wikiSpaceId: null, wikiPageId: null, wikiSlug: null },
         verificationMethods.length > 0 ? verificationMethods : ALL_METHODS,
       );
       void this.telemetry.record('get', 'servers', Date.now() - startedAt, true);
