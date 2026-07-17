@@ -1150,6 +1150,9 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
     border-color: #9ab5ef;
     color: #555;
   }
+  .server-wiki-layout .wiki-rendered .wiki-indent {
+    border-color: #d6dbe5;
+  }
   .server-wiki-layout .wiki-rendered code {
     background: #f2f2f2;
     color: #333;

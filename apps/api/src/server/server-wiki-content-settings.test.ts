@@ -30,6 +30,26 @@ test('server wiki presentation renders only restricted safe markup', () => {
   assert.match(rendered.topNoticeHtml ?? '', /https:\/\/minewiki\.kr/u);
 });
 
+test('server wiki presentation keeps bounded indentation compatible with restricted content', () => {
+  const rendered = renderServerWikiPresentation({
+    contributionPolicySource: '기여 원칙\n 세부 설명',
+    editHelpSource: '편집 도움말\n 예시를 확인하세요.',
+    topNoticeSource: '공지\n 점검 시간은 02:00입니다.',
+    bottomNoticeSource: null,
+  });
+
+  assert.match(rendered.policyHtml ?? '', /<div class="wiki-indent"><p>세부 설명<\/p><\/div>/u);
+  assert.match(rendered.editHelpHtml ?? '', /<div class="wiki-indent"><p>예시를 확인하세요\.<\/p><\/div>/u);
+  assert.match(rendered.topNoticeHtml ?? '', /<div class="wiki-indent"><p>점검 시간은 02:00입니다\.<\/p><\/div>/u);
+  assert.throws(
+    () => normalizeServerWikiContentSettings({
+      ...emptySettings,
+      topNoticeSource: '공지\n [[파일:secret.png]]',
+    }),
+    hasErrorCode('SERVER_WIKI_CONTENT_UNSUPPORTED_MARKUP'),
+  );
+});
+
 test('server wiki presentation rejects active and document-level markup', () => {
   assert.throws(
     () => normalizeServerWikiContentSettings({

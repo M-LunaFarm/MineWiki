@@ -121,7 +121,7 @@ function renderRestrictedSource(source: string | null, mode: 'document' | 'notic
 
 function findInvalidNode(nodes: readonly AstNode[], mode: 'document' | 'notice'): string | null {
   for (const node of nodes) {
-    if (mode === 'notice' && node.type !== 'paragraph' && node.type !== 'blockquote' && node.type !== 'hr') {
+    if (mode === 'notice' && node.type !== 'paragraph' && node.type !== 'blockquote' && node.type !== 'indent' && node.type !== 'hr') {
       return node.type;
     }
     if (
@@ -129,6 +129,7 @@ function findInvalidNode(nodes: readonly AstNode[], mode: 'document' | 'notice')
       && node.type !== 'paragraph'
       && node.type !== 'list'
       && node.type !== 'blockquote'
+      && node.type !== 'indent'
       && node.type !== 'hr'
       && node.type !== 'codeblock'
     ) {
@@ -138,7 +139,7 @@ function findInvalidNode(nodes: readonly AstNode[], mode: 'document' | 'notice')
       const invalid = findInvalidInline(node.children);
       if (invalid) return invalid;
     }
-    if (node.type === 'blockquote') {
+    if (node.type === 'blockquote' || node.type === 'indent') {
       const invalid = findInvalidNode(node.children, mode);
       if (invalid) return invalid;
     }

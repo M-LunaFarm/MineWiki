@@ -462,7 +462,12 @@ function parseMarkupDocument(
       }
     }
 
-    const heading = parseWikiHeadingLine(line, options.gitBookMarkdown === true);
+    // Canonical NamuMark indentation uses the block lexer, which deliberately
+    // treats heading-shaped text as prose instead of promoting it into the
+    // document outline.
+    const heading = nestingKind === 'indent'
+      ? null
+      : parseWikiHeadingLine(line, options.gitBookMarkdown === true);
     if (heading) {
       ast.push({
         type: 'heading',

@@ -142,7 +142,7 @@ test('parses canonical indentation as recursive blocks with shared render metada
     'include',
     'component',
     'toc',
-    'heading',
+    'paragraph',
     'category',
   ]);
   assert.equal(parsed.ast[1]?.type, 'paragraph');
@@ -150,6 +150,7 @@ test('parses canonical indentation as recursive blocks with shared render metada
   assert.deepEqual(parsed.categories, ['들여쓰기']);
   assert.deepEqual(parsed.includes, ['틀:안내']);
   assert.deepEqual(parsed.footnotes, ['들여쓴 각주']);
+  assert.deepEqual(parsed.headings, []);
   assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['가이드', '인용 문서']);
   assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['inside.png']);
 
@@ -157,9 +158,10 @@ test('parses canonical indentation as recursive blocks with shared render metada
   assert.match(html, /^<div class="wiki-indent"><p>바깥/u);
   assert.match(html, /<div class="wiki-indent"><p>안쪽[^]*<ul class="wiki-list"><li>안쪽 목록/u);
   assert.match(html, /<blockquote class="wiki-quote"><p>인용/u);
-  assert.match(html, /wiki-toc[^]*들여쓴 제목/u);
+  assert.match(html, /== 들여쓴 제목 ==/u);
+  assert.equal(html.includes('>들여쓴 제목</h2>'), false);
   assert.match(html, /<section class="footnotes">[^]*들여쓴 각주[^]*<\/section>/u);
-  assert.ok(html.indexOf('<section class="footnotes">') < html.indexOf('<nav class="wiki-toc"'));
+  assert.ok(html.indexOf('<section class="footnotes">') < html.indexOf('<aside class="wiki-toc-empty">'));
   assert.match(html, /<\/div>\n<p>들여쓰기 뒤 본문<\/p>$/u);
 });
 
