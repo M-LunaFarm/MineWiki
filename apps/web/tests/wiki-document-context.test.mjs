@@ -17,7 +17,7 @@ test('ordinary wiki documents enrich the body with ACL-filtered backlinks and ca
 });
 
 test('server wiki keeps its dedicated GitBook shell instead of receiving the global context cards', () => {
-  const serverBranch = route.slice(route.indexOf("if (prefix === 'server'"), route.indexOf("if (page.title === '대문'"));
+  const serverBranch = route.slice(route.indexOf("if ((prefix === 'server' || prefix === 'serverWiki')"), route.indexOf("if (page.title === '대문'"));
   assert.match(serverBranch, /<ServerWikiArticleView/u);
   assert.doesNotMatch(serverBranch, /WikiDocumentContext/u);
 });

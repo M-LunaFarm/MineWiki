@@ -13,7 +13,7 @@ export interface WikiRoutePage {
 export class WikiRoutePathBatch {
   constructor(
     private readonly namespaceById: ReadonlyMap<number, string>,
-    private readonly serverSlugBySpaceId: ReadonlyMap<bigint, string>
+    private readonly serverWikiBySpaceId: ReadonlyMap<bigint, { slug: string; siteSlug: string }>
   ) {}
 
   namespace(page: Pick<WikiRoutePage, 'namespaceId'>, fallback = 'main'): string {
@@ -21,22 +21,36 @@ export class WikiRoutePathBatch {
   }
 
   serverSlug(page: Pick<WikiRoutePage, 'spaceId'>): string | undefined {
-    return this.serverSlugBySpaceId.get(page.spaceId);
+    return this.serverWikiBySpaceId.get(page.spaceId)?.siteSlug;
+  }
+
+  serverWiki(page: Pick<WikiRoutePage, 'spaceId'>): { slug: string; siteSlug: string } | undefined {
+    return this.serverWikiBySpaceId.get(page.spaceId);
   }
 
   routePath(page: WikiRoutePage, fallbackNamespace = 'main'): string {
     const namespace = this.namespace(page, fallbackNamespace);
     if (namespace === 'server') {
-      const serverSlug = this.serverSlugBySpaceId.get(page.spaceId);
-      if (serverSlug) return buildCanonicalServerWikiPath(serverSlug, page.localPath);
+      const serverWiki = this.serverWikiBySpaceId.get(page.spaceId);
+      if (serverWiki) return buildCanonicalServerWikiPath(
+        serverWiki.siteSlug,
+        page.localPath,
+        serverWiki.slug,
+        '/serverWiki'
+      );
     }
     return wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
   }
 
   targetRoutePath(namespace: string, targetPath: string, contextPage?: Pick<WikiRoutePage, 'spaceId'>): string {
     if (namespace === 'server' && contextPage) {
-      const serverSlug = this.serverSlug(contextPage);
-      if (serverSlug) return buildCanonicalServerWikiPath(serverSlug, targetPath);
+      const serverWiki = this.serverWikiBySpaceId.get(contextPage.spaceId);
+      if (serverWiki) return buildCanonicalServerWikiPath(
+        serverWiki.siteSlug,
+        targetPath,
+        serverWiki.slug,
+        '/serverWiki'
+      );
     }
     return wikiUrl(namespace as Parameters<typeof wikiUrl>[0], targetPath);
   }
@@ -68,36 +82,51 @@ export class WikiRoutePathResolver {
     const serverWikis = serverSpaceIds.length > 0
       ? await this.prisma.serverWiki.findMany({
           where: { spaceId: { in: serverSpaceIds }, status: { not: 'disabled' } },
-          select: { spaceId: true, slug: true }
+          select: { spaceId: true, slug: true, siteSlug: true }
         })
       : [];
     return new WikiRoutePathBatch(
       namespaceById,
-      new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]))
+      new Map(serverWikis.map((wiki) => [wiki.spaceId, {
+        slug: wiki.slug,
+        siteSlug: wiki.siteSlug ?? wiki.slug
+      }]))
     );
   }
 }
 
-export function buildCanonicalServerWikiPath(serverSlug: string, localPath: string): string {
-  const normalizedSlug = slugifyTitle(serverSlug);
+export function buildCanonicalServerWikiPath(
+  serverSlug: string,
+  localPath: string,
+  contentRootSlug = serverSlug,
+  routePrefix: '/server' | '/serverWiki' = '/server'
+): string {
+  const normalizedSlug = slugifyTitle(contentRootSlug);
+  const normalizedRouteSlug = slugifyTitle(serverSlug);
   const normalizedPath = slugifyTitle(localPath);
   const relativePath = normalizedPath === normalizedSlug
     ? ''
     : normalizedPath.startsWith(`${normalizedSlug}/`)
       ? normalizedPath.slice(normalizedSlug.length + 1)
       : normalizedPath;
-  const encodedSlug = normalizedSlug.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+  const encodedSlug = normalizedRouteSlug.split('/').map((segment) => encodeURIComponent(segment)).join('/');
   const encodedRelativePath = relativePath
     .split('/')
     .filter(Boolean)
     .map((segment) => encodeURIComponent(segment))
     .join('/');
-  return encodedRelativePath ? `/server/${encodedSlug}/${encodedRelativePath}` : `/server/${encodedSlug}`;
+  return encodedRelativePath ? `${routePrefix}/${encodedSlug}/${encodedRelativePath}` : `${routePrefix}/${encodedSlug}`;
 }
 
-export function buildCanonicalServerWikiToolPath(serverSlug: string, localPath: string, tool: string): string {
+export function buildCanonicalServerWikiToolPath(
+  serverSlug: string,
+  localPath: string,
+  tool: string,
+  contentRootSlug = serverSlug,
+  routePrefix: '/server' | '/serverWiki' = '/server'
+): string {
   if (!/^[a-z][a-z0-9-]{1,31}$/u.test(tool)) throw new BadRequestException('Invalid server wiki tool.');
-  const rootPath = buildCanonicalServerWikiPath(serverSlug, serverSlug);
-  const pagePath = buildCanonicalServerWikiPath(serverSlug, localPath);
+  const rootPath = buildCanonicalServerWikiPath(serverSlug, contentRootSlug, contentRootSlug, routePrefix);
+  const pagePath = buildCanonicalServerWikiPath(serverSlug, localPath, contentRootSlug, routePrefix);
   return `${rootPath}/_tools/${tool}${pagePath.slice(rootPath.length)}`;
 }

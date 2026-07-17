@@ -13,7 +13,7 @@ test('/wiki redirects to the seeded main page', () => {
   });
 });
 
-test('/server/* remains canonical and is not redirected', () => {
+test('/server/* remains available for application-level server wiki redirects', () => {
   assert.equal(redirectFor('/server/example'), null);
 });
 

@@ -5,7 +5,7 @@ import { WikiEditorLoadError } from './wiki-editor-load-error';
 import { ServerWikiWorkspace } from './server-wiki-workspace';
 
 interface WikiEditRoutePageProps {
-  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
+  readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'serverWiki' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
   readonly segments?: string[];
 }
 
@@ -14,6 +14,7 @@ const namespaceByPrefix = {
   mod: 'mod',
   modpack: 'modpack',
   server: 'server',
+  serverWiki: 'server',
   dev: 'dev',
   guide: 'guide',
   data: 'data',
@@ -26,7 +27,7 @@ const namespaceByPrefix = {
 } as const;
 
 export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoutePageProps) {
-  const title = segments.length > 0 ? segments.map(decodeWikiRouteSegment).join('/') : '대문';
+  let title = segments.length > 0 ? segments.map(decodeWikiRouteSegment).join('/') : '대문';
   const routePath = buildWikiRoutePath(prefix, segments);
   let page;
   try {
@@ -40,8 +41,20 @@ export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoute
       />
     );
   }
-  const serverSlug = prefix === 'server'
-    ? page?.serverWiki?.slug ?? (segments[0] ? decodeWikiRouteSegment(segments[0]) : null)
+  let serverContextPage = page;
+  if (prefix === 'serverWiki') {
+    const rootPage = page ?? (segments[0]
+      ? await fetchWikiPageByPath(buildWikiRoutePath('serverWiki', [segments[0]]))
+      : null);
+    serverContextPage = rootPage;
+    const contentSlug = rootPage?.serverWiki?.contentSlug;
+    if (contentSlug) {
+      const relativeTitle = segments.slice(1).map(decodeWikiRouteSegment).join('/');
+      title = relativeTitle ? `${contentSlug}/${relativeTitle}` : contentSlug;
+    }
+  }
+  const serverSlug = prefix === 'server' || prefix === 'serverWiki'
+    ? serverContextPage?.serverWiki?.contentSlug ?? (segments[0] ? decodeWikiRouteSegment(segments[0]) : null)
     : null;
   let presentation = null;
   let presentationLoadFailed = false;
@@ -63,8 +76,8 @@ export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoute
       presentationLoadFailed={presentationLoadFailed}
     />
   );
-  if (prefix === 'server' && page?.serverWiki) {
-    return <ServerWikiWorkspace page={page} section="편집">{editor}</ServerWikiWorkspace>;
+  if ((prefix === 'server' || prefix === 'serverWiki') && serverContextPage?.serverWiki) {
+    return <ServerWikiWorkspace page={serverContextPage} section="편집">{editor}</ServerWikiWorkspace>;
   }
   return editor;
 }

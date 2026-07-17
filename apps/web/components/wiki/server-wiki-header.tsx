@@ -6,6 +6,7 @@ import { ServerWikiNavigation } from './server-wiki-navigation';
 export function ServerWikiHeader({ page }: { readonly page: WikiPageResponse }) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
+  const rootPath = `/serverWiki/${encodeURIComponent(wiki.slug)}`;
 
   return (
     <header className="sticky top-0 z-50 border-b border-[#e6e6e6] bg-white/95 text-[#1f1f1f] backdrop-blur-xl">
@@ -16,7 +17,7 @@ export function ServerWikiHeader({ page }: { readonly page: WikiPageResponse }) 
             <span className="sr-only">문서 메뉴 열기</span>
           </summary>
           <div className="fixed inset-x-0 top-16 max-h-[calc(100vh-4rem)] overflow-y-auto border-b border-[#e6e6e6] bg-white px-4 py-4 shadow-xl">
-            <form action={`/server/${encodeURIComponent(wiki.slug)}/_search`} className="mb-4">
+            <form action={`${rootPath}/_search`} className="mb-4">
               <label className="relative block">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#888]" aria-hidden="true" />
                 <span className="sr-only">서버 문서 검색</span>
@@ -27,7 +28,7 @@ export function ServerWikiHeader({ page }: { readonly page: WikiPageResponse }) 
           </div>
         </details>
         <Link
-          href={`/server/${encodeURIComponent(wiki.slug)}`}
+          href={rootPath}
           className="flex min-w-0 items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30"
         >
           <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#346ddb] text-white">
@@ -39,7 +40,7 @@ export function ServerWikiHeader({ page }: { readonly page: WikiPageResponse }) 
           </span>
         </Link>
 
-        <form action={`/server/${encodeURIComponent(wiki.slug)}/_search`} className="ml-auto hidden w-full max-w-md md:block">
+        <form action={`${rootPath}/_search`} className="ml-auto hidden w-full max-w-md md:block">
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#888]" aria-hidden="true" />
             <span className="sr-only">서버 문서 검색</span>

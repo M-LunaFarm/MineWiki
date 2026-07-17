@@ -124,6 +124,10 @@ test('builds canonical server tool paths for root and nested documents', () => {
     buildServerWikiToolPath('/server/luna/API/requests', 'history'),
     '/server/luna/_tools/history/API/requests',
   );
+  assert.equal(
+    buildServerWikiToolPath('/serverWiki/luna-docs/API/requests', 'history'),
+    '/serverWiki/luna-docs/_tools/history/API/requests',
+  );
   assert.throws(() => buildServerWikiToolPath('/wiki/대문', 'history'), /Not a server wiki route/);
 });
 
@@ -149,6 +153,7 @@ test('revision and diff links preserve the canonical source document', () => {
 
 test('history links preserve server, category, and standard document route families', () => {
   assert.equal(buildWikiHistoryPath('/server/luna/rules'), '/server/luna/_tools/history/rules');
+  assert.equal(buildWikiHistoryPath('/serverWiki/luna-docs/rules'), '/serverWiki/luna-docs/_tools/history/rules');
   assert.equal(buildWikiHistoryPath('/wiki/category/게임/몹'), '/wiki/category/_tools/history/게임/몹');
   assert.equal(buildWikiHistoryPath('/guide/setup'), '/guide/_tools/history/setup');
 });

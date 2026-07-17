@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, FileText, LayoutTemplate, Loader2, Save, Users } from 'lucide-react';
+import { AlertTriangle, ExternalLink, FileText, LayoutTemplate, Link2, Loader2, Save, Users } from 'lucide-react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
@@ -13,6 +13,8 @@ import { ServerWikiLayoutPlansContent } from './server-wiki-layout-plans';
 interface ContentSettings {
   readonly serverWikiId: string;
   readonly slug: string;
+  readonly siteSlug: string;
+  readonly wikiUrl: string;
   readonly version: number;
   readonly contributionPolicyVersion: number;
   readonly contributionPolicySource: string | null;
@@ -234,6 +236,7 @@ function ContentSettingsForm({ serverId, onAccessLoaded }: { readonly serverId: 
       {error ? <Message tone="error">{error}</Message> : null}
       {notice ? <Message tone="success">{notice}</Message> : null}
       {conflictVersion !== null ? <div className="flex flex-col gap-3 rounded-xl border border-amber-300/25 bg-amber-400/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between"><span>다른 관리자의 변경이 먼저 저장되었습니다. 현재 버전은 {conflictVersion}입니다.</span><button type="button" onClick={() => void load()} className="btn-secondary min-h-11">최신 설정 다시 불러오기</button></div> : null}
+      {settings.access.canManageLayout ? <SiteAddressForm serverId={serverId} initialSiteSlug={settings.siteSlug} /> : null}
       <div className="grid gap-6 xl:grid-cols-2">
         <SourceEditor label="기여 정책" description="편집 전에 기여자가 확인할 운영 원칙입니다." field="contributionPolicySource" value={form.contributionPolicySource} bytes={byteCounts.contributionPolicySource} onChange={(value) => setForm((current) => ({ ...current, contributionPolicySource: value }))} />
         <SourceEditor label="편집 도움말" description="문서 문체, 분류와 작성 규칙을 안내합니다." field="editHelpSource" value={form.editHelpSource} bytes={byteCounts.editHelpSource} onChange={(value) => setForm((current) => ({ ...current, editHelpSource: value }))} />
@@ -250,6 +253,40 @@ function ContentSettingsForm({ serverId, onAccessLoaded }: { readonly serverId: 
       </div>
     </section>
   );
+}
+
+function SiteAddressForm({ serverId, initialSiteSlug }: { readonly serverId: string; readonly initialSiteSlug: string }) {
+  const baseUrl = normalizeApiBaseUrl();
+  const [savedSlug, setSavedSlug] = useState(initialSiteSlug);
+  const [siteSlug, setSiteSlug] = useState(initialSiteSlug);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ tone: 'error' | 'success'; text: string } | null>(null);
+  const valid = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/.test(siteSlug);
+
+  async function saveSiteSlug() {
+    if (!valid || siteSlug === savedSlug || saving) return;
+    setSaving(true); setMessage(null);
+    try {
+      const response = await fetch(`${baseUrl}/v1/servers/${encodeURIComponent(serverId)}/wiki-site-slug`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+        body: JSON.stringify({ siteSlug }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message ?? '서버 위키 주소를 변경하지 못했습니다.');
+      setSavedSlug(body.siteSlug); setSiteSlug(body.siteSlug);
+      setMessage({ tone: 'success', text: '서버 위키 주소를 변경했습니다. 기존 주소는 새 주소로 연결됩니다.' });
+    } catch (value) {
+      setMessage({ tone: 'error', text: value instanceof Error ? value.message : '서버 위키 주소를 변경하지 못했습니다.' });
+    } finally { setSaving(false); }
+  }
+
+  return <div className="rounded-xl border border-emerald-300/15 bg-emerald-400/[0.04] p-4 sm:p-5">
+    <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-400/10 text-emerald-300"><Link2 className="size-4" aria-hidden="true" /></span><div><strong className="text-sm text-white">서버 위키 사이트 주소</strong><p className="mt-1 text-xs leading-5 text-slate-400">문서의 내부 경로와 분리된 고유 주소입니다. 영문 소문자, 숫자, 하이픈으로 3~63자를 입력하세요.</p></div></div>
+    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"><label className="min-w-0 flex-1"><span className="sr-only">서버 위키 사이트 주소</span><span className="flex min-h-11 overflow-hidden rounded-lg border border-white/10 bg-[#0d1219] focus-within:border-emerald-300/50"><span className="flex items-center border-r border-white/10 px-3 text-xs text-slate-500">minewiki.kr/serverWiki/</span><input value={siteSlug} onChange={(event) => setSiteSlug(event.target.value.trim().toLowerCase())} maxLength={63} spellCheck={false} className="min-w-0 flex-1 bg-transparent px-3 text-sm text-white outline-none" /></span></label><button type="button" onClick={() => void saveSiteSlug()} disabled={!valid || siteSlug === savedSlug || saving} className="btn-primary min-h-11 shrink-0 disabled:cursor-not-allowed disabled:opacity-50">{saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}주소 저장</button><a href={`/serverWiki/${encodeURIComponent(savedSlug)}`} className="btn-secondary min-h-11 shrink-0" target="_blank" rel="noreferrer">열기<ExternalLink className="size-4" /></a></div>
+    {!valid && siteSlug.length > 0 ? <p className="mt-2 text-xs text-red-300">영문 소문자, 숫자, 하이픈 조합으로 3~63자를 입력하세요.</p> : null}
+    {message ? <div className="mt-3"><Message tone={message.tone}>{message.text}</Message></div> : null}
+  </div>;
 }
 
 function SourceEditor({ label, description, field, value, bytes: size, onChange, compact = false }: { readonly label: string; readonly description: string; readonly field: SourceField; readonly value: string | null; readonly bytes: number; readonly onChange: (value: string) => void; readonly compact?: boolean }) {

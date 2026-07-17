@@ -54,6 +54,16 @@ const SHORT_CODE_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
 const SHORT_CODE_LENGTH = 7;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHORT_CODE_PATTERN = /^[a-z0-9]{5,12}$/;
+const SERVER_WIKI_SITE_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
+const RESERVED_SERVER_WIKI_SITE_SLUGS = new Set([
+  'admin',
+  'api',
+  'server',
+  'serverwiki',
+  'servers',
+  'static',
+  'www',
+]);
 
 @Injectable()
 export class ServerService {
@@ -698,6 +708,7 @@ export class ServerService {
           voteServerId: server.id,
           serverName: server.name,
           slug,
+          siteSlug: slug,
           host: server.joinHost,
           port: server.joinPort,
           edition: server.edition,
@@ -1599,12 +1610,54 @@ export class ServerService {
     };
   }
 
+  async updateWikiSiteSlug(serverId: string, input: string, actorAccountId?: string | null) {
+    const siteSlug = input.trim().toLowerCase();
+    if (!SERVER_WIKI_SITE_SLUG_PATTERN.test(siteSlug)) {
+      throw new BadRequestException('사이트 주소는 영문 소문자, 숫자, 하이픈 조합으로 3~63자여야 합니다.');
+    }
+    if (RESERVED_SERVER_WIKI_SITE_SLUGS.has(siteSlug)) {
+      throw new BadRequestException('예약된 사이트 주소는 사용할 수 없습니다.');
+    }
+    const current = await this.prisma.serverWiki.findUnique({
+      where: { voteServerId: serverId },
+      select: { id: true, siteSlug: true },
+    });
+    if (!current) throw new NotFoundException('Server wiki not found.');
+    if (current.siteSlug === siteSlug) {
+      return { siteSlug, wikiUrl: `/serverWiki/${encodeURIComponent(siteSlug)}` };
+    }
+    try {
+      await this.prisma.serverWiki.update({
+        where: { id: current.id },
+        data: { siteSlug },
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new ConflictException('이미 사용 중인 서버 위키 사이트 주소입니다.');
+      }
+      throw error;
+    }
+    await this.events?.audit('server.wiki.site_slug.update', {
+      category: 'server',
+      actorAccountId: actorAccountId ?? null,
+      subjectType: 'server_wiki',
+      subjectId: current.id,
+      metadata: {
+        serverId,
+        previousSiteSlug: current.siteSlug,
+        siteSlug,
+      },
+    });
+    return { siteSlug, wikiUrl: `/serverWiki/${encodeURIComponent(siteSlug)}` };
+  }
+
   async getWikiContentSettings(serverId: string) {
     const settings = await this.prisma.serverWiki.findUnique({
       where: { voteServerId: serverId },
       select: {
         id: true,
         slug: true,
+        siteSlug: true,
         contributionPolicySource: true,
         editHelpSource: true,
         topNoticeSource: true,
@@ -1631,6 +1684,7 @@ export class ServerService {
       select: {
         id: true,
         slug: true,
+        siteSlug: true,
         contributionPolicySource: true,
         editHelpSource: true,
         topNoticeSource: true,
@@ -1691,6 +1745,7 @@ export class ServerService {
         select: {
           id: true,
           slug: true,
+          siteSlug: true,
           contributionPolicySource: true,
           editHelpSource: true,
           topNoticeSource: true,
@@ -1866,6 +1921,7 @@ export interface ServerWikiLinkResponse {
 interface ServerWikiContentSettingsRecord {
   readonly id: bigint;
   readonly slug: string;
+  readonly siteSlug: string | null;
   readonly contributionPolicySource: string | null;
   readonly editHelpSource: string | null;
   readonly topNoticeSource: string | null;
@@ -1881,6 +1937,8 @@ function toWikiContentSettingsResponse(settings: ServerWikiContentSettingsRecord
   return {
     serverWikiId: settings.id.toString(),
     slug: settings.slug,
+    siteSlug: settings.siteSlug ?? settings.slug,
+    wikiUrl: `/serverWiki/${encodeURIComponent(settings.siteSlug ?? settings.slug)}`,
     version: settings.contentSettingsVersion,
     contributionPolicyVersion: settings.contributionPolicyVersion,
     contributionPolicySource: settings.contributionPolicySource,
@@ -2073,9 +2131,10 @@ function toServerWikiLinkResponse(
     wikiPageId?: bigint | null;
     wikiSlug?: string | null;
   },
-  serverWiki: { id: bigint; spaceId: bigint; slug: string } | null,
+  serverWiki: { id: bigint; spaceId: bigint; slug: string; siteSlug?: string | null } | null,
 ): ServerWikiLinkResponse {
   const wikiSlug = server.wikiSlug ?? serverWiki?.slug ?? null;
+  const siteSlug = serverWiki?.siteSlug ?? wikiSlug;
   const wikiSpaceId = server.wikiSpaceId?.toString() ?? serverWiki?.spaceId.toString() ?? null;
   const linked = Boolean(wikiSlug && wikiSpaceId);
   return {
@@ -2084,7 +2143,7 @@ function toServerWikiLinkResponse(
     wikiSpaceId,
     wikiPageId: server.wikiPageId?.toString() ?? null,
     wikiSlug,
-    wikiUrl: wikiSlug ? `/server/${encodeURIComponent(wikiSlug)}` : null,
+    wikiUrl: siteSlug ? `/serverWiki/${encodeURIComponent(siteSlug)}` : null,
     serverDirectoryPath: buildServerDirectoryPath(server),
     status: linked ? 'linked' : 'unlinked',
   };

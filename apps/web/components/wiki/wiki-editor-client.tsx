@@ -110,7 +110,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
       ? `${sectionTitle ?? page.displayTitle} 섹션 편집`
       : `${page.displayTitle} 편집`
     : `${title} 새 문서 작성`;
-  const editorPath = routePath.startsWith('/server/')
+  const editorPath = routePath.startsWith('/server/') || routePath.startsWith('/serverWiki/')
     ? buildServerWikiToolPath(routePath, 'edit')
     : routePath.startsWith('/wiki/category/')
       ? buildCategoryWikiToolPath(routePath, 'edit')

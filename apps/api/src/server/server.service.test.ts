@@ -175,7 +175,7 @@ if (!hasDatabase) {
       assert.ok(link.wikiSpaceId);
       assert.ok(link.wikiPageId);
       assert.ok(link.wikiSlug);
-      assert.equal(link.wikiUrl, `/server/${encodeURIComponent(link.wikiSlug ?? '')}`);
+      assert.equal(link.wikiUrl, `/serverWiki/${encodeURIComponent(link.wikiSlug ?? '')}`);
 
       const detail = await service.detail(server.id);
       assert.equal(detail.wikiSpaceId, link.wikiSpaceId);

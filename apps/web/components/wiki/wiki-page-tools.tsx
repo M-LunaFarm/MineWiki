@@ -28,7 +28,7 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
   const [confirmation, setConfirmation] = useState('');
   const [working, setWorking] = useState<'move' | 'delete' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const isServerWiki = routePath === '/server' || routePath.startsWith('/server/');
+  const isServerWiki = routePath === '/server' || routePath.startsWith('/server/') || routePath.startsWith('/serverWiki/');
   const isUserRoot = /^\/user\/[^/]+$/u.test(routePath);
   const rawHref = isServerWiki ? buildServerWikiToolPath(routePath, 'raw') : `/wiki/raw/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
   const backlinksHref = isServerWiki ? buildServerWikiToolPath(routePath, 'backlinks') : `/wiki/backlinks/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
