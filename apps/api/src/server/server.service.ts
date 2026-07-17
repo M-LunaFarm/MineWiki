@@ -2336,8 +2336,7 @@ function toSummary(server: {
     latencyMs: server.latencyMs ?? null,
     rank:
       server.stats &&
-      server.stats.rankCalculatedAt &&
-      (server.stats.votesTotal > 0 || server.votes24h > 0 || (server.votesMonthly ?? 0) > 0)
+      server.stats.rankCalculatedAt
       ? {
           current: server.stats.rankCurrent,
           delta24h: server.stats.rankDelta24h,

@@ -420,6 +420,54 @@ test('server list preserves rank when only historical valid votes remain', async
   assert.equal(server.rank?.current, 1);
 });
 
+test('server list exposes an aggregated rank even when the server has zero votes', async () => {
+  const serverId = randomUUID();
+  const calculatedAt = new Date('2026-07-17T00:45:00.000Z');
+  const prisma = {
+    server: {
+      findMany: async () => [
+        {
+          id: serverId,
+          name: 'Zero Vote Server',
+          joinHost: 'zero.example.com',
+          joinPort: 25565,
+          edition: 'java',
+          supportedVersions: ['1.21'],
+          tags: [],
+          shortDescription: 'Aggregated zero-vote server',
+          verificationGrade: 'Unverified',
+          verifiedAt: null,
+          votes24h: 0,
+          votesMonthly: 0,
+          reviewsCount: 0,
+          voteRequiresOwnership: false,
+          bannerUrl: null,
+          websiteUrl: null,
+          playersOnline: 0,
+          playersMax: 0,
+          playersLastUpdatedAt: null,
+          isOnline: true,
+          latencyMs: 30,
+          stats: {
+            rankCurrent: 9,
+            rankDelta24h: 0,
+            rankBest: 9,
+            votesTotal: 0,
+            rankCalculatedAt: calculatedAt,
+            lastUpdatedAt: calculatedAt,
+          },
+        },
+      ],
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const [server] = await service.list();
+
+  assert.equal(server.rank?.current, 9);
+  assert.equal(server.rank?.updatedAt, calculatedAt.toISOString());
+});
+
 test('server wiki Docs layout is always included without a paid entitlement', async () => {
   const prisma = {
     serverWiki: {
