@@ -76,7 +76,7 @@ test('user root documents and cross-owner trees are rejected by immutable owners
   assert.equal(userDocumentTreeHasSingleOwner(null, null, []), false);
 });
 
-test('user and file move invariants prevent identity transfer and file extension changes', () => {
+test('user, file, and server move invariants preserve identity and wiki boundaries', () => {
   assert.match(wikiMoveNamespaceInvariantViolation({
     previousNamespace: 'user', namespace: 'main', previousTitle: 'owner/page', title: 'page'
   }) ?? '', /cannot move across namespaces/);
@@ -89,8 +89,16 @@ test('user and file move invariants prevent identity transfer and file extension
   assert.equal(wikiMoveNamespaceInvariantViolation({
     previousNamespace: 'file', namespace: 'file', previousTitle: 'asset.PNG', title: 'renamed.png'
   }), null);
-  assert.equal(wikiMoveNamespaceInvariantViolation({
+  assert.match(wikiMoveNamespaceInvariantViolation({
     previousNamespace: 'server', namespace: 'guide', previousTitle: 'server/page', title: 'page'
+  }) ?? '', /linked server wiki/);
+  assert.match(wikiMoveNamespaceInvariantViolation({
+    previousNamespace: 'server', namespace: 'server', previousTitle: 'server/page', title: 'server/renamed',
+    previousSpaceId: 10n, spaceId: 20n
+  }) ?? '', /linked server wiki/);
+  assert.equal(wikiMoveNamespaceInvariantViolation({
+    previousNamespace: 'server', namespace: 'server', previousTitle: 'server/page', title: 'server/renamed',
+    previousSpaceId: 10n, spaceId: 10n
   }), null);
 });
 

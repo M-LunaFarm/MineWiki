@@ -132,7 +132,7 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
               ))}
             </select>
             <span id="wiki-move-namespace-help" className="mt-1.5 block text-[11px] font-normal leading-5 text-slate-500">
-              사용자·파일 문서는 식별자와 파일 연결을 보호하기 위해 현재 네임스페이스 안에서만 이동할 수 있습니다.
+              사용자·파일 문서와 서버 위키 문서는 연결된 소유권과 파일 관계를 보호하기 위해 현재 위키 안에서만 이동할 수 있습니다.
             </span>
           </label>
           <label className="block text-xs font-semibold text-slate-400">
@@ -215,7 +215,7 @@ const STANDARD_MOVE_NAMESPACES = [
 function moveNamespaceOptions(namespace: string): ReadonlyArray<{ readonly code: string; readonly label: string }> {
   if (namespace === 'user') return [{ code: 'user', label: '사용자' }];
   if (namespace === 'file') return [{ code: 'file', label: '파일' }];
-  if (namespace === 'server') return [{ code: 'server', label: '서버 위키' }, ...STANDARD_MOVE_NAMESPACES];
+  if (namespace === 'server') return [{ code: 'server', label: '서버 위키' }];
   return STANDARD_MOVE_NAMESPACES.some((option) => option.code === namespace)
     ? STANDARD_MOVE_NAMESPACES
     : [{ code: namespace, label: namespace }];

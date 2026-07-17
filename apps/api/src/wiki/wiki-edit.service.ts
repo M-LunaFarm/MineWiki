@@ -951,7 +951,14 @@ export class WikiEditService {
         spaceId: this.cleanOptional(request.spaceId)
           ?? (destinationNamespaceCode === namespace.code ? page.spaceId.toString() : undefined)
       });
-      this.assertMoveNamespaceInvariants(namespace.code, destination.namespaceCode, page.title, destination.title);
+      this.assertMoveNamespaceInvariants(
+        namespace.code,
+        destination.namespaceCode,
+        page.title,
+        destination.title,
+        page.spaceId,
+        destination.spaceId,
+      );
       if (destination.namespaceCode === 'user' && !userDocumentTreeHasSingleOwner(
         page.ownerProfileId,
         destination.ownerProfileId,
@@ -1423,9 +1430,18 @@ export class WikiEditService {
     previousNamespace: string,
     namespace: string,
     previousTitle: string,
-    title: string
+    title: string,
+    previousSpaceId: bigint,
+    spaceId: bigint,
   ): void {
-    const violation = wikiMoveNamespaceInvariantViolation({ previousNamespace, namespace, previousTitle, title });
+    const violation = wikiMoveNamespaceInvariantViolation({
+      previousNamespace,
+      namespace,
+      previousTitle,
+      title,
+      previousSpaceId,
+      spaceId,
+    });
     if (violation) throw new BadRequestException(violation);
   }
 
@@ -2079,7 +2095,22 @@ export function wikiMoveNamespaceInvariantViolation(input: {
   readonly namespace: string;
   readonly previousTitle: string;
   readonly title: string;
+  readonly previousSpaceId?: bigint;
+  readonly spaceId?: bigint;
 }): string | null {
+  if (
+    (input.previousNamespace === 'server' || input.namespace === 'server')
+    && (
+      input.previousNamespace !== input.namespace
+      || (
+        input.previousSpaceId !== undefined
+        && input.spaceId !== undefined
+        && input.previousSpaceId !== input.spaceId
+      )
+    )
+  ) {
+    return 'Server wiki documents can only move inside their linked server wiki.';
+  }
   if (input.previousNamespace !== input.namespace && (
     input.previousNamespace === 'user'
     || input.namespace === 'user'
