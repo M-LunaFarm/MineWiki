@@ -905,6 +905,9 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
     background: #f6f6f6;
     color: #242424;
   }
+  .server-wiki-layout .wiki-rendered .wiki-table-header-hidden > thead {
+    display: none;
+  }
   .server-wiki-layout .wiki-rendered .table-scroll {
     display: block;
     width: 100%;

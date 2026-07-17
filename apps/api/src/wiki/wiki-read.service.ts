@@ -2026,7 +2026,10 @@ export class WikiReadService {
       revision
     });
     const linkResolution = wikiLinkResolutionContext(namespace, page.localPath);
-    const parsed = parseMarkup(revision.contentRaw, { linkResolution });
+    const parsed = parseMarkup(revision.contentRaw, {
+      linkResolution,
+      gitBookMarkdown: namespace === 'server'
+    });
     if (parsed.redirectTarget && options.followRedirects) {
       const target = resolveContextualLinkTarget(namespace, page.localPath, parsed.redirectTarget);
       const redirected = await this.getPageInternal(target.namespace, target.title, access, {
