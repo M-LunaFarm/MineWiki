@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import {
-  ArrowLeft,
   ArrowRight,
   BookOpen,
   ChevronLeft,
@@ -8,13 +7,12 @@ import {
   List,
   PencilLine,
   History,
-  ShieldCheck,
-  Trophy,
 } from 'lucide-react';
 
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { fetchServerWikiPresentation } from '../../lib/wiki-server-api';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
+import { ServerWikiHeader } from './server-wiki-header';
 import { WikiPageTools } from './wiki-page-tools';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
@@ -53,14 +51,13 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
     : [];
 
   return (
-    <main className="server-wiki-layout min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
-      <div className={`mx-auto grid w-full max-w-[1600px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
+    <div className="server-wiki-layout min-h-screen bg-[#0b0e12] text-slate-200">
+      <ServerWikiHeader page={page} />
+      <main className={`mx-auto grid w-full max-w-[1600px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
         <ServerWikiSidebar page={page} />
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-            <Link href={page.serverDirectoryPath ?? '/servers'} className="hover:text-emerald-300">서버 상세</Link>
-            <span>/</span>
             <Link href={`/server/${encodeURIComponent(wiki.slug)}`} className="hover:text-emerald-300">{wiki.name} 위키</Link>
             <span>/</span>
             <span className="text-slate-300">{page.displayTitle}</span>
@@ -89,7 +86,6 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               </div>
             </div>
             <p className="mt-5 text-sm text-slate-500">{routePath} · 최근 수정 {updatedAt}</p>
-            <Link href={page.serverDirectoryPath ?? '/servers'} className="mt-6 inline-flex min-h-11 items-center gap-2 rounded-lg border border-white/10 px-3 text-sm font-semibold text-slate-300 transition hover:border-emerald-300/40 hover:text-emerald-200"><ArrowLeft className="size-4" />랭킹 서버 상세로 돌아가기</Link>
           </header>
 
           {address && !isHandbook ? (
@@ -193,23 +189,11 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               </nav>
             </section>
             <div className="border-t border-white/10" />
-            {!isHandbook ? <section className="rounded-xl border border-white/10 p-5">
-              <div className="flex items-start gap-3">
-                <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 p-2.5 text-emerald-300"><Trophy className="size-5" /></span>
-                <div>
-                  <h2 className="font-semibold text-white">{wiki.name}를 응원해 주세요</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-500">서버 순위와 리뷰는 더 많은 유저가 서버를 발견하도록 돕습니다.</p>
-                </div>
-              </div>
-              <Link href={page.serverDirectoryPath ?? '/servers'} className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-emerald-400/60 px-4 py-2.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-400/10">
-                <ShieldCheck className="size-4" />{isBrand ? '서버 디렉터리에서 보기' : '서버 순위 / 투표하기'}
-              </Link>
-            </section> : null}
             <p className="text-xs text-slate-600">업데이트: {updatedAt}</p>
           </div>
         </aside>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
 

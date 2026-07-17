@@ -58,8 +58,7 @@ export function AppShell({ children }: AppShellProps) {
   if (isServerWikiPage) {
     return (
       <div className="min-h-screen bg-[#0b0e12] text-slate-100">
-        <SiteHeader />
-        <div className="pt-16">{children}</div>
+        {children}
       </div>
     );
   }
@@ -68,7 +67,7 @@ export function AppShell({ children }: AppShellProps) {
     return (
       <div className="wiki-shell min-h-screen text-slate-100">
         <SiteHeader />
-        <main className="mx-auto w-full max-w-7xl px-4 pb-12 pt-28 sm:px-6 lg:px-10">{children}</main>
+        <main className="mx-auto w-full max-w-7xl px-0 pb-12 pt-28 sm:px-6 lg:px-10">{children}</main>
         <SiteFooter />
       </div>
     );

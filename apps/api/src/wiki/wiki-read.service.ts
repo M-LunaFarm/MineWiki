@@ -1698,6 +1698,7 @@ export class WikiReadService {
   async search(input: {
     readonly q?: string;
     readonly namespace?: string;
+    readonly serverSlug?: string;
     readonly target?: string;
     /** Internal tenant boundary used by credentialed API tokens. */
     readonly spaceId?: bigint;
@@ -1717,10 +1718,26 @@ export class WikiReadService {
     }
     const limit = Math.min(Math.max(Number(input.limit ?? 20) || 20, 1), 50);
     const cursor = parseWikiSearchCursor(input.cursor);
-    const namespace = input.namespace?.trim()
-      ? await this.prisma.wikiNamespace.findUnique({ where: { code: input.namespace.trim() } })
+    let spaceId = input.spaceId;
+    let namespaceCode = input.namespace?.trim() || undefined;
+    if (input.serverSlug?.trim()) {
+      const serverWiki = await this.prisma.serverWiki.findUnique({
+        where: { slug: input.serverSlug.trim() },
+        select: { spaceId: true, status: true },
+      });
+      if (!serverWiki || serverWiki.status !== 'active') {
+        return { items: [], nextCursor: null };
+      }
+      if (namespaceCode && namespaceCode !== 'server') {
+        return { items: [], nextCursor: null };
+      }
+      namespaceCode = 'server';
+      spaceId = serverWiki.spaceId;
+    }
+    const namespace = namespaceCode
+      ? await this.prisma.wikiNamespace.findUnique({ where: { code: namespaceCode } })
       : null;
-    if (input.namespace?.trim() && !namespace) {
+    if (namespaceCode && !namespace) {
       return { items: [], nextCursor: null };
     }
 
@@ -1728,7 +1745,7 @@ export class WikiReadService {
     const currentMatchIds = await findCurrentSearchMatchIds(this.prisma, {
       query,
       namespaceId: namespace?.id ?? null,
-      spaceId: input.spaceId ?? null,
+      spaceId: spaceId ?? null,
       cursor,
       limit: scanLimit + 1
     });
@@ -1740,7 +1757,7 @@ export class WikiReadService {
     const pageById = new Map(unorderedPages.map((page) => [page.id, page]));
     const pages = candidateIds.flatMap((id) => {
       const page = pageById.get(id);
-      return page && (input.spaceId === undefined || page.spaceId === input.spaceId) ? [page] : [];
+      return page && (spaceId === undefined || page.spaceId === spaceId) ? [page] : [];
     });
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
     const revisionVisibility = currentRevisionIds.length > 0

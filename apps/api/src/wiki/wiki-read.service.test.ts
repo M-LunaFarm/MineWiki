@@ -273,6 +273,37 @@ test('wiki search cursor is stable and rejects tampering', () => {
   assert.throws(() => parseWikiSearchCursor('not-a-cursor'), /cursor is invalid/);
 });
 
+test('server wiki search resolves the slug to a mandatory tenant space filter', async () => {
+  const rawQueries: Array<{ sql: string; values: unknown[] }> = [];
+  const prisma = {
+    serverWiki: {
+      async findUnique() { return { spaceId: 5643n, status: 'active' }; },
+    },
+    wikiNamespace: {
+      async findUnique() { return { id: 7, code: 'server' }; },
+    },
+    async $queryRawUnsafe(sql: string, ...values: unknown[]) {
+      rawQueries.push({ sql, values });
+      return [];
+    },
+  } as unknown as PrismaService;
+
+  const permissions = {
+    async filterReadablePages({ pages }: { pages: unknown[] }) { return pages; },
+  } as unknown as WikiPermissionService;
+  const result = await new WikiReadService(prisma, permissions).search({
+    q: '명령어',
+    serverSlug: '4cfjfkz-ac256525',
+  });
+
+  assert.deepEqual(result, { items: [], nextCursor: null });
+  assert.equal(rawQueries.length, 1);
+  assert.match(rawQueries[0]!.sql, /p\.namespace_id = \?/u);
+  assert.match(rawQueries[0]!.sql, /p\.space_id = \?/u);
+  assert.equal(rawQueries[0]!.values.includes(7), true);
+  assert.equal(rawQueries[0]!.values.includes(5643n), true);
+});
+
 test('wiki search batches current revisions and returns a continuation cursor', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const pages = Array.from({ length: 6 }, (_, index) => ({
