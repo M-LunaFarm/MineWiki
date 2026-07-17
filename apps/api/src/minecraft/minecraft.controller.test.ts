@@ -28,14 +28,19 @@ test('Minecraft authorization accepts a recently authenticated session', async (
   assert.equal(called, true);
 });
 
-test('Minecraft authorization and revoke reject an old session', async () => {
+test('Minecraft authorization, primary selection, and revoke reject an old session', async () => {
   const service = {
     startAuthorization: async () => assert.fail('service must not be called'),
+    setPrimaryIdentity: async () => assert.fail('service must not be called'),
     revokeIdentity: async () => assert.fail('service must not be called'),
   } as unknown as MinecraftService;
   const controller = new MinecraftController(service);
   const stale = session(new Date(Date.now() - 16 * 60 * 1000).toISOString());
 
   assert.throws(() => controller.startOAuth({}, stale), ForbiddenException);
+  assert.throws(
+    () => controller.setPrimaryIdentity('00000000-0000-4000-8000-000000000002', stale),
+    ForbiddenException,
+  );
   await assert.rejects(() => controller.revokeOwnIdentity(stale), ForbiddenException);
 });
