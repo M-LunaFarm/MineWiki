@@ -17,6 +17,7 @@ import { BusinessEventService } from '../events/business-event.service';
 import { VoteStore, type VoteRecord } from '../vote/vote.store';
 import { MinecraftService } from '../minecraft/minecraft.service';
 import { AccountSeparationService } from '../auth/account-separation.service';
+import { withCanonicalAccountGroups } from '../auth/account-lifecycle-fence';
 import type { SessionPayload } from '../session/session.service';
 
 const REVIEW_COOLDOWN_MS = 1000 * 60 * 60 * 24; // 24시간
@@ -152,7 +153,8 @@ export class ReviewService {
     const filtered = tagFilter
       ? reviews.filter((review) => normalizeReviewTags(review.tags).includes(tagFilter))
       : reviews;
-    const mapped = filtered.map((review) => toReviewResponse(review, viewerAccountId));
+    const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
+    const mapped = filtered.map((review) => toReviewResponse(review, viewerAccountIds));
     const sorted = sortMode === 'wilson'
       ? [...mapped].sort((a, b) => {
           const diff = calculateWilsonScore(b.rating) - calculateWilsonScore(a.rating);
@@ -234,8 +236,9 @@ export class ReviewService {
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
     const last = pageRows.at(-1);
+    const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
     return {
-      items: pageRows.map((review) => toReviewResponse(review, viewerAccountId)),
+      items: pageRows.map((review) => toReviewResponse(review, viewerAccountIds)),
       nextCursor: hasMore && last
         ? this.encodeReviewCursor({
             version: 1,
@@ -258,7 +261,8 @@ export class ReviewService {
       where: { serverId },
       orderBy: { createdAt: 'desc' }
     });
-    return reviews.map((review) => toReviewResponse(review, viewerAccountId));
+    const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
+    return reviews.map((review) => toReviewResponse(review, viewerAccountIds));
   }
 
   private encodeReviewCursor(cursor: ReviewCursor): string {
@@ -321,18 +325,21 @@ export class ReviewService {
     const visibility = normalizeVisibility(parsed.visibility);
     const authorDisplayName = isAnonymous ? '익명' : actualDisplayName;
 
-    const review = await this.prisma.$transaction(async (transaction) => {
+    const outcome = await withCanonicalAccountGroups(this.prisma, [session.userId], async (transaction, groups) => {
+      const group = groups[0];
+      if (!group) throw new ForbiddenException('계정 정보를 찾을 수 없습니다.');
       await this.acquireReviewSubmissionGate(
         transaction,
         serverId,
-        session.userId,
+        group.canonicalAccountId,
+        group.accountIds,
         now
       );
       const created = await transaction.serverReview.create({
         data: {
           id: randomUUID(),
           serverId,
-          authorAccountId: session.userId,
+          authorAccountId: group.canonicalAccountId,
           authorDisplayName,
           rating: parsed.rating,
           body: parsed.body,
@@ -353,8 +360,9 @@ export class ReviewService {
           data: { reviewsCount: { increment: 1 } }
         });
       }
-      return created;
+      return { review: created, accountIds: group.accountIds };
     });
+    const review = outcome.review;
 
     void this.events.track('review.submitted', {
       serverId,
@@ -364,7 +372,7 @@ export class ReviewService {
       author: review.authorDisplayName
     });
 
-    return toReviewResponse(review, session.userId);
+    return toReviewResponse(review, outcome.accountIds);
   }
 
   async update(
@@ -373,27 +381,22 @@ export class ReviewService {
     payload: unknown,
     session: SessionPayload
   ): Promise<ServerReview> {
-    const review = await this.prisma.serverReview.findFirst({
-      where: { id: reviewId, serverId }
-    });
-    if (!review) {
-      throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
-    }
-    if (review.authorAccountId !== session.userId) {
-      throw new ForbiddenException('본인이 작성한 리뷰만 수정할 수 있습니다.');
-    }
-
     const parsed = updateReviewSchema.parse(payload);
-    const updated = await this.prisma.serverReview.update({
-      where: { id: reviewId },
-      data: {
-        rating: parsed.rating,
-        body: parsed.body,
-        tags: parsed.tags
+    const outcome = await withCanonicalAccountGroups(this.prisma, [session.userId], async (transaction, groups) => {
+      const group = groups[0];
+      const review = await transaction.serverReview.findFirst({ where: { id: reviewId, serverId } });
+      if (!review) throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
+      if (!group || !group.accountIds.includes(review.authorAccountId)) {
+        throw new ForbiddenException('본인이 작성한 리뷰만 수정할 수 있습니다.');
       }
+      const updated = await transaction.serverReview.update({
+        where: { id: reviewId },
+        data: { rating: parsed.rating, body: parsed.body, tags: parsed.tags }
+      });
+      return { updated, accountIds: group.accountIds };
     });
 
-    return toReviewResponse(updated, session.userId);
+    return toReviewResponse(outcome.updated, outcome.accountIds);
   }
 
   async remove(
@@ -401,17 +404,13 @@ export class ReviewService {
     reviewId: string,
     session: SessionPayload
   ): Promise<void> {
-    const review = await this.prisma.serverReview.findFirst({
-      where: { id: reviewId, serverId }
-    });
-    if (!review) {
-      throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
-    }
-    if (review.authorAccountId !== session.userId) {
-      throw new ForbiddenException('본인이 작성한 리뷰만 삭제할 수 있습니다.');
-    }
-
-    await this.prisma.$transaction(async (transaction) => {
+    await withCanonicalAccountGroups(this.prisma, [session.userId], async (transaction, groups) => {
+      const group = groups[0];
+      const review = await transaction.serverReview.findFirst({ where: { id: reviewId, serverId } });
+      if (!review) throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
+      if (!group || !group.accountIds.includes(review.authorAccountId)) {
+        throw new ForbiddenException('본인이 작성한 리뷰만 삭제할 수 있습니다.');
+      }
       const deleted = await transaction.serverReview.delete({ where: { id: reviewId } });
       if (deleted.visibility === 'public') {
         const counter = await transaction.server.updateMany({
@@ -442,13 +441,17 @@ export class ReviewService {
       throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
     }
 
-    let created = false;
-    try {
-      await this.prisma.$transaction(async (transaction) => {
+    const outcome = await withCanonicalAccountGroups(this.prisma, [reporterAccountId], async (transaction, groups) => {
+      const group = groups[0];
+      if (!group) throw new ForbiddenException('계정 정보를 찾을 수 없습니다.');
+      const duplicate = await transaction.reviewReport.findFirst({
+        where: { reviewId, accountId: { in: [...group.accountIds] } }
+      });
+      if (!duplicate) {
         await transaction.reviewReport.create({
           data: {
             reviewId,
-            accountId: reporterAccountId,
+            accountId: group.canonicalAccountId,
             reason: normalizedReason,
             status: 'open',
             statusUpdatedAt: new Date(),
@@ -458,33 +461,26 @@ export class ReviewService {
           where: { id: reviewId },
           data: { reports: { increment: 1 } }
         });
-      });
-      created = true;
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        // Duplicate report; ignore.
-      } else {
-        throw error;
       }
-    }
-
-    const updated = await this.prisma.serverReview.findUnique({
-      where: { id: reviewId }
+      const updated = await transaction.serverReview.findUnique({ where: { id: reviewId } });
+      return { created: !duplicate, updated, actorAccountId: group.canonicalAccountId, accountIds: group.accountIds };
     });
+
+    const updated = outcome.updated;
     if (!updated) {
       throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
     }
-    if (created) {
+    if (outcome.created) {
       await this.events.audit('review.report.created', {
         category: 'review',
         severity: 'warning',
-        actorAccountId: reporterAccountId,
+        actorAccountId: outcome.actorAccountId,
         subjectType: 'review_report',
         subjectId: reviewId,
         metadata: { serverId, reviewId },
       });
     }
-    return toReviewResponse(updated, reporterAccountId);
+    return toReviewResponse(updated, outcome.accountIds);
   }
 
   async setAdminReply(
@@ -517,7 +513,7 @@ export class ReviewService {
           }
     });
 
-    return toReviewResponse(updated, viewerAccountId);
+    return toReviewResponse(updated, await this.resolveAccountGroupIds(viewerAccountId));
   }
 
   async markHelpful(
@@ -527,7 +523,9 @@ export class ReviewService {
     isHelpful: boolean
   ): Promise<ServerReview> {
     const now = new Date();
-    const updated = await this.prisma.$transaction(async (transaction) => {
+    const outcome = await withCanonicalAccountGroups(this.prisma, [voterAccountId], async (transaction, groups) => {
+      const group = groups[0];
+      if (!group) throw new ForbiddenException('계정 정보를 찾을 수 없습니다.');
       const lockedReviews = await transaction.$queryRaw<Array<{ id: string }>>`
         SELECT id
         FROM ServerReview
@@ -538,13 +536,8 @@ export class ReviewService {
         throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
       }
 
-      const existing = await transaction.reviewHelpfulVote.findUnique({
-        where: {
-          reviewId_accountId: {
-            reviewId,
-            accountId: voterAccountId
-          }
-        }
+      const existing = await transaction.reviewHelpfulVote.findFirst({
+        where: { reviewId, accountId: { in: [...group.accountIds] } }
       });
       if (existing && now.getTime() - existing.lastMarkedAt.getTime() < HELPFUL_COOLDOWN_MS) {
         throw new ForbiddenException('잠시 후 다시 시도해주세요. (도움표시 쿨다운)');
@@ -552,12 +545,7 @@ export class ReviewService {
 
       if (existing) {
         await transaction.reviewHelpfulVote.update({
-          where: {
-            reviewId_accountId: {
-              reviewId,
-              accountId: voterAccountId
-            }
-          },
+          where: { id: existing.id },
           data: {
             isHelpful,
             lastMarkedAt: now
@@ -567,7 +555,7 @@ export class ReviewService {
         await transaction.reviewHelpfulVote.create({
           data: {
             reviewId,
-            accountId: voterAccountId,
+            accountId: group.canonicalAccountId,
             isHelpful,
             lastMarkedAt: now
           }
@@ -577,13 +565,14 @@ export class ReviewService {
       const helpfulCount = await transaction.reviewHelpfulVote.count({
         where: { reviewId, isHelpful: true }
       });
-      return transaction.serverReview.update({
+      const updated = await transaction.serverReview.update({
         where: { id: reviewId },
         data: { helpfulCount }
       });
+      return { updated, accountIds: group.accountIds };
     });
 
-    return toReviewResponse(updated, voterAccountId);
+    return toReviewResponse(outcome.updated, outcome.accountIds);
   }
 
   async getGateStatus(serverId: string, session?: SessionPayload): Promise<ReviewGateStatus> {
@@ -690,26 +679,28 @@ export class ReviewService {
     transaction: Prisma.TransactionClient,
     serverId: string,
     authorAccountId: string,
+    accountIds: readonly string[],
     now: Date
   ): Promise<void> {
     const cutoff = new Date(now.getTime() - REVIEW_COOLDOWN_MS);
-    const refreshed = await transaction.reviewSubmissionGate.updateMany({
-      where: { serverId, authorAccountId, lastSubmittedAt: { lte: cutoff } },
-      data: { lastSubmittedAt: now }
+    const gates = await transaction.reviewSubmissionGate.findMany({
+      where: { serverId, authorAccountId: { in: [...accountIds] } },
+      orderBy: { lastSubmittedAt: 'desc' }
     });
-    if (refreshed.count === 1) {
-      return;
+    if (gates[0] && gates[0].lastSubmittedAt > cutoff) {
+      throw new ForbiddenException('이미 최근에 리뷰를 작성했습니다. 잠시 후 다시 시도해주세요.');
     }
-    try {
-      await transaction.reviewSubmissionGate.create({
-        data: { serverId, authorAccountId, lastSubmittedAt: now }
-      });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ForbiddenException('이미 최근에 리뷰를 작성했습니다. 잠시 후 다시 시도해주세요.');
-      }
-      throw error;
-    }
+    await transaction.reviewSubmissionGate.deleteMany({
+      where: { serverId, authorAccountId: { in: [...accountIds] } }
+    });
+    await transaction.reviewSubmissionGate.create({ data: { serverId, authorAccountId, lastSubmittedAt: now } });
+  }
+
+  private async resolveAccountGroupIds(accountId?: string): Promise<readonly string[]> {
+    if (!accountId) return [];
+    return withCanonicalAccountGroups(this.prisma, [accountId], async (_transaction, groups) =>
+      groups[0]?.accountIds ?? []
+    );
   }
 }
 
@@ -768,7 +759,7 @@ function toReviewResponse(review: {
   evidenceVoteId?: string | null;
   evidenceVerifiedAt?: Date | null;
   evidencePolicyVersion?: string | null;
-}, viewerAccountId?: string): ServerReview {
+}, viewerAccountIds: readonly string[] = []): ServerReview {
   const tags = normalizeReviewTags(review.tags);
   const adminReplyAuthor = normalizeAdminReplyAuthor(review.adminReplyAuthor);
   return {
@@ -796,7 +787,7 @@ function toReviewResponse(review: {
         }
       : null,
     createdAt: review.createdAt.toISOString(),
-    canManage: Boolean(viewerAccountId && viewerAccountId === review.authorAccountId)
+    canManage: viewerAccountIds.includes(review.authorAccountId)
   };
 }
 

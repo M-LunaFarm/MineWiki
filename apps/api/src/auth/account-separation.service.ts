@@ -9,6 +9,7 @@ import type { z } from 'zod';
 import { authProviderSchema } from '@minewiki/schemas';
 import { PrismaService } from '../common/prisma.service';
 import { withActiveCanonicalAccountGroup } from './account-lifecycle-fence';
+import { rehomeReviewsForCanonicalMerge } from '../review/review-account-merge';
 
 export type AuthProvider = z.infer<typeof authProviderSchema>;
 
@@ -382,6 +383,7 @@ export class AccountSeparationService {
       where: { accountId: accountIdFilter },
       data: { accountId: canonicalAccountId },
     });
+    await rehomeReviewsForCanonicalMerge(tx, canonicalAccountId, accountIds);
 
     const identities = await tx.minecraftIdentity.findMany({
       where: { accountId: { in: [...accountIds] } },
