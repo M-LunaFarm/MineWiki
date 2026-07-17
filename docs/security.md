@@ -8,6 +8,7 @@ Last reviewed: 2026-07-06
 | --- | --- | --- |
 | Auth cookies | Pass | `SessionService` issues `mw_session` as `httpOnly`, `secure`, `sameSite=strict`, scoped to `/`. OAuth provider choice never grants elevated access; roles and permissions are resolved for every request. |
 | Account privacy | Pass | Full account details are available only through session-protected self lookup; arbitrary account IDs cannot expose email, provider identity, linked accounts, or login history. |
+| Account enumeration | Pass | Password reset and verification resend return indistinguishable accepted responses for missing, verified, ambiguous, and pending accounts; resend responses do not expose account IDs. |
 | OAuth identity proof | Pass | Login requires the state-bound `oauth/start` and `oauth/complete` exchange. Raw provider user IDs and client-supplied manual link codes cannot create sessions or account links. |
 | Outbound diagnostics | Pass | Votifier TCP diagnostics reject private/reserved targets and require the authenticated server owner or a `server.admin` role before opening a connection. |
 | Operations telemetry | Pass | Queue depth and failure counts require an authenticated administrative role and are not exposed through the public monitoring surface. |
