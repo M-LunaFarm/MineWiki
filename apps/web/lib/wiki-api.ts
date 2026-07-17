@@ -2009,11 +2009,15 @@ async function mutateWikiPage<T>(pageId: string, action: string, body: Record<st
 export async function uploadWikiImage(input: {
   data: string;
   filename: string;
-  pageId: string;
+  pageId?: string;
+  spaceId?: string;
   license: string;
   sourceUrl?: string;
   sourceText?: string;
 }): Promise<{ url: string; publicPath: string; id: string; filename: string; wikiDocumentPath: string | null }> {
+  if (Boolean(input.pageId) === Boolean(input.spaceId)) {
+    throw new Error('Exactly one wiki page or space is required for an upload.');
+  }
   const response = await fetch(`${apiBaseUrl()}/v1/files/images`, {
     method: 'POST',
     credentials: 'include',
@@ -2026,8 +2030,8 @@ export async function uploadWikiImage(input: {
       license: input.license,
       sourceUrl: input.sourceUrl,
       sourceText: input.sourceText,
-      linkedResourceType: 'wiki_page',
-      linkedResourceId: input.pageId,
+      linkedResourceType: input.pageId ? 'wiki_page' : 'wiki_space',
+      linkedResourceId: input.pageId ?? input.spaceId,
     }),
   });
   const body = await response.json().catch(() => ({}));

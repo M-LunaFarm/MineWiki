@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
-import { ArchiveRestore, Code2, Compass, FilePenLine, FolderPen, GitCommitHorizontal, Link2, Loader2, MessagesSquare, MessageSquareText, ShieldCheck, Trash2 } from 'lucide-react';
+import { ArchiveRestore, Code2, Compass, FilePenLine, FolderPen, GitCommitHorizontal, ImagePlus, Link2, Loader2, MessagesSquare, MessageSquareText, ShieldCheck, Trash2 } from 'lucide-react';
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { WikiWatchButton } from './wiki-watch-button';
@@ -86,6 +86,7 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
           <Code2 className="size-3.5" /> 원문
         </Link>
         {account ? <Link href="/wiki/watchlist" className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ArchiveRestore className="size-3.5" /> 관심 목록</Link> : null}
+        {account ? <Link href={`/wiki/upload?spaceId=${encodeURIComponent(spaceId)}`} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ImagePlus className="size-3.5" /> 파일 업로드</Link> : null}
         <Link
           href={backlinksHref}
           className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"
