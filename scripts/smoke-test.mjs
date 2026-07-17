@@ -53,6 +53,7 @@ const checks = [
     url: `${apiBaseUrl}/ready`,
     expectedStatuses: [200],
     expectedJson: { status: 'ok', service: 'minewiki-api' },
+    expectedWorkerStatuses: ['ok', 'degraded'],
   },
   {
     name: 'minecraft ownership callback',
@@ -79,6 +80,7 @@ const checks = [
     url: `${webBaseUrl}/api/ready`,
     expectedStatuses: [200],
     expectedJson: { status: 'ok', service: 'minewiki-api' },
+    expectedWorkerStatuses: ['ok', 'degraded'],
   },
 ];
 
@@ -106,12 +108,22 @@ for (const check of checks) {
       );
       continue;
     }
-    if (check.expectedJson) {
+    if (check.expectedJson || check.expectedWorkerStatuses) {
       const body = await response.json().catch(() => null);
-      if (!matchesJsonSubset(body, check.expectedJson)) {
+      if (check.expectedJson && !matchesJsonSubset(body, check.expectedJson)) {
         failures += 1;
         console.error(
           `fail ${check.name}: response does not identify ${check.expectedJson.service ?? 'the expected service'}`,
+        );
+        continue;
+      }
+      if (
+        check.expectedWorkerStatuses &&
+        !check.expectedWorkerStatuses.includes(body?.checks?.worker?.status)
+      ) {
+        failures += 1;
+        console.error(
+          `fail ${check.name}: worker status is ${body?.checks?.worker?.status ?? 'missing'}`,
         );
         continue;
       }

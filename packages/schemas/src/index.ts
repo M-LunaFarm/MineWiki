@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './worker-health';
+
 export const CURRENT_POLICY_VERSIONS = {
   terms: {
     version: 'v1.2',

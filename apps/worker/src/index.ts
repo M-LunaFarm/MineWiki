@@ -1,5 +1,6 @@
 ﻿import { Queue, Worker as BullWorker, type JobsOptions, type Processor } from 'bullmq';
 import Redis from 'ioredis';
+import { randomUUID } from 'node:crypto';
 import { Logger, ObservabilityExporter } from '@minewiki/logger';
 import { ConfigService, assertSupportedQueueServer } from '@minewiki/config';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
@@ -10,6 +11,7 @@ import { createVoteDispatcher } from './processors/vote-dispatcher';
 import { createServerPinger } from './processors/server-pinger';
 import { createClaimVerifier } from './processors/claim-verifier';
 import { createRankAggregator } from './processors/rank-aggregator';
+import { WORKER_HEARTBEAT_INTERVAL_MS } from '@minewiki/schemas';
 import {
   createDiscordDigestSender,
   createDiscordDigestDeliverer,
@@ -46,6 +48,8 @@ import { triggerAccountDeletionSweep } from './account-deletion-scheduler';
 import { processAccountDeletionDiscordRevocations } from './account-deletion-discord-revocations';
 import { triggerBillingEntitlementSweep } from './billing-entitlement-scheduler';
 import { deriveAccountDeletionServiceToken, deriveBillingLifecycleServiceToken } from '@minewiki/auth';
+import { publishWorkerHeartbeat } from './worker-heartbeat';
+import { RETRYABLE_SCHEDULED_JOB_OPTIONS } from './queue-options';
 
 const PING_INTERVAL_MS = 5 * 60 * 1000;
 const RANK_INTERVAL_MS = 60 * 60 * 1000;
@@ -174,6 +178,7 @@ function createQueue(name: string, jobOptions?: JobsOptions): Queue {
     defaultJobOptions: {
       removeOnComplete: 100,
       removeOnFail: 500,
+      ...RETRYABLE_SCHEDULED_JOB_OPTIONS,
       ...jobOptions,
     },
   });
@@ -584,6 +589,14 @@ async function bootstrapWorker(): Promise<void> {
   await connection.ping();
   assertSupportedQueueServer(await connection.info('server'));
 
+  const heartbeatIdentity = {
+    instanceId: randomUUID(),
+    pid: process.pid,
+    workerCount: workers.length,
+    startedAt: new Date().toISOString(),
+  };
+  await publishWorkerHeartbeat(connection, heartbeatIdentity, queues);
+
   for (const worker of workers) {
     void worker.run().catch((error) => {
       return terminateOnRunLoopFailure({
@@ -604,6 +617,9 @@ async function bootstrapWorker(): Promise<void> {
   }
 
   scheduleInterval('server-ping', PING_INTERVAL_MS, enqueueServerPings);
+  scheduleInterval('worker-heartbeat', WORKER_HEARTBEAT_INTERVAL_MS, () =>
+    publishWorkerHeartbeat(connection, heartbeatIdentity, queues),
+  );
   scheduleInterval('claim-check', CLAIM_SCAN_INTERVAL_MS, enqueueClaimChecks);
   scheduleInterval('rank-aggregation', RANK_INTERVAL_MS, enqueueRankAggregation);
   scheduleInterval('wiki-notification-outbox', WIKI_NOTIFICATION_INTERVAL_MS, async () => {

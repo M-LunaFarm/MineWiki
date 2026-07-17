@@ -2,8 +2,9 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService, assertSupportedQueueServer } from '@minewiki/config';
 import Redis from 'ioredis';
 import { PrismaService } from './common/prisma.service';
+import { checkWorkerReadiness, type WorkerReadinessCheck } from './worker-readiness';
 
-interface DependencyCheck {
+export interface DependencyCheck {
   readonly status: 'ok' | 'error' | 'disabled';
   readonly latencyMs: number;
   readonly message?: string;
@@ -15,6 +16,7 @@ export interface ReadinessReport {
   readonly checks: {
     readonly database: DependencyCheck;
     readonly redis: DependencyCheck;
+    readonly worker: WorkerReadinessCheck;
   };
   readonly checkedAt: string;
 }
@@ -64,10 +66,22 @@ export class AppService implements OnModuleDestroy {
         : Promise.resolve<DependencyCheck>({ status: 'disabled', latencyMs: 0 }),
     ]);
 
+    const worker = !this.redis
+      ? { status: 'disabled' as const, latencyMs: 0 }
+      : redis.status === 'error'
+        ? { status: 'error' as const, latencyMs: 0, message: 'redis_unavailable' }
+        : await withTimeout(checkWorkerReadiness(this.redis), 2_000).catch(() => ({
+            status: 'error' as const,
+            latencyMs: 2_000,
+            message: 'worker_check_unavailable',
+          }));
+
     return {
+      // The API remains ready to serve foreground traffic during a background-worker
+      // outage. Worker health is still explicit in the report and enforced by smoke.
       status: database.status === 'ok' && redis.status !== 'error' ? 'ok' : 'error',
       service: 'minewiki-api',
-      checks: { database, redis },
+      checks: { database, redis, worker },
       checkedAt: new Date().toISOString(),
     };
   }

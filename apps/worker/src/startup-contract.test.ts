@@ -9,6 +9,7 @@ test('worker gates consumers and schedulers on database and Redis readiness', ()
   const databaseReady = source.indexOf('await prisma.$connect()', bootstrapStart);
   const redisReady = source.indexOf('await connection.ping()', bootstrapStart);
   const redisCompatible = source.indexOf('assertSupportedQueueServer', redisReady);
+  const firstHeartbeat = source.indexOf('await publishWorkerHeartbeat', redisCompatible);
   const workerStart = source.indexOf('worker.run()', bootstrapStart);
   const schedulerStart = source.indexOf("scheduleInterval('server-ping'", bootstrapStart);
   const billingSchedulerStart = source.indexOf("scheduleInterval('billing-entitlement'", bootstrapStart);
@@ -17,9 +18,12 @@ test('worker gates consumers and schedulers on database and Redis readiness', ()
   assert.ok(databaseReady > bootstrapStart);
   assert.ok(redisReady > databaseReady);
   assert.ok(redisCompatible > redisReady);
-  assert.ok(workerStart > redisCompatible);
+  assert.ok(firstHeartbeat > redisCompatible);
+  assert.ok(workerStart > firstHeartbeat);
   assert.ok(schedulerStart > workerStart);
   assert.ok(billingSchedulerStart > workerStart);
   assert.match(source, /autorun:\s*false/);
+  assert.match(source, /RETRYABLE_SCHEDULED_JOB_OPTIONS/);
+  assert.match(source, /scheduleInterval\('worker-heartbeat'/);
   assert.match(source, /Worker bootstrap failed/);
 });
