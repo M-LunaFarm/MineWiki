@@ -826,6 +826,27 @@ test('renders GitBook-style Markdown tables with alignment and mobile-safe wrapp
   assert.equal(parsed.ast[1]?.type, 'paragraph');
 });
 
+test('renders sanitized GitBook HTML tables only in GitBook compatibility mode', () => {
+  const source = [
+    '# 서버 안내',
+    '',
+    '<table data-header-hidden><thead><tr><th width="184"></th><th></th></tr></thead><tbody><tr><td>서버 주소</td><td><a href="https://lunaf.kr/">lunaf.kr</a></td></tr><tr><td colspan="2"><code>/spawn</code></td></tr></tbody></table>'
+  ].join('\n');
+  const escaped = renderDocument(parseMarkup(source).ast);
+  const parsed = parseMarkup(source, { gitBookMarkdown: true });
+  const html = renderDocument(parsed.ast);
+
+  assert.match(escaped, /&lt;table data-header-hidden&gt;/u);
+  assert.equal(parsed.ast[0]?.type, 'heading');
+  assert.equal(parsed.ast[1]?.type, 'wiki_table');
+  assert.match(html, /<h1 id="서버-안내">서버 안내<\/h1>/u);
+  assert.match(html, /<div class="table-scroll"><table class="component-table wiki-table wiki-table-header-hidden">/u);
+  assert.match(html, /<th style="width:184px"><\/th>/u);
+  assert.match(html, /<td colspan="2"><code>\/spawn<\/code><\/td>/u);
+  assert.match(html, /<a href="https:\/\/lunaf\.kr\/" rel="nofollow noopener" target="_blank">lunaf\.kr<\/a>/u);
+  assert.equal(html.includes('data-header-hidden'), false);
+});
+
 test('preserves validated light and dark NamuMark table colors for theme switching', () => {
   const parsed = parseMarkup('||<tablebgcolor=#ffffff,#101418><tablecolor=black,white><tablebordercolor=#336699,#88aadd><bgcolor=#eeeeee,#202830><color=#112233,#ddeeff>테마 셀||');
   const table = parsed.ast[0];

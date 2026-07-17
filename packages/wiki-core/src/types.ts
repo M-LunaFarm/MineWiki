@@ -59,6 +59,7 @@ export interface WikiTableRow {
 export interface WikiTableOptions {
   align?: 'left' | 'center' | 'right';
   width?: string;
+  headerHidden?: boolean;
   backgroundColor?: string;
   darkBackgroundColor?: string;
   color?: string;

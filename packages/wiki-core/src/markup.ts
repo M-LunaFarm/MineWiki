@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.20.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.21.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -211,6 +211,7 @@ function mergeNestedMetadata(
 
 export interface ParseMarkupOptions {
   linkResolution?: WikiLinkResolutionContext;
+  gitBookMarkdown?: boolean;
 }
 
 export function parseMarkup(raw: string, options: ParseMarkupOptions | number = {}): ParsedDocument {
@@ -232,7 +233,7 @@ function parseMarkupDocument(
       ? '인용문 중첩 제한을 초과했습니다.'
       : '접기 블록 중첩 제한을 초과했습니다.');
   }
-  const source = maskWikiCommentLines(raw.replace(/\r\n/g, '\n'));
+  const source = maskWikiCommentLines(raw.replace(/\r\n/g, '\n'), options.gitBookMarkdown === true);
   const lines = source.split('\n');
   const ast: AstNode[] = [];
   const links = new Set<string>();
@@ -427,7 +428,7 @@ function parseMarkupDocument(
       }
     }
 
-    const heading = parseWikiHeadingLine(line);
+    const heading = parseWikiHeadingLine(line, options.gitBookMarkdown === true);
     if (heading) {
       ast.push({
         type: 'heading',
@@ -455,6 +456,15 @@ function parseMarkupDocument(
       const nested = parseMarkupDocument(quoteLines.join('\n'), options, foldingDepth + 1, 'blockquote');
       mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
       ast.push({ type: 'blockquote', children: nested.ast });
+      continue;
+    }
+
+    const gitBookHtmlTable = options.gitBookMarkdown
+      ? parseGitBookHtmlTable(lines, i, links, errors, blockingErrors, footnotes, options.linkResolution)
+      : null;
+    if (gitBookHtmlTable) {
+      i += gitBookHtmlTable.consumedLineCount - 1;
+      ast.push(gitBookHtmlTable.node);
       continue;
     }
 
@@ -604,18 +614,19 @@ function startsMarkupBlock(lines: readonly string[], index: number): boolean {
   if (/^\{\{[^|}\n]+\s*$/u.test(line)) return true;
   if (!line.startsWith('{{{') && /^\{\{.+?\}\}$/u.test(line)) return true;
   if (/\[\[분류:[^\]]+\]\]/u.test(line)) return true;
-  if (parseWikiHeadingLine(line)) return true;
+  if (parseWikiHeadingLine(line, true)) return true;
   if (/^-{4,}$/u.test(trimmed)) return true;
   if (line.startsWith('>')) return true;
+  if (/^<table(?:\s|>)/iu.test(trimmed)) return true;
   if (parseWikiTableStart(line, lines[index + 1])) return true;
   if (/^\[\[파일:[^\]]+\]\]$/u.test(line)) return true;
   return Boolean(parseWikiListLine(line));
 }
 
-function maskWikiCommentLines(source: string): string {
+function maskWikiCommentLines(source: string, gitBookMarkdown = false): string {
   let literalDepth = 0;
   return source.split('\n').map((line) => {
-    if (literalDepth === 0 && line.startsWith('##')) return '';
+    if (literalDepth === 0 && line.startsWith('##') && !(gitBookMarkdown && /^#{1,6}\s+\S/u.test(line))) return '';
     for (let index = 0; index <= line.length - 3; index += 1) {
       if (isEscapedAt(line, index)) continue;
       const marker = line.slice(index, index + 3);
@@ -637,7 +648,12 @@ function isEscapedAt(value: string, index: number): boolean {
   return slashes % 2 === 1;
 }
 
-function parseWikiHeadingLine(line: string): { level: number; text: string; folded: boolean } | null {
+function parseWikiHeadingLine(line: string, gitBookMarkdown = false): { level: number; text: string; folded: boolean } | null {
+  if (gitBookMarkdown) {
+    const markdown = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/u.exec(line);
+    const text = markdown?.[2]?.trim();
+    if (markdown && text) return { level: markdown[1]!.length, text, folded: false };
+  }
   const opening = line.match(/^=+/)?.[0] ?? '';
   const closing = line.match(/=+$/)?.[0] ?? '';
   if (!opening || opening.length !== closing.length || opening.length > 6) return null;
@@ -988,6 +1004,142 @@ interface MarkdownTableStart {
   alignments: Array<'left' | 'center' | 'right' | undefined>;
   bodyRows: string[][];
   consumedLineCount: number;
+}
+
+function parseGitBookHtmlTable(
+  lines: readonly string[],
+  startIndex: number,
+  links: Set<string>,
+  errors: string[],
+  blockingErrors: string[],
+  footnotes: string[],
+  linkResolution?: WikiLinkResolutionContext
+): { node: Extract<AstNode, { type: 'wiki_table' }>; consumedLineCount: number } | null {
+  const firstLine = lines[startIndex]?.trimStart() ?? '';
+  if (!/^<table(?:\s|>)/iu.test(firstLine)) return null;
+  const sourceLines: string[] = [];
+  let cursor = startIndex;
+  while (cursor < lines.length && sourceLines.length < 500) {
+    const current = lines[cursor] ?? '';
+    sourceLines.push(current);
+    if (/<\/table>\s*$/iu.test(current.trimEnd())) break;
+    cursor += 1;
+  }
+  const rawTable = sourceLines.join('\n').trim();
+  if (!/<\/table>\s*$/iu.test(rawTable)) {
+    errors.push('닫히지 않은 GitBook HTML 표를 일반 텍스트로 처리했습니다.');
+    return null;
+  }
+  const sanitized = sanitizeHtml(rawTable, {
+    allowedTags: ['table', 'caption', 'thead', 'tbody', 'tr', 'th', 'td', 'a', 'code', 'br'],
+    allowedAttributes: {
+      table: ['data-header-hidden'],
+      th: ['colspan', 'rowspan', 'width'],
+      td: ['colspan', 'rowspan', 'width'],
+      a: ['href']
+    },
+    allowedSchemes: ['http', 'https', 'mailto']
+  });
+  const tableAttributes = sanitized.match(/^<table([^>]*)>/iu)?.[1] ?? '';
+  const bodyStart = sanitized.search(/<tbody(?:\s|>)/iu);
+  const rows: WikiTableRow[] = [];
+  for (const rowMatch of sanitized.matchAll(/<tr(?:\s[^>]*)?>([\s\S]*?)<\/tr>/giu)) {
+    if (rows.length >= 200) {
+      errors.push('GitBook HTML 표는 200행까지만 표시됩니다.');
+      break;
+    }
+    const cells: WikiTableCell[] = [];
+    for (const cellMatch of (rowMatch[1] ?? '').matchAll(/<(th|td)([^>]*)>([\s\S]*?)<\/\1>/giu)) {
+      if (cells.length >= 50) {
+        errors.push('GitBook HTML 표는 행마다 50열까지만 표시됩니다.');
+        break;
+      }
+      const tag = cellMatch[1]?.toLowerCase();
+      const attributes = cellMatch[2] ?? '';
+      const width = readGitBookHtmlDimension(attributes, 'width');
+      cells.push({
+        children: parseGitBookHtmlInline(cellMatch[3] ?? '', links, errors, blockingErrors, footnotes, linkResolution),
+        colspan: readGitBookHtmlSpan(attributes, 'colspan'),
+        rowspan: readGitBookHtmlSpan(attributes, 'rowspan'),
+        ...(tag === 'th' || (bodyStart >= 0 && (rowMatch.index ?? 0) < bodyStart) ? { header: true } : {}),
+        ...(width ? { width } : {})
+      });
+    }
+    if (cells.length > 0) rows.push({ cells });
+  }
+  if (rows.length === 0) {
+    errors.push('내용이 없는 GitBook HTML 표를 무시했습니다.');
+    return null;
+  }
+  const captionSource = sanitized.match(/<caption(?:\s[^>]*)?>([\s\S]*?)<\/caption>/iu)?.[1] ?? '';
+  return {
+    node: {
+      type: 'wiki_table',
+      caption: parseGitBookHtmlInline(captionSource, links, errors, blockingErrors, footnotes, linkResolution),
+      rows,
+      options: { headerHidden: /\bdata-header-hidden(?:\s*=|\s|$)/iu.test(tableAttributes) }
+    },
+    consumedLineCount: sourceLines.length
+  };
+}
+
+function parseGitBookHtmlInline(
+  source: string,
+  links: Set<string>,
+  errors: string[],
+  blockingErrors: string[],
+  footnotes: string[],
+  linkResolution?: WikiLinkResolutionContext
+): InlineNode[] {
+  const sanitized = sanitizeHtml(source, {
+    allowedTags: ['a', 'code', 'br'],
+    allowedAttributes: { a: ['href'] },
+    allowedSchemes: ['http', 'https', 'mailto']
+  });
+  const nodes: InlineNode[] = [];
+  const pattern = /<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>|<code>([\s\S]*?)<\/code>|<br\s*\/?>/giu;
+  let lastIndex = 0;
+  for (const match of sanitized.matchAll(pattern)) {
+    if ((match.index ?? 0) > lastIndex) appendGitBookHtmlText(nodes, sanitized.slice(lastIndex, match.index));
+    if (/^<br/iu.test(match[0])) {
+      nodes.push({ type: 'line_break' });
+    } else if (match[3] !== undefined) {
+      nodes.push({ type: 'code', code: decodeGitBookHtmlText(match[3]) });
+    } else {
+      const href = decodeGitBookHtmlText(match[1] ?? '');
+      const label = decodeGitBookHtmlText(match[2] ?? '') || href;
+      if (/^(?:https?:\/\/|mailto:)/iu.test(href) || isSafeLocalHref(href)) {
+        nodes.push({ type: 'external_link', href, label });
+      } else {
+        appendGitBookHtmlText(nodes, label);
+      }
+    }
+    lastIndex = (match.index ?? 0) + match[0].length;
+  }
+  if (lastIndex < sanitized.length) appendGitBookHtmlText(nodes, sanitized.slice(lastIndex));
+  if (nodes.length === 0 && source.trim()) {
+    return parseInline(decodeGitBookHtmlText(source), links, errors, blockingErrors, footnotes, linkResolution);
+  }
+  return nodes;
+}
+
+function appendGitBookHtmlText(nodes: InlineNode[], source: string) {
+  const text = decodeGitBookHtmlText(source);
+  if (text) nodes.push({ type: 'text', text });
+}
+
+function decodeGitBookHtmlText(source: string): string {
+  return sanitizeHtml(source, { allowedTags: [], allowedAttributes: {} }).replace(/\s+/gu, ' ').trim();
+}
+
+function readGitBookHtmlSpan(attributes: string, name: 'colspan' | 'rowspan'): number {
+  const value = Number(new RegExp(`\\b${name}\\s*=\\s*["']?(\\d+)`, 'iu').exec(attributes)?.[1] ?? 1);
+  return Number.isSafeInteger(value) ? Math.max(1, Math.min(100, value)) : 1;
+}
+
+function readGitBookHtmlDimension(attributes: string, name: 'width'): string | undefined {
+  const value = Number(new RegExp(`\\b${name}\\s*=\\s*["']?(\\d+)`, 'iu').exec(attributes)?.[1] ?? 0);
+  return Number.isSafeInteger(value) && value >= 1 && value <= 4096 ? `${value}px` : undefined;
 }
 
 function parseMarkdownTableStart(lines: readonly string[], startIndex: number): MarkdownTableStart | null {
@@ -2762,7 +2914,10 @@ function renderWikiTable(
   const captionHtml = caption.length > 0
     ? `<caption class="wiki-table-caption">${renderInline(caption, footnotes, options)}</caption>`
     : '';
-  const html = `<table class="component-table wiki-table"${tableStyles}>${captionHtml}${headRows ? `<thead>${headRows}</thead>` : ''}${bodyRows ? `<tbody>${bodyRows}</tbody>` : ''}</table>`;
+  const tableClass = tableOptions.headerHidden
+    ? 'component-table wiki-table wiki-table-header-hidden'
+    : 'component-table wiki-table';
+  const html = `<table class="${tableClass}"${tableStyles}>${captionHtml}${headRows ? `<thead>${headRows}</thead>` : ''}${bodyRows ? `<tbody>${bodyRows}</tbody>` : ''}</table>`;
   return `<div class="${wrapperClass}"${wrapperStyles}>${html}</div>`;
 }
 
