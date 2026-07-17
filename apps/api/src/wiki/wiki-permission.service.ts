@@ -73,7 +73,10 @@ export interface WikiSectionLockPolicy {
 const EDITOR_ROLES = new Set(['owner', 'manager', 'editor', 'maintainer', 'trusted']);
 const OWNER_ROLES = new Set(['owner', 'manager', 'maintainer']);
 const REVIEWER_ROLES = new Set(['reviewer']);
-const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published']);
+// `protected` is a published document state. Mutation authority is enforced
+// independently through protectionLevel and ACLs, so hiding these pages would
+// turn edit protection into an unintended public-read outage.
+const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published', 'protected']);
 const PUBLIC_REVISION_VISIBILITIES = new Set(['public']);
 const ACTIVE_SPACE_STATUSES = new Set(['active']);
 const ACTIVE_PROFILE_STATUSES = new Set(['active']);

@@ -143,6 +143,24 @@ test('anonymous public read is allowed', async () => {
   assert.equal(decision.allowed, true);
 });
 
+test('protected documents stay publicly readable while official-only editing remains restricted', async () => {
+  const service = createService();
+  const protectedPage = page({ status: 'protected', protectionLevel: 'official_only' });
+
+  const read = await service.canReadPage({
+    accountId: null,
+    page: protectedPage,
+    revision: { visibility: 'public' }
+  });
+  const edit = await service.canEditPage({
+    actor: actor({ profileId: 200n }),
+    page: protectedPage
+  });
+
+  assert.deepEqual(read, { allowed: true, reason: 'public_read' });
+  assert.deepEqual(edit, { allowed: false, reason: 'owner_required' });
+});
+
 test('user documents bind creation and edits to immutable profile ownership', async () => {
   const service = createService({ profile: { id: 100n, username: 'owner_name', status: 'active' } });
   const owner = actor({ profileId: 100n });
