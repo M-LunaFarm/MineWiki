@@ -183,13 +183,21 @@ export class WikiWatchService {
         p.protection_level AS protectionLevel,
         p.status,
         p.created_by AS createdBy,
-        p.updated_at AS pageUpdatedAt
+        snapshot_revision.created_at AS pageUpdatedAt
       FROM wiki_page_watches w
       INNER JOIN pages p ON p.id = w.page_id
+      INNER JOIN page_revisions snapshot_revision ON snapshot_revision.id = (
+        SELECT candidate_revision.id
+        FROM page_revisions candidate_revision
+        WHERE candidate_revision.page_id = p.id
+          AND candidate_revision.created_at <= ${snapshotAt}
+        ORDER BY candidate_revision.created_at DESC, candidate_revision.id DESC
+        LIMIT 1
+      )
       WHERE w.profile_id = ${profileId}
-        AND p.updated_at <= ${snapshotAt}
+        AND w.created_at <= ${snapshotAt}
         ${after}
-      ORDER BY p.updated_at DESC, w.id DESC
+      ORDER BY snapshot_revision.created_at DESC, w.id DESC
       LIMIT ${take}
     `);
   }

@@ -41,8 +41,10 @@ interface CandidateRow {
   readonly protectionLevel: string;
   readonly status: string;
   readonly createdBy: bigint | null;
-  readonly pageUpdatedAt: Date;
+  pageUpdatedAt: Date;
+  watchCreatedAt: Date;
   watchUpdatedAt: Date;
+  revisionHistory: Date[];
 }
 
 function candidate(
@@ -66,7 +68,9 @@ function candidate(
     status: 'normal',
     createdBy: 20n,
     pageUpdatedAt,
+    watchCreatedAt: new Date('2026-01-01T00:00:00Z'),
     watchUpdatedAt: new Date('2026-01-01T00:00:00Z'),
+    revisionHistory: [pageUpdatedAt],
     ...overrides
   };
 }
@@ -109,14 +113,20 @@ function createListService(
       rawCalls += 1;
       sql.push(query.strings.join('?'));
       const values = query.values as unknown[];
-      const profileId = values[0] as bigint;
-      const snapshotAt = values[1] as Date;
+      const snapshotAt = values[0] as Date;
+      const profileId = values[1] as bigint;
       const take = Number(values.at(-1));
-      const position = values.length > 3
-        ? { pageUpdatedAt: values[2] as Date, watchId: values[4] as bigint }
+      const position = values.length > 4
+        ? { pageUpdatedAt: values[3] as Date, watchId: values[5] as bigint }
         : null;
       return sourceRows
-        .filter((row) => row.profileId === profileId && row.pageUpdatedAt <= snapshotAt)
+        .filter((row) => row.profileId === profileId && row.watchCreatedAt <= snapshotAt)
+        .flatMap((row) => {
+          const snapshotRevisionAt = row.revisionHistory
+            .filter((createdAt) => createdAt <= snapshotAt)
+            .sort((left, right) => right.getTime() - left.getTime())[0];
+          return snapshotRevisionAt ? [{ ...row, pageUpdatedAt: snapshotRevisionAt }] : [];
+        })
         .filter((row) => !position || row.pageUpdatedAt < position.pageUpdatedAt || (
           row.pageUpdatedAt.getTime() === position.pageUpdatedAt.getTime() && row.watchId < position.watchId
         ))
@@ -221,8 +231,10 @@ test('watchlist orders newest document changes first', async () => {
   const result = await service.list(session);
 
   assert.deepEqual(result.items.map((item) => item.pageId), ['12', '11']);
-  assert.match(stats.sql[0] ?? '', /ORDER BY p\.updated_at DESC, w\.id DESC/u);
+  assert.match(stats.sql[0] ?? '', /ORDER BY snapshot_revision\.created_at DESC, w\.id DESC/u);
   assert.match(stats.sql[0] ?? '', /INNER JOIN pages p ON p\.id = w\.page_id/u);
+  assert.match(stats.sql[0] ?? '', /candidate_revision\.created_at <=/u);
+  assert.match(stats.sql[0] ?? '', /w\.created_at <=/u);
 });
 
 test('watchlist breaks equal page update times by descending watch id', async () => {
@@ -272,6 +284,26 @@ test('watchlist cursor rejects payload tampering and use by another profile', as
     service.list({ ...session, userId: 'account-2' }, first.nextCursor, 1),
     /cursor not found/u
   );
+});
+
+test('watchlist cursor fences new watches and keeps the snapshot revision order after later edits', async () => {
+  const firstRow = candidate(72n, 11n, new Date('2026-07-16T00:00:00Z'));
+  const secondRow = candidate(71n, 12n, new Date('2026-07-15T00:00:00Z'));
+  const rows = [firstRow, secondRow];
+  const { service } = createListService(rows);
+  const first = await service.list(session, undefined, 1);
+  assert.deepEqual(first.items.map((item) => item.pageId), ['11']);
+  assert.ok(first.nextCursor);
+
+  const later = new Date('2999-01-01T00:00:00Z');
+  secondRow.pageUpdatedAt = later;
+  secondRow.revisionHistory.push(later);
+  rows.push(candidate(73n, 13n, new Date('2026-07-14T00:00:00Z'), { watchCreatedAt: later }));
+
+  const second = await service.list(session, first.nextCursor, 10);
+  assert.deepEqual(second.items.map((item) => item.pageId), ['12']);
+  assert.equal(second.items[0]?.updatedAt, '2026-07-15T00:00:00.000Z');
+  assert.equal(second.nextCursor, null);
 });
 
 test('bounded ACL scans advance by the last scanned row without skips or duplicates', async () => {
