@@ -66,12 +66,28 @@ export class MinecraftController {
     return this.minecraftService.getIdentity(session.userId);
   }
 
+  @Get('identities')
+  getOwnIdentities(@CurrentSession() session: SessionPayload): Promise<{ identities: MinecraftIdentity[] }> {
+    return this.minecraftService.getIdentities(session.userId).then((identities) => ({ identities }));
+  }
+
   @Delete('identity')
   @HttpCode(204)
   @Throttle({ default: { limit: 5, ttl: 300 } })
   async revokeOwnIdentity(@CurrentSession() session: SessionPayload): Promise<void> {
     this.assertRecentAuthentication(session);
     await this.minecraftService.revokeIdentity(session.userId);
+  }
+
+  @Delete('identities/:minecraftUuid')
+  @HttpCode(204)
+  @Throttle({ default: { limit: 8, ttl: 300 } })
+  async revokeSelectedIdentity(
+    @Param('minecraftUuid', new ParseUUIDPipe()) minecraftUuid: string,
+    @CurrentSession() session: SessionPayload,
+  ): Promise<void> {
+    this.assertRecentAuthentication(session);
+    await this.minecraftService.revokeIdentity(session.userId, minecraftUuid);
   }
 
   @Get('identity/:userId')

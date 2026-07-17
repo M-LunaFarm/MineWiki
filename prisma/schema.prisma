@@ -126,7 +126,7 @@ model Account {
   sessions                Session[]
   emailVerifications      EmailVerification[]
   passwordResets          PasswordReset[]
-  minecraftIdentity       MinecraftIdentity?
+  minecraftIdentities     MinecraftIdentity[]
   minecraftAuthorizations MinecraftAuthorization[]
   oauthStates             OAuthState[]
   oauthCredentials        OAuthCredential[]
@@ -533,13 +533,17 @@ model MinecraftAuthorization {
 }
 
 model MinecraftIdentity {
-  accountId      String   @id
+  id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  accountId      String
   uuid           String   @unique
   playerName     String?
   msOwned        Boolean
+  isPrimary      Boolean  @default(false)
   lastVerifiedAt DateTime
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, isPrimary])
 }
 
 model Server {

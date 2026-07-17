@@ -104,10 +104,13 @@ if (!hasDatabase) {
   });
 
   const ensureIdentity = async (accountId: string, uuid = randomUUID()) => {
-    await prisma.minecraftIdentity.upsert({
-      where: { accountId },
-      update: { uuid, msOwned: true, lastVerifiedAt: new Date() },
-      create: { accountId, uuid, msOwned: true, lastVerifiedAt: new Date() }
+    const existingMinecraftIdentity = await prisma.minecraftIdentity.findFirst({ where: { accountId } });
+    if (existingMinecraftIdentity) await prisma.minecraftIdentity.update({
+      where: { id: existingMinecraftIdentity.id },
+      data: { uuid, msOwned: true, isPrimary: true, lastVerifiedAt: new Date() },
+    });
+    else await prisma.minecraftIdentity.create({
+      data: { accountId, uuid, msOwned: true, isPrimary: true, lastVerifiedAt: new Date() },
     });
     return uuid;
   };

@@ -236,7 +236,7 @@ export class AccountConflictService {
           where: {
             provider: 'discord',
             providerUserId: discordUserId,
-            id: { not: accountId },
+            id: { notIn: accountIds },
           },
           select: { id: true },
         }),
@@ -244,7 +244,7 @@ export class AccountConflictService {
           where: {
             provider: 'discord',
             providerUserId: discordUserId,
-            accountId: { not: accountId },
+            accountId: { notIn: accountIds },
           },
           select: { accountId: true },
         }),

@@ -230,16 +230,16 @@ export class DiscordMinecraftLinkRepository {
     const db = store ?? this.prisma;
     const operations = [
       db.minecraftIdentity.upsert({
-        where: { accountId: input.accountId },
+        where: { uuid: input.minecraftUuid },
         create: {
           accountId: input.accountId,
           uuid: input.minecraftUuid,
           playerName: input.minecraftName,
           msOwned: true,
+          isPrimary: true,
           lastVerifiedAt: now
         },
         update: {
-          uuid: input.minecraftUuid,
           playerName: input.minecraftName,
           msOwned: true,
           lastVerifiedAt: now

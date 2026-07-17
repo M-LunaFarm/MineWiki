@@ -22,6 +22,8 @@ function createHarness(options: {
   const tickets: unknown[] = [];
   const messages: unknown[] = [];
   const audits: unknown[] = [];
+  const mergedAccountIds: string[] = [];
+  const linkedLegacyWikiProfileIds: bigint[] = [];
 
   const prisma = {
     minecraftIdentity: {
@@ -65,9 +67,15 @@ function createHarness(options: {
             : []),
         ];
       },
-      async findFirst(input: { where?: { provider?: string; email?: unknown } }) {
+      async findFirst(input: { where?: { provider?: string; email?: unknown; id?: { notIn?: string[] } } }) {
         if (input.where?.email) {
           return options.duplicateEmailAccountId ? { id: options.duplicateEmailAccountId } : null;
+        }
+        if (
+          options.duplicateDiscordAccountId &&
+          input.where?.id?.notIn?.includes(options.duplicateDiscordAccountId)
+        ) {
+          return null;
         }
         return options.duplicateDiscordAccountId ? { id: options.duplicateDiscordAccountId } : null;
       },
@@ -86,6 +94,10 @@ function createHarness(options: {
           return options.linkedWikiProfile ? { id: 999n } : null;
         }
         return options.legacyWikiProfileId ? { id: options.legacyWikiProfileId } : null;
+      },
+      async updateMany(input: { where: { id: bigint } }) {
+        linkedLegacyWikiProfileIds.push(input.where.id);
+        return { count: 1 };
       },
     },
     supportTicket: {
@@ -117,12 +129,13 @@ function createHarness(options: {
       return null;
     },
   };
-
   return {
     accountId,
     tickets,
     messages,
     audits,
+    mergedAccountIds,
+    linkedLegacyWikiProfileIds,
     service: new AccountConflictService(
       prisma as never,
       events as never,
@@ -175,6 +188,19 @@ test('reports a separate active account with the same verified email without aut
 
 test('does not report Minecraft identity stored inside the canonical account group', async () => {
   const harness = createHarness({ linkedAccountId: randomUUID() });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.deepEqual(response.conflicts, []);
+});
+
+test('does not report a Discord account already inside the canonical account group', async () => {
+  const linkedAccountId = randomUUID();
+  const harness = createHarness({
+    minecraftUuid: null,
+    linkedAccountId,
+    duplicateDiscordAccountId: linkedAccountId,
+  });
 
   const response = await harness.service.listLinkConflicts(harness.accountId);
 
@@ -264,4 +290,37 @@ test('creates manual merge request from safe conflict rejection message', async 
   assert.equal(response.conflicts.length, 1);
   assert.equal(response.conflicts[0]?.kind, 'minecraft_identity_duplicate');
   assert.equal(harness.tickets.length, 1);
+});
+
+test('reports a conflicting Discord account without mutating account ownership', async () => {
+  const duplicateAccountId = randomUUID();
+  const harness = createHarness({ minecraftUuid: null, duplicateDiscordAccountId: duplicateAccountId });
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+  assert.equal(response.conflicts.length, 1);
+  assert.deepEqual(harness.mergedAccountIds, []);
+  assert.equal(harness.tickets.length, 0);
+  assert.equal(harness.audits.length, 0);
+});
+
+test('reports a matching verified email without merging accounts', async () => {
+  const duplicateAccountId = randomUUID();
+  const harness = createHarness({
+    minecraftUuid: null,
+    discordUserId: null,
+    accountEmail: 'same-person@example.com',
+    emailVerified: true,
+    duplicateEmailAccountId: duplicateAccountId,
+  });
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+  assert.equal(response.conflicts.length, 1);
+  assert.deepEqual(harness.mergedAccountIds, []);
+  assert.equal(harness.audits.length, 0);
+});
+
+test('reports an unowned legacy wiki profile without claiming it', async () => {
+  const harness = createHarness({ minecraftUuid: null, discordUserId: null, accountEmail: 'legacy@example.com', emailVerified: true, legacyWikiProfileId: 197n });
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+  assert.equal(response.conflicts.length, 1);
+  assert.deepEqual(harness.linkedLegacyWikiProfileIds, []);
+  assert.equal(harness.tickets.length, 0);
 });
