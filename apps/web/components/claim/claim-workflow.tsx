@@ -869,7 +869,7 @@ export function ClaimWorkflow() {
             : '검증 토큰 발급';
 
   return (
-    <section className="pb-16 text-white">
+    <section className="claim-surface pb-16 text-white">
       <div className="mb-8 border-b border-[#2a2a2d] pb-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>

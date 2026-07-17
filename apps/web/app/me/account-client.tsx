@@ -731,7 +731,7 @@ export function AccountClientPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#121212] text-white">
+    <div className="account-surface min-h-screen bg-[#121212] text-white">
       <SiteHeader />
 
       <main className="min-h-screen pb-16 pt-24">

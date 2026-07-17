@@ -582,7 +582,7 @@ function PolicyAgreements({
 function PolicyCheckbox({ checked, onChange, href, label }: { readonly checked: boolean; readonly onChange: (value: boolean) => void; readonly href: string; readonly label: string }) {
   return (
     <label className="flex items-start gap-3">
-      <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-white/20 bg-white/[0.04] text-[#35e5b7] focus:ring-[#35e5b7]" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <input type="checkbox" className="policy-checkbox mt-0.5 h-4 w-4 rounded border-white/20 bg-white/[0.04] text-[#35e5b7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#35e5b7]" checked={checked} onChange={(event) => onChange(event.target.checked)} />
       <span><span className="mr-1 font-semibold text-rose-300">[필수]</span><Link className="text-[#35e5b7] underline" href={href} target="_blank" rel="noopener noreferrer">{label}</Link>에 동의합니다.</span>
     </label>
   );

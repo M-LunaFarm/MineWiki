@@ -139,8 +139,8 @@ export function ServerHeroLive({
 
   return (
     <section className="space-y-6">
-      <div className="dark-fixed-surface relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0d1219] shadow-2xl shadow-black/40">
-        <div className="group absolute inset-0 h-full w-full">
+      <div className="server-hero-surface relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0d1219] shadow-2xl shadow-black/40">
+        <div className="server-hero-artwork group absolute inset-0 h-full w-full">
           {detail.bannerUrl ? (
             <img
               src={detail.bannerUrl}
@@ -156,19 +156,19 @@ export function ServerHeroLive({
               {getServerPreviewInitial(detail.name)}
             </div>
           )}
-          <div className="absolute inset-0 bg-[linear-gradient(90deg,#0d1219_0%,rgba(13,18,25,0.94)_42%,rgba(13,18,25,0.68)_100%)]" />
-          <div className="absolute inset-0 bg-[linear-gradient(0deg,#0d1219_0%,rgba(13,18,25,0)_55%,rgba(13,18,25,0.55)_100%)]" />
+          <div className="server-hero-overlay-primary absolute inset-0 bg-[linear-gradient(90deg,#0d1219_0%,rgba(13,18,25,0.94)_42%,rgba(13,18,25,0.68)_100%)]" />
+          <div className="server-hero-overlay-secondary absolute inset-0 bg-[linear-gradient(0deg,#0d1219_0%,rgba(13,18,25,0)_55%,rgba(13,18,25,0.55)_100%)]" />
         </div>
 
         <div className="relative grid gap-7 px-5 py-6 lg:grid-cols-[96px_minmax(0,1fr)_300px] lg:items-center lg:px-8 lg:py-8">
           <div className="relative z-10 flex-shrink-0">
-            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-[#1a2230] to-[#0d1219] text-4xl font-black text-white shadow-xl shadow-black/40">
+            <div className="server-hero-mark flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-[#1a2230] to-[#0d1219] text-4xl font-black text-white shadow-xl shadow-black/40">
               {serverInitial}
             </div>
           </div>
 
           <div className="relative z-10 min-w-0">
-            <p className="mb-3 inline-flex rounded-md border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300 backdrop-blur">
+            <p className="server-hero-chip mb-3 inline-flex rounded-md border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300 backdrop-blur">
               {editionLabel}
             </p>
             <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -208,7 +208,7 @@ export function ServerHeroLive({
                 initialOpen={initialVoteOpen}
                 triggerClassName="inline-flex items-center gap-3 rounded-xl bg-[#14c794] px-8 py-3.5 text-base font-bold text-[#06140d] shadow-lg shadow-[#14c794]/25 transition hover:bg-[#1ee6a4] active:scale-[0.99]"
               />
-              <div className="group flex min-w-0 items-center gap-4 rounded-xl border border-white/[0.08] bg-white/[0.04] p-1.5 pl-4 pr-2 backdrop-blur">
+              <div className="server-hero-chip group flex min-w-0 items-center gap-4 rounded-xl border border-white/[0.08] bg-white/[0.04] p-1.5 pl-4 pr-2 backdrop-blur">
                 <span className="min-w-0">
                   <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                     주소
@@ -219,7 +219,7 @@ export function ServerHeroLive({
                 </span>
                 <CopyAddressButton
                   address={joinAddress}
-                  className="shrink-0 whitespace-nowrap rounded-lg bg-white/[0.06] p-2.5 text-slate-300 transition hover:bg-white hover:text-black"
+                  className="server-hero-copy shrink-0 whitespace-nowrap rounded-lg bg-white/[0.06] p-2.5 text-slate-300 transition hover:bg-white hover:text-black"
                   idleLabel=""
                   copiedLabel="OK"
                 >
@@ -227,7 +227,7 @@ export function ServerHeroLive({
                 </CopyAddressButton>
               </div>
               {detail.shortCode ? (
-                <div className="group flex min-w-0 items-center gap-4 rounded-xl border border-white/[0.08] bg-white/[0.04] p-1.5 pl-4 pr-2 backdrop-blur">
+                <div className="server-hero-chip group flex min-w-0 items-center gap-4 rounded-xl border border-white/[0.08] bg-white/[0.04] p-1.5 pl-4 pr-2 backdrop-blur">
                   <span className="min-w-0">
                     <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                       짧은 URL
@@ -238,7 +238,7 @@ export function ServerHeroLive({
                   </span>
                   <CopyAddressButton
                     address={shareUrl}
-                    className="shrink-0 whitespace-nowrap rounded-lg bg-white/[0.06] p-2.5 text-slate-300 transition hover:bg-white hover:text-black"
+                    className="server-hero-copy shrink-0 whitespace-nowrap rounded-lg bg-white/[0.06] p-2.5 text-slate-300 transition hover:bg-white hover:text-black"
                     idleLabel=""
                     copiedLabel="OK"
                   >
@@ -248,7 +248,7 @@ export function ServerHeroLive({
               ) : null}
               {detail.websiteUrl ? (
                 <a
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-5 py-3.5 font-semibold text-white backdrop-blur-sm transition hover:border-white/20"
+                  className="server-hero-chip inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-5 py-3.5 font-semibold text-white backdrop-blur-sm transition hover:border-white/20"
                   href={detail.websiteUrl}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -260,7 +260,7 @@ export function ServerHeroLive({
             </div>
           </div>
 
-          <div className="relative z-10 hidden gap-3 rounded-2xl border border-white/[0.07] bg-[#0d1219]/85 p-4 backdrop-blur lg:grid">
+          <div className="server-hero-verification relative z-10 hidden gap-3 rounded-2xl border border-white/[0.07] bg-[#0d1219]/85 p-4 backdrop-blur lg:grid">
             <div className="flex items-center gap-2 text-sm font-bold text-white">
               <BadgeCheck className="h-4 w-4 text-cyan-200" />
               검증 현황
@@ -325,7 +325,7 @@ function HeroInfo({
   readonly value: string;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 backdrop-blur">
+    <div className="server-hero-chip flex min-w-0 items-center gap-3 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 backdrop-blur">
       <Icon className="h-4 w-4 shrink-0 text-cyan-200" />
       <div className="min-w-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">

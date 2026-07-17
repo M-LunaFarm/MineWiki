@@ -2,7 +2,7 @@ import { WikiRecentDiscussionsClient } from '../../../components/wiki/wiki-recen
 import Link from 'next/link';
 
 export default function WikiRecentDiscussionsPage() {
-  return <section className="mx-auto w-full max-w-5xl space-y-7">
+  return <section className="mx-auto w-full max-w-5xl space-y-7 px-4 py-8 sm:px-6 lg:px-8">
     <header className="border-b border-white/10 pb-6">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">Discussions</p>
       <h1 className="mt-3 text-3xl font-bold text-white">최근 토론</h1>

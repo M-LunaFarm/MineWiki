@@ -293,10 +293,10 @@ export function ServerListExplorer({
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between xl:w-auto">
-              <div className="flex items-center gap-3 text-sm text-[#676c64]">
+              <div className="paper-results-summary flex items-center gap-3 text-sm text-[#676c64]">
                 <span>
                   결과{' '}
-                  <strong className="text-[#20231f]">
+                  <strong className="paper-results-count text-[#20231f]">
                     {ranking.total.toLocaleString('ko-KR')}
                   </strong>
                   개
@@ -485,7 +485,7 @@ export function ServerListExplorer({
               다음 서버를 펼치는 중
             </div>
           ) : currentPage < totalPages ? (
-            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[#777b73]">
+            <span className="paper-load-more-hint text-xs font-semibold uppercase tracking-[0.16em] text-[#777b73]">
               아래로 스크롤하면 더 불러옵니다
             </span>
           ) : servers.length > 0 ? (
@@ -662,7 +662,7 @@ function FilterGroup({
 function SideStat({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="rounded-md border border-[#b7b3a9] bg-white/20 px-3 py-2">
-      <p className="text-[11px] text-[#72766e]">{label}</p>
+      <p className="paper-side-stat-label text-[11px] text-[#72766e]">{label}</p>
       <p className="mt-1 text-sm font-bold text-[#242824]">{value}</p>
     </div>
   );
@@ -823,18 +823,12 @@ function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly
             >
               상세
             </Link>
-            {online ? (
-              <Link
-                href={`${serverPath}?vote=1`}
-                className="inline-flex h-9 items-center justify-center rounded-lg bg-[#13ec80] px-3 text-sm font-bold text-[#07100b] transition-colors hover:bg-[#38f09b]"
-              >
-                투표
-              </Link>
-            ) : (
-              <span className="inline-flex h-9 cursor-not-allowed items-center justify-center rounded-lg bg-gray-800 px-3 text-sm font-bold text-gray-500">
-                투표 불가
-              </span>
-            )}
+            <Link
+              href={`${serverPath}?vote=1`}
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-[#13ec80] px-3 text-sm font-bold text-[#07100b] transition-colors hover:bg-[#38f09b]"
+            >
+              투표
+            </Link>
           </div>
           <p className="hidden truncate text-right text-xs text-gray-500 lg:block">{updatedAt}</p>
         </div>

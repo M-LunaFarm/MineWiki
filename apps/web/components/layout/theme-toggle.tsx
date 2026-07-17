@@ -16,7 +16,10 @@ export function ThemeToggle({ paper = false }: { readonly paper?: boolean }) {
   const [theme, setTheme] = useState<Theme>('dark');
 
   useEffect(() => {
-    setTheme(resolveTheme());
+    const resolved = resolveTheme();
+    document.documentElement.dataset.theme = resolved;
+    document.documentElement.style.colorScheme = resolved;
+    setTheme(resolved);
   }, []);
 
   const toggle = () => {

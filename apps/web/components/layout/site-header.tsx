@@ -36,6 +36,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
   const { account, loading } = useAuth();
   const [currentSearch, setCurrentSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   useEffect(() => {
     const syncSearchFromLocation = () => {
@@ -81,6 +82,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
 
   useEffect(() => {
     setMobileOpen(false);
+    setAccountMenuOpen(false);
   }, [pathname]);
 
   const hasAdminAccess = Boolean(
@@ -101,7 +103,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
   });
 
   return (
-    <header className={`fixed inset-x-0 top-0 z-50 overflow-x-clip border-b backdrop-blur-xl ${variant === 'paper' ? 'border-[#b8b4aa]/70 bg-[#f4f2ec]/90 text-[#252925]' : 'border-white/[0.06] bg-[#07090c]/80'}`}>
+    <header className={`site-header fixed inset-x-0 top-0 z-50 overflow-x-clip border-b backdrop-blur-xl ${variant === 'paper' ? 'border-[#b8b4aa]/70 bg-[#f4f2ec]/90 text-[#252925]' : 'border-white/[0.06] bg-[#07090c]/80'}`}>
       <div className="mx-auto w-full max-w-[1440px] px-3 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between gap-2 sm:gap-4">
           <div className="flex min-w-0 items-center gap-7">
@@ -152,13 +154,22 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
 
             <span className="hidden sm:inline-flex"><WikiReviewQueueBadge paper={variant === 'paper'} /></span>
             <span className="hidden sm:inline-flex"><WikiNotificationBell paper={variant === 'paper'} /></span>
-            <AccountDropdown />
+            <AccountDropdown
+              open={accountMenuOpen}
+              onOpenChange={(open) => {
+                setAccountMenuOpen(open);
+                if (open) setMobileOpen(false);
+              }}
+            />
             <span className="hidden min-[400px]:inline-flex"><ThemeToggle paper={variant === 'paper'} /></span>
             <button
               type="button"
               className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-300 transition hover:border-white/20 hover:text-white lg:hidden"
               aria-label={mobileOpen ? '메뉴 닫기' : '메뉴 열기'}
-              onClick={() => setMobileOpen((open) => !open)}
+              onClick={() => {
+                setAccountMenuOpen(false);
+                setMobileOpen((open) => !open);
+              }}
             >
               {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>

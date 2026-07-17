@@ -117,7 +117,7 @@ export function ServerDetailShowcase({
       : '수집 중';
 
   return (
-    <div className="min-h-screen text-white">
+    <div className="server-detail-surface min-h-screen text-white">
       <SiteHeader />
 
       <main className="relative z-10 pb-20 pt-24">
@@ -151,7 +151,7 @@ export function ServerDetailShowcase({
             <section id="server-overview" className="min-w-0 xl:col-start-1 xl:row-start-1">
               <ServerOverviewCard detail={detail} />
               {wikiHref ? (
-                <section className="mt-6 overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/[0.09] via-[#111821] to-[#10161e] p-5 sm:p-6" aria-labelledby="server-documentation-title">
+                <section className="server-documentation-card mt-6 overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/[0.09] via-[#111821] to-[#10161e] p-5 sm:p-6" aria-labelledby="server-documentation-title">
                   <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex min-w-0 items-start gap-4">
                       <span className="grid size-12 shrink-0 place-items-center rounded-xl border border-emerald-400/25 bg-emerald-400/10 text-emerald-200">
@@ -367,7 +367,7 @@ export function ServerDetailShowcase({
                   href={buildServerPath(server)}
                   className="surface-card surface-card-hover group block overflow-hidden p-0"
                 >
-                  <div className="relative h-36 overflow-hidden bg-[#0d1219]">
+                  <div className="dark-fixed-surface relative h-36 overflow-hidden bg-[#0d1219]">
                     {server.bannerUrl ? (
                       <img
                         src={server.bannerUrl}

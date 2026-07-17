@@ -99,6 +99,7 @@ export function VoteModalModern({
   const [success, setSuccess] = useState<VoteResponse | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaKey, setCaptchaKey] = useState(0);
+  const [captchaTheme, setCaptchaTheme] = useState<'light' | 'dark'>('dark');
 
   const baseUrl = normalizeApiBaseUrl(apiBaseUrl);
   const turnstileSiteKey = normalizeSiteKey(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
@@ -114,6 +115,7 @@ export function VoteModalModern({
 
   useEffect(() => {
     if (isOpen) {
+      setCaptchaTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -130,7 +132,7 @@ export function VoteModalModern({
     const normalizedUsername = normalizeMinecraftUsername(
       identityStatus === 'verified' ? identity?.playerName ?? username : username,
     );
-    if (!isValidMinecraftUsername(normalizedUsername)) {
+    if (identityStatus !== 'verified' && !isValidMinecraftUsername(normalizedUsername)) {
       setError('닉네임은 영문/숫자/_ 조합으로 3~16자여야 합니다.');
       return;
     }
@@ -150,7 +152,7 @@ export function VoteModalModern({
         credentials: 'include',
         body: JSON.stringify({
           username: normalizedUsername,
-          captchaToken,
+          ...(captchaToken ? { captchaToken } : {}),
         }),
       });
 
@@ -236,7 +238,7 @@ export function VoteModalModern({
               transition={{ type: 'spring', damping: 20, stiffness: 300 }}
               className="relative w-full max-w-md"
             >
-              <div className="max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-[#30343b] bg-[#151922] p-6 shadow-2xl shadow-black/40">
+              <div className="vote-modal-surface max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-[#30343b] bg-[#151922] p-6 shadow-2xl shadow-black/40">
                 <div className="relative">
                   {/* Header */}
                   <div className="flex items-start justify-between mb-6">
@@ -381,7 +383,7 @@ export function VoteModalModern({
                             siteKey={turnstileSiteKey as string}
                             onSuccess={(token) => setCaptchaToken(token)}
                             onExpire={() => setCaptchaToken(null)}
-                            options={{ theme: 'dark' }}
+                            options={{ theme: 'auto' }}
                           />
                         </div>
                       ) : captchaMode === 'hcaptcha' ? (
@@ -395,7 +397,7 @@ export function VoteModalModern({
                             sitekey={hcaptchaSiteKey as string}
                             onVerify={(token) => setCaptchaToken(token)}
                             onExpire={() => setCaptchaToken(null)}
-                            theme="dark"
+                            theme={captchaTheme}
                           />
                         </div>
                       ) : (

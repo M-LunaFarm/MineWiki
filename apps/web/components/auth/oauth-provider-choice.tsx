@@ -24,7 +24,9 @@ export function OAuthProviderChoice({
   onClick,
 }: OAuthProviderChoiceProps) {
   const label = PROVIDER_LABEL[provider];
-  const accent = provider === 'discord' ? 'text-[#7c87ff]' : 'text-[#18d86b]';
+  const accent = provider === 'discord'
+    ? 'auth-provider-label-discord text-[#7c87ff]'
+    : 'auth-provider-label-naver text-[#18d86b]';
   const active = state !== 'idle' && state !== 'inactive';
   const className = `auth-provider-button flex min-h-14 items-center justify-between gap-3 rounded-lg border bg-[#0d1416] px-3.5 py-3 text-left transition ${
     active ? 'border-[#35e5b7]/35' : 'border-white/10'

@@ -62,7 +62,7 @@ export function ServerReviewsHeader({
             disabled={composeDisabled}
             className={`w-full rounded-lg px-5 py-2.5 text-sm font-semibold transition ${
               composeDisabled
-                ? 'cursor-not-allowed border border-[#30343b] bg-[#101216] text-[#6b7280]'
+                ? 'review-compose-disabled cursor-not-allowed border border-[#30343b] bg-[#101216] text-[#6b7280]'
                 : 'bg-[#f5f7fb] text-[#111827] hover:bg-white'
             }`}
           >

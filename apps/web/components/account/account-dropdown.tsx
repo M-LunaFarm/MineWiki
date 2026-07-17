@@ -4,7 +4,7 @@ import type { MinecraftIdentity } from '@minewiki/schemas';
 import { ChevronDown, LayoutDashboard, LogOut, Server, Settings, ShieldCheck, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../providers/auth-context';
 import { getApiBaseUrl } from '../../lib/runtime-config';
 
@@ -18,14 +18,28 @@ function buildMinecraftAvatarCandidates(uuid: string): string[] {
   ];
 }
 
-export function AccountDropdown() {
+export function AccountDropdown({
+  open: controlledOpen,
+  onOpenChange,
+}: {
+  readonly open?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
+} = {}) {
   const { account, loading, logout } = useAuth();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
   const [error, setError] = useState<string | null>(null);
   const [minecraftAvatarCandidates, setMinecraftAvatarCandidates] = useState<string[]>([]);
   const [minecraftAvatarIndex, setMinecraftAvatarIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
+
+  const setDropdownOpen = useCallback((next: boolean) => {
+    if (controlledOpen === undefined) {
+      setInternalOpen(next);
+    }
+    onOpenChange?.(next);
+  }, [controlledOpen, onOpenChange]);
 
   useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -33,12 +47,12 @@ export function AccountDropdown() {
         return;
       }
       if (!containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
+        setDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [setDropdownOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,14 +95,14 @@ export function AccountDropdown() {
 
   const toggle = () => {
     setError(null);
-    setOpen((value) => !value);
+    setDropdownOpen(!open);
   };
 
   const handleLogout = async () => {
     try {
       await logout();
     } finally {
-      setOpen(false);
+      setDropdownOpen(false);
     }
   };
 
@@ -187,7 +201,7 @@ export function AccountDropdown() {
               <Link
                 className="block rounded-md border border-[#13ec80]/30 bg-[#13ec80]/10 px-3 py-2 text-center text-xs font-semibold text-[#13ec80] transition hover:bg-[#13ec80]/20"
                 href="/me"
-                onClick={() => setOpen(false)}
+                onClick={() => setDropdownOpen(false)}
               >
                 계정 및 보안 열기
               </Link>
@@ -195,7 +209,7 @@ export function AccountDropdown() {
                 <Link
                   className="inline-flex items-center gap-2 rounded-md px-3 py-2 transition hover:bg-white/5 hover:text-[#13ec80]"
                   href="/servers/register"
-                  onClick={() => setOpen(false)}
+                  onClick={() => setDropdownOpen(false)}
                 >
                   <Server className="h-4 w-4" />
                   서버 등록
@@ -203,7 +217,7 @@ export function AccountDropdown() {
                 <Link
                   className="inline-flex items-center gap-2 rounded-md px-3 py-2 transition hover:bg-white/5 hover:text-[#13ec80]"
                   href="/dashboard"
-                  onClick={() => setOpen(false)}
+                  onClick={() => setDropdownOpen(false)}
                 >
                   <LayoutDashboard className="h-4 w-4" />
                   대시보드
@@ -211,7 +225,7 @@ export function AccountDropdown() {
                 <Link
                   className="inline-flex items-center gap-2 rounded-md px-3 py-2 transition hover:bg-white/5 hover:text-[#13ec80]"
                   href="/me"
-                  onClick={() => setOpen(false)}
+                  onClick={() => setDropdownOpen(false)}
                 >
                   <Settings className="h-4 w-4" />
                   계정 관리
@@ -219,7 +233,7 @@ export function AccountDropdown() {
                 <Link
                   className="inline-flex items-center gap-2 rounded-md px-3 py-2 transition hover:bg-white/5 hover:text-[#13ec80]"
                   href="/claim"
-                  onClick={() => setOpen(false)}
+                  onClick={() => setDropdownOpen(false)}
                 >
                   <ShieldCheck className="h-4 w-4" />
                   검증 마법사
@@ -248,22 +262,22 @@ export function AccountDropdown() {
               </div>
               <Link
                 href={`/login?returnTo=${encodeURIComponent(pathname || '/')}`}
-                className="w-full rounded-md border border-white/10 bg-[#5865F2]/85 px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#4752c4] disabled:opacity-50"
-                onClick={() => setOpen(false)}
+                className="w-full rounded-md border border-white/10 bg-[#4752c4] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#3c45a5] disabled:opacity-50"
+                onClick={() => setDropdownOpen(false)}
               >
                 Discord 로그인
               </Link>
               <Link
                 href={`/login?returnTo=${encodeURIComponent(pathname || '/')}`}
-                className="w-full rounded-md border border-white/10 bg-[#03C75A]/85 px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#029b48] disabled:opacity-50"
-                onClick={() => setOpen(false)}
+                className="w-full rounded-md border border-white/10 bg-[#087a42] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#066534] disabled:opacity-50"
+                onClick={() => setDropdownOpen(false)}
               >
                 NAVER 로그인
               </Link>
               <Link
                 href="/login"
                 className="block rounded-md border border-white/10 px-3 py-2 text-center text-xs font-semibold text-slate-300 transition hover:bg-white/5"
-                onClick={() => setOpen(false)}
+                onClick={() => setDropdownOpen(false)}
               >
                 이메일 로그인/회원가입
               </Link>

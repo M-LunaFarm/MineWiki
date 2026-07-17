@@ -209,7 +209,7 @@ export function PolicyViewer({ documentName, versions }: PolicyViewerProps) {
           </div>
 
           <footer className="border-t border-white/10 p-5 md:p-7">
-            <div className="flex items-start gap-3 border border-yellow-500/20 bg-yellow-500/10 p-4 text-yellow-100">
+            <div className="policy-version-notice flex items-start gap-3 border border-yellow-500/20 bg-yellow-500/10 p-4 text-yellow-100">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <p className="text-xs leading-5">
                 {hasMultipleVersions

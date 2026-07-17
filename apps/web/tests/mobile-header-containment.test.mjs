@@ -9,6 +9,9 @@ test('mobile header controls and account menu stay inside the viewport', async (
   ]);
 
   assert.match(header, /overflow-x-clip/u);
+  assert.match(header, /open=\{accountMenuOpen\}/u);
+  assert.match(header, /if \(open\) setMobileOpen\(false\)/u);
+  assert.match(header, /setAccountMenuOpen\(false\);\s*setMobileOpen/u);
   assert.match(header, /hidden sm:inline-flex[^>]*><WikiNotificationBell/u);
   assert.match(header, /hidden min-\[400px\]:inline-flex/u);
   assert.match(header, /href="\/wiki\/notifications"/u);
