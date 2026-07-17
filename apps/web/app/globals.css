@@ -887,31 +887,23 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
     color: #242424;
   }
   .server-wiki-layout .wiki-rendered .table-scroll {
+    display: block;
     width: 100%;
     max-width: 100%;
     overflow-x: auto;
-    border: 1px solid #e1e1e1;
-    border-radius: 0.5rem;
     -webkit-overflow-scrolling: touch;
   }
   .server-wiki-layout .wiki-rendered .table-scroll table {
-    width: max-content;
-    min-width: 100%;
-    border: 0;
-    border-collapse: separate;
-    border-spacing: 0;
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
+    border-collapse: collapse;
   }
   .server-wiki-layout .wiki-rendered .table-scroll :is(th, td) {
-    min-width: 8rem;
-    max-width: 32rem;
+    min-width: 0;
+    max-width: none;
     overflow-wrap: anywhere;
-    border-width: 0 1px 1px 0;
-  }
-  .server-wiki-layout .wiki-rendered .table-scroll tr:last-child > :is(th, td) {
-    border-bottom-width: 0;
-  }
-  .server-wiki-layout .wiki-rendered .table-scroll :is(th, td):last-child {
-    border-right-width: 0;
+    word-break: normal;
   }
 
   .admin-acl-input {
