@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { fetchWikiBacklinks, fetchWikiCategory, fetchWikiPageByPath, fetchWikiPublicProfile, fetchWikiPublicStats, fetchWikiRecent, fetchWikiSpecial } from '../../lib/wiki-server-api';
+import { fetchWikiBacklinks, fetchWikiCategory, fetchWikiPageByPath, fetchWikiPublicProfile, fetchWikiPublicStats, fetchWikiRecent, fetchWikiRevisions, fetchWikiSpecial } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiArticleView } from './wiki-article-view';
 import { WikiNamespaceFrontPage } from './wiki-namespace-front-page';
@@ -52,18 +52,23 @@ export async function WikiRoutePage({ prefix, segments = [] }: WikiRoutePageProp
       />
     );
   }
-  const [backlinksResults, categoryResults] = await Promise.all([
+  const [backlinksResults, categoryResults, revisionsResult] = await Promise.all([
     Promise.allSettled([fetchWikiBacklinks(page.id, 8)]),
     Promise.allSettled(page.categories.slice(0, 3).map((category) => fetchWikiCategory({ category, limit: 8 }))),
+    fetchWikiRevisions(page.id, 6).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
+    ),
   ]);
   const backlinksResult = backlinksResults[0];
   const backlinks = backlinksResult.status === 'fulfilled' ? backlinksResult.value.items : [];
   const related = categoryResults.flatMap((result) => result.status === 'fulfilled' ? result.value.items : []);
+  const revisions = revisionsResult.status === 'fulfilled' ? revisionsResult.value.items : [];
   return (
     <WikiArticleView
       page={page}
       routePath={routePath}
-      afterContent={<WikiDocumentContext currentPageId={page.id} backlinks={backlinks} related={related} />}
+      afterContent={<WikiDocumentContext currentPageId={page.id} routePath={routePath} backlinks={backlinks} related={related} revisions={revisions} />}
     />
   );
 }

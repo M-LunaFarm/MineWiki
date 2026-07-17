@@ -58,8 +58,9 @@ export async function fetchWikiRenderedRevision(revisionId: string): Promise<Wik
   return readWikiResponse<WikiRenderedRevisionResponse>(response, 'Failed to load rendered wiki revision.');
 }
 
-export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionListResponse> {
-  const response = await wikiFetch(`/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions?limit=50`);
+export async function fetchWikiRevisions(pageId: string, limit = 50): Promise<WikiRevisionListResponse> {
+  const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
+  const response = await wikiFetch(`/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions?limit=${safeLimit}`);
   return readWikiResponse<WikiRevisionListResponse>(response, 'Failed to load wiki revisions.');
 }
 
