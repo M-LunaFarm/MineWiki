@@ -133,10 +133,7 @@ export class FileService {
     );
     const metadata = normalizeWikiFileMetadata(request, usageContext);
     if (usageContext === 'wiki_editor' && !linkedResource) {
-      throw new BadRequestException('Wiki file uploads require a linked wiki page.');
-    }
-    if (usageContext === 'wiki_editor' && linkedResource?.type !== 'wiki_page') {
-      throw new BadRequestException('Wiki editor uploads must be linked to a wiki page.');
+      throw new BadRequestException('Wiki file uploads require a linked wiki page or space.');
     }
     if (linkedResource && session) {
       await this.permissions.assertCanLink(linkedResource, session);
@@ -190,7 +187,9 @@ export class FileService {
       try {
         await this.wikiEdits.createFileDocumentAfterAuthorizedUpload(session, {
           filename: created.filename,
-          linkedPageId: linkedResource!.id
+          ...(linkedResource!.type === 'wiki_page'
+            ? { linkedPageId: linkedResource!.id }
+            : { linkedSpaceId: linkedResource!.id })
         });
       } catch (error) {
         await this.prisma.uploadedFile.update({ where: { id: created.id }, data: { status: 'deleted' } });

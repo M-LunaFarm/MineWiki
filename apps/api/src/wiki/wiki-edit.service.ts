@@ -137,7 +137,8 @@ export function userDocumentTreeHasSingleOwner(
 
 export interface AuthorizedWikiFileDocumentRequest {
   readonly filename: string;
-  readonly linkedPageId: string;
+  readonly linkedPageId?: string;
+  readonly linkedSpaceId?: string;
 }
 
 export interface WikiMoveResponse extends WikiMutationResponse {
@@ -224,17 +225,25 @@ export class WikiEditService {
     if (!/^[a-f0-9-]{16,64}\.(?:png|jpe?g|webp)$/i.test(filename)) {
       throw new BadRequestException('Stored wiki filename is invalid.');
     }
-    const linkedPageId = this.parseBigIntId(request.linkedPageId, 'linkedPageId');
-    const [actor, linkedPage] = await Promise.all([
-      this.wikiProfiles.ensureWikiProfile(session.userId),
-      this.prisma.wikiPage.findUnique({ where: { id: linkedPageId } })
-    ]);
+    const linkedPageId = request.linkedPageId
+      ? this.parseBigIntId(request.linkedPageId, 'linkedPageId')
+      : null;
+    const linkedSpaceId = request.linkedSpaceId
+      ? this.parseBigIntId(request.linkedSpaceId, 'linkedSpaceId')
+      : null;
+    if ((linkedPageId === null) === (linkedSpaceId === null)) {
+      throw new BadRequestException('Exactly one linked wiki page or space is required.');
+    }
+    const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
-    await this.wikiPermissions.assertCanEditPage({ actor: permissionActor, page: linkedPage });
+    const permissionPage = linkedPageId !== null
+      ? await this.prisma.wikiPage.findUnique({ where: { id: linkedPageId } })
+      : await this.buildWikiSpacePermissionPage(linkedSpaceId!);
+    await this.wikiPermissions.assertCanEditPage({ actor: permissionActor, page: permissionPage });
     await this.wikiPermissions.assertCanUsePageAction({
       accountId: session.userId,
       action: 'upload_file',
-      page: linkedPage
+      page: permissionPage
     });
     return this.createPageInternal(session, {
       namespace: 'file',
@@ -243,6 +252,28 @@ export class WikiEditService {
       contentRaw: `== 파일 ==\n[[파일:${filename}|섬네일|업로드 파일]]\n\n== 이용 안내 ==\n라이선스와 출처는 이미지 아래에 표시됩니다.\n\n[[분류:파일]]`,
       editSummary: '위키 파일 업로드'
     }, true);
+  }
+
+  private async buildWikiSpacePermissionPage(spaceId: bigint) {
+    const space = await this.prisma.wikiSpace.findUnique({ where: { id: spaceId } });
+    if (!space || space.status !== 'active') {
+      throw new NotFoundException('Wiki space not found.');
+    }
+    const namespace = await this.prisma.wikiNamespace.findUnique({
+      where: { code: space.rootNamespaceCode },
+    });
+    if (!namespace) {
+      throw new NotFoundException('Wiki namespace not found.');
+    }
+    return {
+      id: 0n,
+      namespaceId: namespace.id,
+      spaceId: space.id,
+      title: space.title,
+      protectionLevel: 'open',
+      status: 'normal',
+      createdBy: space.createdBy,
+    };
   }
 
   private async createPageInternal(
@@ -2177,7 +2208,7 @@ function sectionContentsByAnchor(content: string, anchor: string): string[] {
   const parsed = parseMarkup(content);
   const lines = content.replace(/\r\n/g, '\n').split('\n');
   return parsed.headings
-    .filter((heading) => heading.anchor === anchor)
+    .filter((heading) => heading.anchor === anchor || heading.title === anchor)
     .map((heading) => lines.slice(heading.startLine - 1, heading.endLine).join('\n'));
 }
 
@@ -2190,7 +2221,9 @@ export function sectionByAnchor(content: string, anchor: string): {
 } | null {
   const normalized = content.replace(/\r\n/g, '\n');
   const parsed = parseMarkup(normalized);
-  const matches = parsed.headings.filter((heading) => heading.anchor === anchor);
+  const matches = parsed.headings.filter(
+    (heading) => heading.anchor === anchor || heading.title === anchor,
+  );
   if (matches.length !== 1) return null;
   const heading = matches[0]!;
   const lines = normalized.split('\n');

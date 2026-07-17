@@ -371,6 +371,8 @@ test('section ranges are derived from server-parsed heading anchors', () => {
     startLine: 2,
     endLine: 3
   });
+  assert.deepEqual(sectionByAnchor(content, '소개'), section);
+  assert.equal(sectionByAnchor('== 소개 ==\n첫째\n== 소개 ==\n둘째', '소개'), null);
   assert.equal(sectionByAnchor(content, '없음'), null);
 });
 
@@ -862,7 +864,22 @@ test('file document creation rechecks edit and upload_file permissions', async (
   const actions: string[] = [];
   const prisma = {
     wikiPage: { async findUnique() { return { id: 7n, spaceId: 1n, title: '문서', protectionLevel: 'open', status: 'normal' }; } },
-    wikiNamespace: { async findUnique() { return null; } }
+    wikiSpace: {
+      async findUnique() {
+        return {
+          id: 3n,
+          status: 'active',
+          rootNamespaceCode: 'main',
+          title: '메인 위키',
+          createdBy: 3n,
+        };
+      },
+    },
+    wikiNamespace: {
+      async findUnique(input: { where: { code: string } }) {
+        return input.where.code === 'main' ? { id: 1, code: 'main' } : null;
+      },
+    }
   } as unknown as PrismaService;
   const profiles = { async ensureWikiProfile() { return { id: 3n, status: 'active' }; } } as unknown as WikiProfileService;
   const permissions = {
@@ -880,6 +897,23 @@ test('file document creation rechecks edit and upload_file permissions', async (
     /namespace not found/i
   );
   assert.deepEqual(actions, ['edit', 'upload_file']);
+  actions.length = 0;
+  await assert.rejects(
+    service.createFileDocumentAfterAuthorizedUpload(session('account'), {
+      filename: '12345678-1234-1234-1234-123456789abc.webp',
+      linkedSpaceId: '3'
+    }),
+    /namespace not found/i
+  );
+  assert.deepEqual(actions, ['edit', 'upload_file']);
+  await assert.rejects(
+    service.createFileDocumentAfterAuthorizedUpload(session('account'), {
+      filename: '12345678-1234-1234-1234-123456789abc.webp',
+      linkedPageId: '7',
+      linkedSpaceId: '3'
+    }),
+    /Exactly one linked wiki page or space/u
+  );
   await assert.rejects(
     service.createFileDocumentAfterAuthorizedUpload(session('account'), {
       filename: '../escape.webp',
@@ -1069,7 +1103,7 @@ if (!hasDatabase) {
         editSummary: '소개 섹션만 수정',
         baseRevisionId: section.baseRevisionId
       });
-      assert.equal(updated.sectionAnchor, '소개');
+      assert.equal(updated.sectionAnchor, 's-1');
       const revision = await edits.getRevision(updated.revisionId, fixture.account.id);
       assert.equal(revision.contentRaw, '서문\n== 소개 ==\n새 본문\n== 보존 ==\n건드리지 않음');
       assert.equal(revision.editSummary, '소개 섹션만 수정');

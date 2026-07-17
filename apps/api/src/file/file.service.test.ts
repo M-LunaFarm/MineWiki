@@ -69,7 +69,11 @@ function session(userId: string, isElevated = false, permissions: string[] = [])
 function createService(options: { denyUploadFile?: boolean; failFileDocument?: boolean; referencedWikiFilename?: string; failObjectDelete?: boolean } = {}) {
   const files = new Map<string, TestFile>();
   const actionCalls: string[] = [];
-  const fileDocuments: Array<{ filename: string; linkedPageId: string }> = [];
+  const fileDocuments: Array<{
+    filename: string;
+    linkedPageId?: string;
+    linkedSpaceId?: string;
+  }> = [];
   let deleteAttempts = 0;
   const wikiPages = new Map<bigint, { id: bigint; status: string }>([
     [7n, { id: 7n, status: 'normal' }]
@@ -167,13 +171,21 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
       }
     },
     wikiSpace: {
-      async findUnique() {
-        return null;
+      async findUnique(args: { where: { id: bigint } }) {
+        return args.where.id === 3n
+          ? {
+              id: 3n,
+              status: 'active',
+              rootNamespaceCode: 'main',
+              title: '메인 위키',
+              createdBy: 1n,
+            }
+          : null;
       }
     },
     wikiNamespace: {
-      async findUnique() {
-        return null;
+      async findUnique(args: { where: { code: string } }) {
+        return args.where.code === 'main' ? { id: 1, code: 'main' } : null;
       }
     }
   };
@@ -199,7 +211,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
   const wikiEdits = {
     async createFileDocumentAfterAuthorizedUpload(
       _session: unknown,
-      request: { filename: string; linkedPageId: string }
+      request: { filename: string; linkedPageId?: string; linkedSpaceId?: string }
     ) {
       if (options.failFileDocument) throw new Error('File document failed.');
       fileDocuments.push(request);
@@ -239,6 +251,24 @@ test('file service stores canonical image metadata', async () => {
   assert.deepEqual(fileDocuments, [{ filename: 'stored.webp', linkedPageId: '7' }]);
   assert.equal(uploaded.wikiDocumentPath, '/file/stored.webp');
   assert.equal(uploaded.url, 'upload://stored.webp');
+});
+
+test('standalone wiki uploads can bind to an editable wiki space', async () => {
+  const { service, actionCalls, fileDocuments } = createService();
+  const uploaded = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'standalone.png',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_space',
+    linkedResourceId: '3',
+  }, session('account-1'));
+
+  assert.equal(uploaded.linkedResourceType, 'wiki_space');
+  assert.equal(uploaded.linkedResourceId, '3');
+  assert.deepEqual(actionCalls, ['upload_file']);
+  assert.deepEqual(fileDocuments, [{ filename: 'stored.webp', linkedSpaceId: '3' }]);
+  assert.equal(uploaded.wikiDocumentPath, '/file/stored.webp');
 });
 
 test('file service list hides private and unlisted files from non-owners', async () => {
