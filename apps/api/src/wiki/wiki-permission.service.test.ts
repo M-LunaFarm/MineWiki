@@ -706,6 +706,28 @@ test('ordinary editors can revert but cannot move or delete without explicit ACL
   );
 });
 
+test('read-denied pages cannot be moved, deleted, or reverted through direct mutation calls', async () => {
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        if (input.action === 'read') {
+          return { matched: true, allowed: false, reason: 'hidden_page' };
+        }
+        return { matched: true, allowed: true, reason: `allowed_${input.action}` };
+      }
+    } as WikiAclService
+  });
+  const editor = actor({ profileId: 200n });
+  const target = page({ createdBy: 100n });
+
+  for (const action of ['move', 'delete', 'revert'] as const) {
+    await assert.rejects(
+      service.assertCanMutatePageAction({ actor: editor, action, page: target }),
+      /not found/i
+    );
+  }
+});
+
 test('page creator can move and delete an editable page', async () => {
   const service = createService();
   const creator = actor({ profileId: 100n });

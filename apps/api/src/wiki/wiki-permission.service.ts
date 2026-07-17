@@ -533,6 +533,11 @@ export class WikiPermissionService {
     readonly store?: WikiPermissionStore;
   }): Promise<void> {
     const store = input.store ?? this.prisma;
+    await this.assertCanReadPage({
+      actor: input.actor,
+      page: input.page,
+      store
+    });
     await this.assertCanEditPage({
       actor: input.actor,
       page: input.page,
