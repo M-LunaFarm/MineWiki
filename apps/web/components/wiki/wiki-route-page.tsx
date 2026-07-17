@@ -10,11 +10,12 @@ import { WikiDocumentContext } from './wiki-document-context';
 interface WikiRoutePageProps {
   readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'serverWiki' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
   readonly segments?: string[];
+  readonly followRedirects?: boolean;
 }
 
-export async function WikiRoutePage({ prefix, segments = [] }: WikiRoutePageProps) {
+export async function WikiRoutePage({ prefix, segments = [], followRedirects = true }: WikiRoutePageProps) {
   const routePath = buildWikiRoutePath(prefix, segments);
-  const page = await fetchWikiPageByPath(routePath);
+  const page = await fetchWikiPageByPath(routePath, { followRedirects });
   if (prefix === 'user') {
     const username = segments[0] ? decodeWikiRouteSegment(segments[0]) : '';
     const profile = username ? await fetchWikiPublicProfile(username) : null;

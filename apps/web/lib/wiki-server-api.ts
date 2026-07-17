@@ -30,8 +30,12 @@ export async function fetchWikiPublicStats(namespace?: string): Promise<WikiPubl
   return readWikiResponse<WikiPublicStatsResponse>(response, 'Failed to load public wiki stats.');
 }
 
-export async function fetchWikiPageByPath(path: string): Promise<WikiPageResponse | null> {
+export async function fetchWikiPageByPath(
+  path: string,
+  options: { readonly followRedirects?: boolean } = {},
+): Promise<WikiPageResponse | null> {
   const params = new URLSearchParams({ path });
+  if (options.followRedirects === false) params.set('redirect', '0');
   const response = await wikiFetch(`/v1/wiki/page/by-path?${params.toString()}`);
   if (response.status === 404) return null;
   return readWikiResponse<WikiPageResponse>(response, `Failed to load wiki page (${path}).`);
