@@ -865,9 +865,11 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                           <Pin className="size-3.5" /> 고정됨
                         </span>
                       ) : null}
-                      <Link href={userDocumentHref(item.createdByUsername, item.createdBy)} className="hover:text-emerald-200">
-                        {item.createdByName}
-                      </Link>
+                      {item.createdBy ? (
+                        <Link href={userDocumentHref(item.createdByUsername, item.createdBy)} className="hover:text-emerald-200">
+                          {item.createdByName}
+                        </Link>
+                      ) : <span>{item.createdByName}</span>}
                       {selected.canReply && item.createdByUsername ? (
                         <button type="button" onClick={() => mentionAuthor(item.createdByUsername!)} className="inline-flex min-h-11 items-center gap-1 hover:text-emerald-200" aria-label={`${item.createdByName}님에게 답글`}>
                           <Reply className="size-3.5" /> 답글
@@ -875,7 +877,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                       ) : null}
                     </span>
                     <span className="flex flex-wrap items-center gap-3">
-                      <time>{formatDate(item.createdAt)}</time>
+                      {item.createdAt ? <time>{formatDate(item.createdAt)}</time> : null}
                       {item.status === 'normal' || item.canChangeVisibility ? (
                         <button type="button" disabled={working} onClick={() => void showRawComment(item.id)} className="inline-flex min-h-11 items-center gap-1 hover:text-emerald-200">
                           <Code2 className="size-3.5" /> {rawComment?.id === item.id ? '원문 닫기' : '원문'}
@@ -913,7 +915,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                     </span>
                   </div>
                   <p className="mt-3 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-slate-200">
-                    {item.content ? <DiscussionCommentContent content={item.content} mentions={item.mentions ?? []} /> : (item.status === 'hidden' ? '관리자에 의해 숨겨진 댓글입니다.' : '삭제된 댓글입니다.')}
+                    {item.content ? <DiscussionCommentContent content={item.content} mentions={item.mentions ?? []} /> : (item.status === 'hidden' ? '비공개 처리된 댓글입니다.' : '삭제된 댓글입니다.')}
                   </p>
                   {item.poll ? (
                     <DiscussionPollCard
