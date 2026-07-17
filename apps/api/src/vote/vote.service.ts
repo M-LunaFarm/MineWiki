@@ -23,8 +23,11 @@ import { PrismaService } from '../common/prisma.service';
 const normalizeMinecraftUsername = (value: string) =>
   value.normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/gu, '').trim();
 const votePayloadSchema = z.object({
-  username: z.string().transform(normalizeMinecraftUsername).pipe(z.string().regex(/^[A-Za-z0-9_]{3,16}$/)),
-  captchaToken: z.string().trim().min(1).optional()
+  username: z.string().transform(normalizeMinecraftUsername).optional(),
+  captchaToken: z.preprocess(
+    (value) => value === null ? undefined : value,
+    z.string().trim().min(1).optional(),
+  )
 });
 const minecraftUsernamePattern = /^[A-Za-z0-9_]{3,16}$/;
 
@@ -85,6 +88,9 @@ export class VoteService {
       throw new BadRequestException('닉네임을 3~16자 사이로 입력해 주세요.');
     }
     const payload = parsedPayload.data;
+    if (!context.minecraftUuid && !minecraftUsernamePattern.test(payload.username ?? '')) {
+      throw new BadRequestException('닉네임을 3~16자 사이로 입력해 주세요.');
+    }
     await this.verifyCaptchaToken(payload.captchaToken, context.ipAddress);
     context = await this.resolveVoteIdentity(context);
     const verifiedMinecraftUsername = context.minecraftUsername?.trim();
@@ -95,7 +101,10 @@ export class VoteService {
     }
     const normalizedUsername = context.minecraftUuid
       ? verifiedMinecraftUsername!
-      : payload.username;
+      : payload.username ?? '';
+    if (!minecraftUsernamePattern.test(normalizedUsername)) {
+      throw new BadRequestException('닉네임을 3~16자 사이로 입력해 주세요.');
+    }
 
     if (server.voteRequiresOwnership && !context.minecraftUuid) {
       throw new ForbiddenException(

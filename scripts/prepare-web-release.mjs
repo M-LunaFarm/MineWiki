@@ -2,12 +2,18 @@ import { cp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'no
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertCaptchaKeyPairs, assertCaptchaPublicKeysEmbedded } from './web-captcha-build-guard.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const webRoot = path.join(repoRoot, 'apps/web');
 const nextRoot = path.join(webRoot, '.next');
 const standaloneRoot = path.join(nextRoot, 'standalone');
 const releasesRoot = path.join(repoRoot, '.releases/web');
+process.chdir(repoRoot);
+await import('./load-environment.mjs');
+
+assertCaptchaKeyPairs();
+await assertCaptchaPublicKeysEmbedded(path.join(nextRoot, 'static'));
 
 if (!existsSync(path.join(standaloneRoot, 'server.js')) &&
     !existsSync(path.join(standaloneRoot, 'apps/web/server.js'))) {

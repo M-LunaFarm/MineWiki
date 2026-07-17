@@ -8,13 +8,14 @@ const voteId = '6ebd0b54-5864-46c2-a835-942937b0f6ec';
 const targetId = 'f8be13d6-b155-44c9-ad90-2f7efa96b7d7';
 const dispatchAttemptId = '6396003e-0956-4a2e-bf2b-a2ad83d7102f';
 
-test('vote accepted creates dispatch attempts and queues vote id', async () => {
+test('offline server vote is accepted and creates dispatch attempts', async () => {
   const queuedJobs: unknown[] = [];
   const createdAttempts: unknown[] = [];
   const service = new VoteService(
     {
       ensureExists: async () => ({
         id: serverId,
+        isOnline: false,
         voteRequiresOwnership: false,
         votesMonthly: 10
       })
@@ -44,6 +45,7 @@ test('vote accepted creates dispatch attempts and queues vote id', async () => {
     serverId,
     {
       username: 'DemoPlayer',
+      captchaToken: null,
       agreeTerms: true,
       agreePrivacy: true
     },
@@ -183,7 +185,7 @@ test('verified Minecraft voters cannot redirect rewards to a typed nickname', as
 
   await service.submitVote(
     serverId,
-    { username: 'RewardThief', agreeTerms: true, agreePrivacy: true },
+    { username: '보상탈취', agreeTerms: true, agreePrivacy: true },
     {
       minecraftUuid: '3f0df999-1ab4-48cf-9c96-c5a834d0d1ee',
       minecraftUsername: 'OwnedPlayer',
