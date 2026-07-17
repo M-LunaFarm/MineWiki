@@ -640,6 +640,53 @@ test('API space constraints reject raw and update access before ACL evaluation',
   assert.equal(aclChecks, 0);
 });
 
+test('revert requires history access before loading or materializing a source revision', async () => {
+  let revisionReads = 0;
+  const page = {
+    id: 7n,
+    namespaceId: 1,
+    spaceId: 9n,
+    title: '숨김 역사 문서',
+    status: 'normal',
+    currentRevisionId: 12n,
+  };
+  const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    async $queryRaw() { return [{ id: 7n }]; },
+    wikiPage: { async findUnique() { return page; } },
+    wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
+    wikiPageRevision: {
+      async findUnique() { revisionReads += 1; return null; },
+      async findFirst() { revisionReads += 1; return null; },
+    },
+  } as unknown as PrismaService;
+  const profiles = {
+    async ensureWikiProfile() { return { id: 3n, status: 'active' }; },
+  } as unknown as WikiProfileService;
+  const actions: string[] = [];
+  const permissions = {
+    actorFromSession() { return { accountId: 'account', profileId: 3n, status: 'active' }; },
+    async assertCanMutatePageAction(input: { action: string }) { actions.push(input.action); },
+    async assertCanUsePageAction(input: { action: string }) {
+      actions.push(input.action);
+      throw new NotFoundException('Wiki page not found.');
+    },
+  } as unknown as WikiPermissionService;
+  const edits = new WikiEditService(prisma, profiles, permissions);
+
+  await assert.rejects(
+    edits.revertPage(session('account'), '7', {
+      revisionId: '11',
+      baseRevisionId: '12',
+      reason: '숨겨진 역사 판 되돌리기',
+    }),
+    NotFoundException,
+  );
+
+  assert.deepEqual(actions, ['revert', 'history']);
+  assert.equal(revisionReads, 0);
+});
+
 test('new-page request acceptance creates the page and first revision atomically under the requester identity', async () => {
   const now = new Date('2026-07-15T00:00:00Z');
   const request = {

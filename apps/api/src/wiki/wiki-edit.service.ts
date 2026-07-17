@@ -1264,9 +1264,16 @@ export class WikiEditService {
       if (!namespace) {
         throw new NotFoundException('Wiki namespace not found.');
       }
+      const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
       await this.wikiPermissions.assertCanMutatePageAction({
-        actor: this.wikiPermissions.actorFromSession(session, actor),
+        actor: permissionActor,
         action: 'revert',
+        page,
+        store: tx
+      });
+      await this.wikiPermissions.assertCanUsePageAction({
+        actor: permissionActor,
+        action: 'history',
         page,
         store: tx
       });
@@ -1285,7 +1292,7 @@ export class WikiEditService {
         throw new BadRequestException('The selected revision is already current.');
       }
       await this.assertLockedSectionsUnchanged({
-        actor: this.wikiPermissions.actorFromSession(session, actor),
+        actor: permissionActor,
         page,
         currentContent: latest?.contentRaw ?? '',
         nextContent: source.contentRaw,
