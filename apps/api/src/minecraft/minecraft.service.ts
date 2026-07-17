@@ -308,6 +308,46 @@ export class MinecraftService {
     };
   }
 
+  async setPrimaryIdentity(userId: string, minecraftUuid: string): Promise<MinecraftIdentity> {
+    const normalizedUuid = normalizeMinecraftUuid(minecraftUuid);
+    let selected: {
+      uuid: string;
+      playerName: string | null;
+      msOwned: boolean;
+      lastVerifiedAt: Date;
+    } | null = null;
+    await withActiveCanonicalAccountGroup(this.prisma, [userId], async (tx, group) => {
+      const identity = await tx.minecraftIdentity.findFirst({
+        where: { uuid: normalizedUuid, accountId: { in: [...group.accountIds] } },
+        select: { id: true, uuid: true, playerName: true, msOwned: true, lastVerifiedAt: true },
+      });
+      if (!identity) {
+        throw new NotFoundException('Minecraft ownership verification not found for user');
+      }
+      await tx.minecraftIdentity.updateMany({
+        where: { accountId: { in: [...group.accountIds] }, isPrimary: true },
+        data: { isPrimary: false },
+      });
+      await tx.minecraftIdentity.update({
+        where: { id: identity.id },
+        data: { isPrimary: true },
+      });
+      selected = identity;
+    });
+    const identity = selected!;
+    await this.events.track('minecraft.verification.primary_changed', {
+      userId,
+      uuid: identity.uuid,
+    });
+    return {
+      uuid: identity.uuid,
+      playerName: identity.playerName ?? undefined,
+      msOwned: identity.msOwned,
+      isPrimary: true,
+      lastVerifiedAt: identity.lastVerifiedAt.toISOString(),
+    };
+  }
+
   async revokeIdentity(userId: string, minecraftUuid?: string): Promise<void> {
     const clusterAccountIds = await this.resolveCanonicalAccountIds(userId);
     const removedIdentity = await this.prisma.$transaction(async (tx) => {

@@ -205,6 +205,56 @@ test('canonical account selects the primary identity when multiple accounts are 
   assert.equal(identity.isPrimary, true);
 });
 
+test('selecting a primary identity replaces the previous primary across linked accounts', async () => {
+  const canonicalAccountId = randomUUID();
+  const linkedAccountId = randomUUID();
+  const selectedUuid = randomUUID();
+  const updates: unknown[] = [];
+  const tracked: unknown[] = [];
+  const transaction = {
+    account: {
+      findMany: async () => [
+        { id: canonicalAccountId, canonicalAccountId: null },
+        { id: linkedAccountId, canonicalAccountId },
+      ],
+      count: async () => 2,
+    },
+    accountLink: { findMany: async () => [] },
+    minecraftIdentity: {
+      findFirst: async () => ({
+        id: 2n,
+        uuid: selectedUuid,
+        playerName: 'SelectedPlayer',
+        msOwned: true,
+        lastVerifiedAt: new Date('2026-07-17T00:00:00.000Z'),
+      }),
+      updateMany: async (input: unknown) => { updates.push(input); return { count: 1 }; },
+      update: async (input: unknown) => { updates.push(input); return {}; },
+    },
+    $queryRaw: async () => [{ id: canonicalAccountId }, { id: linkedAccountId }],
+  };
+  const service = new MinecraftService(
+    { track: async (...args: unknown[]) => tracked.push(args) } as never,
+    {} as never,
+    {
+      $transaction: async (callback: (tx: typeof transaction) => Promise<unknown>) => callback(transaction),
+    } as never,
+  );
+
+  const selected = await service.setPrimaryIdentity(canonicalAccountId, selectedUuid);
+
+  assert.equal(selected.uuid, selectedUuid);
+  assert.equal(selected.isPrimary, true);
+  assert.deepEqual(updates, [
+    {
+      where: { accountId: { in: [canonicalAccountId, linkedAccountId].sort() }, isPrimary: true },
+      data: { isPrimary: false },
+    },
+    { where: { id: 2n }, data: { isPrimary: true } },
+  ]);
+  assert.equal(tracked.length, 1);
+});
+
 test('revoking ownership clears identity and pending OAuth state across linked accounts', async () => {
   const canonicalAccountId = randomUUID();
   const linkedAccountId = randomUUID();

@@ -445,6 +445,31 @@ export function MinecraftOwnershipPanel() {
     }
   }, [identities]);
 
+  const handleSetPrimaryIdentity = useCallback(async (selectedIdentity: MinecraftIdentity) => {
+    setError(null);
+    setStatus('loadingIdentity');
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/minecraft/identities/${encodeURIComponent(selectedIdentity.uuid)}/primary`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: await csrfHeaders(),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body?.message === 'string' ? body.message : '대표 Minecraft 계정을 변경하지 못했습니다.');
+      }
+      const primary = (await response.json()) as MinecraftIdentity;
+      const next = identities.map((item) => ({ ...item, isPrimary: item.uuid === primary.uuid }));
+      setIdentities(next.sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary)));
+      setIdentity(primary);
+      setPlayerName(primary.playerName ?? null);
+    } catch (primaryError) {
+      setError(primaryError instanceof Error ? primaryError.message : '대표 Minecraft 계정을 변경하지 못했습니다.');
+    } finally {
+      setStatus('idle');
+    }
+  }, [identities]);
+
   const currentStep = useMemo(() => {
     if (identity || flowStage === 'completed') {
       return 4;
@@ -603,7 +628,10 @@ export function MinecraftOwnershipPanel() {
                     <p className="flex items-center gap-2 truncate text-sm font-bold text-white">{item.playerName ?? item.uuid.slice(0, 8)}<span className="inline-flex shrink-0 items-center gap-1 rounded border border-[#13ec80]/40 bg-[#13ec80]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#13ec80]"><CheckCircle2 className="size-3" />{item.isPrimary ? 'PRIMARY' : 'VERIFIED'}</span></p>
                     <p className="mt-1 truncate font-mono text-[10px] text-[#8b97a6]">{item.uuid}</p>
                   </div>
-                  <button type="button" onClick={() => void handleRevokeIdentity(item)} disabled={isBusy} className="shrink-0 rounded-md border border-red-500/30 px-2.5 py-2 text-[11px] font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50">{isRevoking ? '처리 중' : '해제'}</button>
+                  <div className="flex shrink-0 flex-col gap-1.5">
+                    {!item.isPrimary ? <button type="button" onClick={() => void handleSetPrimaryIdentity(item)} disabled={isBusy} className="rounded-md border border-[#13ec80]/35 px-2.5 py-2 text-[11px] font-semibold text-[#13ec80] hover:bg-[#13ec80]/10 disabled:opacity-50">대표로 설정</button> : null}
+                    <button type="button" onClick={() => void handleRevokeIdentity(item)} disabled={isBusy} className="rounded-md border border-red-500/30 px-2.5 py-2 text-[11px] font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50">{isRevoking ? '처리 중' : '해제'}</button>
+                  </div>
                 </article>
               ))}
             </div>

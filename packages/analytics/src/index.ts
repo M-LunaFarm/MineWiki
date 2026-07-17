@@ -6,6 +6,7 @@ export type AnalyticsEventName =
   | 'minecraft.verification.completed'
   | 'minecraft.verification.failed'
   | 'minecraft.verification.revoked'
+  | 'minecraft.verification.primary_changed'
   | 'discord.verify.session.created'
   | 'discord.verify.completed'
   | 'discord.verify.revoked'
@@ -33,6 +34,10 @@ export interface AnalyticsEventPayloadMap {
   'minecraft.verification.revoked': {
     userId: string;
     removed: boolean;
+  };
+  'minecraft.verification.primary_changed': {
+    userId: string;
+    uuid: string;
   };
   'discord.verify.session.created': {
     sessionId: string;

@@ -7,6 +7,7 @@ import {
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   UseGuards
 } from '@nestjs/common';
@@ -88,6 +89,16 @@ export class MinecraftController {
   ): Promise<void> {
     this.assertRecentAuthentication(session);
     await this.minecraftService.revokeIdentity(session.userId, minecraftUuid);
+  }
+
+  @Patch('identities/:minecraftUuid/primary')
+  @Throttle({ default: { limit: 8, ttl: 300 } })
+  setPrimaryIdentity(
+    @Param('minecraftUuid', new ParseUUIDPipe()) minecraftUuid: string,
+    @CurrentSession() session: SessionPayload,
+  ): Promise<MinecraftIdentity> {
+    this.assertRecentAuthentication(session);
+    return this.minecraftService.setPrimaryIdentity(session.userId, minecraftUuid);
   }
 
   @Get('identity/:userId')
