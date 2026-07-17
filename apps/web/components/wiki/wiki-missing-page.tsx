@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { FilePlus2, FileQuestion, History, Search } from 'lucide-react';
+import { FilePlus2, FileQuestion, History, Search, Server } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { useAuth } from '../providers/auth-context';
+import { isMissingServerWikiRoot } from '../../lib/wiki-search-display.mjs';
 
 const STANDARD_WIKI_PATH = /^\/(?:wiki|mod|modpack|dev|guide|data|help|project|template|file)\/.+/u;
 
@@ -13,6 +14,31 @@ export function WikiMissingPage() {
   const { account, loading } = useAuth();
   const editPath = missingWikiEditPath(pathname);
   const title = missingWikiTitle(pathname);
+
+  if (isMissingServerWikiRoot(pathname)) {
+    return (
+      <main className="mx-auto flex min-h-[55vh] w-full max-w-3xl items-center px-4 py-16">
+        <section className="surface-flat w-full p-6 sm:p-8">
+          <div className="flex size-11 items-center justify-center rounded-xl border border-sky-300/20 bg-sky-300/10 text-sky-200">
+            <Server className="size-6" aria-hidden="true" />
+          </div>
+          <p className="mt-5 text-xs font-semibold uppercase tracking-[0.16em] text-sky-200">서버 위키 없음</p>
+          <h1 className="mt-2 text-2xl font-bold text-white sm:text-3xl">서버 위키를 찾을 수 없습니다</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-400">
+            주소가 잘못되었거나 더 이상 공개되지 않는 서버 위키입니다. 서버 목록에서 운영 중인 서버를 찾거나 공개된 위키 문서를 검색해 보세요.
+          </p>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Link href="/servers" className="btn-primary min-h-11 gap-2">
+              <Server className="size-4" aria-hidden="true" /> 서버 목록 보기
+            </Link>
+            <Link href="/search?namespace=server" className="btn-secondary min-h-11 gap-2">
+              <Search className="size-4" aria-hidden="true" /> 서버 위키 검색
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   if (!editPath) {
     return (

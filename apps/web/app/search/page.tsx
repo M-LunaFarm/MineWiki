@@ -6,6 +6,7 @@ import { buildServerPath } from '../../lib/server-routes';
 import type { WikiSearchResult } from '../../lib/wiki-api';
 import { searchWiki } from '../../lib/wiki-server-api';
 import { formatCombinedSearchSummary, formatWikiResultBadge } from '../../lib/search-result-count.mjs';
+import { formatWikiNamespace, formatWikiResultPath } from '../../lib/wiki-search-display.mjs';
 
 interface SearchPageProps {
   readonly searchParams: Promise<{
@@ -222,8 +223,8 @@ function WikiResult({ result }: { readonly result: WikiSearchResult }) {
   return (
     <Link href={result.routePath} className="block px-1 py-5 transition hover:bg-white/[0.025] sm:px-4">
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span className="chip chip-muted">{result.namespace}</span>
-        <span>{result.routePath}</span>
+        <span className="chip chip-muted">{formatWikiNamespace(result.namespace)}</span>
+        <span className="break-all">{formatWikiResultPath(result.routePath)}</span>
         <span>{new Date(result.updatedAt).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}</span>
       </div>
       <h3 className="mt-2 text-lg font-semibold text-white">

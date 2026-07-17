@@ -10,6 +10,7 @@ import {
   buildServerWikiPagePath,
   buildServerWikiToolPath,
   encodeWikiSearchCursor,
+  makeSearchSnippet,
   parseWikiSearchCursor,
   serverWikiNavigationDepth,
   WikiReadService,
@@ -380,6 +381,21 @@ test('wiki search cursor is stable and rejects tampering', () => {
   const cursor = encodeWikiSearchCursor(date, 42n);
   assert.deepEqual(parseWikiSearchCursor(cursor), { updatedAt: date, id: 42n });
   assert.throws(() => parseWikiSearchCursor('not-a-cursor'), /cursor is invalid/);
+});
+
+test('wiki search snippets expose readable prose instead of source markup', () => {
+  const snippet = makeSearchSnippet([
+    '== 관리자 목록 ==',
+    '[[분류:운영]]',
+    '> **안내** [관리자 메일](mailto:admin@example.kr)',
+    '<table><tr><td>서버 운영 안내&#x20;</td></tr></table>',
+    '![](<../assets/server logo (1) (1).png>)\\',
+    '**아너** (1) (1).png>)',
+  ].join('\n'), '서버', '관리자 목록');
+
+  assert.match(snippet, /안내 관리자 메일/u);
+  assert.match(snippet, /서버 운영 안내/u);
+  assert.doesNotMatch(snippet, /(?:관리자 목록|\[\[|\]\]|==|<\/?(?:table|tr|td)|mailto:|\*\*|&#x20;|\.png|\\)/u);
 });
 
 test('server wiki search resolves the slug to a mandatory tenant space filter', async () => {

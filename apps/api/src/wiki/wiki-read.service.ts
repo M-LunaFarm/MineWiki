@@ -1972,7 +1972,7 @@ export class WikiReadService {
       const revision = page.currentRevisionId ? revisionByPage.get(`${page.id}:${page.currentRevisionId}`) : null;
       if (!revision) continue;
       const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
-      const snippet = makeSearchSnippet(revision.contentRaw, query);
+      const snippet = makeSearchSnippet(revision.contentRaw, query, page.displayTitle);
       items.push({
         pageId: page.id.toString(),
         namespace: namespaceCode,
@@ -2768,8 +2768,27 @@ function publicSpecialSnapshotItem(
   };
 }
 
-function makeSearchSnippet(content: string, query: string): string {
-  const normalizedContent = content.replace(/\s+/g, ' ').trim();
+export function makeSearchSnippet(content: string, query: string, displayTitle?: string): string {
+  const source = content
+    .replace(/!\[([^\]]*)\]\(<[^>\r\n]*>\)/gu, ' $1 ')
+    .replace(/\[([^\]]+)\]\(<[^>\r\n]*>\)/gu, ' $1 ');
+  let normalizedContent = decodeSearchSnippetEntities(parseMarkup(source, { gitBookMarkdown: true }).plainText)
+    .replace(/(^|\s)={1,6}\s*([^=]+?)\s*={1,6}(?=\s|$)/gu, '$1$2 ')
+    .replace(/(^|\s)#{1,6}\s+/gu, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/gu, ' $1 ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, ' $1 ')
+    .replace(/(?:\([^()\r\n]*\)\s*)+\.(?:avif|gif|jpe?g|png|svg|webp)>?\)?/giu, ' ')
+    .replace(/(?:\([^()\r\n]*\)\s*)*\([^()\r\n]*\.(?:avif|gif|jpe?g|png|svg|webp)>?\)/giu, ' ')
+    .replace(/(^|\s)[>*+-]\s+/gu, '$1')
+    .replace(/[*_~`]+/gu, '')
+    .replace(/\\([\\`*_{}[\]()#+\-.!>])/gu, '$1')
+    .replace(/\\+(?=\s|$)/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normalizedTitle = displayTitle?.replace(/\s+/g, ' ').trim();
+  if (normalizedTitle && normalizedContent.toLocaleLowerCase('ko-KR').startsWith(normalizedTitle.toLocaleLowerCase('ko-KR'))) {
+    normalizedContent = normalizedContent.slice(normalizedTitle.length).replace(/^[\s:|·-]+/u, '');
+  }
   const index = normalizedContent.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
   if (index < 0) {
     return normalizedContent.slice(0, 160);
@@ -2777,6 +2796,21 @@ function makeSearchSnippet(content: string, query: string): string {
   const start = Math.max(index - 60, 0);
   const end = Math.min(index + query.length + 100, normalizedContent.length);
   return `${start > 0 ? '...' : ''}${normalizedContent.slice(start, end)}${end < normalizedContent.length ? '...' : ''}`;
+}
+
+function decodeSearchSnippetEntities(value: string): string {
+  const named: Readonly<Record<string, string>> = {
+    amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"'
+  };
+  return value.replace(/&(?:#(x[0-9a-f]+|\d+)|([a-z]+));/giu, (match, numeric: string | undefined, name: string | undefined) => {
+    if (name) return named[name.toLocaleLowerCase()] ?? match;
+    const codePoint = numeric?.toLocaleLowerCase().startsWith('x')
+      ? Number.parseInt(numeric.slice(1), 16)
+      : Number.parseInt(numeric ?? '', 10);
+    return Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff
+      ? String.fromCodePoint(codePoint)
+      : match;
+  });
 }
 
 function wikiSearchTextMatches(value: string, query: string): boolean {
