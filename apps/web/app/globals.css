@@ -908,20 +908,21 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .server-wiki-layout .wiki-rendered .table-scroll {
     display: block;
     width: 100%;
+    min-width: 0;
     max-width: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: none;
     -webkit-overflow-scrolling: touch;
   }
   .server-wiki-layout .wiki-rendered .table-scroll table {
     width: 100%;
-    min-width: 0;
     table-layout: auto;
     border-collapse: collapse;
   }
   .server-wiki-layout .wiki-rendered .table-scroll :is(th, td) {
-    min-width: 0;
     max-width: none;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
     word-break: normal;
   }
 
