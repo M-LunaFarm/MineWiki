@@ -32,10 +32,10 @@ test('light theme covers shared authenticated and admin surface palettes', async
   assert.match(adminLayout, /admin-surface/u);
   assert.match(header, /site-header/u);
   assert.match(css, /\.site-header \.header-search-results/u);
-  assert.match(css, /\.account-surface \[class\*='text-\[#c3cbd4\]'\]/u);
-  assert.match(css, /\.account-surface \[class\*='text-amber-50'\]/u);
-  assert.match(css, /\.account-surface \[class\*='text-emerald-100'\]/u);
-  assert.match(css, /\.account-surface \[class\*='text-blue-100'\]/u);
+  assert.match(css, /\.account-surface \[class~='text-\[#c3cbd4\]'\]/u);
+  assert.match(css, /\.account-surface \[class~='text-amber-50'\]/u);
+  assert.match(css, /\.account-surface \[class~='text-emerald-100'\]/u);
+  assert.match(css, /\.account-surface \[class~='text-blue-100'\]/u);
 });
 
 test('light theme preserves branded and destructive button labels', async () => {
@@ -75,7 +75,7 @@ test('server detail uses light content cards while preserving artwork contrast',
   assert.match(serverDetail, /server-documentation-card/);
   assert.match(serverDetail, /dark-fixed-surface relative h-36/);
   assert.match(css, /server-detail-surface \.server-documentation-card/);
-  assert.match(css, /server-detail-surface \[class\*='text-emerald-100'\]/);
+  assert.match(css, /server-detail-surface \[class~='text-emerald-100'\]/);
 });
 
 test('server hero follows light mode instead of forcing a dark surface', async () => {
@@ -103,12 +103,12 @@ test('theme contrast corrections cover shared links, metadata and provider label
 
   assert.match(css, /html\[data-theme='light'\] \.wiki-rendered a:not\(\.button\)/u);
   assert.match(css, /html\[data-theme='light'\] \.chip-accent/u);
-  assert.match(css, /html\[data-theme='dark'\] \[class\*='text-slate-500'\]/u);
+  assert.match(css, /html\[data-theme='dark'\] \[class~='text-slate-500'\]/u);
   assert.match(css, /html\[data-theme='dark'\] \.paper-mobile-filter/u);
   assert.match(css, /auth-provider-label-discord/u);
   assert.match(css, /auth-provider-label-naver/u);
   assert.match(css, /vote-modal-surface \[class~='text-blue-100'\]/u);
-  assert.match(css, /paper-server-row a\[class\*='bg-\[#13ec80\]'\]/u);
+  assert.match(css, /paper-server-row a\[class~='bg-\[#13ec80\]'\]/u);
   assert.match(css, /html\[data-theme='light'\] \.policy-version-notice/u);
   assert.match(css, /html\[data-theme='dark'\] \.paper-results-summary/u);
   assert.match(css, /html\[data-theme='dark'\] \.wiki-rendered \.doc-status small/u);
