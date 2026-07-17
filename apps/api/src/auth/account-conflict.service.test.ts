@@ -6,8 +6,12 @@ import { AccountConflictService } from './account-conflict.service';
 function createHarness(options: {
   readonly accountId?: string;
   readonly minecraftUuid?: string | null;
+  readonly minecraftUuids?: readonly string[];
   readonly duplicateMinecraftAccountId?: string | null;
+  readonly duplicateMinecraftUuid?: string | null;
   readonly discordUserId?: string | null;
+  readonly discordByMinecraftUuid?: Readonly<Record<string, string>>;
+  readonly minecraftByDiscordUserId?: Readonly<Record<string, string>>;
   readonly duplicateDiscordAccountId?: string | null;
   readonly duplicateEmailAccountId?: string | null;
   readonly linkedAccountId?: string | null;
@@ -17,7 +21,11 @@ function createHarness(options: {
   readonly linkedWikiProfile?: boolean;
 } = {}) {
   const accountId = options.accountId ?? randomUUID();
-  const minecraftUuid = options.minecraftUuid === undefined ? randomUUID() : options.minecraftUuid;
+  const minecraftUuids = options.minecraftUuids
+    ? [...options.minecraftUuids]
+    : options.minecraftUuid === null
+      ? []
+      : [options.minecraftUuid ?? randomUUID()];
   const discordUserId = options.discordUserId === undefined ? 'discord-1' : options.discordUserId;
   const tickets: unknown[] = [];
   const messages: unknown[] = [];
@@ -27,13 +35,17 @@ function createHarness(options: {
 
   const prisma = {
     minecraftIdentity: {
-      async findFirst(input: { where?: { accountId?: { notIn?: string[] } } }) {
+      async findMany() {
+        return minecraftUuids.map((uuid, index) => ({ id: BigInt(index + 1), uuid }));
+      },
+      async findFirst(input: { where?: { uuid?: string; accountId?: { notIn?: string[] } } }) {
         if (input.where?.accountId?.notIn) {
-          return options.duplicateMinecraftAccountId
+          return options.duplicateMinecraftAccountId &&
+            (!options.duplicateMinecraftUuid || options.duplicateMinecraftUuid === input.where.uuid)
             ? { accountId: options.duplicateMinecraftAccountId }
             : null;
         }
-        return minecraftUuid ? { uuid: minecraftUuid } : null;
+        return null;
       },
     },
     account: {
@@ -122,11 +134,15 @@ function createHarness(options: {
     },
   };
   const discordMinecraftLinks = {
-    async findByDiscordUserId() {
-      return null;
+    async findByDiscordUserId(discordId: string) {
+      const minecraftUuid = options.minecraftByDiscordUserId?.[discordId];
+      return minecraftUuid ? { discordUserId: discordId, minecraftUuid } : null;
     },
-    async findByMinecraftUuid() {
-      return null;
+    async findByMinecraftUuid(minecraftUuid: string) {
+      const linkedDiscordUserId = options.discordByMinecraftUuid?.[minecraftUuid];
+      return linkedDiscordUserId
+        ? { discordUserId: linkedDiscordUserId, minecraftUuid }
+        : null;
     },
   };
   return {
@@ -153,6 +169,53 @@ test('detects duplicate Minecraft identity conflict', async () => {
   assert.equal(response.conflicts.length, 1);
   assert.equal(response.conflicts[0]?.kind, 'minecraft_identity_duplicate');
   assert.equal(response.conflicts[0]?.conflictingAccountId, duplicateAccountId);
+});
+
+test('detects a conflict attached only to a secondary Minecraft identity', async () => {
+  const primaryUuid = randomUUID();
+  const secondaryUuid = randomUUID();
+  const duplicateAccountId = randomUUID();
+  const harness = createHarness({
+    minecraftUuids: [primaryUuid, secondaryUuid],
+    duplicateMinecraftUuid: secondaryUuid,
+    duplicateMinecraftAccountId: duplicateAccountId,
+  });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.equal(response.conflicts.length, 1);
+  assert.equal(response.conflicts[0]?.kind, 'minecraft_identity_duplicate');
+  assert.equal(response.conflicts[0]?.minecraftUuid, secondaryUuid);
+  assert.equal(response.conflicts[0]?.conflictingAccountId, duplicateAccountId);
+});
+
+test('checks Discord verification history against every Minecraft identity', async () => {
+  const primaryUuid = randomUUID();
+  const secondaryUuid = randomUUID();
+  const harness = createHarness({
+    minecraftUuids: [primaryUuid, secondaryUuid],
+    discordByMinecraftUuid: { [secondaryUuid]: 'different-discord-user' },
+  });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.equal(response.conflicts.length, 1);
+  assert.equal(response.conflicts[0]?.kind, 'discord_minecraft_mismatch');
+  assert.equal(response.conflicts[0]?.minecraftUuid, secondaryUuid);
+  assert.equal(response.conflicts[0]?.discordUserId, 'different-discord-user');
+});
+
+test('does not mismatch a Discord verification linked to any identity in the group', async () => {
+  const primaryUuid = randomUUID();
+  const secondaryUuid = randomUUID();
+  const harness = createHarness({
+    minecraftUuids: [primaryUuid, secondaryUuid],
+    minecraftByDiscordUserId: { 'discord-1': secondaryUuid },
+  });
+
+  const response = await harness.service.listLinkConflicts(harness.accountId);
+
+  assert.deepEqual(response.conflicts, []);
 });
 
 test('detects duplicate Discord identity conflict', async () => {
