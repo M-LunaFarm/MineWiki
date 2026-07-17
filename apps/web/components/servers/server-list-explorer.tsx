@@ -466,11 +466,11 @@ export function ServerListExplorer({
               </section>
             ) : (
               <section className="mb-12 divide-y divide-[#aaa79e]/55 border-b border-[#aaa79e]/55">
-                {servers.map((server, index) => (
+                {servers.map((server) => (
                   <ServerCard
                     key={server.id}
                     server={server}
-                    rank={index + 1}
+                    rank={sort === 'votes24h_desc' ? server.rank?.current ?? null : null}
                   />
                 ))}
               </section>
@@ -668,7 +668,7 @@ function SideStat({ label, value }: { readonly label: string; readonly value: st
   );
 }
 
-function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly rank: number }) {
+function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly rank: number | null }) {
   const online = resolveOnline(server);
   const badgeTone = getGradeTone(server.verificationGrade);
   const fallback = getServerPreviewFallbackClass(getServerPreviewSeed(server));
@@ -691,7 +691,7 @@ function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly
   return (
     <article className="paper-server-row group px-4 py-4 transition-colors hover:bg-[#e3eadf]/55">
       <div className="grid gap-3 lg:grid-cols-[42px_112px_minmax(0,1fr)_340px] lg:items-center">
-        <div className="hidden text-center text-sm font-bold text-gray-500 lg:block">{rank}</div>
+        <div className="hidden text-center text-sm font-bold text-gray-500 lg:block">{rank ?? '—'}</div>
 
         <div className="relative h-20 overflow-hidden border border-[#b7b3a9] bg-[#e8e5de] sm:h-20 lg:h-[74px]">
           {server.bannerUrl ? (
@@ -712,9 +712,9 @@ function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly
 
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded border border-gray-700 bg-[#090d12] px-2 py-0.5 text-xs font-bold text-gray-400 lg:hidden">
+            {rank ? <span className="rounded border border-gray-700 bg-[#090d12] px-2 py-0.5 text-xs font-bold text-gray-400 lg:hidden">
               #{rank}
-            </span>
+            </span> : null}
             <Link
               href={serverPath}
               className="min-w-0 truncate text-base font-bold text-white transition-colors hover:text-[#13ec80]"
