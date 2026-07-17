@@ -387,7 +387,11 @@ test('deleted discussion comments do not expose their former content', async () 
 
   const result = await discussions.getThread(thread.id.toString());
   assert.equal(result.comments[0]?.content, null);
-  assert.equal(result.comments[0]?.status, 'deleted');
+  assert.equal(result.comments[0]?.status, 'hidden');
+  assert.equal(result.comments[0]?.createdBy, null);
+  assert.equal(result.comments[0]?.createdByName, '비공개 사용자');
+  assert.equal(result.comments[0]?.createdAt, null);
+  assert.doesNotMatch(JSON.stringify(result.comments[0]), /removed secret|테스터|2026-01-01/);
 });
 
 test('hidden discussion comments mask content for readers but remain visible to page managers', async () => {
@@ -415,8 +419,12 @@ test('hidden discussion comments mask content for readers but remain visible to 
   const manager = await new WikiDiscussionService(store as unknown as PrismaService, profiles, managerPermissions).getThread('30', session);
 
   assert.equal(reader.comments[0]?.content, null);
+  assert.equal(reader.comments[0]?.createdBy, null);
+  assert.equal(reader.comments[0]?.createdAt, null);
+  assert.doesNotMatch(JSON.stringify(reader.comments[0]), /moderation evidence|테스터|2026-01-01/);
   assert.equal(reader.comments[0]?.canChangeVisibility, false);
   assert.equal(manager.comments[0]?.content, 'moderation evidence');
+  assert.equal(manager.comments[0]?.createdBy, '20');
   assert.equal(manager.comments[0]?.canChangeVisibility, true);
 });
 
@@ -624,10 +632,10 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
 
 test('discussion previews expose the first and latest comments without hidden or deleted content', async () => {
   const previewRows = [
-    { id: 1n, threadId: 30n, contentPreview: 'first comment', contentLength: 13n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), firstRank: 1n, recentRank: 5n, commentCount: 5n },
+    { id: 1n, threadId: 30n, contentPreview: 'first comment', contentLength: 13n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), firstRank: 1n, recentRank: 2n, commentCount: 2n },
     { id: 3n, threadId: 30n, contentPreview: 'hidden secret', contentLength: 13n, status: 'hidden', createdBy: 21n, createdAt: new Date('2026-01-03T00:00:00Z'), firstRank: 3n, recentRank: 3n, commentCount: 5n },
     { id: 4n, threadId: 30n, contentPreview: 'deleted secret', contentLength: 14n, status: 'deleted', createdBy: 21n, createdAt: new Date('2026-01-04T00:00:00Z'), firstRank: 4n, recentRank: 2n, commentCount: 5n },
-    { id: 5n, threadId: 30n, contentPreview: 'latest comment', contentLength: 14n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-05T00:00:00Z'), firstRank: 5n, recentRank: 1n, commentCount: 5n },
+    { id: 5n, threadId: 30n, contentPreview: 'latest comment', contentLength: 14n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-05T00:00:00Z'), firstRank: 2n, recentRank: 1n, commentCount: 2n },
   ];
   const store = {
     wikiPage: { async findUnique() { return page; } },
@@ -643,19 +651,18 @@ test('discussion previews expose the first and latest comments without hidden or
   );
 
   const result = await discussions.listThreadsPage('10', null, undefined, 30, 'all', true);
-  assert.equal(result.items[0]?.commentCount, 5);
+  assert.equal(result.items[0]?.commentCount, 2);
   assert.deepEqual(result.items[0]?.preview, {
     firstComment: {
       id: '1', status: 'normal', contentPreview: 'first comment', truncated: false,
       createdBy: '20', createdByName: '테스터', createdAt: '2026-01-01T00:00:00.000Z',
     },
     recentComments: [
-      { id: '3', status: 'hidden', contentPreview: null, truncated: false, createdBy: '21', createdByName: '숨김 사용자', createdAt: '2026-01-03T00:00:00.000Z' },
-      { id: '4', status: 'deleted', contentPreview: null, truncated: false, createdBy: '21', createdByName: '숨김 사용자', createdAt: '2026-01-04T00:00:00.000Z' },
       { id: '5', status: 'normal', contentPreview: 'latest comment', truncated: false, createdBy: '20', createdByName: '테스터', createdAt: '2026-01-05T00:00:00.000Z' },
     ],
-    omittedCommentCount: 1,
+    omittedCommentCount: 0,
   });
+  assert.doesNotMatch(JSON.stringify(result.items[0]?.preview), /hidden secret|deleted secret|숨김 사용자/);
 });
 
 test('active discussion filter includes open and paused but excludes closed threads', async () => {

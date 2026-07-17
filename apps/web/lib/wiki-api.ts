@@ -676,7 +676,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     } | null;
     readonly content: string | null;
     readonly status: string;
-    readonly createdBy: string;
+    readonly createdBy: string | null;
     readonly createdByName: string;
     readonly createdByUsername: string | null;
     readonly mentions: ReadonlyArray<{
@@ -685,7 +685,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
       readonly start: number;
       readonly end: number;
     }>;
-    readonly createdAt: string;
+    readonly createdAt: string | null;
     readonly canDelete: boolean;
     readonly canChangeVisibility: boolean;
     readonly pinned: boolean;

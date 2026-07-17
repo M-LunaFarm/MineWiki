@@ -94,7 +94,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     } | null;
     readonly content: string | null;
     readonly status: string;
-    readonly createdBy: string;
+    readonly createdBy: string | null;
     readonly createdByName: string;
     readonly createdByUsername: string | null;
     readonly mentions: ReadonlyArray<{
@@ -103,7 +103,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
       readonly start: number;
       readonly end: number;
     }>;
-    readonly createdAt: string;
+    readonly createdAt: string | null;
     readonly canDelete: boolean;
     readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
@@ -218,7 +218,7 @@ export class WikiDiscussionService {
     const countRows = threads.length > 0
       ? await this.prisma.wikiDiscussionComment.groupBy({
           by: ['threadId'],
-          where: { threadId: { in: threads.map((thread) => thread.id) }, entryType: 'comment' },
+          where: { threadId: { in: threads.map((thread) => thread.id) }, entryType: 'comment', status: 'normal' },
           _count: { _all: true }
         })
       : [];
@@ -301,14 +301,13 @@ export class WikiDiscussionService {
       : false;
     const pageThreads = visibleThreads.slice(0, limit);
     const hasMore = visibleThreads.length > limit || hasUnscannedCandidates;
-    const canViewHidden = includePreview && Boolean(actor && await this.wikiPermissions.canModeratePage({ actor, page }));
     const previewData = includePreview
       ? await this.loadThreadPreviews(pageThreads.map((thread) => thread.id))
       : null;
     const countRows = !previewData && pageThreads.length > 0
       ? await this.prisma.wikiDiscussionComment.groupBy({
           by: ['threadId'],
-          where: { threadId: { in: pageThreads.map((thread) => thread.id) }, entryType: 'comment' },
+          where: { threadId: { in: pageThreads.map((thread) => thread.id) }, entryType: 'comment', status: 'normal' },
           _count: { _all: true }
         })
       : [];
@@ -355,8 +354,7 @@ export class WikiDiscussionService {
         previewData ? this.toThreadPreview(
           previewData.rowsByThreadId.get(thread.id) ?? [],
           countByThreadId.get(thread.id) ?? 0,
-          profileById,
-          canViewHidden
+          profileById
         ) : undefined
       )),
       nextCursor: hasMore && last ? this.encodeRecentCursor(snapshotAt, last.updatedAt, last.id) : null,
@@ -549,7 +547,9 @@ export class WikiDiscussionService {
       ? await this.prisma.wikiDiscussionComment.findUnique({ where: { id: thread.pinnedCommentId } })
       : null;
     const displayComments = pinnedComment && pinnedComment.threadId === thread.id ? [...pageComments, pinnedComment] : pageComments;
-    const commentCount = await this.prisma.wikiDiscussionComment.count({ where: { threadId: thread.id, entryType: 'comment' } });
+    const commentCount = await this.prisma.wikiDiscussionComment.count({
+      where: { threadId: thread.id, entryType: 'comment', status: 'normal' }
+    });
     const authorIds = [...new Set([thread.createdBy, ...displayComments.map((comment) => comment.createdBy)])];
     const mentionOccurrencesByComment = new Map(displayComments.map((comment) => [
       comment.id,
@@ -643,22 +643,25 @@ export class WikiDiscussionService {
         if (left.id === thread.pinnedCommentId) return -1;
         if (right.id === thread.pinnedCommentId) return 1;
         return left.id < right.id ? -1 : 1;
-      }).map((comment) => ({
+      }).map((comment) => {
+        const concealed = comment.entryType !== 'system'
+          && (comment.status === 'deleted' || (comment.status === 'hidden' && !canManage));
+        return {
         id: comment.id.toString(),
         entryType: comment.entryType === 'system' ? 'system' as const : 'comment' as const,
         systemEvent: comment.entryType === 'system' ? systemEvents.get(comment.id) ?? null : null,
-        content: comment.entryType === 'system' || comment.status === 'deleted' || (comment.status === 'hidden' && !canManage) ? null : comment.content,
-        status: comment.status,
-        createdBy: comment.createdBy.toString(),
-        createdByName: profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
-        createdByUsername: usernameByProfileId.get(comment.createdBy) ?? null,
-        mentions: comment.entryType === 'system' || comment.status === 'deleted' || (comment.status === 'hidden' && !canManage)
+        content: concealed || comment.entryType === 'system' ? null : comment.content,
+        status: concealed ? 'hidden' : comment.status,
+        createdBy: concealed ? null : comment.createdBy.toString(),
+        createdByName: concealed ? '비공개 사용자' : profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
+        createdByUsername: concealed ? null : usernameByProfileId.get(comment.createdBy) ?? null,
+        mentions: concealed || comment.entryType === 'system'
           ? []
           : (mentionOccurrencesByComment.get(comment.id) ?? []).flatMap((mention) => {
               const target = mentionProfileByUsername.get(mention.username.toLocaleLowerCase('en-US'));
               return target ? [{ username: target.username, profileId: target.id.toString(), start: mention.start, end: mention.end }] : [];
             }),
-        createdAt: comment.createdAt.toISOString(),
+        createdAt: concealed ? null : comment.createdAt.toISOString(),
         canDelete: Boolean(comment.entryType !== 'system' && comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
         canChangeVisibility: Boolean(comment.entryType !== 'system' && canManage && comment.status !== 'deleted'),
         pinned: comment.id === thread.pinnedCommentId,
@@ -673,7 +676,7 @@ export class WikiDiscussionService {
           actorProfileName: profileById.get(event.actorProfileId) ?? '알 수 없는 사용자',
           createdAt: event.createdAt.toISOString()
         }))
-      }))
+      }})
     };
   }
 
@@ -1516,6 +1519,7 @@ export class WikiDiscussionService {
           COUNT(*) OVER (PARTITION BY thread_id) AS comment_count
         FROM wiki_discussion_comments
         WHERE entry_type = 'comment'
+          AND status = 'normal'
           AND thread_id IN (${Prisma.join(threadIds)})
       )
       SELECT
@@ -1536,6 +1540,7 @@ export class WikiDiscussionService {
     const rowsByThreadId = new Map<bigint, ThreadPreviewRow[]>();
     const countByThreadId = new Map<bigint, number>();
     for (const row of rows) {
+      if (row.status !== 'normal') continue;
       const group = rowsByThreadId.get(row.threadId) ?? [];
       group.push(row);
       rowsByThreadId.set(row.threadId, group);
@@ -1547,13 +1552,12 @@ export class WikiDiscussionService {
   private toThreadPreview(
     rows: readonly ThreadPreviewRow[],
     commentCount: number,
-    profileById: ReadonlyMap<bigint, string>,
-    canViewHidden: boolean
+    profileById: ReadonlyMap<bigint, string>
   ): WikiThreadPreview {
     const firstRow = rows.find((row) => Number(row.firstRank) === 1) ?? null;
     const recentRows = rows.filter((row) => Number(row.recentRank) <= 3 && row.id !== firstRow?.id);
-    const firstComment = firstRow ? this.toThreadCommentPreview(firstRow, profileById, canViewHidden) : null;
-    const recentComments = recentRows.map((row) => this.toThreadCommentPreview(row, profileById, canViewHidden));
+    const firstComment = firstRow ? this.toThreadCommentPreview(firstRow, profileById) : null;
+    const recentComments = recentRows.map((row) => this.toThreadCommentPreview(row, profileById));
     return {
       firstComment,
       recentComments,
@@ -1563,17 +1567,15 @@ export class WikiDiscussionService {
 
   private toThreadCommentPreview(
     row: ThreadPreviewRow,
-    profileById: ReadonlyMap<bigint, string>,
-    canViewHidden: boolean
+    profileById: ReadonlyMap<bigint, string>
   ): WikiThreadCommentPreview {
-    const readable = row.status === 'normal' || (row.status === 'hidden' && canViewHidden);
-    const normalized = readable ? row.contentPreview.replace(/\s+/gu, ' ').trim() : '';
+    const normalized = row.contentPreview.replace(/\s+/gu, ' ').trim();
     const characters = [...normalized];
     return {
       id: row.id.toString(),
       status: row.status,
-      contentPreview: readable ? characters.slice(0, 280).join('') : null,
-      truncated: readable && (Number(row.contentLength) > 600 || characters.length > 280),
+      contentPreview: characters.slice(0, 280).join(''),
+      truncated: Number(row.contentLength) > 600 || characters.length > 280,
       createdBy: row.createdBy.toString(),
       createdByName: profileById.get(row.createdBy) ?? '알 수 없는 사용자',
       createdAt: row.createdAt.toISOString()
