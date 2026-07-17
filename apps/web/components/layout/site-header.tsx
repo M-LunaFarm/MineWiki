@@ -101,9 +101,9 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
   });
 
   return (
-    <header className={`fixed inset-x-0 top-0 z-50 border-b backdrop-blur-xl ${variant === 'paper' ? 'border-[#b8b4aa]/70 bg-[#f4f2ec]/90 text-[#252925]' : 'border-white/[0.06] bg-[#07090c]/80'}`}>
+    <header className={`fixed inset-x-0 top-0 z-50 overflow-x-clip border-b backdrop-blur-xl ${variant === 'paper' ? 'border-[#b8b4aa]/70 bg-[#f4f2ec]/90 text-[#252925]' : 'border-white/[0.06] bg-[#07090c]/80'}`}>
       <div className="mx-auto w-full max-w-[1440px] px-3 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between gap-4">
+        <div className="flex h-16 items-center justify-between gap-2 sm:gap-4">
           <div className="flex min-w-0 items-center gap-7">
             <Link href="/" className="flex shrink-0 items-center gap-2 sm:gap-2.5" aria-label="MineWiki 홈">
               <span
@@ -139,7 +139,7 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
             </nav>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-3">
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-3">
             <div className="hidden border-l border-white/[0.08] pl-4 text-xs text-slate-500 2xl:block">
               {loading
                 ? '세션 확인 중'
@@ -150,10 +150,10 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
 
             <HeaderSearch value={currentSearch} onChange={setCurrentSearch} variant={variant} className="hidden xl:block" />
 
-            <WikiReviewQueueBadge paper={variant === 'paper'} />
-            <WikiNotificationBell paper={variant === 'paper'} />
+            <span className="hidden sm:inline-flex"><WikiReviewQueueBadge paper={variant === 'paper'} /></span>
+            <span className="hidden sm:inline-flex"><WikiNotificationBell paper={variant === 'paper'} /></span>
             <AccountDropdown />
-            <ThemeToggle paper={variant === 'paper'} />
+            <span className="hidden min-[400px]:inline-flex"><ThemeToggle paper={variant === 'paper'} /></span>
             <button
               type="button"
               className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-300 transition hover:border-white/20 hover:text-white lg:hidden"
@@ -168,6 +168,20 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
         {mobileOpen ? (
           <div className="border-t border-white/[0.06] py-3 lg:hidden">
             <HeaderSearch value={currentSearch} onChange={setCurrentSearch} variant={variant} className="mb-3" mobile />
+            <div className="mb-3 flex items-center justify-between rounded-lg border border-white/[0.06] px-3 py-2 min-[400px]:hidden">
+              <span className="text-xs font-medium text-slate-400">화면 테마</span>
+              <ThemeToggle paper={variant === 'paper'} />
+            </div>
+            {account ? (
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                <Link href="/wiki/notifications" className="rounded-lg border border-white/[0.06] px-3 py-2 text-center text-xs font-medium text-slate-300">
+                  내 알림
+                </Link>
+                <Link href="/wiki/edit-requests?status=open&scope=reviewable" className="rounded-lg border border-white/[0.06] px-3 py-2 text-center text-xs font-medium text-slate-300">
+                  편집 요청 검토
+                </Link>
+              </div>
+            ) : null}
             <nav className="grid gap-0.5">
               {visibleLinks.map((link) => {
                 const active = isActive(pathname, link.key);

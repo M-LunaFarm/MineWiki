@@ -55,7 +55,9 @@ await rename(pendingLink, path.join(releasesRoot, 'current'));
 const releases = (await readdir(releasesRoot, { withFileTypes: true }))
   .filter((entry) => entry.isDirectory() && entry.name !== releaseKey)
   .sort((left, right) => right.name.localeCompare(left.name));
-for (const stale of releases.slice(2)) {
+// Keep enough immutable releases for every web process to survive a missed
+// reload. minewiki.kr and verify.minewiki.kr run as separate PM2 processes.
+for (const stale of releases.slice(8)) {
   await rm(path.join(releasesRoot, stale.name), { recursive: true, force: true });
 }
 

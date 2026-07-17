@@ -106,7 +106,7 @@ export function AccountDropdown() {
   };
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative min-w-0">
       <button
         type="button"
         onClick={toggle}
@@ -135,7 +135,7 @@ export function AccountDropdown() {
       </button>
 
       {open ? (
-        <div className="account-menu absolute right-0 z-40 mt-2.5 w-[min(21rem,calc(100vw-1rem))] overflow-hidden rounded-lg border border-[#30363d] bg-[#181a1d] p-3 text-sm text-[#e6e6e6] shadow-xl">
+        <div className="account-menu fixed inset-x-2 top-[4.5rem] z-40 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-lg border border-[#30363d] bg-[#181a1d] p-3 text-sm text-[#e6e6e6] shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2.5 sm:w-[min(21rem,calc(100vw-1rem))]">
           {account ? (
             <div className="space-y-3">
               <div className="rounded-md border border-[#30363d] bg-[#111315] p-3 text-xs text-[#9ca3af]">

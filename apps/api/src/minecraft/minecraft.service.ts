@@ -338,35 +338,49 @@ export class MinecraftService {
       throw new InternalServerErrorException('MICROSOFT_REDIRECT_URI is not configured.');
     }
 
-    const form = new URLSearchParams({
-      client_id: clientId,
-      scope: 'XboxLive.signin',
-      code,
-      redirect_uri: effectiveRedirect,
-      grant_type: 'authorization_code'
-    });
-
-    if (clientSecret) {
-      form.set('client_secret', clientSecret);
-    }
-    if (codeVerifier) {
-      form.set('code_verifier', codeVerifier);
-    }
-
-    const response = await this.safeFetch(
-      MICROSOFT_TOKEN_URL,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
+    const requestToken = (includeClientSecret: boolean) => {
+      const form = new URLSearchParams({
+        client_id: clientId,
+        scope: 'XboxLive.signin',
+        code,
+        redirect_uri: effectiveRedirect,
+        grant_type: 'authorization_code'
+      });
+      if (includeClientSecret && clientSecret) {
+        form.set('client_secret', clientSecret);
+      }
+      if (codeVerifier) {
+        form.set('code_verifier', codeVerifier);
+      }
+      return this.safeFetch(
+        MICROSOFT_TOKEN_URL,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: form
         },
-        body: form
-      },
-      'Microsoft token exchange'
-    );
+        'Microsoft token exchange'
+      );
+    };
+
+    let response = await requestToken(Boolean(clientSecret));
+    if (response.status === 401 && clientSecret && codeVerifier) {
+      const oauthError = await this.readMicrosoftOAuthError(response);
+      this.logger.warn(
+        { status: response.status, oauthError: oauthError.error, aadsts: oauthError.aadsts },
+        'Microsoft confidential token exchange rejected; retrying the PKCE public-client flow'
+      );
+      response = await requestToken(false);
+    }
 
     if (!response.ok) {
-      this.logger.warn({ status: response.status }, 'Microsoft token exchange failed');
+      const oauthError = await this.readMicrosoftOAuthError(response);
+      this.logger.warn(
+        { status: response.status, oauthError: oauthError.error, aadsts: oauthError.aadsts },
+        'Microsoft token exchange failed'
+      );
       if (response.status === 403) {
         throw new ServiceUnavailableException(
           'Verification temporarily unavailable. Please try again later.'
@@ -385,6 +399,23 @@ export class MinecraftService {
     }
 
     return data.access_token;
+  }
+
+  private async readMicrosoftOAuthError(response: Response): Promise<{
+    readonly error?: string;
+    readonly aadsts?: string;
+  }> {
+    const payload = (await response.json().catch(() => ({}))) as {
+      readonly error?: unknown;
+      readonly error_description?: unknown;
+    };
+    const description = typeof payload.error_description === 'string'
+      ? payload.error_description
+      : '';
+    return {
+      error: typeof payload.error === 'string' ? payload.error.slice(0, 80) : undefined,
+      aadsts: description.match(/AADSTS\d+/u)?.[0]
+    };
   }
 
   private async authenticateWithXboxLive(accessToken: string): Promise<{

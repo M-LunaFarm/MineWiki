@@ -60,6 +60,57 @@ test('Microsoft authorization uses the fixed callback and keeps PKCE verifier se
   assert.ok((createdAuthorizations[0]?.codeVerifier.length ?? 0) >= 43);
 });
 
+test('Microsoft token exchange falls back to PKCE when a configured client secret is rejected', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: URLSearchParams[] = [];
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    requests.push(new URLSearchParams(String(init?.body ?? '')));
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({
+        error: 'invalid_client',
+        error_description: 'AADSTS7000215: Invalid client secret.',
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ access_token: 'microsoft-access-token' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const service = new MinecraftService(
+      {} as never,
+      {
+        getOptional: (key: string) => {
+          if (key === 'MICROSOFT_CLIENT_ID') return 'public-client-id';
+          if (key === 'MICROSOFT_CLIENT_SECRET') return 'expired-secret';
+          if (key === 'MICROSOFT_REDIRECT_URI') return 'https://verify.minewiki.kr/minecraft/callback';
+          return undefined;
+        },
+      } as never,
+      {} as never,
+    );
+    const exchange = service as unknown as {
+      exchangeAuthorizationCode(code: string, redirectUri: string, codeVerifier: string): Promise<string>;
+    };
+
+    const token = await exchange.exchangeAuthorizationCode(
+      'one-time-code',
+      'https://verify.minewiki.kr/minecraft/callback',
+      'A'.repeat(64),
+    );
+
+    assert.equal(token, 'microsoft-access-token');
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0]?.get('client_secret'), 'expired-secret');
+    assert.equal(requests[1]?.has('client_secret'), false);
+    assert.equal(requests[0]?.get('code_verifier'), 'A'.repeat(64));
+    assert.equal(requests[1]?.get('code_verifier'), 'A'.repeat(64));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('canonical account reads Minecraft identity stored on a linked account', async () => {
   const canonicalAccountId = randomUUID();
   const linkedAccountId = randomUUID();
