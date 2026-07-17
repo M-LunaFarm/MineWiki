@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
+import { ServerWikiHeader } from './server-wiki-header';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
 
 export function ServerWikiWorkspace({
@@ -13,8 +14,9 @@ export function ServerWikiWorkspace({
   readonly children: ReactNode;
 }) {
   return (
-    <main className="server-wiki-layout min-h-[calc(100vh-4rem)] bg-[#0b0e12] text-slate-200">
-      <div className="mx-auto grid w-full max-w-[1600px] grid-cols-[minmax(0,1fr)] lg:grid-cols-[330px_minmax(0,1fr)]">
+    <div className="server-wiki-layout min-h-screen bg-[#0b0e12] text-slate-200">
+      <ServerWikiHeader page={page} />
+      <main className="mx-auto grid w-full max-w-[1600px] grid-cols-[minmax(0,1fr)] lg:grid-cols-[330px_minmax(0,1fr)]">
         <ServerWikiSidebar page={page} />
         <section className="min-w-0 px-4 py-7 sm:px-8 lg:px-12 lg:py-10 xl:px-16">
           <nav className="mb-6 flex flex-wrap items-center gap-2 text-sm text-slate-500" aria-label="현재 위치">
@@ -26,8 +28,8 @@ export function ServerWikiWorkspace({
           </nav>
           {children}
         </section>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
 

@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 
 const detail = await readFile(new URL('../components/servers/server-detail-showcase.tsx', import.meta.url), 'utf8');
 const wiki = await readFile(new URL('../components/wiki/server-wiki-article-view.tsx', import.meta.url), 'utf8');
+const wikiHeader = await readFile(new URL('../components/wiki/server-wiki-header.tsx', import.meta.url), 'utf8');
+const appShell = await readFile(new URL('../components/layout/app-shell.tsx', import.meta.url), 'utf8');
 
 test('server detail promotes linked documentation as a first-class child experience', () => {
   const overview = detail.indexOf('<ServerOverviewCard detail={detail} />');
@@ -17,15 +19,21 @@ test('server detail promotes linked documentation as a first-class child experie
   assert.match(detail.slice(documentation, reviews), /GitBook처럼 문서별로/u);
 });
 
-test('server wiki keeps a clear return boundary and enriches the root document with navigation', () => {
-  const breadcrumb = wiki.indexOf('랭킹 서버 상세로 돌아가기');
+test('server wiki uses its own documentation shell and enriches the root document with navigation', () => {
+  const header = wiki.indexOf('<ServerWikiHeader page={page} />');
   const article = wiki.indexOf('id={contentId}');
   const startHere = wiki.indexOf('id="server-wiki-start-here-title"');
 
-  assert.ok(breadcrumb > 0);
-  assert.ok(article > breadcrumb);
+  assert.ok(header > 0);
+  assert.ok(article > header);
   assert.ok(startHere > article);
   assert.match(wiki, /const isWikiHome = currentIndex === 0/u);
   assert.match(wiki, /wiki\.navigation\.filter\(\(item\) => !item\.current\)\.slice\(0, 6\)/u);
-  assert.match(wiki, /href=\{page\.serverDirectoryPath \?\? '\/servers'\}/u);
+  assert.match(wikiHeader, /Documentation/u);
+  assert.match(wikiHeader, /서버 문서 검색/u);
+  assert.match(wikiHeader, /서버 정보/u);
+  assert.match(appShell, /const isServerWikiPage/u);
+  assert.match(appShell, /if \(isServerWikiPage\)/u);
+  assert.doesNotMatch(appShell.slice(appShell.indexOf('if (isServerWikiPage)'), appShell.indexOf('if (isWikiPage)')), /SiteHeader/u);
+  assert.doesNotMatch(wiki, /랭킹 서버 상세로 돌아가기/u);
 });

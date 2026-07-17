@@ -176,6 +176,7 @@ export class WikiController {
     @Req() request: FastifyRequest,
     @Query('q') q: string | undefined,
     @Query('namespace') namespace: string | undefined,
+    @Query('serverSlug') serverSlug: string | undefined,
     @Query('target') target: string | undefined,
     @Query('limit') limit: string | undefined,
     @Query('cursor') cursor: string | undefined
@@ -183,6 +184,7 @@ export class WikiController {
     return this.wikiRead.search({
       q,
       namespace,
+      serverSlug,
       target,
       limit,
       cursor,

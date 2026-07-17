@@ -136,7 +136,7 @@ test('optional browser wiki reads forward the complete session payload', async (
     controller.getBacklinks('1', request),
     controller.getBlame('1', request),
     controller.getRecent(request),
-    controller.search(request, 'query', undefined, undefined, undefined, undefined),
+    controller.search(request, 'query', undefined, undefined, undefined, undefined, undefined),
     controller.suggest(request, 'query', undefined),
     controller.special(request),
     controller.categoryMembers('category', request),

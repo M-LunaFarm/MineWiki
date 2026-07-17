@@ -1,0 +1,66 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { Search } from 'lucide-react';
+import { fetchWikiPageByPath, searchWiki } from '../../lib/wiki-server-api';
+import { ServerWikiWorkspace } from './server-wiki-workspace';
+
+export async function ServerWikiSearchPage({
+  slug,
+  searchParams,
+}: {
+  readonly slug: string;
+  readonly searchParams: { q?: string; target?: string; cursor?: string };
+}) {
+  const page = await fetchWikiPageByPath(`/server/${slug}`);
+  if (!page?.serverWiki) notFound();
+  const query = searchParams.q?.trim().slice(0, 100) ?? '';
+  const target = searchParams.target === 'title' || searchParams.target === 'content'
+    ? searchParams.target
+    : 'all';
+  const cursor = searchParams.cursor?.trim() || undefined;
+  const result = query
+    ? await searchWiki({ q: query, serverSlug: slug, target, cursor, limit: 30 })
+    : { items: [], nextCursor: null };
+
+  return (
+    <ServerWikiWorkspace page={page} section="문서 검색">
+      <header className="border-b border-white/10 pb-7">
+        <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-300">Documentation search</p>
+        <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-white sm:text-4xl">{page.serverWiki.name} 문서 검색</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-500">이 서버 위키의 문서만 검색합니다.</p>
+      </header>
+
+      <form action={`/server/${encodeURIComponent(slug)}/_search`} className="mt-7 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto]">
+        <label className="relative">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-500" aria-hidden="true" />
+          <span className="sr-only">검색어</span>
+          <input name="q" type="search" maxLength={100} defaultValue={query} autoFocus placeholder="문서 제목 또는 내용" className="h-12 w-full rounded-lg border border-white/10 bg-white/[0.035] pl-10 pr-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/40" />
+        </label>
+        <select name="target" defaultValue={target} aria-label="검색 대상" className="h-12 rounded-lg border border-white/10 bg-[#11161c] px-3 text-sm text-white outline-none focus:border-emerald-300/40">
+          <option value="all">제목 + 본문</option>
+          <option value="title">제목만</option>
+          <option value="content">본문만</option>
+        </select>
+        <button type="submit" className="h-12 rounded-lg bg-emerald-400 px-6 text-sm font-bold text-emerald-950 transition hover:bg-emerald-300">검색</button>
+      </form>
+
+      {query ? (
+        <section className="mt-8" aria-live="polite">
+          <p className="mb-4 text-sm text-slate-400"><strong className="text-white">‘{query}’</strong> 검색 결과 {result.items.length.toLocaleString('ko-KR')}개</p>
+          <div className="divide-y divide-white/10 border-y border-white/10">
+            {result.items.map((item) => (
+              <Link key={item.pageId} href={item.routePath} className="block px-1 py-5 transition hover:bg-white/[0.025] sm:px-3">
+                <h2 className="font-semibold text-slate-100">{item.displayTitle}</h2>
+                <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{item.snippet}</p>
+              </Link>
+            ))}
+            {result.items.length === 0 ? <p className="py-8 text-sm text-slate-500">일치하는 문서가 없습니다.</p> : null}
+          </div>
+          {result.nextCursor ? (
+            <Link href={`/server/${encodeURIComponent(slug)}/_search?q=${encodeURIComponent(query)}&target=${encodeURIComponent(target)}&cursor=${encodeURIComponent(result.nextCursor)}`} className="mt-5 inline-flex min-h-11 items-center rounded-lg border border-white/10 px-4 text-sm font-semibold text-emerald-300 hover:border-emerald-300/35">다음 결과</Link>
+          ) : null}
+        </section>
+      ) : null}
+    </ServerWikiWorkspace>
+  );
+}

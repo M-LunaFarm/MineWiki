@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, BookOpen } from 'lucide-react';
+import { BookOpen } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiCreateLink } from './server-wiki-create-link';
 import { ServerWikiNavigation } from './server-wiki-navigation';
@@ -46,15 +46,6 @@ export function ServerWikiSidebar({ page }: { readonly page: WikiPageResponse })
         {address ? <p className="mt-4 hidden break-all px-2 font-mono text-xs text-slate-600 lg:block">{address}</p> : null}
       </nav>
 
-      <div className="hidden px-6 pb-6 lg:absolute lg:inset-x-0 lg:bottom-0 lg:block">
-        <Link
-          href={page.serverDirectoryPath ?? '/servers'}
-          className="flex items-center justify-center gap-2 rounded-lg border border-white/10 px-4 py-3 text-sm text-slate-400 transition hover:border-white/20 hover:text-white"
-        >
-          <ArrowLeft className="size-4" />
-          서버 상세로 돌아가기
-        </Link>
-      </div>
     </aside>
   );
 }
