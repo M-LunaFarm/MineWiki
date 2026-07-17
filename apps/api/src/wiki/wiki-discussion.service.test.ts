@@ -387,6 +387,7 @@ test('deleted discussion comments do not expose their former content', async () 
 
   const result = await discussions.getThread(thread.id.toString());
   assert.equal(result.comments[0]?.content, null);
+  assert.equal(result.comments[0]?.contentHtml, null);
   assert.equal(result.comments[0]?.status, 'hidden');
   assert.equal(result.comments[0]?.createdBy, null);
   assert.equal(result.comments[0]?.createdByName, '비공개 사용자');
@@ -419,13 +420,68 @@ test('hidden discussion comments mask content for readers but remain visible to 
   const manager = await new WikiDiscussionService(store as unknown as PrismaService, profiles, managerPermissions).getThread('30', session);
 
   assert.equal(reader.comments[0]?.content, null);
+  assert.equal(reader.comments[0]?.contentHtml, null);
   assert.equal(reader.comments[0]?.createdBy, null);
   assert.equal(reader.comments[0]?.createdAt, null);
   assert.doesNotMatch(JSON.stringify(reader.comments[0]), /moderation evidence|테스터|2026-01-01/);
   assert.equal(reader.comments[0]?.canChangeVisibility, false);
   assert.equal(manager.comments[0]?.content, 'moderation evidence');
+  assert.match(manager.comments[0]?.contentHtml ?? '', /moderation evidence/u);
   assert.equal(manager.comments[0]?.createdBy, '20');
   assert.equal(manager.comments[0]?.canChangeVisibility, true);
+});
+
+test('discussion comments expose sanitized restricted NamuMark with server-wiki links and validated mentions', async () => {
+  const serverPage = { ...page, namespaceId: 2, spaceId: 9n, localPath: 'luna/가이드/설치' };
+  const comment = {
+    id: 40n,
+    threadId: thread.id,
+    content: [
+      "'''안내''' @Alice",
+      '||항목||값||',
+      '{{{@Alice}}}',
+      '[[../규칙]]',
+      '[[include(비밀 문서)]]',
+      '[youtube(dQw4w9WgXcQ)]',
+    ].join('\n'),
+    status: 'normal',
+    entryType: 'comment',
+    createdBy: 20n,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: null,
+  };
+  const store = {
+    wikiPage: { async findUnique() { return serverPage; } },
+    wikiNamespace: { async findUnique() { return { code: 'server' }; } },
+    serverWiki: { async findUnique() { return { slug: 'luna', status: 'active' }; } },
+    wikiDiscussionThread: { async findUnique() { return thread; } },
+    wikiDiscussionComment: { async count() { return 1; }, async findMany() { return [comment]; } },
+    wikiDiscussionSubscription: { async findUnique() { return null; } },
+    wikiProfile: {
+      async findMany() {
+        return [
+          { id: 20n, username: 'Author', displayName: '작성자', status: 'active' },
+          { id: 21n, username: 'Alice', displayName: '앨리스', status: 'active' },
+        ];
+      },
+    },
+  };
+  const result = await new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async assertCanReadPage() {} } as unknown as WikiPermissionService,
+  ).getThread(thread.id.toString());
+  const rendered = result.comments[0];
+
+  assert.equal(rendered?.content, comment.content);
+  assert.match(rendered?.contentHtml ?? '', /<strong>안내<\/strong>/u);
+  assert.match(rendered?.contentHtml ?? '', /<table class="component-table wiki-table"/u);
+  assert.match(rendered?.contentHtml ?? '', /href="\/server\/luna\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EA%B7%9C%EC%B9%99"/u);
+  assert.equal((rendered?.contentHtml?.match(/href="\/user\/Alice"/gu) ?? []).length, 1);
+  assert.match(rendered?.contentHtml ?? '', /<code>@Alice<\/code>/u);
+  assert.equal(rendered?.contentHtml?.includes('wiki-transclusion'), false);
+  assert.equal(rendered?.contentHtml?.includes('<iframe'), false);
+  assert.deepEqual(rendered?.mentions, [{ username: 'Alice', profileId: '21', start: 9, end: 15 }]);
 });
 
 test('comment moderation history is bounded and visible only to page managers', async () => {

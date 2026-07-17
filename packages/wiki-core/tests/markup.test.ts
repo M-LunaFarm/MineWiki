@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, parseMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
+import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, parseMarkup, renderDiscussionMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
 import { parseLinkTarget, resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
@@ -319,6 +319,76 @@ test('keeps relative links inside an isolated server-wiki route base', () => {
   });
   assert.deepEqual(root.links, ['규칙']);
   assert.equal(root.blockingErrors.includes('상대 링크가 문서 루트를 벗어날 수 없습니다.'), true);
+});
+
+test('renders the safe discussion NamuMark subset with contextual links and tables', () => {
+  const html = renderDiscussionMarkup([
+    "'''굵게'''와 [[../규칙|규칙]]",
+    ' * 첫 항목',
+    '  * 하위 항목',
+    '> 인용문',
+    '||<tablewidth=100%><thead>항목||값||',
+    '||상태||정상||',
+    '{{{#!syntax js',
+    '<script>alert(1)</script>',
+    '}}}',
+  ].join('\n'), {
+    internalLinkBasePath: '/server/luna',
+    linkResolution: { currentDocumentPath: '가이드/설치', namespace: 'main' },
+  });
+
+  assert.match(html, /<strong>굵게<\/strong>/u);
+  assert.match(html, /href="\/server\/luna\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EA%B7%9C%EC%B9%99"/u);
+  assert.match(html, /<ul class="wiki-list">/u);
+  assert.match(html, /<blockquote class="wiki-quote">/u);
+  assert.match(html, /<table class="component-table wiki-table"/u);
+  assert.match(html, /<pre class="codeblock" data-lang="js"><code>&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/code><\/pre>/u);
+  assert.equal(html.includes('<script>'), false);
+});
+
+test('keeps document-level and dynamic markup inert in discussion comments', () => {
+  const html = renderDiscussionMarkup([
+    '[[include(비공개 문서)]]',
+    '[[파일:secret.png]]',
+    '[youtube(dQw4w9WgXcQ)]',
+    '[pagecount]',
+    '[* note secret]',
+    '[목차]',
+    '#redirect [[비공개 문서]]',
+    '== 제목 ==',
+    '표시할 문장',
+  ].join('\n'));
+
+  assert.equal(html.includes('wiki-transclusion'), false);
+  assert.equal(html.includes('<img'), false);
+  assert.equal(html.includes('<iframe'), false);
+  assert.equal(html.includes('wiki-dynamic'), false);
+  assert.equal(html.includes('footnote'), false);
+  assert.equal(html.includes('wiki-toc'), false);
+  assert.equal(html.includes('넘겨주기'), false);
+  assert.equal(html.includes('<h2'), false);
+  assert.match(html, /<p>제목<\/p>/u);
+  assert.match(html, /표시할 문장/u);
+});
+
+test('links only validated discussion mentions outside code and existing links', () => {
+  const html = renderDiscussionMarkup([
+    '@Alice 확인 @Unknown',
+    '{{{@Alice}}}',
+    '[[문서|@Alice]]',
+    '[https://example.com/@Alice @Alice]',
+    'mail@Alice.example',
+  ].join('\n'), {
+    mentions: [{ username: 'Alice', href: '/user/Alice' }],
+  });
+
+  assert.equal((html.match(/href="\/user\/Alice"/gu) ?? []).length, 1);
+  assert.match(html, /<a href="\/user\/Alice">@Alice<\/a>/u);
+  assert.match(html, /<code>@Alice<\/code>/u);
+  assert.match(html, /href="\/wiki\/%EB%AC%B8%EC%84%9C">@Alice<\/a>/u);
+  assert.match(html, /href="https:\/\/example\.com\/@Alice" rel="nofollow noopener" target="_blank">@Alice<\/a>/u);
+  assert.match(html, /mail@Alice\.example/u);
+  assert.match(html, /@Unknown/u);
 });
 
 test('renders fragments without indexing same-page anchors as page links', () => {

@@ -675,6 +675,8 @@ export interface WikiThreadDetail extends WikiThreadSummary {
       readonly afterRedacted: boolean;
     } | null;
     readonly content: string | null;
+    /** Sanitized restricted NamuMark from the API; optional during rolling deploys. */
+    readonly contentHtml?: string | null;
     readonly status: string;
     readonly createdBy: string | null;
     readonly createdByName: string;
