@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import {
   fetchServerDetail,
   fetchServerUpdates,
-  fetchServerReviews,
+  fetchServerReviewPage,
   fetchServerStats,
   fetchServerReferrals,
   fetchServerSummaries,
@@ -91,7 +91,7 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
     console.error('Failed to load server updates', error);
     return [];
   });
-  const reviewsPromise = fetchServerReviews(serverId, {
+  const reviewsPromise = fetchServerReviewPage(serverId, {
     limit: 12,
     sort: currentReviewSort,
     rating: currentReviewRating,
@@ -109,11 +109,6 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
   ]);
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 
-  const averageRating =
-    reviews.length > 0
-      ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length
-      : null;
-
   const recommendedServers = recommendations.filter((server) => server.id !== serverId).slice(0, 4);
   const canonicalPath = buildServerPath(detail);
 
@@ -122,7 +117,7 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
       <ServerJsonLd
         detail={detail}
         stats={stats}
-        averageRating={averageRating}
+        reviewAggregate={reviews.aggregate}
         path={canonicalPath}
         siteUrl={siteUrl}
       />
@@ -132,7 +127,9 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
         detail={detail}
         stats={stats}
         updates={updates}
-        reviews={reviews}
+        reviews={reviews.items}
+        reviewAggregate={reviews.aggregate}
+        reviewNextCursor={reviews.nextCursor}
         referrals={referrals}
         recommendations={recommendedServers}
         currentReviewSort={currentReviewSort}

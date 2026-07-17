@@ -1,9 +1,9 @@
-import type { ServerDetail, ServerStats } from '@minewiki/schemas';
+import type { ServerDetail, ServerReviewAggregate, ServerStats } from '@minewiki/schemas';
 
 interface ServerJsonLdProps {
   readonly detail: ServerDetail;
   readonly stats?: ServerStats | null;
-  readonly averageRating?: number | null;
+  readonly reviewAggregate?: ServerReviewAggregate;
   readonly path: string;
   readonly siteUrl?: string;
 }
@@ -18,7 +18,7 @@ function toGameServerStatus(stats?: ServerStats | null): 'Online' | 'OnlineFull'
   return 'Online';
 }
 
-export function ServerJsonLd({ detail, stats, averageRating, path, siteUrl }: ServerJsonLdProps) {
+export function ServerJsonLd({ detail, stats, reviewAggregate, path, siteUrl }: ServerJsonLdProps) {
   const fullUrl = siteUrl ? new URL(path, siteUrl).toString() : undefined;
   const sameAs = [detail.websiteUrl, detail.discordUrl].filter(Boolean);
 
@@ -56,11 +56,11 @@ export function ServerJsonLd({ detail, stats, averageRating, path, siteUrl }: Se
     image: detail.bannerUrl
   };
 
-  if (averageRating !== undefined && averageRating !== null && detail.reviewsCount > 0) {
+  if (reviewAggregate && reviewAggregate.average !== null && reviewAggregate.total > 0) {
     payload.aggregateRating = {
       '@type': 'AggregateRating',
-      ratingValue: Number(averageRating.toFixed(1)),
-      reviewCount: detail.reviewsCount,
+      ratingValue: Number(reviewAggregate.average.toFixed(1)),
+      reviewCount: reviewAggregate.total,
       bestRating: 5,
       worstRating: 1
     };

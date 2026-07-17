@@ -1,7 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ReviewGateStatus as ApiReviewGateStatus, ServerReview } from '@minewiki/schemas';
+import type {
+  ReviewGateStatus as ApiReviewGateStatus,
+  ServerReview,
+  ServerReviewAggregate,
+  ServerReviewPage,
+} from '@minewiki/schemas';
 import { ReviewList } from '../reviews/review-list';
 import { ReviewGateHint } from '../reviews/review-gate-hint';
 import { ServerReviewsHeader } from './server-reviews-header';
@@ -25,10 +30,10 @@ interface ServerReviewSectionProps {
   readonly serverId: string;
   readonly serverPath?: string;
   readonly initialReviews: ServerReview[];
+  readonly initialAggregate: ServerReviewAggregate;
+  readonly initialNextCursor: string | null;
   readonly apiBaseUrl?: string;
   readonly trustLabelCopy: Record<string, string>;
-  readonly initialReviewCount: number;
-  readonly initialAverageRating: number | null;
   readonly availableTags: string[];
   readonly currentSort: 'wilson' | 'newest';
   readonly currentRating?: number;
@@ -41,10 +46,10 @@ export function ServerReviewSection({
   serverId,
   serverPath,
   initialReviews,
+  initialAggregate,
+  initialNextCursor,
   apiBaseUrl,
   trustLabelCopy,
-  initialReviewCount,
-  initialAverageRating,
   availableTags,
   currentSort,
   currentRating,
@@ -52,13 +57,12 @@ export function ServerReviewSection({
   ratingOptions,
   sortOptions
 }: ServerReviewSectionProps) {
-  const [reviewCount, setReviewCount] = useState(initialReviewCount);
-  const [averageRating, setAverageRating] = useState<number | null>(initialAverageRating);
+  const [aggregate, setAggregate] = useState(initialAggregate);
   const [latestReview, setLatestReview] = useState<ServerReview | null>(null);
   const [tags, setTags] = useState(availableTags);
   const [gateStatus, setGateStatus] = useState<ReviewGateStatus>(EMPTY_STATUS);
   const [reviews, setReviews] = useState(initialReviews);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
   const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
@@ -89,10 +93,24 @@ export function ServerReviewSection({
   }, [initialReviews]);
 
   useEffect(() => {
-    setReviewCount(initialReviewCount);
-    setAverageRating(initialAverageRating);
+    setAggregate(initialAggregate);
+    setNextCursor(initialNextCursor);
     setTags(availableTags);
-  }, [initialReviewCount, initialAverageRating, availableTags]);
+  }, [initialAggregate, initialNextCursor, availableTags]);
+
+  const refreshPublicAggregate = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `${baseUrl}/v1/servers/${serverId}/reviews/page?limit=1`,
+        { credentials: 'include' }
+      );
+      if (!response.ok) return;
+      const payload = (await response.json()) as ServerReviewPage;
+      setAggregate(payload.aggregate);
+    } catch (error) {
+      console.warn('공개 리뷰 집계 새로고침 실패', error);
+    }
+  }, [baseUrl, serverId]);
 
   const refreshOwnership = useCallback(async () => {
     try {
@@ -130,11 +148,7 @@ export function ServerReviewSection({
         const payload = (await response.json()) as ServerReview[];
         setReviews(payload);
         setNextCursor(null);
-        setReviewCount(payload.length);
         if (payload.length > 0) {
-          const average =
-            payload.reduce((sum, review) => sum + review.rating, 0) / payload.length;
-          setAverageRating(parseFloat(average.toFixed(2)));
           setTags((current) => {
             const next = new Set(current);
             payload.forEach((review) => review.tags.forEach((tag) => next.add(tag)));
@@ -170,9 +184,10 @@ export function ServerReviewSection({
         if (!response.ok) {
           return;
         }
-        const payload = (await response.json()) as { items: ServerReview[]; nextCursor: string | null };
+        const payload = (await response.json()) as ServerReviewPage;
         setReviews(payload.items);
         setNextCursor(payload.nextCursor);
+        setAggregate(payload.aggregate);
       } catch (error) {
         console.warn('뷰어 리뷰 로드 실패', error);
       }
@@ -189,14 +204,13 @@ export function ServerReviewSection({
   ]);
 
   const tagOptions = useMemo(() => tags, [tags]);
-  const ratingDistribution = useMemo(
-    () =>
-      reviews.reduce<Record<number, number>>((accumulator, review) => {
-        accumulator[review.rating] = (accumulator[review.rating] ?? 0) + 1;
-        return accumulator;
-      }, {}),
-    [reviews]
-  );
+  const ratingDistribution = useMemo<Record<number, number>>(() => ({
+    1: aggregate.histogram['1'],
+    2: aggregate.histogram['2'],
+    3: aggregate.histogram['3'],
+    4: aggregate.histogram['4'],
+    5: aggregate.histogram['5'],
+  }), [aggregate.histogram]);
   const canCompose =
     gateStatus.isLoggedIn && gateStatus.isMinecraftOwned && gateStatus.hasRecentVote;
   const composeLabel = gateStatus.isLoggedIn
@@ -224,17 +238,7 @@ export function ServerReviewSection({
       }
       return [review, ...current];
     });
-    setReviewCount((previousCount) => {
-      const nextCount = previousCount + 1;
-      setAverageRating((previousAverage) => {
-        if (previousAverage === null) {
-          return review.rating;
-        }
-        const updatedAverage = (previousAverage * previousCount + review.rating) / nextCount;
-        return Number.isFinite(updatedAverage) ? parseFloat(updatedAverage.toFixed(2)) : review.rating;
-      });
-      return nextCount;
-    });
+    void refreshPublicAggregate();
     setTags((current) => {
       const next = new Set(current);
       review.tags.forEach((tag) => next.add(tag));
@@ -245,13 +249,6 @@ export function ServerReviewSection({
   const handleReviewUpdated = (nextReview: ServerReview) => {
     setReviews((current) => {
       const next = current.map((item) => (item.id === nextReview.id ? nextReview : item));
-      const visibleAverage =
-        next.length > 0
-          ? next.reduce((sum, review) => sum + review.rating, 0) / next.length
-          : null;
-      setAverageRating(
-        visibleAverage === null ? null : parseFloat(visibleAverage.toFixed(2))
-      );
       setTags(() => {
         const unique = new Set<string>();
         next.forEach((review) => review.tags.forEach((tag) => unique.add(tag)));
@@ -259,19 +256,12 @@ export function ServerReviewSection({
       });
       return next;
     });
+    void refreshPublicAggregate();
   };
 
   const handleReviewDeleted = (deletedReview: ServerReview) => {
     setReviews((current) => {
       const next = current.filter((item) => item.id !== deletedReview.id);
-      const visibleAverage =
-        next.length > 0
-          ? next.reduce((sum, review) => sum + review.rating, 0) / next.length
-          : null;
-      setAverageRating(
-        visibleAverage === null ? null : parseFloat(visibleAverage.toFixed(2))
-      );
-      setReviewCount((previousCount) => Math.max(0, previousCount - 1));
       setTags(() => {
         const unique = new Set<string>();
         next.forEach((review) => review.tags.forEach((tag) => unique.add(tag)));
@@ -279,6 +269,7 @@ export function ServerReviewSection({
       });
       return next;
     });
+    void refreshPublicAggregate();
   };
 
   const loadMoreReviews = async () => {
@@ -299,12 +290,13 @@ export function ServerReviewSection({
         { credentials: 'include' }
       );
       if (!response.ok) throw new Error('failed to load more reviews');
-      const payload = (await response.json()) as { items: ServerReview[]; nextCursor: string | null };
+      const payload = (await response.json()) as ServerReviewPage;
       setReviews((current) => [
         ...current,
         ...payload.items.filter((review) => !current.some((item) => item.id === review.id))
       ]);
       setNextCursor(payload.nextCursor);
+      setAggregate(payload.aggregate);
     } catch (error) {
       console.warn('추가 리뷰 로드 실패', error);
     } finally {
@@ -315,8 +307,8 @@ export function ServerReviewSection({
   return (
     <section className="rounded-xl border border-[#30343b] bg-[#151922] p-6 md:p-8">
       <ServerReviewsHeader
-        reviewCount={reviewCount}
-        averageRating={averageRating}
+        reviewCount={aggregate.total}
+        averageRating={aggregate.average}
         ratingDistribution={ratingDistribution}
         composeLabel={composeLabel}
         composeDisabled={composerDisabled}

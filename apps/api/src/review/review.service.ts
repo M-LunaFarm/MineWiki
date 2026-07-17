@@ -5,7 +5,9 @@ import {
   reviewTagSchema,
   reviewVisibilitySchema,
   type ReviewGateStatus,
-  type ServerReview
+  type ServerReview,
+  type ServerReviewAggregate,
+  type ServerReviewPage
 } from '@minewiki/schemas';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -39,10 +41,7 @@ export interface ReviewPageOptions extends ReviewListOptions {
   readonly cursor?: string;
 }
 
-export interface ReviewPageResponse {
-  readonly items: ServerReview[];
-  readonly nextCursor: string | null;
-}
+export type ReviewPageResponse = ServerReviewPage;
 
 const REVIEW_TAG_SET = new Set(reviewTagSchema.options);
 const REVIEW_VISIBILITY_SET = new Set(reviewVisibilitySchema.options);
@@ -83,6 +82,36 @@ function calculateWilsonScore(rating: number): number {
   const centreAdjustment = (z * z) / (2 * total);
   const adjustedStandardDeviation = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * total)) / total);
   return Math.max(0, (p + centreAdjustment - adjustedStandardDeviation) / denominator);
+}
+
+function toReviewAggregate(
+  rows: Array<{ rating: number; _count: { _all: number } }>
+): ServerReviewAggregate {
+  const histogram: ServerReviewAggregate['histogram'] = {
+    '1': 0,
+    '2': 0,
+    '3': 0,
+    '4': 0,
+    '5': 0
+  };
+  let total = 0;
+  let ratingSum = 0;
+
+  for (const row of rows) {
+    const star = String(row.rating) as keyof typeof histogram;
+    if (!(star in histogram)) {
+      throw new InternalServerErrorException('유효하지 않은 공개 리뷰 평점이 있습니다.');
+    }
+    histogram[star] = row._count._all;
+    total += row._count._all;
+    ratingSum += row.rating * row._count._all;
+  }
+
+  return {
+    total,
+    average: total > 0 ? ratingSum / total : null,
+    histogram
+  };
 }
 
 @Injectable()
@@ -176,21 +205,32 @@ export class ReviewService {
             ]
           }
       : undefined;
-    const rows = await this.prisma.serverReview.findMany({
-      where: {
-        serverId,
-        visibility: 'public',
-        createdAt: { lte: snapshotAt },
-        updatedAt: { lte: snapshotAt },
-        rating: ratingFilter ?? undefined,
-        tags: tagFilter ? { array_contains: [tagFilter] } : undefined,
-        AND: positionFilter
-      },
-      orderBy: sort === 'newest'
-        ? [{ createdAt: 'desc' }, { id: 'desc' }]
-        : [{ rating: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
-      take: limit + 1
-    });
+    const publicSnapshotWhere = {
+      serverId,
+      visibility: 'public' as const,
+      createdAt: { lte: snapshotAt },
+      updatedAt: { lte: snapshotAt }
+    };
+    const [rows, aggregateRows] = await this.prisma.$transaction(async (transaction) => {
+      const pageRows = await transaction.serverReview.findMany({
+        where: {
+          ...publicSnapshotWhere,
+          rating: ratingFilter ?? undefined,
+          tags: tagFilter ? { array_contains: [tagFilter] } : undefined,
+          AND: positionFilter
+        },
+        orderBy: sort === 'newest'
+          ? [{ createdAt: 'desc' }, { id: 'desc' }]
+          : [{ rating: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1
+      });
+      const ratingGroups = await transaction.serverReview.groupBy({
+        by: ['rating'],
+        where: publicSnapshotWhere,
+        _count: { _all: true }
+      });
+      return [pageRows, ratingGroups] as const;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
     const last = pageRows.at(-1);
@@ -207,7 +247,8 @@ export class ReviewService {
             id: last.id,
             rating: last.rating
           })
-        : null
+        : null,
+      aggregate: toReviewAggregate(aggregateRows)
     };
   }
 

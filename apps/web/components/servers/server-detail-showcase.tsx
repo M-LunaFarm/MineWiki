@@ -4,6 +4,7 @@ import type {
   ServerDetail,
   ServerReferral,
   ServerReview,
+  ServerReviewAggregate,
   ServerStats,
   ServerSummary,
   ServerUpdate,
@@ -41,6 +42,8 @@ interface ServerDetailShowcaseProps {
   readonly stats: ServerStats | null;
   readonly updates: ServerUpdate[];
   readonly reviews: ServerReview[];
+  readonly reviewAggregate: ServerReviewAggregate;
+  readonly reviewNextCursor: string | null;
   readonly referrals: ServerReferral[];
   readonly recommendations: ServerSummary[];
   readonly apiBaseUrl?: string;
@@ -58,7 +61,7 @@ const TRUST_LABEL_COPY: Record<string, string> = {
 };
 
 const REVIEW_SORT_OPTIONS: Array<{ value: 'wilson' | 'newest'; label: string }> = [
-  { value: 'wilson', label: '추천 순' },
+  { value: 'wilson', label: '평점 순' },
   { value: 'newest', label: '최신 순' },
 ];
 
@@ -78,6 +81,8 @@ export function ServerDetailShowcase({
   stats,
   updates,
   reviews,
+  reviewAggregate,
+  reviewNextCursor,
   referrals,
   recommendations,
   apiBaseUrl,
@@ -86,10 +91,6 @@ export function ServerDetailShowcase({
   currentReviewTag,
   initialVoteOpen = false,
 }: ServerDetailShowcaseProps) {
-  const averageRating =
-    reviews.length > 0
-      ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length
-      : null;
   const availableTags = Array.from(
     new Set([
       ...reviews.flatMap((review) => review.tags),
@@ -317,10 +318,10 @@ export function ServerDetailShowcase({
                 serverId={serverId}
                 serverPath={serverPath}
                 initialReviews={reviews}
+                initialAggregate={reviewAggregate}
+                initialNextCursor={reviewNextCursor}
                 apiBaseUrl={apiBaseUrl}
                 trustLabelCopy={TRUST_LABEL_COPY}
-                initialReviewCount={detail.reviewsCount > 0 ? detail.reviewsCount : reviews.length}
-                initialAverageRating={averageRating}
                 availableTags={availableTags}
                 currentSort={currentReviewSort}
                 currentRating={currentReviewRating}
