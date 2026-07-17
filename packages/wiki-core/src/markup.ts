@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.19.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.20.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
