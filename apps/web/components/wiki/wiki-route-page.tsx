@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation';
-import { fetchWikiPageByPath, fetchWikiPublicProfile } from '../../lib/wiki-server-api';
+import { fetchWikiPageByPath, fetchWikiPublicProfile, fetchWikiPublicStats, fetchWikiRecent, fetchWikiSpecial } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiArticleView } from './wiki-article-view';
+import { WikiNamespaceFrontPage } from './wiki-namespace-front-page';
 import { ServerWikiArticleView } from './server-wiki-article-view';
 import { WikiUserProfileHeader, WikiUserProfileHub } from './wiki-user-profile-header';
 
@@ -32,5 +33,27 @@ export async function WikiRoutePage({ prefix, segments = [] }: WikiRoutePageProp
   if (prefix === 'server' && page.serverWiki) {
     return <ServerWikiArticleView page={page} routePath={routePath} />;
   }
+  if (page.title === '대문' && isStandardFrontPagePrefix(prefix)) {
+    const namespace = prefix === 'wiki' ? 'main' : prefix;
+    const [statsResult, recentResult, featuredResult] = await Promise.allSettled([
+      fetchWikiPublicStats(namespace),
+      fetchWikiRecent({ namespace }),
+      fetchWikiSpecial({ type: 'long', namespace, limit: 7 }),
+    ]);
+    const pageCount = statsResult.status === 'fulfilled' ? statsResult.value.pageCount : 0;
+    const recent = recentResult.status === 'fulfilled' ? recentResult.value.items : [];
+    const featured = featuredResult.status === 'fulfilled' ? featuredResult.value.items : [];
+    return (
+      <WikiArticleView
+        page={page}
+        routePath={routePath}
+        afterContent={<WikiNamespaceFrontPage namespace={namespace} routePath={routePath} pageCount={pageCount} recent={recent} featured={featured} showSearch={!page.html.includes('class="search-page"')} />}
+      />
+    );
+  }
   return <WikiArticleView page={page} routePath={routePath} />;
+}
+
+function isStandardFrontPagePrefix(prefix: WikiRoutePageProps['prefix']): boolean {
+  return !['server', 'user', 'category'].includes(prefix);
 }

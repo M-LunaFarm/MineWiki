@@ -240,6 +240,12 @@ export interface WikiRecentChangeListResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiPublicStatsResponse {
+  readonly pageCount: number;
+  readonly namespace: string | null;
+  readonly generatedAt: string;
+}
+
 export interface WikiSearchResult {
   readonly pageId: string;
   readonly namespace: string;

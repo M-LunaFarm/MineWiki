@@ -1023,6 +1023,33 @@ html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
   .wiki-rendered .front-wiki-component h2 {
     @apply mt-0;
   }
+  .wiki-rendered .front-wiki-intro {
+    @apply rounded-2xl border border-emerald-400/20 bg-gradient-to-br from-emerald-400/[0.08] via-white/[0.025] to-transparent px-5 py-6 sm:px-7 sm:py-8;
+  }
+  .wiki-rendered .front-wiki-intro p {
+    @apply mb-0 max-w-3xl text-base leading-8 text-slate-300;
+  }
+  .wiki-rendered .front-wiki-search .search-page {
+    @apply flex flex-col gap-3 sm:flex-row;
+  }
+  .wiki-rendered .front-wiki-search .search-page-input {
+    @apply min-h-12 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 text-base text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/60 focus:ring-2 focus:ring-emerald-300/10;
+  }
+  .wiki-rendered .front-wiki-search .search-page-submit {
+    @apply min-h-12 rounded-xl bg-[#14c794] px-6 text-sm font-bold text-[#06140d] transition hover:bg-[#1ee6a4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b0e12];
+  }
+  .wiki-rendered .front-wiki-card {
+    @apply my-3 rounded-xl border border-white/10 bg-white/[0.025] px-5 py-5 transition hover:border-emerald-300/30 hover:bg-emerald-400/[0.04];
+  }
+  .wiki-rendered .front-wiki-card h2 a {
+    @apply no-underline hover:text-emerald-200;
+  }
+  .wiki-rendered .front-wiki-card > p:last-child {
+    @apply mb-0;
+  }
+  .wiki-rendered .front-wiki-card-links {
+    @apply text-sm text-slate-500;
+  }
   .wiki-rendered .quick-actions {
     @apply mt-5 flex flex-wrap gap-2;
   }

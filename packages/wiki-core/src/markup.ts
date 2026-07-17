@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.18.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.19.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -127,6 +127,9 @@ const allowedTags = [
   'section',
   'nav',
   'aside',
+  'form',
+  'input',
+  'button',
   'details',
   'summary',
   'iframe',
@@ -393,9 +396,18 @@ function parseMarkupDocument(
 
     const inlineComponent = line.startsWith('{{{') ? null : line.match(/^\{\{(.+?)\}\}$/);
     if (inlineComponent) {
-      const name = componentNameMap[inlineComponent[1].trim()] ?? inlineComponent[1].trim();
-      ast.push({ type: 'component', name, props: {} });
-      components.push({ name, props: {} });
+      const [rawName = '', ...rawProps] = inlineComponent[1].split('|');
+      const props: Record<string, string> = {};
+      for (const rawProp of rawProps) {
+        const separator = rawProp.indexOf('=');
+        if (separator <= 0) continue;
+        const key = rawProp.slice(0, separator).trim();
+        const value = rawProp.slice(separator + 1).trim();
+        if (key && !(key in props)) props[key] = value;
+      }
+      const name = componentNameMap[rawName.trim()] ?? rawName.trim();
+      ast.push({ type: 'component', name, props });
+      components.push({ name, props });
       continue;
     }
 
@@ -1806,6 +1818,9 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       figcaption: ['class'],
       section: ['class'],
       nav: ['class', 'aria-label'],
+      form: ['class', 'action', 'method', 'role', 'aria-label'],
+      input: ['class', 'type', 'name', 'placeholder', 'aria-label', 'autocomplete'],
+      button: ['class', 'type'],
       blockquote: ['class'],
       caption: ['class'],
       span: ['class', 'style', 'title', 'id', 'aria-hidden', 'aria-label'],
@@ -2246,17 +2261,17 @@ function renderComponent(name: string, props: Record<string, string>, options: R
       props['기준'] ?? ''
     )}</span><small>${escapeHtml(props['사유'] ?? formatComponentValue('확인일', props['확인일'] ?? ''))}</small></aside>`;
   }
-  if (name === 'front_intro') return `<section class="front-wiki-component"><h2>${escapeHtml(props['제목'] ?? 'MineWiki')}</h2><p>${escapeHtml(props['설명'] ?? '')}</p></section>`;
-  if (name === 'front_search') return `<section class="front-wiki-component"><form class="search-page" action="/search" method="get"><input name="q" placeholder="${escapeAttr(props['예시'] ?? '검색')}"><button>검색</button></form></section>`;
+  if (name === 'front_intro') return `<section class="front-wiki-component front-wiki-intro"><h2>${escapeHtml(props['제목'] ?? 'MineWiki')}</h2><p>${escapeHtml(props['설명'] ?? '')}</p></section>`;
+  if (name === 'front_search') return `<section class="front-wiki-component front-wiki-search"><form class="search-page" action="/search" method="get" role="search" aria-label="위키 검색"><input class="search-page-input" type="search" name="q" placeholder="${escapeAttr(props['예시'] ?? '검색')}" aria-label="검색어" autocomplete="off"><button class="search-page-submit" type="submit">검색</button></form></section>`;
   if (name === 'front_card') {
     const links = Object.entries(props)
       .filter(([key, value]) => /^링크\d+$/.test(key) && value)
       .map(([, value]) => renderSearchLink(value))
       .join(' · ');
-    const target = props['대상'] ?? '/wiki';
+    const target = props['대상'] ?? props['링크'] ?? '/wiki';
     const title = props['제목'] ?? '문서';
     const heading = isSafeLocalHref(target) ? `<a href="${escapeAttr(target)}">${escapeHtml(title)}</a>` : renderInternalLink(target, title, options);
-    return `<section class="front-wiki-component"><h2>${heading}</h2><p>${escapeHtml(props['설명'] ?? '')}</p><p>${links}</p></section>`;
+    return `<section class="front-wiki-component front-wiki-card"><h2>${heading}</h2><p>${escapeHtml(props['설명'] ?? '')}</p>${links ? `<p class="front-wiki-card-links">${links}</p>` : ''}</section>`;
   }
   if (name === 'server_operator_notice') {
     const buttons = [1, 2]

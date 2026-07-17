@@ -55,6 +55,21 @@ test('parses links, categories, components, and safe HTML', () => {
   assert.equal(html.includes('class="wiki-link missing"'), true);
 });
 
+test('keeps front-page search interactive and supports legacy card link targets', () => {
+  const parsed = parseMarkup([
+    '{{대문 검색|예시=블록, 명령어, 서버 이름 검색}}',
+    '{{대문 카드|제목=서버 찾기|설명=인증된 서버를 확인하세요.|링크=/servers}}',
+  ].join('\n\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.match(html, /<form class="search-page" action="\/search" method="get" role="search" aria-label="위키 검색">/u);
+  assert.match(html, /<input class="search-page-input" type="search" name="q"[^>]+aria-label="검색어"/u);
+  assert.match(html, /<button class="search-page-submit" type="submit">검색<\/button>/u);
+  assert.match(html, /class="front-wiki-component front-wiki-card"/u);
+  assert.match(html, /<a href="\/servers">서버 찾기<\/a>/u);
+  assert.equal(html.includes('<form action="https://example.com">'), false);
+});
+
 test('renders nested inline markup and collects dependencies inside wrappers', () => {
   const parsed = parseMarkup("'''굵게 ''기울임 [[내부 문서]]''와 ~~취소 [[파일:아이콘.png|설명]]~~'''\n{{{#336699 색상 __밑줄 [math(x^2)]__}}}");
   const html = renderDocument(parsed.ast, {

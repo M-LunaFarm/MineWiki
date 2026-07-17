@@ -15,10 +15,19 @@ import type {
   WikiSpecialDocumentType,
   WikiPublicBlockHistoryResponse,
   WikiPublicProfileResponse,
+  WikiPublicStatsResponse,
   ServerWikiPresentation,
 } from './wiki-api';
 
 const API_BASE = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL);
+
+export async function fetchWikiPublicStats(namespace?: string): Promise<WikiPublicStatsResponse> {
+  const params = new URLSearchParams();
+  if (namespace) params.set('namespace', namespace);
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const response = await wikiFetch(`/v1/wiki/stats${suffix}`);
+  return readWikiResponse<WikiPublicStatsResponse>(response, 'Failed to load public wiki stats.');
+}
 
 export async function fetchWikiPageByPath(path: string): Promise<WikiPageResponse | null> {
   const params = new URLSearchParams({ path });
