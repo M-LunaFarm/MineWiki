@@ -731,6 +731,31 @@ test('renders NamuMark table captions and explicit header rows semantically', ()
   assert.match(html, /<tbody><tr><td>MineWiki<\/td><td>온라인<\/td><\/tr><\/tbody>/);
 });
 
+test('renders GitBook-style Markdown tables with alignment and mobile-safe wrappers', () => {
+  const parsed = parseMarkup([
+    '| 명령어 | 설명 | 상태 |',
+    '| :--- | :---: | ---: |',
+    '| `/spawn` | 스폰으로 이동 | 사용 가능 |',
+    '| `a|b` | 이스케이프 \\| 포함 | 점검 중 |',
+    '',
+    '표 다음 문단'
+  ].join('\n'));
+  const table = parsed.ast[0];
+
+  assert.equal(table?.type, 'wiki_table');
+  if (table?.type !== 'wiki_table') return;
+  assert.deepEqual(table.rows.map((row) => row.cells.map((cell) => cell.align)), [
+    ['left', 'center', 'right'],
+    ['left', 'center', 'right'],
+    ['left', 'center', 'right']
+  ]);
+  assert.equal(table.rows[2]?.cells[0]?.children[0]?.type, 'text');
+  assert.match(renderDocument(parsed.ast), /<div class="table-scroll"><table class="component-table wiki-table">/u);
+  assert.match(renderDocument(parsed.ast), /<thead><tr><th style="text-align:left">명령어<\/th>/u);
+  assert.match(renderDocument(parsed.ast), /이스케이프 \| 포함/u);
+  assert.equal(parsed.ast[1]?.type, 'paragraph');
+});
+
 test('preserves validated light and dark NamuMark table colors for theme switching', () => {
   const parsed = parseMarkup('||<tablebgcolor=#ffffff,#101418><tablecolor=black,white><tablebordercolor=#336699,#88aadd><bgcolor=#eeeeee,#202830><color=#112233,#ddeeff>테마 셀||');
   const table = parsed.ast[0];
