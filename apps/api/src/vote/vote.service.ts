@@ -20,8 +20,10 @@ import { BusinessEventService } from '../events/business-event.service';
 import { VoteStore } from './vote.store';
 import { PrismaService } from '../common/prisma.service';
 
+const normalizeMinecraftUsername = (value: string) =>
+  value.normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/gu, '').trim();
 const votePayloadSchema = z.object({
-  username: z.string().trim().regex(/^[A-Za-z0-9_]{3,16}$/),
+  username: z.string().transform(normalizeMinecraftUsername).pipe(z.string().regex(/^[A-Za-z0-9_]{3,16}$/)),
   captchaToken: z.string().trim().min(1).optional()
 });
 const minecraftUsernamePattern = /^[A-Za-z0-9_]{3,16}$/;

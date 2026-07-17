@@ -281,7 +281,12 @@ export const minecraftIdentitySchema = z.object({
   uuid: z.string().uuid(),
   playerName: z.string().min(1).optional(),
   msOwned: z.boolean(),
+  isPrimary: z.boolean().optional(),
   lastVerifiedAt: z.string().datetime(),
+});
+
+export const minecraftIdentityListSchema = z.object({
+  identities: z.array(minecraftIdentitySchema),
 });
 
 export const minecraftVerificationRequestSchema = z.object({
@@ -307,6 +312,7 @@ export const userAccountSchema = z.object({
   authProvider: authProviderSchema,
   createdAt: z.string().datetime(),
   minecraftIdentity: minecraftIdentitySchema.nullable(),
+  minecraftIdentities: z.array(minecraftIdentitySchema).optional(),
 });
 
 export const serverVerificationGradeSchema = z.enum(['Verified', 'Unverified']);

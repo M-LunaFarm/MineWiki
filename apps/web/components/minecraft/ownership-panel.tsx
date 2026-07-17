@@ -83,6 +83,7 @@ export function MinecraftOwnershipPanel() {
     ? requestedReturnTo
     : null;
   const [identity, setIdentity] = useState<MinecraftIdentity | null>(null);
+  const [identities, setIdentities] = useState<MinecraftIdentity[]>([]);
   const [playerName, setPlayerName] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'verifying' | 'loadingIdentity'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +91,6 @@ export function MinecraftOwnershipPanel() {
   const [isStarting, setIsStarting] = useState(false);
   const [isRevoking, setIsRevoking] = useState(false);
   const [flowStage, setFlowStage] = useState<FlowStage>('idle');
-  const [avatarIndex, setAvatarIndex] = useState(0);
   const [discordVerifyStatus, setDiscordVerifyStatus] = useState<string | null>(null);
   const [mergeTicketId, setMergeTicketId] = useState<string | null>(null);
   const [mergeRequestStatus, setMergeRequestStatus] = useState<string | null>(null);
@@ -104,15 +104,6 @@ export function MinecraftOwnershipPanel() {
     flowStage === 'callback' ||
     flowStage === 'verifying';
 
-  const avatarCandidates = useMemo(
-    () => (identity ? buildAvatarCandidates(identity.uuid) : []),
-    [identity],
-  );
-  const activeAvatarSrc = avatarCandidates[avatarIndex];
-  const avatarInitial = useMemo(() => {
-    const source = playerName ?? identity?.uuid ?? 'P';
-    return source.slice(0, 1).toUpperCase();
-  }, [identity?.uuid, playerName]);
 
   const performVerification = useCallback(
     async (details: { authorizationCode: string; state?: string }) => {
@@ -147,8 +138,14 @@ export function MinecraftOwnershipPanel() {
         }
 
         const data = (await response.json()) as MinecraftIdentity;
-        setIdentity(data);
-        setPlayerName(data.playerName ?? null);
+        setIdentities((current) => {
+          const next = [data, ...current.filter((item) => item.uuid !== data.uuid)];
+          return next.sort((left, right) => Number(Boolean(right.isPrimary)) - Number(Boolean(left.isPrimary)));
+        });
+        if (!identity || data.isPrimary) {
+          setIdentity(data);
+          setPlayerName(data.playerName ?? null);
+        }
         if (verifySessionId && verifyToken) {
           await completeDiscordVerifySession(verifySessionId, verifyToken, data);
           setDiscordVerifyStatus('Discord 검증 세션이 MineWiki 계정과 연결되었습니다.');
@@ -167,7 +164,7 @@ export function MinecraftOwnershipPanel() {
         setStatus('idle');
       }
     },
-    [verifySessionId, verifyToken],
+    [identity, verifySessionId, verifyToken],
   );
 
   const fetchIdentity = useCallback(async () => {
@@ -175,16 +172,9 @@ export function MinecraftOwnershipPanel() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/v1/minecraft/identity`, {
+      const response = await fetch(`${API_BASE_URL}/v1/minecraft/identities`, {
         credentials: 'include',
       });
-
-      if (response.status === 404) {
-        setIdentity(null);
-        setPlayerName(null);
-        setFlowStage('idle');
-        return;
-      }
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -193,14 +183,16 @@ export function MinecraftOwnershipPanel() {
         throw new Error(message);
       }
 
-      const data = (await response.json()) as MinecraftIdentity;
-      setIdentity(data);
-      setPlayerName(data.playerName ?? null);
-      if (verifySessionId && verifyToken) {
-        await completeDiscordVerifySession(verifySessionId, verifyToken, data);
+      const data = (await response.json()) as { identities: MinecraftIdentity[] };
+      const primary = data.identities.find((item) => item.isPrimary) ?? data.identities[0] ?? null;
+      setIdentities(data.identities);
+      setIdentity(primary);
+      setPlayerName(primary?.playerName ?? null);
+      if (primary && verifySessionId && verifyToken) {
+        await completeDiscordVerifySession(verifySessionId, verifyToken, primary);
         setDiscordVerifyStatus('Discord 검증 세션이 MineWiki 계정과 연결되었습니다.');
       }
-      setFlowStage('completed');
+      setFlowStage(primary ? 'completed' : 'idle');
     } catch (identityError) {
       setError(
         identityError instanceof Error
@@ -281,8 +273,14 @@ export function MinecraftOwnershipPanel() {
         }
         const nextIdentity = verifiedIdentity as MinecraftIdentity;
         oauthPopupRef.current = null;
-        setIdentity(nextIdentity);
-        setPlayerName(nextIdentity.playerName ?? null);
+        setIdentities((current) => {
+          const next = [nextIdentity, ...current.filter((item) => item.uuid !== nextIdentity.uuid)];
+          return next.sort((left, right) => Number(Boolean(right.isPrimary)) - Number(Boolean(left.isPrimary)));
+        });
+        if (!identity || nextIdentity.isPrimary) {
+          setIdentity(nextIdentity);
+          setPlayerName(nextIdentity.playerName ?? null);
+        }
         setPendingAuth(null);
         setError(null);
         setFlowStage('completed');
@@ -330,11 +328,7 @@ export function MinecraftOwnershipPanel() {
 
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [pendingAuth, performVerification, verifySessionId, verifyToken]);
-
-  useEffect(() => {
-    setAvatarIndex(0);
-  }, [identity?.uuid]);
+  }, [identity, pendingAuth, performVerification, verifySessionId, verifyToken]);
 
   const handleStartOAuth = useCallback(async () => {
     setError(null);
@@ -396,7 +390,7 @@ export function MinecraftOwnershipPanel() {
     }
   }, []);
 
-  const handleRevokeIdentity = useCallback(async () => {
+  const handleRevokeIdentity = useCallback(async (selectedIdentity: MinecraftIdentity) => {
     if (typeof window !== 'undefined') {
       const confirmed = window.confirm(
         'Minecraft 소유권 인증을 취소하면 인증 전용 기능(예: 소유권 요구 투표)이 제한될 수 있습니다. 계속할까요?',
@@ -410,7 +404,7 @@ export function MinecraftOwnershipPanel() {
     setIsRevoking(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/v1/minecraft/identity`, {
+      const response = await fetch(`${API_BASE_URL}/v1/minecraft/identities/${encodeURIComponent(selectedIdentity.uuid)}`, {
         method: 'DELETE',
         credentials: 'include',
         headers: await csrfHeaders(),
@@ -428,8 +422,16 @@ export function MinecraftOwnershipPanel() {
         throw new Error(message);
       }
 
-      setIdentity(null);
-      setPlayerName(null);
+      const remaining = identities.filter((item) => item.uuid !== selectedIdentity.uuid);
+      const selectedPrimary = remaining.find((item) => item.isPrimary) ?? remaining[0] ?? null;
+      const normalizedRemaining = remaining.map((item) => ({
+        ...item,
+        isPrimary: item.uuid === selectedPrimary?.uuid,
+      }));
+      const nextPrimary = normalizedRemaining.find((item) => item.isPrimary) ?? null;
+      setIdentities(normalizedRemaining);
+      setIdentity(nextPrimary);
+      setPlayerName(nextPrimary?.playerName ?? null);
       setPendingAuth(null);
       setFlowStage('idle');
     } catch (revokeError) {
@@ -441,7 +443,7 @@ export function MinecraftOwnershipPanel() {
     } finally {
       setIsRevoking(false);
     }
-  }, []);
+  }, [identities]);
 
   const currentStep = useMemo(() => {
     if (identity || flowStage === 'completed') {
@@ -502,27 +504,10 @@ export function MinecraftOwnershipPanel() {
                 <path d="M10.155 10.875H0.6v9.555h9.555v-9.555Z" fill="#00A4EF" />
                 <path d="M20.67 10.875h-9.555v9.555h9.555v-9.555Z" fill="#FFB900" />
               </svg>
-              {isStarting || status === 'loadingIdentity' ? '요청 중…' : 'Microsoft로 인증하기'}
+              {isStarting || status === 'loadingIdentity' ? '요청 중…' : identities.length > 0 ? 'Minecraft 계정 추가' : 'Microsoft로 인증하기'}
               <SquareArrowOutUpRight className="h-4 w-4" />
             </button>
 
-            {identity ? (
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-100 transition hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => void handleRevokeIdentity()}
-                disabled={isBusy}
-              >
-                {isRevoking ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    취소 중…
-                  </>
-                ) : (
-                  '소유권 인증 취소'
-                )}
-              </button>
-            ) : null}
           </div>
         </div>
 
@@ -604,45 +589,24 @@ export function MinecraftOwnershipPanel() {
           </div>
         ) : null}
 
-        {identity ? (
-          <div className="mt-6 flex flex-wrap items-center gap-4 border-t border-white/10 pt-6">
-            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded border border-white/15 bg-[#121212]">
-              {activeAvatarSrc ? (
-                <Image
-                  src={activeAvatarSrc}
-                  alt="Minecraft avatar"
-                  width={48}
-                  height={48}
-                  className="h-12 w-12 object-cover"
-                  unoptimized
-                  onError={() => {
-                    setAvatarIndex((current) =>
-                      current < avatarCandidates.length - 1 ? current + 1 : current,
-                    );
-                  }}
-                />
-              ) : (
-                <span className="text-sm font-semibold text-[#c8d3de]">{avatarInitial}</span>
-              )}
+        {identities.length > 0 ? (
+          <div className="mt-6 border-t border-white/10 pt-6">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-bold text-white">인증된 Minecraft 계정 {identities.length}개</p>
+              {returnTo ? <Link href={returnTo} className="inline-flex rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-bold text-[#07130d] transition hover:bg-[#35f29a]">리뷰 화면으로 돌아가기</Link> : null}
             </div>
-            <div>
-              <p className="flex items-center gap-2 text-sm font-bold text-white">
-                {playerName ?? identity.uuid.slice(0, 8)}
-                <span className="inline-flex items-center gap-1 rounded border border-[#13ec80]/40 bg-[#13ec80]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#13ec80]">
-                  <CheckCircle2 className="h-3 w-3" />
-                  VERIFIED
-                </span>
-              </p>
-              <p className="mt-0.5 font-mono text-[11px] text-[#8b97a6]">UUID: {identity.uuid}</p>
-              <p className="mt-0.5 text-[11px] text-[#8b97a6]">
-                최근 검증: {new Date(identity.lastVerifiedAt).toLocaleString('ko-KR')}
-              </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {identities.map((item) => (
+                <article key={item.uuid} className="flex min-w-0 items-center gap-3 rounded-lg border border-white/10 bg-[#121212] p-3">
+                  <Image src={buildAvatarCandidates(item.uuid)[0]!} alt={`${item.playerName ?? 'Minecraft'} avatar`} width={48} height={48} className="size-12 rounded object-cover" unoptimized />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 truncate text-sm font-bold text-white">{item.playerName ?? item.uuid.slice(0, 8)}<span className="inline-flex shrink-0 items-center gap-1 rounded border border-[#13ec80]/40 bg-[#13ec80]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#13ec80]"><CheckCircle2 className="size-3" />{item.isPrimary ? 'PRIMARY' : 'VERIFIED'}</span></p>
+                    <p className="mt-1 truncate font-mono text-[10px] text-[#8b97a6]">{item.uuid}</p>
+                  </div>
+                  <button type="button" onClick={() => void handleRevokeIdentity(item)} disabled={isBusy} className="shrink-0 rounded-md border border-red-500/30 px-2.5 py-2 text-[11px] font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-50">{isRevoking ? '처리 중' : '해제'}</button>
+                </article>
+              ))}
             </div>
-            {returnTo ? (
-              <Link href={returnTo} className="ml-auto inline-flex rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-bold text-[#07130d] transition hover:bg-[#35f29a]">
-                리뷰 화면으로 돌아가기
-              </Link>
-            ) : null}
           </div>
         ) : (
           <p className="mt-6 border-t border-white/10 pt-5 text-xs text-[#8b97a6]">

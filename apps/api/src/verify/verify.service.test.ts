@@ -80,7 +80,7 @@ if (!hasDatabase) {
       assert.equal(completed.status, 'sync_pending');
       assert.ok(completed.verificationUrl.includes(session.sessionId));
 
-      const identity = await prisma.minecraftIdentity.findUnique({
+      const identity = await prisma.minecraftIdentity.findFirst({
         where: { accountId: account.id }
       });
       assert.equal(identity?.uuid, minecraftUuid);

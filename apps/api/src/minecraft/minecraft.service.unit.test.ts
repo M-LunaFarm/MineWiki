@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { ConflictException } from '@nestjs/common';
 import { MinecraftService } from './minecraft.service';
 
 test('Microsoft authorization uses the fixed callback and keeps PKCE verifier server-side', async () => {
@@ -128,10 +127,12 @@ test('canonical account reads Minecraft identity stored on a linked account', as
           assert.deepEqual(input.where.accountId.in, [canonicalAccountId, linkedAccountId]);
           return [
             {
+              id: 1n,
               accountId: linkedAccountId,
               uuid: minecraftUuid,
               playerName: 'LinkedPlayer',
               msOwned: true,
+              isPrimary: true,
               lastVerifiedAt: new Date('2026-07-12T00:00:00.000Z'),
             },
           ];
@@ -162,10 +163,12 @@ test('a linked alias session reads the Minecraft identity on its canonical accou
       },
       minecraftIdentity: {
         findMany: async () => [{
+          id: 1n,
           accountId: canonicalAccountId,
           uuid: minecraftUuid,
           playerName: 'CanonicalPlayer',
           msOwned: true,
+          isPrimary: true,
           lastVerifiedAt: new Date('2026-07-12T00:00:00.000Z'),
         }],
       },
@@ -177,8 +180,9 @@ test('a linked alias session reads the Minecraft identity on its canonical accou
   assert.equal(identity.playerName, 'CanonicalPlayer');
 });
 
-test('canonical account fails closed when linked accounts contain multiple identities', async () => {
+test('canonical account selects the primary identity when multiple accounts are registered', async () => {
   const canonicalAccountId = randomUUID();
+  const primaryUuid = randomUUID();
   const service = new MinecraftService(
     {} as never,
     {} as never,
@@ -189,17 +193,16 @@ test('canonical account fails closed when linked accounts contain multiple ident
       },
       minecraftIdentity: {
         findMany: async () => [
-          { accountId: canonicalAccountId },
-          { accountId: randomUUID() },
+          { id: 1n, accountId: canonicalAccountId, uuid: primaryUuid, playerName: 'PrimaryPlayer', msOwned: true, isPrimary: true, lastVerifiedAt: new Date() },
+          { id: 2n, accountId: canonicalAccountId, uuid: randomUUID(), playerName: 'AltPlayer', msOwned: true, isPrimary: false, lastVerifiedAt: new Date() },
         ],
       },
     } as never,
   );
 
-  await assert.rejects(
-    () => service.getStoredIdentity(canonicalAccountId),
-    (error: unknown) => error instanceof ConflictException,
-  );
+  const identity = await service.getStoredIdentity(canonicalAccountId);
+  assert.equal(identity.uuid, primaryUuid);
+  assert.equal(identity.isPrimary, true);
 });
 
 test('revoking ownership clears identity and pending OAuth state across linked accounts', async () => {
@@ -217,6 +220,7 @@ test('revoking ownership clears identity and pending OAuth state across linked a
         findMany: async () => [{ id: canonicalAccountId }, { id: linkedAccountId }],
       },
       minecraftIdentity: {
+        findFirst: async () => null,
         deleteMany: (input: unknown) => {
           identityDeletes.push(input);
           return Promise.resolve({ count: 1 });
@@ -228,7 +232,21 @@ test('revoking ownership clears identity and pending OAuth state across linked a
           return Promise.resolve({ count: 1 });
         },
       },
-      $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
+      $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        minecraftIdentity: {
+          findFirst: async () => null,
+          deleteMany: (input: unknown) => {
+            identityDeletes.push(input);
+            return Promise.resolve({ count: 1 });
+          },
+        },
+        minecraftAuthorization: {
+          deleteMany: (input: unknown) => {
+            authorizationDeletes.push(input);
+            return Promise.resolve({ count: 1 });
+          },
+        },
+      }),
     } as never,
   );
 

@@ -45,7 +45,7 @@ function normalizeSiteKey(value: string | undefined): string | undefined {
 }
 
 function normalizeMinecraftUsername(value: string): string {
-  return value.trim();
+  return value.normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/gu, '').trim();
 }
 
 function isValidMinecraftUsername(value: string): boolean {
@@ -118,7 +118,9 @@ export function VoteModal({
     event.preventDefault();
     setError(null);
     setSuccess(null);
-    const normalizedUsername = normalizeMinecraftUsername(username);
+    const normalizedUsername = normalizeMinecraftUsername(
+      identityStatus === 'verified' ? identity?.playerName ?? username : username,
+    );
     if (!isValidMinecraftUsername(normalizedUsername)) {
       setError('닉네임은 영문/숫자/_ 조합으로 3~16자여야 합니다.');
       return;
