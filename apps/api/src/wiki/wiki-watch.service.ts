@@ -105,7 +105,10 @@ export class WikiWatchService {
     });
     const serverSpaces = [...new Set(pages.filter((page) => namespaces.find((item) => item.id === page.namespaceId)?.code === 'server').map((page) => page.spaceId))];
     const serverWikis = serverSpaces.length > 0
-      ? await this.prisma.serverWiki.findMany({ where: { spaceId: { in: serverSpaces } }, select: { spaceId: true, slug: true } })
+      ? await this.prisma.serverWiki.findMany({
+          where: { spaceId: { in: serverSpaces }, status: 'active' },
+          select: { spaceId: true, slug: true },
+        })
       : [];
     const pageById = new Map(readablePages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
@@ -116,6 +119,7 @@ export class WikiWatchService {
       if (!page || page.status === 'deleted') continue;
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
       const serverSlug = serverSlugBySpace.get(page.spaceId);
+      if (namespace === 'server' && !serverSlug) continue;
       visible.push({ watch, item: {
         pageId: page.id.toString(),
         title: page.displayTitle,

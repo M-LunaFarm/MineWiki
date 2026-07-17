@@ -2129,7 +2129,7 @@ export class WikiReadService {
       return null;
     }
     const serverWiki = await this.prisma.serverWiki.findFirst({
-      where: { spaceId },
+      where: { spaceId, status: 'active' },
       select: {
         id: true,
         voteServerId: true,
