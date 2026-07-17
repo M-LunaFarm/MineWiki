@@ -1830,6 +1830,46 @@ model ServerWikiLayoutEntitlement {
   @@map("server_wiki_layout_entitlements")
 }
 
+model PaddleWebhookEvent {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  providerEventId String    @map("provider_event_id") @db.VarChar(64)
+  environment     String    @db.VarChar(16)
+  eventType       String    @map("event_type") @db.VarChar(64)
+  occurredAt      DateTime  @map("occurred_at")
+  status          String    @default("received") @db.VarChar(24)
+  payload         Json
+  attempts        Int       @default(1) @db.UnsignedInt
+  lastError       String?   @map("last_error") @db.Text
+  receivedAt      DateTime  @default(now()) @map("received_at")
+  processedAt     DateTime? @map("processed_at")
+
+  @@unique([environment, providerEventId], map: "uq_paddle_webhook_environment_event")
+  @@index([status, receivedAt], map: "idx_paddle_webhook_status_received")
+  @@index([eventType, occurredAt], map: "idx_paddle_webhook_type_occurred")
+  @@map("paddle_webhook_events")
+}
+
+model PaddleSubscriptionShadow {
+  id                     BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  environment            String    @db.VarChar(16)
+  providerSubscriptionId String    @map("provider_subscription_id") @db.VarChar(64)
+  providerCustomerId     String?   @map("provider_customer_id") @db.VarChar(64)
+  status                 String    @db.VarChar(32)
+  nextBilledAt           DateTime? @map("next_billed_at")
+  currentPeriodStartsAt  DateTime? @map("current_period_starts_at")
+  currentPeriodEndsAt    DateTime? @map("current_period_ends_at")
+  scheduledChange        Json?     @map("scheduled_change")
+  lastEventId            String    @map("last_event_id") @db.VarChar(64)
+  lastEventOccurredAt    DateTime  @map("last_event_occurred_at")
+  lastPayload            Json      @map("last_payload")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@unique([environment, providerSubscriptionId], map: "uq_paddle_subscription_environment_id")
+  @@index([status, updatedAt], map: "idx_paddle_subscription_status_updated")
+  @@map("paddle_subscription_shadows")
+}
+
 model ModWiki {
   id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   spaceId           BigInt    @map("space_id") @db.UnsignedBigInt

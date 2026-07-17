@@ -17,7 +17,8 @@ async function bootstrap(): Promise<void> {
     AppModule,
     new FastifyAdapter({ logger: false }),
     {
-      bufferLogs: true
+      bufferLogs: true,
+      rawBody: true
     }
   );
 

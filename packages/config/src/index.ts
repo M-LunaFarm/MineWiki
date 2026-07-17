@@ -71,6 +71,10 @@ const envSchema = z.object({
   ACCOUNT_LINKING_ENABLED: z.string().optional(),
   APP_ENCRYPTION_KEY: z.string().optional(),
   WEB_PUSH_ENABLED: z.string().optional(),
+  PADDLE_MODE: z.enum(['off', 'shadow']).default('off'),
+  PADDLE_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
+  PADDLE_WEBHOOK_SECRET: z.string().optional(),
+  PADDLE_WEBHOOK_TOLERANCE_SECONDS: z.coerce.number().int().min(1).max(300).default(5),
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().optional(),
@@ -265,6 +269,9 @@ function validateProductionEnvironment(env: EnvSchema): void {
     );
     validateMicrosoftRedirectUri(env, failures);
     validateOptionalGroup(env, ['SMTP_USER', 'SMTP_PASS'], 'SMTP authentication', failures);
+    if (env.PADDLE_MODE === 'shadow' && isBlank(env.PADDLE_WEBHOOK_SECRET)) {
+      failures.push('PADDLE_WEBHOOK_SECRET is required when PADDLE_MODE is shadow');
+    }
   }
 
   validateWebPushConfiguration(env, failures);
