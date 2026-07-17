@@ -944,6 +944,25 @@ test('renders sanitized GitBook HTML tables only in GitBook compatibility mode',
   assert.equal(html.includes('data-header-hidden'), false);
 });
 
+test('renders safe GitBook Markdown links without leaking raw syntax or macro warnings', () => {
+  const parsed = parseMarkup([
+    '[rules](/server/example/notice/rules)',
+    '[connectable.md](/server/example/notice/rules/connectable)',
+    '[공식 사이트](https://example.com/docs)',
+    '[위험](javascript:alert(1))',
+    '![이미지](https://example.com/image.png)'
+  ].join('\n'), { gitBookMarkdown: true });
+  const html = renderDocument(parsed.ast);
+
+  assert.match(html, /<a href="\/server\/example\/notice\/rules">rules<\/a>/u);
+  assert.match(html, /<a href="\/server\/example\/notice\/rules\/connectable">connectable\.md<\/a>/u);
+  assert.match(html, /href="https:\/\/example\.com\/docs" rel="nofollow noopener" target="_blank">공식 사이트<\/a>/u);
+  assert.equal(html.includes('지원하지 않는 매크로'), false);
+  assert.equal(html.includes('](/server/'), false);
+  assert.equal(html.includes('javascript:'), false);
+  assert.match(html, /!\[이미지\]\(https:\/\/example\.com\/image\.png\)/u);
+});
+
 test('preserves validated light and dark NamuMark table colors for theme switching', () => {
   const parsed = parseMarkup('||<tablebgcolor=#ffffff,#101418><tablecolor=black,white><tablebordercolor=#336699,#88aadd><bgcolor=#eeeeee,#202830><color=#112233,#ddeeff>테마 셀||');
   const table = parsed.ast[0];

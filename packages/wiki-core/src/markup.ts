@@ -1734,7 +1734,7 @@ function parseInline(
   nestingDepth = 0
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
-  const pattern = /(?<file>\[\[파일:(?<fileBody>[^\]]+)\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>[^\]]+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<literal>\{\{\{(?<literalText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)|(?<escape>\\(?<escapedChar>[\s\S]))/gu;
+  const pattern = /(?<file>\[\[파일:(?<fileBody>[^\]]+)\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>[^\]]+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<literal>\{\{\{(?<literalText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<markdownImage>!\[(?<markdownImageLabel>[^\]\n]*)\]\((?<markdownImageHref>[^)\s\n]+)\))|(?<markdownLink>\[(?<markdownLabel>[^\]\n]+)\]\((?<markdownHref>[^)\s\n]+)\))|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)|(?<escape>\\(?<escapedChar>[\s\S]))/gu;
   const nested = (value: string): InlineNode[] => nestingDepth >= MAX_INLINE_NESTING
     ? [{ type: 'text', text: value }]
     : parseInline(value, links, errors, blockingErrors, footnotes, linkResolution, nestingDepth + 1);
@@ -1787,6 +1787,16 @@ function parseInline(
     } else if (group.external !== undefined) {
       const href = group.externalHref ?? '';
       nodes.push({ type: 'external_link', href, label: group.externalLabel ?? href });
+    } else if (group.markdownImage !== undefined) {
+      nodes.push({ type: 'text', text: group.markdownImage });
+    } else if (group.markdownLink !== undefined) {
+      const href = group.markdownHref ?? '';
+      const label = group.markdownLabel ?? href;
+      if (/^(?:https?:\/\/|mailto:)/iu.test(href) || isSafeLocalHref(href)) {
+        nodes.push({ type: 'external_link', href, label });
+      } else {
+        nodes.push({ type: 'text', text: label });
+      }
     } else if (group.macro !== undefined) {
       const name = (group.macroName ?? '').slice(0, 64);
       const macro = parseSafeInlineMacro(name, group.macroArgs, errors);
