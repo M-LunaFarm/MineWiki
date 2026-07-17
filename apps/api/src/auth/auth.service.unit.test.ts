@@ -131,6 +131,69 @@ test('password change rejects reusing the current password', async () => {
   assert.equal(transactionCalled, false);
 });
 
+test('password reset revokes reset tokens and sessions across the canonical account group', async () => {
+  const aliasAccountId = randomUUID();
+  const canonicalAccountId = randomUUID();
+  const accountIds = [aliasAccountId, canonicalAccountId].sort();
+  const resetDeletes: unknown[] = [];
+  let revokedSessionsInput: unknown;
+  const prisma = {
+    account: {
+      findMany: async () => [
+        { id: aliasAccountId, canonicalAccountId },
+        { id: canonicalAccountId, canonicalAccountId: null },
+      ],
+      count: async () => 2,
+      updateMany: async () => ({ count: 1 }),
+    },
+    accountLink: { findMany: async () => [] },
+    passwordReset: {
+      deleteMany: async (input: unknown) => {
+        resetDeletes.push(input);
+        return { count: resetDeletes.length === 1 ? 1 : 0 };
+      },
+    },
+    session: {
+      deleteMany: async (input: unknown) => {
+        revokedSessionsInput = input;
+        return { count: 2 };
+      },
+    },
+    $queryRaw: async () => accountIds.map((id) => ({ id })),
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+  };
+  const service = new AuthService(
+    {} as never,
+    {} as never,
+    prisma as never,
+    {} as never,
+    new ConfigService({} as NodeJS.ProcessEnv),
+    {} as never,
+  );
+  (service as unknown as {
+    resolvePasswordReset(token: string): Promise<{
+      accountId: string;
+      email: string;
+      storedToken: string;
+      expiresAt: Date;
+    }>;
+  }).resolvePasswordReset = async () => ({
+    accountId: aliasAccountId,
+    email: 'linked@example.com',
+    storedToken: 'stored-reset-token',
+    expiresAt: new Date('2030-01-01T00:00:00.000Z'),
+  });
+
+  await service.resetPassword('plain-reset-token', 'ChangedPW1!');
+
+  assert.deepEqual(resetDeletes[1], {
+    where: { accountId: { in: accountIds } },
+  });
+  assert.deepEqual(revokedSessionsInput, {
+    where: { accountId: { in: accountIds } },
+  });
+});
+
 test('avatar upload uses canonical file service metadata path', async () => {
   const account = {
     id: randomUUID(),

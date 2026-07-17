@@ -427,7 +427,7 @@ export class AuthService {
     const reset = await this.resolvePasswordReset(normalizedToken);
     const passwordHash = await hash(newPassword, ARGON_OPTIONS);
     const resetAt = new Date();
-    await withActiveCanonicalAccountGroup(this.prisma, [reset.accountId], async (transaction) => {
+    await withActiveCanonicalAccountGroup(this.prisma, [reset.accountId], async (transaction, group) => {
       const claimed = await transaction.passwordReset.deleteMany({
         where: {
           token: reset.storedToken,
@@ -453,10 +453,10 @@ export class AuthService {
       }
 
       await transaction.passwordReset.deleteMany({
-        where: { accountId: reset.accountId },
+        where: { accountId: { in: [...group.accountIds] } },
       });
       await transaction.session.deleteMany({
-        where: { accountId: reset.accountId },
+        where: { accountId: { in: [...group.accountIds] } },
       });
     });
     return { success: true };
