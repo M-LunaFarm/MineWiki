@@ -5,7 +5,16 @@ import type { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiIncludeService } from './wiki-include.service';
-import { buildServerWikiNavigation, buildServerWikiPagePath, buildServerWikiToolPath, encodeWikiSearchCursor, parseWikiSearchCursor, serverWikiNavigationDepth, WikiReadService } from './wiki-read.service';
+import {
+  buildServerWikiNavigation,
+  buildServerWikiPagePath,
+  buildServerWikiToolPath,
+  encodeWikiSearchCursor,
+  parseWikiSearchCursor,
+  serverWikiIdentityConflicts,
+  serverWikiNavigationDepth,
+  WikiReadService,
+} from './wiki-read.service';
 
 test('public pagecount filters revisions, ACLs, and namespaces without request-specific address context', async () => {
   const pages = [
@@ -238,6 +247,66 @@ test('public server wiki rendering fails closed when a persisted premium layout 
   }];
   const entitled = await service.findServerWikiContext('server', 7n, 9n, {});
   assert.equal(entitled?.context.layout, 'brand');
+});
+
+test('server wiki identity fails closed only when both the linked name and host conflict', async () => {
+  assert.equal(serverWikiIdentityConflicts(
+    { serverName: ' Luna Farm ', host: 'PLAY.EXAMPLE.TEST.' },
+    { name: 'luna farm', joinHost: 'play.example.test' },
+  ), false);
+  assert.equal(serverWikiIdentityConflicts(
+    { serverName: '이전 이름', host: 'play.example.test' },
+    { name: '새 이름', joinHost: 'play.example.test' },
+  ), false);
+  assert.equal(serverWikiIdentityConflicts(
+    { serverName: '루나팜', host: 'lunaf.kr' },
+    { name: 'CreeperWiki', joinHost: 'creeper.wiki' },
+  ), true);
+
+  const prisma = {
+    serverWiki: {
+      async findFirst() {
+        return {
+          id: 6n,
+          voteServerId: 'ac256525-0000-0000-0000-000000000000',
+          serverName: '루나팜',
+          slug: '4cfjfkz-ac256525',
+          siteSlug: 'lunafarm',
+          host: 'lunaf.kr',
+          port: 25565,
+          edition: 'java',
+          supportedVersions: '1.21',
+          genres: 'survival',
+          layoutKey: 'docs',
+        };
+      },
+    },
+    server: {
+      async findUnique() {
+        return {
+          id: 'ac256525-0000-0000-0000-000000000000',
+          shortCode: '4cfjfkz',
+          name: 'CreeperWiki',
+          joinHost: 'creeper.wiki',
+          joinPort: 25565,
+          edition: 'java',
+          isOnline: true,
+          playersOnline: 10,
+          playersMax: 100,
+        };
+      },
+    },
+    serverWikiLayoutEntitlement: { async findMany() { return []; } },
+    wikiPage: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const service = new WikiReadService(prisma, {} as WikiPermissionService) as unknown as {
+    findServerWikiContext(namespace: string, spaceId: bigint, pageId: bigint, access: unknown): Promise<unknown>;
+  };
+
+  await assert.rejects(
+    () => service.findServerWikiContext('server', 5643n, 740n, {}),
+    /Server wiki not found/u,
+  );
 });
 
 test('server wiki navigation removes the duplicated space slug', () => {

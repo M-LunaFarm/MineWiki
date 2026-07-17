@@ -2313,6 +2313,10 @@ export class WikiReadService {
             select: {
               id: true,
               shortCode: true,
+              name: true,
+              joinHost: true,
+              joinPort: true,
+              edition: true,
               isOnline: true,
               playersOnline: true,
               playersMax: true
@@ -2337,6 +2341,9 @@ export class WikiReadService {
           })
         : Promise.resolve([]),
     ]);
+    if (server && serverWikiIdentityConflicts(serverWiki, server)) {
+      throw new NotFoundException('Server wiki not found.');
+    }
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
     const publicRevisions = currentRevisionIds.length > 0
       ? await this.prisma.wikiPageRevision.findMany({
@@ -2359,12 +2366,12 @@ export class WikiReadService {
     return {
       directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
       context: {
-        name: serverWiki.serverName,
+        name: server?.name ?? serverWiki.serverName,
         slug: siteSlug,
         contentSlug: serverWiki.slug,
-        host: serverWiki.host,
-        port: serverWiki.port,
-        edition: serverWiki.edition,
+        host: server?.joinHost ?? serverWiki.host,
+        port: server?.joinPort ?? serverWiki.port,
+        edition: server?.edition ?? serverWiki.edition,
         supportedVersions: serverWiki.supportedVersions,
         genres: serverWiki.genres,
         isOnline: server?.isOnline ?? null,
@@ -2507,6 +2514,31 @@ export function buildServerWikiToolPath(serverSlug: string, localPath: string, t
 export function serverWikiNavigationDepth(serverSlug: string, localPath: string): number {
   const relativePath = serverWikiRelativePath(serverSlug, localPath);
   return relativePath ? relativePath.split('/').filter(Boolean).length : 0;
+}
+
+export function serverWikiIdentityConflicts(
+  wiki: { serverName: string; host: string | null },
+  server: { name: string; joinHost: string },
+): boolean {
+  const wikiName = normalizeServerIdentityValue(wiki.serverName);
+  const serverName = normalizeServerIdentityValue(server.name);
+  const wikiHost = normalizeServerHost(wiki.host);
+  const serverHost = normalizeServerHost(server.joinHost);
+  return wikiName.length > 0
+    && serverName.length > 0
+    && wikiHost.length > 0
+    && serverHost.length > 0
+    && wikiName !== serverName
+    && wikiHost !== serverHost;
+}
+
+function normalizeServerIdentityValue(value: string): string {
+  return value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
+}
+
+function normalizeServerHost(value: string | null): string {
+  if (!value) return '';
+  return normalizeServerIdentityValue(value).replace(/\.+$/u, '');
 }
 
 export function buildServerWikiNavigation(
