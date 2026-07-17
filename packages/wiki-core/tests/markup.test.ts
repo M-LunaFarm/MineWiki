@@ -506,14 +506,15 @@ test('limits recursive blockquotes independently', () => {
   assert.equal(parsed.blockingErrors.includes('인용문 중첩 제한을 초과했습니다.'), true);
 });
 
-test('duplicate heading anchors are blocking markup errors', () => {
+test('repeated heading titles receive stable structural anchors without blocking edits', () => {
   const parsed = parseMarkup('== Intro ==\n첫 번째\n\n===== Intro =====\n두 번째');
+  const html = renderDocument(parsed.ast);
 
-  assert.equal(parsed.headings.filter((heading) => heading.anchor === 'Intro').length, 2);
-  assert.equal(
-    parsed.blockingErrors.some((error) => error.includes('중복 제목 앵커')),
-    true,
-  );
+  assert.deepEqual(parsed.headings.map((heading) => heading.anchor), ['s-1', 's-1.0.0.1']);
+  assert.equal(parsed.blockingErrors.some((error) => error.includes('중복 제목 앵커')), false);
+  assert.equal((html.match(/id="Intro"/gu) ?? []).length, 1);
+  assert.match(html, /<h2 id="s-1"><span class="wiki-anchor" id="Intro"><\/span>Intro<\/h2>/u);
+  assert.match(html, /<h5 id="s-1\.0\.0\.1">Intro<\/h5>/u);
 });
 
 test('parses all canonical NamuMark heading levels without truncating delimiters', () => {
@@ -541,7 +542,7 @@ test('parses all canonical NamuMark heading levels without truncating delimiters
 
   const html = renderDocument(parsed.ast);
   for (const [level, title] of ['첫째', '둘째', '셋째', '넷째', '다섯째', '여섯째'].entries()) {
-    assert.match(html, new RegExp(`<h${level + 1} id="[^"]+">${title}<\\/h${level + 1}>`));
+    assert.match(html, new RegExp(`<h${level + 1} id="s-[^"]+"><span class="wiki-anchor" id="${title}"></span>${title}<\\/h${level + 1}>`));
   }
   assert.match(html, /wiki-toc-level-1[^]*?<span>1<\/span>첫째/);
   assert.match(html, /wiki-toc-level-6[^]*?<span>1\.1\.1\.1\.1\.1<\/span>여섯째/);
@@ -569,8 +570,8 @@ test('renders canonical folded headings as closed content sections', () => {
   ]);
   assert.equal(parsed.ast[0]?.type, 'heading');
   if (parsed.ast[0]?.type === 'heading') assert.equal(parsed.ast[0].folded, true);
-  assert.match(html, /<details class="wiki-heading-section"><summary class="wiki-heading-summary"><h2 id="접힌-제목">접힌 제목<\/h2><\/summary><div class="wiki-heading-content"><p>숨겨진 본문<\/p><\/div><\/details>/);
-  assert.match(html, /<\/details>\n<h3 id="하위-제목">하위 제목<\/h3>\n<p>하위 본문<\/p>/);
+  assert.match(html, /<details class="wiki-heading-section"><summary class="wiki-heading-summary"><h2 id="s-1"><span class="wiki-anchor" id="접힌-제목"><\/span>접힌 제목<\/h2><\/summary><div class="wiki-heading-content"><p>숨겨진 본문<\/p><\/div><\/details>/);
+  assert.match(html, /<\/details>\n<h3 id="s-1\.1"><span class="wiki-anchor" id="하위-제목"><\/span>하위 제목<\/h3>\n<p>하위 본문<\/p>/);
 });
 
 test('folded headings remain in the table of contents and reject malformed markers', () => {
@@ -579,7 +580,7 @@ test('folded headings remain in the table of contents and reject malformed marke
 
   assert.deepEqual(parsed.headings.map((heading) => heading.title), ['최상위 접기']);
   assert.match(html, /wiki-toc-level-1[^]*?최상위 접기/);
-  assert.equal(html.includes('<h2 id="한쪽만">'), false);
+  assert.equal(html.includes('id="한쪽만"'), false);
   assert.match(html, /<p>본문<br \/>==# 한쪽만 ==<\/p>/);
 });
 
@@ -839,7 +840,7 @@ test('renders sanitized GitBook HTML tables only in GitBook compatibility mode',
   assert.match(escaped, /&lt;table data-header-hidden&gt;/u);
   assert.equal(parsed.ast[0]?.type, 'heading');
   assert.equal(parsed.ast[1]?.type, 'wiki_table');
-  assert.match(html, /<h1 id="서버-안내">서버 안내<\/h1>/u);
+  assert.match(html, /<h1 id="s-1"><span class="wiki-anchor" id="서버-안내"><\/span>서버 안내<\/h1>/u);
   assert.match(html, /<div class="table-scroll"><table class="component-table wiki-table wiki-table-header-hidden">/u);
   assert.match(html, /<th style="width:184px"><\/th>/u);
   assert.match(html, /<td colspan="2"><code>\/spawn<\/code><\/td>/u);

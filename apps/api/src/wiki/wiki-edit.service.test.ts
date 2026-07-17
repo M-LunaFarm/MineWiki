@@ -217,10 +217,10 @@ test('namespace-aware moves update a whole subtree and rebuild every current ind
 
 test('section ranges are derived from server-parsed heading anchors', () => {
   const content = '서문\r\n== 소개 ==\r\n소개 본문\r\n=== 세부 ===\r\n세부 본문\r\n== 마무리 ==\r\n마지막';
-  const section = sectionByAnchor(content, '소개');
+  const section = sectionByAnchor(content, 's-1');
 
   assert.deepEqual(section, {
-    anchor: '소개',
+    anchor: 's-1',
     title: '소개',
     contentRaw: '== 소개 ==\n소개 본문',
     startLine: 2,
@@ -231,8 +231,8 @@ test('section ranges are derived from server-parsed heading anchors', () => {
 
 test('section replacement preserves every adjacent line and supports the final section', () => {
   const content = '서문\n== 소개 ==\n이전\n== 마무리 ==\n마지막';
-  const replaced = replaceSectionByAnchor(content, '소개', '== 소개 ==\n수정');
-  const final = replaceSectionByAnchor(replaced ?? '', '마무리', '== 결론 ==\n완료');
+  const replaced = replaceSectionByAnchor(content, 's-1', '== 소개 ==\n수정');
+  const final = replaceSectionByAnchor(replaced ?? '', 's-2', '== 결론 ==\n완료');
 
   assert.equal(replaced, '서문\n== 소개 ==\n수정\n== 마무리 ==\n마지막');
   assert.equal(final, '서문\n== 소개 ==\n수정\n== 결론 ==\n완료');
@@ -595,7 +595,7 @@ test('section edit checks read, raw, and edit ACL before returning source', asyn
   } as unknown as WikiPermissionService;
   const service = new WikiEditService(prisma, profiles, permissions);
 
-  const section = await service.getSectionForEdit(session('account'), '7', '소개');
+  const section = await service.getSectionForEdit(session('account'), '7', 's-1');
 
   assert.equal(section.contentRaw, '== 소개 ==\n본문');
   assert.equal(section.baseRevisionId, '11');
@@ -627,13 +627,13 @@ test('section edit rebuilds the full document and delegates final validation to 
     return { pageId: '7', revisionId: '12', revisionNo: 2, namespace: 'main', title: '문서', slug: '문서' };
   };
 
-  const result = await service.updateSection(session('account'), '7', '소개', {
+  const result = await service.updateSection(session('account'), '7', 's-1', {
     contentRaw: '== 새 소개 ==\n수정',
     editSummary: '섹션 수정',
     baseRevisionId: '11'
   });
 
-  assert.equal(result.sectionAnchor, '새-소개');
+  assert.equal(result.sectionAnchor, 's-1');
   assert.equal(delegated?.contentRaw, '서문\n== 새 소개 ==\n수정\n== 다음 ==\n보존');
   assert.equal(delegated?.baseRevisionId, '11');
   assert.equal(delegated?.editSummary, '섹션 수정');
@@ -657,11 +657,11 @@ test('section edit rejects foreign bases and replacement without a heading', asy
   const service = new WikiEditService(prisma, profiles, permissions);
 
   await assert.rejects(
-    service.updateSection(session('account'), '7', '소개', { contentRaw: '== 소개 ==\n수정', baseRevisionId: '10' }),
+    service.updateSection(session('account'), '7', 's-1', { contentRaw: '== 소개 ==\n수정', baseRevisionId: '10' }),
     /Base revision does not match this document/
   );
   await assert.rejects(
-    service.updateSection(session('account'), '7', '소개', { contentRaw: '제목 없음', baseRevisionId: '11' }),
+    service.updateSection(session('account'), '7', 's-1', { contentRaw: '제목 없음', baseRevisionId: '11' }),
     /must begin with a wiki heading/
   );
 });

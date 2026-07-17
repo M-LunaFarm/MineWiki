@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.21.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.22.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -541,15 +541,12 @@ function parseMarkupDocument(
   }
 
   const headings = ast.filter((node): node is Extract<AstNode, { type: 'heading' }> => node.type === 'heading');
-  const seenHeadings = new Set<string>();
   headings.forEach((heading, index) => {
     const next = headings[index + 1];
     heading.endLine = (next?.startLine ?? lines.length + 1) - 1;
-    if (seenHeadings.has(heading.id)) {
-      blockingErrors.push(`중복 제목 앵커가 있습니다: ${heading.text}`);
-    }
-    seenHeadings.add(heading.id);
   });
+
+  if (foldingDepth === 0) assignStructuralHeadingIds(ast);
 
   if (foldingDepth === 0) {
     if (!components.some((component) => component.name === 'document_status')) {
@@ -1637,7 +1634,12 @@ export function applyIncludeParametersToAst(
   return ast.map((node): AstNode => {
     if (node.type === 'heading') {
       const text = replace(node.text);
-      return { ...node, text, id: `${headingPrefix}${makeHeadingId(text)}` };
+      return {
+        ...node,
+        text,
+        id: `${headingPrefix}${node.id}`,
+        ...(node.legacyId ? { legacyId: `${headingPrefix}${makeHeadingId(text)}` } : {})
+      };
     }
     if (node.type === 'paragraph') return { ...node, children: inline(node.children) };
     if (node.type === 'blockquote') return {
@@ -2087,13 +2089,13 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       if (node.type === 'heading' && node.folded) {
         let sectionEnd = index + 1;
         while (sectionEnd < nodes.length && nodes[sectionEnd]?.type !== 'heading') sectionEnd += 1;
-        const heading = `<h${node.level} id="${escapeAttr(node.id)}">${escapeHtml(node.text)}</h${node.level}>`;
+        const heading = renderHeading(node);
         output.push(`<details class="wiki-heading-section"><summary class="wiki-heading-summary">${heading}</summary><div class="wiki-heading-content">${renderNodes(nodes.slice(index + 1, sectionEnd))}</div></details>`);
         index = sectionEnd - 1;
         continue;
       }
       if (node.type === 'heading') {
-        output.push(`<h${node.level} id="${escapeAttr(node.id)}">${escapeHtml(node.text)}</h${node.level}>`);
+        output.push(renderHeading(node));
         continue;
       }
       if (node.type === 'paragraph') {
@@ -2363,6 +2365,34 @@ function collectTocHeadings(ast: readonly AstNode[]): Array<{ level: number; tex
     }
   }
   return headings;
+}
+
+function assignStructuralHeadingIds(ast: readonly AstNode[]): void {
+  const headings = collectTocHeadings(ast) as Array<Extract<AstNode, { type: 'heading' }>>;
+  if (headings.length === 0) return;
+  const minimumLevel = Math.min(...headings.map((heading) => heading.level));
+  const counters = Array.from({ length: 7 - minimumLevel }, () => 0);
+  const seenLegacyIds = new Set<string>();
+  for (const heading of headings) {
+    const depth = Math.max(0, Math.min(counters.length - 1, heading.level - minimumLevel));
+    counters[depth] = (counters[depth] ?? 0) + 1;
+    for (let index = depth + 1; index < counters.length; index += 1) counters[index] = 0;
+    heading.id = `s-${counters.slice(0, depth + 1).join('.')}`;
+    const legacyId = makeHeadingId(heading.text);
+    if (legacyId && legacyId !== heading.id && !seenLegacyIds.has(legacyId)) {
+      heading.legacyId = legacyId;
+      seenLegacyIds.add(legacyId);
+    } else {
+      delete heading.legacyId;
+    }
+  }
+}
+
+function renderHeading(node: Extract<AstNode, { type: 'heading' }>): string {
+  const legacyAnchor = node.legacyId
+    ? `<span class="wiki-anchor" id="${escapeAttr(node.legacyId)}"></span>`
+    : '';
+  return `<h${node.level} id="${escapeAttr(node.id)}">${legacyAnchor}${escapeHtml(node.text)}</h${node.level}>`;
 }
 
 function renderTableOfContents(
