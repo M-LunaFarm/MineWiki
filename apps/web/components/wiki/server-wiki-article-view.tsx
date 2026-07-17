@@ -16,6 +16,7 @@ import { ServerWikiHeader } from './server-wiki-header';
 import { WikiPageTools } from './wiki-page-tools';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
+import { serverWikiDocumentTitle } from '../../lib/server-wiki-navigation.mjs';
 
 interface ServerWikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -27,6 +28,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
   if (!wiki) return null;
   const presentation = await fetchServerWikiPresentation(wiki.contentSlug);
   const contentId = `wiki-content-${page.id}`;
+  const documentTitle = serverWikiDocumentTitle(page.displayTitle, [wiki.slug, wiki.contentSlug], wiki.name);
 
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
@@ -60,13 +62,13 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
           <nav className="flex flex-wrap items-center gap-2 text-sm text-[#777]">
             <Link href={`/serverWiki/${encodeURIComponent(wiki.slug)}`} className="hover:text-[#346ddb]">{wiki.name} 위키</Link>
             <span>/</span>
-            <span className="text-[#333]">{page.displayTitle}</span>
+            <span className="text-[#333]">{documentTitle}</span>
           </nav>
 
           <header className="mt-7 border-b border-[#e8e8e8] pb-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <h1 className="text-3xl font-bold tracking-tight text-[#1f1f1f] sm:text-5xl">
-                {page.displayTitle}
+                {documentTitle}
               </h1>
               <div className="flex flex-wrap items-center gap-2">
                 <Link

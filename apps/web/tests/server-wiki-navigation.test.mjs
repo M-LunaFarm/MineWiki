@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   parseCollapsedServerWikiNavigation,
   serverWikiAncestorIds,
+  serverWikiDocumentTitle,
   visibleServerWikiNavigation,
 } from '../lib/server-wiki-navigation.mjs';
 
@@ -24,6 +25,12 @@ test('collapsed server wiki branches hide only their descendants', () => {
     visibleServerWikiNavigation(items, new Set(['install'])).map((item) => item.id),
     ['root', 'guide', 'install', 'rules'],
   );
+});
+
+test('server wiki document titles hide internal tenant prefixes', () => {
+  assert.equal(serverWikiDocumentTitle('example/접속 방법', ['example', 'content-root'], '크리퍼타운 SMP'), '접속 방법');
+  assert.equal(serverWikiDocumentTitle('example', ['example'], '크리퍼타운 SMP'), '크리퍼타운 SMP');
+  assert.equal(serverWikiDocumentTitle('다른 문서', ['example'], '크리퍼타운 SMP'), '다른 문서');
 });
 
 test('current document ancestors are derived from the flat navigation tree', () => {

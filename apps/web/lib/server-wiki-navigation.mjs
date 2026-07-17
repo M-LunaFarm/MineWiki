@@ -40,3 +40,12 @@ export function parseCollapsedServerWikiNavigation(value, items) {
     return new Set();
   }
 }
+
+export function serverWikiDocumentTitle(displayTitle, slugs, wikiName) {
+  const title = displayTitle.trim();
+  for (const slug of new Set(slugs.map((value) => value?.trim()).filter(Boolean))) {
+    if (title === slug) return wikiName;
+    if (title.startsWith(`${slug}/`)) return title.slice(slug.length + 1);
+  }
+  return title;
+}
