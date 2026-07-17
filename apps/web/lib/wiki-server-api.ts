@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { normalizeApiBaseUrl } from './runtime-config';
 import type {
   WikiPageResponse,
+  WikiBacklinkResponse,
   WikiCategoryResponse,
   WikiContributionResponse,
   WikiRecentChangeListResponse,
@@ -60,6 +61,14 @@ export async function fetchWikiRenderedRevision(revisionId: string): Promise<Wik
 export async function fetchWikiRevisions(pageId: string): Promise<WikiRevisionListResponse> {
   const response = await wikiFetch(`/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions?limit=50`);
   return readWikiResponse<WikiRevisionListResponse>(response, 'Failed to load wiki revisions.');
+}
+
+export async function fetchWikiBacklinks(pageId: string, limit = 8): Promise<WikiBacklinkResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const response = await wikiFetch(
+    `/v1/wiki/pages/${encodeURIComponent(pageId)}/backlinks?${params.toString()}`,
+  );
+  return readWikiResponse<WikiBacklinkResponse>(response, 'Failed to load wiki backlinks.');
 }
 
 export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {
