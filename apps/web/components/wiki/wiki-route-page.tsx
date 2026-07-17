@@ -1,10 +1,11 @@
 import { notFound } from 'next/navigation';
-import { fetchWikiPageByPath, fetchWikiPublicProfile, fetchWikiPublicStats, fetchWikiRecent, fetchWikiSpecial } from '../../lib/wiki-server-api';
+import { fetchWikiBacklinks, fetchWikiCategory, fetchWikiPageByPath, fetchWikiPublicProfile, fetchWikiPublicStats, fetchWikiRecent, fetchWikiSpecial } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiArticleView } from './wiki-article-view';
 import { WikiNamespaceFrontPage } from './wiki-namespace-front-page';
 import { ServerWikiArticleView } from './server-wiki-article-view';
 import { WikiUserProfileHeader, WikiUserProfileHub } from './wiki-user-profile-header';
+import { WikiDocumentContext } from './wiki-document-context';
 
 interface WikiRoutePageProps {
   readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
@@ -51,7 +52,20 @@ export async function WikiRoutePage({ prefix, segments = [] }: WikiRoutePageProp
       />
     );
   }
-  return <WikiArticleView page={page} routePath={routePath} />;
+  const [backlinksResults, categoryResults] = await Promise.all([
+    Promise.allSettled([fetchWikiBacklinks(page.id, 8)]),
+    Promise.allSettled(page.categories.slice(0, 3).map((category) => fetchWikiCategory({ category, limit: 8 }))),
+  ]);
+  const backlinksResult = backlinksResults[0];
+  const backlinks = backlinksResult.status === 'fulfilled' ? backlinksResult.value.items : [];
+  const related = categoryResults.flatMap((result) => result.status === 'fulfilled' ? result.value.items : []);
+  return (
+    <WikiArticleView
+      page={page}
+      routePath={routePath}
+      afterContent={<WikiDocumentContext currentPageId={page.id} backlinks={backlinks} related={related} />}
+    />
+  );
 }
 
 function isStandardFrontPagePrefix(prefix: WikiRoutePageProps['prefix']): boolean {
