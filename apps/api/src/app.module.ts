@@ -24,6 +24,7 @@ import { FileModule } from './file/file.module';
 import { RoleModule } from './roles/role.module';
 import { EventsModule } from './events/events.module';
 import { RoleAdminModule } from './roles/role-admin.module';
+import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
@@ -53,7 +54,8 @@ import { RoleAdminModule } from './roles/role-admin.module';
     PrismaModule,
     RoleModule,
     RoleAdminModule,
-    EventsModule
+    EventsModule,
+    BillingModule
   ],
   controllers: [AppController],
   providers: [

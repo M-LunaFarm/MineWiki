@@ -43,6 +43,18 @@ test('production config accepts complete environment', () => {
   assert.equal(config.get('APP_ENCRYPTION_KEY'), 'base64-production-key');
 });
 
+test('Paddle shadow mode requires a webhook secret only when enabled', () => {
+  const disabled = validProductionEnv();
+  disabled.PADDLE_MODE = 'off';
+  assert.doesNotThrow(() => new ConfigService(disabled));
+
+  const shadow = validProductionEnv();
+  shadow.PADDLE_MODE = 'shadow';
+  assert.throws(() => new ConfigService(shadow), /PADDLE_WEBHOOK_SECRET is required/);
+  shadow.PADDLE_WEBHOOK_SECRET = 'paddle-endpoint-secret';
+  assert.equal(new ConfigService(shadow).get('PADDLE_MODE'), 'shadow');
+});
+
 test('WebAuthn config requires an exact validated origin and related RP ID', () => {
   assert.throws(
     () => new ConfigService({ WEBAUTHN_ORIGIN: 'https://login.minewiki.kr' }),
