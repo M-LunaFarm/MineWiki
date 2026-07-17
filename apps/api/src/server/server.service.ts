@@ -1927,7 +1927,7 @@ function normalizeTimestamp(timestamp?: string): string {
   return new Date().toISOString();
 }
 
-function buildOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationInput[] {
+export function buildOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationInput[] {
   switch (sort) {
     case 'votesMonthly_desc':
       return [{ votesMonthly: 'desc' }, { name: 'asc' }];
@@ -1945,7 +1945,12 @@ function buildOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationInput[] {
       return [{ createdAt: 'desc' }, { name: 'asc' }];
     case 'votes24h_desc':
     default:
-      return [{ votes24h: 'desc' }, { name: 'asc' }];
+      return [
+        { votes24h: 'desc' },
+        { stats: { votesLast7d: 'desc' } },
+        { reviewsCount: 'desc' },
+        { name: 'asc' },
+      ];
   }
 }
 
