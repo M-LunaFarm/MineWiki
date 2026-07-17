@@ -51,41 +51,41 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
     : [];
 
   return (
-    <div className="server-wiki-layout min-h-screen bg-[#0b0e12] text-slate-200">
+    <div className="server-wiki-layout min-h-screen bg-white text-[#333]">
       <ServerWikiHeader page={page} />
-      <main className={`mx-auto grid w-full max-w-[1600px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
+      <main className={`mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
         <ServerWikiSidebar page={page} />
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
-          <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-            <Link href={`/server/${encodeURIComponent(wiki.slug)}`} className="hover:text-emerald-300">{wiki.name} 위키</Link>
+          <nav className="flex flex-wrap items-center gap-2 text-sm text-[#777]">
+            <Link href={`/server/${encodeURIComponent(wiki.slug)}`} className="hover:text-[#346ddb]">{wiki.name} 위키</Link>
             <span>/</span>
-            <span className="text-slate-300">{page.displayTitle}</span>
+            <span className="text-[#333]">{page.displayTitle}</span>
           </nav>
 
-          <header className="mt-7 border-b border-white/10 pb-8">
+          <header className="mt-7 border-b border-[#e8e8e8] pb-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <h1 className="font-display text-3xl font-extrabold tracking-tight text-white sm:text-5xl">
+              <h1 className="text-3xl font-bold tracking-tight text-[#1f1f1f] sm:text-5xl">
                 {page.displayTitle}
               </h1>
               <div className="flex flex-wrap items-center gap-2">
                 <Link
                   href={buildServerWikiToolPath(routePath, 'history')}
-                  className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-emerald-300/40 hover:text-emerald-200"
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#dedede] px-3 py-2 text-sm text-[#666] transition hover:border-[#b8c9ed] hover:bg-[#f7f9ff] hover:text-[#2458bd]"
                 >
                   <History className="size-4" />
                   역사
                 </Link>
                 <Link
                   href={editPath}
-                  className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-400 transition hover:border-emerald-300/40 hover:text-emerald-200"
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#dedede] px-3 py-2 text-sm text-[#666] transition hover:border-[#b8c9ed] hover:bg-[#f7f9ff] hover:text-[#2458bd]"
                 >
                   <PencilLine className="size-4" />
                   편집
                 </Link>
               </div>
             </div>
-            <p className="mt-5 text-sm text-slate-500">{routePath} · 최근 수정 {updatedAt}</p>
+            <p className="mt-5 text-sm text-[#888]">{routePath} · 최근 수정 {updatedAt}</p>
           </header>
 
           {address && !isHandbook ? (
@@ -175,7 +175,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
           </div>
         </article>
 
-        <aside className="hidden border-l border-white/10 px-8 py-12 2xl:block">
+        <aside className="hidden border-l border-[#ededed] px-8 py-12 2xl:block">
           <div className="sticky top-28 space-y-8">
             <section>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-300"><List className="size-4" />이 페이지</h2>

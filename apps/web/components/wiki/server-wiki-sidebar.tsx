@@ -10,23 +10,23 @@ export function ServerWikiSidebar({ page }: { readonly page: WikiPageResponse })
   const address = wiki.host ? `${wiki.host}${wiki.port && wiki.port !== 25565 ? `:${wiki.port}` : ''}` : null;
 
   return (
-    <aside className="min-w-0 border-white/10 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] lg:border-r">
-      <div className="border-b border-white/10 px-5 py-5 lg:px-6 lg:py-7">
-        <Link href={`/server/${encodeURIComponent(wiki.slug)}`} className="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/60">
-          <span className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-2 text-emerald-300">
+    <aside className="hidden min-w-0 border-[#e8e8e8] bg-[#fbfbfb] lg:sticky lg:top-16 lg:block lg:h-[calc(100vh-4rem)] lg:border-r">
+      <div className="border-b border-[#e8e8e8] px-6 py-6">
+        <Link href={`/server/${encodeURIComponent(wiki.slug)}`} className="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30">
+          <span className="rounded-lg bg-[#eef3ff] p-2 text-[#346ddb]">
             <BookOpen className="size-5" />
           </span>
           <span className="min-w-0">
-            <span className="block truncate font-display text-lg font-bold text-white">{wiki.name}</span>
-            <span className="mt-0.5 block text-xs text-slate-500">서버 위키</span>
+            <span className="block truncate text-base font-semibold text-[#242424]">{wiki.name}</span>
+            <span className="mt-0.5 block text-xs text-[#777]">서버 위키</span>
           </span>
         </Link>
         <div className="mt-4 flex items-center justify-between gap-3 text-xs">
-          <span className={wiki.isOnline ? 'text-emerald-300' : 'text-slate-500'}>
-            <span className={`mr-2 inline-block size-2 rounded-full ${wiki.isOnline ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+          <span className={wiki.isOnline ? 'text-[#25845a]' : 'text-[#777]'}>
+            <span className={`mr-2 inline-block size-2 rounded-full ${wiki.isOnline ? 'bg-[#32a56f]' : 'bg-[#aaa]'}`} />
             {wiki.isOnline ? '온라인' : wiki.isOnline === false ? '오프라인' : '확인 중'}
           </span>
-          <span className="truncate text-slate-400">
+          <span className="truncate text-[#777]">
             {wiki.playersOnline !== null && wiki.playersMax !== null
               ? `${wiki.playersOnline} / ${wiki.playersMax}`
               : wiki.supportedVersions ?? wiki.edition}
@@ -34,16 +34,17 @@ export function ServerWikiSidebar({ page }: { readonly page: WikiPageResponse })
         </div>
       </div>
 
-      <nav className="px-4 py-3 lg:max-h-[calc(100vh-18rem)] lg:overflow-y-auto lg:py-5" aria-label={`${wiki.name} 위키 문서 트리`}>
-        <div className="hidden items-center gap-2 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 lg:flex">
+      <nav className="flex h-[calc(100vh-13rem)] flex-col px-4 py-5" aria-label={`${wiki.name} 위키 문서 트리`}>
+        <div className="flex items-center gap-2 px-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#888]">
           <BookOpen className="size-4" />
           문서
         </div>
-        <ServerWikiNavigation items={wiki.navigation} storageKey={`minewiki:server-wiki:${wiki.slug}:collapsed`} />
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1"><ServerWikiNavigation items={wiki.navigation} storageKey={`minewiki:server-wiki:${wiki.slug}:collapsed`} /></div>
         <div className="mt-3">
           <ServerWikiCreateLink serverSlug={wiki.slug} />
         </div>
-        {address ? <p className="mt-4 hidden break-all px-2 font-mono text-xs text-slate-600 lg:block">{address}</p> : null}
+        {address ? <p className="mt-4 break-all px-2 font-mono text-xs text-[#888]">{address}</p> : null}
+        <a href="https://github.com/GitbookIO/gitbook" target="_blank" rel="noreferrer" className="mt-4 border-t border-[#e8e8e8] px-2 pt-4 text-xs text-[#888] hover:text-[#346ddb]">GitBook 스타일의 서버 문서</a>
       </nav>
 
     </aside>
