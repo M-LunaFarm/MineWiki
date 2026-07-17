@@ -26,7 +26,7 @@ CREATE TEMPORARY TABLE `_CanonicalMinecraftPrimary` (
   `identity_id` BIGINT UNSIGNED NOT NULL,
   PRIMARY KEY (`canonical_account_id`),
   UNIQUE KEY `_CanonicalMinecraftPrimary_identity_id_key` (`identity_id`)
-);
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 INSERT INTO `_CanonicalMinecraftPrimary` (`canonical_account_id`, `identity_id`)
 SELECT ranked.`canonical_account_id`, ranked.`identity_id`
