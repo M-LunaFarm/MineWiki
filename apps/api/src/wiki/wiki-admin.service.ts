@@ -902,7 +902,8 @@ export class WikiAdminService {
         {
           contentSize: revision.contentSize,
           contentRaw: revision.contentRaw,
-          fileNames: [...collectWikiFileNames(parsed.ast)]
+          fileNames: [...collectWikiFileNames(parsed.ast)],
+          redirectTarget: parsed.redirectTarget
         }
       );
       await tx.wikiPage.update({

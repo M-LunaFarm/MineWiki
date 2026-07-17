@@ -833,6 +833,10 @@ test('backlinks expose only links from the current readable source revision', as
           { id: 1n, sourcePageId: 30n, sourceRevisionId: 300n, linkType: 'link' }
         ];
       }
+    },
+    wikiPageRevision: {
+      async findUnique() { return { visibility: 'public' }; },
+      async findMany() { return [{ id: 200n }]; }
     }
   } as unknown as PrismaService;
   const permissions = {
@@ -844,6 +848,77 @@ test('backlinks expose only links from the current readable source revision', as
   assert.equal(response.items.length, 1);
   assert.equal(response.items[0]?.sourcePageId, '20');
   assert.equal(response.items[0]?.routePath, '/wiki/%ED%98%84%EC%9E%AC');
+  assert.deepEqual(response.items[0]?.linkTypes, ['link']);
+  assert.deepEqual(response.summary.namespaceCounts, [{ namespace: 'main', count: 1 }]);
+  assert.deepEqual(response.summary.typeCounts, [{ type: 'link', count: 1 }]);
+  assert.deepEqual(response.filters, { types: ['link', 'file', 'include', 'redirect'], namespace: 'main' });
+});
+
+test('backlinks validate and forward type filters without leaking hidden namespace counts', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const target = { id: 10n, namespaceId: 1, spaceId: 1n, slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 100n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now, localPath: '대문' };
+  const visible = { ...target, id: 20n, namespaceId: 2, slug: '파일 사용', title: '파일 사용', displayTitle: '파일 사용', currentRevisionId: 200n };
+  const hidden = { ...target, id: 30n, namespaceId: 3, slug: '비공개', title: '비공개', displayTitle: '비공개', currentRevisionId: 300n };
+  const queries: Array<Record<string, unknown>> = [];
+  let sourcePageWhere: unknown;
+  const prisma = {
+    wikiPage: { async findUnique() { return target; }, async findMany(args: { where: unknown }) { sourcePageWhere = args.where; return [visible, hidden]; } },
+    wikiNamespace: {
+      async findUnique() { return { id: 1, code: 'main' }; },
+      async findMany() { return [{ id: 2, code: 'guide' }, { id: 3, code: 'secret' }]; }
+    },
+    wikiPageLink: { async findMany(args: { where: Record<string, unknown> }) { queries.push(args.where); return [
+      { id: 3n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'redirect' },
+      { id: 2n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'file' },
+      { id: 1n, sourcePageId: 30n, sourceRevisionId: 300n, linkType: 'redirect' }
+    ]; } },
+    wikiPageRevision: {
+      async findUnique() { return { visibility: 'public' }; },
+      async findMany() { return [{ id: 200n }, { id: 300n }]; }
+    }
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage({ page }: { page: { id: bigint } }) { if (page.id === 30n) throw new Error('hidden'); } } as unknown as WikiPermissionService;
+
+  const service = new WikiReadService(prisma, permissions);
+  const response = await service.getBacklinks({ pageId: '10', types: 'file,redirect', namespace: 'guide', sourceSpaceId: 1n });
+
+  assert.deepEqual(queries[0]?.linkType, { in: ['link', 'file', 'include', 'redirect'] });
+  assert.deepEqual(sourcePageWhere, { id: { in: [20n, 30n] }, spaceId: 1n });
+  assert.deepEqual(response.items.map((item) => item.sourcePageId), ['20']);
+  assert.deepEqual(response.items[0]?.linkTypes, ['file', 'redirect']);
+  assert.deepEqual(response.summary.namespaceCounts, [{ namespace: 'guide', count: 1 }]);
+  assert.deepEqual(response.summary.typeCounts, [{ type: 'file', count: 1 }, { type: 'redirect', count: 1 }]);
+  assert.deepEqual(response.filters, { types: ['file', 'redirect'], namespace: 'guide' });
+  await assert.rejects(() => service.getBacklinks({ pageId: '10', types: 'script' }), /types must contain only/u);
+});
+
+test('backlinks use deterministic title cursors in both directions and bind them to filters', async () => {
+  const now = new Date('2026-07-13T00:00:00Z');
+  const target = { id: 10n, namespaceId: 1, spaceId: 1n, slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 100n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now, localPath: '대문' };
+  const sources = [
+    { ...target, id: 21n, title: 'Bravo', displayTitle: 'Bravo', slug: 'bravo', currentRevisionId: 201n },
+    { ...target, id: 20n, title: 'alpha', displayTitle: 'alpha', slug: 'alpha', currentRevisionId: 200n },
+    { ...target, id: 22n, title: 'Charlie', displayTitle: 'Charlie', slug: 'charlie', currentRevisionId: 202n }
+  ];
+  const prisma = {
+    wikiPage: { async findUnique() { return target; }, async findMany() { return sources; } },
+    wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; }, async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiPageRevision: { async findUnique() { return { visibility: 'public' }; }, async findMany() { return sources.map((source) => ({ id: source.currentRevisionId })); } },
+    wikiPageLink: { async findMany() { return sources.map((source, index) => ({ id: BigInt(index + 1), sourcePageId: source.id, sourceRevisionId: source.currentRevisionId, linkType: 'link' })); } }
+  } as unknown as PrismaService;
+  const service = new WikiReadService(prisma, { async assertCanReadPage() {} } as unknown as WikiPermissionService);
+
+  const first = await service.getBacklinks({ pageId: '10', limit: 1 });
+  const second = await service.getBacklinks({ pageId: '10', limit: 1, cursor: first.nextCursor! });
+  const back = await service.getBacklinks({ pageId: '10', limit: 1, cursor: second.prevCursor! });
+
+  assert.deepEqual(first.items.map((item) => item.displayTitle), ['alpha']);
+  assert.deepEqual(second.items.map((item) => item.displayTitle), ['Bravo']);
+  assert.deepEqual(back.items.map((item) => item.displayTitle), ['alpha']);
+  assert.equal(first.prevCursor, null);
+  assert.ok(second.prevCursor);
+  assert.ok(second.nextCursor);
+  await assert.rejects(() => service.getBacklinks({ pageId: '10', limit: 1, types: 'file', cursor: first.nextCursor! }), /cursor is invalid for the selected backlink filters/u);
 });
 
 test('category membership exposes only current readable documents', async () => {

@@ -220,7 +220,8 @@ export class WikiModerationService {
       {
         contentSize: revision.contentSize,
         contentRaw: revision.contentRaw,
-        fileNames: [...collectWikiFileNames(parsed.ast)]
+        fileNames: [...collectWikiFileNames(parsed.ast)],
+        redirectTarget: parsed.redirectTarget
       }
     );
     await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });

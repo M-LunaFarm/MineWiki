@@ -180,14 +180,27 @@ export interface WikiBacklinkItem {
   readonly title: string;
   readonly displayTitle: string;
   readonly routePath: string;
-  readonly linkType: string;
+  readonly linkTypes: WikiBacklinkType[];
   readonly updatedAt: string;
 }
 
 export interface WikiBacklinkResponse {
   readonly items: WikiBacklinkItem[];
+  readonly prevCursor: string | null;
   readonly nextCursor: string | null;
+  readonly summary: {
+    readonly total: number;
+    readonly complete: boolean;
+    readonly namespaceCounts: ReadonlyArray<{ readonly namespace: string; readonly count: number }>;
+    readonly typeCounts: ReadonlyArray<{ readonly type: WikiBacklinkType; readonly count: number }>;
+  };
+  readonly filters: {
+    readonly types: WikiBacklinkType[];
+    readonly namespace: string | null;
+  };
 }
+
+export type WikiBacklinkType = 'link' | 'file' | 'include' | 'redirect';
 
 export interface WikiContributionItem {
   readonly id: string;
@@ -654,7 +667,7 @@ export class WikiReadService {
       this.wikiPermissions,
       input.viewer ?? input.accountId ?? null
     );
-    const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
+    const limit = Math.min(Math.max(Number(input.limit ?? 50) || 50, 1), 100);
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
     const changeType = this.parseRecentFilter(input.changeType, 'changeType');
     const namespace = this.parseRecentFilter(input.namespace, 'namespace');
@@ -734,6 +747,8 @@ export class WikiReadService {
     readonly sourceSpaceId?: bigint;
     readonly cursor?: string;
     readonly limit?: string | number;
+    readonly types?: string;
+    readonly namespace?: string;
   }): Promise<WikiBacklinkResponse> {
     const pageId = this.parseBigIntId(input.pageId, 'pageId');
     const target = await this.prisma.wikiPage.findUnique({ where: { id: pageId } });
@@ -746,16 +761,21 @@ export class WikiReadService {
     await this.wikiPermissions.assertCanReadPage({ ...access, page: target });
     const namespace = await this.prisma.wikiNamespace.findUnique({ where: { id: target.namespaceId } });
     if (!namespace) throw new NotFoundException('Wiki namespace not found.');
+    if (!target.currentRevisionId) throw new NotFoundException('Wiki page has no public revision.');
+    const targetRevision = await this.prisma.wikiPageRevision.findUnique({
+      where: { id: target.currentRevisionId },
+      select: { visibility: true }
+    });
+    if (targetRevision?.visibility !== 'public') throw new NotFoundException('Wiki page has no public revision.');
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
-    const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
+    const selectedTypes = parseBacklinkTypes(input.types);
+    const requestedNamespace = parseBacklinkNamespace(input.namespace);
     const links = await this.prisma.wikiPageLink.findMany({
       where: {
         targetNamespaceCode: namespace.code,
         targetSlug: target.slug,
-        ...(cursor ? { id: { lt: cursor } } : {})
-      },
-      orderBy: [{ id: 'desc' }],
-      take: Math.min(limit * 4 + 1, 401)
+        linkType: { in: [...ALL_BACKLINK_TYPES] }
+      }
     });
     const pageIds = [...new Set(links.map((link) => link.sourcePageId))];
     const pages = pageIds.length > 0
@@ -773,35 +793,83 @@ export class WikiReadService {
     const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
     const routePaths = await this.routePaths.preload(pages, namespaceById);
-    const items: WikiBacklinkItem[] = [];
-    let lastScannedId: bigint | null = null;
-    for (const link of links) {
-      lastScannedId = link.id;
-      const source = pageById.get(link.sourcePageId);
-      if (!source || source.currentRevisionId !== link.sourceRevisionId) continue;
+    const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+    const publicRevisions = currentRevisionIds.length > 0
+      ? await this.prisma.wikiPageRevision.findMany({
+          where: { id: { in: currentRevisionIds }, visibility: 'public' },
+          select: { id: true }
+        })
+      : [];
+    const publicRevisionIds = new Set(publicRevisions.map((revision) => revision.id));
+    const readableSourceIds = new Set<bigint>();
+    for (const source of pages) {
       try {
         await this.wikiPermissions.assertCanReadPage({ ...access, page: source });
+        readableSourceIds.add(source.id);
       } catch {
-        continue;
+        // Counts and rows must not reveal ACL-hidden source documents.
       }
+    }
+    const isVisibleCurrentLink = (link: (typeof links)[number]) => {
+      const source = pageById.get(link.sourcePageId);
+      return Boolean(source && source.currentRevisionId === link.sourceRevisionId && publicRevisionIds.has(link.sourceRevisionId) && readableSourceIds.has(source.id));
+    };
+    const grouped = new Map<bigint, { readonly source: (typeof pages)[number]; readonly types: Set<WikiBacklinkType> }>();
+    for (const link of links) {
+      if (!isVisibleCurrentLink(link)) continue;
+      const source = pageById.get(link.sourcePageId)!;
+      const entry = grouped.get(source.id) ?? { source, types: new Set<WikiBacklinkType>() };
+      entry.types.add(link.linkType as WikiBacklinkType);
+      grouped.set(source.id, entry);
+    }
+    const visibleEntries = [...grouped.values()];
+    const namespaceCounts = countBacklinks(visibleEntries.map(({ source }) => namespaceById.get(source.namespaceId) ?? 'main'));
+    const typeCounts = ALL_BACKLINK_TYPES.map((type) => ({
+      type,
+      count: visibleEntries.filter((entry) => entry.types.has(type)).length
+    })).filter((item) => item.count > 0);
+    const selectedNamespace = namespaceCounts.some((item) => item.key === requestedNamespace)
+      ? requestedNamespace
+      : namespaceCounts[0]?.key ?? null;
+    const filtered = visibleEntries
+      .filter(({ source, types }) =>
+        (selectedNamespace === null || (namespaceById.get(source.namespaceId) ?? 'main') === selectedNamespace) &&
+        selectedTypes.some((type) => types.has(type))
+      )
+      .sort(compareBacklinkEntries);
+    const cursor = parseBacklinkCursor(input.cursor, selectedNamespace, selectedTypes);
+    const pageEntries = cursor?.direction === 'prev'
+      ? filtered.filter((entry) => compareBacklinkEntryToCursor(entry, cursor) < 0).slice(-limit)
+      : filtered.filter((entry) => !cursor || compareBacklinkEntryToCursor(entry, cursor) > 0).slice(0, limit);
+    const first = pageEntries[0];
+    const last = pageEntries.at(-1);
+    const hasBefore = Boolean(first && filtered.some((entry) => compareBacklinkEntries(entry, first) < 0));
+    const hasAfter = Boolean(last && filtered.some((entry) => compareBacklinkEntries(entry, last) > 0));
+    const items: WikiBacklinkItem[] = pageEntries.map(({ source, types }) => {
       const sourceNamespace = namespaceById.get(source.namespaceId) ?? 'main';
-      items.push({
-        id: link.id.toString(),
+      return {
+        id: source.id.toString(),
         sourcePageId: source.id.toString(),
-        sourceRevisionId: link.sourceRevisionId.toString(),
+        sourceRevisionId: source.currentRevisionId!.toString(),
         namespace: sourceNamespace,
         title: source.title,
         displayTitle: source.displayTitle,
         routePath: routePaths.routePath(source, sourceNamespace),
-        linkType: link.linkType,
+        linkTypes: ALL_BACKLINK_TYPES.filter((type) => types.has(type)),
         updatedAt: source.updatedAt.toISOString()
-      });
-      if (items.length >= limit) break;
-    }
-    const mayHaveMore = links.length > 0 && (items.length >= limit || links.length >= Math.min(limit * 4 + 1, 401));
+      };
+    });
     return {
       items,
-      nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
+      prevCursor: hasBefore && first ? encodeBacklinkCursor('prev', first, selectedNamespace, selectedTypes) : null,
+      nextCursor: hasAfter && last ? encodeBacklinkCursor('next', last, selectedNamespace, selectedTypes) : null,
+      summary: {
+        total: visibleEntries.length,
+        complete: true,
+        namespaceCounts: namespaceCounts.map(({ key, count }) => ({ namespace: key, count })),
+        typeCounts
+      },
+      filters: { types: selectedTypes, namespace: selectedNamespace }
     };
   }
 
@@ -2598,4 +2666,93 @@ function findSearchHighlights(value: string, query: string): Array<readonly [num
     offset = index + Math.max(query.length, 1);
   }
   return ranges;
+}
+
+const ALL_BACKLINK_TYPES: readonly WikiBacklinkType[] = ['link', 'file', 'include', 'redirect'];
+
+function parseBacklinkTypes(value: string | undefined): WikiBacklinkType[] {
+  if (!value?.trim()) return [...ALL_BACKLINK_TYPES];
+  const requested = [...new Set(value.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))];
+  if (requested.length === 0 || requested.some((item) => !ALL_BACKLINK_TYPES.includes(item as WikiBacklinkType))) {
+    throw new BadRequestException('types must contain only link, file, include, or redirect.');
+  }
+  return requested as WikiBacklinkType[];
+}
+
+function parseBacklinkNamespace(value: string | undefined): string | null {
+  if (!value?.trim()) return null;
+  const normalized = value.normalize('NFKC').trim().toLowerCase();
+  if (!/^[a-z0-9_-]{1,32}$/.test(normalized)) {
+    throw new BadRequestException('namespace is invalid.');
+  }
+  return normalized;
+}
+
+function countBacklinks<T extends string>(values: readonly T[]): Array<{ readonly key: T; readonly count: number }> {
+  const counts = new Map<T, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()]
+    .map(([key, count]) => ({ key, count }))
+    .sort((left, right) => left.key.localeCompare(right.key));
+}
+
+type BacklinkSortEntry = {
+  readonly source: {
+    readonly id: bigint;
+    readonly title: string;
+    readonly displayTitle: string;
+  };
+};
+
+type BacklinkCursor = {
+  readonly direction: 'prev' | 'next';
+  readonly key: string;
+  readonly id: bigint;
+};
+
+function backlinkTitleKey(entry: BacklinkSortEntry): string {
+  return (entry.source.displayTitle || entry.source.title).normalize('NFKC').toLocaleLowerCase('ko-KR').replace(/\s+/g, ' ').trim();
+}
+
+function compareBacklinkEntries(left: BacklinkSortEntry, right: BacklinkSortEntry): number {
+  const titleOrder = backlinkTitleKey(left).localeCompare(backlinkTitleKey(right), 'ko-KR');
+  if (titleOrder !== 0) return titleOrder;
+  return left.source.id < right.source.id ? -1 : left.source.id > right.source.id ? 1 : 0;
+}
+
+function compareBacklinkEntryToCursor(entry: BacklinkSortEntry, cursor: BacklinkCursor): number {
+  const titleOrder = backlinkTitleKey(entry).localeCompare(cursor.key, 'ko-KR');
+  if (titleOrder !== 0) return titleOrder;
+  return entry.source.id < cursor.id ? -1 : entry.source.id > cursor.id ? 1 : 0;
+}
+
+function backlinkFilterSignature(namespace: string | null, types: readonly WikiBacklinkType[]): string {
+  return `${namespace ?? ''}|${[...types].sort().join(',')}`;
+}
+
+function encodeBacklinkCursor(direction: 'prev' | 'next', entry: BacklinkSortEntry, namespace: string | null, types: readonly WikiBacklinkType[]): string {
+  return Buffer.from(JSON.stringify({
+    v: 1,
+    d: direction,
+    k: backlinkTitleKey(entry),
+    i: entry.source.id.toString(),
+    f: backlinkFilterSignature(namespace, types)
+  })).toString('base64url');
+}
+
+function parseBacklinkCursor(value: string | undefined, namespace: string | null, types: readonly WikiBacklinkType[]): BacklinkCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Record<string, unknown>;
+    if (
+      parsed.v !== 1 ||
+      (parsed.d !== 'prev' && parsed.d !== 'next') ||
+      typeof parsed.k !== 'string' || parsed.k.length > 512 ||
+      typeof parsed.i !== 'string' || !/^\d+$/.test(parsed.i) ||
+      parsed.f !== backlinkFilterSignature(namespace, types)
+    ) throw new Error('invalid');
+    return { direction: parsed.d, key: parsed.k, id: BigInt(parsed.i) };
+  } catch {
+    throw new BadRequestException('cursor is invalid for the selected backlink filters.');
+  }
 }

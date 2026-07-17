@@ -69,6 +69,24 @@ test('link index atomically materializes current source metrics', async () => {
   );
 });
 
+test('link index materializes redirects as a distinct backlink type', async () => {
+  const { store, calls } = createStore('main', '옛 문서');
+  await new WikiLinkIndexService().replaceForRevision(
+    store,
+    10n,
+    20n,
+    [],
+    [],
+    [],
+    { contentSize: 24, redirectTarget: '새 문서' }
+  );
+
+  assert.deepEqual(
+    calls.map((item) => [item.targetNamespaceCode, item.targetSlug, item.linkType]),
+    [['main', '새_문서', 'redirect']]
+  );
+});
+
 test('link index replaces the current Korean search vector with its revision', async () => {
   const { store, searchUpdates } = createStore('main', '서버/안내');
   await new WikiLinkIndexService().replaceForRevision(

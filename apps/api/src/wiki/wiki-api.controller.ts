@@ -129,6 +129,8 @@ export class WikiApiController {
     @Param('id') pageId: string,
     @Query('cursor') cursor: string | undefined,
     @Query('limit') limit: string | undefined,
+    @Query('types') types: string | undefined,
+    @Query('namespace') namespace: string | undefined,
     @Req() request: FastifyRequest,
   ): Promise<WikiBacklinkResponse> {
     const token = requireWikiApiToken(request);
@@ -139,6 +141,8 @@ export class WikiApiController {
       accountId: token.accountId,
       cursor,
       limit,
+      types,
+      namespace,
       ...(token.spaceId ? { sourceSpaceId: BigInt(token.spaceId) } : {}),
     });
   }

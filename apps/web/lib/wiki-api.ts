@@ -434,13 +434,26 @@ export interface WikiBacklinkItem {
   readonly title: string;
   readonly displayTitle: string;
   readonly routePath: string;
-  readonly linkType: string;
+  readonly linkTypes: WikiBacklinkType[];
   readonly updatedAt: string;
 }
 
+export type WikiBacklinkType = 'link' | 'file' | 'include' | 'redirect';
+
 export interface WikiBacklinkResponse {
   readonly items: WikiBacklinkItem[];
+  readonly prevCursor: string | null;
   readonly nextCursor: string | null;
+  readonly summary: {
+    readonly total: number;
+    readonly complete: boolean;
+    readonly namespaceCounts: ReadonlyArray<{ readonly namespace: string; readonly count: number }>;
+    readonly typeCounts: ReadonlyArray<{ readonly type: WikiBacklinkType; readonly count: number }>;
+  };
+  readonly filters: {
+    readonly types: WikiBacklinkType[];
+    readonly namespace: string | null;
+  };
 }
 
 export interface WikiContributionResponse {
@@ -1173,9 +1186,11 @@ export async function fetchWikiSection(pageId: string, anchor: string): Promise<
   return response.json();
 }
 
-export async function fetchWikiBacklinks(pageId: string, cursor?: string): Promise<WikiBacklinkResponse> {
-  const params = new URLSearchParams({ limit: '30' });
-  if (cursor) params.set('cursor', cursor);
+export async function fetchWikiBacklinks(pageId: string, input: { readonly cursor?: string; readonly types?: readonly WikiBacklinkType[]; readonly namespace?: string | null; readonly limit?: number } = {}): Promise<WikiBacklinkResponse> {
+  const params = new URLSearchParams({ limit: String(input.limit ?? 50) });
+  if (input.cursor) params.set('cursor', input.cursor);
+  if (input.types?.length) params.set('types', input.types.join(','));
+  if (input.namespace) params.set('namespace', input.namespace);
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/backlinks?${params.toString()}`, { credentials: 'include' });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

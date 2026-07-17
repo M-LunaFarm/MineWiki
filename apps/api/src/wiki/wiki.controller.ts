@@ -112,13 +112,17 @@ export class WikiController {
     @Param('id') pageId: string,
     @Req() request: FastifyRequest,
     @Query('cursor') cursor?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('types') types?: string,
+    @Query('namespace') namespace?: string
   ): Promise<WikiBacklinkResponse> {
     return this.wikiRead.getBacklinks({
       pageId,
       viewer: request.sessionPayload ?? null,
       cursor,
-      limit
+      limit,
+      types,
+      namespace
     });
   }
 

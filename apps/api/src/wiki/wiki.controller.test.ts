@@ -153,6 +153,17 @@ test('optional browser wiki reads forward the complete session payload', async (
   assert.equal(received.every((entry) => entry.viewer === session), true);
 });
 
+test('browser backlink reads forward type and namespace filters', async () => {
+  let received: unknown;
+  const reads = { async getBacklinks(input: unknown) { received = input; return { items: [], prevCursor: null, nextCursor: null }; } } as unknown as WikiReadService;
+  const controller = new WikiController({} as WikiProfileService, reads, {} as WikiEditService, captchaStub);
+  const request = { sessionPayload: null } as FastifyRequest;
+
+  await controller.getBacklinks('10', request, 'cursor', '50', 'file,redirect', 'server');
+
+  assert.deepEqual(received, { pageId: '10', viewer: null, cursor: 'cursor', limit: '50', types: 'file,redirect', namespace: 'server' });
+});
+
 test('anonymous wiki controller read applies CIDR ACL from the central request context', async () => {
   const store = {
     aclRule: {

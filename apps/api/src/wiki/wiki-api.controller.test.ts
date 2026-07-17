@@ -121,7 +121,7 @@ test('read-only automation APIs preserve token scope and tenant boundaries', asy
 
   await controller.search('검색', 'server', 'title', '10', 'cursor', requestWithToken());
   await controller.getPageRevisions('10', '20', '30', requestWithToken());
-  await controller.getPageBacklinks('10', '40', '50', requestWithToken());
+  await controller.getPageBacklinks('10', '40', '50', 'file,redirect', 'server', requestWithToken());
   await controller.getRevisionDiff('20', '21', requestWithToken());
 
   assert.deepEqual(calls, [
@@ -136,7 +136,7 @@ test('read-only automation APIs preserve token scope and tenant boundaries', asy
     { method: 'scope', args: [token, 'wiki:read'] },
     { method: 'pageSpace', args: [token, '10'] },
     { method: 'backlinks', args: [{
-      pageId: '10', accountId: 'account-id', cursor: '40', limit: '50', sourceSpaceId: 42n,
+      pageId: '10', accountId: 'account-id', cursor: '40', limit: '50', types: 'file,redirect', namespace: 'server', sourceSpaceId: 42n,
     }] },
     { method: 'scope', args: [token, 'wiki:read'] },
     { method: 'diff', args: ['20', '21', 'account-id', { allowedSpaceId: 42n }] },

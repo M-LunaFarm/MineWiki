@@ -14,7 +14,7 @@ export class WikiLinkIndexService {
     links: readonly string[],
     categories: readonly string[] = [],
     includes: readonly string[] = [],
-    metrics?: { readonly contentSize: number; readonly contentRaw?: string; readonly fileNames?: readonly string[] }
+    metrics?: { readonly contentSize: number; readonly contentRaw?: string; readonly fileNames?: readonly string[]; readonly redirectTarget?: string | null }
   ): Promise<void> {
     const page = await store.wikiPage.findUnique({
       where: { id: pageId },
@@ -63,6 +63,15 @@ export class WikiLinkIndexService {
         targetSlug: fileName,
         linkType: 'file'
       });
+    }
+    if (metrics?.redirectTarget && !containsIncludePlaceholder(metrics.redirectTarget)) {
+      const resolved = resolveTarget(namespace.code, page.localPath, metrics.redirectTarget);
+      if (resolved.targetSlug && resolved.targetSlug.length <= 255 && resolved.targetNamespaceCode.length <= 32) {
+        normalized.set(`redirect:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, {
+          ...resolved,
+          linkType: 'redirect'
+        });
+      }
     }
     await store.wikiPageLink.deleteMany({ where: { sourcePageId: pageId } });
     if (normalized.size > 0) {

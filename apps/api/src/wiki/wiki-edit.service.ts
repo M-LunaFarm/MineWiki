@@ -1893,7 +1893,8 @@ export class WikiEditService {
       {
         contentSize: revision.contentSize,
         contentRaw: revision.contentRaw,
-        fileNames: [...collectWikiFileNames(parsed.ast)]
+        fileNames: [...collectWikiFileNames(parsed.ast)],
+        redirectTarget: parsed.redirectTarget
       }
     );
     await this.notifications?.notifyWatchedRevision(tx as Prisma.TransactionClient, {
@@ -1926,7 +1927,8 @@ export class WikiEditService {
       {
         contentSize: revision.contentSize,
         contentRaw: revision.contentRaw,
-        fileNames: [...collectWikiFileNames(parsed.ast)]
+        fileNames: [...collectWikiFileNames(parsed.ast)],
+        redirectTarget: parsed.redirectTarget
       }
     );
   }
