@@ -88,3 +88,36 @@ test('watchlist uses bounded cursor overfetch and one batched ACL decision', asy
   assert.ok(result.nextCursor);
   await assert.rejects(service.list(session, 'tampered', 1), /cursor not found/u);
 });
+
+test('watchlist hides server pages whose linked server wiki is not active', async () => {
+  const serverPage = { ...page, namespaceId: 2, spaceId: 9n, localPath: 'luna/guide' };
+  let serverWikiQuery: unknown;
+  const prisma = {
+    wikiPageWatch: {
+      async findMany() {
+        return [{ id: 1n, profileId: 20n, pageId: serverPage.id, lastSeenRevisionId: 29n, createdAt: serverPage.createdAt, updatedAt: serverPage.updatedAt }];
+      },
+    },
+    wikiPage: { async findMany() { return [serverPage]; } },
+    wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
+    serverWiki: {
+      async findMany(query: unknown) {
+        serverWikiQuery = query;
+        return [];
+      },
+    },
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 20n, status: 'active' }; } } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: session.userId, profileId: 20n, status: 'active' }; },
+    async filterReadablePages({ pages }: { pages: Array<typeof serverPage> }) { return pages; },
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiWatchService(prisma, profiles, permissions).list(session);
+
+  assert.deepEqual(result.items, []);
+  assert.deepEqual(serverWikiQuery, {
+    where: { spaceId: { in: [9n] }, status: 'active' },
+    select: { spaceId: true, slug: true },
+  });
+});

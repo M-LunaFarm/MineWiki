@@ -178,9 +178,11 @@ test('public server wiki rendering fails closed when a persisted premium layout 
     startsAt: Date;
     expiresAt: Date | null;
   }> = [];
+  let serverWikiQuery: unknown;
   const prisma = {
     serverWiki: {
-      async findFirst() {
+      async findFirst(query: unknown) {
+        serverWikiQuery = query;
         return {
           id: 5n,
           voteServerId: null,
@@ -210,6 +212,21 @@ test('public server wiki rendering fails closed when a persisted premium layout 
 
   const withoutEntitlement = await service.findServerWikiContext('server', 7n, 9n, {});
   assert.equal(withoutEntitlement?.context.layout, 'docs');
+  assert.deepEqual(serverWikiQuery, {
+    where: { spaceId: 7n, status: 'active' },
+    select: {
+      id: true,
+      voteServerId: true,
+      serverName: true,
+      slug: true,
+      host: true,
+      port: true,
+      edition: true,
+      supportedVersions: true,
+      genres: true,
+      layoutKey: true,
+    },
+  });
 
   entitlementRows = [{
     layoutKey: 'brand',
