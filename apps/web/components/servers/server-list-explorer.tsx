@@ -326,7 +326,7 @@ export function ServerListExplorer({
                   onChange={(event) => setSort(event.target.value as SortFilter)}
                   className="paper-control h-10 w-full cursor-pointer appearance-none px-3 pr-8 font-medium"
                 >
-                  <option value="votes24h_desc">투표순</option>
+                  <option value="votes24h_desc">24시간 투표순</option>
                   <option value="votesMonthly_desc">월간 투표순</option>
                   <option value="playersOnline_desc">동접순</option>
                   <option value="reviews_desc">리뷰 많은순</option>
@@ -584,7 +584,7 @@ export function ServerListExplorer({
                   onChange={(event) => setSort(event.target.value as SortFilter)}
                   className="paper-control h-10 w-full px-3"
                 >
-                  <option value="votes24h_desc">투표순</option>
+                  <option value="votes24h_desc">24시간 투표순</option>
                   <option value="votesMonthly_desc">월간 투표순</option>
                   <option value="playersOnline_desc">동접순</option>
                   <option value="reviews_desc">리뷰 많은순</option>

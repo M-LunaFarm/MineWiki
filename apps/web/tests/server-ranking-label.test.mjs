@@ -9,4 +9,6 @@ test('server list renders canonical vote rank only for the canonical ranking sor
   assert.doesNotMatch(source, /rank=\{index \+ 1\}/u);
   assert.match(source, /readonly rank: number \| null/u);
   assert.match(source, /\{rank \? <span/u);
+  assert.equal(source.match(/<option value="votes24h_desc">24시간 투표순<\/option>/gu)?.length, 2);
+  assert.doesNotMatch(source, /<option value="votes24h_desc">투표순<\/option>/u);
 });
