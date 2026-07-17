@@ -337,6 +337,7 @@ export function ServerDetailShowcase({
             apiBaseUrl={apiBaseUrl}
             initialPolicy={detail.voteRequiresOwnership ?? false}
             initialWikiSlug={detail.wikiSlug ?? null}
+            initialProfile={detail}
             className="mt-8"
           />
         </div>

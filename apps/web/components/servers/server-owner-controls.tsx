@@ -3,18 +3,29 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import type { VotifierTarget } from '@minewiki/schemas';
+import type { ServerDetail, VotifierTarget } from '@minewiki/schemas';
 import { AlertCircle, BookOpen, CheckCircle2, Clock3, ExternalLink, Rocket, RotateCcw } from 'lucide-react';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { useAuth } from '../providers/auth-context';
 import { csrfHeaders } from '../../lib/csrf';
 import { PrivilegedActionGate } from '../auth/privileged-action-gate';
+import { ServerProfileSettings } from './server-profile-settings';
 
 interface ServerOwnerControlsProps {
   readonly serverId: string;
   readonly apiBaseUrl?: string;
   readonly initialPolicy: boolean;
   readonly initialWikiSlug?: string | null;
+  readonly initialProfile: Pick<
+    ServerDetail,
+    | 'name'
+    | 'tags'
+    | 'shortDescription'
+    | 'longDescription'
+    | 'websiteUrl'
+    | 'discordUrl'
+    | 'bannerUrl'
+  >;
   readonly className?: string;
 }
 
@@ -128,6 +139,7 @@ export function ServerOwnerControls({
   apiBaseUrl,
   initialPolicy,
   initialWikiSlug,
+  initialProfile,
   className,
 }: ServerOwnerControlsProps) {
   const { account } = useAuth();
@@ -520,6 +532,12 @@ export function ServerOwnerControls({
           프리미엄 등록하기
         </Link>
       </div>
+
+      <ServerProfileSettings
+        serverId={serverId}
+        baseUrl={baseUrl}
+        initial={initialProfile}
+      />
 
       <div className="mt-5 rounded-lg border border-[#2a2a2d] bg-[#1c1c1f] p-4 text-sm text-slate-200">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
