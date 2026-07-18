@@ -78,6 +78,9 @@ export interface WikiPageResponse {
     readonly playersMax: number | null;
     readonly publicationStatus: 'draft' | 'published' | 'unpublished';
     readonly layout: 'docs' | 'handbook' | 'brand';
+    readonly navigationKey: string;
+    readonly previousDocument: ServerWikiNavigationDocumentLink | null;
+    readonly nextDocument: ServerWikiNavigationDocumentLink | null;
     readonly navigation: ReadonlyArray<{
       readonly kind: 'group' | 'page';
       readonly id: string;
@@ -88,6 +91,12 @@ export interface WikiPageResponse {
       readonly hasChildren: boolean;
     }>;
   } | null;
+}
+
+export interface ServerWikiNavigationDocumentLink {
+  readonly id: string;
+  readonly title: string;
+  readonly path: string;
 }
 
 export interface ServerWikiNavigationResponse {
@@ -3663,12 +3672,25 @@ export class WikiReadService {
         genres: true,
         publicationStatus: true,
         layoutKey: true,
-        navigationOrder: true
+        navigationOrder: true,
+        navigationVersion: true,
+        contentSettingsVersion: true,
       }
     });
     if (!serverWiki) {
       return null;
     }
+    const releasedNavigation = releaseId
+      ? await this.findReleasedServerWikiNavigationSummary({
+          releaseId,
+          serverWikiId: serverWiki.id,
+          spaceId,
+          contentSlug: serverWiki.slug,
+          siteSlug: serverWiki.siteSlug ?? serverWiki.slug,
+          currentPageId,
+          access,
+        })
+      : null;
     const now = new Date();
     const [server, pageRows, layoutEntitlements, release] = await Promise.all([
       serverWiki.voteServerId
@@ -3687,12 +3709,15 @@ export class WikiReadService {
             }
           })
         : null,
-      releaseId
+      releaseId && !releasedNavigation
         ? this.prisma.serverWikiReleaseItem.findMany({
             where: { releaseId, serverWikiId: serverWiki.id, spaceId, pageType: { not: 'redirect' } },
             orderBy: [{ localPath: 'asc' }, { pageId: 'asc' }],
+            select: serverWikiNavigationReleaseItemSelect,
           })
-        : this.prisma.wikiPage.findMany({
+        : releaseId
+          ? Promise.resolve([])
+          : this.prisma.wikiPage.findMany({
             where: { spaceId, status: { not: 'deleted' }, pageType: { not: 'redirect' } },
             orderBy: [{ localPath: 'asc' }, { id: 'asc' }]
           }),
@@ -3735,22 +3760,7 @@ export class WikiReadService {
       readonly ownerProfileId: bigint | null;
       readonly updatedAt: Date;
     }> = releaseId
-      ? (pageRows as ServerWikiReleaseItem[]).map((item) => ({
-          id: item.pageId,
-          namespaceId: item.namespaceId,
-          spaceId: item.spaceId,
-          localPath: item.localPath,
-          slug: item.slug,
-          title: item.title,
-          displayTitle: item.displayTitle,
-          currentRevisionId: item.revisionId,
-          pageType: item.pageType,
-          protectionLevel: item.protectionLevel,
-          status: item.pageStatus,
-          createdBy: item.createdBy,
-          ownerProfileId: item.ownerProfileId,
-          updatedAt: item.pageUpdatedAt,
-        }))
+      ? (pageRows as NavigationReleaseItem[]).map(pageFromNavigationReleaseItem)
       : pageRows as WikiPage[];
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
     const publicRevisionKeys = releaseId
@@ -3776,7 +3786,7 @@ export class WikiReadService {
     const releasedLayoutKey = presentation && typeof presentation.layoutKey === 'string'
       ? presentation.layoutKey
       : serverWiki.layoutKey;
-    const navigation = buildServerWikiNavigation(
+    const navigation = releasedNavigation ? [] : buildServerWikiNavigation(
       serverWiki.slug,
       readablePages,
       currentPageId,
@@ -3784,6 +3794,10 @@ export class WikiReadService {
       '/serverWiki',
       navigationOrder
     );
+    const pageDocuments = navigation.filter((item) => item.kind === 'page' && item.path !== null);
+    const currentIndex = pageDocuments.findIndex((item) => item.current);
+    const documentLink = (item: (typeof pageDocuments)[number] | undefined): ServerWikiNavigationDocumentLink | null =>
+      item?.path ? { id: item.id, title: item.title, path: item.path } : null;
     return {
       directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
       context: {
@@ -3801,9 +3815,85 @@ export class WikiReadService {
         playersMax: server?.playersMax ?? null,
         publicationStatus: serverWiki.publicationStatus as 'draft' | 'published' | 'unpublished',
         layout: resolveEffectiveServerWikiLayout(releasedLayoutKey, layoutEntitlements, now),
+        navigationKey: releaseId
+          ? `release:${releaseId}:v1`
+          : `draft:${serverWiki.navigationVersion}:${serverWiki.contentSettingsVersion}`,
+        previousDocument: releasedNavigation?.previous
+          ?? (currentIndex > 0 ? documentLink(pageDocuments[currentIndex - 1]) : null),
+        nextDocument: releasedNavigation?.next
+          ?? (currentIndex >= 0 ? documentLink(pageDocuments[currentIndex + 1]) : null),
         navigation
       }
     };
+  }
+
+  private async findReleasedServerWikiNavigationSummary(input: {
+    readonly releaseId: bigint;
+    readonly serverWikiId: bigint;
+    readonly spaceId: bigint;
+    readonly contentSlug: string;
+    readonly siteSlug: string;
+    readonly currentPageId: bigint;
+    readonly access: WikiAccessContext;
+  }): Promise<{ readonly previous: ServerWikiNavigationDocumentLink | null; readonly next: ServerWikiNavigationDocumentLink | null } | null> {
+    const current = await this.prisma.serverWikiReleaseNavigationNode.findFirst({
+      where: {
+        releaseId: input.releaseId,
+        serverWikiId: input.serverWikiId,
+        kind: 'page',
+        pageId: input.currentPageId,
+      },
+      select: { position: true },
+    });
+    if (!current) return null;
+    const findNeighbor = async (direction: 'previous' | 'next'): Promise<ServerWikiNavigationDocumentLink | null> => {
+      let cursor = current.position;
+      for (;;) {
+        const nodes = await this.prisma.serverWikiReleaseNavigationNode.findMany({
+          where: {
+            releaseId: input.releaseId,
+            serverWikiId: input.serverWikiId,
+            kind: 'page',
+            position: direction === 'previous' ? { lt: cursor } : { gt: cursor },
+          },
+          orderBy: { position: direction === 'previous' ? 'desc' : 'asc' },
+          take: 32,
+          select: { pageId: true, title: true, position: true },
+        });
+        const pageIds = nodes.flatMap((node) => node.pageId ? [node.pageId] : []);
+        if (pageIds.length === 0) return null;
+        const releaseItems = await this.prisma.serverWikiReleaseItem.findMany({
+          where: {
+            releaseId: input.releaseId,
+            serverWikiId: input.serverWikiId,
+            spaceId: input.spaceId,
+            pageId: { in: pageIds },
+          },
+          select: serverWikiNavigationReleaseItemSelect,
+        });
+        const readable = await this.wikiPermissions.filterReadablePages({
+          ...input.access,
+          pages: releaseItems.map(pageFromNavigationReleaseItem),
+        });
+        const readableIds = new Set(readable.map((page) => page.id));
+        const itemByPageId = new Map(releaseItems.map((item) => [item.pageId, item]));
+        const node = nodes.find((candidate) => candidate.pageId !== null && readableIds.has(candidate.pageId));
+        if (node?.pageId) {
+          const item = itemByPageId.get(node.pageId);
+          if (item) {
+            return {
+              id: node.pageId.toString(),
+              title: node.title,
+              path: buildCanonicalServerWikiPath(input.siteSlug, item.title, input.contentSlug, '/serverWiki'),
+            };
+          }
+        }
+        if (nodes.length < 32) return null;
+        cursor = nodes[nodes.length - 1]!.position;
+      }
+    };
+    const [previous, next] = await Promise.all([findNeighbor('previous'), findNeighbor('next')]);
+    return { previous, next };
   }
 
   private async findRenderableFiles(ast: AstNode[], access: WikiAccessContext) {

@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const detail = await readFile(new URL('../components/servers/server-detail-showcase.tsx', import.meta.url), 'utf8');
 const wiki = await readFile(new URL('../components/wiki/server-wiki-article-view.tsx', import.meta.url), 'utf8');
 const wikiHeader = await readFile(new URL('../components/wiki/server-wiki-header.tsx', import.meta.url), 'utf8');
+const wikiServerApi = await readFile(new URL('../lib/wiki-server-api.ts', import.meta.url), 'utf8');
 const appShell = await readFile(new URL('../components/layout/app-shell.tsx', import.meta.url), 'utf8');
 
 test('server detail promotes linked documentation as a first-class child experience', () => {
@@ -20,7 +21,7 @@ test('server detail promotes linked documentation as a first-class child experie
 });
 
 test('server wiki uses its own documentation shell and enriches the root document with navigation', () => {
-  const header = wiki.indexOf('<ServerWikiHeader page={page} />');
+  const header = wiki.indexOf('<ServerWikiHeader page={pageWithNavigation} />');
   const article = wiki.indexOf('id={contentId}');
   const startHere = wiki.indexOf('id="server-wiki-start-here-title"');
 
@@ -28,6 +29,9 @@ test('server wiki uses its own documentation shell and enriches the root documen
   assert.ok(article > header);
   assert.ok(startHere > article);
   assert.match(wiki, /const isWikiHome = currentIndex === 0/u);
+  assert.match(wiki, /fetchServerWikiNavigation\(wiki\.contentSlug, wiki\.navigationKey\)\.catch\(\(\) => null\)/u);
+  assert.match(wikiServerApi, /new URLSearchParams\(\{ key: navigationKey \}\)/u);
+  assert.match(wikiServerApi, /navigationKey\.startsWith\('draft:'\) \? 'no-store' : 'force-cache'/u);
   assert.match(wiki, /pageNavigation\.filter\(\(item\) => !item\.current\)\.slice\(0, 6\)/u);
   assert.match(wikiHeader, /Documentation/u);
   assert.match(wikiHeader, /서버 문서 검색/u);

@@ -112,6 +112,9 @@ export interface WikiPageResponse {
     readonly playersMax: number | null;
     readonly publicationStatus: 'draft' | 'published' | 'unpublished';
     readonly layout: 'docs' | 'handbook' | 'brand';
+    readonly navigationKey: string;
+    readonly previousDocument: ServerWikiNavigationDocumentLink | null;
+    readonly nextDocument: ServerWikiNavigationDocumentLink | null;
     readonly navigation: ReadonlyArray<{
       readonly kind: 'group' | 'page';
       readonly id: string;
@@ -122,6 +125,25 @@ export interface WikiPageResponse {
       readonly hasChildren: boolean;
     }>;
   } | null;
+}
+
+export interface ServerWikiNavigationDocumentLink {
+  readonly id: string;
+  readonly title: string;
+  readonly path: string;
+}
+
+export interface ServerWikiNavigationResponse {
+  readonly key: string;
+  readonly cacheable: boolean;
+  readonly items: ReadonlyArray<{
+    readonly kind: 'group' | 'page';
+    readonly id: string;
+    readonly title: string;
+    readonly path: string | null;
+    readonly depth: number;
+    readonly hasChildren: boolean;
+  }>;
 }
 
 export interface WikiRenderedRevisionResponse extends WikiPageResponse {

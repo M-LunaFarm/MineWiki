@@ -278,6 +278,8 @@ test('public server wiki rendering fails closed when a persisted premium layout 
         publicationStatus: true,
         layoutKey: true,
         navigationOrder: true,
+        navigationVersion: true,
+        contentSettingsVersion: true,
     },
   });
 
@@ -472,6 +474,82 @@ test('released server wiki navigation reads compact rows without full-text relea
   assert.equal(result.items.some((item) => item.id === '2'), false);
   assert.equal(releaseItemQuery?.select?.searchVector, undefined);
   assert.equal(releaseItemQuery?.select?.title, true);
+});
+
+test('released page context reads bounded adjacent navigation instead of every release document', async () => {
+  const releaseItemQueries: Array<{ where?: { pageId?: unknown }; select?: Record<string, boolean> }> = [];
+  const navigationQueries: Array<{ take?: number; orderBy?: { position: string } }> = [];
+  const releaseItem = (pageId: bigint) => ({
+    namespaceId: 7,
+    spaceId: 77n,
+    pageId,
+    revisionId: pageId + 10_000n,
+    localPath: `luna/page-${pageId}`,
+    slug: `luna/page-${pageId}`,
+    title: `luna/page-${pageId}`,
+    displayTitle: `문서 ${pageId}`,
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 1n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-19T00:00:00.000Z'),
+  });
+  const prisma = {
+    serverWiki: {
+      async findFirst() {
+        return {
+          id: 8n, voteServerId: null, serverName: 'Luna', slug: 'luna', siteSlug: 'luna-docs',
+          host: null, port: null, edition: 'java', supportedVersions: null, genres: null,
+          publicationStatus: 'published', layoutKey: 'docs', navigationOrder: null,
+          navigationVersion: 4, contentSettingsVersion: 6,
+        };
+      },
+    },
+    serverWikiReleaseNavigationNode: {
+      async findFirst() { return { position: 500 }; },
+      async findMany(query: { take?: number; orderBy?: { position: string } }) {
+        navigationQueries.push(query);
+        return query.orderBy?.position === 'desc'
+          ? [{ pageId: 499n, title: '이전 문서', position: 499 }]
+          : [{ pageId: 501n, title: '다음 문서', position: 501 }];
+      },
+    },
+    serverWikiReleaseItem: {
+      async findMany(query: { where?: { pageId?: unknown }; select?: Record<string, boolean> }) {
+        releaseItemQueries.push(query);
+        const pageIds = (query.where?.pageId as { in?: bigint[] } | undefined)?.in ?? [];
+        return pageIds.map(releaseItem);
+      },
+    },
+    serverWikiLayoutEntitlement: { async findMany() { return []; } },
+    serverWikiRelease: { async findFirst() { return { presentationSnapshot: {} }; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async filterReadablePages({ pages }: { pages: Array<{ id: bigint }> }) { return pages; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions) as unknown as {
+    findServerWikiContext(namespace: string, spaceId: bigint, pageId: bigint, access: unknown, releaseId: bigint): Promise<{
+      context: {
+        navigationKey: string;
+        navigation: unknown[];
+        previousDocument: { id: string } | null;
+        nextDocument: { id: string } | null;
+      };
+    }>;
+  };
+
+  const result = await service.findServerWikiContext('server', 77n, 500n, {}, 9n);
+
+  assert.equal(result.context.navigationKey, 'release:9:v1');
+  assert.deepEqual(result.context.navigation, []);
+  assert.equal(result.context.previousDocument?.id, '499');
+  assert.equal(result.context.nextDocument?.id, '501');
+  assert.equal(navigationQueries.length, 2);
+  assert.ok(navigationQueries.every((query) => query.take === 32));
+  assert.equal(releaseItemQueries.length, 2);
+  assert.ok(releaseItemQueries.every((query) => query.where?.pageId !== undefined));
+  assert.ok(releaseItemQueries.every((query) => query.select?.searchVector === undefined));
 });
 
 test('server wiki navigation removes a duplicated server slug from labels', () => {

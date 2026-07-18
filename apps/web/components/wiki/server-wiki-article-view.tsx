@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 
 import type { WikiPageResponse } from '../../lib/wiki-api';
-import { fetchServerWikiPresentation } from '../../lib/wiki-server-api';
+import { fetchServerWikiNavigation, fetchServerWikiPresentation } from '../../lib/wiki-server-api';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
 import { ServerWikiHeader } from './server-wiki-header';
 import { WikiPageTools } from './wiki-page-tools';
@@ -26,7 +26,18 @@ interface ServerWikiArticleViewProps {
 export async function ServerWikiArticleView({ page, routePath }: ServerWikiArticleViewProps) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
-  const presentation = await fetchServerWikiPresentation(wiki.contentSlug);
+  const [presentation, navigationResponse] = await Promise.all([
+    fetchServerWikiPresentation(wiki.contentSlug),
+    fetchServerWikiNavigation(wiki.contentSlug, wiki.navigationKey).catch(() => null),
+  ]);
+  const navigation = (navigationResponse?.items ?? wiki.navigation).map((item) => ({
+    ...item,
+    current: item.kind === 'page' && item.id === page.id,
+  }));
+  const pageWithNavigation: WikiPageResponse = {
+    ...page,
+    serverWiki: { ...wiki, navigation },
+  };
   const contentId = `wiki-content-${page.id}`;
   const documentTitle = serverWikiDocumentTitle(page.displayTitle, [wiki.slug, wiki.contentSlug], wiki.name);
 
@@ -35,10 +46,10 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
     timeStyle: 'short',
     timeZone: 'Asia/Seoul',
   }).format(new Date(page.updatedAt));
-  const pageNavigation = wiki.navigation.filter((item) => item.kind === 'page' && item.path !== null);
+  const pageNavigation = navigation.filter((item) => item.kind === 'page' && item.path !== null);
   const currentIndex = pageNavigation.findIndex((item) => item.current);
-  const previous = currentIndex > 0 ? pageNavigation[currentIndex - 1] : null;
-  const next = currentIndex >= 0 ? pageNavigation[currentIndex + 1] ?? null : null;
+  const previous = wiki.previousDocument ?? (currentIndex > 0 ? pageNavigation[currentIndex - 1] : null);
+  const next = wiki.nextDocument ?? (currentIndex >= 0 ? pageNavigation[currentIndex + 1] ?? null : null);
   const address = wiki.host ? `${wiki.host}${wiki.port && wiki.port !== 25565 ? `:${wiki.port}` : ''}` : null;
   const isHandbook = wiki.layout === 'handbook';
   const isBrand = wiki.layout === 'brand';
@@ -55,14 +66,14 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
 
   return (
     <div className="server-wiki-layout min-h-screen bg-white text-[#333]">
-      <ServerWikiHeader page={page} />
+      <ServerWikiHeader page={pageWithNavigation} />
       {wiki.publicationStatus !== 'published' ? (
         <aside className="border-y border-amber-300/40 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-950" role="status">
           {wiki.publicationStatus === 'draft' ? '초안 미리보기' : '비공개 미리보기'} · 권한이 있는 협업자에게만 표시됩니다.
         </aside>
       ) : null}
       <main className={`mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
-        <ServerWikiSidebar page={page} />
+        <ServerWikiSidebar page={pageWithNavigation} />
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-[#777]">

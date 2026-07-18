@@ -19,6 +19,7 @@ import type {
   WikiPublicProfileResponse,
   WikiPublicStatsResponse,
   ServerWikiPresentation,
+  ServerWikiNavigationResponse,
 } from './wiki-api';
 
 const API_BASE = normalizeApiBaseUrl(process.env.INTERNAL_API_BASE_URL);
@@ -51,6 +52,20 @@ export async function fetchServerWikiPresentation(slug: string): Promise<ServerW
     response,
     'Failed to load server wiki presentation settings.',
   );
+}
+
+export async function fetchServerWikiNavigation(slug: string, navigationKey: string): Promise<ServerWikiNavigationResponse | null> {
+  const cookieHeader = (await cookies()).toString();
+  const params = new URLSearchParams({ key: navigationKey });
+  const response = await fetch(
+    `${API_BASE}/v1/wiki/server-wikis/${encodeURIComponent(slug)}/navigation?${params.toString()}`,
+    {
+      headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+      cache: cookieHeader || navigationKey.startsWith('draft:') ? 'no-store' : 'force-cache',
+    },
+  );
+  if (response.status === 404) return null;
+  return readWikiResponse<ServerWikiNavigationResponse>(response, 'Failed to load server wiki navigation.');
 }
 
 export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisionResponse> {
