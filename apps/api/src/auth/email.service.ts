@@ -8,8 +8,10 @@ export class EmailService {
   private readonly transporter?: Transporter;
   private readonly from?: string;
   private readonly logger = new Logger(EmailService.name);
+  private readonly siteUrl?: string;
 
   constructor(config: ConfigService) {
+    this.siteUrl = config.getOptional('NEXT_PUBLIC_SITE_URL');
     const host = config.getOptional('SMTP_HOST');
     if (!host) {
       return;
@@ -85,6 +87,49 @@ export class EmailService {
       to: payload.email,
       subject,
       text: lines.join('\n')
+    });
+  }
+
+  async sendContactEmailChangeVerificationEmail(payload: {
+    email: string;
+    token: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    if (!this.transporter || !this.from) throw new Error('SMTP is not configured.');
+    const baseUrl = this.siteUrl?.replace(/\/$/u, '');
+    const confirmUrl = baseUrl
+      ? `${baseUrl}/me/email-change/confirm?token=${encodeURIComponent(payload.token)}`
+      : undefined;
+    await this.transporter.sendMail({
+      from: this.from,
+      to: payload.email,
+      subject: 'MineWiki 연락 이메일 변경 확인',
+      text: [
+        'MineWiki 연락 이메일 변경을 확인해 주세요.',
+        confirmUrl ? `확인 링크: ${confirmUrl}` : `확인 코드: ${payload.token}`,
+        `만료 시각: ${payload.expiresAt.toISOString()}`,
+        '',
+        '본인이 요청하지 않았다면 이 메일을 무시해 주세요.'
+      ].join('\n')
+    });
+  }
+
+  async sendContactEmailChangedNotice(payload: {
+    email: string;
+    newEmailMasked: string;
+    changedAt: Date;
+  }): Promise<void> {
+    if (!this.transporter || !this.from) throw new Error('SMTP is not configured.');
+    await this.transporter.sendMail({
+      from: this.from,
+      to: payload.email,
+      subject: 'MineWiki 연락 이메일이 변경되었습니다',
+      text: [
+        `새 연락 이메일: ${payload.newEmailMasked}`,
+        `변경 시각: ${payload.changedAt.toISOString()}`,
+        '',
+        '본인이 변경하지 않았다면 즉시 고객 지원에 문의해 주세요.'
+      ].join('\n')
     });
   }
 

@@ -25,6 +25,7 @@ import { WikiProfileMergePanel } from '../../components/account/wiki-profile-mer
 import { WikiApiTokenPanel } from '../../components/account/wiki-api-token-panel';
 import { AccountDataExportPanel } from '../../components/account/account-data-export-panel';
 import { WikiUsernamePanel } from '../../components/account/wiki-username-panel';
+import { AccountEmailChangePanel } from '../../components/account/account-email-change-panel';
 import { AuthShellLayout } from '../../components/auth/auth-shell-layout';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
 import { useAuth } from '../../components/providers/auth-context';
@@ -1074,6 +1075,8 @@ export function AccountClientPage() {
           <WikiProfileMergePanel />
 
           <WikiUsernamePanel hasPassword={hasPasswordLogin} />
+
+          <AccountEmailChangePanel />
 
           <MfaSecurityPanel />
 

@@ -132,6 +132,15 @@ export const emailResendRequestSchema = z.object({ email: emailAddressSchema }).
 
 export const emailLoginSetupRequestSchema = emailLoginRequestSchema;
 
+export const contactEmailChangeRequestSchema = z.object({
+  email: emailAddressSchema,
+  password: authPasswordSchema.optional(),
+}).strict();
+
+export const contactEmailChangeConfirmSchema = z.object({
+  token: z.string().trim().min(1).max(512),
+}).strict();
+
 export const passwordResetRequestSchema = z.object({ email: emailAddressSchema }).strict();
 
 export const passwordResetConfirmRequestSchema = z
@@ -806,6 +815,8 @@ export type EmailLoginRequest = z.infer<typeof emailLoginRequestSchema>;
 export type EmailVerificationRequest = z.infer<typeof emailVerificationRequestSchema>;
 export type EmailResendRequest = z.infer<typeof emailResendRequestSchema>;
 export type EmailLoginSetupRequest = z.infer<typeof emailLoginSetupRequestSchema>;
+export type ContactEmailChangeRequest = z.infer<typeof contactEmailChangeRequestSchema>;
+export type ContactEmailChangeConfirm = z.infer<typeof contactEmailChangeConfirmSchema>;
 export type PasswordResetRequest = z.infer<typeof passwordResetRequestSchema>;
 export type PasswordResetConfirmRequest = z.infer<typeof passwordResetConfirmRequestSchema>;
 export type AccountDeletionRequest = z.infer<typeof accountDeletionRequestSchema>;

@@ -745,6 +745,7 @@ export class AccountDeletionService {
     await tx.oAuthState.deleteMany({ where: { linkAccountId: { in: accountIds } } });
     await tx.passwordReset.deleteMany({ where: { accountId: { in: accountIds } } });
     await tx.emailVerification.deleteMany({ where: { accountId: { in: accountIds } } });
+    await tx.accountEmailChange.deleteMany({ where: { canonicalAccountId: { in: accountIds } } });
     await tx.minecraftAuthorization.deleteMany({ where: { accountId: { in: accountIds } } });
     await tx.minecraftIdentity.deleteMany({ where: { accountId: { in: accountIds } } });
   }

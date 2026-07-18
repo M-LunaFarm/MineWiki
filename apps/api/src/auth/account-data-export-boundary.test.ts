@@ -51,6 +51,7 @@ test('every export query has an explicit selection tree without secret field nam
     'stepUpExpiresAt', 'stepUpMethod', 'stepUpPurpose', 'storagePath', 'adminNote',
     'processedBy', 'cancelledBy', 'cancelTokenHash', 'verificationCode',
     'serverSecret', 'publicKey', 'eventLog', 'verificationUrl', 'completionTokenHash',
+    'tokenHash',
   ]) assert.equal(selectedKeys.has(key), false, `forbidden selected field: ${key}`);
   assert.ok(calls.length >= 25, 'expected the complete export section set to be exercised');
 });

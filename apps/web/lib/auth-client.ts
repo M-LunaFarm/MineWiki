@@ -31,6 +31,23 @@ interface PasswordResetConfirmResponse {
   readonly success: true;
 }
 
+export interface AccountEmailChangeState {
+  readonly currentEmail: string | null;
+  readonly hasPassword: boolean;
+  readonly pending: {
+    readonly emailMasked: string;
+    readonly status: 'pending';
+    readonly expiresAt: string;
+    readonly nextResendAt: string;
+  } | null;
+}
+
+export interface AccountEmailChangeRequestResult {
+  readonly accepted: true;
+  readonly expiresAt: string;
+  readonly nextResendAt: string;
+}
+
 export interface AccountLinkConflict {
   readonly id: string;
   readonly kind:
@@ -298,6 +315,53 @@ export async function setupEmailLogin(payload: {
   password: string;
 }): Promise<ResendVerificationResult> {
   return postJson<ResendVerificationResult>('/v1/auth/email/setup', payload);
+}
+
+async function accountEmailChangeRequest<T>(
+  path: string,
+  options: { readonly method?: 'GET' | 'POST'; readonly body?: unknown; readonly csrf?: boolean } = {},
+): Promise<T> {
+  const method = options.method ?? 'GET';
+  const headers = method === 'POST'
+    ? { 'Content-Type': 'application/json', ...(options.csrf === false ? {} : await csrfHeaders()) }
+    : undefined;
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    credentials: 'include',
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new ApiClientError(
+      typeof payload?.message === 'string' ? payload.message : '이메일 변경 요청을 처리하지 못했습니다.',
+      typeof payload?.code === 'string' ? payload.code : 'contact_email_change_failed',
+      response.status,
+      payload?.details,
+    );
+  }
+  return payload as T;
+}
+
+export function fetchAccountEmailChangeState(): Promise<AccountEmailChangeState> {
+  return accountEmailChangeRequest('/v1/auth/me/email-change');
+}
+
+export function requestAccountEmailChange(input: { readonly email: string; readonly password?: string }): Promise<AccountEmailChangeRequestResult> {
+  return accountEmailChangeRequest('/v1/auth/me/email-change/request', { method: 'POST', body: input });
+}
+
+export function resendAccountEmailChange(): Promise<AccountEmailChangeRequestResult> {
+  return accountEmailChangeRequest('/v1/auth/me/email-change/resend', { method: 'POST', body: {} });
+}
+
+export async function confirmAccountEmailChange(token: string): Promise<{ readonly success: true; readonly reauthenticationRequired: true }> {
+  const result = await accountEmailChangeRequest<{ readonly success: true; readonly reauthenticationRequired: true }>(
+    '/v1/auth/email-change/confirm',
+    { method: 'POST', body: { token }, csrf: false },
+  );
+  clearCsrfToken();
+  return result;
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {

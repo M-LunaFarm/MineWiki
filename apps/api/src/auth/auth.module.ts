@@ -26,6 +26,8 @@ import {
   WebAuthnService,
 } from './webauthn.service';
 import { WikiModule } from '../wiki/wiki.module';
+import { AccountEmailChangeController } from './account-email-change.controller';
+import { AccountEmailChangeService } from './account-email-change.service';
 
 @Module({
   imports: [SessionModule, FileModule, WikiModule],
@@ -42,7 +44,8 @@ import { WikiModule } from '../wiki/wiki.module';
     WebAuthnService,
     { provide: WEBAUTHN_SERVER, useValue: DEFAULT_WEBAUTHN_SERVER },
     AccountModerationService,
-    AccountDataExportService
+    AccountDataExportService,
+    AccountEmailChangeService
   ],
   controllers: [
     AuthController,
@@ -53,7 +56,8 @@ import { WikiModule } from '../wiki/wiki.module';
     AccountDeletionAdminController,
     AccountDeletionInternalController,
     AccountModerationController,
-    AccountDataExportController
+    AccountDataExportController,
+    AccountEmailChangeController
   ],
   exports: [AuthService, AccountSeparationService, OAuthFlowService, EmailService]
 })

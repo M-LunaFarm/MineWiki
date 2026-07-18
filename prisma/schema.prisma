@@ -358,6 +358,31 @@ model EmailVerification {
   @@index([email])
 }
 
+model AccountEmailChange {
+  id                   String    @id @default(uuid()) @db.Char(36)
+  canonicalAccountId   String    @map("canonical_account_id") @db.Char(36)
+  credentialAccountId  String?   @map("credential_account_id") @db.Char(36)
+  previousEmail        String?   @map("previous_email") @db.VarChar(254)
+  newEmail             String    @map("new_email") @db.VarChar(254)
+  tokenHash            String    @unique @map("token_hash") @db.Char(64)
+  groupFingerprint     String    @map("group_fingerprint") @db.Char(64)
+  status               String    @default("pending") @db.VarChar(16)
+  activeKey            String?   @unique @map("active_key") @db.Char(36)
+  requestedBySessionId String    @map("requested_by_session_id") @db.Char(36)
+  sentAt               DateTime  @map("sent_at") @db.DateTime(3)
+  resendAvailableAt    DateTime  @map("resend_available_at") @db.DateTime(3)
+  expiresAt            DateTime  @map("expires_at") @db.DateTime(3)
+  confirmedAt          DateTime? @map("confirmed_at") @db.DateTime(3)
+  supersededAt         DateTime? @map("superseded_at") @db.DateTime(3)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([canonicalAccountId, status, createdAt], map: "idx_account_email_changes_account")
+  @@index([newEmail, status], map: "idx_account_email_changes_new_email")
+  @@index([expiresAt], map: "idx_account_email_changes_expiry")
+  @@map("account_email_changes")
+}
+
 model PasswordReset {
   token     String   @id
   accountId String

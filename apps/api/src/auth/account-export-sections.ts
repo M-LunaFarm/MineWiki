@@ -39,6 +39,16 @@ export function buildAccountExportSections(
         suspendedAt: true, suspensionReason: true, createdAt: true, lastLoginAt: true,
       },
     })),
+    staticSection('accountEmailChanges', async () => prisma.accountEmailChange.findMany({
+      where: { canonicalAccountId: { in: accountIds } },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true, canonicalAccountId: true, credentialAccountId: true,
+        previousEmail: true, newEmail: true, status: true,
+        sentAt: true, resendAvailableAt: true, expiresAt: true,
+        confirmedAt: true, supersededAt: true, createdAt: true, updatedAt: true,
+      },
+    })),
     staticSection('accountLinks', async () => prisma.accountLink.findMany({
       where: {
         OR: [
