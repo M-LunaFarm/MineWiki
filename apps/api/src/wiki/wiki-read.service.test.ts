@@ -335,6 +335,8 @@ test('server wiki identity fails closed only when both the linked name and host 
         return {
           id: 'ac256525-0000-0000-0000-000000000000',
           shortCode: '4cfjfkz',
+          wikiSpaceId: 5643n,
+          wikiSlug: '4cfjfkz-ac256525',
           name: 'CreeperWiki',
           joinHost: 'creeper.wiki',
           joinPort: 25565,
@@ -356,6 +358,143 @@ test('server wiki identity fails closed only when both the linked name and host 
     () => service.findServerWikiContext('server', 5643n, 740n, {}),
     /Server wiki not found/u,
   );
+});
+
+test('server wiki context exposes a canonical active directory overview without leaking unsafe links', async () => {
+  let listingStatus: 'active' | 'suspended' = 'active';
+  let votesTotal = 1000;
+  let linkedSpaceId = 5643n;
+  let linkedWikiSlug = '4cfjfkz-ac256525';
+  let serverQuery: { select?: Record<string, unknown> } | undefined;
+  let serverQueries = 0;
+  const prisma = {
+    serverWiki: {
+      async findFirst() {
+        return {
+          id: 6n,
+          voteServerId: 'ac256525-0000-0000-0000-000000000000',
+          serverName: '루나팜',
+          slug: '4cfjfkz-ac256525',
+          siteSlug: 'lunafarm',
+          host: 'lunaf.kr',
+          port: 25565,
+          edition: 'java',
+          supportedVersions: '1.21',
+          genres: 'survival',
+          publicationStatus: 'published',
+          layoutKey: 'docs',
+          navigationOrder: null,
+          navigationVersion: 4,
+          contentSettingsVersion: 6,
+        };
+      },
+    },
+    server: {
+      async findUnique(query: { select?: Record<string, unknown> }) {
+        serverQuery = query;
+        serverQueries += 1;
+        return {
+          id: 'ac256525-0000-0000-0000-000000000000',
+          shortCode: '4cfjfkz',
+          wikiSpaceId: linkedSpaceId,
+          wikiSlug: linkedWikiSlug,
+          name: '루나팜',
+          joinHost: 'lunaf.kr',
+          joinPort: 25565,
+          edition: 'java',
+          listingStatus,
+          shortDescription: '공개 서버 소개',
+          tags: ['survival', 'economy', 'survival', 7],
+          verificationGrade: 'A',
+          votes24h: 32,
+          votesMonthly: 540,
+          reviewsCount: 18,
+          websiteUrl: 'https://lunaf.kr/about',
+          discordUrl: 'javascript:alert(1)',
+          isOnline: true,
+          playersOnline: 10,
+          playersMax: 100,
+          playersLastUpdatedAt: new Date('2026-07-19T06:30:00.000Z'),
+          stats: {
+            rankCurrent: 3,
+            rankDelta24h: 2,
+            rankBest: 1,
+            votesTotal,
+            rankCalculatedAt: new Date('2026-07-19T06:00:00.000Z'),
+          },
+        };
+      },
+    },
+    serverWikiLayoutEntitlement: { async findMany() { return []; } },
+    wikiPage: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async filterReadablePages({ pages }: { pages: unknown[] }) { return pages; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions) as unknown as {
+    findServerWikiContext(namespace: string, spaceId: bigint, pageId: bigint, access: unknown): Promise<{
+      directoryPath: string | null;
+      context: { directoryOverview: {
+        path: string;
+        tags: string[];
+        verificationGrade: string;
+        rank: { current: number; delta24h: number; best: number; updatedAt: string } | null;
+        live: { updatedAt: string | null };
+        websiteUrl: string | null;
+        discordUrl: string | null;
+      } | null };
+    }>;
+  };
+
+  const active = await service.findServerWikiContext('server', 5643n, 740n, {});
+  assert.equal(active.directoryPath, '/servers/4cfjfkz');
+  assert.equal(active.context.directoryOverview?.path, '/servers/4cfjfkz');
+  assert.deepEqual(active.context.directoryOverview?.tags, ['survival', 'economy', 'survival']);
+  assert.equal(active.context.directoryOverview?.verificationGrade, 'Verified');
+  assert.deepEqual(active.context.directoryOverview?.rank, {
+    current: 3,
+    delta24h: 2,
+    best: 1,
+    updatedAt: '2026-07-19T06:00:00.000Z',
+  });
+  assert.equal(active.context.directoryOverview?.live.updatedAt, '2026-07-19T06:30:00.000Z');
+  assert.equal(active.context.directoryOverview?.websiteUrl, 'https://lunaf.kr/about');
+  assert.equal(active.context.directoryOverview?.discordUrl, null);
+  assert.equal(serverQueries, 1);
+  assert.deepEqual(serverQuery?.select?.stats, {
+    select: {
+      rankCurrent: true,
+      rankDelta24h: true,
+      rankBest: true,
+      votesTotal: true,
+      rankCalculatedAt: true,
+    },
+  });
+  assert.equal(serverQuery?.select?.ownerAccountId, undefined);
+  assert.equal(serverQuery?.select?.registrantAccountId, undefined);
+  assert.equal(serverQuery?.select?.longDescription, undefined);
+  assert.equal(serverQuery?.select?.reviews, undefined);
+  assert.equal(serverQuery?.select?.votes, undefined);
+
+  votesTotal = 0;
+  const unranked = await service.findServerWikiContext('server', 5643n, 740n, {});
+  assert.equal(unranked.context.directoryOverview?.rank, null);
+
+  linkedSpaceId = 9999n;
+  const mismatchedSpace = await service.findServerWikiContext('server', 5643n, 740n, {});
+  assert.equal(mismatchedSpace.directoryPath, null);
+  assert.equal(mismatchedSpace.context.directoryOverview, null);
+  linkedSpaceId = 5643n;
+  linkedWikiSlug = 'another-wiki';
+  const mismatchedSlug = await service.findServerWikiContext('server', 5643n, 740n, {});
+  assert.equal(mismatchedSlug.directoryPath, null);
+  assert.equal(mismatchedSlug.context.directoryOverview, null);
+  linkedWikiSlug = '4cfjfkz-ac256525';
+
+  listingStatus = 'suspended';
+  const suspended = await service.findServerWikiContext('server', 5643n, 740n, {});
+  assert.equal(suspended.directoryPath, null);
+  assert.equal(suspended.context.directoryOverview, null);
 });
 
 test('server wiki navigation removes the duplicated space slug', () => {

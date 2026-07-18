@@ -30,6 +30,7 @@ import { wikiLinkResolutionContext } from './wiki-link-context';
 import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
 import { buildServerWikiReleaseNavigation } from './server-wiki-navigation-order';
 import { WikiSpecialCursorCodec, type WikiSpecialCursorBinding, type WikiSpecialCursorPosition } from './wiki-special-cursor';
+import { PUBLIC_SERVER_LISTING_STATUS } from '@minewiki/schemas';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -77,6 +78,29 @@ export interface WikiPageResponse {
     readonly isOnline: boolean | null;
     readonly playersOnline: number | null;
     readonly playersMax: number | null;
+    readonly directoryOverview: {
+      readonly path: string;
+      readonly shortDescription: string;
+      readonly tags: readonly string[];
+      readonly verificationGrade: 'Verified' | 'Unverified';
+      readonly rank: {
+        readonly current: number;
+        readonly delta24h: number;
+        readonly best: number;
+        readonly updatedAt: string;
+      } | null;
+      readonly votes24h: number;
+      readonly votesMonthly: number | null;
+      readonly reviewsCount: number;
+      readonly live: {
+        readonly isOnline: boolean | null;
+        readonly playersOnline: number | null;
+        readonly playersMax: number | null;
+        readonly updatedAt: string | null;
+      };
+      readonly websiteUrl: string | null;
+      readonly discordUrl: string | null;
+    } | null;
     readonly publicationStatus: 'draft' | 'published' | 'unpublished';
     readonly layout: 'docs' | 'handbook' | 'brand';
     readonly navigationKey: string;
@@ -3782,13 +3806,34 @@ export class WikiReadService {
             select: {
               id: true,
               shortCode: true,
+              wikiSpaceId: true,
+              wikiSlug: true,
               name: true,
               joinHost: true,
               joinPort: true,
               edition: true,
+              listingStatus: true,
+              shortDescription: true,
+              tags: true,
+              verificationGrade: true,
+              votes24h: true,
+              votesMonthly: true,
+              reviewsCount: true,
+              websiteUrl: true,
+              discordUrl: true,
               isOnline: true,
               playersOnline: true,
-              playersMax: true
+              playersMax: true,
+              playersLastUpdatedAt: true,
+              stats: {
+                select: {
+                  rankCurrent: true,
+                  rankDelta24h: true,
+                  rankBest: true,
+                  votesTotal: true,
+                  rankCalculatedAt: true,
+                },
+              },
             }
           })
         : null,
@@ -3881,8 +3926,46 @@ export class WikiReadService {
     const currentIndex = pageDocuments.findIndex((item) => item.current);
     const documentLink = (item: (typeof pageDocuments)[number] | undefined): ServerWikiNavigationDocumentLink | null =>
       item?.path ? { id: item.id, title: item.title, path: item.path } : null;
+    const directoryPath = server
+      && server.listingStatus === PUBLIC_SERVER_LISTING_STATUS
+      && server.id === serverWiki.voteServerId
+      && server.wikiSpaceId === spaceId
+      && server.wikiSlug === serverWiki.slug
+      ? `/servers/${server.shortCode?.trim() || server.id}`
+      : null;
+    const directoryOverview = server && directoryPath
+      ? {
+          path: directoryPath,
+          shortDescription: server.shortDescription.trim() || 'No description',
+          tags: normalizeWikiDirectoryTags(server.tags),
+          verificationGrade: server.verificationGrade === 'Unverified' ? 'Unverified' as const : 'Verified' as const,
+          rank: server.stats
+            && server.stats.rankCalculatedAt
+            && server.stats.votesTotal > 0
+            && server.stats.rankCurrent > 0
+            && server.stats.rankBest > 0
+            ? {
+                current: server.stats.rankCurrent,
+                delta24h: server.stats.rankDelta24h,
+                best: server.stats.rankBest,
+                updatedAt: server.stats.rankCalculatedAt.toISOString(),
+              }
+            : null,
+          votes24h: server.votes24h,
+          votesMonthly: server.votesMonthly,
+          reviewsCount: server.reviewsCount,
+          live: {
+            isOnline: server.isOnline,
+            playersOnline: server.playersOnline,
+            playersMax: server.playersMax,
+            updatedAt: server.playersLastUpdatedAt?.toISOString() ?? null,
+          },
+          websiteUrl: safeWikiDirectoryUrl(server.websiteUrl),
+          discordUrl: safeWikiDirectoryUrl(server.discordUrl),
+        }
+      : null;
     return {
-      directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
+      directoryPath,
       context: {
         spaceId: spaceId.toString(),
         name: server?.name ?? serverWiki.serverName,
@@ -3896,6 +3979,7 @@ export class WikiReadService {
         isOnline: server?.isOnline ?? null,
         playersOnline: server?.playersOnline ?? null,
         playersMax: server?.playersMax ?? null,
+        directoryOverview,
         publicationStatus: serverWiki.publicationStatus as 'draft' | 'published' | 'unpublished',
         layout: resolveEffectiveServerWikiLayout(releasedLayoutKey, layoutEntitlements, now),
         navigationKey: releaseId
@@ -4769,5 +4853,25 @@ function parseCategoryCursor(
     return { updatedAt: parsed.t, pageId: BigInt(parsed.i) };
   } catch {
     throw new BadRequestException('cursor is invalid for the selected category filters or publication state.');
+  }
+}
+
+function normalizeWikiDirectoryTags(value: Prisma.JsonValue): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => typeof item === 'string' ? item.trim() : '')
+    .filter((item) => item.length > 0);
+}
+
+function safeWikiDirectoryUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password) {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
   }
 }
