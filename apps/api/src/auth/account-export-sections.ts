@@ -9,7 +9,7 @@ import {
   type FilterReadableThreadIds,
 } from './account-export-section-utils';
 import { buildWikiExportSections } from './account-export-wiki-sections';
-import { buildIntegrationExportSections } from './account-export-integration-sections';
+import { buildIntegrationExportSections } from './account-export-legacy-integration.repository';
 
 export interface AccountExportScope {
   readonly accountIds: readonly string[];

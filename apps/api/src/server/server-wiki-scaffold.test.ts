@@ -64,6 +64,6 @@ test('starter pages provide concrete onboarding and troubleshooting paths', () =
   assert.match(pages[0]?.contentRaw ?? '', /접속 전 확인/u);
   assert.match(pages[0]?.contentRaw ?? '', /서버 추가 순서/u);
   assert.match(pages[0]?.contentRaw ?? '', /접속되지 않을 때/u);
-  assert.match(pages[2]?.contentRaw ?? '', /어떤 버전으로 접속하나요/u);
-  assert.match(pages[2]?.contentRaw ?? '', /어디로 문의하나요/u);
+  assert.match(pages[2]?.contentRaw ?? '', /지원 버전/u);
+  assert.match(pages[2]?.contentRaw ?? '', /문의 방법/u);
 });

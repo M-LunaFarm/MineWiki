@@ -12,6 +12,7 @@ const sourceRoots = [
 const allowedRepositories = new Set([
   path.join(repoRoot, 'apps/api/src/verify/guild.repositories.ts'),
   path.join(repoRoot, 'apps/worker/src/discord-verification.repository.ts'),
+  path.join(repoRoot, 'apps/api/src/auth/account-export-legacy-integration.repository.ts'),
 ]);
 
 test('legacy Luna storage names stay behind compatibility repositories', async () => {
