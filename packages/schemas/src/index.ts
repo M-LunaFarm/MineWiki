@@ -319,6 +319,7 @@ export const userAccountSchema = z.object({
 
 export const serverVerificationGradeSchema = z.enum(['Verified', 'Unverified']);
 export const claimMethodSchema = z.enum(['plugin', 'dns', 'motd']);
+export const PUBLIC_SERVER_LISTING_STATUS = 'active' as const;
 
 export const serverSummarySchema = z.object({
   id: z.string().uuid(),

@@ -16,6 +16,7 @@ import type {
   ServerUpdate,
   VotifierTarget,
 } from '@minewiki/schemas';
+import { PUBLIC_SERVER_LISTING_STATUS } from '@minewiki/schemas';
 import { Prisma, type Server, type ServerWiki } from '@prisma/client';
 import { status, statusBedrock } from 'minecraft-server-util';
 import { resolveSrv } from 'node:dns/promises';
@@ -102,6 +103,7 @@ export class ServerService {
       const servers = await this.prisma.server.findMany({
         where: {
           edition: filters.edition,
+          listingStatus: PUBLIC_SERVER_LISTING_STATUS,
         },
         orderBy: buildOrder(sort),
         include: { stats: true },
@@ -152,6 +154,7 @@ export class ServerService {
   }) {
     const search = input.search?.trim();
     const where: Prisma.ServerWhereInput = {
+      listingStatus: PUBLIC_SERVER_LISTING_STATUS,
       edition: input.edition,
       isOnline: input.online,
       verificationGrade:
@@ -213,7 +216,7 @@ export class ServerService {
       rankUpdatedAt,
     };
   }
-  async detail(idOrShortCode: string): Promise<ServerDetail> {
+  async detail(idOrShortCode: string, viewerAccountId?: string): Promise<ServerDetail> {
     const startedAt = Date.now();
     const lookup = normalizeServerLookup(idOrShortCode);
     try {
@@ -221,7 +224,12 @@ export class ServerService {
         where: lookup,
         include: { stats: true },
       });
-      if (!server) {
+      if (
+        !server ||
+        (server.listingStatus !== PUBLIC_SERVER_LISTING_STATUS &&
+          server.ownerAccountId !== viewerAccountId &&
+          server.registrantAccountId !== viewerAccountId)
+      ) {
         throw new NotFoundException(`Server ${idOrShortCode} not found`);
       }
       const [methods, serverWiki] = await Promise.all([
@@ -1542,6 +1550,7 @@ export class ServerService {
             joinPort: serverInput.joinPort,
             registrationEndpointKey,
             edition: serverInput.edition,
+            listingStatus: 'pending',
             supportedVersions: serverInput.supportedVersions,
             tags: serverInput.tags,
             shortDescription: serverInput.shortDescription,

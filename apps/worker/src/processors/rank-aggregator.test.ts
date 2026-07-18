@@ -10,6 +10,7 @@ type CapturedUpsert = {
 test('rank aggregation derives best rank from snapshots instead of placeholder stats', async () => {
   let voteGroupCall = 0;
   const statsUpserts: CapturedUpsert[] = [];
+  let serverQuery: unknown;
   const prisma = {
     vote: {
       groupBy: async () => {
@@ -24,10 +25,13 @@ test('rank aggregation derives best rank from snapshots instead of placeholder s
       },
     },
     server: {
-      findMany: async () => [
+      findMany: async (query: unknown) => {
+        serverQuery = query;
+        return [
         { id: 'server-a', name: 'Alpha', reviewsCount: 1 },
         { id: 'server-b', name: 'Beta', reviewsCount: 1 },
-      ],
+        ];
+      },
       update: (args: unknown) => ({ operation: 'server.update', args }),
     },
     serverStats: {
@@ -58,6 +62,10 @@ test('rank aggregation derives best rank from snapshots instead of placeholder s
   assert.equal(statsUpserts[1]?.update.rankBest, 1);
   assert.equal(statsUpserts[0]?.update.rankCalculatedAt.toISOString(), '2026-07-11T03:00:00.000Z');
   assert.equal(voteGroupCall, 11);
+  assert.deepEqual(serverQuery, {
+    where: { listingStatus: 'active' },
+    select: { id: true, name: true, reviewsCount: true },
+  });
 });
 
 test('rank aggregation uses the current rank when no historical snapshot exists', async () => {

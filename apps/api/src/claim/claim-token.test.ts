@@ -141,6 +141,7 @@ test('successful ownership verification promotes registrant to owner atomically'
 
   assert.deepEqual(updates, [
     { ownerAccountId: 'account-registrant', registrantAccountId: null },
+    { listingStatus: 'active' },
   ]);
 });
 

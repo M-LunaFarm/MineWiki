@@ -84,6 +84,10 @@ if (!hasDatabase) {
       });
       uploadedFileId = stored.id;
 
+      await prisma.server.update({
+        where: { id: server.id },
+        data: { listingStatus: 'active' },
+      });
       const detail = await service.detail(server.id);
       assert.equal(detail.bannerUrl, stored.publicPath);
       assert.ok(stored.filename.endsWith('.webp'));
@@ -177,7 +181,7 @@ if (!hasDatabase) {
       assert.ok(link.wikiSlug);
       assert.equal(link.wikiUrl, `/serverWiki/${encodeURIComponent(link.wikiSlug ?? '')}`);
 
-      const detail = await service.detail(server.id);
+      const detail = await service.detail(server.id, account.id);
       assert.equal(detail.wikiSpaceId, link.wikiSpaceId);
       assert.equal(detail.wikiPageId, link.wikiPageId);
       assert.equal(detail.wikiSlug, link.wikiSlug);
@@ -197,7 +201,7 @@ if (!hasDatabase) {
           host: `foreign-${unique}.example.net`,
         },
       });
-      const conflictingDetail = await service.detail(server.id);
+      const conflictingDetail = await service.detail(server.id, account.id);
       assert.equal(conflictingDetail.wikiSpaceId, null);
       assert.equal(conflictingDetail.wikiPageId, null);
       assert.equal(conflictingDetail.wikiSlug, null);

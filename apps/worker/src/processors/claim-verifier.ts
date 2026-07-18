@@ -169,6 +169,12 @@ async function applyVerificationResult(
       verifiedAt: grade === 'Unverified' ? null : checkedAt,
     },
   });
+  if (grade !== 'Unverified') {
+    await prisma.server.updateMany({
+      where: { id: snapshot.serverId, listingStatus: 'pending' },
+      data: { listingStatus: 'active' },
+    });
+  }
   return true;
 }
 

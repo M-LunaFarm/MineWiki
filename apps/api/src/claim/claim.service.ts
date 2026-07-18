@@ -207,6 +207,12 @@ export class ClaimService {
           verifiedAt: grade === 'Unverified' ? null : checkedAt,
         },
       });
+      if (grade !== 'Unverified') {
+        await transaction.server.updateMany({
+          where: { id: snapshot.serverId, listingStatus: 'pending' },
+          data: { listingStatus: 'active' },
+        });
+      }
       return true;
     });
   }

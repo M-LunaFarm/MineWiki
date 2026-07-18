@@ -391,7 +391,9 @@ export function ClaimWorkflow() {
       setQueryServerLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${apiBase}/v1/servers/${encodeURIComponent(lookup)}`);
+        const response = await fetch(`${apiBase}/v1/servers/${encodeURIComponent(lookup)}`, {
+          credentials: 'include',
+        });
         if (!response.ok) {
           throw new Error('URL로 지정된 서버를 찾지 못했습니다.');
         }

@@ -9,9 +9,11 @@
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
   ForbiddenException
 } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
 import { ServerService, type ServerProfileUpdateInput } from './server.service';
@@ -30,6 +32,7 @@ import {
   type ServerSort
 } from './server.store';
 import { SessionGuard } from '../session/session.guard';
+import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
 import { RequireStepUp } from '../session/step-up.decorator';
@@ -174,9 +177,13 @@ export class ServerController {
     });
   }
 
+  @UseGuards(OptionalSessionGuard)
   @Get(':id')
-  async detail(@Param('id') id: string): Promise<ServerDetail> {
-    return this.serverService.detail(id);
+  async detail(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<ServerDetail> {
+    return this.serverService.detail(id, request.sessionPayload?.userId);
   }
 
   @Get(':id/wiki')

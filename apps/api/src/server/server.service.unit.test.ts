@@ -107,6 +107,9 @@ test('server detail hides a stale cross-brand wiki link', async () => {
   const now = new Date('2026-07-17T00:00:00.000Z');
   const server = {
     id: randomUUID(),
+    listingStatus: 'active' as const,
+    ownerAccountId: null,
+    registrantAccountId: null,
     shortCode: 'foreign',
     wikiSpaceId: 3n,
     wikiPageId: 4n,
@@ -782,6 +785,26 @@ test('paginated rankings apply server-side filters and return page metadata', as
     { array_contains: ['survival'] },
   );
   assert.equal((queries[0] as { where: { isOnline: unknown } }).where.isOnline, true);
+  assert.equal((queries[0] as { where: { listingStatus: unknown } }).where.listingStatus, 'active');
+});
+
+test('public server list includes only active listings', async () => {
+  let query: unknown;
+  const prisma = {
+    server: {
+      findMany: async (input: unknown) => {
+        query = input;
+        return [];
+      },
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  assert.deepEqual(await service.list(), []);
+  assert.equal(
+    (query as { where: { listingStatus: unknown } }).where.listingStatus,
+    'active',
+  );
 });
 
 test('server banner upload uses canonical file service metadata path', async () => {

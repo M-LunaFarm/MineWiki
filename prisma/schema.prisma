@@ -28,6 +28,12 @@ enum ServerEdition {
   bedrock
 }
 
+enum ServerListingStatus {
+  pending
+  active
+  suspended
+}
+
 enum VerificationGrade {
   A
   B
@@ -547,18 +553,19 @@ model MinecraftIdentity {
 }
 
 model Server {
-  id                      String            @id @default(uuid())
-  shortCode               String?           @unique @db.VarChar(12)
+  id                      String              @id @default(uuid())
+  shortCode               String?             @unique @db.VarChar(12)
   ownerAccountId          String?
   registrantAccountId     String?
-  registrationEndpointKey String?           @unique @db.Char(64)
-  wikiSpaceId             BigInt?           @unique @db.UnsignedBigInt
-  wikiPageId              BigInt?           @unique @db.UnsignedBigInt
+  registrationEndpointKey String?             @unique @db.Char(64)
+  wikiSpaceId             BigInt?             @unique @db.UnsignedBigInt
+  wikiPageId              BigInt?             @unique @db.UnsignedBigInt
   wikiSlug                String?
   name                    String
   joinHost                String
   joinPort                Int
   edition                 ServerEdition
+  listingStatus           ServerListingStatus @default(pending)
   supportedVersions       Json
   tags                    Json
   shortDescription        String
@@ -566,20 +573,20 @@ model Server {
   bannerUrl               String?
   websiteUrl              String?
   discordUrl              String?
-  voteCooldownHours       Int               @default(24)
-  verificationGrade       VerificationGrade @default(Unverified)
+  voteCooldownHours       Int                 @default(24)
+  verificationGrade       VerificationGrade   @default(Unverified)
   verifiedAt              DateTime?
-  votes24h                Int               @default(0)
+  votes24h                Int                 @default(0)
   votesMonthly            Int?
-  reviewsCount            Int               @default(0)
-  voteRequiresOwnership   Boolean           @default(false)
+  reviewsCount            Int                 @default(0)
+  voteRequiresOwnership   Boolean             @default(false)
   playersOnline           Int?
   playersMax              Int?
   playersLastUpdatedAt    DateTime?
   isOnline                Boolean?
   latencyMs               Int?
-  createdAt               DateTime          @default(now())
-  updatedAt               DateTime          @updatedAt
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 
   ownerAccount         Account?              @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
   registrantAccount    Account?              @relation("ServerRegistrant", fields: [registrantAccountId], references: [id], onDelete: SetNull)
@@ -600,6 +607,7 @@ model Server {
   @@index([wikiSpaceId])
   @@index([wikiSlug])
   @@index([verificationGrade])
+  @@index([listingStatus])
   @@index([votes24h])
   @@index([votesMonthly])
   @@index([reviewsCount])

@@ -1,5 +1,6 @@
 ﻿import { Logger } from '@minewiki/logger';
 import type { RankAggregationJob } from '@minewiki/schemas';
+import { PUBLIC_SERVER_LISTING_STATUS } from '@minewiki/schemas';
 import type { PrismaClient } from '@prisma/client';
 import { DateTime } from 'luxon';
 
@@ -47,6 +48,7 @@ export function createRankAggregator(prisma: PrismaHandle) {
         _count: { _all: true }
       }),
       prisma.server.findMany({
+        where: { listingStatus: PUBLIC_SERVER_LISTING_STATUS },
         select: { id: true, name: true, reviewsCount: true }
       }),
       prisma.serverRankSnapshot.groupBy({
