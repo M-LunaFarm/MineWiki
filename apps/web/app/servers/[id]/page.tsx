@@ -7,6 +7,7 @@ import {
   fetchServerReviewPage,
   fetchServerStats,
   fetchServerReferrals,
+  fetchServerRankings,
   fetchServerSummaries,
 } from '../../../lib/api';
 import { ServerJsonLd } from '../../../components/servers/server-json-ld';
@@ -14,6 +15,7 @@ import { getApiBaseUrl } from '../../../lib/runtime-config';
 import { ServerDetailShowcase } from '../../../components/servers/server-detail-showcase';
 import { buildServerPath, resolveServerRouteId } from '../../../lib/server-routes';
 import { createPageMetadata } from '../../../lib/metadata';
+import { selectServerRecommendations } from '../../../lib/server-recommendations.mjs';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -101,9 +103,15 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
     cookie: cookieHeader || undefined,
   });
   const referralsPromise = fetchServerReferrals(serverId);
-  const recommendationsPromise = fetchServerSummaries({ sort: 'votes24h_desc' });
+  const recommendationsPromise = Promise.all([
+    fetchServerRankings({ sort: 'votes24h_desc', page: 1, pageSize: 24 }).catch((error) => {
+      console.error('Failed to load ranked server recommendations', error);
+      return null;
+    }),
+    fetchServerSummaries({ sort: 'votes24h_desc' }),
+  ]);
 
-  const [stats, updates, reviews, referrals, recommendations] = await Promise.all([
+  const [stats, updates, reviews, referrals, [rankingRecommendations, fallbackRecommendations]] = await Promise.all([
     statsPromise,
     updatesPromise,
     reviewsPromise,
@@ -112,7 +120,11 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
   ]);
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 
-  const recommendedServers = recommendations.filter((server) => server.id !== serverId).slice(0, 4);
+  const recommendedServers = selectServerRecommendations({
+    currentServerId: serverId,
+    ranked: rankingRecommendations?.items ?? [],
+    fallback: fallbackRecommendations,
+  });
   const canonicalPath = buildServerPath(detail);
 
   return (

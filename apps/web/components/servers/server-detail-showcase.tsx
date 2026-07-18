@@ -363,7 +363,7 @@ export function ServerDetailShowcase({
               </Link>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-              {recommendations.map((server, idx) => (
+              {recommendations.map((server) => (
                 <Link
                   key={server.id}
                   href={buildServerPath(server)}
@@ -387,8 +387,8 @@ export function ServerDetailShowcase({
                     )}
                     <div className="absolute inset-0 bg-gradient-to-t from-[#11161e] via-transparent to-transparent" />
                     <div className="absolute left-3 top-3">
-                      <span className={`rank-pill ${idx === 0 ? 'rank-1' : 'rank-default'}`}>
-                        {idx + 1}
+                      <span className={`rank-pill ${server.rank?.current === 1 ? 'rank-1' : 'rank-default'}`}>
+                        {server.rank?.current ?? '순위 미집계'}
                       </span>
                     </div>
                   </div>
