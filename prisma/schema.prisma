@@ -958,7 +958,7 @@ model SupportMessage {
   ticketId        String
   authorAccountId String?
   authorRole      SupportMessageAuthorRole
-  body            String
+  body            String                   @db.Text
   isInternal      Boolean                  @default(false)
   createdAt       DateTime                 @default(now())
 
