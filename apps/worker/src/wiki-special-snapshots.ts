@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { parseLinkTarget, parseMarkup, slugifyTitle, wikiUrl, type NamespaceCode, type WikiLinkResolutionContext } from '@minewiki/wiki-core';
 
-const SNAPSHOT_ITEM_LIMIT = 500;
-const SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT = 500;
+const MAX_SNAPSHOT_ITEMS = 50_000;
+const MAX_SNAPSHOT_SOURCE_CONTRIBUTIONS = 50_000;
 export const WIKI_SPECIAL_SNAPSHOT_PROJECTION_VERSION = 2;
 const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published']);
 const PUBLIC_READ_PROTECTION_LEVELS = new Set([
@@ -475,11 +475,14 @@ function snapshotRow(
   generation: string,
   generatedAt: Date
 ): SnapshotRow {
+  if (items.length > MAX_SNAPSHOT_ITEMS) {
+    throw new Error(`Wiki special snapshot ${type}:${namespaceCode} exceeds the safe item limit.`);
+  }
   return {
     type,
     namespaceCode,
     generation,
-    items: items.slice(0, SNAPSHOT_ITEM_LIMIT),
+    items,
     sourcePageCount: pages.length,
     sourceLinkCount: links.length,
     generatedAt
@@ -583,11 +586,13 @@ function sourceContributionMetadata(sourceCounts: ReadonlyMap<bigint, number>): 
 > {
   const contributions = [...sourceCounts.entries()]
     .sort((left, right) => compareBigInt(left[0], right[0]));
+  if (contributions.length > MAX_SNAPSHOT_SOURCE_CONTRIBUTIONS) {
+    throw new Error('Wiki special snapshot contribution list exceeds the safe item limit.');
+  }
   return {
     sourceContributions: contributions
-      .slice(0, SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT)
       .map(([pageId, count]) => ({ pageId: pageId.toString(), count })),
-    sourceContributionsComplete: contributions.length <= SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT
+    sourceContributionsComplete: true
   };
 }
 

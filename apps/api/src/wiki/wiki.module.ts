@@ -47,11 +47,12 @@ import { WikiReportModerationController } from './wiki-report-moderation.control
 import { WikiReportModerationService } from './wiki-report-moderation.service';
 import { WikiPageSwapService } from './wiki-page-swap.service';
 import { WikiUsernameService } from './wiki-username.service';
+import { WikiSpecialCursorCodec } from './wiki-special-cursor';
 
 @Module({
   imports: [SessionModule, EventsModule, CaptchaModule],
   controllers: [WikiController, WikiReportController, WikiApiTokenController, WikiApiController, WikiAdminController, WikiReportModerationController, WikiProfileMergeController, WikiProfileMergeAdminController, WikiDiscussionController, WikiDiscussionLiveController, WikiWatchController, WikiEditRequestController, WikiNotificationController, WikiPushSubscriptionController, WikiPageAclController, WikiThreadAclController, WikiAclGroupAdminController, WikiAclGroupSelfController],
-  providers: [WikiProfileService, WikiProfileMergeService, WikiReportService, WikiReportModerationService, WikiApiTokenService, WikiApiTokenGuard, WikiCaptchaService, WikiContributionPolicyService, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiDiscussionLiveService, WikiWatchService, WikiNotificationService, WikiPushSubscriptionService, WikiRoutePathResolver, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageSwapService, WikiUsernameService, WikiPageAclService, WikiThreadAclService],
+  providers: [WikiProfileService, WikiProfileMergeService, WikiReportService, WikiReportModerationService, WikiApiTokenService, WikiApiTokenGuard, WikiCaptchaService, WikiContributionPolicyService, WikiAdminService, WikiModerationService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiDiscussionService, WikiDiscussionLiveService, WikiWatchService, WikiNotificationService, WikiPushSubscriptionService, WikiRoutePathResolver, WikiSpecialCursorCodec, WikiReadService, WikiEditService, WikiEditRequestService, WikiPageSwapService, WikiUsernameService, WikiPageAclService, WikiThreadAclService],
   exports: [WikiProfileService, WikiProfileMergeService, WikiAdminService, WikiAclService, WikiAclGroupService, WikiPermissionService, WikiLinkIndexService, WikiIncludeService, WikiNotificationService, WikiReadService, WikiEditService]
 })
 export class WikiModule {}

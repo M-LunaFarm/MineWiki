@@ -362,6 +362,19 @@ test('browser backlink reads forward type and namespace filters', async () => {
   assert.deepEqual(received, { pageId: '10', viewer: null, cursor: 'cursor', limit: '50', types: 'file,redirect', namespace: 'server' });
 });
 
+test('special document reads forward the signed cursor input without requiring a session', async () => {
+  let received: unknown;
+  const reads = { async getSpecialDocuments(input: unknown) { received = input; return { type: 'old', items: [], nextCursor: null }; } } as unknown as WikiReadService;
+  const controller = new WikiController({} as WikiProfileService, reads, {} as WikiEditService, captchaStub, pageSwapStub, usernameStub);
+  const request = { sessionPayload: null } as FastifyRequest;
+
+  await controller.special(request, 'old', 'main', '25', 'signed-cursor');
+
+  assert.deepEqual(received, {
+    type: 'old', namespace: 'main', limit: '25', cursor: 'signed-cursor', viewer: null,
+  });
+});
+
 test('anonymous wiki controller read applies CIDR ACL from the central request context', async () => {
   const store = {
     aclRule: {

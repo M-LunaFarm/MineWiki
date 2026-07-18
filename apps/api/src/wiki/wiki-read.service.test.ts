@@ -18,6 +18,11 @@ import {
   WikiReadService,
 } from './wiki-read.service';
 import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
+import { WikiSpecialCursorCodec } from './wiki-special-cursor';
+
+const specialCursorCodec = new WikiSpecialCursorCodec({
+  get(name: string) { return name === 'APP_ENCRYPTION_KEY' ? 'wiki-special-read-test-secret' : undefined; },
+} as never);
 
 test('public pagecount filters revisions, ACLs, and namespaces without request-specific address context', async () => {
   const pages = [
@@ -1470,6 +1475,67 @@ test('special category list counts only current categories from readable documen
     ['초보자', 1, '/wiki/category/%EC%B4%88%EB%B3%B4%EC%9E%90']
   ]);
   assert.equal(linkReads, 0);
+});
+
+test('indexed special documents paginate without duplicate rows and bind the cursor to its filters', async () => {
+  const now = new Date('2026-07-18T00:00:00.000Z');
+  const pages = [3n, 2n, 1n].map((id) => ({
+    id, namespaceId: 1, spaceId: 1n, localPath: `page-${id}`, slug: `page-${id}`,
+    title: `문서 ${id}`, displayTitle: `문서 ${id}`, currentRevisionId: id + 10n,
+    currentContentSize: Number(id) * 100, currentCategoryCount: 0, pageType: 'article',
+    protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now,
+  }));
+  let pageRead = 0;
+  const prisma = {
+    wikiPage: { async findMany() { pageRead += 1; return pageRead === 1 ? pages : [pages[2]!]; } },
+    wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; }, async findMany() { return [{ id: 1, code: 'main' }]; } },
+  } as unknown as PrismaService;
+  const permissions = { async filterReadablePages({ pages: candidates }: { pages: typeof pages }) { return candidates; } } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions, undefined, undefined, undefined, specialCursorCodec);
+
+  const first = await service.getSpecialDocuments({ type: 'long', namespace: 'main', limit: 2 });
+  assert.deepEqual(first.items.map((item) => item.pageId), ['3', '2']);
+  assert.ok(first.nextCursor);
+  const second = await service.getSpecialDocuments({ type: 'long', namespace: 'main', limit: 2, cursor: first.nextCursor! });
+  assert.deepEqual(second.items.map((item) => item.pageId), ['1']);
+  assert.equal(second.nextCursor, null);
+  await assert.rejects(
+    () => service.getSpecialDocuments({ type: 'short', namespace: 'main', limit: 2, cursor: first.nextCursor! }),
+    /유효하지 않거나/u,
+  );
+});
+
+test('graph special snapshots remain reachable beyond the legacy five-hundred item cutoff', async () => {
+  const now = new Date('2026-07-18T00:00:00.000Z');
+  const items = Array.from({ length: 501 }, (_, index) => ({
+    id: `wanted:main:missing-${index}`,
+    pageId: null,
+    namespace: 'main',
+    title: `missing-${index}`,
+    displayTitle: `Missing ${index}`,
+    routePath: `/wiki/missing-${index}`,
+    value: 1,
+    updatedAt: null,
+  }));
+  const prisma = {
+    wikiNamespace: { async findUnique() { return null; } },
+    wikiSpecialSnapshot: { async findUnique() { return {
+      generation: 'generation-501', generatedAt: now, items: { projectionVersion: 2, items },
+    }; } },
+    wikiPage: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const permissions = { async filterReadablePages() { return []; } } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions, undefined, undefined, undefined, specialCursorCodec);
+  let cursor: string | undefined;
+  const reached: string[] = [];
+  do {
+    const page = await service.getSpecialDocuments({ type: 'wanted', limit: 100, cursor });
+    reached.push(...page.items.map((item) => item.id));
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  assert.equal(reached.length, 501);
+  assert.equal(new Set(reached).size, 501);
+  assert.equal(reached.at(-1), 'wanted:main:missing-500');
 });
 
 test('identified special snapshot reads remove denied source contributions from wanted and category aggregates', async () => {

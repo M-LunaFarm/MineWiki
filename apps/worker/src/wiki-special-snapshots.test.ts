@@ -200,7 +200,7 @@ test('page-specific guest allow overrides a broader site deny in public snapshot
   assert.deepEqual(orphaned?.items.map((item) => item.pageId), ['10']);
 });
 
-test('aggregate snapshots persist bounded per-source counts for viewer ACL recomputation', () => {
+test('aggregate snapshots preserve source counts beyond the legacy five-hundred contribution cutoff', () => {
   const pages = Array.from({ length: 501 }, (_, index) =>
     page(BigInt(index + 1), 1, `출처_${index + 1}`, BigInt(index + 1001))
   );
@@ -224,8 +224,8 @@ test('aggregate snapshots persist bounded per-source counts for viewer ACL recom
 
   const wanted = rows.find((row) => row.type === 'wanted' && row.namespaceCode === '');
   assert.equal(wanted?.items[0]?.value, 501);
-  assert.equal(wanted?.items[0]?.sourceContributions?.length, 500);
-  assert.equal(wanted?.items[0]?.sourceContributionsComplete, false);
+  assert.equal(wanted?.items[0]?.sourceContributions?.length, 501);
+  assert.equal(wanted?.items[0]?.sourceContributionsComplete, true);
   assert.deepEqual(wanted?.items[0]?.sourceContributions?.slice(0, 2), [
     { pageId: '1', count: 1 },
     { pageId: '2', count: 1 }

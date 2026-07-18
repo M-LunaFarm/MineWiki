@@ -294,9 +294,10 @@ export class WikiController {
     @Req() request: FastifyRequest,
     @Query('type') type?: string,
     @Query('namespace') namespace?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string
   ): Promise<WikiSpecialDocumentResponse> {
-    return this.wikiRead.getSpecialDocuments({ type, namespace, limit, viewer: request.sessionPayload ?? null });
+    return this.wikiRead.getSpecialDocuments({ type, namespace, limit, cursor, viewer: request.sessionPayload ?? null });
   }
 
   @Get('block-history')
