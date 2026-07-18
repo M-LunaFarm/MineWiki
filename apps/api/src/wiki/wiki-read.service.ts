@@ -64,6 +64,7 @@ export interface WikiPageResponse {
   } | null;
   readonly serverDirectoryPath?: string | null;
   readonly serverWiki?: {
+    readonly spaceId: string;
     readonly name: string;
     readonly slug: string;
     readonly contentSlug: string;
@@ -128,13 +129,19 @@ export interface WikiRecentChangeSummary {
   readonly id: string;
   readonly pageId: string | null;
   readonly revisionId: string | null;
+  readonly previousPublicRevisionId: string | null;
   readonly actorId: string | null;
+  readonly actorName: string;
+  readonly actorUsername: string | null;
   readonly changeType: string;
   readonly title: string;
   readonly namespaceCode: string;
+  readonly spaceId: string | null;
   readonly routePath: string;
   readonly summary: string | null;
   readonly summaryHidden: boolean;
+  readonly sizeDelta: number | null;
+  readonly canViewDiff: boolean;
   readonly isMinor: boolean;
   readonly createdAt: string;
 }
@@ -892,6 +899,7 @@ export class WikiReadService {
     readonly limit?: string | number;
     readonly changeType?: string;
     readonly namespace?: string;
+    readonly spaceId?: string;
     readonly minor?: string;
   } = {}): Promise<WikiRecentChangeListResponse> {
     const access = await resolveWikiAccessContext(
@@ -903,6 +911,7 @@ export class WikiReadService {
     const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
     const changeType = this.parseRecentFilter(input.changeType, 'changeType');
     const namespace = this.parseRecentFilter(input.namespace, 'namespace');
+    const spaceId = input.spaceId ? this.parseBigIntId(input.spaceId, 'spaceId') : null;
     const isMinor = input.minor === 'true' ? true : input.minor === 'false' ? false : undefined;
     if (input.minor && isMinor === undefined) throw new BadRequestException('minor must be true or false.');
     const scanLimit = Math.min(limit * 4 + 1, 401);
@@ -911,6 +920,7 @@ export class WikiReadService {
         ...(cursor ? { id: { lt: cursor } } : {}),
         ...(changeType ? { changeType } : {}),
         ...(namespace ? { namespaceCode: namespace } : {}),
+        ...(spaceId ? { spaceId } : {}),
         ...(isMinor === undefined ? {} : { isMinor })
       },
       orderBy: [{ id: 'desc' }],
@@ -922,6 +932,16 @@ export class WikiReadService {
     const pageIds = [...new Set(changes.flatMap((change) => change.pageId ? [change.pageId] : []))];
     const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
     const pageById = new Map(pages.map((page) => [page.id, page]));
+    const actorIds = [...new Set(changes.flatMap((change) => change.actorId ? [change.actorId] : []))];
+    const profileById = await this.canonicalProfileViews(actorIds);
+    const revisionIds = [...new Set(changes.flatMap((change) => change.revisionId ? [change.revisionId] : []))];
+    const revisionActors = revisionIds.length > 0
+      ? await this.prisma.wikiPageRevision.findMany({
+          where: { id: { in: revisionIds } },
+          select: { id: true, actorType: true, visibility: true }
+        })
+      : [];
+    const revisionActorById = new Map(revisionActors.map((revision) => [revision.id, revision]));
     const knownNamespaces = new Map<number, string>();
     for (const change of changes) {
       const page = change.pageId ? pageById.get(change.pageId) : null;
@@ -929,10 +949,12 @@ export class WikiReadService {
     }
     const routePaths = await this.routePaths.preload(pages, knownNamespaces);
     const readableByPageId = new Map<bigint, boolean>();
+    const historyByPageId = new Map<bigint, boolean>();
     const visible: WikiRecentChangeSummary[] = [];
     let lastScannedId: bigint | null = null;
     for (const change of changes) {
       lastScannedId = change.id;
+      const publicDeletion = change.changeType === 'delete' && change.eventAudience === 'public';
       if (change.pageId) {
         let readable = readableByPageId.get(change.pageId);
         if (readable === undefined) {
@@ -944,25 +966,55 @@ export class WikiReadService {
           }
           readableByPageId.set(change.pageId, readable);
         }
-        if (!readable) continue;
+        if (!readable && !publicDeletion) continue;
       }
-      const publicSummary = publicWikiRecentChangeSummary({
-        summary: change.summary,
-        revisionId: change.revisionId,
-        hiddenByRevisionId
-      });
+      if (change.changeType === 'delete' && !publicDeletion) continue;
+      let canViewDiff = false;
+      if (change.pageId && change.revisionId && change.previousPublicRevisionId && change.changeType !== 'delete') {
+        let historyAllowed = historyByPageId.get(change.pageId);
+        if (historyAllowed === undefined) {
+          try {
+            await this.wikiPermissions.assertCanUsePageAction({
+              ...access,
+              action: 'history',
+              page: pageById.get(change.pageId) ?? null
+            });
+            historyAllowed = true;
+          } catch {
+            historyAllowed = false;
+          }
+          historyByPageId.set(change.pageId, historyAllowed);
+        }
+        const revisionActor = revisionActorById.get(change.revisionId);
+        canViewDiff = historyAllowed && revisionActor?.visibility === 'public';
+      }
+      const publicSummary = change.changeType === 'delete'
+        ? { summary: '문서 삭제', summaryHidden: false }
+        : publicWikiRecentChangeSummary({
+            summary: change.summary,
+            revisionId: change.revisionId,
+            hiddenByRevisionId
+          });
+      const profile = change.actorId ? profileById.get(change.actorId) : null;
+      const revisionActor = change.revisionId ? revisionActorById.get(change.revisionId) : null;
       visible.push({
         id: change.id.toString(),
         pageId: change.pageId?.toString() ?? null,
         revisionId: change.revisionId?.toString() ?? null,
+        previousPublicRevisionId: canViewDiff ? change.previousPublicRevisionId?.toString() ?? null : null,
         actorId: change.actorId?.toString() ?? null,
+        actorName: profile?.displayName ?? (revisionActor?.actorType === 'ip' ? '익명 기여자' : '알 수 없는 기여자'),
+        actorUsername: profile?.username ?? null,
         changeType: change.changeType,
         title: change.title,
         namespaceCode: change.namespaceCode,
+        spaceId: change.spaceId?.toString() ?? null,
         routePath: change.pageId && pageById.has(change.pageId)
           ? routePaths.routePath(pageById.get(change.pageId)!, change.namespaceCode)
-          : wikiUrl(change.namespaceCode as Parameters<typeof wikiUrl>[0], change.title),
+          : wikiUrl(change.namespaceCode as Parameters<typeof wikiUrl>[0], change.localPath ?? change.title),
         ...publicSummary,
+        sizeDelta: change.sizeDelta,
+        canViewDiff,
         isMinor: change.isMinor,
         createdAt: change.createdAt.toISOString()
       });
@@ -2782,6 +2834,7 @@ export class WikiReadService {
     return {
       directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
       context: {
+        spaceId: spaceId.toString(),
         name: server?.name ?? serverWiki.serverName,
         slug: siteSlug,
         contentSlug: serverWiki.slug,
@@ -2859,9 +2912,11 @@ export class WikiReadService {
     readonly username: string;
   }>> {
     if (profileIds.length === 0) return new Map();
+    const profileDelegate = this.prisma.wikiProfile;
+    if (!profileDelegate) return new Map();
     const aliasDelegate = this.prisma.wikiProfileAlias;
     const [profiles, aliases] = await Promise.all([
-      this.prisma.wikiProfile.findMany({
+      profileDelegate.findMany({
         where: { id: { in: profileIds } },
         select: { id: true, displayName: true, username: true }
       }),
@@ -2874,7 +2929,7 @@ export class WikiReadService {
     ]);
     const targetIds = [...new Set(aliases.map((alias) => alias.targetProfileId))];
     const targets = targetIds.length > 0
-      ? await this.prisma.wikiProfile.findMany({
+      ? await profileDelegate.findMany({
           where: { id: { in: targetIds } },
           select: { id: true, displayName: true, username: true }
         })

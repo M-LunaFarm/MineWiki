@@ -192,9 +192,10 @@ export class WikiController {
     @Query('limit') limit?: string,
     @Query('changeType') changeType?: string,
     @Query('namespace') namespace?: string,
+    @Query('spaceId') spaceId?: string,
     @Query('minor') minor?: string
   ): Promise<WikiRecentChangeListResponse> {
-    return this.wikiRead.getRecent({ viewer: request.sessionPayload ?? null, cursor, limit, changeType, namespace, minor });
+    return this.wikiRead.getRecent({ viewer: request.sessionPayload ?? null, cursor, limit, changeType, namespace, spaceId, minor });
   }
 
   @Get('contributions/:profileId')

@@ -935,10 +935,10 @@ test('recent changes use filters, a stable cursor, and one page visibility check
     }
   } as unknown as WikiPermissionService;
 
-  const result = await new WikiReadService(prisma, permissions).getRecent({ cursor: '11', limit: 2, changeType: 'edit', namespace: 'server', minor: 'false' });
+  const result = await new WikiReadService(prisma, permissions).getRecent({ cursor: '11', limit: 2, changeType: 'edit', namespace: 'server', spaceId: '1', minor: 'false' });
 
   assert.deepEqual(recentQuery, {
-    where: { id: { lt: 11n }, changeType: 'edit', namespaceCode: 'server', isMinor: false },
+    where: { id: { lt: 11n }, changeType: 'edit', namespaceCode: 'server', spaceId: 1n, isMinor: false },
     orderBy: [{ id: 'desc' }],
     take: 9
   });
@@ -947,6 +947,32 @@ test('recent changes use filters, a stable cursor, and one page visibility check
   assert.deepEqual(result.items.map((item) => item.id), ['10', '8']);
   assert.equal(result.items[0]?.routePath, '/serverWiki/alpha/%EA%B3%B5%EA%B0%9C_%EB%AC%B8%EC%84%9C');
   assert.equal(result.nextCursor, '8');
+});
+
+test('recent changes expose only public deletion snapshots with a generic reason', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  const deleted = { id: 7n, namespaceId: 1, spaceId: 5n, localPath: '삭제됨', title: '삭제됨', protectionLevel: 'open', status: 'deleted' };
+  const row = (id: bigint, eventAudience: string) => ({
+    id, pageId: deleted.id, revisionId: 70n, previousPublicRevisionId: null, actorId: 9n,
+    spaceId: 5n, changeType: 'delete', title: '삭제됨', localPath: '삭제됨', namespaceCode: 'main',
+    summary: '개인정보가 포함된 내부 삭제 사유', sizeDelta: 0, eventAudience, isMinor: false, createdAt: now,
+  });
+  const prisma = {
+    wikiRecentChange: { async findMany() { return [row(2n, 'public'), row(1n, 'restricted')]; } },
+    wikiPage: { async findMany() { return [deleted]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 70n, editSummaryHidden: false, actorType: 'user', visibility: 'public' }]; } },
+    wikiProfile: { async findMany() { return [{ id: 9n, username: 'editor', displayName: '편집자' }]; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() { throw new Error('deleted'); } } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getRecent({ spaceId: '5' });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.summary, '문서 삭제');
+  assert.equal(result.items[0]?.actorName, '편집자');
+  assert.equal(result.items[0]?.canViewDiff, false);
+  assert.doesNotMatch(JSON.stringify(result), /개인정보가 포함된 내부 삭제 사유/u);
 });
 
 test('recent changes redact stale denormalized summaries from hidden or missing source revisions', async () => {

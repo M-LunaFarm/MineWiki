@@ -9,6 +9,7 @@ import { astContainsFile } from './wiki-edit.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiRoutePathResolver } from './wiki-route-path.resolver';
 import { aclGroupScopeMatches } from './wiki-acl-group-scope';
+import { WikiPermissionService } from './wiki-permission.service';
 
 const ALLOWED_PROTECTION_LEVELS = new Set([
   'open',
@@ -134,7 +135,8 @@ export class WikiAdminService {
     private readonly prisma: PrismaService,
     @Optional() private readonly events?: BusinessEventService,
     @Optional() private readonly wikiLinks?: WikiLinkIndexService,
-    @Optional() private readonly routePaths?: WikiRoutePathResolver
+    @Optional() private readonly routePaths?: WikiRoutePathResolver,
+    @Optional() private readonly wikiPermissions?: WikiPermissionService
   ) {}
 
   async getRecent(): Promise<WikiAdminRecentChange[]> {
@@ -950,6 +952,15 @@ export class WikiAdminService {
       await this.lockPageForRevision(tx, pageId);
       const page = await tx.wikiPage.findUnique({ where: { id: pageId } });
       if (!page) throw new NotFoundException('Wiki page not found.');
+      let eventAudience: 'public' | 'restricted' = 'restricted';
+      if (input.status === 'deleted' && this.wikiPermissions) {
+        try {
+          await this.wikiPermissions.assertCanReadPage({ actor: null, accountId: null, page, store: tx });
+          eventAudience = 'public';
+        } catch {
+          eventAudience = 'restricted';
+        }
+      }
       const latestPublic = input.status === 'normal'
         ? await tx.wikiPageRevision.findFirst({
             where: { pageId, visibility: 'public' },
@@ -968,6 +979,14 @@ export class WikiAdminService {
         }
       });
       const namespace = await tx.wikiNamespace.findUnique({ where: { id: updated.namespaceId } });
+      if (input.status === 'normal' && this.wikiPermissions) {
+        try {
+          await this.wikiPermissions.assertCanReadPage({ actor: null, accountId: null, page: updated, store: tx });
+          eventAudience = 'public';
+        } catch {
+          eventAudience = 'restricted';
+        }
+      }
       await this.insertRecentChange({
         pageId: updated.id,
         revisionId: updated.currentRevisionId,
@@ -975,7 +994,10 @@ export class WikiAdminService {
         changeType: input.status === 'deleted' ? 'delete' : 'restore',
         title: updated.title,
         namespaceCode: namespace?.code ?? 'main',
-        summary: input.reason?.trim() || (input.status === 'deleted' ? '관리자 삭제' : '관리자 복구')
+        summary: input.status === 'deleted' ? '문서 삭제' : input.reason?.trim() || '관리자 복구',
+        sizeDelta: 0,
+        previousPublicRevisionId: null,
+        eventAudience
       }, tx);
       return { page, updated };
     });
@@ -995,21 +1017,56 @@ export class WikiAdminService {
   private async insertRecentChange(input: {
     readonly pageId: bigint;
     readonly revisionId: bigint | null;
+    readonly previousPublicRevisionId?: bigint | null;
     readonly actorId: bigint | null;
     readonly changeType: string;
     readonly title: string;
     readonly namespaceCode: string;
     readonly summary?: string | null;
-  }, store: Pick<PrismaService, 'wikiRecentChange'> = this.prisma): Promise<void> {
+    readonly sizeDelta?: number | null;
+    readonly eventAudience?: 'public' | 'restricted';
+  }, store: PrismaService | Prisma.TransactionClient = this.prisma): Promise<void> {
+    const page = await store.wikiPage.findUnique({ where: { id: input.pageId } });
+    if (!page) throw new NotFoundException('Wiki page not found while recording its recent change.');
+    const revision = input.revisionId
+      ? await store.wikiPageRevision.findUnique({ where: { id: input.revisionId } })
+      : null;
+    const previousPublicRevisionId = input.previousPublicRevisionId !== undefined
+      ? input.previousPublicRevisionId
+      : revision?.parentRevisionId ?? null;
+    const previous = input.sizeDelta === undefined && previousPublicRevisionId
+      ? await store.wikiPageRevision.findFirst({
+          where: { id: previousPublicRevisionId, pageId: page.id, visibility: 'public' },
+          select: { contentSize: true }
+        })
+      : null;
+    let eventAudience = input.eventAudience ?? 'restricted';
+    if (input.eventAudience === undefined && this.wikiPermissions) {
+      try {
+        await this.wikiPermissions.assertCanReadPage({ actor: null, accountId: null, page, store });
+        eventAudience = 'public';
+      } catch {
+        eventAudience = 'restricted';
+      }
+    }
     await store.wikiRecentChange.create({
       data: {
         pageId: input.pageId,
         revisionId: input.revisionId,
+        previousPublicRevisionId,
         actorId: input.actorId,
+        spaceId: page.spaceId,
         changeType: input.changeType,
         title: input.title,
+        localPath: page.localPath,
         namespaceCode: input.namespaceCode,
         summary: input.summary ?? null,
+        sizeDelta: input.sizeDelta !== undefined
+          ? input.sizeDelta
+          : revision && previous
+            ? revision.contentSize - previous.contentSize
+            : revision?.contentSize ?? null,
+        eventAudience,
         isMinor: false,
         createdAt: new Date()
       }

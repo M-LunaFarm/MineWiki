@@ -380,6 +380,8 @@ export class WikiEditService {
       await this.insertRecentChange(tx, {
         pageId: page.id,
         revisionId: revision.id,
+        spaceId: page.spaceId,
+        localPath: page.localPath,
         actorId: actor.id,
         changeType: 'edit',
         title: page.title,
@@ -512,6 +514,8 @@ export class WikiEditService {
       await this.insertRecentChange(tx, {
         pageId: page.id,
         revisionId: revision.id,
+        spaceId: page.spaceId,
+        localPath: page.localPath,
         actorId: actor.id,
         changeType: 'revert',
         title: page.title,
@@ -678,6 +682,8 @@ export class WikiEditService {
       await this.insertRecentChange(tx, {
         pageId: page.id,
         revisionId: revision.id,
+        spaceId: page.spaceId,
+        localPath: page.localPath,
         actorId: actor.id,
         changeType: 'create',
         title: page.title,
@@ -995,6 +1001,8 @@ export class WikiEditService {
       await this.insertRecentChange(tx, {
         pageId: page.id,
         revisionId: revision.id,
+        spaceId: page.spaceId,
+        localPath: page.localPath,
         actorId: attributionProfileId,
         changeType: 'edit',
         title: page.title,
@@ -1107,7 +1115,8 @@ export class WikiEditService {
       });
       await tx.wikiPage.update({ where: { id: page.id }, data: { currentRevisionId: revision.id, updatedAt: now } });
       await this.insertRecentChange(tx, {
-        pageId: page.id, revisionId: revision.id, actorId: editRequest.createdBy, changeType: 'edit',
+        pageId: page.id, revisionId: revision.id, spaceId: page.spaceId, localPath: page.localPath,
+        actorId: editRequest.createdBy, changeType: 'edit',
         title: page.title, namespaceCode: namespace.code, summary: revision.editSummary, isMinor: revision.isMinor, createdAt: now
       });
       const completed = await tx.wikiEditRequest.updateMany({
@@ -1250,6 +1259,8 @@ export class WikiEditService {
       await this.insertRecentChange(tx, {
         pageId: page.id,
         revisionId: revision.id,
+        spaceId: page.spaceId,
+        localPath: page.localPath,
         actorId: request.createdBy,
         changeType: 'create',
         title: page.title,
@@ -1573,7 +1584,8 @@ export class WikiEditService {
       }
       for (const move of moves) {
         await this.insertRecentChange(tx, {
-          pageId: move.source.id, revisionId: move.source.currentRevisionId, actorId: actor.id,
+          pageId: move.source.id, revisionId: move.source.currentRevisionId,
+          spaceId: move.target.spaceId, localPath: move.target.slug, actorId: actor.id,
           changeType: 'move', title: move.target.title, namespaceCode: move.target.namespaceCode,
           summary: this.moveRecentSummary({
             reason: this.cleanOptional(request.reason),
@@ -1733,6 +1745,8 @@ export class WikiEditService {
       await this.insertRecentChange(tx, {
         pageId: page.id,
         revisionId: revision.id,
+        spaceId: page.spaceId,
+        localPath: page.localPath,
         actorId: actor.id,
         changeType: 'revert',
         title: page.title,
@@ -1787,8 +1801,15 @@ export class WikiEditService {
       if (page.status === status) {
         throw new BadRequestException(`Wiki page is already ${status}.`);
       }
+      let eventAudience: 'public' | 'restricted' = 'restricted';
       const permissionActor = this.wikiPermissions.actorFromSession(session, actor);
       if (status === 'deleted') {
+        try {
+          await this.wikiPermissions.assertCanReadPage({ actor: null, accountId: null, page, store: tx });
+          eventAudience = 'public';
+        } catch {
+          eventAudience = 'restricted';
+        }
         await this.wikiPermissions.assertCanMutatePageAction({
           actor: permissionActor,
           action: 'delete',
@@ -1870,14 +1891,33 @@ export class WikiEditService {
           updatedAt: now
         }
       });
+      if (status === 'normal') {
+        try {
+          await this.wikiPermissions.assertCanReadPage({ actor: null, accountId: null, page: updated, store: tx });
+          eventAudience = 'public';
+        } catch {
+          eventAudience = 'restricted';
+        }
+      }
       await this.insertRecentChange(tx, {
-          pageId: updated.id,
-          revisionId: restoredRevision?.id ?? updated.currentRevisionId,
+        pageId: updated.id,
+        revisionId: restoredRevision?.id ?? updated.currentRevisionId,
+        spaceId: updated.spaceId,
+        localPath: updated.localPath,
         actorId: actor.id,
         changeType: status === 'deleted' ? 'delete' : 'restore',
         title: updated.title,
         namespaceCode: namespace.code,
-        summary: this.cleanOptional(request.reason) ?? (status === 'deleted' ? '문서 삭제' : '문서 복구'),
+        summary: status === 'deleted'
+          ? '문서 삭제'
+          : this.cleanOptional(request.reason) ?? '문서 복구',
+        eventAudience,
+        previousPublicRevisionId: restoredRevision && restoredRevision.id !== latestPublic?.id
+          ? latestPublic?.id ?? null
+          : null,
+        sizeDelta: restoredRevision && restoredRevision.id !== latestPublic?.id && latestPublic
+          ? restoredRevision.contentSize - latestPublic.contentSize
+          : 0,
         isMinor: false,
         createdAt: now
       });
@@ -2593,28 +2633,60 @@ export class WikiEditService {
   }
 
   private async insertRecentChange(
-    tx: Pick<PrismaService, 'wikiRecentChange'>,
+    tx: Prisma.TransactionClient,
     input: {
       pageId: bigint;
       revisionId: bigint | null;
+      spaceId?: bigint;
+      localPath?: string;
+      previousPublicRevisionId?: bigint | null;
       actorId: bigint | null;
       changeType: ChangeType;
       title: string;
       namespaceCode: string;
       summary?: string | null;
+      sizeDelta?: number | null;
+      eventAudience?: 'public' | 'restricted';
       isMinor: boolean;
       createdAt: Date;
     }
   ): Promise<void> {
+    const page = input.spaceId !== undefined && input.localPath !== undefined
+      ? { id: input.pageId, spaceId: input.spaceId, localPath: input.localPath, status: 'normal' }
+      : await tx.wikiPage.findUnique({ where: { id: input.pageId } });
+    if (!page) throw new NotFoundException('Wiki page not found while recording its recent change.');
+    const revision = input.revisionId && typeof tx.wikiPageRevision.findUnique === 'function'
+      ? await tx.wikiPageRevision.findUnique({ where: { id: input.revisionId } })
+      : null;
+    const previousPublicRevisionId = input.previousPublicRevisionId !== undefined
+      ? input.previousPublicRevisionId
+      : revision?.parentRevisionId ?? null;
+    const previous = input.sizeDelta === undefined && previousPublicRevisionId
+      && typeof tx.wikiPageRevision.findFirst === 'function'
+      ? await tx.wikiPageRevision.findFirst({
+          where: { id: previousPublicRevisionId, pageId: input.pageId, visibility: 'public' },
+          select: { contentSize: true }
+        })
+      : null;
+    const eventAudience = input.eventAudience ?? 'restricted';
     await tx.wikiRecentChange.create({
       data: {
         pageId: input.pageId,
         revisionId: input.revisionId,
+        previousPublicRevisionId,
         actorId: input.actorId,
+        spaceId: page.spaceId,
         changeType: input.changeType,
         title: input.title,
+        localPath: page.localPath,
         namespaceCode: input.namespaceCode,
         summary: input.summary ?? null,
+        sizeDelta: input.sizeDelta !== undefined
+          ? input.sizeDelta
+          : revision && previous
+            ? revision.contentSize - previous.contentSize
+            : revision?.contentSize ?? null,
+        eventAudience,
         isMinor: input.isMinor,
         createdAt: input.createdAt
       }

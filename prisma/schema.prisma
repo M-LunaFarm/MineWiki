@@ -1906,22 +1906,29 @@ model WikiEditRequest {
 }
 
 model WikiRecentChange {
-  id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  pageId        BigInt?  @map("page_id") @db.UnsignedBigInt
-  revisionId    BigInt?  @map("revision_id") @db.UnsignedBigInt
-  actorId       BigInt?  @map("actor_id") @db.UnsignedBigInt
-  changeType    String   @map("change_type") @db.VarChar(32)
-  title         String   @db.VarChar(255)
-  namespaceCode String   @map("namespace_code") @db.VarChar(32)
-  summary       String?  @db.VarChar(255)
-  isMinor       Boolean  @default(false) @map("is_minor")
-  createdAt     DateTime @map("created_at")
+  id                       BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId                   BigInt?  @map("page_id") @db.UnsignedBigInt
+  revisionId               BigInt?  @map("revision_id") @db.UnsignedBigInt
+  previousPublicRevisionId BigInt?  @map("previous_public_revision_id") @db.UnsignedBigInt
+  actorId                  BigInt?  @map("actor_id") @db.UnsignedBigInt
+  spaceId                  BigInt?  @map("space_id") @db.UnsignedBigInt
+  changeType               String   @map("change_type") @db.VarChar(32)
+  title                    String   @db.VarChar(255)
+  localPath                String?  @map("local_path") @db.VarChar(500)
+  namespaceCode            String   @map("namespace_code") @db.VarChar(32)
+  summary                  String?  @db.VarChar(255)
+  sizeDelta                Int?     @map("size_delta")
+  eventAudience            String   @default("restricted") @map("event_audience") @db.VarChar(16)
+  isMinor                  Boolean  @default(false) @map("is_minor")
+  createdAt                DateTime @map("created_at")
 
   @@index([createdAt])
   @@index([changeType])
   @@index([changeType, createdAt])
   @@index([pageId, createdAt])
   @@index([actorId, createdAt])
+  @@index([spaceId, id], map: "idx_recent_changes_space_id")
+  @@index([spaceId, changeType, id], map: "idx_recent_changes_space_type_id")
   @@map("recent_changes")
 }
 

@@ -2693,7 +2693,13 @@ function normalizeShortDescription(value?: string | null): string {
 async function finalizeCreatedServerWikiPage(
   tx: Prisma.TransactionClient,
   input: {
-    readonly page: { readonly id: bigint; readonly title: string; readonly displayTitle: string };
+    readonly page: {
+      readonly id: bigint;
+      readonly spaceId: bigint;
+      readonly localPath: string;
+      readonly title: string;
+      readonly displayTitle: string;
+    };
     readonly revision: {
       readonly id: bigint;
       readonly contentSize: number;
@@ -2749,11 +2755,16 @@ async function finalizeCreatedServerWikiPage(
     data: {
       pageId: input.page.id,
       revisionId: input.revision.id,
+      previousPublicRevisionId: null,
       actorId: input.actorId,
+      spaceId: input.page.spaceId,
       changeType: 'create',
       title: input.page.title,
+      localPath: input.page.localPath,
       namespaceCode: input.namespaceCode,
       summary: input.revision.editSummary,
+      sizeDelta: input.revision.contentSize,
+      eventAudience: 'restricted',
       isMinor: input.revision.isMinor,
       createdAt: input.now,
     },

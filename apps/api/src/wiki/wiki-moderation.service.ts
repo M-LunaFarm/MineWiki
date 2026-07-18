@@ -161,7 +161,10 @@ export class WikiModerationService {
       return { pageId: plan.pageId, status: 'skipped', reason: plan.skipReason ?? 'manual_review', newRevisionId: null };
     }
     const page = await tx.wikiPage.findUnique({ where: { id: input.pageId } });
-    const rollbackTo = await tx.wikiPageRevision.findUnique({ where: { id: BigInt(plan.rollbackToRevisionId) } });
+    const [rollbackTo, currentRevision] = await Promise.all([
+      tx.wikiPageRevision.findUnique({ where: { id: BigInt(plan.rollbackToRevisionId) } }),
+      tx.wikiPageRevision.findUnique({ where: { id: input.expectedCurrentRevisionId } }),
+    ]);
     const latestStored = await tx.wikiPageRevision.findFirst({
       where: { pageId: input.pageId }, orderBy: [{ revisionNo: 'desc' }]
     });
@@ -229,8 +232,13 @@ export class WikiModerationService {
     await tx.wikiRecentChange.create({
       data: {
         pageId: page.id, revisionId: revision.id, actorId: input.actorProfileId,
+        previousPublicRevisionId: input.expectedCurrentRevisionId,
+        spaceId: page.spaceId,
         changeType: 'rollback', title: page.title, namespaceCode: namespace?.code ?? 'main',
-        summary: revision.editSummary, isMinor: false, createdAt: now
+        localPath: page.localPath,
+        summary: revision.editSummary,
+        sizeDelta: currentRevision ? revision.contentSize - currentRevision.contentSize : null,
+        eventAudience: 'restricted', isMinor: false, createdAt: now
       }
     });
     await this.notifications.notifyWatchedRevision(tx, {
