@@ -1130,6 +1130,7 @@ export class WikiReadService {
     readonly accountId?: string | null;
     readonly viewer?: WikiAccessViewer;
     readonly pageId?: string;
+    readonly spaceId?: string;
   }): Promise<WikiDocumentTemplateSummary[]> {
     const access = await resolveWikiAccessContext(
       this.prisma,
@@ -1137,11 +1138,15 @@ export class WikiReadService {
       input.viewer ?? input.accountId ?? null
     );
     let spaceId: bigint | null = null;
+    if (input.pageId && input.spaceId) throw new BadRequestException('Choose either pageId or spaceId for document templates.');
     if (input.pageId) {
       const page = await this.prisma.wikiPage.findUnique({ where: { id: this.parseBigIntId(input.pageId, 'pageId') } });
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
       await this.wikiPermissions.assertCanReadPage({ ...access, page });
       spaceId = page.spaceId;
+    } else if (input.spaceId) {
+      spaceId = this.parseBigIntId(input.spaceId, 'spaceId');
+      await this.wikiPermissions.assertCanReadSpace({ ...access, spaceId });
     }
     const profile = access.accountId
       ? await this.prisma.wikiProfile.findUnique({ where: { accountId: access.accountId }, select: { id: true } })

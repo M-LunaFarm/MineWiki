@@ -61,6 +61,30 @@ test('new wiki pages require captcha before the clean mutation reaches the edit 
   assert.deepEqual(mutationInput, { receivedSession: session, body: { namespace: 'main', title: '새 문서', contentRaw: '본문' } });
 });
 
+test('wiki create context forwards the authenticated target before a new document exists', async () => {
+  const session = { userId: 'account-1', requestIp: '192.0.2.20' } as SessionPayload;
+  let received: unknown;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    {} as WikiReadService,
+    {
+      async getCreateContext(receivedSession: SessionPayload, input: unknown) {
+        received = { receivedSession, input };
+        return { namespace: 'server', namespaceId: 6, spaceId: '22', title: 'minewiki/규칙', displayTitle: '규칙', pageType: 'server', canCreate: true, canRequest: true };
+      },
+    } as unknown as WikiEditService,
+    captchaStub,
+    pageSwapStub,
+    usernameStub,
+  );
+
+  const response = await controller.getCreateContext(session, 'server', 'minewiki/규칙', '22');
+
+  assert.deepEqual(received, { receivedSession: session, input: { namespace: 'server', title: 'minewiki/규칙', spaceId: '22' } });
+  assert.equal(response.spaceId, '22');
+  assert.equal(response.canCreate, true);
+});
+
 test('wiki preview forwards the authenticated session and stable page context', async () => {
   const session = { userId: 'account-1', requestIp: '192.0.2.20' } as SessionPayload;
   let previewInput: unknown;

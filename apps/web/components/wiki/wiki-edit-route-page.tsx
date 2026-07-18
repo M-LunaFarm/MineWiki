@@ -71,6 +71,7 @@ export async function WikiEditRoutePage({ prefix, segments = [] }: WikiEditRoute
       page={page}
       namespace={namespaceByPrefix[prefix]}
       title={title}
+      createSpaceId={page?.spaceId ?? serverContextPage?.spaceId ?? null}
       routePath={routePath}
       presentation={presentation}
       presentationLoadFailed={presentationLoadFailed}

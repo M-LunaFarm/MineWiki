@@ -133,6 +133,39 @@ test('revision reads build an ACL actor from browser sessions while bare account
   assert.equal(readInputs[1]?.accountId, 'token-account');
 });
 
+test('new document templates are scoped to an explicitly readable wiki space', async () => {
+  let templateQuery: unknown;
+  let readableSpace: bigint | null = null;
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 9n }; } },
+    documentTemplate: {
+      async findMany(input: unknown) {
+        templateQuery = input;
+        return [{
+          id: 1n, templateKey: 'server-guide', title: '서버 안내', description: null,
+          templateScope: 'space', targetArea: 'wiki', defaultCategory: null, contentRaw: '본문',
+        }];
+      },
+    },
+  } as unknown as PrismaService;
+  const permissions = {
+    actorFromSession() { return { accountId: 'account-1', profileId: 9n, status: 'active', groups: [], permissions: [], requestIp: '' }; },
+    async assertCanReadSpace(input: { spaceId: bigint }) { readableSpace = input.spaceId; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+  const viewer = { userId: 'account-1' } as SessionPayload;
+
+  const result = await service.getDocumentTemplates({ spaceId: '22', viewer });
+
+  assert.equal(readableSpace, 22n);
+  assert.equal(result[0]?.scope, 'space');
+  assert.deepEqual((templateQuery as { where: { OR: unknown[] } }).where.OR, [
+    { templateScope: 'global', spaceId: null },
+    { templateScope: 'space', spaceId: 22n },
+    { templateScope: 'user', createdBy: 9n },
+  ]);
+});
+
 test('public block history redacts private reasons and account identity while keeping a stable cursor', async () => {
   const now = new Date('2026-07-15T12:00:00.000Z');
   const events = [

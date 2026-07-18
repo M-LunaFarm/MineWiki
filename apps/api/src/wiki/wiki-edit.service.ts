@@ -106,6 +106,17 @@ export interface ResolvedWikiCreateTarget {
   readonly ownerProfileId: bigint | null;
 }
 
+export interface WikiCreateContextResponse {
+  readonly namespace: string;
+  readonly namespaceId: number;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly pageType: string;
+  readonly canCreate: boolean;
+  readonly canRequest: boolean;
+}
+
 export interface WikiEditConflictDetails {
   readonly type: 'wiki_edit_conflict';
   readonly scope: 'page' | 'section';
@@ -439,6 +450,56 @@ export class WikiEditService {
 
   async resolveCreatePageTarget(request: Pick<WikiPageMutationRequest, 'namespace' | 'title' | 'spaceId'>): Promise<ResolvedWikiCreateTarget> {
     return this.resolveCreatePageTargetWithStore(this.prisma, request);
+  }
+
+  async getCreateContext(
+    session: SessionPayload,
+    request: Pick<WikiPageMutationRequest, 'namespace' | 'title' | 'spaceId'>
+  ): Promise<WikiCreateContextResponse> {
+    const target = await this.resolveCreatePageTarget(request);
+    const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const actor = this.wikiPermissions.actorFromSession(session, profile);
+    await this.wikiPermissions.assertCanReadCreateTarget({
+      actor,
+      namespaceId: target.namespaceId,
+      namespaceCode: target.namespaceCode,
+      spaceId: target.spaceId,
+      title: target.title
+    });
+    const createDecision = await this.wikiPermissions.canCreatePage({
+      actor,
+      namespaceCode: target.namespaceCode,
+      spaceId: target.spaceId,
+      title: target.title,
+      pageType: target.pageType
+    });
+    let canRequest = true;
+    try {
+      await this.wikiPermissions.assertCanUseCreateTargetAction({
+        actor,
+        action: 'edit_request',
+        namespaceId: target.namespaceId,
+        namespaceCode: target.namespaceCode,
+        spaceId: target.spaceId,
+        title: target.title
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) canRequest = false;
+      else throw error;
+    }
+    if (!createDecision.allowed && !canRequest) {
+      throw new ForbiddenException('Wiki page creation and edit requests are not allowed.');
+    }
+    return {
+      namespace: target.namespaceCode,
+      namespaceId: target.namespaceId,
+      spaceId: target.spaceId.toString(),
+      title: target.title,
+      displayTitle: target.displayTitle,
+      pageType: target.pageType,
+      canCreate: createDecision.allowed,
+      canRequest
+    };
   }
 
   private async resolveCreatePageTargetWithStore(

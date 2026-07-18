@@ -105,6 +105,37 @@ test('user, file, and server move invariants preserve identity and wiki boundari
   }), null);
 });
 
+test('new document context resolves its space and exposes distinct create and request decisions', async () => {
+  const permissionInputs: Array<Record<string, unknown>> = [];
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
+    wikiSpace: {
+      async findUnique() { return { id: 10n, status: 'active', spaceType: 'basic', rootNamespaceCode: 'main' }; },
+    },
+    serverWiki: {},
+  } as unknown as PrismaService;
+  const profiles = {
+    async ensureWikiProfile() { return { id: 3n, accountId: 'account-1', status: 'active' }; },
+  } as unknown as WikiProfileService;
+  const permissions = {
+    actorFromSession() { return { accountId: 'account-1', profileId: 3n, status: 'active', groups: [], permissions: [], requestIp: '' }; },
+    async assertCanReadCreateTarget(input: Record<string, unknown>) { permissionInputs.push({ kind: 'read', ...input }); },
+    async canCreatePage(input: Record<string, unknown>) { permissionInputs.push({ kind: 'create', ...input }); return { allowed: false, reason: 'request review' }; },
+    async assertCanUseCreateTargetAction(input: Record<string, unknown>) { permissionInputs.push({ kind: 'request', ...input }); },
+  } as unknown as WikiPermissionService;
+  const service = new WikiEditService(prisma, profiles, permissions);
+  const session = { userId: 'account-1' } as SessionPayload;
+
+  const result = await service.getCreateContext(session, { namespace: 'main', title: '새 문서', spaceId: '10' });
+
+  assert.deepEqual(result, {
+    namespace: 'main', namespaceId: 1, spaceId: '10', title: '새 문서', displayTitle: '새 문서',
+    pageType: 'article', canCreate: false, canRequest: true,
+  });
+  assert.deepEqual(permissionInputs.map((input) => input.kind), ['read', 'create', 'request']);
+  assert.equal(permissionInputs[2]?.action, 'edit_request');
+});
+
 test('subtree move redirects clone page ACLs atomically and keep raw old paths restricted', async () => {
   const sourceRoot = {
     id: 7n, namespaceId: 1, spaceId: 10n, localPath: 'old', slug: 'old', title: 'Old',

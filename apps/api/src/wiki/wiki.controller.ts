@@ -10,6 +10,7 @@ import {
   type WikiMoveRequest,
   type WikiMoveResponse,
   type WikiMutationResponse,
+  type WikiCreateContextResponse,
   type WikiPageMutationRequest,
   type WikiPreviewResponse,
   type WikiRevertRequest,
@@ -83,6 +84,18 @@ export class WikiController {
     return this.wikiRead.getPage(namespace, title, request.sessionPayload ?? null, {
       followRedirects: shouldFollowRedirects(redirect, noRedirect)
     });
+  }
+
+  @Get('create-context')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  getCreateContext(
+    @CurrentSession() session: SessionPayload,
+    @Query('namespace') namespace?: string,
+    @Query('title') title?: string,
+    @Query('spaceId') spaceId?: string
+  ): Promise<WikiCreateContextResponse> {
+    return this.wikiEdit.getCreateContext(session, { namespace, title, spaceId });
   }
 
   @Get('page/by-path')
@@ -272,9 +285,10 @@ export class WikiController {
   @UseGuards(OptionalSessionGuard)
   templates(
     @Req() request: FastifyRequest,
-    @Query('pageId') pageId?: string
+    @Query('pageId') pageId?: string,
+    @Query('spaceId') spaceId?: string
   ): Promise<WikiDocumentTemplateSummary[]> {
-    return this.wikiRead.getDocumentTemplates({ pageId, viewer: request.sessionPayload ?? null });
+    return this.wikiRead.getDocumentTemplates({ pageId, spaceId, viewer: request.sessionPayload ?? null });
   }
 
   @Get('revisions/:revisionId')

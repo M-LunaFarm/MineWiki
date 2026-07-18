@@ -380,6 +380,17 @@ export interface WikiDocumentTemplateSummary {
   readonly contentRaw: string;
 }
 
+export interface WikiCreateContext {
+  readonly namespace: string;
+  readonly namespaceId: number;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly pageType: string;
+  readonly canCreate: boolean;
+  readonly canRequest: boolean;
+}
+
 export interface WikiBlameResponse {
   readonly pageId: string;
   readonly revisionId: string;
@@ -1950,13 +1961,14 @@ export async function previewWikiMarkup(
   return response.json();
 }
 
-export async function saveWikiPage(input: { pageId?: string; namespace: string; title: string; contentRaw: string; editSummary: string; isMinor: boolean; baseRevisionId?: string; captchaToken?: string; policyAcceptance?: WikiPolicyAcceptance }): Promise<WikiMutationResponse> {
+export async function saveWikiPage(input: { pageId?: string; spaceId?: string; namespace: string; title: string; contentRaw: string; editSummary: string; isMinor: boolean; baseRevisionId?: string; captchaToken?: string; policyAcceptance?: WikiPolicyAcceptance }): Promise<WikiMutationResponse> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages${input.pageId ? `/${input.pageId}` : ''}`, {
     method: input.pageId ? 'PATCH' : 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
     body: JSON.stringify({
       namespace: input.namespace,
+      spaceId: input.spaceId,
       title: input.title,
       contentRaw: input.contentRaw,
       editSummary: input.editSummary,
@@ -2179,9 +2191,21 @@ export async function listWikiFiles(
   return response.json();
 }
 
-export async function listWikiDocumentTemplates(pageId?: string): Promise<WikiDocumentTemplateSummary[]> {
+export async function fetchWikiCreateContext(input: {
+  readonly namespace: string;
+  readonly title: string;
+  readonly spaceId?: string;
+}): Promise<WikiCreateContext> {
+  const params = new URLSearchParams({ namespace: input.namespace, title: input.title });
+  if (input.spaceId) params.set('spaceId', input.spaceId);
+  return readWikiBrowser<WikiCreateContext>(`/v1/wiki/create-context?${params.toString()}`);
+}
+
+export async function listWikiDocumentTemplates(input: { readonly pageId?: string; readonly spaceId?: string } = {}): Promise<WikiDocumentTemplateSummary[]> {
+  if (input.pageId && input.spaceId) throw new Error('Choose either a wiki page or space for document templates.');
   const params = new URLSearchParams();
-  if (pageId) params.set('pageId', pageId);
+  if (input.pageId) params.set('pageId', input.pageId);
+  if (input.spaceId) params.set('spaceId', input.spaceId);
   const suffix = params.size > 0 ? `?${params.toString()}` : '';
   return readWikiBrowser<WikiDocumentTemplateSummary[]>(`/v1/wiki/templates${suffix}`);
 }

@@ -13,6 +13,7 @@ import { WikiEditorLoadError } from './wiki-editor-load-error';
 import {
   fetchWikiRevision,
   fetchWikiSection,
+  fetchWikiCreateContext,
   createWikiEditRequest,
   createWikiPageRequest,
   listWikiFiles,
@@ -24,6 +25,7 @@ import {
   type UploadedFileMetadata,
   type WikiEditConflictDetails,
   type WikiDocumentTemplateSummary,
+  type WikiCreateContext,
   WikiApiError,
   type ServerWikiPresentation,
   type WikiPageResponse,
@@ -34,6 +36,7 @@ interface WikiEditorClientProps {
   readonly page: WikiPageResponse | null;
   readonly namespace: string;
   readonly title: string;
+  readonly createSpaceId: string | null;
   readonly routePath: string;
   readonly presentation: ServerWikiPresentation | null;
   readonly presentationLoadFailed: boolean;
@@ -47,7 +50,7 @@ interface WikiEditorDraft {
   readonly savedAt: number;
 }
 
-export function WikiEditorClient({ page, namespace, title, routePath, presentation, presentationLoadFailed }: WikiEditorClientProps) {
+export function WikiEditorClient({ page, namespace, title, createSpaceId, routePath, presentation, presentationLoadFailed }: WikiEditorClientProps) {
   const router = useRouter();
   const { account, loading } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -73,6 +76,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   const [fileSourceUrl, setFileSourceUrl] = useState('');
   const [fileSourceText, setFileSourceText] = useState('');
   const [templates, setTemplates] = useState<WikiDocumentTemplateSummary[]>([]);
+  const [createContext, setCreateContext] = useState<WikiCreateContext | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [loadingRevision, setLoadingRevision] = useState(Boolean(page));
@@ -92,7 +96,8 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   const [previewing, startPreviewTransition] = useTransition();
   const [saving, startSaveTransition] = useTransition();
   const fileSourceRequired = Boolean(fileLicense && fileLicense !== 'self-created');
-  const canUploadImage = Boolean(page && fileLicense && (!fileSourceRequired || fileSourceUrl.trim()));
+  const uploadSpaceId = page ? null : createContext?.spaceId ?? null;
+  const canUploadImage = Boolean((page || uploadSpaceId) && fileLicense && (!fileSourceRequired || fileSourceUrl.trim()));
   const hasUnresolvedConflict = containsWikiConflictMarkers(contentRaw);
   const needsCaptcha = !page && isCaptchaConfigured();
   const policyRequired = Boolean(presentation?.policy.required && presentation.policy.html);
@@ -233,10 +238,24 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   }, [contentRaw, editSummary, isMinor, sourceReady]);
 
   useEffect(() => {
-    if (!account || page) return;
+    if (!account || page) {
+      setCreateContext(null);
+      return;
+    }
+    let cancelled = false;
+    fetchWikiCreateContext({ namespace, title, spaceId: createSpaceId ?? undefined })
+      .then((context) => { if (!cancelled) setCreateContext(context); })
+      .catch((error) => {
+        if (!cancelled) setFeedback(error instanceof Error ? error.message : '새 문서 공간을 확인하지 못했습니다.');
+      });
+    return () => { cancelled = true; };
+  }, [account, createSpaceId, namespace, page, title]);
+
+  useEffect(() => {
+    if (!account || page || !createContext) return;
     let cancelled = false;
     setLoadingTemplates(true);
-    listWikiDocumentTemplates()
+    listWikiDocumentTemplates({ spaceId: createContext.spaceId })
       .then((items) => {
         if (cancelled) return;
         setTemplates(items);
@@ -249,13 +268,15 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
         if (!cancelled) setLoadingTemplates(false);
       });
     return () => { cancelled = true; };
-  }, [account, page]);
+  }, [account, createContext, page]);
 
   const canSubmit = useMemo(() => {
-    return Boolean(account && sourceReady && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict && (!needsCaptcha || captchaToken) && policyReady);
-  }, [account, sourceReady, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict, needsCaptcha, captchaToken, policyReady]);
+    return Boolean(account && (page || createContext) && sourceReady && contentRaw.trim() && editSummary.trim() && !loadingRevision && blockingErrors.length === 0 && !hasUnresolvedConflict && (!needsCaptcha || captchaToken) && policyReady);
+  }, [account, page, createContext, sourceReady, contentRaw, editSummary, loadingRevision, blockingErrors.length, hasUnresolvedConflict, needsCaptcha, captchaToken, policyReady]);
   const saveBlocker = blockingErrors.length > 0
     ? '차단 오류를 먼저 해결해야 저장할 수 있습니다.'
+    : !page && !createContext
+      ? '새 문서가 속할 위키 공간과 작성 권한을 확인하고 있습니다.'
     : hasUnresolvedConflict
       ? '동시 편집 충돌 표시를 모두 정리해야 저장할 수 있습니다.'
       : !contentRaw.trim()
@@ -292,6 +313,14 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   }
 
   function submit() {
+    if (!page && !createContext) {
+      setFeedback('새 문서가 속할 위키 공간과 작성 권한을 확인한 뒤 다시 시도해 주세요.');
+      return;
+    }
+    if (!page && !createContext?.canCreate) {
+      setFeedback('이 공간에는 문서를 직접 만들 수 없습니다. 새 문서 검토 요청을 이용해 주세요.');
+      return;
+    }
     if (!canSubmit) {
       setFeedback(blockingErrors.length > 0 ? null : needsCaptcha && !captchaToken
         ? '새 문서를 만들기 전에 로봇 방지 확인을 완료해 주세요.'
@@ -319,6 +348,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
         } else {
           await saveWikiPage({
             pageId: page?.id,
+            spaceId: page ? undefined : createContext?.spaceId,
             namespace,
             title,
             contentRaw,
@@ -365,6 +395,14 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
   }
 
   function submitForReview() {
+    if (!page && !createContext) {
+      setFeedback('새 문서가 속할 위키 공간과 요청 권한을 확인한 뒤 다시 시도해 주세요.');
+      return;
+    }
+    if (!page && !createContext?.canRequest) {
+      setFeedback('이 공간에는 새 문서 검토 요청을 제출할 수 없습니다.');
+      return;
+    }
     if (!account || !contentRaw.trim() || !editSummary.trim() || (page && !baseRevisionId)) {
       setFeedback('본문과 편집 요약을 입력해야 편집 요청을 보낼 수 있습니다.');
       return;
@@ -385,7 +423,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
         if (page && baseRevisionId) {
           await createWikiEditRequest({ pageId: page.id, baseRevisionId, contentRaw, editSummary, isMinor, policyAcceptance });
         } else {
-          await createWikiPageRequest({ namespace, title, contentRaw, editSummary, isMinor, captchaToken: captchaToken ?? undefined, policyAcceptance });
+          await createWikiPageRequest({ namespace, title, spaceId: createContext?.spaceId, contentRaw, editSummary, isMinor, captchaToken: captchaToken ?? undefined, policyAcceptance });
         }
         if (draftKey) removeWikiEditorDraft(window.localStorage, draftKey);
         sourceSnapshotRef.current = { contentRaw, editSummary, isMinor };
@@ -455,8 +493,8 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
     if (!file) {
       return;
     }
-    if (!page) {
-      setFeedback('새 문서를 먼저 저장한 뒤 파일을 업로드해 주세요. 파일은 저장된 문서의 ACL에 연결됩니다.');
+    if (!page && !uploadSpaceId) {
+      setFeedback('새 문서가 속할 위키 공간과 업로드 권한을 확인한 뒤 다시 시도해 주세요.');
       return;
     }
     if (!fileLicense) {
@@ -478,7 +516,8 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
       const uploaded = await uploadWikiImage({
         data,
         filename: file.name,
-        pageId: page.id,
+        pageId: page?.id,
+        spaceId: uploadSpaceId ?? undefined,
         license: fileLicense,
         sourceUrl: fileSourceUrl.trim() || undefined,
         sourceText: fileSourceText.trim() || undefined,
@@ -686,21 +725,23 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
               />
               사소한 편집
             </label>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={!canSubmit || saving || uploadingImage}
-              aria-describedby="wiki-save-requirement"
-              className="btn-primary h-10 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              저장
-            </button>
+            {page || createContext?.canCreate ? (
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!canSubmit || saving || uploadingImage}
+                aria-describedby="wiki-save-requirement"
+                className="btn-primary h-10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                저장
+              </button>
+            ) : <span aria-hidden="true" />}
           </div>
           <p id="wiki-save-requirement" className={saveBlocker ? 'text-xs text-amber-200' : 'text-xs text-slate-500'} aria-live="polite">
             {saveBlocker ?? '본문과 편집 요약이 준비되었습니다.'}
           </p>
-          {!sectionAnchor ? (
+          {!sectionAnchor && (page || createContext?.canRequest) ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
               <p className="max-w-2xl text-xs leading-5 text-slate-400">{page ? '직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.' : '직접 생성할 수 없는 문서도 관리자가 검토하는 새 문서 요청으로 제출할 수 있습니다.'}</p>
               <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim() || (needsCaptcha && !captchaToken) || !policyReady} className="btn-secondary h-10 disabled:opacity-50">{page ? '검토 요청' : '새 문서 검토 요청'}</button>
@@ -709,7 +750,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
           <section className="rounded-lg border border-white/10 bg-white/[0.025] p-4">
             <h2 className="text-sm font-semibold text-white">파일 저작권·출처</h2>
             <p className="mt-2 text-xs leading-5 text-slate-400">업로드 파일은 이 문서의 <code>upload_file</code> ACL을 따릅니다. 라이선스와 출처는 파일이 표시되는 모든 문서에 함께 노출됩니다.</p>
-            {page ? (
+            {page || uploadSpaceId ? (
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-1.5 text-xs font-semibold text-slate-300">
                   라이선스 <span className="text-red-300">필수</span>
@@ -727,7 +768,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
                   <input value={fileSourceText} maxLength={255} onChange={(event) => setFileSourceText(event.target.value)} placeholder="예: Mojang Studios / 공식 위키" className="h-10 rounded-lg border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-600 focus:border-emerald-300/50" />
                 </label>
               </div>
-            ) : <p className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs text-amber-100">새 문서를 먼저 저장해야 파일을 문서 ACL에 안전하게 연결할 수 있습니다.</p>}
+            ) : <p className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-xs text-amber-100">새 문서가 속할 위키 공간과 업로드 권한을 확인하고 있습니다.</p>}
           </section>
           <div className="flex flex-wrap items-center gap-2">
             <button
