@@ -268,6 +268,25 @@ export interface WikiPageLifecycleEventListResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiPageAclHistoryEventSummary {
+  readonly id: string;
+  readonly actionType: 'create' | 'delete' | 'reorder';
+  readonly actorProfileId: string | null;
+  readonly actorName: string | null;
+  readonly actorUsername: string | null;
+  readonly reason: string | null;
+  readonly oldRules: unknown | null;
+  readonly newRules: unknown | null;
+  readonly detailsVisible: boolean;
+  readonly createdAt: string;
+}
+
+export interface WikiPageAclHistoryEventListResponse {
+  readonly items: WikiPageAclHistoryEventSummary[];
+  readonly nextCursor: string | null;
+  readonly detailsVisible: boolean;
+}
+
 export interface WikiDeletedPageSummary {
   readonly id: string;
   readonly namespace: string;
@@ -795,6 +814,54 @@ export class WikiReadService {
       };
     });
     return { items, nextCursor: hasMore ? rows.at(-1)?.id.toString() ?? null : null };
+  }
+
+  async getPageAclHistoryEvents(
+    pageId: string,
+    viewer?: WikiAccessViewer,
+    cursor?: string,
+    requestedLimit: string | number = 50
+  ): Promise<WikiPageAclHistoryEventListResponse> {
+    const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
+    if (!page) throw new NotFoundException('Wiki page not found.');
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    await this.wikiPermissions.assertCanReadPage({ ...access, page });
+    await this.wikiPermissions.assertCanUsePageAction({ ...access, action: 'history', page });
+    const management = await this.wikiPermissions.canManagePageAcl({ actor: access.actor ?? null, page });
+    const detailsVisible = management.allowed;
+
+    const limit = Math.min(Math.max(Number(requestedLimit) || 50, 1), 100);
+    const cursorId = cursor ? this.parseBigIntId(cursor, 'cursor') : null;
+    const events = await this.prisma.aclChangeLog.findMany({
+      where: {
+        targetType: 'page',
+        targetId: parsedPageId,
+        ...(cursorId ? { id: { lt: cursorId } } : {})
+      },
+      orderBy: [{ id: 'desc' }],
+      take: limit + 1
+    });
+    const hasMore = events.length > limit;
+    const rows = events.slice(0, limit);
+    const actorIds = [...new Set(rows.flatMap((event) => event.changedBy ? [event.changedBy] : []))];
+    const profileById = await this.canonicalProfileViews(actorIds);
+    const items = rows.map((event) => {
+      const actor = event.changedBy ? profileById.get(event.changedBy) : null;
+      return {
+        id: event.id.toString(),
+        actionType: event.actionType as 'create' | 'delete' | 'reorder',
+        actorProfileId: event.changedBy?.toString() ?? null,
+        actorName: actor?.displayName ?? null,
+        actorUsername: actor?.username ?? null,
+        reason: detailsVisible ? event.reason : null,
+        oldRules: detailsVisible ? event.oldRuleJson : null,
+        newRules: detailsVisible ? event.newRuleJson : null,
+        detailsVisible,
+        createdAt: event.createdAt.toISOString()
+      };
+    });
+    return { items, nextCursor: hasMore ? rows.at(-1)?.id.toString() ?? null : null, detailsVisible };
   }
 
   async getRecent(input: {

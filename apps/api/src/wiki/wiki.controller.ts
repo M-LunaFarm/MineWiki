@@ -32,6 +32,7 @@ import {
   type WikiDeletedPageSummary,
   type WikiPageResponse,
   type WikiPageLifecycleEventListResponse,
+  type WikiPageAclHistoryEventListResponse,
   type WikiRecentChangeListResponse,
   type WikiRevisionListResponse,
   type WikiRenderedRevisionResponse,
@@ -133,6 +134,17 @@ export class WikiController {
     @Query('limit') limit?: string
   ): Promise<WikiPageLifecycleEventListResponse> {
     return this.wikiRead.getPageLifecycleEvents(pageId, request.sessionPayload ?? null, cursor, limit);
+  }
+
+  @Get('pages/:id/acl-history')
+  @UseGuards(OptionalSessionGuard)
+  getPageAclHistoryEvents(
+    @Param('id') pageId: string,
+    @Req() request: FastifyRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiPageAclHistoryEventListResponse> {
+    return this.wikiRead.getPageAclHistoryEvents(pageId, request.sessionPayload ?? null, cursor, limit);
   }
 
   @Get('pages/:id/raw')

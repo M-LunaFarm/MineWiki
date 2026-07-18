@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { ArrowRight, Loader2 } from 'lucide-react';
-import { fetchWikiPageLifecycleEvents, fetchWikiRevisions, type WikiPageLifecycleEventListResponse, type WikiRevisionListResponse } from '../../lib/wiki-api';
+import { fetchWikiPageAclHistoryEvents, fetchWikiPageLifecycleEvents, fetchWikiRevisions, type WikiPageAclHistoryEventListResponse, type WikiPageLifecycleEventListResponse, type WikiRevisionListResponse } from '../../lib/wiki-api';
 import { buildWikiDiffPath, buildWikiRevisionPath } from '../../lib/wiki-routes.mjs';
 import { WikiRevertButton } from './wiki-revert-button';
 import { WikiReportButton } from './wiki-report-button';
@@ -11,14 +11,16 @@ import { WikiEditSummary } from './wiki-edit-summary';
 
 type Revision = WikiRevisionListResponse['items'][number];
 type LifecycleEvent = WikiPageLifecycleEventListResponse['items'][number];
+type AclHistoryEvent = WikiPageAclHistoryEventListResponse['items'][number];
 type SelectionKind = 'older' | 'newer';
 
-export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, initial, initialLifecycle }: {
+export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, initial, initialLifecycle, initialAclHistory }: {
   readonly pageId: string;
   readonly currentRevisionId: string;
   readonly routePath: string;
   readonly initial: WikiRevisionListResponse;
   readonly initialLifecycle: WikiPageLifecycleEventListResponse;
+  readonly initialAclHistory: WikiPageAclHistoryEventListResponse;
 }) {
   const [revisions, setRevisions] = useState(initial.items);
   const [cursor, setCursor] = useState(initial.nextCursor);
@@ -28,6 +30,10 @@ export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, in
   const [lifecycleCursor, setLifecycleCursor] = useState(initialLifecycle.nextCursor);
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [aclEvents, setAclEvents] = useState(initialAclHistory.items);
+  const [aclCursor, setAclCursor] = useState(initialAclHistory.nextCursor);
+  const [aclLoading, setAclLoading] = useState(false);
+  const [aclError, setAclError] = useState<string | null>(null);
   const [olderId, setOlderId] = useState(initial.items[1]?.id ?? null);
   const [newerId, setNewerId] = useState(initial.items[0]?.id ?? null);
   const older = revisions.find((revision) => revision.id === olderId) ?? null;
@@ -74,6 +80,21 @@ export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, in
     }
   }
 
+  async function loadMoreAclHistory() {
+    if (!aclCursor) return;
+    setAclLoading(true);
+    setAclError(null);
+    try {
+      const response = await fetchWikiPageAclHistoryEvents(pageId, aclCursor);
+      setAclEvents((current) => [...current, ...response.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      setAclCursor(response.nextCursor);
+    } catch (caught) {
+      setAclError(caught instanceof Error ? caught.message : '이전 ACL 기록을 불러오지 못했습니다.');
+    } finally {
+      setAclLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       {lifecycleEvents.length > 0 ? (
@@ -87,6 +108,19 @@ export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, in
             {lifecycleEvents.map((event) => <LifecycleCard key={event.id} event={event} />)}
           </div>
           {lifecycleCursor ? <button type="button" disabled={lifecycleLoading} onClick={() => void loadMoreLifecycle()} className="btn-secondary min-h-11 w-full sm:w-auto">{lifecycleLoading ? <Loader2 className="size-4 animate-spin" /> : null} 이전 수명주기 더 보기</button> : null}
+        </section>
+      ) : null}
+      {aclEvents.length > 0 ? (
+        <section className="space-y-3" aria-labelledby="wiki-acl-history-heading">
+          <div>
+            <h2 id="wiki-acl-history-heading" className="text-lg font-semibold text-white">ACL 변경 기록</h2>
+            <p className="mt-1 text-sm text-slate-400">문서 접근 규칙의 생성·삭제·순서 변경 기록입니다. 규칙 대상과 사유는 관리 권한이 있을 때만 표시합니다.</p>
+          </div>
+          {aclError ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{aclError}</p> : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {aclEvents.map((event) => <AclHistoryCard key={event.id} event={event} />)}
+          </div>
+          {aclCursor ? <button type="button" disabled={aclLoading} onClick={() => void loadMoreAclHistory()} className="btn-secondary min-h-11 w-full sm:w-auto">{aclLoading ? <Loader2 className="size-4 animate-spin" /> : null} 이전 ACL 기록 더 보기</button> : null}
         </section>
       ) : null}
       <section className="surface-flat flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between" aria-label="판 비교 선택">
@@ -142,6 +176,22 @@ function LifecycleIdentity({ identity, fallback }: { identity: LifecycleEvent['s
 }
 
 function LifecycleActor({ event }: { event: LifecycleEvent }) {
+  if (!event.actorProfileId) return <>unknown</>;
+  return <Link href={event.actorUsername ? `/user/${encodeURIComponent(event.actorUsername)}` : `/wiki/contributions/${event.actorProfileId}`} className="hover:text-emerald-200">{event.actorName ?? event.actorProfileId}</Link>;
+}
+
+function AclHistoryCard({ event }: { event: AclHistoryEvent }) {
+  const label = event.actionType === 'create' ? 'ACL 규칙 생성' : event.actionType === 'delete' ? 'ACL 규칙 삭제' : 'ACL 규칙 순서 변경';
+  return <article className="border border-white/10 bg-[#111821] p-4"><div className="flex items-center justify-between gap-3"><strong className="text-white">{label}</strong><time className="text-xs text-slate-500">{formatDate(event.createdAt)}</time></div>{event.detailsVisible ? <AclRuleDetails event={event} /> : <p className="mt-3 text-sm text-slate-400">상세 규칙은 ACL 관리 권한이 있는 사용자에게만 표시됩니다.</p>}{event.reason ? <p className="mt-2 break-words text-sm text-slate-400">사유: {event.reason}</p> : null}<p className="mt-3 text-xs text-slate-500">처리자 <AclActor event={event} /></p></article>;
+}
+
+function AclRuleDetails({ event }: { event: AclHistoryEvent }) {
+  const snapshot = event.newRules ?? event.oldRules;
+  const count = Array.isArray(snapshot) ? snapshot.length : snapshot ? 1 : 0;
+  return <p className="mt-3 text-sm text-slate-300">{count > 0 ? `규칙 ${count}개가 변경되었습니다.` : '규칙 스냅샷이 없습니다.'}</p>;
+}
+
+function AclActor({ event }: { event: AclHistoryEvent }) {
   if (!event.actorProfileId) return <>unknown</>;
   return <Link href={event.actorUsername ? `/user/${encodeURIComponent(event.actorUsername)}` : `/wiki/contributions/${event.actorProfileId}`} className="hover:text-emerald-200">{event.actorName ?? event.actorProfileId}</Link>;
 }

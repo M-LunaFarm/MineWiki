@@ -274,6 +274,25 @@ export interface WikiPageLifecycleEventListResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiPageAclHistoryEventSummary {
+  readonly id: string;
+  readonly actionType: 'create' | 'delete' | 'reorder';
+  readonly actorProfileId: string | null;
+  readonly actorName: string | null;
+  readonly actorUsername: string | null;
+  readonly reason: string | null;
+  readonly oldRules: unknown | null;
+  readonly newRules: unknown | null;
+  readonly detailsVisible: boolean;
+  readonly createdAt: string;
+}
+
+export interface WikiPageAclHistoryEventListResponse {
+  readonly items: WikiPageAclHistoryEventSummary[];
+  readonly nextCursor: string | null;
+  readonly detailsVisible: boolean;
+}
+
 export interface WikiRevisionDiffResponse {
   readonly left: WikiRevisionResponse;
   readonly right: WikiRevisionResponse;
@@ -1694,6 +1713,12 @@ export async function fetchWikiPageLifecycleEvents(pageId: string, cursor?: stri
   const params = new URLSearchParams({ limit: '50' });
   if (cursor) params.set('cursor', cursor);
   return readWikiBrowser(`/v1/wiki/pages/${encodeURIComponent(pageId)}/lifecycle?${params.toString()}`);
+}
+
+export async function fetchWikiPageAclHistoryEvents(pageId: string, cursor?: string): Promise<WikiPageAclHistoryEventListResponse> {
+  const params = new URLSearchParams({ limit: '50' });
+  if (cursor) params.set('cursor', cursor);
+  return readWikiBrowser(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl-history?${params.toString()}`);
 }
 
 export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {

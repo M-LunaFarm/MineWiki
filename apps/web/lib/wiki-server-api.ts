@@ -11,6 +11,7 @@ import type {
   WikiRenderedRevisionResponse,
   WikiRevisionListResponse,
   WikiPageLifecycleEventListResponse,
+  WikiPageAclHistoryEventListResponse,
   WikiSearchResponse,
   WikiSpecialDocumentResponse,
   WikiSpecialDocumentType,
@@ -72,6 +73,12 @@ export async function fetchWikiPageLifecycleEvents(pageId: string, limit = 50): 
   const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
   const response = await wikiFetch(`/v1/wiki/pages/${encodeURIComponent(pageId)}/lifecycle?limit=${safeLimit}`);
   return readWikiResponse<WikiPageLifecycleEventListResponse>(response, 'Failed to load wiki page lifecycle.');
+}
+
+export async function fetchWikiPageAclHistoryEvents(pageId: string, limit = 50): Promise<WikiPageAclHistoryEventListResponse> {
+  const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit)));
+  const response = await wikiFetch(`/v1/wiki/pages/${encodeURIComponent(pageId)}/acl-history?limit=${safeLimit}`);
+  return readWikiResponse<WikiPageAclHistoryEventListResponse>(response, 'Failed to load wiki page ACL history.');
 }
 
 export async function fetchWikiBacklinks(pageId: string, limit = 8): Promise<WikiBacklinkResponse> {

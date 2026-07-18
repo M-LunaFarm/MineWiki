@@ -725,6 +725,50 @@ test('page lifecycle history uses an independent id cursor and redacts cross-spa
   assert.equal(result.items[1]?.identityRedacted, true);
 });
 
+test('page ACL history keeps a stable cursor and exposes rule snapshots only to ACL managers', async () => {
+  const now = new Date('2026-07-18T10:00:00Z');
+  const page = { id: 1n, namespaceId: 2, spaceId: 20n, title: 'Policy', status: 'normal', createdBy: 1n };
+  let historyWhere: unknown;
+  const events = [
+    { id: 12n, targetType: 'page', targetId: 1n, actionType: 'create', oldRuleJson: null, newRuleJson: { action: 'edit', subjectType: 'user', subjectValue: '99' }, reason: 'private reason', changedBy: 3n, createdAt: now },
+    { id: 11n, targetType: 'page', targetId: 1n, actionType: 'delete', oldRuleJson: { action: 'read', subjectType: 'ip', subjectValue: '192.0.2.1' }, newRuleJson: null, reason: 'remove address rule', changedBy: 3n, createdAt: now },
+    { id: 10n, targetType: 'page', targetId: 1n, actionType: 'reorder', oldRuleJson: [], newRuleJson: [], reason: null, changedBy: null, createdAt: now }
+  ];
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    aclChangeLog: { async findMany(args: { where: unknown }) { historyWhere = args.where; return events; } },
+    wikiProfile: {
+      async findUnique() { return { id: 3n, status: 'active' }; },
+      async findMany() { return [{ id: 3n, displayName: 'Maintainer', username: 'maintainer' }]; }
+    }
+  } as unknown as PrismaService;
+  let manager = false;
+  const permissions = {
+    actorFromSession() { return { profileId: 3n, status: 'active' }; },
+    async assertCanReadPage() {},
+    async assertCanUsePageAction() {},
+    async canManagePageAcl() { return { allowed: manager, reason: manager ? 'page_manager_acl' : 'page_manager_required' }; }
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const publicResult = await service.getPageAclHistoryEvents('1', null, '13', 2);
+  assert.deepEqual(historyWhere, { targetType: 'page', targetId: 1n, id: { lt: 13n } });
+  assert.equal(publicResult.nextCursor, '11');
+  assert.equal(publicResult.detailsVisible, false);
+  assert.equal(publicResult.items[0]?.reason, null);
+  assert.equal(publicResult.items[0]?.newRules, null);
+  assert.equal(publicResult.items[1]?.oldRules, null);
+  assert.equal(publicResult.items[0]?.actorUsername, 'maintainer');
+
+  manager = true;
+  const managerResult = await service.getPageAclHistoryEvents('1', {
+    userId: 'account', isElevated: false, permissions: [], groups: [], requestIp: null
+  } as unknown as SessionPayload, undefined, 1);
+  assert.equal(managerResult.detailsVisible, true);
+  assert.equal(managerResult.items[0]?.reason, 'private reason');
+  assert.deepEqual(managerResult.items[0]?.newRules, { action: 'edit', subjectType: 'user', subjectValue: '99' });
+});
+
 test('historical revision rendering keeps raw source private and applies read plus history ACLs', async () => {
   const now = new Date('2026-07-16T00:00:00Z');
   const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'history', slug: 'history', title: 'History', displayTitle: 'History', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
