@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { verify } from '@node-rs/argon2';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import {
   assertFreshStepUp,
   type SessionPayload,
@@ -45,7 +46,7 @@ export class AccountDataExportService {
     }
 
     const generatedAt = new Date();
-    await this.prisma.auditEvent.create({
+    await writeAuditRecord(this.prisma, {
       data: {
         category: 'account',
         action: 'account.data_export.started',
@@ -225,7 +226,7 @@ export class AccountDataExportService {
   }
 
   private async recordOutcome(accountId: string, canonicalAccountId: string, outcome: 'completed' | 'failed') {
-    await this.prisma.auditEvent.create({
+    await writeAuditRecord(this.prisma, {
       data: {
         category: 'account',
         action: `account.data_export.${outcome}`,

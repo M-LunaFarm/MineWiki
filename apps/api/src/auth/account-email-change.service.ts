@@ -10,6 +10,7 @@ import { verify } from '@node-rs/argon2';
 import { randomBytes } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import type { SessionPayload } from '../session/session.service';
 import {
   readCanonicalAccountGroup,
@@ -111,7 +112,7 @@ export class AccountEmailChangeService {
 
       const unavailable = await this.isEmailUnavailable(tx, newEmail, confirmed.accountIds, confirmed.canonicalAccountId);
       if (unavailable) {
-        await tx.auditEvent.create({ data: {
+        await writeAuditRecord(tx, { data: {
           category: 'account',
           action: 'account.contact_email.change_requested',
           severity: 'info',
@@ -145,7 +146,7 @@ export class AccountEmailChangeService {
         createdAt: now,
         updatedAt: now,
       } });
-      await tx.auditEvent.create({ data: {
+      await writeAuditRecord(tx, { data: {
         category: 'account',
         action: 'account.contact_email.change_requested',
         severity: 'info',
@@ -198,7 +199,7 @@ export class AccountEmailChangeService {
         where: { id: pending.id },
         data: { tokenHash: hashValue(token), sentAt: now, resendAvailableAt: nextResendAt, updatedAt: now },
       });
-      await tx.auditEvent.create({ data: {
+      await writeAuditRecord(tx, { data: {
         category: 'account',
         action: 'account.contact_email.verification_resent',
         severity: 'info',
@@ -298,7 +299,7 @@ export class AccountEmailChangeService {
         where: { id: snapshot.id },
         data: { status: 'confirmed', activeKey: null, confirmedAt: changedAt, updatedAt: changedAt },
       });
-      await tx.auditEvent.create({ data: {
+      await writeAuditRecord(tx, { data: {
         category: 'account',
         action: 'account.contact_email.changed',
         severity: 'warning',

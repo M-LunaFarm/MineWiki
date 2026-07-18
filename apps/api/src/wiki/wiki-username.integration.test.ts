@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
+import { runWithFullHttpRequestContext } from '../common/http/request-context';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiUsernameService } from './wiki-username.service';
@@ -69,10 +70,12 @@ test('real database renames a Wiki identity, its document tree, and pending crea
   } });
   const service = new WikiUsernameService(prisma, new WikiProfileService(prisma), new WikiLinkIndexService());
   try {
-    const result = await service.change({ userId: account.id, authenticatedAt: now.toISOString() } as SessionPayload, {
+    const result = await runWithFullHttpRequestContext({
+      requestIp: '198.51.100.31', requestId: `rename-${suffix}`, userAgent: 'MineWiki-Rename-Test/1.0',
+    }, () => service.change({ userId: account.id, authenticatedAt: now.toISOString() } as SessionPayload, {
       username: newUsername,
       confirmation: oldUsername,
-    });
+    }));
     assert.equal(result.previousUsername, oldUsername);
     assert.equal(result.username, newUsername);
     assert.equal(result.movedDocumentCount, 2);
@@ -95,6 +98,9 @@ test('real database renames a Wiki identity, its document tree, and pending crea
     assert.equal(alias?.profileId, profile.id);
     assert.equal(changes.length, 2);
     assert.equal(audits.length, 1);
+    assert.equal(audits[0]?.requestId, `rename-${suffix}`);
+    assert.equal(audits[0]?.ipAddress, '198.51.100.31');
+    assert.equal(audits[0]?.userAgent, 'MineWiki-Rename-Test/1.0');
     assert.equal(searchDocuments.length, 2);
   } finally {
     await prisma.wikiEditRequest.deleteMany({ where: { id: pending.id } });

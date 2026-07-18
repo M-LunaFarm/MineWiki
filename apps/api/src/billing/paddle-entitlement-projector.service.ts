@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, type ServerWikiLayoutEntitlement } from '@prisma/client';
 import { BillingCatalog, type PaddleBillableLayoutKey } from './billing-catalog';
 import { toAuditJson } from '../events/business-event.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 
 const ACCESS_STATUSES = new Set(['active', 'trialing', 'past_due']);
 const REVOKED_STATUSES = new Set(['paused', 'canceled']);
@@ -270,7 +271,7 @@ async function appendAudit(
   eventId: string,
   providerStatus: string,
 ): Promise<void> {
-  await tx.auditEvent.create({
+  await writeAuditRecord(tx, {
     data: {
       category: 'billing',
       action,

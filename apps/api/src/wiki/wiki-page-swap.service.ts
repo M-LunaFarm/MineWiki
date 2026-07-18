@@ -12,6 +12,7 @@ import {
 import { Prisma, type WikiPage, type WikiPageRevision } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import type { SessionPayload } from '../session/session.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { wikiLinkResolutionContext } from './wiki-link-context';
@@ -277,7 +278,7 @@ export class WikiPageSwapService {
           },
         ],
       });
-      await tx.auditEvent.create({
+      await writeAuditRecord(tx, {
         data: {
           category: 'wiki',
           action: 'wiki.swap',

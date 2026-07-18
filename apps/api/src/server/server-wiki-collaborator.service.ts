@@ -8,6 +8,7 @@ import {
 import { Prisma, type WikiProfile } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
 
 export const SERVER_WIKI_COLLABORATOR_ROLES = [
@@ -679,7 +680,7 @@ export class ServerWikiCollaboratorService {
       readonly now: Date;
     },
   ): Promise<void> {
-    await tx.auditEvent.create({
+    await writeAuditRecord(tx, {
       data: {
         category: 'server',
         action: input.action,

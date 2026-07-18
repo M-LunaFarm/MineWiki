@@ -3,6 +3,7 @@ import { collectWikiFileNames, hashContent, parseMarkup, renderDocument, WIKI_RE
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService, toAuditJson } from '../events/business-event.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import { astContainsFile } from './wiki-edit.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
@@ -699,7 +700,7 @@ export class WikiAdminService {
         if (changed.count !== 1) throw editSummaryModerationConflict();
 
         const nextVersion = expectedVersion + 1;
-        await tx.auditEvent.create({
+        await writeAuditRecord(tx, {
           data: {
             category: 'wiki',
             action: hidden

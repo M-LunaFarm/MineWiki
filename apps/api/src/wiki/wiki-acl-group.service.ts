@@ -8,6 +8,7 @@ import {
 import { cidrContains, CidrValidationError, normalizeIpOrCidr } from '@minewiki/security';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 
 const GROUP_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/u;
 const GROUP_STATUSES = new Set(['active', 'archived']);
@@ -564,7 +565,7 @@ async function appendChangeLog(tx: Prisma.TransactionClient, input: {
       createdAt: input.now
     }
   });
-  await tx.auditEvent.create({
+  await writeAuditRecord(tx, {
     data: {
       category: 'wiki',
       action: `wiki.acl.${input.actionType}`,

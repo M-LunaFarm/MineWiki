@@ -44,16 +44,16 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  app.getHttpAdapter().getInstance().addHook('onRequest', runInHttpRequestContext);
   app.getHttpAdapter().getInstance().addHook('onRequest', (request, reply, done) => {
     const requestIdHeader = request.headers['x-request-id'];
     const requestId = Array.isArray(requestIdHeader)
       ? requestIdHeader[0]
       : requestIdHeader || randomUUID();
-    (request as typeof request & { requestId?: string }).requestId = requestId;
+    request.requestId = requestId;
     reply.header('x-request-id', requestId);
     done();
   });
+  app.getHttpAdapter().getInstance().addHook('onRequest', runInHttpRequestContext);
 
   app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalInterceptors(app.get(TelemetryInterceptor));

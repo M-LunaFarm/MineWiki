@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import { WikiProfileService } from './wiki-profile.service';
 
 const MERGEABLE_PROFILE_STATUSES = ['active', 'blocked'] as const;
@@ -144,7 +145,7 @@ export class WikiProfileMergeService {
           updatedAt: new Date()
         }
       });
-      await tx.auditEvent.create({
+      await writeAuditRecord(tx, {
         data: {
           category: 'wiki_profile',
           action: 'wiki_profile.merge_requested',
@@ -298,7 +299,7 @@ export class WikiProfileMergeService {
           reason: request.reason ?? approvalReason
         }
       });
-      await tx.auditEvent.create({
+      await writeAuditRecord(tx, {
         data: {
           category: 'wiki_profile',
           action: 'wiki_profile.merge_completed',
@@ -346,7 +347,7 @@ export class WikiProfileMergeService {
           version: { increment: 1 }
         }
       });
-      await tx.auditEvent.create({
+      await writeAuditRecord(tx, {
         data: {
           category: 'wiki_profile',
           action: 'wiki_profile.merge_rejected',

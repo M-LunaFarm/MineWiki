@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import { RoleService } from '../roles/role.service';
 import type { SessionPayload } from '../session/session.service';
 import { WIKI_REPORT_TARGET_TYPES, type WikiReportTargetType } from './wiki-report.service';
@@ -228,7 +229,7 @@ export class WikiReportModerationService {
     metadata: Record<string, unknown>,
     createdAt: Date,
   ): Promise<void> {
-    await tx.auditEvent.create({
+    await writeAuditRecord(tx, {
       data: {
         category: 'wiki',
         action,

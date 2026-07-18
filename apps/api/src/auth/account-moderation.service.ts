@@ -16,6 +16,7 @@ import type {
   AdminAccountSummary,
 } from '@minewiki/schemas';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import {
   type CanonicalAccountGroup,
   withCanonicalAccountGroups,
@@ -213,7 +214,7 @@ export class AccountModerationService {
           }),
         ]);
         const action = operation === 'suspend' ? 'account.suspended' : 'account.restored';
-        await tx.auditEvent.create({
+        await writeAuditRecord(tx, {
           data: {
             category: 'account',
             action,

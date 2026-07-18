@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, type ServerWikiLayoutEntitlement } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 
 export interface BillingEntitlementSweepResult {
   readonly examined: number;
@@ -101,7 +102,7 @@ export class ServerWikiLayoutEntitlementLifecycleService {
           },
         });
       }
-      await tx.auditEvent.create({
+      await writeAuditRecord(tx, {
         data: {
           category: 'billing',
           action: 'billing.entitlement.expired',

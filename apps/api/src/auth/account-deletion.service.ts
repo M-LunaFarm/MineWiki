@@ -11,6 +11,7 @@ import { Prisma } from '@prisma/client';
 import { verify } from '@node-rs/argon2';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import type { SessionPayload } from '../session/session.service';
 import { AccountDeletionLegacyIdentityRepository, GuildSettingsRepository } from '../verify/guild.repositories';
 import { EmailService } from './email.service';
@@ -145,7 +146,7 @@ export class AccountDeletionService {
             },
           });
       await this.revokeCredentials(tx, freshGroup.accountIds);
-      await tx.auditEvent.create({
+      await writeAuditRecord(tx, {
         data: {
           category: 'account', action: 'account.deletion.requested', severity: 'warning',
           actorAccountId: input.session.userId, subjectType: 'account_deletion_request',
@@ -183,7 +184,7 @@ export class AccountDeletionService {
         where: { id: { in: accountIds }, lifecycleStatus: 'deletion_pending' },
         data: { lifecycleStatus: 'active', deletionRequestedAt: null },
       });
-      await tx.auditEvent.create({
+      await writeAuditRecord(tx, {
         data: {
           category: 'account', action: 'account.deletion.cancelled', severity: 'info',
           subjectType: 'account_deletion_request', subjectId: request.id,
@@ -249,7 +250,7 @@ export class AccountDeletionService {
           where: { id: request.id },
           data: { status: 'blocked', blockerSnapshot: blockers as unknown as Prisma.InputJsonValue, adminNote: cleanNote(note), version: { increment: 1 } },
         });
-        await tx.auditEvent.create({
+        await writeAuditRecord(tx, {
           data: { category: 'account', action: 'account.deletion.blocked', severity: 'warning', actorAccountId: adminAccountId, subjectType: 'account_deletion_request', subjectId: request.id, metadata: { blockers } as unknown as Prisma.InputJsonValue },
         });
         return { blocked: true as const, blockers };
@@ -313,7 +314,7 @@ export class AccountDeletionService {
         where: { id: request.id },
         data: { status: 'completed', processedAt: now, processedBy: adminAccountId, adminNote: cleanNote(note), version: { increment: 1 } },
       });
-      await tx.auditEvent.create({
+      await writeAuditRecord(tx, {
         data: {
           category: 'account', action: 'account.deletion.completed', severity: 'warning',
           actorAccountId: adminAccountId, subjectType: 'account_deletion_request', subjectId: request.id,
@@ -483,7 +484,7 @@ export class AccountDeletionService {
       const changed = await tx.accountDeletionRequest.updateMany({ where: { id: request.id, version: request.version }, data: { status: 'rejected', adminNote: reason, processedAt: new Date(), processedBy: adminAccountId, version: { increment: 1 } } });
       if (changed.count !== 1) throw new ConflictException('요청 상태가 동시에 변경되었습니다.');
       await tx.account.updateMany({ where: { id: { in: jsonStringArray(request.accountIds) }, lifecycleStatus: 'deletion_pending' }, data: { lifecycleStatus: 'active', deletionRequestedAt: null } });
-      await tx.auditEvent.create({ data: { category: 'account', action: 'account.deletion.rejected', severity: 'warning', actorAccountId: adminAccountId, subjectType: 'account_deletion_request', subjectId: request.id, metadata: { reason } } });
+      await writeAuditRecord(tx, { data: { category: 'account', action: 'account.deletion.rejected', severity: 'warning', actorAccountId: adminAccountId, subjectType: 'account_deletion_request', subjectId: request.id, metadata: { reason } } });
       const updated = await tx.accountDeletionRequest.findUnique({ where: { id: request.id } });
       if (!updated) throw new NotFoundException('계정 종료 요청을 찾을 수 없습니다.');
       return toStatus(updated);

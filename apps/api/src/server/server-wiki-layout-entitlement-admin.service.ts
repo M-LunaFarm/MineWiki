@@ -8,6 +8,7 @@ import { Prisma, type ServerWikiLayoutEntitlement } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 
 export const PREMIUM_SERVER_WIKI_LAYOUTS = ['handbook', 'brand'] as const;
 export type PremiumServerWikiLayout = (typeof PREMIUM_SERVER_WIKI_LAYOUTS)[number];
@@ -411,7 +412,7 @@ export class ServerWikiLayoutEntitlementAdminService {
       readonly requestFingerprint?: string;
     },
   ): Promise<void> {
-    await tx.auditEvent.create({
+    await writeAuditRecord(tx, {
       data: {
         category: 'billing',
         action: input.action,

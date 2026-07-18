@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
 import { AccountEmailChangeService } from './account-email-change.service';
 import type { SessionPayload } from '../session/session.service';
+import { runWithFullHttpRequestContext } from '../common/http/request-context';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -76,7 +77,11 @@ if (!hasDatabase) {
         authenticatedAt: new Date().toISOString(),
       } satisfies SessionPayload;
 
-      const requested = await service.request(session, { email: newEmail, password: 'CurrentPW1!' });
+      const context = {
+        requestIp: '198.51.100.32', requestId: `email-${suffix}`, userAgent: 'MineWiki-Email-Test/1.0',
+      };
+      const requested = await runWithFullHttpRequestContext(context, () =>
+        service.request(session, { email: newEmail, password: 'CurrentPW1!' }));
       assert.equal(requested.accepted, true);
       assert.equal(deliveries.length, 1);
       assert.equal(JSON.stringify(requested).includes(deliveries[0]!.token), false);
@@ -89,11 +94,11 @@ if (!hasDatabase) {
         where: { id: initialChange.id },
         data: { resendAvailableAt: new Date(Date.now() - 1) },
       });
-      const resent = await service.resend(session);
+      const resent = await runWithFullHttpRequestContext(context, () => service.resend(session));
       assert.equal(resent.expiresAt, requested.expiresAt);
       assert.equal(deliveries.length, 2);
       await assert.rejects(service.confirm(deliveries[0]!.token));
-      const confirmed = await service.confirm(deliveries[1]!.token);
+      const confirmed = await runWithFullHttpRequestContext(context, () => service.confirm(deliveries[1]!.token));
       assert.deepEqual(confirmed, { success: true, reauthenticationRequired: true });
 
       const [account, storedProfile, sessions, resets, verifications, change, audit] = await Promise.all([
@@ -115,6 +120,9 @@ if (!hasDatabase) {
       assert.equal(change.status, 'confirmed');
       assert.equal(notices[0]?.email, oldEmail);
       assert.equal(JSON.stringify(audit.metadata).includes(newEmail), false);
+      assert.equal(audit.requestId, `email-${suffix}`);
+      assert.equal(audit.ipAddress, '198.51.100.32');
+      assert.equal(audit.userAgent, 'MineWiki-Email-Test/1.0');
       await assert.rejects(service.confirm(deliveries[0]!.token));
     } finally {
       await prisma.auditEvent.deleteMany({ where: { subjectId: accountId } });

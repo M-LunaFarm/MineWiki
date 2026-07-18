@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 
 export const SERVER_WIKI_PUBLICATION_STATUSES = ['draft', 'published', 'unpublished'] as const;
 export type ServerWikiPublicationStatus = (typeof SERVER_WIKI_PUBLICATION_STATUSES)[number];
@@ -147,7 +148,7 @@ export class ServerWikiPublicationService {
         }
 
         const version = expectedVersion + 1;
-        await tx.auditEvent.create({
+        await writeAuditRecord(tx, {
           data: {
             category: 'server',
             action: status === 'published'

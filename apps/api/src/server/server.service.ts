@@ -24,6 +24,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { isIP } from 'node:net';
 import { normalizeMinecraftServerHost } from '@minewiki/minecraft';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import { type StoredVerificationGrade, type ServerFilters, type ServerSort } from './server.store';
 import { FileService, type FileImageUploadRequest, type FileImageUploadResponse } from '../file/file.service';
 import { FirestoreTelemetryService } from '../telemetry/firestore-telemetry.service';
@@ -1194,7 +1195,7 @@ export class ServerService {
             wikiSlug: serverWiki.slug,
           },
         });
-        await tx.auditEvent.create({
+        await writeAuditRecord(tx, {
           data: {
             category: 'server',
             action: 'server.wiki.link',
@@ -1540,7 +1541,7 @@ export class ServerService {
           where: { serverId: id, enabled: true },
           data: { enabled: false },
         });
-        await tx.auditEvent.create({
+        await writeAuditRecord(tx, {
           data: {
             category: 'server',
             action: 'server.deleted',

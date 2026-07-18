@@ -7,22 +7,10 @@ import {
 } from '@minewiki/analytics';
 import { Logger } from '@minewiki/logger';
 import { PrismaService } from '../common/prisma.service';
+import { redactAuditValue } from './audit-redaction';
+import { writeAuditEvent, type AuditEventInput } from './audit-event-writer';
 
-const REDACTED = '[redacted]';
-const SENSITIVE_KEY_PATTERN = /(authorization|token|secret|password|credential|cookie)/i;
-
-export interface AuditEventInput {
-  readonly category?: string;
-  readonly severity?: 'info' | 'warning' | 'error' | 'critical';
-  readonly actorAccountId?: string | null;
-  readonly actorProfileId?: bigint | number | string | null;
-  readonly subjectType?: string | null;
-  readonly subjectId?: string | number | bigint | null;
-  readonly requestId?: string | null;
-  readonly ipAddress?: string | null;
-  readonly userAgent?: string | null;
-  readonly metadata?: unknown;
-}
+export { redactAuditValue, toAuditJson } from './audit-redaction';
 
 export interface AuditEventResponse {
   readonly id: string;
@@ -68,7 +56,6 @@ export class BusinessEventService {
   ): Promise<void> {
     await trackEvent(name, payload);
     await this.audit(name, {
-      category: categoryFromAction(name),
       metadata: payload
     });
   }
@@ -78,21 +65,7 @@ export class BusinessEventService {
       return;
     }
     try {
-      await this.prisma.auditEvent.create({
-        data: {
-          category: cleanText(input.category ?? categoryFromAction(action), 64),
-          action: cleanText(action, 128),
-          severity: cleanText(input.severity ?? 'info', 16),
-          actorAccountId: input.actorAccountId ?? null,
-          actorProfileId: normalizeBigInt(input.actorProfileId),
-          subjectType: input.subjectType ? cleanText(input.subjectType, 64) : null,
-          subjectId: normalizeString(input.subjectId, 128),
-          requestId: input.requestId ? cleanText(input.requestId, 64) : null,
-          ipAddress: input.ipAddress ? cleanText(input.ipAddress, 64) : null,
-          userAgent: input.userAgent ? cleanText(input.userAgent, 512) : null,
-          metadata: input.metadata === undefined ? undefined : toAuditJson(input.metadata)
-        }
-      });
+      await writeAuditEvent(this.prisma, action, input);
     } catch (error) {
       Logger.warn({ err: error, action }, 'Failed to persist audit event');
     }
@@ -183,97 +156,4 @@ function toAuditEventResponse(row: {
     metadata: redactAuditValue(row.metadata) as Prisma.JsonValue | null,
     createdAt: row.createdAt.toISOString(),
   };
-}
-
-export function toAuditJson(value: unknown): Prisma.InputJsonValue {
-  return redactAuditValue(value) as Prisma.InputJsonValue;
-}
-
-export function redactAuditValue(value: unknown): unknown {
-  return redactValue(value);
-}
-
-function redactValue(value: unknown, key?: string): unknown {
-  if (key && SENSITIVE_KEY_PATTERN.test(key)) {
-    return REDACTED;
-  }
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value === 'bigint') {
-    return value.toString();
-  }
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (Array.isArray(value)) {
-    return value.map((entry) => redactValue(entry));
-  }
-  if (typeof value === 'object') {
-    const output: Record<string, unknown> = {};
-    for (const [entryKey, entryValue] of Object.entries(value as Record<string, unknown>)) {
-      output[entryKey] = redactValue(entryValue, entryKey);
-    }
-    return output;
-  }
-  if (typeof value === 'string') {
-    return sanitizeStringValue(value);
-  }
-  if (['number', 'boolean'].includes(typeof value)) {
-    return value;
-  }
-  return String(value);
-}
-
-function sanitizeStringValue(value: string): string {
-  if (!/[?&](verifyToken|completionToken|token|secret|access_token|refresh_token)=/i.test(value)) {
-    return value;
-  }
-  try {
-    const parsed = new URL(value);
-    for (const key of [...parsed.searchParams.keys()]) {
-      if (SENSITIVE_KEY_PATTERN.test(key) || key === 'access_token' || key === 'refresh_token') {
-        parsed.searchParams.set(key, REDACTED);
-      }
-    }
-    return parsed.toString();
-  } catch {
-    return value.replace(
-      /([?&][^=]*(?:token|secret|authorization|access_token|refresh_token)[^=]*=)([^&]+)/gi,
-      `$1${encodeURIComponent(REDACTED)}`
-    );
-  }
-}
-
-function categoryFromAction(action: string): string {
-  const parts = action.split('.');
-  if (parts[0] === 'discord' && parts[1] === 'verify') {
-    return 'discord.verify';
-  }
-  if (parts[0] === 'plugin' && parts[1] === 'sync') {
-    return 'plugin.sync';
-  }
-  return cleanText(parts[0] || 'system', 64);
-}
-
-function cleanText(value: string, maxLength: number): string {
-  return value.trim().slice(0, maxLength) || 'unknown';
-}
-
-function normalizeBigInt(value: bigint | number | string | null | undefined): bigint | null {
-  if (value === null || value === undefined || value === '') {
-    return null;
-  }
-  try {
-    return BigInt(value);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeString(value: string | number | bigint | null | undefined, maxLength: number): string | null {
-  if (value === null || value === undefined || value === '') {
-    return null;
-  }
-  return String(value).slice(0, maxLength);
 }
