@@ -1886,7 +1886,7 @@ async function fetchWikiAdminJson<T>(path: string, init?: RequestInit): Promise<
 
 export async function previewWikiMarkup(
   contentRaw: string,
-  context?: { readonly namespace: string; readonly localPath: string },
+  context?: { readonly pageId?: string; readonly namespace: string; readonly localPath: string },
 ): Promise<{ html: string; errors: string[]; blockingErrors: string[] }> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/preview`, {
     method: 'POST',

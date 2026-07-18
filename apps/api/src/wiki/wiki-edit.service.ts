@@ -15,6 +15,7 @@ import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiNotificationService } from './wiki-notification.service';
+import { WikiIncludeService } from './wiki-include.service';
 import { wikiLinkResolutionContext } from './wiki-link-context';
 import { publicWikiRevisionEditSummary } from './wiki-revision-summary';
 import { hasWikiConflictMarkers, mergeWikiSource, WikiMergeLimitError } from './wiki-merge';
@@ -192,6 +193,12 @@ export interface WikiPreviewResponse {
   readonly blockingErrors: string[];
 }
 
+export interface WikiPreviewContext {
+  readonly pageId?: string;
+  readonly namespace?: string;
+  readonly localPath?: string;
+}
+
 @Injectable()
 export class WikiEditService {
   private readonly contributionPolicies: WikiContributionPolicyService;
@@ -204,6 +211,7 @@ export class WikiEditService {
     @Optional() private readonly wikiLinks?: WikiLinkIndexService,
     @Optional() private readonly notifications?: WikiNotificationService,
     @Optional() contributionPolicies?: WikiContributionPolicyService,
+    @Optional() private readonly wikiIncludes?: WikiIncludeService,
   ) {
     this.contributionPolicies = contributionPolicies
       ?? new WikiContributionPolicyService(prisma);
@@ -1734,20 +1742,88 @@ export class WikiEditService {
     };
   }
 
-  preview(
+  async preview(
     contentRaw: string | undefined,
-    context?: { readonly namespace?: string; readonly localPath?: string },
-  ): WikiPreviewResponse {
-    const linkResolution = context?.namespace && context.localPath !== undefined
-      ? wikiLinkResolutionContext(context.namespace, context.localPath)
+    context?: WikiPreviewContext,
+    viewer?: WikiAccessViewer,
+  ): Promise<WikiPreviewResponse> {
+    const previewContext = await this.resolvePreviewContext(context, viewer);
+    const linkResolution = previewContext
+      ? wikiLinkResolutionContext(previewContext.namespace, previewContext.localPath)
       : undefined;
     const parsed = parseMarkup(contentRaw ?? '', linkResolution ? { linkResolution } : {});
+    const expanded = this.wikiIncludes && previewContext && astContainsInclude(parsed.ast)
+      ? await this.wikiIncludes.expand({
+          ast: parsed.ast,
+          accountId: previewContext.access.accountId,
+          actor: previewContext.access.actor,
+          requestIp: previewContext.access.requestIp,
+          sourcePageId: previewContext.pageId,
+          sourceNamespace: previewContext.namespace,
+          sourceLocalPath: previewContext.localPath,
+        })
+      : { ast: parsed.ast };
     return {
-      html: renderDocument(parsed.ast, linkResolution ? { linkResolution } : {}),
+      html: renderDocument(expanded.ast, linkResolution ? { linkResolution } : {}),
       links: parsed.links,
       categories: parsed.categories,
       errors: parsed.errors,
       blockingErrors: parsed.blockingErrors
+    };
+  }
+
+  private async resolvePreviewContext(
+    context: WikiPreviewContext | undefined,
+    viewer: WikiAccessViewer,
+  ): Promise<{
+    readonly pageId: bigint;
+    readonly namespace: string;
+    readonly localPath: string;
+    readonly access: WikiAccessContext;
+  } | null> {
+    if (!context?.pageId && (!context?.namespace || context.localPath === undefined)) {
+      return null;
+    }
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    if (context.pageId) {
+      const pageId = this.parseBigIntId(context.pageId, 'pageId');
+      const page = await this.prisma.wikiPage.findUnique({ where: { id: pageId } });
+      if (!page) throw new NotFoundException('Wiki page not found.');
+      const namespace = await this.prisma.wikiNamespace.findUnique({
+        where: { id: page.namespaceId },
+        select: { code: true },
+      });
+      if (!namespace) throw new NotFoundException('Wiki namespace not found.');
+      await this.wikiPermissions.assertCanReadPage({ ...access, page });
+      return { pageId, namespace: namespace.code, localPath: page.localPath, access };
+    }
+
+    const namespaceCode = this.cleanNamespace(context.namespace);
+    const localPath = this.requiredString(context.localPath, 'localPath');
+    if (!/^[a-z][a-z0-9_-]{0,31}$/u.test(namespaceCode) || localPath.length > 500) {
+      throw new BadRequestException('Wiki preview context is invalid.');
+    }
+    const namespace = await this.prisma.wikiNamespace.findUnique({
+      where: { code: namespaceCode },
+      select: { id: true, code: true },
+    });
+    if (!namespace) throw new NotFoundException('Wiki namespace not found.');
+    const existing = await this.prisma.wikiPage.findUnique({
+      where: {
+        namespaceId_slug: {
+          namespaceId: namespace.id,
+          slug: slugifyTitle(localPath),
+        },
+      },
+    });
+    if (existing) {
+      await this.wikiPermissions.assertCanReadPage({ ...access, page: existing });
+    }
+    return {
+      pageId: existing?.id ?? 0n,
+      namespace: namespace.code,
+      localPath: existing?.localPath ?? localPath,
+      access,
     };
   }
 
@@ -2142,6 +2218,21 @@ export class WikiEditService {
 
 export function astContainsFile(ast: readonly AstNode[]): boolean {
   return collectWikiFileNames(ast).size > 0;
+}
+
+export function astContainsInclude(ast: readonly AstNode[]): boolean {
+  return ast.some((node) => {
+    if (node.type === 'include') return true;
+    if (
+      node.type === 'indent'
+      || node.type === 'folding'
+      || node.type === 'wiki_style'
+      || node.type === 'blockquote'
+    ) {
+      return astContainsInclude(node.children);
+    }
+    return false;
+  });
 }
 
 export function isReservedWikiToolPath(namespaceCode: string, slug: string): boolean {

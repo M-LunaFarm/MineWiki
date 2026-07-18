@@ -53,6 +53,36 @@ test('new wiki pages require captcha before the clean mutation reaches the edit 
   assert.deepEqual(mutationInput, { receivedSession: session, body: { namespace: 'main', title: '새 문서', contentRaw: '본문' } });
 });
 
+test('wiki preview forwards the authenticated session and stable page context', async () => {
+  const session = { userId: 'account-1', requestIp: '192.0.2.20' } as SessionPayload;
+  let previewInput: unknown;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    {} as WikiReadService,
+    {
+      async preview(contentRaw: string, context: unknown, viewer: unknown) {
+        previewInput = { contentRaw, context, viewer };
+        return { html: '<p>preview</p>', links: [], categories: [], errors: [], blockingErrors: [] };
+      },
+    } as unknown as WikiEditService,
+    captchaStub,
+  );
+
+  const response = await controller.previewPage({
+    contentRaw: '[include(틀:안내)]',
+    pageId: '7',
+    namespace: 'main',
+    localPath: '대문',
+  }, session);
+
+  assert.deepEqual(previewInput, {
+    contentRaw: '[include(틀:안내)]',
+    context: { pageId: '7', namespace: 'main', localPath: '대문' },
+    viewer: session,
+  });
+  assert.equal(response.html, '<p>preview</p>');
+});
+
 test('wiki move controller forwards additive destination namespace and space fields', async () => {
   const session = { userId: 'account-1' } as SessionPayload;
   let mutationInput: unknown;

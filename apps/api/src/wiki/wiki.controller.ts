@@ -296,11 +296,15 @@ export class WikiController {
   @Post('preview')
   @Throttle({ default: { limit: 30, ttl: 60 } })
   @UseGuards(SessionGuard)
-  previewPage(@Body() body: { contentRaw?: string; namespace?: string; localPath?: string }): WikiPreviewResponse {
+  previewPage(
+    @Body() body: { contentRaw?: string; pageId?: string; namespace?: string; localPath?: string },
+    @CurrentSession() session: SessionPayload,
+  ): Promise<WikiPreviewResponse> {
     return this.wikiEdit.preview(body.contentRaw, {
+      pageId: body.pageId,
       namespace: body.namespace,
       localPath: body.localPath,
-    });
+    }, session);
   }
 
   @Post('pages')

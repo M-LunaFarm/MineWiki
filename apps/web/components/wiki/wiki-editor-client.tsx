@@ -274,6 +274,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
     startPreviewTransition(async () => {
       try {
         const preview = await previewWikiMarkup(contentRaw, {
+          pageId: page?.id,
           namespace,
           localPath: page?.slug ?? title,
         });
@@ -871,7 +872,7 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
             <code className="mt-3 block overflow-x-auto rounded-md border border-white/10 bg-[#0d1219] px-3 py-2 text-xs text-emerald-200">
               {'[include(틀:안내,이름=값)]'}
             </code>
-            <p className="mt-3 text-xs leading-5 text-slate-500">틀의 <code>@이름@</code> 또는 <code>@이름=기본값@</code>이 전달한 값으로 표시됩니다. 미리보기에서는 포함 본문을 해석하지 않으며, 저장 후 읽기 권한이 있는 틀만 표시됩니다.</p>
+            <p className="mt-3 text-xs leading-5 text-slate-500">틀의 <code>@이름@</code> 또는 <code>@이름=기본값@</code>이 전달한 값으로 표시됩니다. 미리보기와 저장된 문서 모두 현재 계정이 읽을 수 있는 틀만 본문에 펼칩니다.</p>
             <div className="mt-4 border-t border-white/10 pt-4">
               <p className="text-xs font-semibold text-slate-300">본문 목차</p>
               <code className="mt-2 block rounded-md border border-white/10 bg-[#0d1219] px-3 py-2 text-xs text-emerald-200">{'[목차]  또는  [목차(hide)]'}</code>

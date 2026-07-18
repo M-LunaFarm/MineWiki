@@ -7,6 +7,7 @@ import type { SessionPayload } from '../session/session.service';
 import { buildWikiSearchVector, parseMarkup } from '@minewiki/wiki-core';
 import {
   astContainsFile,
+  astContainsInclude,
   categoryDocumentReferencesSelf,
   isUserDocumentRoot,
   isReservedWikiToolPath,
@@ -24,6 +25,7 @@ import { WikiReadService } from './wiki-read.service';
 import type { WikiNotificationService } from './wiki-notification.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import type { BusinessEventService } from '../events/business-event.service';
+import type { WikiIncludeService } from './wiki-include.service';
 
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -394,12 +396,81 @@ function session(userId: string, isElevated = false, permissions: string[] = [])
   };
 }
 
-test('preview returns blocking markup errors', () => {
+test('preview returns blocking markup errors', async () => {
   const edits = new WikiEditService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
-  const preview = edits.preview('<script>alert(1)</script>');
+  const preview = await edits.preview('<script>alert(1)</script>');
 
   assert.ok(preview.blockingErrors.length > 0);
   assert.ok(preview.blockingErrors.some((error) => error.includes('HTML')));
+});
+
+test('preview expands readable includes with the authenticated page context', async () => {
+  const page = {
+    id: 7n,
+    namespaceId: 3,
+    spaceId: 9n,
+    localPath: '서버-문서/안내',
+    slug: 'server-doc/guide',
+    title: '안내',
+    displayTitle: '안내',
+    currentRevisionId: 11n,
+    pageType: 'article',
+    protectionLevel: 'open',
+    status: 'normal',
+    currentContentSize: 0,
+    currentCategoryCount: 0,
+    createdBy: null,
+    ownerProfileId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 4n, status: 'active' }; } },
+    wikiPage: { async findUnique() { return page; } },
+    wikiNamespace: { async findUnique() { return { id: 3, code: 'server' }; } },
+  } as unknown as PrismaService;
+  let readPageId: bigint | null = null;
+  const permissions = {
+    actorFromSession() { return { accountId: 'account-1', profileId: 4n, status: 'active' }; },
+    async assertCanReadPage(input: { page: { id: bigint } }) { readPageId = input.page.id; },
+  } as unknown as WikiPermissionService;
+  let includeInput: Parameters<WikiIncludeService['expand']>[0] | null = null;
+  const includes = {
+    async expand(input: Parameters<WikiIncludeService['expand']>[0]) {
+      includeInput = input;
+      return {
+        ast: [{ type: 'paragraph' as const, children: [{ type: 'text' as const, text: '확장된 안내' }] }],
+        includedSourceBytes: 12,
+      };
+    },
+  } as WikiIncludeService;
+  const edits = new WikiEditService(
+    prisma,
+    {} as WikiProfileService,
+    permissions,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    includes,
+  );
+
+  const preview = await edits.preview('[include(틀:안내)]', {
+    pageId: '7',
+    namespace: 'main',
+    localPath: '조작된/경로',
+  }, session('account-1'));
+
+  assert.equal(readPageId, 7n);
+  assert.equal(includeInput?.sourcePageId, 7n);
+  assert.equal(includeInput?.sourceNamespace, 'server');
+  assert.equal(includeInput?.sourceLocalPath, '서버-문서/안내');
+  assert.match(preview.html, /확장된 안내/u);
+});
+
+test('include detection covers nested preview containers', () => {
+  assert.equal(astContainsInclude(parseMarkup('문서').ast), false);
+  assert.equal(astContainsInclude(parseMarkup('{{{#!folding 안내\n[include(틀:안내)]\n}}}').ast), true);
 });
 
 test('revision diff aligns unchanged lines after an insertion', () => {
