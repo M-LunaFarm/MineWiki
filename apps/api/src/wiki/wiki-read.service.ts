@@ -886,11 +886,25 @@ export class WikiReadService {
     page: { readonly id: bigint; readonly spaceId: bigint },
     access: WikiAccessContext,
   ): Promise<{ readonly revisionId: bigint; readonly releaseId: bigint } | undefined> {
+    const releasedItem = await this.releasedItemForViewer(page, access);
+    return releasedItem
+      ? { revisionId: releasedItem.revisionId, releaseId: releasedItem.releaseId }
+      : undefined;
+  }
+
+  private async releasedItemForViewer(
+    page: { readonly id: bigint; readonly spaceId: bigint },
+    access: WikiAccessContext,
+    requireServerWiki = false,
+  ): Promise<ServerWikiReleaseItem | undefined> {
     const serverWiki = await this.prisma.serverWiki.findFirst({
       where: { spaceId: page.spaceId, status: 'active' },
       select: { id: true, spaceId: true, publicationStatus: true, publishedReleaseId: true },
     });
-    if (!serverWiki) return undefined;
+    if (!serverWiki) {
+      if (requireServerWiki) throw new NotFoundException('Public wiki revision not found.');
+      return undefined;
+    }
     if (await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: page.spaceId })) {
       return undefined;
     }
@@ -904,10 +918,9 @@ export class WikiReadService {
         spaceId: page.spaceId,
         pageId: page.id,
       },
-      select: { revisionId: true },
     });
     if (!item) throw new NotFoundException('Public wiki revision not found.');
-    return { revisionId: item.revisionId, releaseId: serverWiki.publishedReleaseId };
+    return item;
   }
 
   async getPageLifecycleEvents(
@@ -1205,12 +1218,16 @@ export class WikiReadService {
       this.wikiPermissions,
       input.viewer ?? input.accountId ?? null
     );
-    await this.wikiPermissions.assertCanReadPage({ ...access, page: target });
     const namespace = await this.prisma.wikiNamespace.findUnique({ where: { id: target.namespaceId } });
     if (!namespace) throw new NotFoundException('Wiki namespace not found.');
-    if (!target.currentRevisionId) throw new NotFoundException('Wiki page has no public revision.');
+    const releasedTarget = namespace.code === 'server'
+      ? await this.releasedItemForViewer(target, access, true)
+      : undefined;
+    const projectedTarget = releasedTarget ? pageFromServerWikiReleaseItem(releasedTarget) : target;
+    await this.wikiPermissions.assertCanReadPage({ ...access, page: projectedTarget });
+    if (!projectedTarget.currentRevisionId) throw new NotFoundException('Wiki page has no public revision.');
     const targetRevision = await this.prisma.wikiPageRevision.findUnique({
-      where: { id: target.currentRevisionId },
+      where: { id: projectedTarget.currentRevisionId },
       select: { visibility: true }
     });
     if (targetRevision?.visibility !== 'public') throw new NotFoundException('Wiki page has no public revision.');
@@ -1220,7 +1237,7 @@ export class WikiReadService {
     const links = await this.prisma.wikiPageLink.findMany({
       where: {
         targetNamespaceCode: namespace.code,
-        targetSlug: target.slug,
+        targetSlug: projectedTarget.slug,
         linkType: { in: [...ALL_BACKLINK_TYPES] }
       }
     });
@@ -1237,9 +1254,7 @@ export class WikiReadService {
     const namespaces = namespaceIds.length > 0
       ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } } })
       : [];
-    const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
-    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
     const publicRevisions = currentRevisionIds.length > 0
       ? await this.prisma.wikiPageRevision.findMany({
@@ -1248,8 +1263,70 @@ export class WikiReadService {
         })
       : [];
     const publicRevisionIds = new Set(publicRevisions.map((revision) => revision.id));
+    const sourceSpaceIds = [...new Set(pages
+      .filter((page) => namespaceById.get(page.namespaceId) === 'server')
+      .map((page) => page.spaceId))];
+    const serverWikis = sourceSpaceIds.length > 0
+      ? await this.prisma.serverWiki.findMany({
+          where: { spaceId: { in: sourceSpaceIds }, status: 'active' },
+          select: {
+            id: true,
+            spaceId: true,
+            slug: true,
+            siteSlug: true,
+            publicationStatus: true,
+            publishedReleaseId: true,
+          },
+        })
+      : [];
+    const serverWikiBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki]));
+    const previewSpaceIds = new Set<bigint>();
+    for (const wiki of serverWikis) {
+      if (await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: wiki.spaceId })) {
+        previewSpaceIds.add(wiki.spaceId);
+      }
+    }
+    const publicReleaseWikis = serverWikis.filter((wiki) =>
+      !previewSpaceIds.has(wiki.spaceId)
+      && wiki.publicationStatus === 'published'
+      && wiki.publishedReleaseId !== null);
+    const releasedSources = publicReleaseWikis.length > 0 && pages.length > 0
+      ? await this.prisma.serverWikiReleaseItem.findMany({
+          where: {
+            pageId: { in: pages.map((page) => page.id) },
+            OR: publicReleaseWikis.map((wiki) => ({
+              releaseId: wiki.publishedReleaseId!,
+              serverWikiId: wiki.id,
+              spaceId: wiki.spaceId,
+            })),
+          },
+        })
+      : [];
+    const releasedSourceByPageId = new Map(releasedSources.flatMap((item) => {
+      const wiki = serverWikiBySpace.get(item.spaceId);
+      return wiki
+        && wiki.publishedReleaseId === item.releaseId
+        && wiki.id === item.serverWikiId
+        ? [[item.pageId, item] as const]
+        : [];
+    }));
+    const projectedSourceByPageId = new Map<bigint, ReturnType<typeof pageFromServerWikiReleaseItem> | WikiPage>();
+    for (const page of pages) {
+      const isServerSource = namespaceById.get(page.namespaceId) === 'server';
+      const serverWiki = serverWikiBySpace.get(page.spaceId);
+      if (!isServerSource || (serverWiki && previewSpaceIds.has(page.spaceId))) {
+        if (page.currentRevisionId && publicRevisionIds.has(page.currentRevisionId)) {
+          projectedSourceByPageId.set(page.id, page);
+        }
+        continue;
+      }
+      const releasedSource = releasedSourceByPageId.get(page.id);
+      if (releasedSource) projectedSourceByPageId.set(page.id, pageFromServerWikiReleaseItem(releasedSource));
+    }
+    const projectedSources = [...projectedSourceByPageId.values()];
+    const routePaths = await this.routePaths.preload(projectedSources, namespaceById);
     const readableSourceIds = new Set<bigint>();
-    for (const source of pages) {
+    for (const source of projectedSources) {
       try {
         await this.wikiPermissions.assertCanReadPage({ ...access, page: source });
         readableSourceIds.add(source.id);
@@ -1258,13 +1335,13 @@ export class WikiReadService {
       }
     }
     const isVisibleCurrentLink = (link: (typeof links)[number]) => {
-      const source = pageById.get(link.sourcePageId);
-      return Boolean(source && source.currentRevisionId === link.sourceRevisionId && publicRevisionIds.has(link.sourceRevisionId) && readableSourceIds.has(source.id));
+      const source = projectedSourceByPageId.get(link.sourcePageId);
+      return Boolean(source && source.currentRevisionId === link.sourceRevisionId && readableSourceIds.has(source.id));
     };
-    const grouped = new Map<bigint, { readonly source: (typeof pages)[number]; readonly types: Set<WikiBacklinkType> }>();
+    const grouped = new Map<bigint, { readonly source: (typeof projectedSources)[number]; readonly types: Set<WikiBacklinkType> }>();
     for (const link of links) {
       if (!isVisibleCurrentLink(link)) continue;
-      const source = pageById.get(link.sourcePageId)!;
+      const source = projectedSourceByPageId.get(link.sourcePageId)!;
       const entry = grouped.get(source.id) ?? { source, types: new Set<WikiBacklinkType>() };
       entry.types.add(link.linkType as WikiBacklinkType);
       grouped.set(source.id, entry);

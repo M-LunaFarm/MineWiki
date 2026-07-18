@@ -1547,6 +1547,114 @@ test('backlinks expose only links from the current readable source revision', as
   assert.deepEqual(response.filters, { types: ['link', 'file', 'include', 'redirect'], namespace: 'main' });
 });
 
+test('public server wiki backlinks use released target and source identities while preview uses the draft', async () => {
+  const now = new Date('2026-07-19T04:00:00.000Z');
+  const target = {
+    id: 10n, namespaceId: 7, spaceId: 40n, slug: 'luna/draft-target', title: 'luna/draft-target',
+    displayTitle: '초안 대상', currentRevisionId: 101n, pageType: 'article', protectionLevel: 'open',
+    status: 'normal', createdBy: 1n, ownerProfileId: null, createdAt: now, updatedAt: now, localPath: 'luna/draft-target',
+  };
+  const source = {
+    ...target,
+    id: 20n,
+    slug: 'luna/draft-source',
+    title: 'luna/draft-source',
+    displayTitle: '비공개 초안 소스',
+    localPath: 'luna/draft-source',
+    currentRevisionId: 201n,
+  };
+  const releaseBase = {
+    releaseId: 70n,
+    serverWikiId: 50n,
+    spaceId: 40n,
+    namespaceId: 7,
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 1n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-18T04:00:00.000Z'),
+    searchVector: 'release',
+    createdAt: new Date('2026-07-18T04:00:00.000Z'),
+  };
+  const releasedTarget = {
+    ...releaseBase,
+    id: 80n,
+    pageId: 10n,
+    revisionId: 100n,
+    slug: 'luna/public-target',
+    title: 'luna/public-target',
+    displayTitle: '공개 대상',
+    localPath: 'luna/public-target',
+  };
+  const releasedSource = {
+    ...releaseBase,
+    id: 81n,
+    pageId: 20n,
+    revisionId: 200n,
+    slug: 'luna/public-source',
+    title: 'luna/public-source',
+    displayTitle: '공개 소스',
+    localPath: 'luna/public-source',
+  };
+  const wiki = {
+    id: 50n,
+    spaceId: 40n,
+    slug: 'luna',
+    siteSlug: 'luna-docs',
+    publicationStatus: 'published',
+    publishedReleaseId: 70n,
+  };
+  let preview = false;
+  const linkQueries: Array<Record<string, unknown>> = [];
+  const prisma = {
+    wikiPage: {
+      async findUnique() { return target; },
+      async findMany() { return [source]; },
+    },
+    wikiNamespace: {
+      async findUnique() { return { id: 7, code: 'server' }; },
+      async findMany() { return [{ id: 7, code: 'server' }]; },
+    },
+    wikiPageRevision: {
+      async findUnique() { return { visibility: 'public' }; },
+      async findMany() { return [{ id: 201n }]; },
+    },
+    wikiPageLink: {
+      async findMany(args: { where: Record<string, unknown> }) {
+        linkQueries.push(args.where);
+        return [
+          { id: 2n, sourcePageId: 20n, sourceRevisionId: 201n, linkType: 'link' },
+          { id: 1n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'link' },
+        ];
+      },
+    },
+    serverWiki: {
+      async findFirst() { return wiki; },
+      async findMany() { return [wiki]; },
+    },
+    serverWikiReleaseItem: {
+      async findFirst() { return releasedTarget; },
+      async findMany() { return [releasedSource]; },
+    },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return preview; },
+    async assertCanReadPage() {},
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const publicResult = await service.getBacklinks({ pageId: '10' });
+  assert.equal(linkQueries[0]?.targetSlug, 'luna/public-target');
+  assert.deepEqual(publicResult.items.map((item) => [item.displayTitle, item.sourceRevisionId]), [['공개 소스', '200']]);
+  assert.equal(publicResult.items[0]?.routePath, '/serverWiki/luna-docs/public-source');
+
+  preview = true;
+  const previewResult = await service.getBacklinks({ pageId: '10' });
+  assert.equal(linkQueries[1]?.targetSlug, 'luna/draft-target');
+  assert.deepEqual(previewResult.items.map((item) => [item.displayTitle, item.sourceRevisionId]), [['비공개 초안 소스', '201']]);
+});
+
 test('backlinks validate and forward type filters without leaking hidden namespace counts', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const target = { id: 10n, namespaceId: 1, spaceId: 1n, slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 100n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now, localPath: '대문' };
