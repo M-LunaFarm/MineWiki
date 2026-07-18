@@ -101,6 +101,7 @@ export type MfaStepUpPurpose =
   | 'audit_read'
   | 'account_delete_admin'
   | 'account_moderation'
+  | 'account_merge_admin'
   | 'mfa_manage'
   | 'account_export';
 

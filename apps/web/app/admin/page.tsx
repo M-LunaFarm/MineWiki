@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookOpenCheck, ClipboardList, Crown, Flag, Headphones, ShieldCheck, UserRoundX, UsersRound } from 'lucide-react';
+import { BookOpenCheck, ClipboardList, Crown, Flag, GitMerge, Headphones, ShieldCheck, UserRoundX, UsersRound } from 'lucide-react';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -38,6 +38,12 @@ const ADMIN_TOOLS: ReadonlyArray<{
     title: '계정 종료 운영',
     description: '14일 유예, 자산 이전 조건과 계정 비식별화 처리 상태를 관리합니다.',
     icon: UserRoundX,
+  },
+  {
+    href: '/admin/account-merges',
+    title: '계정 연결 검토',
+    description: 'Discord·이메일·Minecraft 로그인 충돌의 소유권 증거를 확인하고 안전하게 연결합니다.',
+    icon: GitMerge,
   },
   {
     href: '/admin/support',

@@ -31,6 +31,7 @@ export function AdminAccessGate({ children }: { readonly children: ReactNode }) 
     if (pathname.startsWith('/admin/support')) return roles.includes('support_agent') || permissions.includes('support.admin');
     if (pathname.startsWith('/admin/reviews')) return roles.includes('moderator') || permissions.includes('review.moderate');
     if (pathname.startsWith('/admin/account-deletions')) return permissions.includes('admin.account.delete');
+    if (pathname.startsWith('/admin/account-merges')) return permissions.includes('admin.account.merge');
     if (pathname.startsWith('/admin/wiki/users')) return permissions.includes('wiki.user.block');
     if (pathname.startsWith('/admin/wiki/batch-rollback')) return permissions.includes('wiki.batch_rollback');
     if (pathname.startsWith('/admin/wiki/reports')) return permissions.includes('wiki.report.moderate');
@@ -91,6 +92,7 @@ function adminStepUpPurpose(pathname: string): MfaStepUpPurpose | null {
   if (pathname.startsWith('/admin/users')) return 'account_moderation';
   if (pathname.startsWith('/admin/reviews')) return 'review_moderation';
   if (pathname.startsWith('/admin/account-deletions')) return 'account_delete_admin';
+  if (pathname.startsWith('/admin/account-merges')) return 'account_merge_admin';
   if (pathname.startsWith('/admin/billing')) return 'server_admin';
   if (pathname.startsWith('/admin/audit')) return 'audit_read';
   return null;

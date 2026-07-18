@@ -22,6 +22,7 @@ const PURPOSE_LABELS: Record<MfaStepUpPurpose, string> = {
   audit_read: '감사 기록 조회',
   account_delete_admin: '계정 종료 관리',
   account_moderation: '계정 보안 조치',
+  account_merge_admin: '계정 연결 승인',
   mfa_manage: '다중 인증 설정',
   account_export: '계정 데이터 내보내기',
 };
