@@ -1084,6 +1084,8 @@ model UploadedFile {
   linkedResourceType String?  @map("linked_resource_type") @db.VarChar(64)
   linkedResourceId   String?  @map("linked_resource_id") @db.VarChar(128)
   status             String   @default("active") @db.VarChar(32)
+  deletedAt          DateTime? @map("deleted_at") @db.DateTime(3)
+  retainedUntil      DateTime? @map("retained_until") @db.DateTime(3)
   createdAt          DateTime @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt          DateTime @updatedAt @map("updated_at") @db.DateTime(3)
 
@@ -1093,6 +1095,7 @@ model UploadedFile {
   @@index([linkedResourceType, linkedResourceId])
   @@index([sha256])
   @@index([status])
+  @@index([status, retainedUntil])
   @@map("uploaded_files")
 }
 

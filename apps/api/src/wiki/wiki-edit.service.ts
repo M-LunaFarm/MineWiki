@@ -1525,6 +1525,9 @@ export class WikiEditService {
       if (status === 'normal' && !latestPublic) {
         throw new ConflictException('A wiki page without a public revision cannot be restored.');
       }
+      if (namespace.code === 'file') {
+        await this.transitionFilePageAsset(tx, page, status, now);
+      }
       const updated = await tx.wikiPage.update({
         where: { id: page.id },
         data: {
@@ -1558,6 +1561,51 @@ export class WikiEditService {
       }
     });
     return result;
+  }
+
+  private async transitionFilePageAsset(
+    tx: Prisma.TransactionClient,
+    page: { readonly id: bigint; readonly title: string },
+    status: 'normal' | 'deleted',
+    now: Date,
+  ): Promise<void> {
+    const asset = await tx.uploadedFile.findFirst({
+      where: { wikiFilename: page.title, usageContext: 'wiki_editor' },
+    });
+    if (status === 'normal') {
+      if (!asset || !['active', 'delete_pending', 'retained'].includes(asset.status)) {
+        throw new ConflictException('The file document cannot be restored because its retained asset is unavailable.');
+      }
+      await tx.uploadedFile.update({
+        where: { id: asset.id },
+        data: { status: 'active', deletedAt: null, retainedUntil: null },
+      });
+      return;
+    }
+    const references = await tx.$queryRaw<Array<{ sourcePageId: bigint }>>`
+      SELECT l.source_page_id AS sourcePageId
+      FROM page_links l
+      JOIN pages p
+        ON p.id = l.source_page_id
+       AND p.current_revision_id = l.source_revision_id
+      JOIN namespaces n
+        ON n.id = p.namespace_id
+      WHERE l.target_namespace_code = 'file'
+        AND l.target_slug = ${page.title}
+        AND l.link_type = 'file'
+        AND p.status <> 'deleted'
+        AND NOT (n.code = 'file' AND p.id = ${page.id})
+      LIMIT 1
+    `;
+    if (references.length > 0) {
+      throw new ConflictException('File is still referenced by a current wiki document.');
+    }
+    if (asset && asset.status !== 'retained') {
+      await tx.uploadedFile.update({
+        where: { id: asset.id },
+        data: { status: 'retained', deletedAt: now, retainedUntil: wikiFileRetentionDeadline(now) },
+      });
+    }
   }
 
   private async assertPageIsNotSpaceRoot(
@@ -2294,6 +2342,10 @@ export class WikiEditService {
     }
     return BigInt(value);
   }
+}
+
+function wikiFileRetentionDeadline(deletedAt: Date): Date {
+  return new Date(deletedAt.getTime() + 90 * 24 * 60 * 60 * 1_000);
 }
 
 export function astContainsFile(ast: readonly AstNode[]): boolean {

@@ -385,20 +385,25 @@ export class FileService {
       }
       return current;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    try {
-      await this.uploads.deleteObject(file.storagePath);
-    } catch {
-      throw new ServiceUnavailableException('Stored file deletion failed. Retry the same request.');
-    }
-    if (file.usageContext === 'wiki_editor' && file.wikiFilename) {
+    const isWikiAsset = file.usageContext === 'wiki_editor' && Boolean(file.wikiFilename);
+    if (isWikiAsset && file.wikiFilename) {
       if (!this.wikiEdits) {
         throw new ServiceUnavailableException('Wiki file document service is unavailable. Retry the same request.');
       }
       await this.wikiEdits.deleteFileDocumentAfterAuthorizedUpload(session, file.wikiFilename);
+    } else {
+      try {
+        await this.uploads.deleteObject(file.storagePath);
+      } catch {
+        throw new ServiceUnavailableException('Stored file deletion failed. Retry the same request.');
+      }
     }
+    const deletedAt = new Date();
     await this.prisma.uploadedFile.update({
       where: { id },
-      data: { status: 'deleted', wikiFilename: null }
+      data: isWikiAsset
+        ? { status: 'retained', deletedAt, retainedUntil: retentionDeadline(deletedAt) }
+        : { status: 'deleted', wikiFilename: null, deletedAt, retainedUntil: null }
     });
     await this.events?.audit('file.delete', {
       category: 'file',
@@ -413,6 +418,10 @@ export class FileService {
     });
     return { deleted: true };
   }
+}
+
+function retentionDeadline(deletedAt: Date): Date {
+  return new Date(deletedAt.getTime() + 90 * 24 * 60 * 60 * 1_000);
 }
 
 function normalizeUsageContext(value?: string): string {

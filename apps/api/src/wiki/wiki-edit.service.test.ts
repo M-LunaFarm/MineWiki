@@ -136,6 +136,55 @@ test('new document context resolves its space and exposes distinct create and re
   assert.equal(permissionInputs[2]?.action, 'edit_request');
 });
 
+test('file page restoration reactivates only a retained asset with the same logical filename', async () => {
+  const updates: unknown[] = [];
+  const service = new WikiEditService(
+    {} as PrismaService,
+    {} as WikiProfileService,
+    {} as WikiPermissionService,
+  ) as unknown as {
+    transitionFilePageAsset(
+      tx: unknown,
+      page: { id: bigint; title: string },
+      status: 'normal' | 'deleted',
+      now: Date,
+    ): Promise<void>;
+  };
+  const tx = {
+    uploadedFile: {
+      async findFirst() { return { id: 'file-1', status: 'retained', wikiFilename: 'logo.webp' }; },
+      async update(input: unknown) { updates.push(input); },
+    },
+    async $queryRaw() { return []; },
+  };
+
+  await service.transitionFilePageAsset(tx, { id: 7n, title: 'logo.webp' }, 'normal', new Date());
+
+  assert.deepEqual(updates, [{
+    where: { id: 'file-1' },
+    data: { status: 'active', deletedAt: null, retainedUntil: null },
+  }]);
+});
+
+test('file page restoration fails closed after the retained object is unavailable', async () => {
+  const service = new WikiEditService(
+    {} as PrismaService,
+    {} as WikiProfileService,
+    {} as WikiPermissionService,
+  ) as unknown as {
+    transitionFilePageAsset(tx: unknown, page: { id: bigint; title: string }, status: 'normal', now: Date): Promise<void>;
+  };
+  const tx = {
+    uploadedFile: { async findFirst() { return null; } },
+    async $queryRaw() { return []; },
+  };
+
+  await assert.rejects(
+    () => service.transitionFilePageAsset(tx, { id: 7n, title: 'lost.webp' }, 'normal', new Date()),
+    /retained asset is unavailable/u,
+  );
+});
+
 test('subtree move redirects clone page ACLs atomically and keep raw old paths restricted', async () => {
   const sourceRoot = {
     id: 7n, namespaceId: 1, spaceId: 10n, localPath: 'old', slug: 'old', title: 'Old',

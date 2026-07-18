@@ -27,6 +27,8 @@ interface TestFile {
   linkedResourceType: string | null;
   linkedResourceId: string | null;
   status: string;
+  deletedAt: Date | null;
+  retainedUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -122,6 +124,8 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
           sourceText: null,
           linkedResourceType: null,
           linkedResourceId: null,
+          deletedAt: null,
+          retainedUntil: null,
           createdAt: now,
           updatedAt: now,
           ...args.data
@@ -361,8 +365,8 @@ test('wiki file deletion blocks current references and keeps failed object delet
   await assert.rejects(() => failing.service.getFile(retryable.id, session('account-1')), /File not found/);
 });
 
-test('wiki file deletion retires its document and releases the logical filename', async () => {
-  const { service, files, deletedFileDocuments } = createService();
+test('wiki file deletion retires its document while retaining the recoverable object and logical filename', async () => {
+  const { service, files, deletedFileDocuments, getDeleteAttempts } = createService();
   const uploaded = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'retire me.png',
@@ -375,8 +379,11 @@ test('wiki file deletion retires its document and releases the logical filename'
   await service.deleteFile(uploaded.id, session('account-1'));
 
   assert.deepEqual(deletedFileDocuments, ['retire_me.webp']);
-  assert.equal(files.get(uploaded.id)?.status, 'deleted');
-  assert.equal(files.get(uploaded.id)?.wikiFilename, null);
+  assert.equal(files.get(uploaded.id)?.status, 'retained');
+  assert.equal(files.get(uploaded.id)?.wikiFilename, 'retire_me.webp');
+  assert.equal(getDeleteAttempts(), 0);
+  assert.ok(files.get(uploaded.id)?.deletedAt instanceof Date);
+  assert.ok(files.get(uploaded.id)?.retainedUntil instanceof Date);
 });
 
 test('private raw file is only readable by owner or file administrator', async () => {
