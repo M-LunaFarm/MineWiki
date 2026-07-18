@@ -25,6 +25,9 @@ test('server wiki settings exposes a mobile-safe publication lifecycle', async (
   assert.match(publication, /review\.required/u);
   assert.match(publication, /review\.reviewerAvailable/u);
   assert.match(publication, /reviewer를 다시 배정해야 공개할 수 있습니다/u);
+  assert.match(publication, /submission\?\.status === 'changes_requested'/u);
+  assert.match(publication, /publication\.submission\.changeRequest\.note/u);
+  assert.match(publication, /새 manifest로 다시 제출/u);
   assert.match(publication, /candidate\.counts\[kind\]/u);
   assert.match(publication, /candidate\.hasChanges/u);
   assert.match(publication, /publication\.readiness\.ready/u);

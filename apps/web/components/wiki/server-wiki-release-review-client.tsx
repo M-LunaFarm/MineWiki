@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, CheckCircle2, ClipboardCheck, FilePenLine, Loader2, RefreshCw, Server, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ClipboardCheck, FilePenLine, Loader2, MessageSquareWarning, RefreshCw, Server, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { csrfHeaders } from '../../lib/csrf';
@@ -116,7 +116,9 @@ export function ServerWikiReleaseReviewDetailClient({ candidateId }: { readonly 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<boolean | null>(null);
+  const [pendingDecision, setPendingDecision] = useState<'approve' | 'revoke' | 'changes_requested' | null>(null);
+  const [changeNote, setChangeNote] = useState('');
+  const [resolved, setResolved] = useState<string | null>(null);
   const [pages, setPages] = useState<readonly CandidatePage[]>([]);
   const [pageCursor, setPageCursor] = useState<string | null>(null);
   const [pageFilter, setPageFilter] = useState<PageFilter>('changed');
@@ -199,14 +201,37 @@ export function ServerWikiReleaseReviewDetailClient({ candidateId }: { readonly 
     } finally { setSaving(false); }
   }
 
+  async function requestChanges() {
+    if (!detail || saving || changeNote.trim().length < 5) return;
+    setSaving(true); setError(null); setMessage(null);
+    try {
+      const response = await fetch(`${baseUrl}/v1/servers/${encodeURIComponent(detail.serverId)}/wiki-publication/changes-request`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+        body: JSON.stringify({
+          candidateId: detail.candidateId,
+          candidateToken: detail.candidateToken,
+          note: changeNote.trim(),
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.message ?? '변경 요청을 등록하지 못했습니다.');
+      setResolved('제출자에게 변경 요청을 전달했습니다. 이 후보는 수정된 새 manifest가 제출될 때까지 게시할 수 없습니다.');
+      setDetail(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '변경 요청을 등록하지 못했습니다.');
+    } finally { setSaving(false); }
+  }
+
   if (loading) return <LoadingCard label="릴리스 후보 불러오는 중" />;
+  if (resolved) return <section className="surface-flat p-6"><CheckCircle2 className="size-7 text-emerald-300" /><h1 className="mt-4 text-xl font-bold text-white">변경 요청을 등록했습니다</h1><p className="mt-2 text-sm leading-6 text-slate-300">{resolved}</p><Link href="/wiki/release-reviews" className="btn-secondary mt-5 min-h-11"><ArrowLeft className="size-4" />검토 큐로 돌아가기</Link></section>;
   if (error && !detail) return <ErrorCard message={error} onRetry={() => void load()} />;
   if (!detail) return null;
   return <div className="space-y-5">
     <Link href="/wiki/release-reviews" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-slate-300 hover:text-white"><ArrowLeft className="size-4" />릴리스 검토 큐</Link>
     <section className="surface-flat overflow-hidden">
       <header className="border-b border-white/10 p-5"><p className="text-xs font-semibold text-emerald-300">{detail.serverName}</p><h1 className="mt-2 text-2xl font-bold text-white">릴리스 후보 #{detail.candidateId}</h1><p className="mt-3 text-sm leading-6 text-slate-400">{detail.submissionReason}</p><CandidateCounts counts={detail.counts} /></header>
-      <div className="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-white">독립 검토 {detail.review.approved ? '승인 완료' : '대기 중'}</p><p className="mt-1 text-xs text-slate-400">승인은 이 후보 ID와 저장된 manifest에만 적용됩니다.</p></div><button type="button" disabled={saving || !detail.review.canApprove} onClick={() => setPendingApproval(!detail.review.viewerApproved)} className="btn-primary min-h-11">{saving ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />}{detail.review.viewerApproved ? '내 승인 취소' : '후보 승인'}</button></div>
+      <div className="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-white">독립 검토 {detail.review.approved ? '승인 완료' : '대기 중'}</p><p className="mt-1 text-xs text-slate-400">결정은 이 후보 ID와 저장된 manifest에만 적용됩니다.</p></div><button type="button" disabled={saving || !detail.review.canApprove} onClick={() => setPendingDecision(detail.review.viewerApproved ? 'revoke' : 'approve')} className="btn-primary min-h-11">{saving ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />}{detail.review.viewerApproved ? '내 승인 취소' : '후보 승인'}</button></div>
       {message ? <p className="border-b border-white/10 px-5 py-3 text-sm text-emerald-200" role="status">{message}</p> : null}
       {error ? <p className="border-b border-white/10 px-5 py-3 text-sm text-red-200" role="alert">{error}</p> : null}
       <div className="flex flex-wrap gap-2 border-b border-white/10 p-5" aria-label="문서 변경 종류 필터">
@@ -219,8 +244,9 @@ export function ServerWikiReleaseReviewDetailClient({ candidateId }: { readonly 
       </ul> : null}
       {!pageLoading && !pageError && pages.length === 0 ? <p className="p-6 text-sm text-slate-400"><CheckCircle2 className="mr-2 inline size-4" />이 필터에 해당하는 문서가 없습니다.</p> : null}
       {!pageLoading && !pageError && pageCursor ? <div className="border-t border-white/10 p-5"><button type="button" disabled={pageLoadingMore} onClick={() => void loadPages(pageFilter, pageCursor, true)} className="btn-secondary min-h-11 w-full">{pageLoadingMore ? <Loader2 className="size-4 animate-spin" /> : null}문서 더 불러오기</button></div> : null}
+      <div className="border-t border-red-300/15 bg-red-400/[0.035] p-5"><h2 className="flex items-center gap-2 font-semibold text-white"><MessageSquareWarning className="size-4 text-red-300" />변경 요청</h2><p className="mt-2 text-xs leading-5 text-slate-400">문제가 있는 위치와 기대하는 수정 내용을 구체적으로 남겨 주세요. 요청 후 이 후보의 기존 승인은 모두 무효화됩니다.</p><textarea value={changeNote} onChange={(event) => setChangeNote(event.target.value)} minLength={5} maxLength={1000} rows={4} placeholder="예: 규칙 문서의 제재 단계와 이의 제기 절차를 구체적으로 작성해 주세요." className="mt-3 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm leading-6 text-white outline-none focus:border-red-300/50" /><div className="mt-2 flex items-center justify-between gap-3"><span className="text-xs text-slate-500">{changeNote.length.toLocaleString('ko-KR')} / 1,000</span><button type="button" disabled={saving || !detail.review.canApprove || changeNote.trim().length < 5} onClick={() => setPendingDecision('changes_requested')} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-red-300/30 px-4 text-sm font-semibold text-red-100 hover:bg-red-300/10 disabled:opacity-50"><MessageSquareWarning className="size-4" />변경 요청 보내기</button></div></div>
     </section>
-    <MfaStepUpDialog open={pendingApproval !== null} purpose="wiki_release_review" onClose={() => setPendingApproval(null)} onSuccess={async () => { const approve = pendingApproval; setPendingApproval(null); if (approve !== null) await changeApproval(approve); }} />
+    <MfaStepUpDialog open={pendingDecision !== null} purpose="wiki_release_review" onClose={() => setPendingDecision(null)} onSuccess={async () => { const decision = pendingDecision; setPendingDecision(null); if (decision === 'changes_requested') await requestChanges(); else if (decision !== null) await changeApproval(decision === 'approve'); }} />
   </div>;
 }
 

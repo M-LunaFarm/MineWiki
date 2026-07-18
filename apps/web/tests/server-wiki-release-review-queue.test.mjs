@@ -18,6 +18,9 @@ test('reviewers can discover and approve immutable server wiki candidates withou
   assert.match(client, /filterKinds/u);
   assert.match(client, /candidateId: detail\.candidateId/u);
   assert.match(client, /candidateToken: detail\.candidateToken/u);
+  assert.match(client, /wiki-publication\/changes-request/u);
+  assert.match(client, /변경 요청 보내기/u);
+  assert.match(client, /maxLength=\{1000\}/u);
   assert.match(client, /본문 변경 비교/u);
   assert.doesNotMatch(client, /\/wiki\/diff\/\$\{page\.before\.revisionId\}/u);
   assert.match(diffPage, /fetchServerWikiReleaseCandidateDiff/u);

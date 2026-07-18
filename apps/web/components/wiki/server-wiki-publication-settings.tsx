@@ -51,6 +51,11 @@ interface PublicationState {
     readonly submissionReason: string;
     readonly submittedAt: string;
     readonly submittedByProfileId: string | null;
+    readonly changeRequest: {
+      readonly note: string;
+      readonly reviewerProfileId: string;
+      readonly decidedAt: string;
+    } | null;
   }) | null;
   readonly review: {
     readonly required: boolean;
@@ -236,6 +241,7 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
     && !hasCurrentSubmission;
   const canPublish = publication.access.canPublish
     && publication.submission !== null
+    && publication.submission.status === 'pending_review'
     && reason.trim().length >= 5
     && (!publication.review.required || publication.review.approved);
   const canUnpublish = publication.access.canPublish && reason.trim().length >= 5 && confirmation === '비공개';
@@ -264,7 +270,7 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
         saving={saving}
         onApproval={setPendingApproval}
       />
-      {publication.submission ? <p className={`mt-3 rounded-lg border px-4 py-3 text-xs ${hasCurrentSubmission ? 'border-emerald-300/20 bg-emerald-400/5 text-emerald-100' : 'border-amber-300/25 bg-amber-400/10 text-amber-100'}`}>{hasCurrentSubmission ? `검토 요청 #${publication.submission.id} · ${new Date(publication.submission.submittedAt).toLocaleString('ko-KR')}` : '검토 요청을 제출한 뒤 작업본이 변경되었습니다. 기존 후보는 그대로 보존되며, 새 변경까지 포함하려면 다시 제출하세요.'}</p> : null}
+      {publication.submission?.status === 'changes_requested' && publication.submission.changeRequest ? <aside className="mt-3 rounded-lg border border-red-300/25 bg-red-400/10 px-4 py-3 text-sm text-red-100" role="status"><strong>변경 요청됨</strong><p className="mt-2 whitespace-pre-wrap leading-6">{publication.submission.changeRequest.note}</p><p className="mt-2 text-xs text-red-100/70">{new Date(publication.submission.changeRequest.decidedAt).toLocaleString('ko-KR')} · 내용을 수정하면 새 manifest로 다시 제출할 수 있습니다.</p></aside> : publication.submission ? <p className={`mt-3 rounded-lg border px-4 py-3 text-xs ${hasCurrentSubmission ? 'border-emerald-300/20 bg-emerald-400/5 text-emerald-100' : 'border-amber-300/25 bg-amber-400/10 text-amber-100'}`}>{hasCurrentSubmission ? `검토 요청 #${publication.submission.id} · ${new Date(publication.submission.submittedAt).toLocaleString('ko-KR')}` : '검토 요청을 제출한 뒤 작업본이 변경되었습니다. 기존 후보는 그대로 보존되며, 새 변경까지 포함하려면 다시 제출하세요.'}</p> : null}
       {message ? <p className={`mt-4 text-sm ${message.tone === 'error' ? 'text-red-200' : 'text-emerald-200'}`} role="status">{message.text}</p> : null}
 
       {publication.access.canPublish ? <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,280px)_auto] lg:items-end">
