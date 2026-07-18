@@ -96,10 +96,12 @@ export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Pr
   return readWikiResponse<WikiRevisionDiffResponse>(response, 'Failed to load wiki diff.');
 }
 
-export async function fetchWikiRecent(input: { readonly changeType?: string; readonly namespace?: string; readonly minor?: string } = {}): Promise<WikiRecentChangeListResponse> {
+export async function fetchWikiRecent(input: { readonly cursor?: string; readonly changeType?: string; readonly namespace?: string; readonly spaceId?: string; readonly minor?: string } = {}): Promise<WikiRecentChangeListResponse> {
   const params = new URLSearchParams({ limit: '30' });
+  if (input.cursor) params.set('cursor', input.cursor);
   if (input.changeType) params.set('changeType', input.changeType);
   if (input.namespace) params.set('namespace', input.namespace);
+  if (input.spaceId) params.set('spaceId', input.spaceId);
   if (input.minor) params.set('minor', input.minor);
   const response = await wikiFetch(`/v1/wiki/recent?${params.toString()}`);
   return readWikiResponse<WikiRecentChangeListResponse>(response, 'Failed to load recent wiki changes.');

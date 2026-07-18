@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookOpen, ExternalLink, Menu, Search } from 'lucide-react';
+import { BookOpen, ExternalLink, History, Menu, Search } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiNavigation } from './server-wiki-navigation';
 
@@ -52,6 +52,14 @@ export function ServerWikiHeader({ page }: { readonly page: WikiPageResponse }) 
             />
           </label>
         </form>
+
+        <Link
+          href={`${rootPath}/_changes`}
+          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-medium text-[#666] transition hover:bg-[#f5f5f5] hover:text-[#202020] sm:text-sm"
+        >
+          <History className="size-3.5" aria-hidden="true" />
+          변경 기록
+        </Link>
 
         <Link
           href={page.serverDirectoryPath ?? '/servers'}

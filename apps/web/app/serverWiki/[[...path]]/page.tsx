@@ -3,6 +3,7 @@ import { WikiEditRoutePage } from '../../../components/wiki/wiki-edit-route-page
 import { WikiHistoryRoutePage } from '../../../components/wiki/wiki-history-route-page';
 import { ServerWikiToolRoutePage } from '../../../components/wiki/server-wiki-tool-route-page';
 import { ServerWikiSearchPage } from '../../../components/wiki/server-wiki-search-page';
+import { ServerWikiRecentPage } from '../../../components/wiki/server-wiki-recent-page';
 import { parseServerWikiToolRoute } from '../../../lib/wiki-routes.mjs';
 
 interface PageProps {
@@ -17,6 +18,9 @@ export default async function ServerWikiSitePage({ params, searchParams }: PageP
   const path = resolvedParams.path ?? [];
   if (path.length === 2 && path[1] === '_search') {
     return <ServerWikiSearchPage slug={path[0] ?? ''} routePrefix="serverWiki" searchParams={await searchParams} />;
+  }
+  if (path.length === 2 && path[1] === '_changes') {
+    return <ServerWikiRecentPage slug={path[0] ?? ''} />;
   }
   const toolRoute = parseServerWikiToolRoute(path);
   if (toolRoute?.tool === 'raw' || toolRoute?.tool === 'backlinks' || toolRoute?.tool === 'discuss' || toolRoute?.tool === 'requests' || toolRoute?.tool === 'blame' || toolRoute?.tool === 'acl') {

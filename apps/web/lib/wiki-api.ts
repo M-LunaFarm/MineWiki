@@ -98,6 +98,7 @@ export interface WikiPageResponse {
   } | null;
   readonly serverDirectoryPath?: string | null;
   readonly serverWiki?: {
+    readonly spaceId: string;
     readonly name: string;
     readonly slug: string;
     readonly contentSlug: string;
@@ -309,13 +310,19 @@ export interface WikiRecentChangeSummary {
   readonly id: string;
   readonly pageId: string | null;
   readonly revisionId: string | null;
+  readonly previousPublicRevisionId: string | null;
   readonly actorId: string | null;
+  readonly actorName: string;
+  readonly actorUsername: string | null;
   readonly changeType: string;
   readonly title: string;
   readonly namespaceCode: string;
+  readonly spaceId: string | null;
   readonly routePath: string;
   readonly summary: string | null;
   readonly summaryHidden: boolean;
+  readonly sizeDelta: number | null;
+  readonly canViewDiff: boolean;
   readonly isMinor: boolean;
   readonly createdAt: string;
 }
@@ -1773,6 +1780,7 @@ export async function fetchWikiRecent(
     cursor?: string;
     changeType?: string;
     namespace?: string;
+    spaceId?: string;
     minor?: string;
   } = {},
 ): Promise<WikiRecentChangeListResponse> {
@@ -1780,6 +1788,7 @@ export async function fetchWikiRecent(
   if (input.cursor) params.set('cursor', input.cursor);
   if (input.changeType) params.set('changeType', input.changeType);
   if (input.namespace) params.set('namespace', input.namespace);
+  if (input.spaceId) params.set('spaceId', input.spaceId);
   if (input.minor) params.set('minor', input.minor);
   return readWikiBrowser(`/v1/wiki/recent?${params.toString()}`);
 }

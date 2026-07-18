@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
+import { ArrowLeftRight, Loader2, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { fetchWikiRecent, type WikiRecentChangeListResponse, type WikiRecentChangeSummary } from '../../lib/wiki-api';
@@ -8,7 +8,7 @@ import { WikiEditSummary } from './wiki-edit-summary';
 
 interface WikiRecentChangesClientProps {
   readonly initial: WikiRecentChangeListResponse;
-  readonly filters: { readonly changeType?: string; readonly namespace?: string; readonly minor?: string };
+  readonly filters: { readonly changeType?: string; readonly namespace?: string; readonly spaceId?: string; readonly minor?: string };
 }
 
 export function WikiRecentChangesClient({ initial, filters }: WikiRecentChangesClientProps) {
@@ -50,12 +50,17 @@ function RecentChange({ change }: { readonly change: WikiRecentChangeSummary }) 
         <span className="chip chip-muted">{changeTypeLabel(change.changeType)}</span>
         {change.isMinor ? <span className="chip chip-muted">사소한 편집</span> : null}
       </div>
-      <h2 className="truncate text-base font-semibold text-white"><Link href={change.routePath} className="hover:text-emerald-200">{change.title}</Link></h2>
+      <h2 className="truncate text-base font-semibold text-white">{change.changeType === 'delete' ? change.title : <Link href={change.routePath} className="hover:text-emerald-200">{change.title}</Link>}</h2>
       <p className="mt-1 break-words text-sm text-slate-400"><WikiEditSummary summary={change.summary} hidden={change.summaryHidden} /></p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1"><UserRound className="size-3.5" aria-hidden="true" />{change.actorId ? <Link href={`/wiki/contributions/${encodeURIComponent(change.actorId)}`} className="hover:text-emerald-200">{change.actorName}{change.actorUsername ? ` · @${change.actorUsername}` : ''}</Link> : change.actorName}</span>
+        {change.sizeDelta !== null ? <span className={change.sizeDelta > 0 ? 'font-semibold text-emerald-300' : change.sizeDelta < 0 ? 'font-semibold text-rose-300' : 'text-slate-500'}>{formatSizeDelta(change.sizeDelta)}</span> : null}
+      </div>
     </div>
     <div className="flex flex-wrap items-center gap-2 text-sm text-slate-400 md:justify-end">
       <time>{formatDate(change.createdAt)}</time>
-      {change.revisionId ? <Link href={`/wiki/revision/${change.revisionId}`} className="chip chip-muted">판 보기</Link> : null}
+      {change.canViewDiff && change.previousPublicRevisionId && change.revisionId ? <Link href={`/wiki/diff/${encodeURIComponent(change.previousPublicRevisionId)}/${encodeURIComponent(change.revisionId)}`} className="chip chip-accent inline-flex items-center gap-1"><ArrowLeftRight className="size-3.5" aria-hidden="true" />비교</Link> : null}
+      {change.revisionId && change.changeType !== 'delete' ? <Link href={`/wiki/revision/${change.revisionId}`} className="chip chip-muted">판 보기</Link> : null}
     </div>
   </article>;
 }
@@ -70,4 +75,10 @@ function namespaceLabel(value: string): string {
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Seoul' }).format(new Date(value));
+}
+
+function formatSizeDelta(value: number): string {
+  if (value > 0) return `+${value.toLocaleString('ko-KR')} bytes`;
+  if (value < 0) return `${value.toLocaleString('ko-KR')} bytes`;
+  return '0 bytes';
 }
