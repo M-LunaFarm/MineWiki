@@ -10,6 +10,7 @@ import { useAuth } from '../providers/auth-context';
 import { csrfHeaders } from '../../lib/csrf';
 import { PrivilegedActionGate } from '../auth/privileged-action-gate';
 import { ServerProfileSettings } from './server-profile-settings';
+import { ServerWikiReadinessCard, type ServerWikiReadiness } from './server-wiki-readiness-card';
 
 interface ServerOwnerControlsProps {
   readonly serverId: string;
@@ -64,28 +65,10 @@ type DispatchSummary = {
   readonly failed: DispatchAttemptSummary[];
 };
 
-const READINESS_LABELS: Readonly<Record<string, string>> = {
-  canonicalLink: '안전한 서버 연결',
-  requiredDocuments: '필수 문서 4개',
-  introduction: '서버 소개',
-  officialRules: '공식 규칙',
-  officialChannels: '공식 홈페이지 또는 Discord',
-  searchIndex: '문서 검색 색인',
-};
-
 type ServerWikiLinkResponse = {
   readonly wikiSlug: string | null;
   readonly wikiUrl: string | null;
   readonly status: 'linked' | 'unlinked';
-};
-
-type ServerWikiReadiness = {
-  readonly status: 'unlinked' | 'repair_required' | 'needs_attention' | 'ready';
-  readonly wikiUrl: string | null;
-  readonly completedChecks: number;
-  readonly totalChecks: number;
-  readonly checks: Record<string, boolean>;
-  readonly nextAction: { readonly code: string; readonly label: string; readonly href: string } | null;
 };
 
 function createDefaultTargets(): EditableTarget[] {
@@ -635,39 +618,7 @@ export function ServerOwnerControls({
             {wikiFeedback.message}
           </p>
         ) : null}
-        {wikiReadiness && wikiReadiness.status !== 'unlinked' ? (
-          <div className={`mt-4 rounded-lg border p-4 ${
-            wikiReadiness.status === 'ready'
-              ? 'border-emerald-400/25 bg-emerald-400/5'
-              : wikiReadiness.status === 'repair_required'
-                ? 'border-red-400/25 bg-red-400/5'
-                : 'border-amber-300/25 bg-amber-300/5'
-          }`}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="flex items-center gap-2 font-semibold text-white">
-                {wikiReadiness.status === 'ready' ? <CheckCircle2 className="size-4 text-emerald-300" /> : <AlertCircle className="size-4 text-amber-300" />}
-                {wikiReadiness.status === 'ready' ? '문서 공간 준비 완료' : wikiReadiness.status === 'repair_required' ? '연결 복구 필요' : '문서 완성도 보강 필요'}
-              </p>
-              <span className="text-xs text-slate-400">{wikiReadiness.completedChecks}/{wikiReadiness.totalChecks} 확인 완료</span>
-            </div>
-            {wikiReadiness.status === 'needs_attention' ? (
-              <div className="mt-3 grid gap-2 text-xs text-slate-300 sm:grid-cols-2">
-                {Object.entries(wikiReadiness.checks).map(([key, complete]) => (
-                  <span key={key} className="flex items-center gap-2">
-                    <span className={`size-1.5 rounded-full ${complete ? 'bg-emerald-300' : 'bg-amber-300'}`} />
-                    {READINESS_LABELS[key] ?? key}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {wikiReadiness.nextAction ? (
-              <Link href={wikiReadiness.nextAction.href} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-bold text-[#06140d] transition hover:bg-[#1ee6a4]">
-                {wikiReadiness.nextAction.label}
-                <ExternalLink className="size-3.5" />
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
+        {wikiReadiness ? <ServerWikiReadinessCard readiness={wikiReadiness} /> : null}
       </div>
 
       <div className="mt-5">
