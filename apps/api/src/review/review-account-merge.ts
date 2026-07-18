@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 
-const REPORT_STATUS_PRIORITY = { in_review: 4, open: 3, resolved: 2, dismissed: 1 } as const;
+const ACTIVE_REPORT_STATUSES = new Set(['open', 'in_review']);
+const REPORT_STATUS_PRIORITY = { in_review: 2, open: 1 } as const;
 
 export async function rehomeReviewsForCanonicalMerge(
   tx: Prisma.TransactionClient,
@@ -47,16 +48,31 @@ export async function rehomeReviewsForCanonicalMerge(
     orderBy: [{ updatedAt: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
   });
   for (const reviewId of new Set(reports.map((report) => report.reviewId))) {
-    const winner = reports.filter((report) => report.reviewId === reviewId).sort((left, right) =>
-      REPORT_STATUS_PRIORITY[right.status] - REPORT_STATUS_PRIORITY[left.status]
+    const reviewReports = reports.filter((report) => report.reviewId === reviewId);
+    const activeReports = reviewReports.filter((report) => ACTIVE_REPORT_STATUSES.has(report.status));
+    const activeWinner = activeReports.sort((left, right) =>
+      REPORT_STATUS_PRIORITY[right.status as keyof typeof REPORT_STATUS_PRIORITY]
+        - REPORT_STATUS_PRIORITY[left.status as keyof typeof REPORT_STATUS_PRIORITY]
       || right.updatedAt.getTime() - left.updatedAt.getTime()
       || Number(right.accountId === canonicalAccountId) - Number(left.accountId === canonicalAccountId)
       || left.id.localeCompare(right.id))[0];
-    if (!winner) continue;
-    await tx.reviewReport.deleteMany({ where: { reviewId, accountId: { in: allAccountIds }, id: { not: winner.id } } });
-    if (winner.accountId !== canonicalAccountId) {
-      await tx.reviewReport.update({ where: { id: winner.id }, data: { accountId: canonicalAccountId } });
+    const mergedAt = new Date();
+    for (const report of activeReports) {
+      if (report.id === activeWinner?.id) continue;
+      await tx.reviewReport.update({
+        where: { id: report.id },
+        data: {
+          status: 'dismissed',
+          resolution: '계정 통합으로 중복 활성 신고가 자동 종결되었습니다.',
+          statusUpdatedAt: mergedAt,
+          dismissedAt: mergedAt,
+        },
+      });
     }
+    await tx.reviewReport.updateMany({
+      where: { reviewId, accountId: { in: allAccountIds } },
+      data: { accountId: canonicalAccountId },
+    });
     const reportsCount = await tx.reviewReport.count({ where: { reviewId } });
     await tx.serverReview.update({ where: { id: reviewId }, data: { reports: reportsCount } });
   }

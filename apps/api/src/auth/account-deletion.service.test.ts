@@ -402,6 +402,23 @@ if (!hasDatabase) {
       },
     });
     const review = await prisma.serverReview.create({ data: { serverId: server.id, authorAccountId: group.firstId, authorDisplayName: 'Player', rating: 5, body: '보존할 리뷰', tags: [], evidenceMinecraftUuid: minecraftUuid, evidenceVoteId: vote.id, evidenceVerifiedAt: new Date(), evidencePolicyVersion: 'v1' } });
+    const outsider = await prisma.account.create({ data: {
+      id: randomUUID(), provider: 'email', providerUserId: `review-outsider-${randomUUID()}@example.com`, emailVerified: true,
+    } });
+    await prisma.reviewHelpfulVote.createMany({ data: [
+      { reviewId: review.id, accountId: group.secondId, isHelpful: true, lastMarkedAt: new Date() },
+      { reviewId: review.id, accountId: outsider.id, isHelpful: true, lastMarkedAt: new Date() },
+    ] });
+    await prisma.reviewReport.create({ data: {
+      reviewId: review.id,
+      accountId: group.secondId,
+      reason: '보존해야 하는 신고 사건',
+      status: 'resolved',
+      resolution: '운영 검토 완료',
+      statusUpdatedAt: new Date(),
+      resolvedAt: new Date(),
+    } });
+    await prisma.serverReview.update({ where: { id: review.id }, data: { helpfulCount: 2, reports: 1 } });
     try {
       const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
       await prisma.accountDeletionRequest.update({ where: { id: requested.id }, data: { scheduledFor: new Date(Date.now() - 1000) } });
@@ -415,6 +432,12 @@ if (!hasDatabase) {
       assert.equal(storedReview?.isAnonymous, true);
       assert.equal(storedReview?.evidenceMinecraftUuid, null);
       assert.equal(storedReview?.evidenceVoteId, null);
+      assert.equal(storedReview?.helpfulCount, 1);
+      assert.equal(storedReview?.reports, 1);
+      const preservedReport = await prisma.reviewReport.findFirst({ where: { reviewId: review.id } });
+      assert.equal(preservedReport?.accountId, group.secondId);
+      assert.equal(preservedReport?.status, 'resolved');
+      assert.equal(preservedReport?.resolution, '운영 검토 완료');
       assert.equal(storedVote?.accountId, null);
       assert.equal(storedVote?.minecraftUuid, null);
       assert.equal(storedVote?.ipAddress, null);
@@ -440,6 +463,7 @@ if (!hasDatabase) {
       await prisma.lunaDiscordAccountLink.deleteMany({ where: { discordUserId } });
       await prisma.lunaGuild.deleteMany({ where: { guildId } });
       await cleanup([group.firstId, group.secondId], server.id);
+      await prisma.account.delete({ where: { id: outsider.id } }).catch(() => undefined);
     }
   });
 

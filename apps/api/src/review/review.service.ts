@@ -811,7 +811,10 @@ export class ReviewService {
     ]);
     const reportStatusByReviewId = new Map<string, ServerReview['viewerReportStatus']>();
     for (const report of reports) {
-      if (reportStatusByReviewId.has(report.reviewId)) continue;
+      const current = reportStatusByReviewId.get(report.reviewId);
+      const isActive = ['open', 'in_review'].includes(report.status);
+      if (current && ['open', 'in_review'].includes(current)) continue;
+      if (current && !isActive) continue;
       const wasEditedAfterFinalization = ['resolved', 'dismissed'].includes(report.status)
         && report.review.updatedAt > report.statusUpdatedAt;
       reportStatusByReviewId.set(

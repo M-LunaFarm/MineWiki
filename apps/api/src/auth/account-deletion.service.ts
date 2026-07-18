@@ -264,8 +264,20 @@ export class AccountDeletionService {
       await this.anonymizeUserDocuments(tx, request.id, profiles, now);
       const wikiCollaboratorRolesRevoked = await this.revokeWikiCollaboratorRoles(tx, profileIds, now);
       await tx.uploadedFile.updateMany({ where: { ownerAccountId: { in: accountIds } }, data: { ownerAccountId: null } });
+      const affectedHelpfulReviews = await tx.reviewHelpfulVote.findMany({
+        where: { accountId: { in: accountIds } },
+        select: { reviewId: true },
+        distinct: ['reviewId'],
+      });
       await tx.reviewHelpfulVote.deleteMany({ where: { accountId: { in: accountIds } } });
-      await tx.reviewReport.deleteMany({ where: { accountId: { in: accountIds } } });
+      for (const { reviewId } of affectedHelpfulReviews) {
+        const helpfulCount = await tx.reviewHelpfulVote.count({ where: { reviewId, isHelpful: true } });
+        await tx.serverReview.update({ where: { id: reviewId }, data: { helpfulCount } });
+      }
+      await tx.reviewReport.updateMany({
+        where: { assigneeAccountId: { in: accountIds } },
+        data: { assigneeAccountId: null },
+      });
       await tx.reviewSubmissionGate.deleteMany({ where: { authorAccountId: { in: accountIds } } });
       await tx.accountConsent.updateMany({ where: { accountId: { in: accountIds } }, data: { ipAddress: null, userAgent: null } });
       await tx.accountRole.deleteMany({ where: { accountId: { in: accountIds } } });

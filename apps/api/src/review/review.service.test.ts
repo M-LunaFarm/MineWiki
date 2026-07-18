@@ -304,6 +304,21 @@ if (!hasDatabase) {
 
     await reviewService.report(server.id, review.id, reporter.id, '열린 사건 중복 신고');
     assert.equal(await prisma.reviewReport.count({ where: { reviewId: review.id } }), 2);
+
+    await prisma.reviewReport.create({
+      data: {
+        reviewId: review.id,
+        accountId: reporter.id,
+        reason: '활성 사건보다 나중에 기록된 종결 사건',
+        status: 'dismissed',
+        resolution: '별도 사건 종결',
+        statusUpdatedAt: new Date(Date.now() + 1_000),
+        dismissedAt: new Date(Date.now() + 1_000),
+      },
+    });
+    const activePreferredReceipt = (await reviewService.list(server.id, {}, reporter.id))
+      .find((item) => item.id === review.id);
+    assert.equal(activePreferredReceipt?.viewerReportStatus, 'open');
   });
 
   test('removing a review decrements only the public review counter', async () => {
