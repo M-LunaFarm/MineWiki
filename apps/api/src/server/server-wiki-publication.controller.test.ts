@@ -26,8 +26,8 @@ test('publication endpoints require a session and mutations require server_admin
     'server_admin',
   );
   assert.equal(Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, ServerWikiPublicationController.prototype.submitCandidate), 'server_admin');
-  assert.equal(Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, ServerWikiPublicationController.prototype.approveCandidate), 'server_admin');
-  assert.equal(Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, ServerWikiPublicationController.prototype.revokeCandidateApproval), 'server_admin');
+  assert.equal(Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, ServerWikiPublicationController.prototype.approveCandidate), 'wiki_release_review');
+  assert.equal(Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, ServerWikiPublicationController.prototype.revokeCandidateApproval), 'wiki_release_review');
   const mutationGuards = Reflect.getMetadata(
     GUARDS_METADATA,
     ServerWikiPublicationController.prototype.update,

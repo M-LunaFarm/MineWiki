@@ -86,7 +86,7 @@ export class ServerWikiPublicationController {
   }
 
   @Post('approval')
-  @RequireStepUp('server_admin')
+  @RequireStepUp('wiki_release_review')
   @Throttle({ default: { limit: 12, ttl: 60 } })
   approveCandidate(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
@@ -98,7 +98,7 @@ export class ServerWikiPublicationController {
   }
 
   @Delete('approval')
-  @RequireStepUp('server_admin')
+  @RequireStepUp('wiki_release_review')
   @Throttle({ default: { limit: 12, ttl: 60 } })
   revokeCandidateApproval(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,

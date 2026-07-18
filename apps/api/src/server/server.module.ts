@@ -21,11 +21,13 @@ import { ServerWikiPublicationController } from './server-wiki-publication.contr
 import { ServerWikiPublicationService } from './server-wiki-publication.service';
 import { ServerWikiTemplateController } from './server-wiki-template.controller';
 import { ServerWikiTemplateService } from './server-wiki-template.service';
+import { ServerWikiReleaseReviewQueueController } from './server-wiki-release-review-queue.controller';
+import { ServerWikiReleaseReviewQueueService } from './server-wiki-release-review-queue.service';
 
 @Module({
   imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
-  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiTemplateService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiPublicationController, ServerWikiTemplateController],
+  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController],
   exports: [ServerService]
 })
 export class ServerModule {}
