@@ -38,6 +38,16 @@ export class ServerWikiReleaseReviewQueueController {
     return this.reviews.pages(session.userId, candidateId, kinds, cursor, limit);
   }
 
+  @Get(':candidateId/pages/:pageId/diff')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  diff(
+    @CurrentSession() session: SessionPayload,
+    @Param('candidateId') candidateId: string,
+    @Param('pageId') pageId: string,
+  ) {
+    return this.reviews.diff(session.userId, candidateId, pageId);
+  }
+
   @Get(':candidateId')
   @Throttle({ default: { limit: 30, ttl: 60 } })
   get(

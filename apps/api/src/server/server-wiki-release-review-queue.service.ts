@@ -1,7 +1,8 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { readCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import { PrismaService } from '../common/prisma.service';
+import { WikiEditService } from '../wiki/wiki-edit.service';
 import type { ServerWikiReleaseCandidate } from './server-wiki-release-candidate';
 import type { ServerWikiReleaseCandidatePageKind } from './server-wiki-release-candidate';
 import { ServerWikiReleaseManifestCursorCodec } from './server-wiki-release-manifest-cursor';
@@ -28,6 +29,7 @@ export class ServerWikiReleaseReviewQueueService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly manifestCursors: ServerWikiReleaseManifestCursorCodec = new ServerWikiReleaseManifestCursorCodec(),
+    @Optional() private readonly wikiEdit?: WikiEditService,
   ) {}
 
   async list(accountId: string, cursorInput?: string, limitInput?: string) {
@@ -130,7 +132,13 @@ export class ServerWikiReleaseReviewQueueService {
     const filtered = manifest.pages
       .filter((page) => kinds.includes(page.kind) && (afterPageId === null || BigInt(page.pageId) > afterPageId))
       .sort((left, right) => BigInt(left.pageId) < BigInt(right.pageId) ? -1 : BigInt(left.pageId) > BigInt(right.pageId) ? 1 : 0);
-    const items = filtered.slice(0, limit);
+    const items = filtered.slice(0, limit).map((page) => ({
+      ...page,
+      previewPath: null,
+      diffPath: page.contentChanged && page.before && page.after
+        ? `/wiki/release-reviews/${row.id.toString()}/pages/${page.pageId}/diff`
+        : null,
+    }));
     return {
       items,
       nextCursor: filtered.length > limit && items.length > 0
@@ -138,6 +146,52 @@ export class ServerWikiReleaseReviewQueueService {
         : null,
       kinds,
     };
+  }
+
+  async diff(accountId: string, candidateIdInput: string, pageIdInput: string) {
+    const candidateId = parseCandidateId(candidateIdInput);
+    const pageId = parseCandidateId(pageIdInput);
+    const viewer = await this.resolveReviewer(accountId);
+    if (!viewer) throw reviewNotFound();
+    const row = await this.prisma.serverWikiReleaseCandidate.findFirst({
+      where: {
+        id: candidateId,
+        status: 'pending_review',
+        spaceId: { in: [...viewer.spaceIds] },
+        serverWiki: { status: 'active', voteServerId: { not: null } },
+      },
+      select: {
+        id: true, serverWikiId: true, spaceId: true, token: true,
+        manifestSnapshot: true, releaseSnapshot: true,
+      },
+    });
+    if (!row) throw reviewNotFound();
+    const manifest = parseManifest(row.manifestSnapshot, row.token);
+    const page = manifest.pages.find((item) => item.pageId === pageId.toString());
+    if (!page?.contentChanged || !page.before || !page.after || !manifest.baselineReleaseId) throw reviewNotFound();
+    const baselineReleaseId = parseCandidateId(manifest.baselineReleaseId);
+    const beforeRevisionId = parseCandidateId(page.before.revisionId);
+    const afterRevisionId = parseCandidateId(page.after.revisionId);
+    const baseline = await this.prisma.serverWikiReleaseItem.findFirst({
+      where: {
+        releaseId: baselineReleaseId,
+        serverWikiId: row.serverWikiId,
+        spaceId: row.spaceId,
+        pageId,
+        revisionId: beforeRevisionId,
+      },
+      select: { id: true },
+    });
+    if (!baseline || !releaseSnapshotContains(row.releaseSnapshot, row.spaceId, pageId, afterRevisionId)) {
+      throw corruptCandidate();
+    }
+    if (!this.wikiEdit) throw new ServiceUnavailableException('Candidate diff service is unavailable.');
+    return this.wikiEdit.getRevisionDiff(
+      beforeRevisionId.toString(),
+      afterRevisionId.toString(),
+      accountId,
+      { allowedSpaceId: row.spaceId },
+    );
   }
 
   private async resolveReviewer(accountId: string): Promise<{
@@ -255,6 +309,16 @@ function manifestSummary(manifest: ServerWikiReleaseCandidate) {
     hasChanges: manifest.hasChanges,
     totalPageCount: manifest.pages.length,
   };
+}
+
+function releaseSnapshotContains(value: Prisma.JsonValue, spaceId: bigint, pageId: bigint, revisionId: bigint): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const pages = (value as Prisma.JsonObject).pages;
+  if (!Array.isArray(pages)) return false;
+  return pages.some((item) => item !== null && typeof item === 'object' && !Array.isArray(item)
+    && item.id === pageId.toString()
+    && item.spaceId === spaceId.toString()
+    && item.currentRevisionId === revisionId.toString());
 }
 
 function reviewNotFound(): NotFoundException {

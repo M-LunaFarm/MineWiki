@@ -83,10 +83,18 @@ export interface ServerWikiPublicationResponse {
     readonly ready: boolean;
     readonly blockers: readonly ServerWikiPublicationReadinessBlocker[];
   };
-  readonly candidate: ServerWikiReleaseCandidate;
-  readonly submission: PersistedServerWikiReleaseCandidate | null;
+  readonly candidate: ServerWikiReleaseCandidateSummary;
+  readonly submission: PersistedServerWikiReleaseCandidateSummary | null;
   readonly review: ServerWikiReleaseReviewState;
 }
+
+export type ServerWikiReleaseCandidateSummary = Omit<ServerWikiReleaseCandidate, 'pages'> & {
+  readonly totalPageCount: number;
+};
+
+export type PersistedServerWikiReleaseCandidateSummary = Omit<PersistedServerWikiReleaseCandidate, 'pages'> & {
+  readonly totalPageCount: number;
+};
 
 export type ServerWikiPublicationReadinessBlocker =
   | 'invalid_link'
@@ -947,8 +955,8 @@ function toResponse(
       canApprove: context.authority === 'reviewer',
     },
     readiness: { ready: blockers.length === 0, blockers },
-    candidate,
-    submission,
+    candidate: candidateSummary(candidate),
+    submission: submission ? candidateSummary(submission) : null,
     review,
   };
 }
@@ -1036,7 +1044,7 @@ function candidateEmpty(candidate: ServerWikiReleaseCandidate): ConflictExceptio
     statusCode: 409,
     code: 'SERVER_WIKI_RELEASE_CANDIDATE_EMPTY',
     message: 'Server wiki release candidate has no changes.',
-    candidate,
+    candidate: candidateSummary(candidate),
   });
 }
 
@@ -1079,8 +1087,13 @@ function candidateChanged(candidate: ServerWikiReleaseCandidate): ConflictExcept
     statusCode: 409,
     code: 'SERVER_WIKI_RELEASE_CANDIDATE_CHANGED',
     message: 'Server wiki release candidate changed. Review the latest manifest and retry.',
-    candidate,
+    candidate: candidateSummary(candidate),
   });
+}
+
+function candidateSummary<T extends ServerWikiReleaseCandidate>(candidate: T): Omit<T, 'pages'> & { readonly totalPageCount: number } {
+  const { pages, ...summary } = candidate;
+  return { ...summary, totalPageCount: pages.length };
 }
 
 function prismaCode(error: unknown): string | null {

@@ -15,8 +15,8 @@ function candidate(id: bigint, spaceId: bigint, pageCount = 0) {
     contentChanged: index % kinds.length === 1,
     identityChanged: index % kinds.length === 2,
     metadataChanged: false,
-    before: null,
-    after: null,
+    before: index % kinds.length === 0 ? null : candidateIdentity(index + 1, 1000 + index),
+    after: index % kinds.length === 3 ? null : candidateIdentity(index + 1, 2000 + index),
     updatedAt: '2026-07-18T00:00:00.000Z',
   }));
   return {
@@ -31,12 +31,21 @@ function candidate(id: bigint, spaceId: bigint, pageCount = 0) {
     requiredApprovals: 1,
     manifestSnapshot: {
       token,
-      baselineReleaseId: null,
+      baselineReleaseId: pageCount > 0 ? '900' : null,
       generatedAt: '2026-07-18T00:00:00.000Z',
       counts: { added: Math.ceil(pageCount / 4), updated: Math.ceil(Math.max(0, pageCount - 1) / 4), moved: Math.ceil(Math.max(0, pageCount - 2) / 4), removed: Math.ceil(Math.max(0, pageCount - 3) / 4), unchanged: 0 },
       pages,
       presentation: { navigationChanged: false, contentSettingsChanged: false, layoutChanged: false, linkGraphChanged: false },
       hasChanges: true,
+    },
+    releaseSnapshot: {
+      presentation: {},
+      pages: pages.filter((page) => page.after).map((page) => ({
+        id: page.pageId,
+        spaceId: spaceId.toString(),
+        currentRevisionId: page.after!.revisionId,
+      })),
+      links: [],
     },
     serverWiki: {
       voteServerId: `22222222-2222-4222-8222-${id.toString().padStart(12, '0')}`,
@@ -78,13 +87,30 @@ function fixture() {
       async count() { return 2; },
     },
     serverWikiReleaseApproval: { async findMany() { return []; } },
+    serverWikiReleaseItem: {
+      async findFirst(args: { where: { releaseId: bigint; serverWikiId: bigint; spaceId: bigint; pageId: bigint; revisionId: bigint } }) {
+        return args.where.releaseId === 900n && args.where.pageId === 2n && args.where.revisionId === 1001n ? { id: 1n } : null;
+      },
+    },
   };
   const cursors = new ServerWikiReleaseManifestCursorCodec({
     get(name: string) { return name === 'APP_ENCRYPTION_KEY' ? 'release-review-queue-test-secret' : undefined; },
   } as never);
   return {
-    service: new ServerWikiReleaseReviewQueueService(prisma as never, cursors),
+    service: new ServerWikiReleaseReviewQueueService(prisma as never, cursors, {
+      async getRevisionDiff(leftId: string, rightId: string, viewer: string, options: { allowedSpaceId: bigint }) {
+        return { leftId, rightId, viewer, allowedSpaceId: options.allowedSpaceId.toString(), hunks: [] };
+      },
+    } as never),
     revokeReviewer() { reviewerEnabled = false; },
+  };
+}
+
+function candidateIdentity(pageId: number, revisionId: number) {
+  return {
+    revisionId: String(revisionId), title: `Page ${pageId}`, displayTitle: `Page ${pageId}`,
+    localPath: `page-${pageId}`, routePath: `/serverWiki/test/page-${pageId}`,
+    pageType: 'document', protectionLevel: 'normal', status: 'normal', updatedAt: '2026-07-18T00:00:00.000Z',
   };
 }
 
@@ -135,4 +161,12 @@ test('manifest cursor cannot cross candidates or filters and role revocation sto
   await assert.rejects(() => service.pages(accountId, '3', 'added,updated', tampered, '10'), BadRequestException);
   revokeReviewer();
   await assert.rejects(() => service.pages(accountId, '3', 'added,updated', first.nextCursor!, '10'), NotFoundException);
+});
+
+test('candidate diff is bound to persisted baseline and after snapshot revisions', async () => {
+  const { service } = fixture();
+  const result = await service.diff(accountId, '3', '2') as unknown as { leftId: string; rightId: string; allowedSpaceId: string };
+  assert.deepEqual(result, { leftId: '1001', rightId: '2001', viewer: accountId, allowedSpaceId: '77', hunks: [] });
+  await assert.rejects(() => service.diff(accountId, '3', '1'), NotFoundException);
+  await assert.rejects(() => service.diff(accountId, '1', '2'), NotFoundException);
 });

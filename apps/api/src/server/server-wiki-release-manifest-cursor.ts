@@ -58,10 +58,10 @@ export class ServerWikiReleaseManifestCursorCodec {
 
   private sign(payload: string): string {
     const key = this.config?.get('APP_ENCRYPTION_KEY') ?? process.env.APP_ENCRYPTION_KEY;
-    if (!key && process.env.NODE_ENV === 'production') {
+    if (!key) {
       throw new ServiceUnavailableException('Release manifest cursor signing is not configured.');
     }
-    return createHmac('sha256', key ?? 'minewiki-release-manifest-test-key')
+    return createHmac('sha256', key)
       .update(`minewiki:server-wiki-release-manifest:v1:${payload}`)
       .digest('base64url');
   }

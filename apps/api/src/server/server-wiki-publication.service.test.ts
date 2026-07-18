@@ -409,9 +409,8 @@ test('release candidate manifest is deterministic and classifies the initial pub
   assert.equal(first.candidate.baselineReleaseId, null);
   assert.deepEqual(first.candidate.counts, { added: 4, updated: 0, moved: 0, removed: 0, unchanged: 0 });
   assert.equal(first.candidate.hasChanges, true);
-  assert.ok(first.candidate.pages.every((item) => item.kind === 'added' && item.before === null));
-  assert.equal(first.candidate.pages[0]?.after?.routePath, '/serverWiki/test-server');
-  assert.equal(first.candidate.pages[1]?.after?.routePath, '/serverWiki/test-server/%EC%8B%9C%EC%9E%91%ED%95%98%EA%B8%B0');
+  assert.equal(first.candidate.totalPageCount, 4);
+  assert.equal('pages' in first.candidate, false);
 });
 
 test('candidate token binds the public site slug and release metadata-only changes remain publishable', async () => {
@@ -431,7 +430,7 @@ test('candidate token binds the public site slug and release metadata-only chang
   const candidate = (await fixture.service.get(serverId, fixture.actor)).candidate;
   assert.equal(candidate.hasChanges, true);
   assert.equal(candidate.counts.updated, 1);
-  assert.equal(candidate.pages.find((page) => page.pageId === '100')?.metadataChanged, true);
+  assert.equal(candidate.totalPageCount, 4);
 });
 
 test('publish copies the submitted immutable candidate after the working draft changes', async () => {
