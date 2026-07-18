@@ -45,6 +45,8 @@ import {
   type ServerWikiLayoutKey,
 } from './server-wiki-layout-policy';
 import { serverWikiIdentityConflicts } from './server-wiki-identity';
+import { buildServerWikiMainPage, buildServerWikiStarterPages } from './server-wiki-scaffold';
+import { WikiLinkIndexService } from '../wiki/wiki-link-index.service';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
@@ -86,6 +88,7 @@ export class ServerService {
     private readonly wikiProfiles: WikiProfileService,
     @Optional() private readonly firestoreTelemetry?: FirestoreTelemetryService,
     @Optional() private readonly events?: BusinessEventService,
+    @Optional() private readonly wikiLinks?: WikiLinkIndexService,
   ) {
     this.telemetry = firestoreTelemetry ?? {
       record: async () => {},
@@ -699,7 +702,7 @@ export class ServerService {
       server.wikiSlug ?? server.shortCode ?? server.joinHost ?? server.name,
       server.id,
     );
-    const contentRaw = buildServerMainPageContent(server);
+    const contentRaw = buildServerWikiMainPage(server);
 
     const linked = await this.prisma.$transaction(async (tx) => {
       const namespace = await tx.wikiNamespace.upsert({
@@ -796,6 +799,7 @@ export class ServerService {
         namespaceCode: namespace.code,
         actorId: actor.id,
         now,
+        wikiLinks: this.wikiLinks,
       });
       await tx.wikiSpace.update({
         where: { id: space.id },
@@ -804,7 +808,7 @@ export class ServerService {
           updatedAt: now,
         },
       });
-      for (const starter of buildServerStarterPages(server)) {
+      for (const starter of buildServerWikiStarterPages(server)) {
         const starterParsed = parseMarkup(starter.contentRaw);
         const starterPage = await tx.wikiPage.create({
           data: {
@@ -848,6 +852,7 @@ export class ServerService {
           namespaceCode: namespace.code,
           actorId: actor.id,
           now,
+          wikiLinks: this.wikiLinks,
         });
       }
       const updatedServer = await tx.server.update({
@@ -2203,60 +2208,6 @@ function buildServerDirectoryPath(server: { id: string; shortCode?: string | nul
   return `/servers/${server.shortCode?.trim() || server.id}`;
 }
 
-function buildServerMainPageContent(server: {
-  name: string;
-  joinHost: string;
-  joinPort: number;
-  edition: ServerDetail['edition'];
-  supportedVersions: Prisma.JsonValue;
-  tags: Prisma.JsonValue;
-  shortDescription?: string | null;
-  longDescription: string;
-}): string {
-  const versions = normalizeStringArray(server.supportedVersions);
-  const tags = normalizeStringArray(server.tags);
-  return [
-    `= ${server.name} =`,
-    '',
-    server.longDescription.trim() || normalizeShortDescription(server.shortDescription),
-    '',
-    '== 서버 정보 ==',
-    `* 주소: ${server.joinHost}:${server.joinPort}`,
-    `* 에디션: ${server.edition}`,
-    versions.length > 0 ? `* 지원 버전: ${versions.join(', ')}` : null,
-    tags.length > 0 ? `* 태그: ${tags.join(', ')}` : null,
-    '',
-    '== 참여 안내 ==',
-    '처음 방문했다면 [[시작하기]]를 읽고, 접속 전 [[규칙]]을 확인해 주세요. 자주 묻는 내용은 [[FAQ]]에 정리되어 있습니다.',
-    '',
-  ]
-    .filter((line): line is string => line !== null)
-    .join('\n');
-}
-
-function buildServerStarterPages(
-  server: { name: string; joinHost: string; joinPort: number },
-): ReadonlyArray<{ path: string; title: string; contentRaw: string }> {
-  const address = `${server.joinHost}:${server.joinPort}`;
-  return [
-    {
-      path: '시작하기',
-      title: '시작하기',
-      contentRaw: `== ${server.name} 시작하기 ==\n\n* 접속 주소: ${address}\n* Minecraft 멀티플레이에서 서버 추가를 선택하세요.\n* 접속 전 [[규칙]]을 확인해 주세요.\n\n문제가 있다면 [[FAQ]]를 확인해 주세요.\n`,
-    },
-    {
-      path: '규칙',
-      title: '서버 규칙',
-      contentRaw: `== 기본 규칙 ==\n\n이 문서는 ${server.name} 운영자가 실제 서버 규칙으로 편집할 수 있습니다.\n\n* 다른 이용자를 존중해 주세요.\n* 서버 운영 정책과 공지를 확인해 주세요.\n* 제재 문의는 MineWiki 고객센터를 이용해 주세요.\n`,
-    },
-    {
-      path: 'FAQ',
-      title: '자주 묻는 질문',
-      contentRaw: `== 자주 묻는 질문 ==\n\n=== 서버 주소 ===\n${address}\n\n=== 처음 접속하는 방법 ===\n[[시작하기]] 문서를 확인해 주세요.\n`,
-    },
-  ];
-}
-
 function toSummary(server: {
   id: string;
   shortCode?: string | null;
@@ -2355,6 +2306,7 @@ async function finalizeCreatedServerWikiPage(
     readonly namespaceCode: string;
     readonly actorId: bigint;
     readonly now: Date;
+    readonly wikiLinks?: WikiLinkIndexService;
   },
 ): Promise<void> {
   await tx.wikiPage.update({
@@ -2365,18 +2317,36 @@ async function finalizeCreatedServerWikiPage(
       updatedAt: input.now,
     },
   });
-  await tx.wikiSearchDocument.create({
-    data: {
-      pageId: input.page.id,
-      revisionId: input.revision.id,
-      searchVector: buildWikiSearchVector([
-        input.page.title,
-        input.page.displayTitle,
-        input.contentRaw,
-      ]),
-      updatedAt: input.now,
-    },
-  });
+  if (input.wikiLinks) {
+    const parsed = parseMarkup(input.contentRaw);
+    await input.wikiLinks.replaceForRevision(
+      tx,
+      input.page.id,
+      input.revision.id,
+      parsed.links,
+      parsed.categories,
+      parsed.includes,
+      {
+        contentSize: input.revision.contentSize,
+        contentRaw: input.contentRaw,
+        fileNames: [],
+        redirectTarget: parsed.redirectTarget,
+      },
+    );
+  } else {
+    await tx.wikiSearchDocument.create({
+      data: {
+        pageId: input.page.id,
+        revisionId: input.revision.id,
+        searchVector: buildWikiSearchVector([
+          input.page.title,
+          input.page.displayTitle,
+          input.contentRaw,
+        ]),
+        updatedAt: input.now,
+      },
+    });
+  }
   await tx.wikiRecentChange.create({
     data: {
       pageId: input.page.id,

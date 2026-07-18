@@ -35,6 +35,7 @@
     "data:backfill-wiki-links": "pnpm --filter @minewiki/wiki-core build && node scripts/backfill-wiki-links.mjs",
     "data:backfill-wiki-files": "pnpm --filter @minewiki/wiki-core build && node scripts/backfill-wiki-file-links.mjs",
     "data:backfill-wiki-search": "pnpm --filter @minewiki/wiki-core build && node scripts/backfill-wiki-search.mjs",
+    "data:refresh-server-wiki-scaffolds": "pnpm --filter @minewiki/api build && node scripts/refresh-server-wiki-scaffolds.mjs",
     "pm2:validate": "node scripts/validate-pm2-config.mjs",
     "gateway:validate": "node scripts/validate-upload-gateway.mjs",
     "seed": "node scripts/seed.mjs",

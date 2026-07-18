@@ -114,9 +114,13 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
           ) : null}
 
           {page.headings.length > 0 ? (
-            <details className="mt-8 rounded-xl border border-[#e2e2e2] p-4 2xl:hidden">
-              <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-[#444]">섹션 목차·편집</summary>
-              <ul className="mt-3 space-y-1">
+            <details className="mt-6 border-y border-[#e8e8e8] 2xl:hidden">
+              <summary className="flex min-h-12 cursor-pointer items-center gap-2 py-2 text-sm font-semibold text-[#444]">
+                <List className="size-4 text-[#777]" aria-hidden="true" />
+                <span>이 페이지에서 찾기</span>
+                <span className="ml-auto text-xs font-normal text-[#888]">{page.headings.length}개 섹션</span>
+              </summary>
+              <ul className="space-y-1 border-t border-[#ededed] py-3">
                 {page.headings.map((heading, index) => (
                   <li key={`${heading.anchor}-mobile-${index}`} className="flex items-center gap-2 text-sm">
                     <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-h-11 min-w-0 flex-1 py-3 text-[#666] hover:text-[#346ddb]">{heading.title}</a>
@@ -137,7 +141,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#346ddb]">Start here</p>
                   <h2 id="server-wiki-start-here-title" className="mt-1 text-2xl font-bold text-[#222]">{wiki.name} 문서에서 찾기</h2>
-                  <p className="mt-2 text-sm leading-6 text-[#777]">서버에 참여하기 전에 필요한 공식 안내를 문서별로 확인하세요.</p>
+                  <p className="mt-2 text-sm leading-6 text-[#777]">서버에 참여하기 전에 필요한 안내와 작성 상태를 문서별로 확인하세요.</p>
                 </div>
               </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
