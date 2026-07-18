@@ -232,7 +232,7 @@ export class WikiEditService {
     const filename = this.requiredString(request.filename, 'filename');
     const hasForbiddenCharacter = Array.from(filename).some((character) => {
       const code = character.charCodeAt(0);
-      return code < 32 || code === 127 || '<>:"|?*\\/[]'.includes(character);
+      return code < 32 || code === 127 || /\p{Cf}/u.test(character) || '<>:"|?*\\/[]'.includes(character);
     });
     if (filename.length > 255 || hasForbiddenCharacter) {
       throw new BadRequestException('Wiki filename is invalid.');
@@ -264,6 +264,21 @@ export class WikiEditService {
       contentRaw: `== 파일 ==\n[[파일:${filename}|섬네일|업로드 파일]]\n\n== 이용 안내 ==\n라이선스와 출처는 이미지 아래에 표시됩니다.\n\n[[분류:파일]]`,
       editSummary: '위키 파일 업로드'
     }, true);
+  }
+
+  async deleteFileDocumentAfterAuthorizedUpload(
+    session: SessionPayload,
+    filename: string
+  ): Promise<void> {
+    const namespace = await this.prisma.wikiNamespace.findUnique({ where: { code: 'file' } });
+    if (!namespace) return;
+    const page = await this.prisma.wikiPage.findFirst({
+      where: { namespaceId: namespace.id, title: filename }
+    });
+    if (!page || page.status === 'deleted') return;
+    await this.setPageStatus(session, page.id.toString(), 'deleted', {
+      reason: '업로드 파일 삭제'
+    });
   }
 
   private async buildWikiSpacePermissionPage(spaceId: bigint) {

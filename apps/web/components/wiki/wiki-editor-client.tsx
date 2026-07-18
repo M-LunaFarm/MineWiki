@@ -810,15 +810,15 @@ export function WikiEditorClient({ page, namespace, title, routePath, presentati
                   <button
                     key={file.id}
                     type="button"
-                    onClick={() => insertFileMarkup(file.filename, file.originalName)}
+                    onClick={() => insertFileMarkup(file.wikiFilename ?? file.filename, file.originalName)}
                     className="flex min-h-16 items-center gap-3 rounded-md border border-white/10 bg-[#0d1219] p-3 text-left text-sm text-slate-200 hover:border-emerald-300/40"
                   >
                     <span className="flex h-10 w-10 items-center justify-center rounded-md bg-white/[0.05] text-emerald-200">
                       <FileImage className="h-5 w-5" />
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate font-semibold text-white">{file.originalName ?? file.filename}</span>
-                      <span className="block truncate text-xs text-slate-500">{file.filename}</span>
+                      <span className="block truncate font-semibold text-white">{file.originalName ?? file.wikiFilename ?? file.filename}</span>
+                      <span className="block truncate text-xs text-slate-500">{file.wikiFilename ?? file.filename}</span>
                       {file.license ? <span className="mt-1 block truncate text-[11px] text-emerald-300">{wikiFileLicenseLabel(file.license)}{file.sourceText ? ` · ${file.sourceText}` : ''}</span> : null}
                     </span>
                   </button>

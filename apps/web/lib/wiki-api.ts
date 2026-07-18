@@ -1132,6 +1132,7 @@ export interface UploadedFileMetadata {
   readonly ownerAccountId: string | null;
   readonly filename: string;
   readonly storageFilename: string;
+  readonly wikiFilename: string | null;
   readonly originalName: string | null;
   readonly mimeType: string;
   readonly size: number;
@@ -2041,7 +2042,7 @@ export async function uploadWikiImage(input: {
   }
   return {
     id: String(body.id),
-    filename: String(body.filename),
+    filename: String(body.wikiFilename ?? body.filename),
     url: String(body.url ?? body.publicPath),
     publicPath: String(body.publicPath ?? body.url),
     wikiDocumentPath: typeof body.wikiDocumentPath === 'string' ? body.wikiDocumentPath : null,

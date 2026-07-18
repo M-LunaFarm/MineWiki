@@ -42,6 +42,7 @@ export interface FileMetadataResponse {
   readonly ownerAccountId: string | null;
   readonly filename: string;
   readonly storageFilename: string;
+  readonly wikiFilename: string | null;
   readonly originalName: string | null;
   readonly mimeType: string;
   readonly size: number;
@@ -202,10 +203,11 @@ export class FileService {
     }
     if (usageContext === 'wiki_editor') {
       if (!session || !this.wikiEdits) {
-        await this.prisma.uploadedFile.update({ where: { id: created.id }, data: { status: 'deleted' } });
+        await this.releaseFailedWikiUpload(created.id);
         await this.uploads.deleteObject(stored.storagePath).catch(() => undefined);
         throw new BadRequestException('Wiki file document service is unavailable.');
       }
+      let documentCreated = false;
       try {
         await this.wikiEdits.createFileDocumentAfterAuthorizedUpload(session, {
           filename: created.wikiFilename!,
@@ -213,15 +215,19 @@ export class FileService {
             ? { linkedPageId: linkedResource!.id }
             : { linkedSpaceId: linkedResource!.id })
         });
+        documentCreated = true;
+        created = await this.prisma.uploadedFile.update({
+          where: { id: created.id },
+          data: { status: 'active' }
+        });
       } catch (error) {
-        await this.prisma.uploadedFile.update({ where: { id: created.id }, data: { status: 'deleted' } });
+        if (documentCreated) {
+          await this.wikiEdits.deleteFileDocumentAfterAuthorizedUpload(session, created.wikiFilename!).catch(() => undefined);
+        }
+        await this.releaseFailedWikiUpload(created.id);
         await this.uploads.deleteObject(stored.storagePath).catch(() => undefined);
         throw error;
       }
-      created = await this.prisma.uploadedFile.update({
-        where: { id: created.id },
-        data: { status: 'active' }
-      });
     }
     await this.events?.audit('file.upload', {
       category: 'file',
@@ -240,6 +246,13 @@ export class FileService {
       ...toFileMetadata(created),
       url: stored.publicPath
     };
+  }
+
+  private async releaseFailedWikiUpload(id: string): Promise<void> {
+    await this.prisma.uploadedFile.update({
+      where: { id },
+      data: { status: 'deleted', wikiFilename: null }
+    });
   }
 
   async getFile(id: string, session?: SessionPayload | null): Promise<FileMetadataResponse> {
@@ -377,7 +390,16 @@ export class FileService {
     } catch {
       throw new ServiceUnavailableException('Stored file deletion failed. Retry the same request.');
     }
-    await this.prisma.uploadedFile.update({ where: { id }, data: { status: 'deleted' } });
+    if (file.usageContext === 'wiki_editor' && file.wikiFilename) {
+      if (!this.wikiEdits) {
+        throw new ServiceUnavailableException('Wiki file document service is unavailable. Retry the same request.');
+      }
+      await this.wikiEdits.deleteFileDocumentAfterAuthorizedUpload(session, file.wikiFilename);
+    }
+    await this.prisma.uploadedFile.update({
+      where: { id },
+      data: { status: 'deleted', wikiFilename: null }
+    });
     await this.events?.audit('file.delete', {
       category: 'file',
       actorAccountId: session.userId,
@@ -450,8 +472,9 @@ function toFileMetadata(file: {
   return {
     id: file.id,
     ownerAccountId: file.ownerAccountId,
-    filename: file.wikiFilename ?? file.filename,
+    filename: file.filename,
     storageFilename: file.filename,
+    wikiFilename: file.wikiFilename,
     originalName: file.originalName,
     mimeType: file.mimeType,
     size: file.sizeBytes,
@@ -476,10 +499,14 @@ function toFileMetadata(file: {
 }
 
 function normalizeWikiFilename(requestedName: string | undefined, fallback: string): string {
-  const normalized = requestedName?.normalize('NFC').trim() || fallback;
+  const requested = requestedName?.normalize('NFC').trim() || fallback;
+  const storageExtension = fallback.match(/(\.[A-Za-z0-9]+)$/u)?.[1]?.toLowerCase() ?? '';
+  const requestedWithoutExtension = requested.replace(/\.[^.]+$/u, '');
+  const normalized = `${requestedWithoutExtension || requested}${storageExtension}`
+    .replace(/\s+/gu, '_');
   const hasForbiddenCharacter = Array.from(normalized).some((character) => {
     const code = character.charCodeAt(0);
-    return code < 32 || code === 127 || '<>:"|?*\\/[]'.includes(character);
+    return code < 32 || code === 127 || /\p{Cf}/u.test(character) || '<>:"|?*\\/[]'.includes(character);
   });
   if (
     normalized.length > 255

@@ -76,6 +76,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     linkedPageId?: string;
     linkedSpaceId?: string;
   }> = [];
+  const deletedFileDocuments: string[] = [];
   let deleteAttempts = 0;
   const wikiPages = new Map<bigint, { id: bigint; status: string }>([
     [7n, { id: 7n, status: 'normal' }]
@@ -220,6 +221,9 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
       if (options.failFileDocument) throw new Error('File document failed.');
       fileDocuments.push(request);
       return { pageId: '99' };
+    },
+    async deleteFileDocumentAfterAuthorizedUpload(_session: unknown, filename: string) {
+      deletedFileDocuments.push(filename);
     }
   };
   return {
@@ -228,6 +232,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     wikiPages,
     actionCalls,
     fileDocuments,
+    deletedFileDocuments,
     getDeleteAttempts: () => deleteAttempts
   };
 }
@@ -244,8 +249,9 @@ test('file service stores canonical image metadata', async () => {
   }, session('account-1'));
 
   assert.equal(uploaded.id, 'file-1');
-  assert.equal(uploaded.filename, 'wiki.png');
+  assert.equal(uploaded.filename, 'stored.webp');
   assert.equal(uploaded.storageFilename, 'stored.webp');
+  assert.equal(uploaded.wikiFilename, 'wiki.webp');
   assert.equal(uploaded.originalName, 'wiki.png');
   assert.equal(uploaded.ownerAccountId, 'account-1');
   assert.equal(uploaded.usageContext, 'wiki_editor');
@@ -253,8 +259,8 @@ test('file service stores canonical image metadata', async () => {
   assert.equal(uploaded.license, 'self-created');
   assert.equal(uploaded.sourceText, '업로더 직접 제작');
   assert.deepEqual(actionCalls, ['upload_file']);
-  assert.deepEqual(fileDocuments, [{ filename: 'wiki.png', linkedPageId: '7' }]);
-  assert.equal(uploaded.wikiDocumentPath, '/file/wiki.png');
+  assert.deepEqual(fileDocuments, [{ filename: 'wiki.webp', linkedPageId: '7' }]);
+  assert.equal(uploaded.wikiDocumentPath, '/file/wiki.webp');
   assert.equal(uploaded.url, 'upload://stored.webp');
 });
 
@@ -272,8 +278,8 @@ test('standalone wiki uploads can bind to an editable wiki space', async () => {
   assert.equal(uploaded.linkedResourceType, 'wiki_space');
   assert.equal(uploaded.linkedResourceId, '3');
   assert.deepEqual(actionCalls, ['upload_file']);
-  assert.deepEqual(fileDocuments, [{ filename: 'standalone.png', linkedSpaceId: '3' }]);
-  assert.equal(uploaded.wikiDocumentPath, '/file/standalone.png');
+  assert.deepEqual(fileDocuments, [{ filename: 'standalone.webp', linkedSpaceId: '3' }]);
+  assert.equal(uploaded.wikiDocumentPath, '/file/standalone.webp');
 });
 
 test('file service list hides private and unlisted files from non-owners', async () => {
@@ -353,6 +359,24 @@ test('wiki file deletion blocks current references and keeps failed object delet
   await assert.rejects(() => failing.service.deleteFile(retryable.id, session('account-1')), /Retry the same request/);
   assert.equal(failing.files.get(retryable.id)?.status, 'delete_pending');
   await assert.rejects(() => failing.service.getFile(retryable.id, session('account-1')), /File not found/);
+});
+
+test('wiki file deletion retires its document and releases the logical filename', async () => {
+  const { service, files, deletedFileDocuments } = createService();
+  const uploaded = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'retire me.png',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7'
+  }, session('account-1'));
+
+  await service.deleteFile(uploaded.id, session('account-1'));
+
+  assert.deepEqual(deletedFileDocuments, ['retire_me.webp']);
+  assert.equal(files.get(uploaded.id)?.status, 'deleted');
+  assert.equal(files.get(uploaded.id)?.wikiFilename, null);
 });
 
 test('private raw file is only readable by owner or file administrator', async () => {
@@ -501,6 +525,7 @@ test('failed file document creation disables the uploaded record and removes its
     /File document failed/
   );
   assert.equal([...files.values()][0]?.status, 'deleted');
+  assert.equal([...files.values()][0]?.wikiFilename, null);
   assert.equal(getDeleteAttempts(), 1);
 });
 
@@ -515,8 +540,26 @@ test('wiki upload keeps the logical filename separate from immutable storage', a
     linkedResourceId: '7'
   }, session('account-1'));
 
-  assert.equal(uploaded.filename, '서버 아이콘.png');
+  assert.equal(uploaded.filename, 'stored.webp');
   assert.equal(uploaded.storageFilename, 'stored.webp');
-  assert.equal(files.get(uploaded.id)?.wikiFilename, '서버 아이콘.png');
+  assert.equal(uploaded.wikiFilename, '서버_아이콘.webp');
+  assert.equal(files.get(uploaded.id)?.wikiFilename, '서버_아이콘.webp');
   assert.equal(uploaded.status, 'active');
+});
+
+test('wiki upload rejects invisible Unicode filename controls before creating a record', async () => {
+  const { service, files, getDeleteAttempts } = createService();
+  await assert.rejects(
+    () => service.createImage('account-1', {
+      data: 'data:image/png;base64,aW1hZ2U=',
+      filename: 'safe\u200Bname.png',
+      usageContext: 'wiki_editor',
+      license: 'self-created',
+      linkedResourceType: 'wiki_page',
+      linkedResourceId: '7'
+    }, session('account-1')),
+    /Wiki filename is invalid/
+  );
+  assert.equal(files.size, 0);
+  assert.equal(getDeleteAttempts(), 1);
 });
