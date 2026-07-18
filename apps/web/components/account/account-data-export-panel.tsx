@@ -38,31 +38,31 @@ export function AccountDataExportPanel({ hasPassword }: { readonly hasPassword: 
   }
 
   return (
-    <section className="rounded-xl border border-sky-300/20 bg-sky-300/[0.06] p-5">
+    <section className="rounded-xl border border-cyan-300/20 bg-[#10161e] p-5">
       <div className="flex items-start gap-3">
-        <span className="rounded-lg border border-sky-300/25 bg-sky-300/10 p-2 text-sky-200"><Download className="h-5 w-5" /></span>
+        <span className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 p-2 text-cyan-200"><Download className="h-5 w-5" /></span>
         <div>
-          <h3 className="text-lg font-bold text-sky-100">내 데이터 내보내기</h3>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-[#b8c3cc]">
+          <h3 className="text-lg font-bold text-cyan-200">내 데이터 내보내기</h3>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-300">
             연결된 로그인 계정, 공개 프로필, 서버·투표·리뷰, 지원 기록과 현재 읽을 수 있는 위키 기여를 하나의 버전 지정 JSON 파일로 받습니다. 비밀번호, 세션 토큰, OAuth 토큰, MFA 비밀키와 서버 비밀값은 포함하지 않습니다.
           </p>
         </div>
       </div>
       <div className="mt-4 flex max-w-2xl flex-col gap-3">
         {hasPassword ? (
-          <label className="text-xs font-medium text-[#c6d0d8]">
+          <label className="text-xs font-medium text-slate-300">
             현재 비밀번호
             <input
               type="password"
               autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="mt-1 block w-full rounded-md border border-[#30363d] bg-[#111315] px-3 py-2.5 text-sm text-white outline-none focus:border-sky-300"
+              className="mt-1 block w-full rounded-md border border-[#30363d] bg-[#111315] px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-300"
               placeholder="내보내기 전에 다시 확인합니다"
             />
           </label>
         ) : (
-          <p className="rounded-md border border-sky-300/20 bg-black/15 px-3 py-2 text-xs text-sky-100">
+          <p className="rounded-md border border-cyan-300/20 bg-black/15 px-3 py-2 text-xs text-cyan-200">
             OAuth 전용 계정은 로그인 후 15분 안에 바로 받을 수 있습니다. 시간이 지났다면 다시 로그인하거나 다중 인증으로 확인해 주세요.
           </p>
         )}
@@ -71,7 +71,7 @@ export function AccountDataExportPanel({ hasPassword }: { readonly hasPassword: 
             type="button"
             onClick={() => void download()}
             disabled={working || (hasPassword && password.length === 0)}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-sky-300 px-4 py-2 text-sm font-bold text-[#07131a] disabled:opacity-40"
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-cyan-400 px-4 py-2 text-sm font-bold text-[#07131a] disabled:opacity-40"
           >
             {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {working ? '파일을 준비하는 중' : 'JSON 파일 받기'}
@@ -80,7 +80,7 @@ export function AccountDataExportPanel({ hasPassword }: { readonly hasPassword: 
             type="button"
             onClick={() => setStepUpOpen(true)}
             disabled={working}
-            className="inline-flex items-center justify-center gap-2 rounded-md border border-sky-300/30 px-4 py-2 text-sm font-semibold text-sky-100 disabled:opacity-40"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-cyan-300/30 px-4 py-2 text-sm font-semibold text-cyan-200 disabled:opacity-40"
           >
             <ShieldCheck className="h-4 w-4" />다중 인증으로 확인
           </button>
