@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
 import { renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
+import { PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
 import { Prisma, type WikiDiscussionThread, type WikiPage } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
@@ -8,7 +9,8 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiPermissionService } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { WikiNotificationService } from './wiki-notification.service';
-import { buildServerWikiPagePath, buildServerWikiToolPath } from './wiki-read.service';
+import { buildServerWikiPagePath } from './wiki-read.service';
+import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath } from './wiki-route-path.resolver';
 import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
 import { extractDiscussionMentions, uniqueDiscussionMentionUsernames } from './wiki-discussion-mention';
 import { wikiLinkResolutionContext } from './wiki-link-context';
@@ -436,7 +438,12 @@ export class WikiDiscussionService {
     });
     const order = sort === 'newest' ? 'desc' as const : 'asc' as const;
     const actor = await this.viewerActor(viewer);
-    const visibleRows: Array<{ thread: WikiDiscussionThread; page: WikiPage }> = [];
+    const visibleRows: Array<{
+      thread: WikiDiscussionThread;
+      page: WikiPage;
+      namespace: string;
+      serverWiki: { readonly slug: string; readonly siteSlug: string } | null;
+    }> = [];
     let scanPosition = decoded ? { updatedAt: decoded.updatedAt, id: decoded.id } : null;
     let lastScanned: WikiDiscussionThread | undefined;
     let scannedCandidateCount = 0;
@@ -453,16 +460,19 @@ export class WikiDiscussionService {
       const batchPages = await this.prisma.wikiPage.findMany({
         where: { id: { in: [...new Set(candidates.map((thread) => thread.pageId))] } },
       });
-      const batchPageById = new Map(batchPages.map((page) => [page.id, page]));
+      const projectedPages = await this.projectRecentDiscussionPages(batchPages, accountId, actor);
       const readable = await this.wikiPermissions.filterReadableThreads({
         accountId,
         actor,
         items: candidates.flatMap((thread) => {
-          const page = batchPageById.get(thread.pageId);
-          return page && page.status !== 'deleted' ? [{ thread, page }] : [];
+          const projection = projectedPages.get(thread.pageId);
+          return projection ? [{ thread, page: projection.page }] : [];
         }),
       });
-      visibleRows.push(...readable);
+      visibleRows.push(...readable.flatMap(({ thread }) => {
+        const projection = projectedPages.get(thread.pageId);
+        return projection ? [{ thread, ...projection }] : [];
+      }));
       if (candidates.length < take) { candidatesExhausted = true; break; }
     }
     const hasUnscannedCandidates = visibleRows.length <= limit && !candidatesExhausted && lastScanned
@@ -473,17 +483,6 @@ export class WikiDiscussionService {
       : false;
     const pageRows = visibleRows.slice(0, limit);
     if (pageRows.length === 0 && !hasUnscannedCandidates) return { items: [], nextCursor: null };
-    const pages = pageRows.map((row) => row.page);
-    const namespaces = await this.prisma.wikiNamespace.findMany({
-      where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
-      select: { id: true, code: true }
-    });
-    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    const serverSpaces = [...new Set(pages.filter((page) => namespaceById.get(page.namespaceId) === 'server').map((page) => page.spaceId))];
-    const serverWikis = serverSpaces.length > 0
-      ? await this.prisma.serverWiki.findMany({ where: { spaceId: { in: serverSpaces } }, select: { spaceId: true, slug: true } })
-      : [];
-    const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
     const profileById = await this.profileNames(pageRows.map(({ thread }) => thread.createdBy));
     const countRows = pageRows.length > 0
       ? await this.prisma.wikiDiscussionComment.groupBy({
@@ -493,19 +492,17 @@ export class WikiDiscussionService {
         })
       : [];
     const countByThreadId = new Map(countRows.map((row) => [row.threadId, row._count._all]));
-    const items = pageRows.map(({ thread, page }) => {
-      const namespace = namespaceById.get(page.namespaceId) ?? 'main';
-      const serverSlug = serverSlugBySpace.get(page.spaceId);
-      const routePath = namespace === 'server' && serverSlug
-        ? buildServerWikiPagePath(serverSlug, page.localPath)
+    const items = pageRows.map(({ thread, page, namespace, serverWiki }) => {
+      const routePath = namespace === 'server' && serverWiki
+        ? buildCanonicalServerWikiPath(serverWiki.siteSlug, page.localPath, serverWiki.slug, '/serverWiki')
         : wikiUrl(namespace as Parameters<typeof wikiUrl>[0], page.title);
       return {
         ...this.toThreadSummary(thread, profileById, countByThreadId.get(thread.id) ?? 0),
         pageTitle: page.displayTitle,
         namespace,
         routePath,
-        discussionHref: namespace === 'server' && serverSlug
-          ? `${buildServerWikiToolPath(serverSlug, page.localPath, 'discuss')}?thread=${thread.id.toString()}`
+        discussionHref: namespace === 'server' && serverWiki
+          ? `${buildCanonicalServerWikiToolPath(serverWiki.siteSlug, page.localPath, 'discuss', serverWiki.slug, '/serverWiki')}?thread=${thread.id.toString()}`
           : `/wiki/discuss/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&thread=${thread.id.toString()}`
       };
     });
@@ -517,6 +514,126 @@ export class WikiDiscussionService {
         ? this.encodeRecentCursor(snapshotAt, cursorRow.updatedAt, cursorRow.id, cursorScope)
         : null,
     };
+  }
+
+  private async projectRecentDiscussionPages(
+    pages: readonly WikiPage[],
+    accountId: string | null,
+    actor: Awaited<ReturnType<WikiDiscussionService['viewerActor']>>,
+  ): Promise<Map<bigint, {
+    readonly page: WikiPage;
+    readonly namespace: string;
+    readonly serverWiki: { readonly slug: string; readonly siteSlug: string } | null;
+  }>> {
+    if (pages.length === 0) return new Map();
+    const namespaces = await this.prisma.wikiNamespace.findMany({
+      where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
+      select: { id: true, code: true },
+    });
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+    const publicRevisions = currentRevisionIds.length > 0
+      ? await this.prisma.wikiPageRevision.findMany({
+          where: { id: { in: currentRevisionIds }, visibility: 'public' },
+          select: { id: true },
+        })
+      : [];
+    const publicRevisionIds = new Set(publicRevisions.map((revision) => revision.id));
+    const serverSpaceIds = [...new Set(pages
+      .filter((page) => namespaceById.get(page.namespaceId) === 'server')
+      .map((page) => page.spaceId))];
+    const serverWikis = serverSpaceIds.length > 0
+      ? await this.prisma.serverWiki.findMany({
+          where: { spaceId: { in: serverSpaceIds }, status: 'active' },
+          select: { id: true, spaceId: true, slug: true, siteSlug: true, publicationStatus: true, publishedReleaseId: true },
+        })
+      : [];
+    const serverWikiBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki]));
+    const previewSpaceIds = new Set<bigint>();
+    for (const wiki of serverWikis) {
+      if (await this.wikiPermissions.canPreviewServerWikiSpace({ accountId, actor, spaceId: wiki.spaceId })) {
+        previewSpaceIds.add(wiki.spaceId);
+      }
+    }
+    const publicWikis = serverWikis.filter((wiki) =>
+      !previewSpaceIds.has(wiki.spaceId)
+      && wiki.publicationStatus === 'published'
+      && wiki.publishedReleaseId !== null);
+    const releaseItems = publicWikis.length > 0
+      ? await this.prisma.serverWikiReleaseItem.findMany({
+          where: {
+            pageId: { in: pages.map((page) => page.id) },
+            OR: publicWikis.map((wiki) => ({
+              releaseId: wiki.publishedReleaseId!,
+              serverWikiId: wiki.id,
+              spaceId: wiki.spaceId,
+            })),
+          },
+        })
+      : [];
+    if (releaseItems.length > 0) {
+      const publicReleaseRevisions = await this.prisma.wikiPageRevision.findMany({
+        where: { id: { in: [...new Set(releaseItems.map((item) => item.revisionId))] }, visibility: 'public' },
+        select: { id: true },
+      });
+      for (const revision of publicReleaseRevisions) publicRevisionIds.add(revision.id);
+    }
+    const releaseItemByPageId = new Map(releaseItems.map((item) => [item.pageId, item]));
+    const projected = new Map<bigint, {
+      readonly page: WikiPage;
+      readonly namespace: string;
+      readonly serverWiki: { readonly slug: string; readonly siteSlug: string } | null;
+    }>();
+    for (const page of pages) {
+      const namespace = namespaceById.get(page.namespaceId) ?? 'main';
+      const serverWiki = namespace === 'server' ? serverWikiBySpace.get(page.spaceId) : undefined;
+      if (namespace !== 'server' || (serverWiki && previewSpaceIds.has(page.spaceId))) {
+        if (
+          !page.currentRevisionId
+          || !publicRevisionIds.has(page.currentRevisionId)
+          || !PUBLIC_WIKI_PAGE_STATUSES.includes(page.status as (typeof PUBLIC_WIKI_PAGE_STATUSES)[number])
+          || page.pageType === 'redirect'
+        ) continue;
+        projected.set(page.id, {
+          page,
+          namespace,
+          serverWiki: serverWiki ? { slug: serverWiki.slug, siteSlug: serverWiki.siteSlug ?? serverWiki.slug } : null,
+        });
+        continue;
+      }
+      if (!serverWiki || serverWiki.publishedReleaseId === null) continue;
+      const item = releaseItemByPageId.get(page.id);
+      if (
+        !item
+        || item.releaseId !== serverWiki.publishedReleaseId
+        || item.serverWikiId !== serverWiki.id
+        || item.spaceId !== serverWiki.spaceId
+        || !publicRevisionIds.has(item.revisionId)
+        || !PUBLIC_WIKI_PAGE_STATUSES.includes(item.pageStatus as (typeof PUBLIC_WIKI_PAGE_STATUSES)[number])
+        || item.pageType === 'redirect'
+      ) continue;
+      projected.set(page.id, {
+        page: {
+          ...page,
+          namespaceId: item.namespaceId,
+          spaceId: item.spaceId,
+          localPath: item.localPath,
+          slug: item.slug,
+          title: item.title,
+          displayTitle: item.displayTitle,
+          currentRevisionId: item.revisionId,
+          pageType: item.pageType,
+          protectionLevel: item.protectionLevel,
+          status: item.pageStatus,
+          createdBy: item.createdBy,
+          ownerProfileId: item.ownerProfileId,
+          updatedAt: item.pageUpdatedAt,
+        },
+        namespace,
+        serverWiki: { slug: serverWiki.slug, siteSlug: serverWiki.siteSlug ?? serverWiki.slug },
+      });
+    }
+    return projected;
   }
 
   async getThread(
