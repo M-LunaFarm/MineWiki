@@ -397,6 +397,7 @@ export type WikiSpecialDocumentType =
 
 export interface WikiSpecialDocumentResponse {
   readonly type: WikiSpecialDocumentType;
+  readonly nextCursor: string | null;
   readonly generation?: string | null;
   readonly generatedAt?: string | null;
   readonly isRebuilding?: boolean;

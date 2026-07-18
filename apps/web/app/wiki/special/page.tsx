@@ -3,7 +3,7 @@ import { ArrowUpRight, Compass, ShieldCheck, Shuffle } from 'lucide-react';
 import { fetchWikiSpecial } from '../../../lib/wiki-server-api';
 import type { WikiSpecialDocumentType } from '../../../lib/wiki-api';
 
-interface PageProps { readonly searchParams: Promise<{ type?: string; namespace?: string }>; }
+interface PageProps { readonly searchParams: Promise<{ type?: string; namespace?: string; cursor?: string }>; }
 
 const TYPES: ReadonlyArray<{ key: WikiSpecialDocumentType; label: string; description: string }> = [
   { key: 'orphaned', label: '고립된 문서', description: '다른 공개 문서에서 연결되지 않은 문서' },
@@ -24,7 +24,8 @@ export default async function WikiSpecialPage({ searchParams }: PageProps) {
   const query = await searchParams;
   const type = TYPES.some((item) => item.key === query.type) ? query.type as WikiSpecialDocumentType : 'orphaned';
   const namespace = NAMESPACES.includes(query.namespace ?? '') ? query.namespace ?? '' : '';
-  const result = await fetchWikiSpecial({ type, namespace: namespace || undefined, limit: 100 });
+  const cursor = query.cursor?.trim() || undefined;
+  const result = await fetchWikiSpecial({ type, namespace: namespace || undefined, limit: 100, cursor });
   const current = TYPES.find((item) => item.key === type)!;
 
   return (
@@ -48,20 +49,22 @@ export default async function WikiSpecialPage({ searchParams }: PageProps) {
       </form>
 
       <section>
-        <div className="mb-3 flex items-end justify-between gap-3"><div><h2 className="text-xl font-bold text-white">{current.label}</h2><p className="mt-1 text-sm text-slate-500">{current.description}</p>{result.generatedAt ? <p className="mt-1 text-xs text-slate-600">집계 {formatDateTime(result.generatedAt)}{result.isStale ? ' · 갱신 지연' : ''}</p> : null}</div><span className="chip chip-muted">{result.items.length}개</span></div>
+        <div className="mb-3 flex items-end justify-between gap-3"><div><h2 className="text-xl font-bold text-white">{current.label}</h2><p className="mt-1 text-sm text-slate-500">{current.description}</p>{result.generatedAt ? <p className="mt-1 text-xs text-slate-600">집계 {formatDateTime(result.generatedAt)}{result.isStale ? ' · 갱신 지연' : ''}</p> : null}</div><span className="chip chip-muted">이번 페이지 {result.items.length}개</span></div>
         <div className="divide-y divide-white/10 border border-white/10 bg-[#111821]">
           {result.items.map((item) => <Link key={item.id} href={item.routePath} className="flex items-center justify-between gap-4 p-4 transition hover:bg-white/[0.03] sm:p-5"><div className="min-w-0"><p className="truncate font-semibold text-white">{item.displayTitle}</p><p className="mt-1 truncate text-xs text-slate-500">{item.namespace}:{item.title}</p></div><div className="flex shrink-0 items-center gap-3 text-xs text-slate-500">{type === 'old' && item.updatedAt ? <time dateTime={item.updatedAt}>{formatDate(item.updatedAt)}</time> : item.value !== null ? <span>{type === 'wanted' ? `링크 ${item.value}` : type === 'categories' ? `문서 ${item.value}` : `${item.value.toLocaleString('ko-KR')} bytes`}</span> : null}<ArrowUpRight className="size-4" /></div></Link>)}
           {result.items.length === 0 ? <p className="p-8 text-center text-sm text-slate-500">{result.isRebuilding ? '특수 문서 목록을 처음 집계하고 있습니다. 잠시 후 다시 확인해 주세요.' : '조건에 해당하는 문서가 없습니다.'}</p> : null}
         </div>
+        {result.nextCursor ? <nav className="mt-4 flex justify-end" aria-label="특수 문서 페이지 이동"><Link href={href(type, namespace, undefined, result.nextCursor)} className="btn-secondary min-h-11">다음 페이지 <ArrowUpRight className="size-4" /></Link></nav> : null}
       </section>
     </div>
   );
 }
 
-function href(type: WikiSpecialDocumentType, namespace: string, refresh?: string) {
+function href(type: WikiSpecialDocumentType, namespace: string, refresh?: string, cursor?: string) {
   const params = new URLSearchParams({ type });
   if (namespace) params.set('namespace', namespace);
   if (refresh) params.set('_', refresh);
+  if (cursor) params.set('cursor', cursor);
   return `/wiki/special?${params.toString()}`;
 }
 
