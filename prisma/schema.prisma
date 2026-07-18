@@ -909,10 +909,11 @@ model SupportTicket {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
-  requesterAccount Account          @relation("SupportTicketRequester", fields: [requesterAccountId], references: [id], onDelete: Cascade)
-  assigneeAccount  Account?         @relation("SupportTicketAssignee", fields: [assigneeAccountId], references: [id], onDelete: SetNull)
-  server           Server?          @relation(fields: [serverId], references: [id], onDelete: SetNull)
-  messages         SupportMessage[]
+  requesterAccount    Account              @relation("SupportTicketRequester", fields: [requesterAccountId], references: [id], onDelete: Cascade)
+  assigneeAccount     Account?             @relation("SupportTicketAssignee", fields: [assigneeAccountId], references: [id], onDelete: SetNull)
+  server              Server?              @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  messages            SupportMessage[]
+  accountMergeRequest AccountMergeRequest?
 
   @@index([requesterAccountId, createdAt])
   @@index([assigneeAccountId, status])
@@ -922,6 +923,34 @@ model SupportTicket {
   @@index([verifySessionId])
   @@index([pluginServerId])
   @@index([fileId])
+}
+
+model AccountMergeRequest {
+  id                        String    @id @default(uuid()) @db.Char(36)
+  ticketId                  String    @unique @map("ticket_id") @db.Char(36)
+  requesterAccountId        String    @map("requester_account_id") @db.Char(36)
+  sourceCanonicalAccountId  String    @map("source_canonical_account_id") @db.Char(36)
+  targetCanonicalAccountId  String?   @map("target_canonical_account_id") @db.Char(36)
+  candidateTargetAccountIds Json      @map("candidate_target_account_ids")
+  conflictSnapshot          Json      @map("conflict_snapshot")
+  conflictFingerprint       String    @map("conflict_fingerprint") @db.Char(64)
+  proofSummary              Json?     @map("proof_summary")
+  status                    String    @default("pending") @db.VarChar(32)
+  activeKey                 String?   @unique @map("active_key") @db.Char(36)
+  version                   Int       @default(1)
+  decidedByAccountId        String?   @map("decided_by_account_id") @db.Char(36)
+  decisionReason            String?   @map("decision_reason") @db.VarChar(1000)
+  decidedAt                 DateTime? @map("decided_at") @db.DateTime(3)
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt], map: "idx_account_merge_requests_status")
+  @@index([sourceCanonicalAccountId, status], map: "idx_account_merge_requests_source")
+  @@index([targetCanonicalAccountId, status], map: "idx_account_merge_requests_target")
+  @@index([decidedByAccountId, decidedAt], map: "idx_account_merge_requests_decider")
+  @@map("account_merge_requests")
 }
 
 model SupportMessage {
