@@ -850,6 +850,7 @@ function ServerCard({ server, rank }: { readonly server: ServerSummary; readonly
               icon={<Users className="h-3.5 w-3.5 text-cyan-300" />}
               label="인원"
               value={formatPlayers(server)}
+              detail={formatPlayerTrust(server)}
             />
             <MetricCell
               icon={<Star className="h-3.5 w-3.5 text-yellow-300" />}
@@ -886,10 +887,12 @@ function MetricCell({
   icon,
   label,
   value,
+  detail,
 }: {
   readonly icon: ReactNode;
   readonly label: string;
   readonly value: string;
+  readonly detail?: string;
 }) {
   return (
     <div className="min-w-0 border-l border-[#b7b3a9]/70 px-3 py-1 first:border-l-0">
@@ -898,6 +901,7 @@ function MetricCell({
         {label}
       </span>
       <span className="mt-1 block truncate text-sm font-semibold text-[#242824]">{value}</span>
+      {detail ? <span className="mt-0.5 block truncate text-[10px] text-[#74786f]">{detail}</span> : null}
     </div>
   );
 }
@@ -945,6 +949,10 @@ function formatPlayers(server: ServerSummary): string {
     return '오프라인';
   }
 
+  if (server.playersMetricTrust === 'anomalous') {
+    return '검토 중';
+  }
+
   const playersOnline = typeof server.playersOnline === 'number' ? server.playersOnline : null;
   const playersMax = typeof server.playersMax === 'number' ? server.playersMax : null;
 
@@ -958,6 +966,21 @@ function formatPlayers(server: ServerSummary): string {
     return playersOnline.toLocaleString('ko-KR');
   }
   return `- / ${playersMax?.toLocaleString('ko-KR')}`;
+}
+
+function formatPlayerTrust(server: ServerSummary): string | undefined {
+  switch (server.playersMetricTrust) {
+    case 'trusted':
+      return '소유 확인 서버';
+    case 'self_reported':
+      return '미검증 서버 보고';
+    case 'anomalous':
+      return '이상치 · 순위 후순위';
+    case 'unknown':
+      return '신뢰도 미확인';
+    default:
+      return undefined;
+  }
 }
 
 function formatUpdatedAt(value?: string | null): string {

@@ -89,3 +89,48 @@ export function normalizeMinecraftServerHost(raw: string): string {
   }
   return ascii;
 }
+
+export const PLAYER_METRIC_TRUST_VALUES = [
+  'trusted',
+  'self_reported',
+  'anomalous',
+  'unknown',
+] as const;
+
+export type PlayerMetricTrust = (typeof PLAYER_METRIC_TRUST_VALUES)[number];
+export type PlayerMetricAnomalyReason =
+  | 'online_exceeds_max'
+  | 'online_with_zero_capacity'
+  | 'saturated_large_capacity';
+
+export interface PlayerMetricAssessment {
+  readonly trust: PlayerMetricTrust;
+  readonly source: 'status_ping' | null;
+  readonly anomalyReason: PlayerMetricAnomalyReason | null;
+}
+
+/** Classifies status-protocol counts without presenting unverified values as audited facts. */
+export function assessPlayerMetric(input: {
+  readonly online: boolean;
+  readonly playersOnline: number | null;
+  readonly playersMax: number | null;
+  readonly serverVerified: boolean;
+}): PlayerMetricAssessment {
+  if (!input.online || input.playersOnline === null || input.playersMax === null) {
+    return { trust: 'unknown', source: null, anomalyReason: null };
+  }
+  if (input.playersMax === 0 && input.playersOnline > 0) {
+    return { trust: 'anomalous', source: 'status_ping', anomalyReason: 'online_with_zero_capacity' };
+  }
+  if (input.playersMax > 0 && input.playersOnline > input.playersMax) {
+    return { trust: 'anomalous', source: 'status_ping', anomalyReason: 'online_exceeds_max' };
+  }
+  if (input.playersOnline >= 1_000 && input.playersOnline === input.playersMax) {
+    return { trust: 'anomalous', source: 'status_ping', anomalyReason: 'saturated_large_capacity' };
+  }
+  return {
+    trust: input.serverVerified ? 'trusted' : 'self_reported',
+    source: 'status_ping',
+    anomalyReason: null,
+  };
+}

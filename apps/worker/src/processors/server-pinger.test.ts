@@ -1,6 +1,41 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServerPinger } from './server-pinger';
+import { assessPlayerMetric } from '@minewiki/minecraft';
+
+test('player metric trust rejects impossible and suspicious status counts', () => {
+  assert.deepEqual(
+    assessPlayerMetric({
+      online: true,
+      playersOnline: 42,
+      playersMax: 100,
+      serverVerified: true,
+    }),
+    { trust: 'trusted', source: 'status_ping', anomalyReason: null },
+  );
+  assert.equal(
+    assessPlayerMetric({
+      online: true,
+      playersOnline: 42,
+      playersMax: 100,
+      serverVerified: false,
+    }).trust,
+    'self_reported',
+  );
+  assert.deepEqual(
+    assessPlayerMetric({
+      online: true,
+      playersOnline: 2026,
+      playersMax: 2026,
+      serverVerified: false,
+    }),
+    {
+      trust: 'anomalous',
+      source: 'status_ping',
+      anomalyReason: 'saturated_large_capacity',
+    },
+  );
+});
 
 test('server ping jobs hydrate the current target from the database', async () => {
   const serverId = '11111111-1111-4111-8111-111111111111';

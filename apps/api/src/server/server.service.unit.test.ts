@@ -920,6 +920,7 @@ test('paginated rankings apply server-side filters and return page metadata', as
   assert.deepEqual((queries[1] as { skip: number; take: number }).take, 12);
   assert.deepEqual((queries[1] as { orderBy: unknown }).orderBy, [
     { isOnline: { sort: 'desc', nulls: 'last' } },
+    { playersMetricTrust: 'asc' },
     { playersOnline: { sort: 'desc', nulls: 'last' } },
     { name: 'asc' },
   ]);

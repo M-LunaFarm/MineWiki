@@ -1,5 +1,6 @@
 ﻿import { Logger } from '@minewiki/logger';
 import { UnsafeEndpointError, validateOutboundTarget } from '@minewiki/security';
+import { assessPlayerMetric } from '@minewiki/minecraft';
 import type { ServerPingJob } from '@minewiki/schemas';
 import type { PrismaClient } from '@prisma/client';
 import { status, statusBedrock } from 'minecraft-server-util';
@@ -20,7 +21,7 @@ export function createServerPinger(prisma: PrismaHandle) {
   async function ping(job: ServerPingJob) {
     const server = await prisma.server.findUnique({
       where: { id: job.serverId },
-      select: { joinHost: true, joinPort: true, edition: true },
+      select: { joinHost: true, joinPort: true, edition: true, verificationGrade: true },
     });
     if (!server) {
       throw new Error('server_ping_server_not_found');
@@ -74,6 +75,13 @@ export function createServerPinger(prisma: PrismaHandle) {
       typeof playersOnline === 'number' ? Math.max(0, Math.round(playersOnline)) : 0;
     const playersMaxValue =
       typeof playersMax === 'number' ? Math.max(0, Math.round(playersMax)) : 0;
+    const playerMetric = assessPlayerMetric({
+      online,
+      playersOnline: online ? playersOnlineValue : null,
+      playersMax: online ? playersMaxValue : null,
+      serverVerified:
+        server.verificationGrade !== undefined && server.verificationGrade !== 'Unverified',
+    });
 
     const retentionStart = new Date(now.getTime() - SAMPLE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
     const uptimeStart = new Date(now.getTime() - UPTIME_WINDOW_HOURS * 60 * 60 * 1000);
@@ -86,6 +94,9 @@ export function createServerPinger(prisma: PrismaHandle) {
           online,
           players: online ? playersOnlineValue : null,
           maxPlayers: online ? playersMaxValue : null,
+          playersMetricTrust: playerMetric.trust,
+          playersMetricSource: playerMetric.source,
+          playersAnomalyReason: playerMetric.anomalyReason,
           latency: online ? latencyValue : null,
           motd,
           version,
@@ -100,6 +111,9 @@ export function createServerPinger(prisma: PrismaHandle) {
           playersOnline: online ? playersOnlineValue : null,
           playersMax: online ? playersMaxValue : null,
           playersLastUpdatedAt: online ? now : null,
+          playersMetricTrust: playerMetric.trust,
+          playersMetricSource: playerMetric.source,
+          playersAnomalyReason: playerMetric.anomalyReason,
         },
       });
 

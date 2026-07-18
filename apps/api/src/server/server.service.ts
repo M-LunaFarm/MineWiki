@@ -22,7 +22,7 @@ import { status, statusBedrock } from 'minecraft-server-util';
 import { resolveSrv } from 'node:dns/promises';
 import { createHash, randomInt } from 'node:crypto';
 import { isIP } from 'node:net';
-import { normalizeMinecraftServerHost } from '@minewiki/minecraft';
+import { assessPlayerMetric, normalizeMinecraftServerHost } from '@minewiki/minecraft';
 import { PrismaService } from '../common/prisma.service';
 import { writeAuditRecord } from '../events/audit-event-writer';
 import { type StoredVerificationGrade, type ServerFilters, type ServerSort } from './server.store';
@@ -412,6 +412,7 @@ export class ServerService {
     joinHost: string;
     joinPort: number;
     edition: ServerDetail['edition'];
+    verificationGrade?: StoredVerificationGrade;
   }): Promise<void> {
     const target = await resolveLiveProbeTarget({
       host: server.joinHost,
@@ -457,6 +458,13 @@ export class ServerService {
       typeof playersOnline === 'number' ? Math.max(0, Math.round(playersOnline)) : 0;
     const playersMaxValue =
       typeof playersMax === 'number' ? Math.max(0, Math.round(playersMax)) : 0;
+    const playerMetric = assessPlayerMetric({
+      online,
+      playersOnline: online ? playersOnlineValue : null,
+      playersMax: online ? playersMaxValue : null,
+      serverVerified:
+        server.verificationGrade !== undefined && server.verificationGrade !== 'Unverified',
+    });
     const retentionStart = new Date(now.getTime() - SAMPLE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
     const uptimeStart = new Date(now.getTime() - UPTIME_WINDOW_HOURS * 60 * 60 * 1000);
 
@@ -468,6 +476,9 @@ export class ServerService {
           online,
           players: online ? playersOnlineValue : null,
           maxPlayers: online ? playersMaxValue : null,
+          playersMetricTrust: playerMetric.trust,
+          playersMetricSource: playerMetric.source,
+          playersAnomalyReason: playerMetric.anomalyReason,
           latency: online ? latencyValue : null,
           motd,
           version,
@@ -482,6 +493,9 @@ export class ServerService {
           playersOnline: online ? playersOnlineValue : null,
           playersMax: online ? playersMaxValue : null,
           playersLastUpdatedAt: online ? now : null,
+          playersMetricTrust: playerMetric.trust,
+          playersMetricSource: playerMetric.source,
+          playersAnomalyReason: playerMetric.anomalyReason,
         },
       });
 
@@ -2373,6 +2387,7 @@ export function buildOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationIn
     case 'playersOnline_desc':
       return [
         { isOnline: { sort: 'desc', nulls: 'last' } },
+        { playersMetricTrust: 'asc' },
         { playersOnline: { sort: 'desc', nulls: 'last' } },
         { name: 'asc' },
       ];
@@ -2601,6 +2616,9 @@ function toSummary(server: {
   playersOnline: number | null;
   playersMax: number | null;
   playersLastUpdatedAt: Date | null;
+  playersMetricTrust?: 'trusted' | 'self_reported' | 'anomalous' | 'unknown';
+  playersMetricSource?: 'status_ping' | null;
+  playersAnomalyReason?: string | null;
   isOnline: boolean | null;
   latencyMs: number | null;
   stats?: {
@@ -2614,6 +2632,12 @@ function toSummary(server: {
 }): ServerSummary {
   const supportedVersions = normalizeStringArray(server.supportedVersions);
   const tags = normalizeStringArray(server.tags);
+  const playerMetric = assessPlayerMetric({
+    online: server.isOnline === true,
+    playersOnline: server.playersOnline,
+    playersMax: server.playersMax,
+    serverVerified: server.verificationGrade !== 'Unverified',
+  });
   return {
     id: server.id,
     shortCode: server.shortCode ?? null,
@@ -2640,6 +2664,9 @@ function toSummary(server: {
     playersLastUpdatedAt: server.playersLastUpdatedAt
       ? server.playersLastUpdatedAt.toISOString()
       : null,
+    playersMetricTrust: server.playersMetricTrust ?? playerMetric.trust,
+    playersMetricSource: server.playersMetricSource ?? playerMetric.source,
+    playersAnomalyReason: server.playersAnomalyReason ?? playerMetric.anomalyReason,
     isOnline: server.isOnline ?? null,
     latencyMs: server.latencyMs ?? null,
     rank:

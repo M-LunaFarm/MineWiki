@@ -306,6 +306,9 @@ importers:
       '@minewiki/logger':
         specifier: workspace:*
         version: link:../../packages/logger
+      '@minewiki/minecraft':
+        specifier: workspace:*
+        version: link:../../packages/minecraft
       '@minewiki/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas

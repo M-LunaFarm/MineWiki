@@ -41,6 +41,17 @@ enum VerificationGrade {
   Unverified
 }
 
+enum PlayerMetricTrust {
+  trusted
+  self_reported
+  anomalous
+  unknown
+}
+
+enum PlayerMetricSource {
+  status_ping
+}
+
 enum ReviewVisibility {
   public
   staff
@@ -608,6 +619,9 @@ model Server {
   playersOnline           Int?
   playersMax              Int?
   playersLastUpdatedAt    DateTime?
+  playersMetricTrust      PlayerMetricTrust   @default(unknown)
+  playersMetricSource     PlayerMetricSource?
+  playersAnomalyReason    String?             @db.VarChar(64)
   isOnline                Boolean?
   latencyMs               Int?
   createdAt               DateTime            @default(now())
@@ -636,6 +650,7 @@ model Server {
   @@index([votes24h])
   @@index([votesMonthly])
   @@index([reviewsCount])
+  @@index([playersMetricTrust, playersOnline])
 }
 
 model ServerStats {
@@ -663,16 +678,19 @@ model ServerStats {
 }
 
 model ServerPingSample {
-  id         String   @id @default(uuid())
-  serverId   String
-  timestamp  DateTime
-  online     Boolean
-  players    Int?
-  maxPlayers Int?
-  latency    Int?
-  motd       String?
-  version    String?
-  createdAt  DateTime @default(now())
+  id                   String              @id @default(uuid())
+  serverId             String
+  timestamp            DateTime
+  online               Boolean
+  players              Int?
+  maxPlayers           Int?
+  playersMetricTrust   PlayerMetricTrust   @default(unknown)
+  playersMetricSource  PlayerMetricSource?
+  playersAnomalyReason String?             @db.VarChar(64)
+  latency              Int?
+  motd                 String?
+  version              String?
+  createdAt            DateTime            @default(now())
 
   server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
 
@@ -1064,30 +1082,30 @@ model PluginServer {
 }
 
 model UploadedFile {
-  id                 String   @id @default(uuid()) @db.Char(36)
-  ownerAccountId     String?  @map("owner_account_id") @db.Char(36)
-  filename           String   @db.VarChar(255)
-  wikiFilename       String?  @unique(map: "uk_uploaded_files_wiki_filename") @map("wiki_filename") @db.VarChar(255)
-  originalName       String?  @map("original_name") @db.VarChar(255)
-  mimeType           String   @map("mime_type") @db.VarChar(128)
-  sizeBytes          Int      @map("size_bytes") @db.UnsignedInt
-  width              Int?     @db.UnsignedInt
-  height             Int?     @db.UnsignedInt
-  sha256             String   @db.Char(64)
-  storagePath        String   @map("storage_path") @db.VarChar(1024)
-  publicPath         String   @map("public_path") @db.VarChar(1024)
-  usageContext       String   @default("general") @map("usage_context") @db.VarChar(64)
-  visibility         String   @default("public") @db.VarChar(32)
-  license            String?  @db.VarChar(64)
-  sourceUrl          String?  @map("source_url") @db.VarChar(1024)
-  sourceText         String?  @map("source_text") @db.VarChar(255)
-  linkedResourceType String?  @map("linked_resource_type") @db.VarChar(64)
-  linkedResourceId   String?  @map("linked_resource_id") @db.VarChar(128)
-  status             String   @default("active") @db.VarChar(32)
+  id                 String    @id @default(uuid()) @db.Char(36)
+  ownerAccountId     String?   @map("owner_account_id") @db.Char(36)
+  filename           String    @db.VarChar(255)
+  wikiFilename       String?   @unique(map: "uk_uploaded_files_wiki_filename") @map("wiki_filename") @db.VarChar(255)
+  originalName       String?   @map("original_name") @db.VarChar(255)
+  mimeType           String    @map("mime_type") @db.VarChar(128)
+  sizeBytes          Int       @map("size_bytes") @db.UnsignedInt
+  width              Int?      @db.UnsignedInt
+  height             Int?      @db.UnsignedInt
+  sha256             String    @db.Char(64)
+  storagePath        String    @map("storage_path") @db.VarChar(1024)
+  publicPath         String    @map("public_path") @db.VarChar(1024)
+  usageContext       String    @default("general") @map("usage_context") @db.VarChar(64)
+  visibility         String    @default("public") @db.VarChar(32)
+  license            String?   @db.VarChar(64)
+  sourceUrl          String?   @map("source_url") @db.VarChar(1024)
+  sourceText         String?   @map("source_text") @db.VarChar(255)
+  linkedResourceType String?   @map("linked_resource_type") @db.VarChar(64)
+  linkedResourceId   String?   @map("linked_resource_id") @db.VarChar(128)
+  status             String    @default("active") @db.VarChar(32)
   deletedAt          DateTime? @map("deleted_at") @db.DateTime(3)
   retainedUntil      DateTime? @map("retained_until") @db.DateTime(3)
-  createdAt          DateTime @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
 
   @@index([ownerAccountId])
   @@index([usageContext])

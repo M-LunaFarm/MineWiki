@@ -15,6 +15,7 @@
     "@minewiki/auth": "workspace:*",
     "@minewiki/config": "workspace:*",
     "@minewiki/logger": "workspace:*",
+    "@minewiki/minecraft": "workspace:*",
     "@minewiki/schemas": "workspace:*",
     "@minewiki/security": "workspace:*",
     "@minewiki/wiki-core": "workspace:*",

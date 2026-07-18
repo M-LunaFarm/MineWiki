@@ -327,6 +327,13 @@ export const userAccountSchema = z.object({
 });
 
 export const serverVerificationGradeSchema = z.enum(['Verified', 'Unverified']);
+export const playerMetricTrustSchema = z.enum([
+  'trusted',
+  'self_reported',
+  'anomalous',
+  'unknown',
+]);
+export const playerMetricSourceSchema = z.enum(['status_ping']);
 export const claimMethodSchema = z.enum(['plugin', 'dns', 'motd']);
 export const PUBLIC_SERVER_LISTING_STATUS = 'active' as const;
 
@@ -354,6 +361,9 @@ export const serverSummarySchema = z.object({
   playersOnline: z.number().int().nonnegative().nullable().optional(),
   playersMax: z.number().int().nonnegative().nullable().optional(),
   playersLastUpdatedAt: z.string().datetime().nullable().optional(),
+  playersMetricTrust: playerMetricTrustSchema.optional(),
+  playersMetricSource: playerMetricSourceSchema.nullable().optional(),
+  playersAnomalyReason: z.string().max(64).nullable().optional(),
   isOnline: z.boolean().nullable().optional(),
   latencyMs: z.number().int().nonnegative().nullable().optional(),
   rank: z
