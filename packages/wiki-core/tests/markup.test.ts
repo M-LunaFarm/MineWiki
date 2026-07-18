@@ -963,6 +963,23 @@ test('parses wiki links inside GitBook HTML table text without exposing raw synt
   assert.equal(html.includes('alert(1)'), false);
 });
 
+test('renders and indexes wiki links inside data table component cells', () => {
+  const parsed = parseMarkup([
+    '{{데이터 표',
+    '|제목=빠른 안내',
+    '|열=항목,바로가기',
+    '|행1=주소,[[서버:example/접속 방법|접속 방법]]',
+    '|행2=규칙,[[서버:example/규칙]]',
+    '}}'
+  ].join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.links, ['서버:example/접속 방법', '서버:example/규칙']);
+  assert.match(html, /href="\/server\/example\/%EC%A0%91%EC%86%8D_%EB%B0%A9%EB%B2%95">접속 방법<\/a>/u);
+  assert.match(html, /href="\/server\/example\/%EA%B7%9C%EC%B9%99">서버:example\/규칙<\/a>/u);
+  assert.equal(html.includes('[['), false);
+});
+
 test('renders safe GitBook Markdown links without leaking raw syntax or macro warnings', () => {
   const parsed = parseMarkup([
     '[rules](/server/example/notice/rules)',

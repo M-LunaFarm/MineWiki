@@ -424,6 +424,7 @@ function parseMarkupDocument(
         if (prop) props[prop[1].trim()] = prop[2].trim();
       }
       const name = componentNameMap[componentStart[1].trim()] ?? componentStart[1].trim();
+      collectComponentInlineMetadata(name, props, links, errors, blockingErrors, footnotes, options.linkResolution);
       ast.push({ type: 'component', name, props });
       components.push({ name, props });
       continue;
@@ -441,6 +442,7 @@ function parseMarkupDocument(
         if (key && !(key in props)) props[key] = value;
       }
       const name = componentNameMap[rawName.trim()] ?? rawName.trim();
+      collectComponentInlineMetadata(name, props, links, errors, blockingErrors, footnotes, options.linkResolution);
       ast.push({ type: 'component', name, props });
       components.push({ name, props });
       continue;
@@ -2943,11 +2945,34 @@ function renderDataTable(props: Record<string, string>, options: RenderOptions) 
     .filter(([rowKey]) => /^행\d+$/.test(rowKey))
     .sort(([a], [b]) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')))
     .map(([, value]) => splitCells(value));
-  const head = headers.length ? `<thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead>` : '';
+  const head = headers.length ? `<thead><tr>${headers.map((header) => `<th>${renderComponentInline(header, options)}</th>`).join('')}</tr></thead>` : '';
   const body = rows.length
-    ? rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')
+    ? rows.map((row) => `<tr>${row.map((cell) => `<td>${renderComponentInline(cell, options)}</td>`).join('')}</tr>`).join('')
     : '<tr><td>등록된 데이터가 없습니다.</td></tr>';
   return wrapTable(`<table class="component-table data-table" data-table-key="${escapeAttr(key)}"><caption>${escapeHtml(caption)}</caption>${head}<tbody>${body}</tbody></table>`);
+}
+
+function collectComponentInlineMetadata(
+  name: string,
+  props: Record<string, string>,
+  links: Set<string>,
+  errors: string[],
+  blockingErrors: string[],
+  footnotes: string[],
+  linkResolution?: WikiLinkResolutionContext
+) {
+  if (name !== 'data_table') return;
+  for (const [key, value] of Object.entries(props)) {
+    if (key !== '열' && !/^행\d+$/u.test(key)) continue;
+    for (const cell of splitCells(value)) {
+      parseInline(cell, links, errors, blockingErrors, footnotes, linkResolution);
+    }
+  }
+}
+
+function renderComponentInline(value: string, options: RenderOptions) {
+  const nodes = parseInline(value, new Set(), [], [], [], options.linkResolution);
+  return renderInline(nodes, { entries: [], namedIndexes: new Map(), definitions: new Map() }, options);
 }
 
 function dataTableKey(props: Record<string, string>) {
