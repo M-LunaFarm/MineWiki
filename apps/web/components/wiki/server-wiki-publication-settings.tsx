@@ -55,6 +55,7 @@ interface PublicationState {
   readonly review: {
     readonly required: boolean;
     readonly approved: boolean;
+    readonly reviewerAvailable: boolean;
     readonly canApprove: boolean;
     readonly viewerApproved: boolean;
     readonly approvals: readonly { readonly reviewerProfileId: string; readonly approvedAt: string }[];
@@ -311,7 +312,7 @@ function ReleaseCandidateManifest({
       {(['added', 'updated', 'moved', 'removed', 'unchanged'] as const).map((kind) => <div key={kind} className="bg-[#111821] p-3 text-center"><p className="text-lg font-bold text-white">{candidate.counts[kind].toLocaleString('ko-KR')}</p><p className="mt-1 text-[11px] text-slate-500">{candidateKindLabel(kind)}</p></div>)}
     </div>
     {presentationChanges.length > 0 ? <p className="border-t border-white/10 px-4 py-3 text-xs text-slate-300">사이트 설정 변경: {presentationChanges.join(' · ')}</p> : null}
-    {review.required || review.canApprove ? <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-white">독립 검토 {review.approved ? '승인 완료' : '대기 중'}</p><p className="mt-1 text-xs text-slate-400">{review.required ? `활성 reviewer의 승인이 있어야 공개할 수 있습니다. 현재 승인 ${review.approvals.length.toLocaleString('ko-KR')}건` : '현재 등록된 reviewer가 없어 독립 승인 없이 공개할 수 있습니다.'}</p></div>{review.canApprove ? <button type="button" disabled={saving || !candidate.hasChanges} onClick={() => onApproval(!review.viewerApproved)} className="btn-secondary min-h-11 shrink-0 disabled:opacity-50">{review.viewerApproved ? '내 승인 취소' : '이 후보 승인'}</button> : null}</div> : null}
+    {review.required || review.canApprove ? <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-white">독립 검토 {review.approved ? '승인 완료' : '대기 중'}</p><p className={`mt-1 text-xs ${review.required && !review.reviewerAvailable ? 'text-amber-200' : 'text-slate-400'}`}>{review.required && !review.reviewerAvailable ? '검토 정책은 유지되지만 활성 reviewer가 없습니다. reviewer를 다시 배정해야 공개할 수 있습니다.' : review.required ? `활성 reviewer의 승인이 있어야 공개할 수 있습니다. 현재 승인 ${review.approvals.length.toLocaleString('ko-KR')}건` : '이 위키에는 reviewer 정책이 아직 설정되지 않았습니다.'}</p></div>{review.canApprove ? <button type="button" disabled={saving || !candidate.hasChanges} onClick={() => onApproval(!review.viewerApproved)} className="btn-secondary min-h-11 shrink-0 disabled:opacity-50">{review.viewerApproved ? '내 승인 취소' : '이 후보 승인'}</button> : null}</div> : null}
     <p className="border-t border-white/10 px-4 py-4 text-xs text-slate-400">후보 manifest에는 전체 {candidate.totalPageCount.toLocaleString('ko-KR')}개 문서의 상태가 고정되어 있습니다. 문서별 변경 내용은 reviewer 전용 검토 화면에서 서명된 페이지 단위로 불러옵니다.</p>
   </section>;
 }

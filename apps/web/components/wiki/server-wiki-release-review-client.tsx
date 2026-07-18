@@ -52,6 +52,7 @@ interface ReviewDetail extends QueueItem {
   };
   readonly review: {
     readonly approved: boolean;
+    readonly reviewerAvailable: boolean;
     readonly canApprove: boolean;
     readonly viewerApproved: boolean;
     readonly approvals: readonly { readonly reviewerProfileId: string; readonly approvedAt: string }[];
