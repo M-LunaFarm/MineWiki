@@ -15,7 +15,7 @@ import {
 import { WikiAclGroupConsole } from './wiki-acl-group-console';
 
 const ACTIONS = [
-  ['read', '읽기'], ['edit', '편집'], ['create', '문서 생성'], ['move', '이동'],
+  ['read', '읽기'], ['edit', '편집'], ['edit_request', '편집 요청'], ['create', '문서 생성'], ['move', '이동'],
   ['delete', '삭제'], ['revert', '되돌리기'], ['history', '역사'], ['raw', '원문'],
   ['discuss', '토론 (기존 규칙)'], ['create_thread', '토론 생성'],
   ['write_thread_comment', '토론 댓글 작성'],

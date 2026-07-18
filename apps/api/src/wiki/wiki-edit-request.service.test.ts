@@ -73,7 +73,11 @@ test('new-page edit requests persist an immutable target under a namespace lock'
   const profiles = { async ensureWikiProfile() { return { id: 99n, status: 'active' }; } } as unknown as WikiProfileService;
   const permissions = {
     actorFromSession() { return { accountId: session.userId, profileId: 99n, status: 'active' }; },
-    async assertCanReadCreateTarget(input: { spaceId: bigint }) { readableSpace = input.spaceId; }
+    async assertCanReadCreateTarget(input: { spaceId: bigint }) { readableSpace = input.spaceId; },
+    async assertCanUseCreateTargetAction(input: { action: string; spaceId: bigint }) {
+      assert.equal(input.action, 'edit_request');
+      assert.equal(input.spaceId, 8n);
+    }
   } as unknown as WikiPermissionService;
   const edits = {
     async resolveCreatePageTarget() {
@@ -130,7 +134,8 @@ test('new-page edit requests reject a title that appeared before the namespace l
   const profiles = { async ensureWikiProfile() { return { id: 99n, status: 'active' }; } } as unknown as WikiProfileService;
   const permissions = {
     actorFromSession() { return { accountId: session.userId, profileId: 99n, status: 'active' }; },
-    async assertCanReadCreateTarget() {}
+    async assertCanReadCreateTarget() {},
+    async assertCanUseCreateTargetAction() {}
   } as unknown as WikiPermissionService;
   const edits = {
     async resolveCreatePageTarget() {

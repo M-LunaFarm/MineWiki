@@ -425,6 +425,7 @@ export class WikiEditRequestService {
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
       await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
+      await this.permissions.assertCanUsePageAction({ actor, action: 'edit_request', page, store: tx });
       const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
         page.spaceId,
         input.policyAcceptance,
@@ -488,6 +489,15 @@ export class WikiEditRequestService {
     const now = new Date();
     const request = await this.prisma.$transaction(async (tx) => {
       await this.lockNamespace(tx, target.namespaceId);
+      await this.permissions.assertCanUseCreateTargetAction({
+        actor,
+        action: 'edit_request',
+        namespaceId: target.namespaceId,
+        namespaceCode: target.namespaceCode,
+        spaceId: target.spaceId,
+        title: target.title,
+        store: tx
+      });
       const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
         target.spaceId,
         input.policyAcceptance,
@@ -642,6 +652,7 @@ export class WikiEditRequestService {
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
       if (!request || request.pageId !== page.id) throw new NotFoundException('Wiki edit request not found.');
       await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
+      await this.permissions.assertCanUsePageAction({ accountId: session.userId, action: 'edit_request', page, store: tx });
       if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can edit this request.');
       if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be edited.');
       const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
@@ -708,6 +719,7 @@ export class WikiEditRequestService {
       if (!request || request.pageId !== page.id) throw new NotFoundException('Wiki edit request not found.');
       await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
       await this.permissions.assertCanUsePageAction({ accountId: session.userId, action: 'raw', page, store: tx });
+      await this.permissions.assertCanUsePageAction({ accountId: session.userId, action: 'edit_request', page, store: tx });
       if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can rebase this request.');
       if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be rebased.');
       const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
@@ -812,6 +824,15 @@ export class WikiEditRequestService {
         title: request.targetTitle,
         store: tx
       });
+      await this.permissions.assertCanUseCreateTargetAction({
+        accountId: session.userId,
+        action: 'edit_request',
+        namespaceId: request.targetNamespaceId,
+        namespaceCode: request.targetNamespaceCode,
+        spaceId: request.targetSpaceId,
+        title: request.targetTitle,
+        store: tx
+      });
       if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can edit this request.');
       if (!['pending', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be edited.');
       const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
@@ -875,6 +896,15 @@ export class WikiEditRequestService {
         if (!current || !this.hasCreateTarget(current)) throw new NotFoundException('Wiki edit request target not found.');
         if (current.createdBy !== profile.id) throw new ForbiddenException('Only the author can reopen this request.');
         if (current.status !== 'closed') throw new ConflictException('This edit request is not closed.');
+        await this.permissions.assertCanUseCreateTargetAction({
+          accountId: session.userId,
+          action: 'edit_request',
+          namespaceId: current.targetNamespaceId,
+          namespaceCode: current.targetNamespaceCode,
+          spaceId: current.targetSpaceId,
+          title: current.targetTitle,
+          store: tx
+        });
         const existing = await tx.wikiPage.findUnique({
           where: { namespaceId_slug: { namespaceId: current.targetNamespaceId, slug: current.targetSlug } },
           select: { id: true }
@@ -891,22 +921,41 @@ export class WikiEditRequestService {
       await this.audit('wiki.edit_request.reopen', session, profile.id, null, request.id, this.targetAuditMetadata(request));
       return (await this.present([result]))[0]!;
     }
-    const page = request.pageId === null ? null : await this.page(request.pageId.toString());
-    if (!page || page.currentRevisionId !== request.baseRevisionId) {
-      throw new ConflictException('The document changed. Update the request before reopening it.');
-    }
-    const duplicate = await this.prisma.wikiEditRequest.findFirst({
-      where: { pageId: page.id, createdBy: profile.id, status: { in: ['pending', 'reviewing'] }, id: { not: request.id } },
-      select: { id: true }
+    if (request.pageId === null) throw new NotFoundException('Wiki edit request target not found.');
+    const pageId = request.pageId;
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockPage(tx, pageId);
+      const [page, current] = await Promise.all([
+        tx.wikiPage.findUnique({ where: { id: pageId } }),
+        tx.wikiEditRequest.findUnique({ where: { id: request.id } })
+      ]);
+      if (!page || page.status === 'deleted' || !current || current.pageId !== page.id) {
+        throw new NotFoundException('Wiki edit request target not found.');
+      }
+      if (current.createdBy !== profile.id) throw new ForbiddenException('Only the author can reopen this request.');
+      if (current.status !== 'closed') throw new ConflictException('This edit request is not closed.');
+      if (page.currentRevisionId !== current.baseRevisionId) {
+        throw new ConflictException('The document changed. Update the request before reopening it.');
+      }
+      await this.permissions.assertCanUsePageAction({
+        accountId: session.userId,
+        action: 'edit_request',
+        page,
+        store: tx
+      });
+      const duplicate = await tx.wikiEditRequest.findFirst({
+        where: { pageId: page.id, createdBy: profile.id, status: { in: ['pending', 'reviewing'] }, id: { not: current.id } },
+        select: { id: true }
+      });
+      if (duplicate) throw new ConflictException('You already have an open edit request for this document.');
+      const updated = await tx.wikiEditRequest.updateMany({
+        where: { id: current.id, createdBy: profile.id, status: 'closed', updatedAt: current.updatedAt },
+        data: { status: 'pending', updatedAt: new Date() }
+      });
+      if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
+      return tx.wikiEditRequest.findUniqueOrThrow({ where: { id: current.id } });
     });
-    if (duplicate) throw new ConflictException('You already have an open edit request for this document.');
-    const updated = await this.prisma.wikiEditRequest.updateMany({
-      where: { id: request.id, createdBy: profile.id, status: 'closed' },
-      data: { status: 'pending', updatedAt: new Date() }
-    });
-    if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
-    const result = await this.request(requestId);
-    await this.audit('wiki.edit_request.reopen', session, profile.id, page?.id ?? null, request.id, this.targetAuditMetadata(request));
+    await this.audit('wiki.edit_request.reopen', session, profile.id, result.pageId, result.id, this.targetAuditMetadata(result));
     return (await this.present([result]))[0]!;
   }
 

@@ -26,6 +26,7 @@ type WikiAclStore = Pick<
 export type WikiAclAction =
   | 'read'
   | 'edit'
+  | 'edit_request'
   | 'create'
   | 'move'
   | 'delete'

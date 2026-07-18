@@ -481,6 +481,46 @@ test('page action ACL evaluates the complete browser actor and explicit request 
   assert.equal(evaluations.every((input) => input.requestIp === '198.51.100.9'), true);
 });
 
+test('edit-request ACL preserves the readable default and enforces an explicit create-target deny', async () => {
+  const activeActor = actor({ profileId: 200n });
+  const openService = createService({
+    acl: {
+      async evaluate() {
+        return { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+  await openService.assertCanUseCreateTargetAction({
+    actor: activeActor,
+    action: 'edit_request',
+    namespaceId: 1,
+    namespaceCode: 'guide',
+    spaceId: 10n,
+    title: '새 문서'
+  });
+
+  const deniedService = createService({
+    acl: {
+      async evaluate(input: { action: string }) {
+        return input.action === 'edit_request'
+          ? { matched: true, allowed: false, reason: 'requests_closed' }
+          : { matched: false, allowed: false, reason: 'acl_no_match' };
+      }
+    } as WikiAclService
+  });
+  await assert.rejects(
+    deniedService.assertCanUseCreateTargetAction({
+      actor: activeActor,
+      action: 'edit_request',
+      namespaceId: 1,
+      namespaceCode: 'guide',
+      spaceId: 10n,
+      title: '새 문서'
+    }),
+    (error: unknown) => error instanceof ForbiddenException && error.message.includes('requests_closed')
+  );
+});
+
 test('logged-in active user can edit open page', async () => {
   const service = createService();
   const decision = await service.canEditPage({

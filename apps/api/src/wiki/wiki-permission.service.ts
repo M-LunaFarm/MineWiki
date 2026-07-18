@@ -246,6 +246,7 @@ export class WikiPermissionService {
 
   async assertCanReadCreateTarget(input: {
     readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
     readonly namespaceId: number;
     readonly namespaceCode: string;
     readonly spaceId: bigint;
@@ -258,7 +259,7 @@ export class WikiPermissionService {
       select: { id: true, status: true }
     });
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) throw new NotFoundException('Wiki space not found.');
-    const actor = await this.resolveActor(input.accountId, store);
+    const actor = input.actor === undefined ? await this.resolveActor(input.accountId, store) : input.actor;
     const acl = await this.evaluateAcl('read', actor, {
       namespaceId: input.namespaceId,
       namespaceCode: input.namespaceCode,
@@ -266,6 +267,33 @@ export class WikiPermissionService {
       title: input.title
     }, store);
     if (acl.matched && !acl.allowed) throw new NotFoundException('Wiki page not found.');
+  }
+
+  async assertCanUseCreateTargetAction(input: {
+    readonly accountId?: string | null;
+    readonly actor?: WikiPermissionActor | null;
+    readonly action: Extract<WikiAclAction, 'edit_request'>;
+    readonly namespaceId: number;
+    readonly namespaceCode: string;
+    readonly spaceId: bigint;
+    readonly title: string;
+    readonly store?: WikiPermissionStore;
+  }): Promise<void> {
+    const store = input.store ?? this.prisma;
+    const actor = input.actor === undefined ? await this.resolveActor(input.accountId, store) : input.actor;
+    if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status)) {
+      throw new ForbiddenException('Wiki edit request is not allowed.');
+    }
+    await this.assertCanReadCreateTarget({ ...input, actor, store });
+    const acl = await this.evaluateAcl(input.action, actor, {
+      namespaceId: input.namespaceId,
+      namespaceCode: input.namespaceCode,
+      spaceId: input.spaceId,
+      title: input.title
+    }, store);
+    if (acl.matched && !acl.allowed) {
+      throw new ForbiddenException(`Wiki edit request is not allowed: ${acl.reason}`);
+    }
   }
 
   async canReadPage(input: {
