@@ -13,6 +13,7 @@ import { ServerReviewsHeader } from './server-reviews-header';
 import { ServerReviewFilters } from './server-review-filters';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { ReviewComposerModal } from '../reviews/review-composer-modal';
+import { fetchReviewFeedPage } from '../../lib/review-feed-client';
 
 type ReviewGateStatus = ApiReviewGateStatus;
 
@@ -63,10 +64,15 @@ export function ServerReviewSection({
   const [gateStatus, setGateStatus] = useState<ReviewGateStatus>(EMPTY_STATUS);
   const [reviews, setReviews] = useState(initialReviews);
   const [viewerReceipts, setViewerReceipts] = useState<ServerReview[]>([]);
+  const [viewerReceiptsTotal, setViewerReceiptsTotal] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
+  const [staffNextCursor, setStaffNextCursor] = useState<string | null>(null);
+  const [viewerReceiptsNextCursor, setViewerReceiptsNextCursor] = useState<string | null>(null);
   const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
+  const [loadingMoreReceipts, setLoadingMoreReceipts] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [feedRevision, setFeedRevision] = useState(0);
 
   const baseUrl = useMemo(() => normalizeApiBaseUrl(apiBaseUrl), [apiBaseUrl]);
 
@@ -123,7 +129,9 @@ export function ServerReviewSection({
         return;
       }
       const payload = (await response.json()) as { isOwner: boolean };
-      setIsOwner(Boolean(payload?.isOwner));
+      const owner = Boolean(payload?.isOwner);
+      setIsOwner(owner);
+      if (!owner) setStaffNextCursor(null);
     } catch (error) {
       console.warn('서버 소유자 확인 실패', error);
       setIsOwner(false);
@@ -138,21 +146,26 @@ export function ServerReviewSection({
     if (!isOwner) {
       return;
     }
+    let cancelled = false;
     const loadStaffReviews = async () => {
       try {
-        const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews/staff`, {
-          credentials: 'include'
+        const payload = await fetchReviewFeedPage({
+          baseUrl,
+          serverId,
+          scope: 'staff',
+          sort: currentSort,
+          rating: currentRating,
+          tag: currentTag,
+          visibility: 'all',
         });
-        if (!response.ok) {
-          throw new Error('failed to load staff reviews');
-        }
-        const payload = (await response.json()) as ServerReview[];
-        setReviews(payload);
-        setNextCursor(null);
-        if (payload.length > 0) {
+        if (cancelled) return;
+        setReviews(payload.items);
+        setStaffNextCursor(payload.nextCursor);
+        setAggregate(payload.aggregate);
+        if (payload.items.length > 0) {
           setTags((current) => {
             const next = new Set(current);
-            payload.forEach((review) => review.tags.forEach((tag) => next.add(tag)));
+            payload.items.forEach((review) => review.tags.forEach((tag) => next.add(tag)));
             return Array.from(next).sort((a, b) => a.localeCompare(b));
           });
         }
@@ -161,22 +174,33 @@ export function ServerReviewSection({
       }
     };
     void loadStaffReviews();
-  }, [baseUrl, isOwner, serverId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, currentRating, currentSort, currentTag, feedRevision, isOwner, serverId]);
 
   useEffect(() => {
     if (!gateStatus.isLoggedIn || isOwner) {
       setViewerReceipts([]);
+      setViewerReceiptsTotal(0);
+      setViewerReceiptsNextCursor(null);
       return;
     }
     let cancelled = false;
     const loadViewerReceipts = async () => {
       try {
-        const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews/mine`, {
-          credentials: 'include',
+        const payload = await fetchReviewFeedPage({
+          baseUrl,
+          serverId,
+          scope: 'mine',
+          visibility: 'staff',
+          sort: 'newest',
         });
-        if (!response.ok) return;
-        const payload = (await response.json()) as ServerReview[];
-        if (!cancelled) setViewerReceipts(payload);
+        if (!cancelled) {
+          setViewerReceipts(payload.items);
+          setViewerReceiptsNextCursor(payload.nextCursor);
+          setViewerReceiptsTotal(payload.aggregate.total);
+        }
       } catch (error) {
         console.warn('내 리뷰 영수증 로드 실패', error);
       }
@@ -185,12 +209,13 @@ export function ServerReviewSection({
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, gateStatus.isLoggedIn, isOwner, serverId]);
+  }, [baseUrl, feedRevision, gateStatus.isLoggedIn, isOwner, serverId]);
 
   useEffect(() => {
     if (isOwner) {
       return;
     }
+    let cancelled = false;
     const loadViewerReviews = async () => {
       try {
         const params = new URLSearchParams();
@@ -210,6 +235,7 @@ export function ServerReviewSection({
           return;
         }
         const payload = (await response.json()) as ServerReviewPage;
+        if (cancelled) return;
         setReviews(payload.items);
         setNextCursor(payload.nextCursor);
         setAggregate(payload.aggregate);
@@ -218,12 +244,16 @@ export function ServerReviewSection({
       }
     };
     void loadViewerReviews();
+    return () => {
+      cancelled = true;
+    };
   }, [
     baseUrl,
     currentRating,
     currentSort,
     currentTag,
     initialReviews.length,
+    feedRevision,
     isOwner,
     serverId
   ]);
@@ -236,17 +266,7 @@ export function ServerReviewSection({
     4: aggregate.histogram['4'],
     5: aggregate.histogram['5'],
   }), [aggregate.histogram]);
-  const displayedReviews = useMemo(() => {
-    const privateReceipts = viewerReceipts.filter((review) => review.visibility === 'staff');
-    const byId = new Map(privateReceipts.map((review) => [review.id, review]));
-    for (const review of reviews) {
-      byId.set(review.id, review);
-    }
-    return [...byId.values()];
-  }, [reviews, viewerReceipts]);
-  const privateReceiptCount = viewerReceipts.filter(
-    (review) => review.visibility === 'staff',
-  ).length;
+  const privateReceiptCount = viewerReceiptsTotal;
   const canCompose =
     gateStatus.isLoggedIn && gateStatus.isMinecraftOwned && gateStatus.hasRecentVote;
   const composeLabel = gateStatus.isLoggedIn
@@ -274,7 +294,11 @@ export function ServerReviewSection({
       }
       return [review, ...current];
     });
-    setViewerReceipts((current) => [review, ...current.filter((item) => item.id !== review.id)]);
+    if (review.visibility === 'staff') {
+      setViewerReceipts((current) => [review, ...current.filter((item) => item.id !== review.id)]);
+      setViewerReceiptsTotal((current) => current + 1);
+    }
+    setFeedRevision((current) => current + 1);
     void refreshPublicAggregate();
     setTags((current) => {
       const next = new Set(current);
@@ -297,6 +321,7 @@ export function ServerReviewSection({
       current.map((item) => (item.id === nextReview.id ? nextReview : item)),
     );
     void refreshPublicAggregate();
+    setFeedRevision((current) => current + 1);
   };
 
   const handleReviewDeleted = (deletedReview: ServerReview) => {
@@ -310,13 +335,34 @@ export function ServerReviewSection({
       return next;
     });
     setViewerReceipts((current) => current.filter((item) => item.id !== deletedReview.id));
+    if (deletedReview.visibility === 'staff') {
+      setViewerReceiptsTotal((current) => Math.max(0, current - 1));
+    }
     void refreshPublicAggregate();
+    setFeedRevision((current) => current + 1);
   };
 
   const loadMoreReviews = async () => {
-    if (!nextCursor || loadingMoreReviews || isOwner) return;
+    const cursor = isOwner ? staffNextCursor : nextCursor;
+    if (!cursor || loadingMoreReviews) return;
     setLoadingMoreReviews(true);
     try {
+      if (isOwner) {
+        const payload = await fetchReviewFeedPage({
+          baseUrl,
+          serverId,
+          scope: 'staff',
+          limit: 20,
+          cursor,
+          sort: currentSort,
+          visibility: 'all',
+          rating: currentRating,
+          tag: currentTag,
+        });
+        setReviews((current) => appendUniqueReviews(current, payload.items));
+        setStaffNextCursor(payload.nextCursor);
+        return;
+      }
       const params = new URLSearchParams({
         sort: currentSort,
         limit: String(Math.max(initialReviews.length, 12)),
@@ -332,16 +378,35 @@ export function ServerReviewSection({
       );
       if (!response.ok) throw new Error('failed to load more reviews');
       const payload = (await response.json()) as ServerReviewPage;
-      setReviews((current) => [
-        ...current,
-        ...payload.items.filter((review) => !current.some((item) => item.id === review.id))
-      ]);
+      setReviews((current) => appendUniqueReviews(current, payload.items));
       setNextCursor(payload.nextCursor);
       setAggregate(payload.aggregate);
     } catch (error) {
       console.warn('추가 리뷰 로드 실패', error);
     } finally {
       setLoadingMoreReviews(false);
+    }
+  };
+
+  const loadMoreViewerReceipts = async () => {
+    if (!viewerReceiptsNextCursor || loadingMoreReceipts || isOwner) return;
+    setLoadingMoreReceipts(true);
+    try {
+      const payload = await fetchReviewFeedPage({
+        baseUrl,
+        serverId,
+        scope: 'mine',
+        limit: 20,
+        cursor: viewerReceiptsNextCursor,
+        visibility: 'staff',
+        sort: 'newest',
+      });
+      setViewerReceipts((current) => appendUniqueReviews(current, payload.items));
+      setViewerReceiptsNextCursor(payload.nextCursor);
+    } catch (error) {
+      console.warn('내 리뷰 영수증 추가 로드 실패', error);
+    } finally {
+      setLoadingMoreReceipts(false);
     }
   };
 
@@ -370,14 +435,37 @@ export function ServerReviewSection({
         currentRating={currentRating}
         currentTag={currentTag}
       />
-      {privateReceiptCount > 0 ? (
-        <p className="mb-4 rounded-lg border border-sky-300/20 bg-sky-300/5 px-4 py-3 text-sm text-sky-100">
-          운영진에게만 보낸 내 리뷰 {privateReceiptCount.toLocaleString('ko-KR')}개도 함께 표시합니다.
+      {isOwner ? (
+        <p className="mb-4 rounded-lg border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-sm text-amber-100">
+          운영자 보기: 공개 리뷰와 운영진 전용 리뷰를 함께 집계합니다.
         </p>
+      ) : null}
+      {privateReceiptCount > 0 ? (
+        <div className="mb-6 rounded-lg border border-sky-300/20 bg-sky-300/5 px-4 py-4 text-sm text-sky-100">
+          <p>운영진에게만 보낸 내 리뷰 {privateReceiptCount.toLocaleString('ko-KR')}개도 함께 표시합니다.</p>
+          <div className="mt-3">
+            <ReviewList
+              serverId={serverId}
+              initialReviews={viewerReceipts}
+              apiBaseUrl={baseUrl}
+              trustLabelCopy={trustLabelCopy}
+              isOwner={false}
+              isLoggedIn={gateStatus.isLoggedIn}
+              loginHref={`/login?returnTo=${encodeURIComponent(`${serverPath ?? `/servers/${serverId}`}#reviews`)}`}
+              onReviewUpdated={handleReviewUpdated}
+              onReviewDeleted={handleReviewDeleted}
+            />
+          </div>
+          {viewerReceiptsNextCursor ? (
+            <button type="button" disabled={loadingMoreReceipts} onClick={() => void loadMoreViewerReceipts()} className="mt-2 text-xs font-semibold text-sky-200 underline underline-offset-4 disabled:opacity-50">
+              {loadingMoreReceipts ? '내 리뷰 불러오는 중…' : '이전 내 리뷰 더 보기'}
+            </button>
+          ) : null}
+        </div>
       ) : null}
       <ReviewList
         serverId={serverId}
-        initialReviews={displayedReviews}
+        initialReviews={reviews}
         apiBaseUrl={baseUrl}
         trustLabelCopy={trustLabelCopy}
         newReview={latestReview}
@@ -387,7 +475,7 @@ export function ServerReviewSection({
         onReviewUpdated={handleReviewUpdated}
         onReviewDeleted={handleReviewDeleted}
       />
-      {nextCursor && !isOwner ? (
+      {(isOwner ? staffNextCursor : nextCursor) ? (
         <button
           type="button"
           disabled={loadingMoreReviews}
@@ -408,4 +496,9 @@ export function ServerReviewSection({
       />
     </section>
   );
+}
+
+function appendUniqueReviews(current: ServerReview[], incoming: ServerReview[]): ServerReview[] {
+  const known = new Set(current.map((review) => review.id));
+  return [...current, ...incoming.filter((review) => !known.has(review.id))];
 }
