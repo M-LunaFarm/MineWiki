@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "nest start --watch",
+    "prebuild": "pnpm --filter @minewiki/schemas build",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/apps/api/src/main.js",
     "lint": "eslint \"src/**/*.ts\"",

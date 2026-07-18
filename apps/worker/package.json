@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "prebuild": "pnpm --filter @minewiki/schemas build",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/apps/worker/src/index.js",
     "lint": "eslint \"src/**/*.ts\"",
