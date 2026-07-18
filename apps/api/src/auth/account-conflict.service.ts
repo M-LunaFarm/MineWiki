@@ -1,9 +1,12 @@
 import { BadRequestException, Injectable, Optional } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../common/prisma.service';
+import { writeAuditRecord } from '../events/audit-event-writer';
 import { BusinessEventService } from '../events/business-event.service';
 import { DiscordMinecraftLinkRepository } from '../verify/guild.repositories';
+import { readCanonicalAccountGroup } from './account-lifecycle-fence';
 
 const mergeRequestSchema = z.object({
   message: z.string().trim().max(1000).optional(),
@@ -46,9 +49,10 @@ export class AccountConflictService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly events: BusinessEventService,
+    @Optional() events?: BusinessEventService,
     @Optional() discordMinecraftLinks?: DiscordMinecraftLinkRepository,
   ) {
+    void events;
     this.discordMinecraftLinks =
       discordMinecraftLinks ?? new DiscordMinecraftLinkRepository(prisma);
   }
@@ -67,9 +71,35 @@ export class AccountConflictService {
     const now = new Date();
     const ticketId = randomUUID();
     const body = this.buildTicketBody(accountId, conflicts, parsed.message);
+    const sourceGroup = await readCanonicalAccountGroup(this.prisma, accountId);
+    const targetGroups = await Promise.all(
+      [...new Set(conflicts.flatMap((conflict) =>
+        conflict.conflictingAccountId ? [conflict.conflictingAccountId] : [],
+      ))].map((targetAccountId) => readCanonicalAccountGroup(this.prisma, targetAccountId)),
+    );
+    const candidateTargetAccountIds = [...new Set(targetGroups
+      .map((group) => group.canonicalAccountId)
+      .filter((candidate) => candidate !== sourceGroup.canonicalAccountId))].sort();
+    const targetCanonicalAccountId = candidateTargetAccountIds.length === 1
+      ? candidateTargetAccountIds[0]!
+      : null;
+    const conflictFingerprint = fingerprintAccountConflicts(conflicts);
 
-    await this.prisma.$transaction([
-      this.prisma.supportTicket.create({
+    const existing = await this.prisma.accountMergeRequest.findFirst({
+      where: { activeKey: sourceGroup.canonicalAccountId, status: 'pending' },
+      select: { ticketId: true },
+    });
+    if (existing) {
+      return { ticketId: existing.ticketId, status: 'created', conflicts };
+    }
+
+    const persistedTicketId = await this.prisma.$transaction(async (tx) => {
+      const concurrent = await tx.accountMergeRequest.findFirst({
+        where: { activeKey: sourceGroup.canonicalAccountId, status: 'pending' },
+        select: { ticketId: true },
+      });
+      if (concurrent) return concurrent.ticketId;
+      await tx.supportTicket.create({
         data: {
           id: ticketId,
           requesterAccountId: accountId,
@@ -81,8 +111,8 @@ export class AccountConflictService {
           createdAt: now,
           updatedAt: now,
         },
-      }),
-      this.prisma.supportMessage.create({
+      });
+      await tx.supportMessage.create({
         data: {
           id: randomUUID(),
           ticketId,
@@ -92,27 +122,47 @@ export class AccountConflictService {
           isInternal: false,
           createdAt: now,
         },
-      }),
-    ]);
-
-    await this.events.audit('account.merge_request.created', {
-      category: 'account',
-      actorAccountId: accountId,
-      subjectType: 'support_ticket',
-      subjectId: ticketId,
-      metadata: {
-        conflicts: conflicts.map((conflict) => ({
-          kind: conflict.kind,
-          minecraftUuid: conflict.minecraftUuid,
-          discordUserId: conflict.discordUserId,
-          conflictingAccountId: conflict.conflictingAccountId,
-          legacyWikiProfileId: conflict.legacyWikiProfileId,
-        })),
-      },
-    });
+      });
+      const request = await tx.accountMergeRequest.create({
+        data: {
+          ticketId,
+          requesterAccountId: accountId,
+          sourceCanonicalAccountId: sourceGroup.canonicalAccountId,
+          targetCanonicalAccountId,
+          candidateTargetAccountIds,
+          conflictSnapshot: conflicts as unknown as Prisma.InputJsonValue,
+          conflictFingerprint,
+          proofSummary: {
+            sourceAccountIds: sourceGroup.accountIds,
+            candidateTargetAccountIds,
+            capturedAt: now.toISOString(),
+          },
+          status: 'pending',
+          activeKey: sourceGroup.canonicalAccountId,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      await writeAuditRecord(tx, {
+        data: {
+          category: 'account',
+          action: 'account.merge_request.created',
+          actorAccountId: accountId,
+          subjectType: 'account_merge_request',
+          subjectId: request.id,
+          metadata: {
+            ticketId,
+            conflictKinds: conflicts.map((conflict) => conflict.kind),
+            candidateTargetAccountCount: candidateTargetAccountIds.length,
+            conflictFingerprint,
+          },
+        },
+      });
+      return ticketId;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     return {
-      ticketId,
+      ticketId: persistedTicketId,
       status: 'created',
       conflicts,
     };
@@ -353,6 +403,20 @@ export class AccountConflictService {
     );
     return lines.join('\n').slice(0, 2000);
   }
+}
+
+export function fingerprintAccountConflicts(conflicts: readonly AccountLinkConflict[]): string {
+  const normalized = conflicts
+    .map((conflict) => ({
+      id: conflict.id,
+      kind: conflict.kind,
+      minecraftUuid: conflict.minecraftUuid,
+      discordUserId: conflict.discordUserId,
+      conflictingAccountId: conflict.conflictingAccountId,
+      legacyWikiProfileId: conflict.legacyWikiProfileId,
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }
 
 function uniqueConflicts(conflicts: AccountLinkConflict[]): AccountLinkConflict[] {

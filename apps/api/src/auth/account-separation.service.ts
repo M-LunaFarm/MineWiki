@@ -251,24 +251,52 @@ export class AccountSeparationService {
       this.prisma,
       [primaryAccountId, linkedAccountId],
       async (tx, group) => {
-        await tx.accountLink.createMany({
-          data: [
-            { primaryAccountId, linkedAccountId },
-            { primaryAccountId: linkedAccountId, linkedAccountId: primaryAccountId },
-          ],
-          skipDuplicates: true,
-        });
-        const canonicalAccountId = await this.stabilizeCanonicalAccountInTransaction(
+        await this.linkActiveAccountsInTransaction(
           tx,
           primaryAccountId,
+          linkedAccountId,
           group.accountIds,
         );
-        await this.finalizeCanonicalAccountMerge(tx, canonicalAccountId, group.accountIds);
-        await this.rehomeWebAuthnForCanonicalMerge(tx, primaryAccountId, group.accountIds);
-        await this.synchronizeWikiProfileBlocksForAccountLink(tx, group.accountIds);
-        await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
       },
     );
+  }
+
+  async linkActiveAccountsInTransaction(
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    primaryAccountId: string,
+    linkedAccountId: string,
+    accountIds: readonly string[],
+  ): Promise<string> {
+    if (
+      primaryAccountId === linkedAccountId ||
+      !accountIds.includes(primaryAccountId) ||
+      !accountIds.includes(linkedAccountId)
+    ) {
+      throw new ConflictException('연결할 계정 그룹 정보가 올바르지 않습니다.');
+    }
+    const active = await tx.account.count({
+      where: { id: { in: [...accountIds] }, lifecycleStatus: 'active' },
+    });
+    if (active !== accountIds.length) {
+      throw new ConflictException('종료 또는 정지 상태인 계정은 연결할 수 없습니다.');
+    }
+    await tx.accountLink.createMany({
+      data: [
+        { primaryAccountId, linkedAccountId },
+        { primaryAccountId: linkedAccountId, linkedAccountId: primaryAccountId },
+      ],
+      skipDuplicates: true,
+    });
+    const canonicalAccountId = await this.stabilizeCanonicalAccountInTransaction(
+      tx,
+      primaryAccountId,
+      accountIds,
+    );
+    await this.finalizeCanonicalAccountMerge(tx, canonicalAccountId, accountIds);
+    await this.rehomeWebAuthnForCanonicalMerge(tx, primaryAccountId, accountIds);
+    await this.synchronizeWikiProfileBlocksForAccountLink(tx, accountIds);
+    await this.revokeWikiApiTokensForAccountLink(tx, accountIds);
+    return canonicalAccountId;
   }
 
   async markEmailVerified(accountId: string): Promise<AccountRecord> {

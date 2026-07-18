@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { AccountDeletionAdminController } from '../auth/account-deletion-admin.controller';
 import { AccountModerationController } from '../auth/account-moderation.controller';
+import { AccountMergeRequestAdminController } from '../auth/account-merge-request-admin.controller';
 import { PaddleBillingController } from '../billing/paddle-billing.controller';
 import { AuditController } from '../events/audit.controller';
 import { ReviewModerationController } from '../review/review-moderation.controller';
@@ -27,6 +28,7 @@ const classPolicies = [
   [AuditController, 'audit_read'],
   [AccountDeletionAdminController, 'account_delete_admin'],
   [AccountModerationController, 'account_moderation'],
+  [AccountMergeRequestAdminController, 'account_merge_admin'],
   [ReviewModerationController, 'review_moderation'],
   [WikiReportModerationController, 'wiki_admin'],
   [VoteAdminController, 'vote_admin'],

@@ -164,6 +164,70 @@ export class WikiProfileMergeService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
+  async queueForAccountLink(
+    tx: Prisma.TransactionClient,
+    input: {
+      readonly canonicalAccountId: string;
+      readonly accountIds: readonly string[];
+      readonly preferredTargetAccountIds: readonly string[];
+      readonly requestedByAccountId: string;
+      readonly reason: string;
+    },
+  ): Promise<string[]> {
+    const profiles = await tx.wikiProfile.findMany({
+      where: {
+        accountId: { in: [...input.accountIds] },
+        status: { in: [...MERGEABLE_PROFILE_STATUSES] },
+        mergedIntoProfileId: null,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    if (profiles.length < 2) return [];
+    const target = profiles.find((profile) =>
+      profile.accountId && input.preferredTargetAccountIds.includes(profile.accountId),
+    ) ?? profiles.find((profile) => profile.accountId === input.canonicalAccountId)
+      ?? profiles[0];
+    if (!target) return [];
+
+    const preview = await this.buildPreview(tx, input.canonicalAccountId, target.id);
+    const createdIds: string[] = [];
+    for (const candidate of preview.candidates) {
+      const sourceProfileId = BigInt(candidate.profile.id);
+      const activeKey = `${sourceProfileId.toString()}:${target.id.toString()}`;
+      const request = await tx.wikiProfileMergeRequest.create({
+        data: {
+          canonicalAccountId: input.canonicalAccountId,
+          sourceProfileId,
+          targetProfileId: target.id,
+          status: 'pending',
+          requestedByAccountId: input.requestedByAccountId,
+          requestedByProfileId: target.id,
+          reason: input.reason.slice(0, 1000),
+          previewJson: candidate as unknown as Prisma.InputJsonValue,
+          activeKey,
+          updatedAt: new Date(),
+        },
+      });
+      await writeAuditRecord(tx, {
+        data: {
+          category: 'wiki_profile',
+          action: 'wiki_profile.merge_requested_after_account_link',
+          actorAccountId: input.requestedByAccountId,
+          actorProfileId: target.id,
+          subjectType: 'wiki_profile_merge_request',
+          subjectId: request.id,
+          metadata: {
+            sourceProfileId: sourceProfileId.toString(),
+            targetProfileId: target.id.toString(),
+            requiresBlockedStatus: candidate.requiresBlockedStatus,
+          },
+        },
+      });
+      createdIds.push(request.id);
+    }
+    return createdIds;
+  }
+
   async listForAdmin(status?: string) {
     const normalizedStatus = status?.trim().toLowerCase();
     if (normalizedStatus && !['pending', 'executing', 'completed', 'rejected', 'failed'].includes(normalizedStatus)) {

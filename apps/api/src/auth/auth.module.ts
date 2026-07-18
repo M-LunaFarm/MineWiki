@@ -28,6 +28,8 @@ import {
 import { WikiModule } from '../wiki/wiki.module';
 import { AccountEmailChangeController } from './account-email-change.controller';
 import { AccountEmailChangeService } from './account-email-change.service';
+import { AccountMergeRequestService } from './account-merge-request.service';
+import { AccountMergeRequestAdminController } from './account-merge-request-admin.controller';
 
 @Module({
   imports: [SessionModule, FileModule, WikiModule],
@@ -45,7 +47,8 @@ import { AccountEmailChangeService } from './account-email-change.service';
     { provide: WEBAUTHN_SERVER, useValue: DEFAULT_WEBAUTHN_SERVER },
     AccountModerationService,
     AccountDataExportService,
-    AccountEmailChangeService
+    AccountEmailChangeService,
+    AccountMergeRequestService
   ],
   controllers: [
     AuthController,
@@ -57,7 +60,8 @@ import { AccountEmailChangeService } from './account-email-change.service';
     AccountDeletionInternalController,
     AccountModerationController,
     AccountDataExportController,
-    AccountEmailChangeController
+    AccountEmailChangeController,
+    AccountMergeRequestAdminController
   ],
   exports: [AuthService, AccountSeparationService, OAuthFlowService, EmailService]
 })

@@ -30,6 +30,7 @@ function createHarness(options: {
   const tickets: unknown[] = [];
   const messages: unknown[] = [];
   const audits: unknown[] = [];
+  const mergeRequests: unknown[] = [];
   const mergedAccountIds: string[] = [];
   const linkedLegacyWikiProfileIds: bigint[] = [];
 
@@ -49,7 +50,14 @@ function createHarness(options: {
       },
     },
     account: {
-      async findMany() {
+      async findUnique(input: { where: { id: string } }) {
+        return { id: input.where.id, canonicalAccountId: input.where.id };
+      },
+      async findMany(input?: { select?: { canonicalAccountId?: boolean }; where?: { OR?: Array<{ id?: { in?: string[] }; canonicalAccountId?: { in?: string[] } }> } }) {
+        if (input?.select?.canonicalAccountId) {
+          const ids = input.where?.OR?.flatMap((part) => part.id?.in ?? part.canonicalAccountId?.in ?? []) ?? [];
+          return [...new Set(ids)].map((id) => ({ id, canonicalAccountId: id }));
+        }
         return [
           discordUserId
             ? {
@@ -92,6 +100,9 @@ function createHarness(options: {
         return options.duplicateDiscordAccountId ? { id: options.duplicateDiscordAccountId } : null;
       },
     },
+    accountLink: {
+      async findMany() { return []; },
+    },
     oAuthCredential: {
       async findMany() {
         return [];
@@ -124,15 +135,24 @@ function createHarness(options: {
         return {};
       },
     },
-    async $transaction(operations: Array<Promise<unknown>>) {
-      return Promise.all(operations);
+    accountMergeRequest: {
+      async findFirst() { return null; },
+      async create(args: { data: Record<string, unknown> }) {
+        mergeRequests.push(args);
+        return { id: randomUUID(), ...args.data };
+      },
+    },
+    auditEvent: {
+      async create(args: unknown) {
+        audits.push(args);
+        return {};
+      },
+    },
+    async $transaction(operation: ((tx: unknown) => Promise<unknown>) | Array<Promise<unknown>>) {
+      return typeof operation === 'function' ? operation(prisma) : Promise.all(operation);
     },
   };
-  const events = {
-    audit: async (...args: unknown[]) => {
-      audits.push(args);
-    },
-  };
+  const events = { audit: async () => undefined };
   const discordMinecraftLinks = {
     async findByDiscordUserId(discordId: string) {
       const minecraftUuid = options.minecraftByDiscordUserId?.[discordId];
@@ -150,6 +170,7 @@ function createHarness(options: {
     tickets,
     messages,
     audits,
+    mergeRequests,
     mergedAccountIds,
     linkedLegacyWikiProfileIds,
     service: new AccountConflictService(
@@ -333,9 +354,10 @@ test('creates merge request support ticket without auto-merging', async () => {
   assert.equal(ticket.data.category, 'account');
   assert.equal(ticket.data.priority, 'high');
 
-  const audit = harness.audits[0] as [string, { subjectId: string }];
-  assert.equal(audit[0], 'account.merge_request.created');
-  assert.equal(audit[1].subjectId, response.ticketId);
+  assert.equal(harness.mergeRequests.length, 1);
+  const audit = harness.audits[0] as { data: { action: string; subjectType: string } };
+  assert.equal(audit.data.action, 'account.merge_request.created');
+  assert.equal(audit.data.subjectType, 'account_merge_request');
 });
 
 test('creates manual merge request from safe conflict rejection message', async () => {
