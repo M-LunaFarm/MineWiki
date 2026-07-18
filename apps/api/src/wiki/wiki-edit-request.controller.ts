@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
@@ -58,13 +58,33 @@ export class WikiEditRequestController {
   }
 
   @Post('pages/:pageId/edit-requests')
-  @UseGuards(SessionGuard)
-  @Throttle({ default: { limit: 8, ttl: 60 } })
-  create(
+  @UseGuards(OptionalSessionGuard)
+  @Throttle({ default: { limit: 4, ttl: 300 } })
+  async create(
     @Param('pageId') pageId: string,
-    @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; policyAcceptance?: WikiPolicyAcceptance },
-    @CurrentSession() session: SessionPayload
-  ) { return this.requests.create(session, pageId, body); }
+    @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; captchaToken?: string; policyAcceptance?: WikiPolicyAcceptance },
+    @Req() request: FastifyRequest
+  ) {
+    const session = request.sessionPayload ?? null;
+    if (session) {
+      const authenticatedBody = { ...body };
+      delete authenticatedBody.captchaToken;
+      return this.requests.create(session, pageId, authenticatedBody);
+    }
+    this.requests.assertAnonymousSubmissionEnabled();
+    if (!this.wikiCaptcha.isRequired()) {
+      throw new ServiceUnavailableException({
+        code: 'WIKI_ANONYMOUS_EDIT_REQUESTS_UNAVAILABLE',
+        message: '익명 편집 요청의 로봇 방지 확인이 구성되지 않았습니다.',
+      });
+    }
+    const requestIp = request.clientIp;
+    if (!requestIp) throw new ServiceUnavailableException('Validated client address is unavailable.');
+    await this.wikiCaptcha.assertVerified(body.captchaToken, requestIp);
+    const anonymousBody = { ...body };
+    delete anonymousBody.captchaToken;
+    return this.requests.createAnonymous(pageId, anonymousBody, requestIp);
+  }
 
   @Post('edit-requests')
   @UseGuards(SessionGuard)

@@ -24,32 +24,10 @@ function normalizeIp(value: string | undefined): string | undefined {
   return trimmed;
 }
 
-function pickForwardedIp(header: string | string[] | undefined): string | undefined {
-  if (!header) {
-    return undefined;
-  }
-
-  const values = Array.isArray(header) ? header.join(',') : header;
-  for (const candidate of values.split(',')) {
-    const normalized = normalizeIp(candidate);
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return undefined;
-}
-
 export function extractClientIp(request: FastifyRequest): string | undefined {
-  return (
-    pickForwardedIp(request.headers['x-forwarded-for']) ??
-    normalizeIp(
-      Array.isArray(request.headers['x-real-ip'])
-        ? request.headers['x-real-ip'][0]
-        : request.headers['x-real-ip'],
-    ) ??
-    normalizeIp(request.ip)
-  );
+  // Fastify resolves trusted forwarding headers into request.ip. Reading raw
+  // headers here would let an untrusted direct client choose its abuse identity.
+  return normalizeIp(request.ip);
 }
 
 export function isLoopbackIp(ipAddress: string | null | undefined): boolean {

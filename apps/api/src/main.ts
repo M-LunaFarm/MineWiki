@@ -11,11 +11,15 @@ import { TelemetryInterceptor } from './telemetry/telemetry.interceptor';
 import { randomUUID } from 'node:crypto';
 import { ApiExceptionFilter } from './common/api-exception.filter';
 import { runInHttpRequestContext } from './common/http/request-context';
+import { isLoopbackIp } from './common/http/client-ip';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ logger: false }),
+    new FastifyAdapter({
+      logger: false,
+      trustProxy: (address) => isLoopbackIp(address),
+    }),
     {
       bufferLogs: true,
       rawBody: true

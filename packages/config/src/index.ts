@@ -74,8 +74,11 @@ const envSchema = z.object({
   HCAPTCHA_SECRET_KEY: z.string().optional(),
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().optional(),
   NEXT_PUBLIC_HCAPTCHA_SITE_KEY: z.string().optional(),
+  NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED: z.enum(['true', 'false']).default('false'),
   UPLOAD_STORAGE_ROOT: z.string().optional(),
   ACCOUNT_LINKING_ENABLED: z.string().optional(),
+  WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED: z.enum(['true', 'false']).default('false'),
+  WIKI_ANONYMOUS_IP_HASH_SECRET: z.string().optional(),
   APP_ENCRYPTION_KEY: z.string().optional(),
   WEB_PUSH_ENABLED: z.string().optional(),
   PADDLE_MODE: z.enum(['off', 'shadow', 'live']).default('off'),
@@ -267,6 +270,17 @@ function validateProductionEnvironment(env: EnvSchema): void {
 
   if (env.MINEWIKI_SERVICE === 'api' || env.MINEWIKI_SERVICE === 'all') {
     validateCaptchaConfiguration(env, failures);
+    if (env.WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED === 'true') {
+      validateRequiredGroup(
+        env,
+        ['WIKI_ANONYMOUS_IP_HASH_SECRET'],
+        'anonymous wiki edit requests',
+        failures,
+      );
+      if (env.NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED !== 'true') {
+        failures.push('NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED must be true when anonymous wiki edit requests are enabled');
+      }
+    }
     validateOptionalGroup(
       env,
       ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI'],

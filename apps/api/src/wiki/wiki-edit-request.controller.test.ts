@@ -4,6 +4,7 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 import type { FastifyRequest } from 'fastify';
 import type { SessionPayload } from '../session/session.service';
 import { SessionGuard } from '../session/session.guard';
+import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { WikiEditRequestController } from './wiki-edit-request.controller';
 import type { WikiEditRequestService } from './wiki-edit-request.service';
 import type { WikiCaptchaService } from './wiki-captcha.service';
@@ -47,6 +48,54 @@ test('new-page request controller forwards the authenticated target and draft', 
 
   assert.deepEqual(received, { receivedSession: session, body });
   assert.deepEqual(result, { id: '71', requestKind: 'create' });
+});
+
+test('anonymous existing-page requests require captcha and forward only the validated central address', async () => {
+  let captchaInput: unknown;
+  let received: unknown;
+  const service = {
+    assertAnonymousSubmissionEnabled() {},
+    async createAnonymous(pageId: string, body: unknown, requestIp: string) {
+      received = { pageId, body, requestIp };
+      return { id: '73' };
+    },
+  } as unknown as WikiEditRequestService;
+  const controller = new WikiEditRequestController(service, {
+    isRequired() { return true; },
+    async assertVerified(token: string | undefined, ip: string | undefined) { captchaInput = { token, ip }; },
+  } as WikiCaptchaService);
+
+  await controller.create('10', {
+    baseRevisionId: '20', contentRaw: '제안', editSummary: '수정', captchaToken: 'verified-token',
+  }, { clientIp: '2001:db8::23', sessionPayload: null } as unknown as FastifyRequest);
+
+  assert.deepEqual(captchaInput, { token: 'verified-token', ip: '2001:db8::23' });
+  assert.deepEqual(received, {
+    pageId: '10',
+    body: { baseRevisionId: '20', contentRaw: '제안', editSummary: '수정' },
+    requestIp: '2001:db8::23',
+  });
+  const guards = Reflect.getMetadata(
+    GUARDS_METADATA,
+    WikiEditRequestController.prototype.create,
+  ) as unknown[] | undefined;
+  assert.ok(guards?.includes(OptionalSessionGuard));
+  assert.ok(!guards?.includes(SessionGuard));
+});
+
+test('authenticated existing-page requests never forward a supplied captcha token', async () => {
+  let received: unknown;
+  const service = {
+    async create(receivedSession: SessionPayload, pageId: string, body: unknown) {
+      received = { receivedSession, pageId, body };
+      return { id: '74' };
+    },
+  } as unknown as WikiEditRequestService;
+  const controller = new WikiEditRequestController(service, captchaStub);
+  await controller.create('10', { contentRaw: '제안', captchaToken: 'untrusted-token' }, {
+    sessionPayload: session,
+  } as unknown as FastifyRequest);
+  assert.deepEqual(received, { receivedSession: session, pageId: '10', body: { contentRaw: '제안' } });
 });
 
 test('request context controller preserves the optional viewer session', async () => {

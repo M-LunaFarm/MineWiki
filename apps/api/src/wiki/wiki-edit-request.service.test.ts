@@ -9,6 +9,7 @@ import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiProfileService } from './wiki-profile.service';
 import type { WikiRoutePathResolver } from './wiki-route-path.resolver';
 import type { WikiContributionPolicyService } from './wiki-contribution-policy.service';
+import type { ConfigService } from '@minewiki/config';
 
 const session = { userId: 'account-1' } as SessionPayload;
 const page = {
@@ -51,6 +52,85 @@ test('edit request creation rejects a stale base revision before persistence', a
     }),
     ConflictException
   );
+});
+
+test('anonymous edit request stores only canonical private IP attribution and no profile', async () => {
+  const hashes: string[] = [];
+  const buildService = () => {
+    const prisma = {
+      async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+      async $queryRaw() { return [{ id: page.id }]; },
+      wikiPage: { async findUnique() { return { ...page, ownerProfileId: null }; } },
+      wikiEditRequest: {
+        async count() { return 0; },
+        async findFirst() { return null; },
+        async create(args: { data: Record<string, unknown> }) {
+          hashes.push(String(args.data.submitterIpHash));
+          return {
+            id: BigInt(70 + hashes.length), requestKind: 'edit', reviewedBy: null, reviewNote: null,
+            acceptedRevisionId: null, reviewedAt: null, contributionPolicyVersion: null,
+            submitterType: 'ip', submitterIpHash: args.data.submitterIpHash, ...args.data,
+          };
+        },
+      },
+      wikiProfile: { async findMany() { return []; } },
+      wikiPageRevision: { async findMany() { return []; } },
+    } as unknown as PrismaService;
+    const permissions = {
+      async assertCanUsePageAction(input: { actor: unknown; requestIp: string; action: string }) {
+        assert.equal(input.actor, null);
+        assert.equal(input.action, 'edit_request');
+        assert.ok(input.requestIp);
+      },
+    } as unknown as WikiPermissionService;
+    const policies = { async assertAccepted() { return null; } } as unknown as WikiContributionPolicyService;
+    const config = {
+      getOptional(key: string) {
+        if (key === 'WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED') return 'true';
+        if (key === 'WIKI_ANONYMOUS_IP_HASH_SECRET') return 'test-only-dedicated-secret';
+        return undefined;
+      },
+    } as unknown as ConfigService;
+    return new WikiEditRequestService(
+      prisma, {} as WikiProfileService, permissions, {} as WikiEditService,
+      undefined, undefined, undefined, policies, config,
+    );
+  };
+
+  const first = await buildService().createAnonymous('10', {
+    baseRevisionId: '30', contentRaw: '제안', editSummary: '익명 수정',
+  }, '192.0.2.44');
+  const mapped = await buildService().createAnonymous('10', {
+    baseRevisionId: '30', contentRaw: '다른 제안', editSummary: '익명 수정 2',
+  }, '::ffff:192.0.2.44');
+
+  assert.equal(first.createdBy, null);
+  assert.equal(first.createdByName, '익명 기여자');
+  assert.equal(mapped.createdByName, '익명 기여자');
+  assert.equal(hashes[0], hashes[1]);
+  assert.match(hashes[0] ?? '', /^[a-f0-9]{64}$/u);
+  assert.ok(!JSON.stringify(first).includes('192.0.2.44'));
+  assert.ok(!JSON.stringify(first).includes((hashes[0] ?? '').slice(0, 8)));
+});
+
+test('anonymous edit request rejects stronger page protection before ACL fallback', async () => {
+  const prisma = {
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    async $queryRaw() { return [{ id: page.id }]; },
+    wikiPage: { async findUnique() { return { ...page, ownerProfileId: null, protectionLevel: 'official_only' }; } },
+  } as unknown as PrismaService;
+  const config = {
+    getOptional(key: string) {
+      return key === 'WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED' ? 'true' : 'test-only-dedicated-secret';
+    },
+  } as unknown as ConfigService;
+  const service = new WikiEditRequestService(
+    prisma, {} as WikiProfileService, {} as WikiPermissionService, {} as WikiEditService,
+    undefined, undefined, undefined, undefined, config,
+  );
+  await assert.rejects(() => service.createAnonymous('10', {
+    baseRevisionId: '30', contentRaw: '제안', editSummary: '익명 수정',
+  }, '192.0.2.45'), /Wiki page not found/u);
 });
 
 test('new-page edit requests persist an immutable target under a namespace lock', async () => {

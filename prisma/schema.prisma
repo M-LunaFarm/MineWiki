@@ -1882,7 +1882,9 @@ model WikiEditRequest {
   editSummary               String    @map("edit_summary") @db.VarChar(255)
   isMinor                   Boolean   @default(false) @map("is_minor")
   status                    String    @default("pending") @db.VarChar(32)
-  createdBy                 BigInt    @map("created_by") @db.UnsignedBigInt
+  createdBy                 BigInt?   @map("created_by") @db.UnsignedBigInt
+  submitterType             String    @default("user") @map("submitter_type") @db.VarChar(16)
+  submitterIpHash           String?   @map("submitter_ip_hash") @db.Char(64)
   reviewedBy                BigInt?   @map("reviewed_by") @db.UnsignedBigInt
   reviewNote                String?   @map("review_note") @db.VarChar(1000)
   acceptedRevisionId        BigInt?   @map("accepted_revision_id") @db.UnsignedBigInt
@@ -1896,6 +1898,7 @@ model WikiEditRequest {
   @@index([targetSpaceId, status, createdAt], map: "idx_wiki_edit_requests_target_space")
   @@index([targetNamespaceId, targetOwnerProfileId, targetSlug, status], map: "idx_wiki_edit_requests_user_owner")
   @@index([createdBy, status, createdAt], map: "idx_wiki_edit_requests_creator")
+  @@index([submitterIpHash, status, createdAt], map: "idx_wiki_edit_requests_ip")
   @@index([reviewedBy, reviewedAt], map: "idx_wiki_edit_requests_reviewer")
   @@map("wiki_edit_requests")
 }

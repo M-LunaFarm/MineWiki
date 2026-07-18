@@ -1094,6 +1094,8 @@ export class WikiEditService {
         editSummary: editRequest.editSummary,
         isMinor: editRequest.isMinor,
         actorId: editRequest.createdBy,
+        actorType: editRequest.submitterType === 'ip' ? 'ip' : 'user',
+        actorIpHash: editRequest.submitterIpHash,
         title: page.displayTitle,
         namespaceCode: namespace.code,
         pageTitle: page.title,
@@ -1110,10 +1112,12 @@ export class WikiEditService {
         data: { status: 'accepted', acceptedRevisionId: revision.id, reviewNote: input.reviewNote, reviewedAt: now, updatedAt: now }
       });
       if (completed.count !== 1) throw new ConflictException('This edit request is no longer being reviewed.');
-      await this.notifications?.notifyEditRequestReviewed(tx, {
-        profileId: editRequest.createdBy, pageId: page.id, requestId: editRequest.id,
-        reviewerProfileId: reviewer.id, status: 'accepted', title: page.displayTitle
-      });
+      if (editRequest.createdBy !== null) {
+        await this.notifications?.notifyEditRequestReviewed(tx, {
+          profileId: editRequest.createdBy, pageId: page.id, requestId: editRequest.id,
+          reviewerProfileId: reviewer.id, status: 'accepted', title: page.displayTitle
+        });
+      }
       return {
         mutation: { pageId: page.id.toString(), revisionId: revision.id.toString(), revisionNo: revision.revisionNo, namespace: namespace.code, title: page.title, slug: page.slug },
         request: await tx.wikiEditRequest.findUniqueOrThrow({ where: { id: editRequest.id } })
@@ -1122,7 +1126,15 @@ export class WikiEditService {
     await this.events?.audit('wiki.edit', {
       category: 'wiki', actorAccountId: session.userId, actorProfileId: reviewer.id,
       subjectType: 'wiki_page', subjectId: result.mutation.pageId,
-      metadata: { namespace: result.mutation.namespace, title: result.mutation.title, revisionId: result.mutation.revisionId, revisionNo: result.mutation.revisionNo, attributionProfileId: result.request.createdBy.toString(), editRequestId: result.request.id.toString() }
+      metadata: {
+        namespace: result.mutation.namespace,
+        title: result.mutation.title,
+        revisionId: result.mutation.revisionId,
+        revisionNo: result.mutation.revisionNo,
+        attributionProfileId: result.request.createdBy?.toString() ?? null,
+        attributionType: result.request.submitterType,
+        editRequestId: result.request.id.toString()
+      }
     });
     return result;
   }
@@ -1144,6 +1156,7 @@ export class WikiEditService {
       if (!request || !this.hasCreateTarget(request) || request.targetNamespaceId !== initial.targetNamespaceId) {
         throw new NotFoundException('Wiki create request not found.');
       }
+      if (request.createdBy === null) throw new BadRequestException('Anonymous contributors cannot create documents.');
       await this.contributionPolicies.assertStoredVersionCurrent(
         request.targetSpaceId,
         request.contributionPolicyVersion,
@@ -2413,7 +2426,9 @@ export class WikiEditService {
       contentRaw: string;
       editSummary?: string | null;
       isMinor: boolean;
-      actorId: bigint;
+      actorId: bigint | null;
+      actorType?: 'user' | 'ip';
+      actorIpHash?: string | null;
       title: string;
       namespaceCode: string;
       pageTitle: string;
@@ -2444,11 +2459,11 @@ export class WikiEditService {
         isMinor: input.isMinor,
         editTags: input.editTags ?? null,
         createdBy: input.actorId,
-        actorType: 'user',
-        actorUserId: input.actorId,
+        actorType: input.actorType ?? 'user',
+        actorUserId: input.actorType === 'ip' ? null : input.actorId,
         actorIp: null,
         actorIpText: null,
-        actorIpHash: null,
+        actorIpHash: input.actorIpHash ?? null,
         createdAt: input.createdAt,
         visibility: 'public'
       }
@@ -2533,7 +2548,7 @@ export class WikiEditService {
     input: {
       pageId: bigint;
       revisionId: bigint | null;
-      actorId: bigint;
+      actorId: bigint | null;
       changeType: ChangeType;
       title: string;
       namespaceCode: string;

@@ -918,6 +918,48 @@ test('new-page request acceptance creates the page and first revision atomically
   assert.equal(accepted.request.pageId, 80n);
 });
 
+test('anonymous request approval attribution creates an IP revision without exposing a raw address', async () => {
+  let stored: Record<string, unknown> | null = null;
+  const prisma = {
+    wikiPageRevision: {
+      async create(args: { data: Record<string, unknown> }) {
+        stored = args.data;
+        return { id: 91n, pageId: 7n, revisionNo: 2, contentSize: 5, editSummary: '익명 제안', isMinor: false };
+      },
+    },
+    wikiPageRenderCache: { async create() { return {}; } },
+  } as unknown as PrismaService;
+  const service = new WikiEditService(
+    prisma,
+    {} as WikiProfileService,
+    {} as WikiPermissionService,
+  ) as unknown as {
+    createRevision(tx: PrismaService, input: Record<string, unknown>): Promise<unknown>;
+  };
+  await service.createRevision(prisma, {
+    pageId: 7n,
+    revisionNo: 2,
+    parentRevisionId: 90n,
+    contentRaw: '제안 내용',
+    editSummary: '익명 제안',
+    isMinor: false,
+    actorId: null,
+    actorType: 'ip',
+    actorIpHash: 'a'.repeat(64),
+    title: '문서',
+    namespaceCode: 'main',
+    pageTitle: '문서',
+    pageLocalPath: '문서',
+    createdAt: new Date('2026-07-19T00:00:00Z'),
+  });
+  assert.equal(stored?.createdBy, null);
+  assert.equal(stored?.actorType, 'ip');
+  assert.equal(stored?.actorUserId, null);
+  assert.equal(stored?.actorIpHash, 'a'.repeat(64));
+  assert.equal(stored?.actorIp, null);
+  assert.equal(stored?.actorIpText, null);
+});
+
 test('request page types cannot override the space invariant', async () => {
   const prisma = {
     wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },

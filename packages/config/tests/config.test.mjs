@@ -43,6 +43,16 @@ test('production config accepts complete environment', () => {
   assert.equal(config.get('APP_ENCRYPTION_KEY'), 'base64-production-key');
 });
 
+test('anonymous wiki edit requests require a dedicated private hash key and matching public UI flag', () => {
+  const enabled = validProductionEnv();
+  enabled.WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED = 'true';
+  assert.throws(() => new ConfigService(enabled), /WIKI_ANONYMOUS_IP_HASH_SECRET is required/);
+  enabled.WIKI_ANONYMOUS_IP_HASH_SECRET = 'dedicated-anonymous-ip-secret';
+  assert.throws(() => new ConfigService(enabled), /NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED must be true/);
+  enabled.NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED = 'true';
+  assert.doesNotThrow(() => new ConfigService(enabled));
+});
+
 test('Paddle shadow mode requires a webhook secret only when enabled', () => {
   const disabled = validProductionEnv();
   disabled.PADDLE_MODE = 'off';

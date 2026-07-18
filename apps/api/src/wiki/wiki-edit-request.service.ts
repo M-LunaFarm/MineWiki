@@ -1,4 +1,7 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { createHmac } from 'node:crypto';
+import { ConfigService } from '@minewiki/config';
+import { normalizeIpOrCidr } from '@minewiki/security';
 import { wikiUrl } from '@minewiki/wiki-core';
 import type { Prisma, WikiEditRequest } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -30,7 +33,7 @@ export interface WikiEditRequestSummary {
   readonly editSummaryHidden: boolean;
   readonly isMinor: boolean;
   readonly status: string;
-  readonly createdBy: string;
+  readonly createdBy: string | null;
   readonly createdByName: string;
   readonly reviewedBy: string | null;
   readonly reviewedByName: string | null;
@@ -103,9 +106,19 @@ export class WikiEditRequestService {
     @Optional() private readonly notifications?: WikiNotificationService,
     @Optional() private readonly routePaths?: WikiRoutePathResolver,
     @Optional() contributionPolicies?: WikiContributionPolicyService,
+    @Optional() private readonly config?: ConfigService,
   ) {
     this.contributionPolicies = contributionPolicies
       ?? new WikiContributionPolicyService(prisma);
+  }
+
+  assertAnonymousSubmissionEnabled(): void {
+    if (this.config?.getOptional('WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED') !== 'true') {
+      throw new ForbiddenException({
+        code: 'WIKI_ANONYMOUS_EDIT_REQUESTS_DISABLED',
+        message: '익명 편집 요청이 활성화되지 않았습니다.',
+      });
+    }
   }
 
   async listGlobal(
@@ -454,6 +467,95 @@ export class WikiEditRequestService {
     return (await this.present([request]))[0]!;
   }
 
+  async createAnonymous(
+    pageId: string,
+    input: {
+      readonly baseRevisionId?: string;
+      readonly contentRaw?: string;
+      readonly editSummary?: string;
+      readonly isMinor?: boolean;
+      readonly policyAcceptance?: WikiPolicyAcceptance;
+    },
+    requestIp: string,
+  ): Promise<WikiEditRequestSummary> {
+    this.assertAnonymousSubmissionEnabled();
+    const parsedPageId = this.id(pageId, 'pageId');
+    const baseRevisionId = this.id(this.required(input.baseRevisionId, 'baseRevisionId'), 'baseRevisionId');
+    const content = this.required(input.contentRaw, 'contentRaw');
+    if (hasWikiConflictMarkers(content)) throw new BadRequestException('Resolve every wiki edit conflict marker before submitting.');
+    this.assertContentBounds(content);
+    const summary = this.required(input.editSummary, 'editSummary');
+    if (summary.length > 255) throw new BadRequestException('editSummary is too long.');
+    const ipHash = this.anonymousIpHash(requestIp);
+    const now = new Date();
+    const request = await this.prisma.$transaction(async (tx) => {
+      await this.lockPage(tx, parsedPageId);
+      const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
+      if (!page || page.status !== 'normal' || page.pageType !== 'article' || page.ownerProfileId !== null
+          || !['open', 'review_required'].includes(page.protectionLevel)) {
+        throw new NotFoundException('Wiki page not found.');
+      }
+      await this.permissions.assertCanUsePageAction({
+        actor: null,
+        accountId: null,
+        requestIp,
+        action: 'edit_request',
+        page,
+        store: tx,
+      });
+      const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
+        page.spaceId,
+        input.policyAcceptance,
+        tx,
+      );
+      if (page.currentRevisionId !== baseRevisionId) {
+        throw new ConflictException('The document changed before this edit request was submitted.');
+      }
+      const openAnonymousCount = await tx.wikiEditRequest.count({
+        where: { pageId: page.id, submitterType: 'ip', status: { in: ['pending', 'reviewing'] } },
+      });
+      if (openAnonymousCount >= 20) {
+        throw new HttpException({
+          code: 'WIKI_ANONYMOUS_EDIT_REQUEST_QUEUE_FULL',
+          message: '이 문서의 익명 편집 요청 검토 대기열이 가득 찼습니다.',
+        }, HttpStatus.TOO_MANY_REQUESTS);
+      }
+      const duplicate = await tx.wikiEditRequest.findFirst({
+        where: {
+          pageId: page.id,
+          submitterIpHash: ipHash,
+          status: { in: ['pending', 'reviewing'] },
+        },
+        select: { id: true },
+      });
+      if (duplicate) throw new ConflictException('This anonymous contributor already has an open edit request for this document.');
+      return tx.wikiEditRequest.create({
+        data: {
+          pageId: page.id,
+          baseRevisionId,
+          proposedContent: content,
+          editSummary: summary,
+          isMinor: Boolean(input.isMinor),
+          status: 'pending',
+          createdBy: null,
+          submitterType: 'ip',
+          submitterIpHash: ipHash,
+          contributionPolicyVersion,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    });
+    await this.events?.audit('wiki.edit_request.create_anonymous', {
+      category: 'wiki',
+      subjectType: 'wiki_edit_request',
+      subjectId: request.id.toString(),
+      ipAddress: requestIp,
+      metadata: { pageId: parsedPageId.toString(), submitterType: 'ip' },
+    });
+    return (await this.present([request]))[0]!;
+  }
+
   async createForNewPage(
     session: SessionPayload,
     input: {
@@ -603,14 +705,16 @@ export class WikiEditRequestService {
         }
       });
       if (result.count !== 1) throw new ConflictException('This edit request is no longer pending.');
-      await this.notifications?.notifyEditRequestReviewed(tx, {
-        profileId: request.createdBy,
-        pageId: page?.id ?? null,
-        requestId: request.id,
-        reviewerProfileId: reviewer.id,
-        status: 'rejected',
-        title: page?.displayTitle ?? (this.hasCreateTarget(request) ? request.targetDisplayTitle : '새 문서')
-      });
+      if (request.createdBy !== null) {
+        await this.notifications?.notifyEditRequestReviewed(tx, {
+          profileId: request.createdBy,
+          pageId: page?.id ?? null,
+          requestId: request.id,
+          reviewerProfileId: reviewer.id,
+          status: 'rejected',
+          title: page?.displayTitle ?? (this.hasCreateTarget(request) ? request.targetDisplayTitle : '새 문서')
+        });
+      }
       return tx.wikiEditRequest.findUniqueOrThrow({ where: { id: request.id } });
     });
     await this.audit('wiki.edit_request.reject', session, reviewer.id, page?.id ?? null, request.id, this.hasCreateTarget(request) ? {
@@ -1002,7 +1106,10 @@ export class WikiEditRequestService {
         targetDisplayTitle: request.targetDisplayTitle,
         proposedContent: request.proposedContent, editSummary: publicSummary.summary, editSummaryHidden: publicSummary.summaryHidden,
         isMinor: request.isMinor, status: request.status,
-        createdBy: request.createdBy.toString(), createdByName: names.get(request.createdBy) ?? '알 수 없는 사용자',
+        createdBy: request.createdBy?.toString() ?? null,
+        createdByName: request.createdBy
+          ? names.get(request.createdBy) ?? '알 수 없는 사용자'
+          : '익명 기여자',
         reviewedBy: request.reviewedBy?.toString() ?? null, reviewedByName: request.reviewedBy ? names.get(request.reviewedBy) ?? '알 수 없는 사용자' : null,
         reviewNote: request.reviewNote, acceptedRevisionId: request.acceptedRevisionId?.toString() ?? null,
         contributionPolicyVersion: request.contributionPolicyVersion,
@@ -1012,6 +1119,18 @@ export class WikiEditRequestService {
   }
 
   private required(value: string | undefined, label: string) { const result = value?.trim(); if (!result) throw new BadRequestException(`${label} is required.`); return result; }
+  private anonymousIpHash(requestIp: string): string {
+    const key = this.config?.getOptional('WIKI_ANONYMOUS_IP_HASH_SECRET');
+    if (!key) throw new ForbiddenException('Anonymous edit request attribution is unavailable.');
+    let normalized: string;
+    try {
+      const parsed = normalizeIpOrCidr(requestIp);
+      normalized = parsed.address;
+    } catch {
+      throw new ForbiddenException('Anonymous edit request attribution is unavailable.');
+    }
+    return createHmac('sha256', key).update(`wiki-edit-request-ip:v1:${normalized}`).digest('hex');
+  }
   private id(value: string, label: string) { if (!/^\d+$/.test(value)) throw new BadRequestException(`${label} must be an unsigned integer.`); return BigInt(value); }
   private note(value?: string) { const note = value?.trim() || null; if (note && note.length > 1000) throw new BadRequestException('reviewNote is too long.'); return note; }
   private assertContentBounds(contentRaw: string): void {

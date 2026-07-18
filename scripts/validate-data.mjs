@@ -215,6 +215,20 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'WikiEditRequest has exactly one private submitter identity',
+    `
+      SELECT id
+      FROM wiki_edit_requests
+      WHERE NOT (
+        (submitter_type = 'user' AND created_by IS NOT NULL AND submitter_ip_hash IS NULL)
+        OR
+        (submitter_type = 'ip' AND created_by IS NULL AND submitter_ip_hash REGEXP '^[0-9a-f]{64}$')
+      )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'ServerWiki layout keys and premium entitlements are valid',
     `
       SELECT sw.id
