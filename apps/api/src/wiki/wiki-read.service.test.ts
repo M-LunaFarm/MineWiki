@@ -2091,7 +2091,7 @@ test('contribution tabs expose discussion, edit-request, and reviewer ledgers', 
     wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '토론 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
     wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '문서 방향', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
     wikiEditRequest: { async findMany() { return [editRequest]; } },
-    wikiPageRevision: { async findMany() { return [{ id: 201n, editSummaryHidden: true }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 200n, editSummaryHidden: false }, { id: 201n, editSummaryHidden: true }]; } },
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
   } as unknown as PrismaService;
@@ -2222,13 +2222,14 @@ test('server wiki discussion contributions keep the canonical workspace route', 
     wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '토론 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
     wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '문서 방향', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
     wikiEditRequest: { async findMany() { return [{ id: 31n, pageId: 20n, baseRevisionId: 200n, proposedContent: '내용', editSummary: '수정 제안', isMinor: false, status: 'accepted', createdBy: 5n, reviewedBy: 5n, reviewNote: '승인함', acceptedRevisionId: 201n, createdAt: now, updatedAt: now, reviewedAt: now }]; } },
-    wikiPageRevision: { async findMany() { return [{ id: 201n, editSummaryHidden: false }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 200n, editSummaryHidden: false }, { id: 201n, editSummaryHidden: false }]; } },
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
-    serverWiki: { async findMany() { return [{ spaceId: 9n, slug: 'luna', siteSlug: 'luna-docs' }]; } }
+    serverWiki: { async findMany() { return [{ id: 50n, spaceId: 9n, slug: 'luna', siteSlug: 'luna-docs', status: 'active', publicationStatus: 'published', publishedReleaseId: 70n }]; } }
   } as unknown as PrismaService;
   const permissions = {
     async assertCanReadPage() {},
+    async canPreviewServerWikiSpace() { return true; },
     async filterReadableThreads({ items }: { items: unknown[] }) { return items; }
   } as unknown as WikiPermissionService;
 
@@ -2240,6 +2241,54 @@ test('server wiki discussion contributions keep the canonical workspace route', 
   const requests = await new WikiReadService(prisma, permissions).getContributions({ profileId: '5', activity: 'edit-requests' });
   assert.equal(requests.items[0]?.routePath, '/serverWiki/luna-docs/API/requests');
   assert.equal(requests.items[0]?.href, '/serverWiki/luna-docs/_tools/requests/API/requests?request=31');
+});
+
+test('server wiki discussion contributions use released identity and conceal unpublished draft pages', async () => {
+  const now = new Date('2026-07-19T07:00:00.000Z');
+  const page = {
+    id: 20n, namespaceId: 2, spaceId: 9n, slug: 'draft-page', title: 'luna/draft-page', displayTitle: '초안 문서',
+    currentRevisionId: 201n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 5n,
+    createdAt: now, updatedAt: now, localPath: 'luna/draft-page',
+  };
+  const wiki = {
+    id: 50n, spaceId: 9n, slug: 'luna', siteSlug: 'public-docs', status: 'active',
+    publicationStatus: 'published', publishedReleaseId: 70n as bigint | null, publishedRelease: { publishedAt: new Date('2026-07-19T05:00:00.000Z') },
+  };
+  const releaseItem = {
+    id: 80n, releaseId: 70n, serverWikiId: 50n, spaceId: 9n, pageId: 20n, revisionId: 200n,
+    namespaceId: 2, slug: 'luna/public-page', title: 'luna/public-page', displayTitle: '공개 문서', localPath: 'luna/public-page',
+    pageType: 'article', protectionLevel: 'open', pageStatus: 'normal', createdBy: 5n, ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-19T04:00:00.000Z'), searchVector: '', createdAt: now,
+  };
+  let preview = false;
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; } },
+    wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '배포 후 토론', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
+    wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '문서 방향', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 201n }]; } },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: 2, code: 'server' }]; } },
+    serverWiki: { async findMany() { return [wiki]; } },
+    serverWikiReleaseItem: { async findMany() { return [releaseItem]; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return preview; },
+    async filterReadableThreads({ items }: { items: unknown[] }) { return items; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const publicResult = await service.getContributions({ profileId: '5', activity: 'discussions' });
+  assert.equal(publicResult.items[0]?.routePath, '/serverWiki/public-docs/public-page');
+  assert.equal(publicResult.items[0]?.href, '/serverWiki/public-docs/_tools/discuss/public-page?thread=40&comment=41');
+
+  wiki.publicationStatus = 'draft';
+  wiki.publishedReleaseId = null;
+  const unpublished = await service.getContributions({ profileId: '5', activity: 'discussions' });
+  assert.deepEqual(unpublished.items, []);
+
+  preview = true;
+  const previewResult = await service.getContributions({ profileId: '5', activity: 'discussions' });
+  assert.equal(previewResult.items[0]?.routePath, '/serverWiki/public-docs/draft-page');
 });
 
 test('discussion contributions omit threads hidden by thread ACL in one batch', async () => {
@@ -2254,6 +2303,7 @@ test('discussion contributions omit threads hidden by thread ACL in one batch', 
     wikiProfile: { async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; } },
     wikiDiscussionComment: { async findMany() { return [{ id: 41n, threadId: 40n, content: '비공개 의견', status: 'normal', createdBy: 5n, createdAt: now, updatedAt: null }]; } },
     wikiDiscussionThread: { async findMany() { return [{ id: 40n, pageId: 20n, title: '비공개 토론', status: 'open', createdBy: 5n, createdAt: now, updatedAt: now, pinnedCommentId: null }]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 200n }]; } },
     wikiPage: { async findMany() { return [page]; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
   } as unknown as PrismaService;

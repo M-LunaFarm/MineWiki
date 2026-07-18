@@ -1911,21 +1911,18 @@ export class WikiReadService {
     const pageIds = [...new Set(threads.map((thread) => thread.pageId))];
     const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
     const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
-    const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    const routePaths = await this.routePaths.preload(pages, namespaceById);
-    const viewerProfile = input.session
-      ? await this.prisma.wikiProfile.findUnique({
-          where: { accountId: input.session.userId },
-          select: { id: true, status: true }
-        })
-      : null;
-    const actor = input.session && viewerProfile
-      ? this.wikiPermissions.actorFromSession(input.session, viewerProfile)
-      : undefined;
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.session ?? input.accountId ?? null,
+    );
+    const projection = await this.projectDerivedPagesWithContext(pages, namespaceById, access);
+    const pageById = new Map(projection.pages.map((page) => [page.id, page]));
+    const routePaths = await this.routePaths.preload(projection.pages, namespaceById);
     const readableThreadIds = new Set((await this.wikiPermissions.filterReadableThreads({
       accountId: input.accountId,
-      actor,
+      actor: access.actor ?? undefined,
       items: threads.flatMap((thread) => {
         const page = pageById.get(thread.pageId);
         return page ? [{ thread, page }] : [];
