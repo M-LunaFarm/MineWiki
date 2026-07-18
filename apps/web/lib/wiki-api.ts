@@ -110,6 +110,29 @@ export interface WikiPageResponse {
     readonly isOnline: boolean | null;
     readonly playersOnline: number | null;
     readonly playersMax: number | null;
+    readonly directoryOverview: {
+      readonly path: string;
+      readonly shortDescription: string;
+      readonly tags: readonly string[];
+      readonly verificationGrade: 'Verified' | 'Unverified';
+      readonly rank: {
+        readonly current: number;
+        readonly delta24h: number;
+        readonly best: number;
+        readonly updatedAt: string;
+      } | null;
+      readonly votes24h: number;
+      readonly votesMonthly: number | null;
+      readonly reviewsCount: number;
+      readonly live: {
+        readonly isOnline: boolean | null;
+        readonly playersOnline: number | null;
+        readonly playersMax: number | null;
+        readonly updatedAt: string | null;
+      };
+      readonly websiteUrl: string | null;
+      readonly discordUrl: string | null;
+    } | null;
     readonly publicationStatus: 'draft' | 'published' | 'unpublished';
     readonly layout: 'docs' | 'handbook' | 'brand';
     readonly navigationKey: string;

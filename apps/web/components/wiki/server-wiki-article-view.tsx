@@ -17,6 +17,7 @@ import { WikiPageTools } from './wiki-page-tools';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
 import { serverWikiDocumentTitle } from '../../lib/server-wiki-navigation.mjs';
+import { ServerWikiDirectoryOverview } from './server-wiki-directory-overview';
 
 interface ServerWikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -60,6 +61,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
       : 'lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_292px]';
   const editPath = buildServerWikiToolPath(routePath, 'edit');
   const isWikiHome = currentIndex === 0;
+  const directoryOverview = isWikiHome ? wiki.directoryOverview : null;
   const startHereDocuments = isWikiHome
     ? pageNavigation.filter((item) => !item.current).slice(0, 6)
     : [];
@@ -107,7 +109,11 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
             <p className="mt-5 text-sm text-[#888]">{routePath} · 최근 수정 {updatedAt}</p>
           </header>
 
-          {address && !isHandbook ? (
+          {directoryOverview ? (
+            <ServerWikiDirectoryOverview name={wiki.name} address={address} overview={directoryOverview} />
+          ) : null}
+
+          {address && !isHandbook && !directoryOverview ? (
             isBrand ? (
               <section className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-[#dedede] border-l-4 border-l-[#346ddb] bg-[#fafafa] px-6 py-5 text-sm">
                 <span className="font-mono font-semibold text-[#2458bd]">{address}</span><span className="text-[#aaa]">•</span><span>에디션: {wiki.edition}</span><span className="text-[#aaa]">•</span><span>지원 버전: {wiki.supportedVersions ?? '정보 없음'}</span>
