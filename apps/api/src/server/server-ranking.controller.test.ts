@@ -17,6 +17,9 @@ test('ranking controller normalizes filters and pagination', async () => {
           pageSize: 12,
           totalPages: 0,
           rankUpdatedAt: null,
+          rankEpoch: null,
+          rankStatus: 'empty' as const,
+          unrankedCount: 0,
         };
       },
     } as never,
@@ -36,6 +39,7 @@ test('ranking controller normalizes filters and pagination', async () => {
     '2',
     '12',
     'true',
+    '2026-07-11T00:45:00.000Z',
   );
 
   assert.equal(result.page, 2);
@@ -49,6 +53,7 @@ test('ranking controller normalizes filters and pagination', async () => {
       sort: 'playersOnline_desc',
       page: 2,
       pageSize: 12,
+      rankEpoch: '2026-07-11T00:45:00.000Z',
     },
   ]);
 });
@@ -64,7 +69,7 @@ test('ranking controller rejects oversized page sizes and unknown sorts', () => 
   );
 
   assert.throws(
-    () => controller.rankings(undefined, undefined, undefined, undefined, 'paid', '1', '500', undefined),
+    () => controller.rankings(undefined, undefined, undefined, undefined, 'paid', '1', '500', undefined, undefined),
     (error: unknown) => error instanceof ZodError,
   );
 });

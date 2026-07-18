@@ -28,7 +28,7 @@ import {
   getServerPreviewSeed,
 } from '../../lib/server-preview';
 import { buildServerPath } from '../../lib/server-routes';
-import { fetchServerRankings } from '../../lib/api';
+import { fetchServerRankings, RankingEpochConflictError } from '../../lib/api';
 
 const PAGE_SIZE = 6;
 
@@ -109,6 +109,7 @@ export function ServerListExplorer({
   const [retryToken, setRetryToken] = useState(0);
   const didMountRef = useRef(false);
   const didFetchRef = useRef(false);
+  const rankEpochRef = useRef(initialRanking.rankEpoch);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -142,6 +143,10 @@ export function ServerListExplorer({
   const totalPages = Math.max(1, ranking.totalPages);
   const onlineCount = ranking.summary.online;
   const verifiedCount = ranking.summary.verified;
+  const hasOnlyUnrankedServers =
+    sort === 'votes24h_desc' &&
+    ranking.total === 0 &&
+    ranking.unrankedCount > 0;
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -194,8 +199,12 @@ export function ServerListExplorer({
           sort,
           page: currentPage,
           pageSize: PAGE_SIZE,
+          rankEpoch: sort === 'votes24h_desc' && currentPage > 1
+            ? rankEpochRef.current ?? undefined
+            : undefined,
         });
         if (controller.signal.aborted) return;
+        rankEpochRef.current = nextRanking.rankEpoch;
         setRanking((current) => {
           if (currentPage === 1) return nextRanking;
           const knownIds = new Set(current.items.map((item) => item.id));
@@ -207,6 +216,12 @@ export function ServerListExplorer({
 
       } catch (error) {
         if (controller.signal.aborted) return;
+        if (error instanceof RankingEpochConflictError && currentPage > 1) {
+          rankEpochRef.current = null;
+          setCurrentPage(1);
+          setRetryToken((value) => value + 1);
+          return;
+        }
         console.error('Failed to refresh server rankings', error);
         setLoadError('서버 순위 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.');
       } finally {
@@ -304,6 +319,11 @@ export function ServerListExplorer({
                 {ranking.rankUpdatedAt ? (
                   <span className="hidden text-xs text-gray-500 sm:inline">
                     순위 기준 {formatRankUpdatedAt(ranking.rankUpdatedAt)}
+                  </span>
+                ) : null}
+                {sort === 'votes24h_desc' && ranking.unrankedCount > 0 ? (
+                  <span className="hidden text-xs text-amber-700 sm:inline">
+                    순위 미집계 {ranking.unrankedCount.toLocaleString('ko-KR')}개
                   </span>
                 ) : null}
                 {loading ? <span className="text-xs text-[#13ec80]">순위 갱신 중</span> : null}
@@ -445,6 +465,23 @@ export function ServerListExplorer({
                   className="rounded-lg bg-[#13ec80] px-4 py-2 text-sm font-bold text-[#07100b] transition hover:bg-[#38f09b] disabled:cursor-wait disabled:opacity-60"
                 >
                   {loading ? '다시 연결 중' : '다시 시도'}
+                </button>
+              </section>
+            ) : servers.length === 0 && hasOnlyUnrankedServers ? (
+              <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-amber-700/30 bg-amber-500/[0.04] px-6 py-16 text-center">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-amber-500/10">
+                  <Activity className="h-7 w-7 text-amber-300" />
+                </div>
+                <h2 className="mb-2 text-lg font-bold text-white">아직 집계된 투표 순위가 없습니다</h2>
+                <p className="mb-6 max-w-md text-sm leading-6 text-gray-400">
+                  유효한 투표가 생긴 서버부터 다음 정기 집계에 순위가 표시됩니다. 등록된 서버는 최신 등록순에서 먼저 둘러볼 수 있습니다.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSort('latest')}
+                  className="rounded-lg bg-[#13ec80] px-4 py-2 text-sm font-bold text-[#07100b] transition hover:bg-[#38f09b]"
+                >
+                  등록된 서버 둘러보기
                 </button>
               </section>
             ) : servers.length === 0 ? (

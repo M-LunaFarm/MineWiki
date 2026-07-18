@@ -382,6 +382,9 @@ export const serverRankingResponseSchema = z.object({
   pageSize: z.number().int().positive(),
   totalPages: z.number().int().nonnegative(),
   rankUpdatedAt: z.string().datetime().nullable(),
+  rankEpoch: z.string().datetime().nullable(),
+  rankStatus: z.enum(['ready', 'empty']),
+  unrankedCount: z.number().int().nonnegative(),
 });
 
 export const serverRegistrationSchema = z.object({

@@ -819,7 +819,8 @@ test('paginated rankings apply server-side filters and return page metadata', as
         return { _max: { rankCalculatedAt: new Date('2026-07-11T00:45:00.000Z') } };
       },
     },
-    $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
+    $transaction: async (operation: ((store: unknown) => Promise<unknown>) | Promise<unknown>[]) =>
+      typeof operation === 'function' ? operation(prisma) : Promise.all(operation),
   };
   const service = new ServerService({} as never, prisma as never, {} as never);
 
@@ -840,22 +841,73 @@ test('paginated rankings apply server-side filters and return page metadata', as
   assert.equal(result.totalPages, 3);
   assert.deepEqual(result.summary, { online: 25, verified: 25, votes24h: 420 });
   assert.equal(result.rankUpdatedAt, '2026-07-11T00:45:00.000Z');
+  assert.equal(result.rankEpoch, '2026-07-11T00:45:00.000Z');
+  assert.equal(result.rankStatus, 'ready');
+  assert.equal(result.unrankedCount, 0);
   assert.equal(result.items[0]?.rank?.updatedAt, '2026-07-11T00:45:00.000Z');
   assert.equal(result.items[0]?.rank?.current, 2);
-  assert.equal(queries.length, 6);
-  assert.deepEqual((queries[0] as { skip: number; take: number }).skip, 12);
-  assert.deepEqual((queries[0] as { skip: number; take: number }).take, 12);
-  assert.deepEqual((queries[0] as { orderBy: unknown }).orderBy, [
+  assert.equal(queries.length, 7);
+  assert.deepEqual((queries[1] as { skip: number; take: number }).skip, 12);
+  assert.deepEqual((queries[1] as { skip: number; take: number }).take, 12);
+  assert.deepEqual((queries[1] as { orderBy: unknown }).orderBy, [
     { isOnline: { sort: 'desc', nulls: 'last' } },
     { playersOnline: { sort: 'desc', nulls: 'last' } },
     { name: 'asc' },
   ]);
   assert.deepEqual(
-    (queries[0] as { where: { tags: unknown } }).where.tags,
+    (queries[1] as { where: { tags: unknown } }).where.tags,
     { array_contains: ['survival'] },
   );
-  assert.equal((queries[0] as { where: { isOnline: unknown } }).where.isOnline, true);
-  assert.equal((queries[0] as { where: { listingStatus: unknown } }).where.listingStatus, 'active');
+  assert.equal((queries[1] as { where: { isOnline: unknown } }).where.isOnline, true);
+  assert.equal((queries[1] as { where: { listingStatus: unknown } }).where.listingStatus, 'active');
+});
+
+test('canonical rankings read one completed epoch and reject stale continuation pages', async () => {
+  const epoch = new Date('2026-07-18T04:00:00.000Z');
+  const findQueries: Array<Record<string, unknown>> = [];
+  const prisma = {
+    server: {
+      findMany: async (query: Record<string, unknown>) => {
+        findQueries.push(query);
+        return [];
+      },
+      count: async ({ where }: { where: { AND?: unknown } }) => where.AND ? 2 : 10,
+      aggregate: async () => ({ _sum: { votes24h: 12 } }),
+    },
+    serverStats: {
+      aggregate: async () => ({ _max: { rankCalculatedAt: epoch } }),
+    },
+    $transaction: async (operation: (store: unknown) => Promise<unknown>) => operation(prisma),
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const result = await service.rankings({
+    sort: 'votes24h_desc',
+    page: 2,
+    pageSize: 6,
+    rankEpoch: epoch.toISOString(),
+  });
+
+  assert.equal(result.rankEpoch, epoch.toISOString());
+  assert.equal(result.unrankedCount, 8);
+  assert.deepEqual(findQueries[0]?.orderBy, [
+    { stats: { rankCurrent: 'asc' } },
+    { name: 'asc' },
+  ]);
+  assert.deepEqual(
+    (findQueries[0]?.where as { AND: unknown[] }).AND[1],
+    { stats: { is: { rankCalculatedAt: epoch, rankCurrent: { gt: 0 } } } },
+  );
+
+  await assert.rejects(
+    () => service.rankings({
+      sort: 'votes24h_desc',
+      page: 3,
+      pageSize: 6,
+      rankEpoch: '2026-07-18T03:00:00.000Z',
+    }),
+    /ranking snapshot changed/i,
+  );
 });
 
 test('public server list includes only active listings', async () => {

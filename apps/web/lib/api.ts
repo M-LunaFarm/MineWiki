@@ -59,6 +59,14 @@ export interface ServerRankingOptions {
     | 'name_asc';
   readonly page?: number;
   readonly pageSize?: number;
+  readonly rankEpoch?: string;
+}
+
+export class RankingEpochConflictError extends Error {
+  constructor() {
+    super('The ranking snapshot changed.');
+    this.name = 'RankingEpochConflictError';
+  }
 }
 
 interface ServerReviewOptions {
@@ -92,6 +100,9 @@ export async function fetchServerRankings(
   );
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    if (response.status === 409) {
+      throw new RankingEpochConflictError();
+    }
     throw new Error(body?.message ?? 'Failed to load server rankings.');
   }
   return serverRankingResponseSchema.parse(await response.json());

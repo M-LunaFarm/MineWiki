@@ -80,6 +80,9 @@ export default async function ServerListPage({ searchParams }: PageProps) {
     pageSize: 6,
     totalPages: 0,
     rankUpdatedAt: null,
+    rankEpoch: null,
+    rankStatus: 'empty',
+    unrankedCount: 0,
   };
   let initialLoadError: string | null = null;
   try {

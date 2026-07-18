@@ -109,6 +109,7 @@ const rankingQuerySchema = z.object({
     .default('votes24h_desc'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(24),
+  rankEpoch: z.string().datetime().optional(),
 });
 
 type RequiredServerRegistrationPayload =
@@ -154,6 +155,7 @@ export class ServerController {
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('online') online?: string,
+    @Query('rankEpoch') rankEpoch?: string,
   ): Promise<ServerRankingResponse> {
     const query = rankingQuerySchema.parse({
       edition: edition?.trim() || undefined,
@@ -164,6 +166,7 @@ export class ServerController {
       page: page?.trim() || undefined,
       pageSize: pageSize?.trim() || undefined,
       online: online?.trim() || undefined,
+      rankEpoch: rankEpoch?.trim() || undefined,
     });
     return this.serverService.rankings({
       edition: query.edition,
@@ -174,6 +177,7 @@ export class ServerController {
       sort: query.sort ?? 'votes24h_desc',
       page: query.page ?? 1,
       pageSize: query.pageSize ?? 24,
+      rankEpoch: query.rankEpoch,
     });
   }
 

@@ -154,9 +154,10 @@ export class ServerService {
     readonly sort: ServerSort;
     readonly page: number;
     readonly pageSize: number;
+    readonly rankEpoch?: string;
   }) {
     const search = input.search?.trim();
-    const where: Prisma.ServerWhereInput = {
+    const baseWhere: Prisma.ServerWhereInput = {
       listingStatus: PUBLIC_SERVER_LISTING_STATUS,
       edition: input.edition,
       isOnline: input.online,
@@ -176,48 +177,72 @@ export class ServerService {
         : undefined,
     };
     const skip = (input.page - 1) * input.pageSize;
-    const [servers, total, online, verified, voteAggregate, rankAggregate] =
-      await this.prisma.$transaction([
-        this.prisma.server.findMany({
+    return this.prisma.$transaction(async (tx) => {
+      const rankAggregate = await tx.serverStats.aggregate({
+        where: {
+          server: { listingStatus: PUBLIC_SERVER_LISTING_STATUS },
+          votesTotal: { gt: 0 },
+        },
+        _max: { rankCalculatedAt: true },
+      });
+      const rankEpoch = rankAggregate._max.rankCalculatedAt;
+      const requestedRankEpoch = input.rankEpoch ? new Date(input.rankEpoch) : null;
+      if (
+        input.sort === 'votes24h_desc'
+        && requestedRankEpoch
+        && requestedRankEpoch.getTime() !== rankEpoch?.getTime()
+      ) {
+        throw new ConflictException('The ranking snapshot changed. Restart from the first page.');
+      }
+      const where: Prisma.ServerWhereInput = input.sort === 'votes24h_desc'
+        ? {
+            AND: [
+              baseWhere,
+              { stats: { is: { rankCalculatedAt: rankEpoch ?? new Date(0), rankCurrent: { gt: 0 } } } },
+            ],
+          }
+        : baseWhere;
+      const [servers, total, baseTotal, online, verified, voteAggregate] = await Promise.all([
+        tx.server.findMany({
           where,
-          orderBy: buildOrder(input.sort),
+          orderBy: buildRankingOrder(input.sort),
           include: { stats: true },
           skip,
           take: input.pageSize,
         }),
-        this.prisma.server.count({ where }),
-        this.prisma.server.count({
+        tx.server.count({ where }),
+        tx.server.count({ where: baseWhere }),
+        tx.server.count({
           where: { AND: [where, { isOnline: true }] },
         }),
-        this.prisma.server.count({
+        tx.server.count({
           where: {
             AND: [where, { verificationGrade: { in: ['A', 'B', 'C'] } }],
           },
         }),
-        this.prisma.server.aggregate({
+        tx.server.aggregate({
           where,
           _sum: { votes24h: true },
         }),
-        this.prisma.serverStats.aggregate({
-          where: { server: where, votesTotal: { gt: 0 } },
-          _max: { rankCalculatedAt: true },
-        }),
       ]);
-    const items = servers.map((server) => toSummary(server));
-    const rankUpdatedAt = rankAggregate._max.rankCalculatedAt?.toISOString() ?? null;
-    return {
-      items,
-      total,
-      summary: {
-        online,
-        verified,
-        votes24h: voteAggregate._sum.votes24h ?? 0,
-      },
-      page: input.page,
-      pageSize: input.pageSize,
-      totalPages: total === 0 ? 0 : Math.ceil(total / input.pageSize),
-      rankUpdatedAt,
-    };
+      const rankUpdatedAt = rankEpoch?.toISOString() ?? null;
+      return {
+        items: servers.map((server) => toSummary(server)),
+        total,
+        summary: {
+          online,
+          verified,
+          votes24h: voteAggregate._sum.votes24h ?? 0,
+        },
+        page: input.page,
+        pageSize: input.pageSize,
+        totalPages: total === 0 ? 0 : Math.ceil(total / input.pageSize),
+        rankUpdatedAt,
+        rankEpoch: rankUpdatedAt,
+        rankStatus: rankEpoch ? 'ready' as const : 'empty' as const,
+        unrankedCount: Math.max(0, baseTotal - total),
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
   async detail(idOrShortCode: string, viewerAccountId?: string): Promise<ServerDetail> {
     const startedAt = Date.now();
@@ -2186,6 +2211,13 @@ export function buildOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationIn
         { name: 'asc' },
       ];
   }
+}
+
+export function buildRankingOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationInput[] {
+  if (sort === 'votes24h_desc') {
+    return [{ stats: { rankCurrent: 'asc' } }, { name: 'asc' }];
+  }
+  return buildOrder(sort);
 }
 
 function normalizeServerLookup(value: string): Prisma.ServerWhereUniqueInput {
