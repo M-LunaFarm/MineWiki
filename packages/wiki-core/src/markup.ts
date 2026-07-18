@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.23.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.24.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
@@ -1126,7 +1126,9 @@ function parseGitBookHtmlInline(
   const pattern = /<a\s+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>|<code>([\s\S]*?)<\/code>|<br\s*\/?>/giu;
   let lastIndex = 0;
   for (const match of sanitized.matchAll(pattern)) {
-    if ((match.index ?? 0) > lastIndex) appendGitBookHtmlText(nodes, sanitized.slice(lastIndex, match.index));
+    if ((match.index ?? 0) > lastIndex) {
+      appendGitBookHtmlInline(nodes, sanitized.slice(lastIndex, match.index), links, errors, blockingErrors, footnotes, linkResolution);
+    }
     if (/^<br/iu.test(match[0])) {
       nodes.push({ type: 'line_break' });
     } else if (match[3] !== undefined) {
@@ -1137,21 +1139,31 @@ function parseGitBookHtmlInline(
       if (/^(?:https?:\/\/|mailto:)/iu.test(href) || isSafeLocalHref(href)) {
         nodes.push({ type: 'external_link', href, label });
       } else {
-        appendGitBookHtmlText(nodes, label);
+        appendGitBookHtmlInline(nodes, label, links, errors, blockingErrors, footnotes, linkResolution);
       }
     }
     lastIndex = (match.index ?? 0) + match[0].length;
   }
-  if (lastIndex < sanitized.length) appendGitBookHtmlText(nodes, sanitized.slice(lastIndex));
+  if (lastIndex < sanitized.length) {
+    appendGitBookHtmlInline(nodes, sanitized.slice(lastIndex), links, errors, blockingErrors, footnotes, linkResolution);
+  }
   if (nodes.length === 0 && source.trim()) {
     return parseInline(decodeGitBookHtmlText(source), links, errors, blockingErrors, footnotes, linkResolution);
   }
   return nodes;
 }
 
-function appendGitBookHtmlText(nodes: InlineNode[], source: string) {
+function appendGitBookHtmlInline(
+  nodes: InlineNode[],
+  source: string,
+  links: Set<string>,
+  errors: string[],
+  blockingErrors: string[],
+  footnotes: string[],
+  linkResolution?: WikiLinkResolutionContext
+) {
   const text = decodeGitBookHtmlText(source);
-  if (text) nodes.push({ type: 'text', text });
+  if (text) nodes.push(...parseInline(text, links, errors, blockingErrors, footnotes, linkResolution));
 }
 
 function decodeGitBookHtmlText(source: string): string {

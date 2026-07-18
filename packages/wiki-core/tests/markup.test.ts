@@ -944,6 +944,25 @@ test('renders sanitized GitBook HTML tables only in GitBook compatibility mode',
   assert.equal(html.includes('data-header-hidden'), false);
 });
 
+test('parses wiki links inside GitBook HTML table text without exposing raw syntax', () => {
+  const parsed = parseMarkup([
+    '<table><tbody><tr>',
+    '<td>[[서버:example/시작하기|시작 가이드]]</td>',
+    '<td>[[서버:example/규칙]] · <code>/rules</code><br>[[일반 문서]]</td>',
+    '<td><script>alert(1)</script>[[서버:example/안전|안전]]</td>',
+    '</tr></tbody></table>'
+  ].join('\n'), { gitBookMarkdown: true });
+  const html = renderDocument(parsed.ast);
+
+  assert.deepEqual(parsed.links, ['서버:example/시작하기', '서버:example/규칙', '일반 문서', '서버:example/안전']);
+  assert.match(html, /<a class="wiki-link" href="\/server\/example\/%EC%8B%9C%EC%9E%91%ED%95%98%EA%B8%B0">시작 가이드<\/a>/u);
+  assert.match(html, /<a class="wiki-link" href="\/server\/example\/%EA%B7%9C%EC%B9%99">서버:example\/규칙<\/a> ·<code>\/rules<\/code><br \/>/u);
+  assert.match(html, /<a class="wiki-link" href="\/wiki\/%EC%9D%BC%EB%B0%98_%EB%AC%B8%EC%84%9C">일반 문서<\/a>/u);
+  assert.equal(html.includes('[['), false);
+  assert.equal(html.includes('<script'), false);
+  assert.equal(html.includes('alert(1)'), false);
+});
+
 test('renders safe GitBook Markdown links without leaking raw syntax or macro warnings', () => {
   const parsed = parseMarkup([
     '[rules](/server/example/notice/rules)',
