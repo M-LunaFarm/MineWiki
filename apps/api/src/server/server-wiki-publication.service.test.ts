@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { hashContent } from '@minewiki/wiki-core';
 import { ServerWikiPublicationService } from './server-wiki-publication.service';
+import { buildServerWikiMainPage, buildServerWikiStarterPages } from './server-wiki-scaffold';
 
 const serverId = '11111111-1111-4111-8111-111111111111';
 const ownerAccountId = '22222222-2222-4222-8222-222222222222';
@@ -19,6 +21,11 @@ interface FixtureOptions {
   readonly missingRoot?: boolean;
   readonly rootVisibility?: string;
   readonly invalidLink?: boolean;
+  readonly missingRequiredDocument?: boolean;
+  readonly placeholderRules?: boolean;
+  readonly shortIntroduction?: boolean;
+  readonly missingOfficialChannel?: boolean;
+  readonly staleSearchIndex?: boolean;
 }
 
 function createFixture(options: FixtureOptions = {}) {
@@ -37,6 +44,50 @@ function createFixture(options: FixtureOptions = {}) {
     publicationUpdatedAt: null as Date | null,
     publicationUpdatedBy: null as bigint | null,
   };
+  const server = {
+    id: serverId,
+    ownerAccountId,
+    wikiSpaceId: 77n,
+    wikiPageId: 100n,
+    wikiSlug: options.invalidLink ? 'other-server' : 'test-server',
+    name: 'Test Server',
+    joinHost: 'play.test-server.example',
+    joinPort: 25565,
+    edition: 'java',
+    supportedVersions: ['1.21'],
+    tags: ['survival'],
+    shortDescription: 'Test server summary',
+    longDescription: options.shortIntroduction
+      ? 'Short introduction.'
+      : 'This owner-provided server introduction is intentionally longer than eighty characters so publication readiness can verify factual body content.',
+    websiteUrl: options.missingOfficialChannel ? null : 'https://test-server.example',
+    discordUrl: null,
+  };
+  const starters = buildServerWikiStarterPages(server);
+  const sourceDocuments = [
+    { path: wiki.slug, contentRaw: buildServerWikiMainPage(server) },
+    ...starters.map((page) => ({
+      path: `${wiki.slug}/${page.path}`,
+      contentRaw: page.path === '규칙' && !options.placeholderRules
+        ? '= 공식 서버 규칙 =\n\n서버 운영자가 확인한 실제 플레이 및 커뮤니티 정책입니다.'
+        : page.contentRaw,
+    })),
+  ].filter((page) => !(options.missingRequiredDocument && page.path.endsWith('/FAQ')));
+  const documentRows = sourceDocuments.map((document, index) => ({
+    id: BigInt(100 + index),
+    localPath: document.path,
+    status: 'normal',
+    currentRevisionId: BigInt(200 + index),
+    searchDocument: {
+      revisionId: options.staleSearchIndex && index === 1 ? BigInt(999) : BigInt(200 + index),
+    },
+  }));
+  const revisionRows = sourceDocuments.map((document, index) => ({
+    id: BigInt(200 + index),
+    pageId: BigInt(100 + index),
+    visibility: index === 0 ? options.rootVisibility ?? 'public' : 'public',
+    contentHash: hashContent(document.contentRaw),
+  }));
   const audits: Array<Record<string, unknown>> = [];
   const isolationLevels: string[] = [];
   const lockQueries: string[] = [];
@@ -54,13 +105,7 @@ function createFixture(options: FixtureOptions = {}) {
     },
     server: {
       async findUnique() {
-        return {
-          id: serverId,
-          ownerAccountId,
-          wikiSpaceId: 77n,
-          wikiPageId: 100n,
-          wikiSlug: options.invalidLink ? 'other-server' : 'test-server',
-        };
+        return server;
       },
     },
     serverWiki: {
@@ -124,19 +169,18 @@ function createFixture(options: FixtureOptions = {}) {
         return { id: 100n, spaceId: 77n, status: 'normal', currentRevisionId: 200n };
       },
       async findMany() {
-        return options.missingRoot ? [] : [{ id: 100n, currentRevisionId: 200n }];
+        return options.missingRoot ? [] : documentRows;
       },
     },
     wikiPageRevision: {
       async findUnique() {
         return options.missingRoot
           ? null
-          : { pageId: 100n, visibility: options.rootVisibility ?? 'public' };
+          : revisionRows[0];
       },
       async findMany() {
-        return options.missingRoot || options.rootVisibility === 'hidden'
-          ? []
-          : [{ id: 200n, pageId: 100n }];
+        if (options.missingRoot) return [];
+        return revisionRows.filter((revision) => revision.visibility === 'public');
       },
     },
     auditEvent: {
@@ -226,6 +270,40 @@ test('publish fails closed when readiness is incomplete but unpublish preserves 
   assert.deepEqual(result.readiness.blockers, ['missing_root_page']);
 });
 
+test('publish blocks thin starter content, missing channels, and stale search indexes', async () => {
+  const fixture = createFixture({
+    placeholderRules: true,
+    shortIntroduction: true,
+    missingOfficialChannel: true,
+    staleSearchIndex: true,
+  });
+
+  await assert.rejects(
+    () => fixture.service.update(serverId, {
+      status: 'published', expectedVersion: 0, reason: 'attempted thin content launch',
+    }, fixture.actor),
+    (error: unknown) => {
+      if (!(error instanceof ConflictException)) return false;
+      const response = JSON.stringify(error.getResponse());
+      return response.includes('incomplete_introduction')
+        && response.includes('placeholder_rules')
+        && response.includes('missing_official_channel')
+        && response.includes('search_index_not_ready');
+    },
+  );
+  assert.equal(fixture.audits.length, 0);
+
+  const missingDocument = createFixture({ missingRequiredDocument: true });
+  await assert.rejects(
+    () => missingDocument.service.update(serverId, {
+      status: 'published', expectedVersion: 0, reason: 'attempted incomplete document launch',
+    }, missingDocument.actor),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('missing_required_documents'),
+  );
+  assert.equal(missingDocument.audits.length, 0);
+});
+
 test('stale versions, same-state mutations, and inconsistent links fail without audit', async () => {
   const stale = createFixture({ publicationVersion: 4 });
   await assert.rejects(
@@ -280,7 +358,7 @@ test('GET reports publication timestamps, readiness blockers, and manager author
   assert.deepEqual(result.readiness.blockers, [
     'invalid_site_slug',
     'missing_public_root_revision',
-    'missing_public_document',
+    'missing_required_documents',
   ]);
   assert.equal(fixture.audits.length, 0);
   assert.deepEqual(fixture.isolationLevels, []);

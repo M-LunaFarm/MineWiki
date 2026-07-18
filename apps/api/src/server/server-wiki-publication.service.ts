@@ -6,10 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { isPublicWikiPageStatus, PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
+import { isPublicWikiPageStatus } from '@minewiki/wiki-core/page-status';
+import { hashContent } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
 import { writeAuditRecord } from '../events/audit-event-writer';
+import { buildServerWikiMainPage, buildServerWikiStarterPages, type ServerWikiScaffoldInput } from './server-wiki-scaffold';
 
 export const SERVER_WIKI_PUBLICATION_STATUSES = ['draft', 'published', 'unpublished'] as const;
 export type ServerWikiPublicationStatus = (typeof SERVER_WIKI_PUBLICATION_STATUSES)[number];
@@ -50,7 +52,12 @@ export type ServerWikiPublicationReadinessBlocker =
   | 'invalid_site_slug'
   | 'missing_root_page'
   | 'missing_public_root_revision'
-  | 'missing_public_document';
+  | 'missing_public_document'
+  | 'missing_required_documents'
+  | 'incomplete_introduction'
+  | 'placeholder_rules'
+  | 'missing_official_channel'
+  | 'search_index_not_ready';
 
 interface PublicationContext {
   readonly serverId: string;
@@ -58,6 +65,8 @@ interface PublicationContext {
   readonly spaceId: bigint;
   readonly rootPageId: bigint;
   readonly siteSlug: string;
+  readonly contentSlug: string;
+  readonly serverContent: ServerWikiScaffoldInput;
   readonly actorAccountId: string;
   readonly actorProfileId: bigint | null;
   readonly authority: 'server_admin' | 'owner' | 'manager';
@@ -203,7 +212,23 @@ export class ServerWikiPublicationService {
     }
     const server = await store.server.findUnique({
       where: { id: serverId },
-      select: { id: true, ownerAccountId: true, wikiSpaceId: true, wikiPageId: true, wikiSlug: true },
+      select: {
+        id: true,
+        ownerAccountId: true,
+        wikiSpaceId: true,
+        wikiPageId: true,
+        wikiSlug: true,
+        name: true,
+        joinHost: true,
+        joinPort: true,
+        edition: true,
+        supportedVersions: true,
+        tags: true,
+        shortDescription: true,
+        longDescription: true,
+        websiteUrl: true,
+        discordUrl: true,
+      },
     });
     if (!server) throw new NotFoundException('Server not found.');
     if (!server.wikiSpaceId || !server.wikiPageId || !server.wikiSlug) throw invalidLink();
@@ -280,6 +305,19 @@ export class ServerWikiPublicationService {
       spaceId: wiki.spaceId,
       rootPageId: space.rootPageId!,
       siteSlug: wiki.siteSlug ?? '',
+      contentSlug: wiki.slug,
+      serverContent: {
+        name: server.name,
+        joinHost: server.joinHost,
+        joinPort: server.joinPort,
+        edition: server.edition,
+        supportedVersions: server.supportedVersions,
+        tags: server.tags,
+        shortDescription: server.shortDescription,
+        longDescription: server.longDescription,
+        websiteUrl: server.websiteUrl,
+        discordUrl: server.discordUrl,
+      },
       actorAccountId,
       actorProfileId: actorProfile?.id ?? null,
       authority,
@@ -346,13 +384,23 @@ export class ServerWikiPublicationService {
       || rootRevision.visibility !== 'public'
     ) blockers.push('missing_public_root_revision');
 
+    const starterPages = buildServerWikiStarterPages(context.serverContent);
+    const requiredPaths = [
+      context.contentSlug,
+      ...starterPages.map((page) => `${context.contentSlug}/${page.path}`),
+    ];
     const documents = await store.wikiPage.findMany({
       where: {
         spaceId: context.spaceId,
-        status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
-        currentRevisionId: { not: null },
+        localPath: { in: requiredPaths },
       },
-      select: { id: true, currentRevisionId: true },
+      select: {
+        id: true,
+        localPath: true,
+        status: true,
+        currentRevisionId: true,
+        searchDocument: { select: { revisionId: true } },
+      },
     });
     const revisions = documents.length > 0
       ? await store.wikiPageRevision.findMany({
@@ -360,14 +408,50 @@ export class ServerWikiPublicationService {
             id: { in: documents.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []) },
             visibility: 'public',
           },
-          select: { id: true, pageId: true },
+          select: { id: true, pageId: true, contentHash: true },
         })
       : [];
-    const publicRevisionKeys = new Set(revisions.map((revision) => `${revision.pageId}:${revision.id}`));
-    if (!documents.some((page) => (
-      page.currentRevisionId !== null
-      && publicRevisionKeys.has(`${page.id}:${page.currentRevisionId}`)
-    ))) blockers.push('missing_public_document');
+    const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
+    const documentByPath = new Map(documents.map((page) => [page.localPath, page]));
+    const isPublicCurrentDocument = (path: string): boolean => {
+      const page = documentByPath.get(path);
+      if (!page || !isPublicWikiPageStatus(page.status) || page.currentRevisionId === null) return false;
+      const revision = revisionById.get(page.currentRevisionId);
+      return Boolean(revision && revision.pageId === page.id);
+    };
+    const publicRequiredPaths = requiredPaths.filter(isPublicCurrentDocument);
+    if (publicRequiredPaths.length === 0) blockers.push('missing_public_document');
+    if (publicRequiredPaths.length !== requiredPaths.length) blockers.push('missing_required_documents');
+
+    if (isPublicCurrentDocument(context.contentSlug)) {
+      const page = documentByPath.get(context.contentSlug)!;
+      const revision = revisionById.get(page.currentRevisionId!)!;
+      const introductionCustomized = revision.contentHash !== hashContent(buildServerWikiMainPage(context.serverContent));
+      if (!introductionCustomized && context.serverContent.longDescription.trim().length < 80) {
+        blockers.push('incomplete_introduction');
+      }
+    }
+
+    const rulesPath = `${context.contentSlug}/규칙`;
+    if (isPublicCurrentDocument(rulesPath)) {
+      const page = documentByPath.get(rulesPath)!;
+      const revision = revisionById.get(page.currentRevisionId!)!;
+      const starterRules = starterPages.find((page) => page.path === '규칙');
+      if (starterRules && revision.contentHash === hashContent(starterRules.contentRaw)) {
+        blockers.push('placeholder_rules');
+      }
+    }
+
+    if (!context.serverContent.websiteUrl && !context.serverContent.discordUrl) {
+      blockers.push('missing_official_channel');
+    }
+    if (
+      publicRequiredPaths.length === requiredPaths.length
+      && requiredPaths.some((path) => {
+        const page = documentByPath.get(path)!;
+        return page.searchDocument?.revisionId !== page.currentRevisionId;
+      })
+    ) blockers.push('search_index_not_ready');
     return blockers;
   }
 

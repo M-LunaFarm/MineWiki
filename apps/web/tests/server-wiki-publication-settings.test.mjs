@@ -13,6 +13,13 @@ test('server wiki settings exposes a mobile-safe publication lifecycle', async (
   assert.match(publication, /expectedVersion: publication\.version/u);
   assert.match(publication, /status, expectedVersion: publication\.version, reason: reason\.trim\(\)/u);
   assert.match(publication, /publication\.readiness\.ready/u);
+  for (const blocker of [
+    'missing_required_documents',
+    'incomplete_introduction',
+    'placeholder_rules',
+    'missing_official_channel',
+    'search_index_not_ready',
+  ]) assert.match(publication, new RegExp(blocker, 'u'));
   assert.match(publication, /confirmation !== '비공개'/u);
   assert.match(publication, /min-h-11 w-full/u);
   assert.match(publication, /aria-live="polite"/u);
