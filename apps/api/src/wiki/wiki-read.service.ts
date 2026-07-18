@@ -90,6 +90,19 @@ export interface WikiPageResponse {
   } | null;
 }
 
+export interface ServerWikiNavigationResponse {
+  readonly key: string;
+  readonly cacheable: boolean;
+  readonly items: ReadonlyArray<{
+    readonly kind: 'group' | 'page';
+    readonly id: string;
+    readonly title: string;
+    readonly path: string | null;
+    readonly depth: number;
+    readonly hasChildren: boolean;
+  }>;
+}
+
 export interface WikiRenderedRevisionResponse extends WikiPageResponse {
   readonly routePath: string;
   readonly currentRevisionId: string | null;
@@ -497,6 +510,63 @@ function pageFromServerWikiReleaseItem(item: ServerWikiReleaseItem): ReleasedSer
   };
 }
 
+const serverWikiNavigationReleaseItemSelect = {
+  namespaceId: true,
+  spaceId: true,
+  pageId: true,
+  revisionId: true,
+  localPath: true,
+  slug: true,
+  title: true,
+  displayTitle: true,
+  pageType: true,
+  protectionLevel: true,
+  pageStatus: true,
+  createdBy: true,
+  ownerProfileId: true,
+  pageUpdatedAt: true,
+} satisfies Prisma.ServerWikiReleaseItemSelect;
+
+type NavigationReleaseItem = Prisma.ServerWikiReleaseItemGetPayload<{
+  select: typeof serverWikiNavigationReleaseItemSelect;
+}>;
+
+function pageFromNavigationReleaseItem(item: NavigationReleaseItem): ReleasedServerWikiPage['page'] {
+  return {
+    namespaceId: item.namespaceId,
+    id: item.pageId,
+    spaceId: item.spaceId,
+    localPath: item.localPath,
+    slug: item.slug,
+    title: item.title,
+    displayTitle: item.displayTitle,
+    currentRevisionId: item.revisionId,
+    pageType: item.pageType,
+    protectionLevel: item.protectionLevel,
+    status: item.pageStatus,
+    createdBy: item.createdBy,
+    ownerProfileId: item.ownerProfileId,
+    updatedAt: item.pageUpdatedAt,
+  };
+}
+
+const serverWikiNavigationDraftPageSelect = {
+  namespaceId: true,
+  spaceId: true,
+  id: true,
+  currentRevisionId: true,
+  localPath: true,
+  slug: true,
+  title: true,
+  displayTitle: true,
+  pageType: true,
+  protectionLevel: true,
+  status: true,
+  createdBy: true,
+  ownerProfileId: true,
+  updatedAt: true,
+} satisfies Prisma.WikiPageSelect;
+
 export async function resolveWikiAccessContext(
   prisma: Pick<PrismaService, 'wikiProfile'>,
   wikiPermissions: WikiPermissionService,
@@ -775,6 +845,147 @@ export class WikiReadService {
     }
     const resolved = resolveWikiPath(path);
     return this.getPage(resolved.namespace, resolved.title, viewer, options);
+  }
+
+  async getServerWikiNavigation(slug: string, viewer?: WikiAccessViewer): Promise<ServerWikiNavigationResponse> {
+    const contentSlug = slugifyTitle(slug);
+    const wiki = await this.prisma.serverWiki.findUnique({
+      where: { slug: contentSlug },
+      select: {
+        id: true,
+        spaceId: true,
+        slug: true,
+        siteSlug: true,
+        status: true,
+        publicationStatus: true,
+        publishedReleaseId: true,
+        navigationOrder: true,
+        navigationVersion: true,
+        contentSettingsVersion: true,
+      },
+    });
+    if (!wiki || wiki.status !== 'active') throw new NotFoundException('Server wiki not found.');
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    await this.wikiPermissions.assertCanReadSpace({ ...access, spaceId: wiki.spaceId });
+    const canPreview = await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: wiki.spaceId });
+    const siteSlug = wiki.siteSlug ?? wiki.slug;
+    if (!canPreview) {
+      if (wiki.publicationStatus !== 'published' || wiki.publishedReleaseId === null) {
+        throw new NotFoundException('Server wiki not found.');
+      }
+      const releaseId = wiki.publishedReleaseId;
+      const [storedNodes, release] = await Promise.all([
+        this.prisma.serverWikiReleaseNavigationNode.findMany({
+          where: { releaseId, serverWikiId: wiki.id },
+          orderBy: { position: 'asc' },
+          select: {
+            nodeKey: true,
+            kind: true,
+            pageId: true,
+            parentKey: true,
+            title: true,
+            position: true,
+            depth: true,
+            hasChildren: true,
+          },
+        }),
+        this.prisma.serverWikiRelease.findFirst({
+          where: { id: releaseId, serverWikiId: wiki.id },
+          select: { presentationSnapshot: true },
+        }),
+      ]);
+      const releasedItems = await this.prisma.serverWikiReleaseItem.findMany({
+        where: {
+          releaseId,
+          serverWikiId: wiki.id,
+          spaceId: wiki.spaceId,
+          pageType: { not: 'redirect' },
+          ...(storedNodes.length > 0
+            ? { pageId: { in: storedNodes.flatMap((node) => node.pageId ? [node.pageId] : []) } }
+            : {}),
+        },
+        orderBy: [{ localPath: 'asc' }, { pageId: 'asc' }],
+        select: serverWikiNavigationReleaseItemSelect,
+      });
+      const readableItems = await this.wikiPermissions.filterReadablePages({ ...access, pages: releasedItems.map(pageFromNavigationReleaseItem) });
+      const readableIds = new Set(readableItems.map((page) => page.id));
+      const presentation = isJsonRecord(release?.presentationSnapshot) ? release.presentationSnapshot : null;
+      const navigationOrder = presentation && 'navigationOrder' in presentation
+        ? presentation.navigationOrder ?? null
+        : null;
+      const nodes = storedNodes.length > 0
+        ? storedNodes
+        : buildServerWikiReleaseNavigation(wiki.slug, releasedItems.map(pageFromNavigationReleaseItem), navigationOrder).map((node) => ({
+            nodeKey: node.nodeKey,
+            kind: node.kind,
+            pageId: node.kind === 'page' ? node.page.id : null,
+            parentKey: node.parentKey,
+            title: node.title,
+            position: node.position,
+            depth: node.depth,
+            hasChildren: node.hasChildren,
+          }));
+      const itemByPageId = new Map(releasedItems.map((item) => [item.pageId, item]));
+      const items = projectReadableServerWikiNavigation(nodes, readableIds, (pageId) => {
+        const item = itemByPageId.get(pageId);
+        return item ? buildCanonicalServerWikiPath(siteSlug, item.title, wiki.slug, '/serverWiki') : null;
+      });
+      const hasReadAcl = await this.hasServerWikiNavigationReadAcl(wiki.spaceId, releasedItems);
+      return {
+        key: `release:${releaseId}:v1`,
+        cacheable: access.actor == null && !hasReadAcl,
+        items,
+      };
+    }
+
+    const draftPages = await this.prisma.wikiPage.findMany({
+      where: { spaceId: wiki.spaceId, status: { not: 'deleted' }, pageType: { not: 'redirect' } },
+      orderBy: [{ localPath: 'asc' }, { id: 'asc' }],
+      select: serverWikiNavigationDraftPageSelect,
+    });
+    const revisionIds = draftPages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+    const publicRevisions = revisionIds.length > 0 ? await this.prisma.wikiPageRevision.findMany({
+      where: { id: { in: revisionIds }, visibility: 'public' },
+      select: { id: true, pageId: true },
+    }) : [];
+    const publicKeys = new Set(publicRevisions.map((revision) => `${revision.pageId}:${revision.id}`));
+    const publicPages = draftPages.filter((page) => page.currentRevisionId
+      && publicKeys.has(`${page.id}:${page.currentRevisionId}`));
+    const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
+    return {
+      key: `draft:${wiki.navigationVersion}:${wiki.contentSettingsVersion}`,
+      cacheable: false,
+      items: buildServerWikiNavigation(wiki.slug, readablePages, -1n, siteSlug, '/serverWiki', wiki.navigationOrder)
+        .map((item) => ({
+          kind: item.kind,
+          id: item.id,
+          title: item.title,
+          path: item.path,
+          depth: item.depth,
+          hasChildren: item.hasChildren,
+        })),
+    };
+  }
+
+  private async hasServerWikiNavigationReadAcl(
+    spaceId: bigint,
+    pages: ReadonlyArray<{ readonly pageId: bigint; readonly namespaceId: number }>,
+  ): Promise<boolean> {
+    const now = new Date();
+    const pageIds = pages.map((page) => page.pageId);
+    const namespaceIds = [...new Set(pages.map((page) => BigInt(page.namespaceId)))];
+    return (await this.prisma.aclRule.count({
+      where: {
+        action: 'read',
+        OR: [
+          { targetType: 'site', targetId: null },
+          { targetType: 'space', targetId: spaceId },
+          ...(namespaceIds.length > 0 ? [{ targetType: 'namespace', targetId: { in: namespaceIds } }] : []),
+          ...(pageIds.length > 0 ? [{ targetType: 'page', targetId: { in: pageIds } }] : []),
+        ],
+        AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }],
+      },
+    })) > 0;
   }
 
   async getRenderedRevision(revisionId: string, viewer?: WikiAccessViewer): Promise<WikiRenderedRevisionResponse> {
@@ -3761,6 +3972,68 @@ export function buildServerWikiNavigation(
       hasChildren: node.hasChildren
     };
   });
+}
+
+function projectReadableServerWikiNavigation(
+  nodes: ReadonlyArray<{
+    readonly nodeKey: string;
+    readonly kind: string;
+    readonly pageId: bigint | null;
+    readonly parentKey: string | null;
+    readonly title: string;
+    readonly depth: number;
+    readonly hasChildren: boolean;
+  }>,
+  readablePageIds: ReadonlySet<bigint>,
+  pathForPage: (pageId: bigint) => string | null,
+): ServerWikiNavigationResponse['items'] {
+  const nodeByKey = new Map(nodes.map((node) => [node.nodeKey, node]));
+  const visibleKeys = new Set<string>();
+  for (const node of nodes) {
+    if (node.kind !== 'page' || node.pageId === null || !readablePageIds.has(node.pageId)) continue;
+    visibleKeys.add(node.nodeKey);
+    let parentKey = node.parentKey;
+    const visited = new Set<string>();
+    while (parentKey && !visited.has(parentKey)) {
+      visited.add(parentKey);
+      visibleKeys.add(parentKey);
+      parentKey = nodeByKey.get(parentKey)?.parentKey ?? null;
+    }
+  }
+  const visibleParentKeys = new Set(nodes
+    .filter((node) => visibleKeys.has(node.nodeKey) && node.parentKey && visibleKeys.has(node.parentKey))
+    .map((node) => node.parentKey!));
+  const projected: Array<ServerWikiNavigationResponse['items'][number]> = [];
+  for (const node of nodes) {
+    if (!visibleKeys.has(node.nodeKey)) continue;
+    if (node.kind === 'group') {
+      projected.push({
+        kind: 'group' as const,
+        id: node.nodeKey,
+        title: node.title,
+        path: null,
+        depth: node.depth,
+        hasChildren: visibleParentKeys.has(node.nodeKey),
+      });
+      continue;
+    }
+    if (node.kind !== 'page' || node.pageId === null) continue;
+    const path = pathForPage(node.pageId);
+    if (!path) continue;
+    projected.push({
+      kind: 'page' as const,
+      id: node.pageId.toString(),
+      title: node.title,
+      path,
+      depth: node.depth,
+      hasChildren: visibleParentKeys.has(node.nodeKey),
+    });
+  }
+  return projected;
+}
+
+function isJsonRecord(value: Prisma.JsonValue | null | undefined): value is Prisma.JsonObject {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function serverWikiRelativePath(serverSlug: string, localPath: string): string {

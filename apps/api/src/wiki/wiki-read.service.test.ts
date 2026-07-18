@@ -408,6 +408,72 @@ test('server wiki navigation keeps every document beyond the former 100 item cap
   assert.equal(navigation.at(-1)?.current, true);
 });
 
+test('released server wiki navigation reads compact rows without full-text release vectors and preserves ACL filtering', async () => {
+  const nodes = Array.from({ length: 1000 }, (_, index) => ({
+    nodeKey: `page:${index + 1}`,
+    kind: 'page',
+    pageId: BigInt(index + 1),
+    parentKey: null,
+    title: `문서 ${index + 1}`,
+    position: index,
+    depth: 0,
+    hasChildren: false,
+  }));
+  const releasedItems = nodes.map((node) => ({
+    namespaceId: 7,
+    spaceId: 77n,
+    pageId: node.pageId!,
+    revisionId: BigInt(10_000 + Number(node.pageId)),
+    localPath: `luna/page-${node.pageId}`,
+    slug: `luna/page-${node.pageId}`,
+    title: `luna/page-${node.pageId}`,
+    displayTitle: node.title,
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 1n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-19T00:00:00.000Z'),
+  }));
+  let releaseItemQuery: { select?: Record<string, boolean> } | undefined;
+  const prisma = {
+    serverWiki: {
+      async findUnique() {
+        return {
+          id: 8n, spaceId: 77n, slug: 'luna', siteSlug: 'luna-docs', status: 'active',
+          publicationStatus: 'published', publishedReleaseId: 9n, navigationOrder: null,
+          navigationVersion: 1, contentSettingsVersion: 1,
+        };
+      },
+    },
+    serverWikiReleaseNavigationNode: { async findMany() { return nodes; } },
+    serverWikiRelease: { async findFirst() { return { presentationSnapshot: {} }; } },
+    serverWikiReleaseItem: {
+      async findMany(query: { select?: Record<string, boolean> }) {
+        releaseItemQuery = query;
+        return releasedItems;
+      },
+    },
+    aclRule: { async count() { return 0; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async assertCanReadSpace() {},
+    async canPreviewServerWikiSpace() { return false; },
+    async filterReadablePages({ pages }: { pages: Array<{ id: bigint }> }) {
+      return pages.filter((page) => page.id !== 2n);
+    },
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getServerWikiNavigation('luna');
+
+  assert.equal(result.key, 'release:9:v1');
+  assert.equal(result.cacheable, true);
+  assert.equal(result.items.length, 999);
+  assert.equal(result.items.some((item) => item.id === '2'), false);
+  assert.equal(releaseItemQuery?.select?.searchVector, undefined);
+  assert.equal(releaseItemQuery?.select?.title, true);
+});
+
 test('server wiki navigation removes a duplicated server slug from labels', () => {
   const navigation = buildServerWikiNavigation('luna', [
     { id: 1n, title: 'luna', localPath: 'luna', displayTitle: '루나 서버' },

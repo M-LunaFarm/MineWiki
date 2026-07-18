@@ -41,6 +41,48 @@ test('public wiki stats controller forwards an optional namespace without authen
   assert.equal(response.pageCount, 42);
 });
 
+test('public release navigation revalidates with an ETag while private navigation is never cached', async () => {
+  let cacheable = true;
+  const reads = {
+    async getServerWikiNavigation() {
+      return { key: 'release:9:v1', cacheable, items: [] };
+    },
+  } as unknown as WikiReadService;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    reads,
+    {} as WikiEditService,
+    captchaStub,
+    pageSwapStub,
+    usernameStub,
+  );
+  const headers = new Map<string, string>();
+  let statusCode = 200;
+  let sent = false;
+  const reply = {
+    header(name: string, value: string) { headers.set(name, value); return this; },
+    status(code: number) { statusCode = code; return this; },
+    send() { sent = true; return this; },
+  } as unknown as FastifyReply;
+
+  const first = await controller.getServerWikiNavigation('luna', { headers: {} } as FastifyRequest, reply);
+  const etag = headers.get('ETag');
+  assert.ok(etag);
+  assert.equal(headers.get('Cache-Control'), 'public, max-age=0, must-revalidate');
+  assert.ok(first);
+  assert.equal(first.key, 'release:9:v1');
+
+  await controller.getServerWikiNavigation('luna', { headers: { 'if-none-match': etag } } as FastifyRequest, reply);
+  assert.equal(statusCode, 304);
+  assert.equal(sent, true);
+
+  cacheable = false;
+  headers.clear();
+  await controller.getServerWikiNavigation('luna', { headers: {} } as FastifyRequest, reply);
+  assert.equal(headers.get('Cache-Control'), 'private, no-store');
+  assert.equal(headers.has('ETag'), false);
+});
+
 test('new wiki pages require captcha before the clean mutation reaches the edit service', async () => {
   const session = { userId: 'account-1', requestIp: '192.0.2.20' } as SessionPayload;
   let captchaInput: unknown;

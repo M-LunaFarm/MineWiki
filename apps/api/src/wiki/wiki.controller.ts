@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Header, Optional, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Optional, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { FastifyRequest } from 'fastify';
+import { createHash } from 'node:crypto';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
@@ -39,6 +40,7 @@ import {
   type WikiRenderedRevisionResponse,
   type WikiSearchResponse,
   type WikiSearchSuggestionResponse,
+  type ServerWikiNavigationResponse,
   type WikiPublicStatsResponse,
   type WikiSpecialDocumentResponse,
   type WikiPublicBlockHistoryResponse
@@ -112,6 +114,31 @@ export class WikiController {
     return this.wikiRead.getPageByPath(path, request.sessionPayload ?? null, {
       followRedirects: shouldFollowRedirects(redirect, noRedirect)
     });
+  }
+
+  @Get('server-wikis/:slug/navigation')
+  @UseGuards(OptionalSessionGuard)
+  @Throttle({ default: { limit: 180, ttl: 60 } })
+  async getServerWikiNavigation(
+    @Param('slug') slug: string,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<ServerWikiNavigationResponse | void> {
+    const navigation = await this.wikiRead.getServerWikiNavigation(slug, request.sessionPayload ?? null);
+    if (!navigation.cacheable) {
+      reply.header('Cache-Control', 'private, no-store');
+      reply.header('Vary', 'Cookie, Authorization');
+      return navigation;
+    }
+    const etag = `"${createHash('sha256').update(JSON.stringify(navigation)).digest('base64url')}"`;
+    reply.header('Cache-Control', 'public, max-age=0, must-revalidate');
+    reply.header('ETag', etag);
+    reply.header('Vary', 'Cookie, Authorization');
+    if (request.headers['if-none-match'] === etag) {
+      reply.status(304).send();
+      return;
+    }
+    return navigation;
   }
 
   @Get('page/:id/revisions')
