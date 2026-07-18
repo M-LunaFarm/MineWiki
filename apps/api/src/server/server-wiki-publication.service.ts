@@ -36,6 +36,12 @@ export interface ServerWikiPublicationResponse {
   readonly unpublishedAt: string | null;
   readonly updatedAt: string | null;
   readonly updatedByProfileId: string | null;
+  readonly release: {
+    readonly id: string;
+    readonly version: number;
+    readonly publishedAt: string;
+    readonly pageCount: number;
+  } | null;
   readonly wikiUrl: string;
   readonly access: {
     readonly authority: 'server_admin' | 'owner' | 'manager';
@@ -77,7 +83,27 @@ interface PublicationContext {
     readonly unpublishedAt: Date | null;
     readonly updatedAt: Date | null;
     readonly updatedBy: bigint | null;
+    readonly publishedRelease: {
+      readonly id: bigint;
+      readonly version: number;
+      readonly publishedAt: Date;
+      readonly pageCount: number;
+    } | null;
   };
+  readonly presentation: ServerWikiPresentationSnapshot;
+}
+
+interface ServerWikiPresentationSnapshot {
+  readonly layoutKey: string;
+  readonly navigationOrder: Prisma.JsonValue | null;
+  readonly contributionPolicySource: string | null;
+  readonly editHelpSource: string | null;
+  readonly topNoticeSource: string | null;
+  readonly bottomNoticeSource: string | null;
+  readonly requireContributionPolicyAck: boolean;
+  readonly contributionPolicyVersion: number;
+  readonly contentSettingsVersion: number;
+  readonly navigationVersion: number;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -117,7 +143,7 @@ export class ServerWikiPublicationService {
         if (context.publication.version !== expectedVersion) {
           throw publicationConflict(context.publication.version);
         }
-        if (context.publication.status === status) {
+        if (context.publication.status === status && status !== 'published') {
           throw new BadRequestException(`Server wiki publication is already ${status}.`);
         }
         if (context.publication.status === 'draft' && status === 'unpublished') {
@@ -134,6 +160,10 @@ export class ServerWikiPublicationService {
         }
 
         const now = new Date();
+        const version = expectedVersion + 1;
+        const release = status === 'published'
+          ? await this.createRelease(tx, context, version, reason, now)
+          : context.publication.publishedRelease;
         const changed = await tx.serverWiki.updateMany({
           where: {
             id: context.serverWikiId,
@@ -146,6 +176,7 @@ export class ServerWikiPublicationService {
             ...(status === 'published' ? { publishedAt: now } : { unpublishedAt: now }),
             publicationUpdatedAt: now,
             publicationUpdatedBy: context.actorProfileId,
+            ...(release ? { publishedReleaseId: release.id } : {}),
           },
         });
         if (changed.count !== 1) {
@@ -156,7 +187,6 @@ export class ServerWikiPublicationService {
           throw publicationConflict(latest?.publicationVersion ?? expectedVersion + 1);
         }
 
-        const version = expectedVersion + 1;
         await writeAuditRecord(tx, {
           data: {
             category: 'server',
@@ -175,6 +205,8 @@ export class ServerWikiPublicationService {
               status,
               previousVersion: expectedVersion,
               version,
+              releaseId: release?.id ?? null,
+              releasePageCount: release?.pageCount ?? null,
               reason,
               authority: context.authority,
             }),
@@ -190,6 +222,7 @@ export class ServerWikiPublicationService {
             unpublishedAt: status === 'unpublished' ? now : context.publication.unpublishedAt,
             updatedAt: now,
             updatedBy: context.actorProfileId,
+            publishedRelease: release,
           },
         }, blockers);
       });
@@ -253,6 +286,24 @@ export class ServerWikiPublicationService {
         unpublishedAt: true,
         publicationUpdatedAt: true,
         publicationUpdatedBy: true,
+        layoutKey: true,
+        navigationOrder: true,
+        contributionPolicySource: true,
+        editHelpSource: true,
+        topNoticeSource: true,
+        bottomNoticeSource: true,
+        requireContributionPolicyAck: true,
+        contributionPolicyVersion: true,
+        contentSettingsVersion: true,
+        navigationVersion: true,
+        publishedRelease: {
+          select: {
+            id: true,
+            version: true,
+            publishedAt: true,
+            _count: { select: { items: true } },
+          },
+        },
       },
     });
     if (
@@ -328,8 +379,107 @@ export class ServerWikiPublicationService {
         unpublishedAt: wiki.unpublishedAt,
         updatedAt: wiki.publicationUpdatedAt,
         updatedBy: wiki.publicationUpdatedBy,
+        publishedRelease: wiki.publishedRelease
+          ? {
+              id: wiki.publishedRelease.id,
+              version: wiki.publishedRelease.version,
+              publishedAt: wiki.publishedRelease.publishedAt,
+              pageCount: wiki.publishedRelease._count.items,
+            }
+          : null,
+      },
+      presentation: {
+        layoutKey: wiki.layoutKey,
+        navigationOrder: wiki.navigationOrder,
+        contributionPolicySource: wiki.contributionPolicySource,
+        editHelpSource: wiki.editHelpSource,
+        topNoticeSource: wiki.topNoticeSource,
+        bottomNoticeSource: wiki.bottomNoticeSource,
+        requireContributionPolicyAck: wiki.requireContributionPolicyAck,
+        contributionPolicyVersion: wiki.contributionPolicyVersion,
+        contentSettingsVersion: wiki.contentSettingsVersion,
+        navigationVersion: wiki.navigationVersion,
       },
     };
+  }
+
+  private async createRelease(
+    tx: Prisma.TransactionClient,
+    context: PublicationContext,
+    version: number,
+    reason: string,
+    now: Date,
+  ): Promise<NonNullable<PublicationContext['publication']['publishedRelease']>> {
+    await tx.$queryRaw<Array<{ id: bigint }>>`
+      SELECT id FROM pages WHERE space_id = ${context.spaceId} ORDER BY id FOR UPDATE
+    `;
+    const pages = await tx.wikiPage.findMany({
+      where: {
+        spaceId: context.spaceId,
+        status: { in: ['normal', 'active', 'published', 'protected'] },
+        currentRevisionId: { not: null },
+      },
+      orderBy: [{ id: 'asc' }],
+      select: {
+        id: true,
+        namespaceId: true,
+        spaceId: true,
+        localPath: true,
+        slug: true,
+        title: true,
+        displayTitle: true,
+        currentRevisionId: true,
+        pageType: true,
+        protectionLevel: true,
+        status: true,
+        updatedAt: true,
+      },
+    });
+    const revisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+    const revisions = revisionIds.length > 0
+      ? await tx.wikiPageRevision.findMany({
+          where: { id: { in: revisionIds }, visibility: 'public' },
+          select: { id: true, pageId: true },
+        })
+      : [];
+    const revisionKeys = new Set(revisions.map((revision) => `${revision.pageId}:${revision.id}`));
+    const releasedPages = pages.filter((page) => page.currentRevisionId !== null
+      && revisionKeys.has(`${page.id}:${page.currentRevisionId}`));
+    if (releasedPages.length === 0 || releasedPages.some((page) => page.spaceId !== context.spaceId)) {
+      throw new ConflictException('Server wiki release snapshot is empty or inconsistent.');
+    }
+    const release = await tx.serverWikiRelease.create({
+      data: {
+        serverWikiId: context.serverWikiId,
+        version,
+        reason,
+        presentationSnapshot: context.presentation as unknown as Prisma.InputJsonValue,
+        createdBy: context.actorProfileId,
+        createdAt: now,
+        publishedAt: now,
+      },
+      select: { id: true, version: true, publishedAt: true },
+    });
+    await tx.serverWikiReleaseItem.createMany({
+      data: releasedPages.map((page) => ({
+        releaseId: release.id,
+        serverWikiId: context.serverWikiId,
+        spaceId: context.spaceId,
+        namespaceId: page.namespaceId,
+        pageId: page.id,
+        revisionId: page.currentRevisionId!,
+        localPath: page.localPath,
+        slug: page.slug,
+        title: page.title,
+        displayTitle: page.displayTitle,
+        pageType: page.pageType,
+        protectionLevel: page.protectionLevel,
+        pageStatus: page.status,
+        pageUpdatedAt: page.updatedAt,
+        createdAt: now,
+      })),
+    });
+    return { ...release, pageCount: releasedPages.length };
   }
 
   private async managerAuthority(
@@ -511,6 +661,14 @@ function toResponse(
     unpublishedAt: context.publication.unpublishedAt?.toISOString() ?? null,
     updatedAt: context.publication.updatedAt?.toISOString() ?? null,
     updatedByProfileId: context.publication.updatedBy?.toString() ?? null,
+    release: context.publication.publishedRelease
+      ? {
+          id: context.publication.publishedRelease.id.toString(),
+          version: context.publication.publishedRelease.version,
+          publishedAt: context.publication.publishedRelease.publishedAt.toISOString(),
+          pageCount: context.publication.publishedRelease.pageCount,
+        }
+      : null,
     wikiUrl: `/serverWiki/${encodeURIComponent(context.siteSlug)}`,
     access: { authority: context.authority, canPublish: true },
     readiness: { ready: blockers.length === 0, blockers },

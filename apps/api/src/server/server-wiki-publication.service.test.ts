@@ -43,6 +43,23 @@ function createFixture(options: FixtureOptions = {}) {
     unpublishedAt: null as Date | null,
     publicationUpdatedAt: null as Date | null,
     publicationUpdatedBy: null as bigint | null,
+    publishedReleaseId: null as bigint | null,
+    publishedRelease: null as {
+      id: bigint;
+      version: number;
+      publishedAt: Date;
+      _count: { items: number };
+    } | null,
+    layoutKey: 'docs',
+    navigationOrder: null,
+    contributionPolicySource: null,
+    editHelpSource: null,
+    topNoticeSource: null,
+    bottomNoticeSource: null,
+    requireContributionPolicyAck: false,
+    contributionPolicyVersion: 0,
+    contentSettingsVersion: 0,
+    navigationVersion: 0,
   };
   const server = {
     id: serverId,
@@ -75,9 +92,17 @@ function createFixture(options: FixtureOptions = {}) {
   ].filter((page) => !(options.missingRequiredDocument && page.path.endsWith('/FAQ')));
   const documentRows = sourceDocuments.map((document, index) => ({
     id: BigInt(100 + index),
+    namespaceId: 7,
+    spaceId: 77n,
     localPath: document.path,
+    slug: document.path,
+    title: document.path,
+    displayTitle: document.path,
     status: 'normal',
+    pageType: 'article',
+    protectionLevel: 'open',
     currentRevisionId: BigInt(200 + index),
+    updatedAt: now,
     searchDocument: {
       revisionId: options.staleSearchIndex && index === 1 ? BigInt(999) : BigInt(200 + index),
     },
@@ -89,6 +114,7 @@ function createFixture(options: FixtureOptions = {}) {
     contentHash: hashContent(document.contentRaw),
   }));
   const audits: Array<Record<string, unknown>> = [];
+  const releaseItems: Array<Record<string, unknown>> = [];
   const isolationLevels: string[] = [];
   const lockQueries: string[] = [];
   const profiles = new Map([
@@ -122,6 +148,7 @@ function createFixture(options: FixtureOptions = {}) {
           unpublishedAt?: Date;
           publicationUpdatedAt: Date;
           publicationUpdatedBy: bigint | null;
+          publishedReleaseId?: bigint;
         };
       }) {
         if (args.where.publicationVersion !== wiki.publicationVersion) return { count: 0 };
@@ -131,6 +158,7 @@ function createFixture(options: FixtureOptions = {}) {
         if (args.data.unpublishedAt) wiki.unpublishedAt = args.data.unpublishedAt;
         wiki.publicationUpdatedAt = args.data.publicationUpdatedAt;
         wiki.publicationUpdatedBy = args.data.publicationUpdatedBy;
+        if (args.data.publishedReleaseId) wiki.publishedReleaseId = args.data.publishedReleaseId;
         return { count: 1 };
       },
     },
@@ -172,6 +200,23 @@ function createFixture(options: FixtureOptions = {}) {
         return options.missingRoot ? [] : documentRows;
       },
     },
+    serverWikiRelease: {
+      async create(args: { data: { version: number; publishedAt: Date } }) {
+        const release = {
+          id: BigInt(900 + args.data.version),
+          version: args.data.version,
+          publishedAt: args.data.publishedAt,
+        };
+        wiki.publishedRelease = { ...release, _count: { items: documentRows.length } };
+        return release;
+      },
+    },
+    serverWikiReleaseItem: {
+      async createMany(args: { data: Array<Record<string, unknown>> }) {
+        releaseItems.push(...args.data);
+        return { count: args.data.length };
+      },
+    },
     wikiPageRevision: {
       async findUnique() {
         return options.missingRoot
@@ -202,6 +247,7 @@ function createFixture(options: FixtureOptions = {}) {
     actor,
     wiki,
     audits,
+    releaseItems,
     isolationLevels,
     lockQueries,
     now,
@@ -222,6 +268,10 @@ test('owner publishes a ready draft atomically with version, timestamps, and an 
   assert.equal(result.access.authority, 'owner');
   assert.ok(result.publishedAt);
   assert.equal(fixture.wiki.publicationStatus, 'published');
+  assert.equal(result.release?.pageCount, fixture.releaseItems.length);
+  assert.ok(result.release?.id);
+  assert.equal(fixture.releaseItems.length, 4);
+  assert.ok(fixture.releaseItems.every((item) => item.releaseId === BigInt(result.release!.id)));
   assert.deepEqual(fixture.isolationLevels, [Prisma.TransactionIsolationLevel.Serializable]);
   assert.ok(fixture.lockQueries.some((query) => query.includes('server_wikis')));
   assert.equal(fixture.audits.length, 1);
@@ -304,7 +354,7 @@ test('publish blocks thin starter content, missing channels, and stale search in
   assert.equal(missingDocument.audits.length, 0);
 });
 
-test('stale versions, same-state mutations, and inconsistent links fail without audit', async () => {
+test('stale versions, repeated unpublish, and inconsistent links fail without audit', async () => {
   const stale = createFixture({ publicationVersion: 4 });
   await assert.rejects(
     () => stale.service.update(serverId, {
@@ -314,13 +364,12 @@ test('stale versions, same-state mutations, and inconsistent links fail without 
       && JSON.stringify(error.getResponse()).includes('currentVersion'),
   );
 
-  const same = createFixture({ publicationStatus: 'published' });
-  await assert.rejects(
-    () => same.service.update(serverId, {
-      status: 'published', expectedVersion: 0, reason: 'duplicate launch request',
-    }, same.actor),
-    BadRequestException,
-  );
+  const republish = createFixture({ publicationStatus: 'published' });
+  const republished = await republish.service.update(serverId, {
+    status: 'published', expectedVersion: 0, reason: 'publish reviewed changes',
+  }, republish.actor);
+  assert.equal(republished.status, 'published');
+  assert.equal(republished.release?.version, 1);
 
   const draftUnpublish = createFixture();
   await assert.rejects(
@@ -337,9 +386,10 @@ test('stale versions, same-state mutations, and inconsistent links fail without 
       && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_PUBLICATION_INVALID_LINK'),
   );
   assert.equal(
-    stale.audits.length + same.audits.length + draftUnpublish.audits.length + inconsistent.audits.length,
+    stale.audits.length + draftUnpublish.audits.length + inconsistent.audits.length,
     0,
   );
+  assert.equal(republish.audits.length, 1);
 });
 
 test('GET reports publication timestamps, readiness blockers, and manager authority without mutation', async () => {
