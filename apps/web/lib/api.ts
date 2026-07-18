@@ -67,6 +67,7 @@ interface ServerReviewOptions {
   readonly rating?: number;
   readonly tag?: string;
   readonly cursor?: string;
+  readonly cookie?: string;
 }
 
 export async function fetchServerSummaries(
@@ -164,7 +165,11 @@ export async function fetchServerReviewPage(
   if (options.cursor) searchParams.set('cursor', options.cursor);
   const response = await fetch(
     `${apiBaseUrl()}/v1/servers/${id}/reviews/page?${searchParams.toString()}`,
-    { cache: 'no-store', credentials: 'include' }
+    {
+      cache: 'no-store',
+      credentials: 'include',
+      headers: options.cookie ? { cookie: options.cookie } : undefined,
+    }
   );
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

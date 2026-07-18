@@ -51,6 +51,7 @@ test('a linked account can manage a review owned by its canonical account', asyn
   const prisma = {
     $transaction: async (callback: (tx: typeof transaction) => Promise<unknown>) => callback(transaction),
     serverReview: transaction.serverReview,
+    reviewHelpfulVote: { findMany: async () => [] },
   } as unknown as PrismaService;
   const service = new ReviewService(
     { ensureExists: async () => undefined } as never,

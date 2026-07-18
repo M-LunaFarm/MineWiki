@@ -34,6 +34,9 @@ import { z } from 'zod';
 const reviewReportRequestSchema = z
   .object({ reason: z.string().trim().min(3).max(500) })
   .strict();
+const reviewHelpfulRequestSchema = z
+  .object({ isHelpful: z.boolean() })
+  .strict();
 const reviewReplyRequestSchema = z
   .object({ body: z.string().trim().max(300) })
   .strict();
@@ -171,9 +174,10 @@ export class ReviewController {
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Param('reviewId', new ParseUUIDPipe()) reviewId: string,
     @CurrentSession() session: SessionPayload,
-    @Body('isHelpful') isHelpful?: boolean
+    @Body() body: unknown
   ): Promise<ServerReview> {
-    return this.reviewService.markHelpful(serverId, reviewId, session.userId, isHelpful ?? true);
+    const payload = reviewHelpfulRequestSchema.parse(body);
+    return this.reviewService.markHelpful(serverId, reviewId, session.userId, payload.isHelpful);
   }
 
   @UseGuards(SessionGuard)

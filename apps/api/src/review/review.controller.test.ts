@@ -36,6 +36,40 @@ test('review reports require a bounded reason and preserve the review response c
   assert.deepEqual(calls, [[serverId, reviewId, accountId, '스팸 광고']]);
 });
 
+test('helpful mutations require an exact boolean payload', async () => {
+  const calls: unknown[] = [];
+  const response = { id: reviewId, helpfulCount: 1, viewerHelpful: true };
+  const controller = new ReviewController(
+    {
+      async markHelpful(...args: unknown[]) {
+        calls.push(args);
+        return response;
+      },
+    } as never,
+    {} as never,
+    {} as never,
+  );
+  const session = {
+    sessionId: '44444444-4444-4444-8444-444444444444',
+    userId: accountId,
+    isElevated: false,
+    authenticatedAt: new Date().toISOString(),
+  };
+
+  await assert.rejects(() => controller.markHelpful(serverId, reviewId, session, {}));
+  await assert.rejects(() =>
+    controller.markHelpful(serverId, reviewId, session, { isHelpful: 'false' }),
+  );
+  await assert.rejects(() =>
+    controller.markHelpful(serverId, reviewId, session, { isHelpful: true, extra: true }),
+  );
+  assert.equal(
+    await controller.markHelpful(serverId, reviewId, session, { isHelpful: true }),
+    response,
+  );
+  assert.deepEqual(calls, [[serverId, reviewId, accountId, true]]);
+});
+
 test('review reply accepts only a strict bounded body after owner authorization', async () => {
   const calls: unknown[] = [];
   const response = { id: reviewId, adminReply: null };

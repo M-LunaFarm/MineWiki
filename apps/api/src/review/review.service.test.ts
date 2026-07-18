@@ -1,7 +1,7 @@
 import { after, afterEach, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
 import { ReviewService } from './review.service';
 import { PrismaService } from '../common/prisma.service';
@@ -136,7 +136,7 @@ if (!hasDatabase) {
       { rating: 5, body: '도움표시 동시성 테스트 리뷰', tags: ['community'] },
       createSession(author.id)
     );
-    return { review, server };
+    return { review, server, author };
   };
 
   test('throws when account information is missing', async () => {
@@ -195,7 +195,7 @@ if (!hasDatabase) {
     assert.equal(countedServer.reviewsCount, 1);
   });
 
-  test('supports anonymous staff-only feedback and reporting', async () => {
+  test('keeps anonymous staff-only feedback outside public interactions', async () => {
     const account = await createAccount();
     const server = await createServer();
     const session = createSession(account.id);
@@ -215,10 +215,34 @@ if (!hasDatabase) {
     const publicReviews = await reviewService.list(server.id);
     assert.equal(publicReviews.some((item) => item.id === review.id), false);
 
-    const reported = await reviewService.report(server.id, review.id, account.id, '운영 정책 위반');
-    assert.equal(reported.reports, 1);
-    const duplicate = await reviewService.report(server.id, review.id, account.id, '중복 신고');
-    assert.equal(duplicate.reports, 1);
+    const outsider = await createAccount('Outside reviewer');
+    await assert.rejects(
+      () => reviewService.report(server.id, review.id, outsider.id, '운영 정책 위반'),
+      NotFoundException,
+    );
+    await assert.rejects(
+      () => reviewService.markHelpful(server.id, review.id, outsider.id, true),
+      NotFoundException,
+    );
+    const stored = await prisma.serverReview.findUniqueOrThrow({ where: { id: review.id } });
+    assert.equal(stored.reports, 0);
+    assert.equal(stored.helpfulCount, 0);
+  });
+
+  test('rejects self-report and self-helpful interactions', async () => {
+    const { review, server, author } = await createEligibleReview();
+
+    await assert.rejects(
+      () => reviewService.report(server.id, review.id, author.id, '내 리뷰 신고'),
+      ForbiddenException,
+    );
+    await assert.rejects(
+      () => reviewService.markHelpful(server.id, review.id, author.id, true),
+      ForbiddenException,
+    );
+    const stored = await prisma.serverReview.findUniqueOrThrow({ where: { id: review.id } });
+    assert.equal(stored.reports, 0);
+    assert.equal(stored.helpfulCount, 0);
   });
 
   test('removing a review decrements only the public review counter', async () => {
@@ -287,6 +311,8 @@ if (!hasDatabase) {
     ]);
     assert.equal(activeVotes, 1);
     assert.equal(storedReview.helpfulCount, activeVotes);
+    const listed = await reviewService.listPage(server.id, {}, voter.id);
+    assert.equal(listed.items.find((item) => item.id === review.id)?.viewerHelpful, true);
   });
 
   test('keeps helpfulCount exact during concurrent true and false transitions', async () => {

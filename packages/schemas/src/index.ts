@@ -480,6 +480,7 @@ export const serverReviewSchema = z.object({
   tags: z.array(reviewTagSchema).max(3),
   trustLabels: z.array(reviewTrustLabelSchema),
   helpfulCount: z.number().int().nonnegative(),
+  viewerHelpful: z.boolean(),
   reports: z.number().int().nonnegative(),
   visibility: reviewVisibilitySchema,
   isAnonymous: z.boolean(),

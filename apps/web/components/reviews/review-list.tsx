@@ -16,7 +16,6 @@ interface ReviewListProps {
   readonly onReviewDeleted?: (deletedReview: ServerReview) => void;
 }
 
-type HelpfulState = Record<string, boolean>;
 type ReviewTag = ServerReview['tags'][number];
 
 interface ReviewEditDraft {
@@ -25,7 +24,6 @@ interface ReviewEditDraft {
   readonly tags: ReviewTag[];
 }
 
-const HELPFUL_VOTES_KEY = 'minewiki_helpful_votes';
 const MAX_BODY_LENGTH = 80;
 const MAX_TAGS = 3;
 
@@ -37,29 +35,6 @@ const TAG_LABELS: Record<ReviewTag, string> = {
   content: '콘텐츠',
   economy: '경제',
 };
-
-function loadHelpfulState(): HelpfulState {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-  const raw = window.localStorage.getItem(HELPFUL_VOTES_KEY);
-  if (!raw) {
-    return {};
-  }
-  try {
-    return JSON.parse(raw) as HelpfulState;
-  } catch (error) {
-    console.warn('Failed to parse helpful votes cache', error);
-    return {};
-  }
-}
-
-function persistHelpfulState(state: HelpfulState): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.localStorage.setItem(HELPFUL_VOTES_KEY, JSON.stringify(state));
-}
 
 function createEditDraft(review: ServerReview): ReviewEditDraft {
   return {
@@ -80,7 +55,6 @@ export function ReviewList({
   onReviewDeleted,
 }: ReviewListProps) {
   const [reviews, setReviews] = useState(initialReviews);
-  const [userHelpful, setUserHelpful] = useState<HelpfulState>({});
   const [pending, setPending] = useState<string | null>(null);
   const [reporting, setReporting] = useState<string | null>(null);
   const [replyEditing, setReplyEditing] = useState<string | null>(null);
@@ -96,14 +70,6 @@ export function ReviewList({
   useEffect(() => {
     setReviews(initialReviews);
   }, [initialReviews]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    const cached = loadHelpfulState();
-    setUserHelpful(cached);
-  }, []);
 
   useEffect(() => {
     if (!newReview) {
@@ -195,10 +161,12 @@ export function ReviewList({
     if (pending === reviewId) {
       return;
     }
-    const alreadyHelpful = userHelpful[reviewId] ?? false;
-    const nextHelpful = !alreadyHelpful;
     const previousReview = reviews.find((review) => review.id === reviewId);
-    const hadHelpfulEntry = Object.prototype.hasOwnProperty.call(userHelpful, reviewId);
+    if (!previousReview) {
+      return;
+    }
+    const alreadyHelpful = previousReview?.viewerHelpful ?? false;
+    const nextHelpful = !alreadyHelpful;
 
     setPending(reviewId);
 
@@ -212,14 +180,10 @@ export function ReviewList({
           return {
             ...review,
             helpfulCount: Math.max(0, review.helpfulCount + delta),
+            viewerHelpful: helpful,
           };
         }),
       );
-      setUserHelpful((current) => {
-        const next = { ...current, [reviewId]: helpful };
-        persistHelpfulState(next);
-        return next;
-      });
     };
 
     const revertLocalUpdate = () => {
@@ -228,16 +192,6 @@ export function ReviewList({
           current.map((review) => (review.id === reviewId ? previousReview : review)),
         );
       }
-      setUserHelpful((current) => {
-        const next = { ...current };
-        if (hadHelpfulEntry) {
-          next[reviewId] = alreadyHelpful;
-        } else {
-          delete next[reviewId];
-        }
-        persistHelpfulState(next);
-        return next;
-      });
     };
 
     applyLocalUpdate(nextHelpful);
@@ -410,10 +364,11 @@ export function ReviewList({
       ) : (
         reviews.map((review) => {
           const helpfulCount = helpfulCountByReview.get(review.id) ?? review.helpfulCount;
-          const isHelpful = userHelpful[review.id] ?? false;
+          const isHelpful = review.viewerHelpful;
           const buttonLabel = isHelpful ? '도움돼요 취소' : '도움돼요';
           const showStaffBadge = review.visibility === 'staff';
           const canManage = review.canManage === true;
+          const canInteract = review.visibility === 'public' && !canManage;
           const isEditing = editingReviewId === review.id;
           const draft = editDrafts[review.id] ?? createEditDraft(review);
 
@@ -579,22 +534,26 @@ export function ReviewList({
                   ) : null}
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded-full border border-[#30343b] px-3 py-1 text-xs font-semibold text-white hover:bg-[#202632] disabled:opacity-60"
-                    onClick={() => void handleToggleHelpful(review.id)}
-                    disabled={pending === review.id}
-                  >
-                    {buttonLabel}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-full border border-rose-500/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-60"
-                    onClick={() => void handleReport(review.id)}
-                    disabled={reporting === review.id}
-                  >
-                    신고
-                  </button>
+                  {canInteract ? (
+                    <>
+                      <button
+                        type="button"
+                        className="rounded-full border border-[#30343b] px-3 py-1 text-xs font-semibold text-white hover:bg-[#202632] disabled:opacity-60"
+                        onClick={() => void handleToggleHelpful(review.id)}
+                        disabled={pending === review.id}
+                      >
+                        {buttonLabel}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-full border border-rose-500/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-60"
+                        onClick={() => void handleReport(review.id)}
+                        disabled={reporting === review.id}
+                      >
+                        신고
+                      </button>
+                    </>
+                  ) : null}
                   {canManage ? (
                     <>
                       <button

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { cookies } from 'next/headers';
 import { notFound } from 'next/navigation';
 import {
   fetchServerDetail,
@@ -86,6 +87,7 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
   }
 
   const serverId = detail.id;
+  const cookieHeader = (await cookies()).toString();
   const statsPromise = fetchServerStats(serverId);
   const updatesPromise = fetchServerUpdates(serverId, { limit: 12 }).catch((error) => {
     console.error('Failed to load server updates', error);
@@ -96,6 +98,7 @@ export default async function ServerDetailPage({ params, searchParams }: PagePro
     sort: currentReviewSort,
     rating: currentReviewRating,
     tag: currentReviewTag,
+    cookie: cookieHeader || undefined,
   });
   const referralsPromise = fetchServerReferrals(serverId);
   const recommendationsPromise = fetchServerSummaries({ sort: 'votes24h_desc' });

@@ -154,8 +154,13 @@ export class ReviewService {
     const filtered = tagFilter
       ? reviews.filter((review) => normalizeReviewTags(review.tags).includes(tagFilter))
       : reviews;
-    const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
-    const mapped = filtered.map((review) => toReviewResponse(review, viewerAccountIds));
+    const viewer = await this.resolveViewerReviewContext(
+      viewerAccountId,
+      filtered.map((review) => review.id),
+    );
+    const mapped = filtered.map((review) =>
+      toReviewResponse(review, viewer.accountIds, viewer.helpfulReviewIds.has(review.id)),
+    );
     const sorted = sortMode === 'wilson'
       ? [...mapped].sort((a, b) => {
           const diff = calculateWilsonScore(b.rating) - calculateWilsonScore(a.rating);
@@ -237,9 +242,14 @@ export class ReviewService {
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
     const last = pageRows.at(-1);
-    const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
+    const viewer = await this.resolveViewerReviewContext(
+      viewerAccountId,
+      pageRows.map((review) => review.id),
+    );
     return {
-      items: pageRows.map((review) => toReviewResponse(review, viewerAccountIds)),
+      items: pageRows.map((review) =>
+        toReviewResponse(review, viewer.accountIds, viewer.helpfulReviewIds.has(review.id)),
+      ),
       nextCursor: hasMore && last
         ? this.encodeReviewCursor({
             version: 1,
@@ -262,8 +272,13 @@ export class ReviewService {
       where: { serverId },
       orderBy: { createdAt: 'desc' }
     });
-    const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
-    return reviews.map((review) => toReviewResponse(review, viewerAccountIds));
+    const viewer = await this.resolveViewerReviewContext(
+      viewerAccountId,
+      reviews.map((review) => review.id),
+    );
+    return reviews.map((review) =>
+      toReviewResponse(review, viewer.accountIds, viewer.helpfulReviewIds.has(review.id)),
+    );
   }
 
   async listMine(serverId: string, viewerAccountId: string): Promise<ServerReview[]> {
@@ -277,7 +292,14 @@ export class ReviewService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
     });
-    return reviews.map((review) => toReviewResponse(review, viewerAccountIds));
+    const viewer = await this.resolveViewerReviewContext(
+      viewerAccountId,
+      reviews.map((review) => review.id),
+      viewerAccountIds,
+    );
+    return reviews.map((review) =>
+      toReviewResponse(review, viewer.accountIds, viewer.helpfulReviewIds.has(review.id)),
+    );
   }
 
   private encodeReviewCursor(cursor: ReviewCursor): string {
@@ -449,16 +471,18 @@ export class ReviewService {
     reason: string,
   ): Promise<ServerReview> {
     const normalizedReason = reviewReportReasonSchema.parse(reason);
-    const review = await this.prisma.serverReview.findFirst({
-      where: { id: reviewId, serverId }
-    });
-    if (!review) {
-      throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
-    }
-
     const outcome = await withCanonicalAccountGroups(this.prisma, [reporterAccountId], async (transaction, groups) => {
       const group = groups[0];
       if (!group) throw new ForbiddenException('계정 정보를 찾을 수 없습니다.');
+      const review = await transaction.serverReview.findFirst({
+        where: { id: reviewId, serverId, visibility: 'public' },
+      });
+      if (!review) {
+        throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
+      }
+      if (group.accountIds.includes(review.authorAccountId)) {
+        throw new ForbiddenException('본인이 작성한 리뷰는 신고할 수 없습니다.');
+      }
       const duplicate = await transaction.reviewReport.findFirst({
         where: { reviewId, accountId: { in: [...group.accountIds] } }
       });
@@ -495,7 +519,12 @@ export class ReviewService {
         metadata: { serverId, reviewId },
       });
     }
-    return toReviewResponse(updated, outcome.accountIds);
+    const viewer = await this.resolveViewerReviewContext(
+      reporterAccountId,
+      [reviewId],
+      outcome.accountIds,
+    );
+    return toReviewResponse(updated, viewer.accountIds, viewer.helpfulReviewIds.has(reviewId));
   }
 
   async setAdminReply(
@@ -528,7 +557,8 @@ export class ReviewService {
           }
     });
 
-    return toReviewResponse(updated, await this.resolveAccountGroupIds(viewerAccountId));
+    const viewer = await this.resolveViewerReviewContext(viewerAccountId, [reviewId]);
+    return toReviewResponse(updated, viewer.accountIds, viewer.helpfulReviewIds.has(reviewId));
   }
 
   async markHelpful(
@@ -541,14 +571,17 @@ export class ReviewService {
     const outcome = await withCanonicalAccountGroups(this.prisma, [voterAccountId], async (transaction, groups) => {
       const group = groups[0];
       if (!group) throw new ForbiddenException('계정 정보를 찾을 수 없습니다.');
-      const lockedReviews = await transaction.$queryRaw<Array<{ id: string }>>`
-        SELECT id
+      const lockedReviews = await transaction.$queryRaw<Array<{ id: string; authorAccountId: string }>>`
+        SELECT id, authorAccountId
         FROM ServerReview
-        WHERE id = ${reviewId} AND serverId = ${serverId}
+        WHERE id = ${reviewId} AND serverId = ${serverId} AND visibility = 'public'
         FOR UPDATE
       `;
       if (lockedReviews.length !== 1) {
         throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
+      }
+      if (group.accountIds.includes(lockedReviews[0]!.authorAccountId)) {
+        throw new ForbiddenException('본인이 작성한 리뷰에는 도움표시를 할 수 없습니다.');
       }
 
       const existing = await transaction.reviewHelpfulVote.findFirst({
@@ -587,7 +620,7 @@ export class ReviewService {
       return { updated, accountIds: group.accountIds };
     });
 
-    return toReviewResponse(outcome.updated, outcome.accountIds);
+    return toReviewResponse(outcome.updated, outcome.accountIds, isHelpful);
   }
 
   async getGateStatus(serverId: string, session?: SessionPayload): Promise<ReviewGateStatus> {
@@ -717,6 +750,29 @@ export class ReviewService {
       groups[0]?.accountIds ?? []
     );
   }
+
+  private async resolveViewerReviewContext(
+    accountId: string | undefined,
+    reviewIds: readonly string[],
+    resolvedAccountIds?: readonly string[],
+  ): Promise<{ readonly accountIds: readonly string[]; readonly helpfulReviewIds: ReadonlySet<string> }> {
+    const accountIds = resolvedAccountIds ?? await this.resolveAccountGroupIds(accountId);
+    if (accountIds.length === 0 || reviewIds.length === 0) {
+      return { accountIds, helpfulReviewIds: new Set<string>() };
+    }
+    const helpfulVotes = await this.prisma.reviewHelpfulVote.findMany({
+      where: {
+        reviewId: { in: [...new Set(reviewIds)] },
+        accountId: { in: [...accountIds] },
+        isHelpful: true,
+      },
+      select: { reviewId: true },
+    });
+    return {
+      accountIds,
+      helpfulReviewIds: new Set(helpfulVotes.map((vote) => vote.reviewId)),
+    };
+  }
 }
 
 function deriveDisplayName(displayName?: string | null, fallback?: string | null): string {
@@ -774,7 +830,7 @@ function toReviewResponse(review: {
   evidenceVoteId?: string | null;
   evidenceVerifiedAt?: Date | null;
   evidencePolicyVersion?: string | null;
-}, viewerAccountIds: readonly string[] = []): ServerReview {
+}, viewerAccountIds: readonly string[] = [], viewerHelpful = false): ServerReview {
   const tags = normalizeReviewTags(review.tags);
   const adminReplyAuthor = normalizeAdminReplyAuthor(review.adminReplyAuthor);
   return {
@@ -789,6 +845,7 @@ function toReviewResponse(review: {
         ? ['ms_owned', 'vote_ack']
         : [],
     helpfulCount: review.helpfulCount,
+    viewerHelpful,
     reports: review.reports,
     visibility: review.visibility,
     isAnonymous: review.isAnonymous,
