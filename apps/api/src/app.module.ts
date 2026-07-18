@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { ConfigService } from '@minewiki/config';
 import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -25,16 +26,24 @@ import { RoleModule } from './roles/role.module';
 import { EventsModule } from './events/events.module';
 import { RoleAdminModule } from './roles/role-admin.module';
 import { BillingModule } from './billing/billing.module';
+import { createRateLimitStorage } from './common/rate-limit/rate-limit-storage.factory';
 
 @Module({
   imports: [
-    ThrottlerModule.forRoot([
-      {
-        name: 'default',
-        ttl: 60,
-        limit: 100
-      }
-    ]),
+    ThrottlerModule.forRootAsync({
+      imports: [AppConfigModule],
+      inject: [ConfigService],
+      useFactory: async (config: ConfigService) => ({
+        storage: await createRateLimitStorage(config),
+        throttlers: [
+          {
+            name: 'default',
+            ttl: 60,
+            limit: 100
+          }
+        ]
+      })
+    }),
     ServerModule,
     ReviewModule,
     VoteModule,

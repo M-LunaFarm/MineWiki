@@ -12,7 +12,7 @@ import { RoleService } from '../roles/role.service';
 import { policyConsentStatus } from './policy-consent';
 import { withActiveCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 
-interface SessionRecord {
+export interface SessionRecord {
   readonly sessionId: string;
   readonly userId: string;
   issuedAt: Date;

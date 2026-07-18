@@ -71,6 +71,31 @@ test('optional session guard preserves the centrally extracted IP for anonymous 
   assert.equal(request.sessionPayload, undefined);
 });
 
+test('session guards reuse the record already resolved by the global rate limiter', async () => {
+  const cached = { sessionId: 'cached-session', token: 'cached-token' };
+  let lookups = 0;
+  const service = {
+    ...sessionService(),
+    async getSessionByToken() {
+      lookups += 1;
+      return null;
+    },
+  };
+  const request = {
+    method: 'GET',
+    url: '/v1/wiki/page',
+    headers: { cookie: 'mw_session=cached-token' },
+    rateLimitSessionRecord: cached,
+  } as unknown as FastifyRequest;
+  const executionContext = {
+    switchToHttp: () => ({ getRequest: () => request }),
+  } as unknown as ExecutionContext;
+
+  assert.equal(await new SessionGuard(service as never).canActivate(executionContext), true);
+  assert.equal(lookups, 0);
+  assert.equal(request.sessionToken, 'cached-token');
+});
+
 function sessionService() {
   const session = { sessionId: 'session-id', token: 'session-token' };
   return {

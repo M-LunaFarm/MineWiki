@@ -25,7 +25,9 @@ export class OptionalSessionGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
     const requestIp = request.clientIp ?? null;
     const token = parseCookie(request.headers.cookie, 'mw_session');
-    const session = await this.sessions.getSessionByToken(token);
+    const session = request.rateLimitSessionRecord === undefined
+      ? await this.sessions.getSessionByToken(token)
+      : request.rateLimitSessionRecord ?? undefined;
     if (!session) {
       return true;
     }
