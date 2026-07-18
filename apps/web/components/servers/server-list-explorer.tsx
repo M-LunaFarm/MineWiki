@@ -29,6 +29,11 @@ import {
 } from '../../lib/server-preview';
 import { buildServerPath } from '../../lib/server-routes';
 import { fetchServerRankings, RankingEpochConflictError } from '../../lib/api';
+import {
+  serverRankingRequestFromFilters,
+  shouldLoadUnrankedServerPreview,
+  unrankedServerBrowseHref,
+} from '../../lib/server-ranking-preview.mjs';
 
 const PAGE_SIZE = 6;
 
@@ -86,16 +91,19 @@ interface ServerListExplorerProps {
   readonly initialRanking: ServerRankingResponse;
   readonly initialFilters: ServerListInitialFilters;
   readonly initialLoadError?: string | null;
+  readonly initialUnrankedPreview?: readonly ServerSummary[];
 }
 
 export function ServerListExplorer({
   initialRanking,
   initialFilters,
   initialLoadError = null,
+  initialUnrankedPreview = [],
 }: ServerListExplorerProps) {
   const [ranking, setRanking] = useState(initialRanking);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(initialLoadError);
+  const [unrankedPreview, setUnrankedPreview] = useState<readonly ServerSummary[]>(initialUnrankedPreview);
   const [searchQuery, setSearchQuery] = useState(initialFilters.search);
   const [edition, setEdition] = useState<EditionFilter>(initialFilters.edition);
   const [grade, setGrade] = useState<GradeFilter>(initialFilters.grade);
@@ -143,10 +151,11 @@ export function ServerListExplorer({
   const totalPages = Math.max(1, ranking.totalPages);
   const onlineCount = ranking.summary.online;
   const verifiedCount = ranking.summary.verified;
-  const hasOnlyUnrankedServers =
-    sort === 'votes24h_desc' &&
-    ranking.total === 0 &&
-    ranking.unrankedCount > 0;
+  const hasOnlyUnrankedServers = shouldLoadUnrankedServerPreview(ranking, sort);
+  const activeFilterState = {
+    search: searchQuery, edition, grade, online, sort, tags: selectedGenres, page: currentPage,
+  };
+  const unrankedBrowseHref = unrankedServerBrowseHref(activeFilterState);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -179,6 +188,7 @@ export function ServerListExplorer({
     const timer = window.setTimeout(async () => {
       setLoading(true);
       setLoadError(null);
+      setUnrankedPreview([]);
       const params = new URLSearchParams();
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
       if (edition !== 'all') params.set('edition', edition);
@@ -190,21 +200,25 @@ export function ServerListExplorer({
       const pathname = window.location.pathname === '/' ? '/' : '/servers';
       window.history.replaceState(null, '', query ? `${pathname}?${query}` : pathname);
       try {
-        const nextRanking = await fetchServerRankings({
-          edition: edition === 'all' ? undefined : edition,
-          grade: grade === 'all' ? undefined : grade,
-          online: online === 'online' ? true : undefined,
-          tag: selectedGenres[0],
-          search: searchQuery.trim() || undefined,
-          sort,
-          page: currentPage,
+        const filters = { search: searchQuery, edition, grade, online, sort, tags: selectedGenres, page: currentPage };
+        const nextRanking = await fetchServerRankings(serverRankingRequestFromFilters(filters, {
           pageSize: PAGE_SIZE,
-          rankEpoch: sort === 'votes24h_desc' && currentPage > 1
-            ? rankEpochRef.current ?? undefined
-            : undefined,
-        });
+          rankEpoch: sort === 'votes24h_desc' && currentPage > 1 ? rankEpochRef.current ?? undefined : undefined,
+        }));
+        if (controller.signal.aborted) return;
+        let nextPreview: readonly ServerSummary[] = [];
+        if (shouldLoadUnrankedServerPreview(nextRanking, sort)) {
+          try {
+            nextPreview = (await fetchServerRankings(serverRankingRequestFromFilters(filters, {
+              sort: 'latest', page: 1, pageSize: PAGE_SIZE,
+            }))).items;
+          } catch (previewError) {
+            if (!controller.signal.aborted) console.warn('Failed to refresh unranked server preview', previewError);
+          }
+        }
         if (controller.signal.aborted) return;
         rankEpochRef.current = nextRanking.rankEpoch;
+        setUnrankedPreview(nextPreview);
         setRanking((current) => {
           if (currentPage === 1) return nextRanking;
           const knownIds = new Set(current.items.map((item) => item.id));
@@ -262,6 +276,7 @@ export function ServerListExplorer({
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
                 <input
                   type="search"
+                  aria-label="서버 검색"
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="서버명, 주소, 태그 검색"
@@ -288,6 +303,7 @@ export function ServerListExplorer({
               </div>
 
               <select
+                aria-label="검증 상태"
                 value={grade}
                 onChange={(event) => setGrade(event.target.value as GradeFilter)}
                 className="paper-control hidden h-10 min-w-[140px] cursor-pointer px-3 md:block"
@@ -309,13 +325,7 @@ export function ServerListExplorer({
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between xl:w-auto">
               <div className="paper-results-summary flex items-center gap-3 text-sm text-[#676c64]">
-                <span>
-                  결과{' '}
-                  <strong className="paper-results-count text-[#20231f]">
-                    {ranking.total.toLocaleString('ko-KR')}
-                  </strong>
-                  개
-                </span>
+                {hasOnlyUnrankedServers ? <span>순위 집계 <strong className="paper-results-count text-[#20231f]">0</strong>개 · 등록 서버 <strong className="text-[#20231f]">{ranking.unrankedCount.toLocaleString('ko-KR')}</strong>개</span> : <span>결과 <strong className="paper-results-count text-[#20231f]">{ranking.total.toLocaleString('ko-KR')}</strong>개</span>}
                 {ranking.rankUpdatedAt ? (
                   <span className="hidden text-xs text-gray-500 sm:inline">
                     순위 기준 {formatRankUpdatedAt(ranking.rankUpdatedAt)}
@@ -468,22 +478,19 @@ export function ServerListExplorer({
                 </button>
               </section>
             ) : servers.length === 0 && hasOnlyUnrankedServers ? (
-              <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-amber-700/30 bg-amber-500/[0.04] px-6 py-16 text-center">
-                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-amber-500/10">
-                  <Activity className="h-7 w-7 text-amber-300" />
-                </div>
-                <h2 className="mb-2 text-lg font-bold text-white">아직 집계된 투표 순위가 없습니다</h2>
-                <p className="mb-6 max-w-md text-sm leading-6 text-gray-400">
-                  유효한 투표가 생긴 서버부터 다음 정기 집계에 순위가 표시됩니다. 등록된 서버는 최신 등록순에서 먼저 둘러볼 수 있습니다.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setSort('latest')}
-                  className="rounded-lg bg-[#13ec80] px-4 py-2 text-sm font-bold text-[#07100b] transition hover:bg-[#38f09b]"
-                >
-                  등록된 서버 둘러보기
-                </button>
-              </section>
+              <div className="mb-12">
+                <section className="flex flex-col gap-4 border-b border-amber-700/30 bg-amber-500/[0.05] px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-lg bg-amber-500/10"><Activity className="h-5 w-5 text-amber-700" /></span>
+                    <div><h2 className="font-bold text-[#252925]">투표 순위 집계 전입니다</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-[#676c64]">유효한 투표가 생긴 서버부터 정기 집계에 순위가 표시됩니다. 아래 서버는 순위 번호 없이 최신 등록순으로 안내합니다.</p></div>
+                  </div>
+                  <Link href={unrankedBrowseHref} className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-[#247253] px-4 text-sm font-bold text-white transition hover:bg-[#1d6045]">등록된 서버 전체 보기</Link>
+                </section>
+                {unrankedPreview.length > 0 ? <section aria-labelledby="unranked-server-preview-title" className="divide-y divide-[#aaa79e]/55 border-b border-[#aaa79e]/55">
+                  <h2 id="unranked-server-preview-title" className="sr-only">순위 집계 전 등록 서버</h2>
+                  {unrankedPreview.map((server) => <ServerCard key={server.id} server={server} rank={null} />)}
+                </section> : loading ? <p className="flex min-h-28 items-center justify-center text-sm text-[#676c64]" role="status">등록 서버를 불러오는 중입니다.</p> : <p className="border-b border-[#aaa79e]/55 px-5 py-8 text-center text-sm text-[#676c64]">미리보기를 불러오지 못했습니다. 전체 보기에서 등록 서버를 확인할 수 있습니다.</p>}
+              </div>
             ) : servers.length === 0 ? (
               <section className="flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-800 bg-[#111821] px-6 py-16 text-center">
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-[#1A1A1E]">
@@ -525,7 +532,7 @@ export function ServerListExplorer({
             <span className="paper-load-more-hint text-xs font-semibold uppercase tracking-[0.16em] text-[#777b73]">
               아래로 스크롤하면 더 불러옵니다
             </span>
-          ) : servers.length > 0 ? (
+          ) : servers.length > 0 || unrankedPreview.length > 0 ? (
             <span className="text-xs text-[#777b73]">모든 서버를 확인했습니다.</span>
           ) : null}
         </div>
@@ -583,6 +590,7 @@ export function ServerListExplorer({
                   검증 상태
                 </p>
                 <select
+                  aria-label="검증 상태"
                   value={grade}
                   onChange={(event) => setGrade(event.target.value as GradeFilter)}
                   className="paper-control h-10 w-full px-3"

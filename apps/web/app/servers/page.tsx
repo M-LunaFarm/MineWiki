@@ -1,10 +1,11 @@
-import type { ServerRankingResponse } from '@minewiki/schemas';
+import type { ServerRankingResponse, ServerSummary } from '@minewiki/schemas';
 import { fetchServerRankings } from '../../lib/api';
 import {
   ServerListExplorer,
   type ServerListInitialFilters,
 } from '../../components/servers/server-list-explorer';
 import { createPageMetadata } from '../../lib/metadata';
+import { serverRankingRequestFromFilters, shouldLoadUnrankedServerPreview } from '../../lib/server-ranking-preview.mjs';
 
 interface PageProps {
   readonly searchParams?:
@@ -85,17 +86,18 @@ export default async function ServerListPage({ searchParams }: PageProps) {
     unrankedCount: 0,
   };
   let initialLoadError: string | null = null;
+  let unrankedPreview: ServerSummary[] = [];
   try {
-    ranking = await fetchServerRankings({
-      edition: initialFilters.edition === 'all' ? undefined : initialFilters.edition,
-      grade: initialFilters.grade === 'all' ? undefined : initialFilters.grade,
-      online: initialFilters.online === 'online' ? true : undefined,
-      tag: initialFilters.tags[0],
-      search: initialFilters.search || undefined,
-      sort: initialFilters.sort,
-      page: initialFilters.page,
-      pageSize: 6,
-    });
+    ranking = await fetchServerRankings(serverRankingRequestFromFilters(initialFilters));
+    if (shouldLoadUnrankedServerPreview(ranking, initialFilters.sort)) {
+      try {
+        unrankedPreview = (await fetchServerRankings(serverRankingRequestFromFilters(initialFilters, {
+          sort: 'latest', page: 1, pageSize: 6,
+        }))).items;
+      } catch (error) {
+        console.warn('Failed to load unranked server preview', error);
+      }
+    }
   } catch (error) {
     console.error('Failed to load server list page data', error);
     initialLoadError = '서버 순위 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
@@ -106,6 +108,7 @@ export default async function ServerListPage({ searchParams }: PageProps) {
       initialRanking={ranking}
       initialFilters={initialFilters}
       initialLoadError={initialLoadError}
+      initialUnrankedPreview={unrankedPreview}
     />
   );
 }
