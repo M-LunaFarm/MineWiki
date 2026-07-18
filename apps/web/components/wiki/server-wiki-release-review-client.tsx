@@ -26,6 +26,8 @@ interface CandidatePage {
   readonly kind: CandidateKind;
   readonly contentChanged: boolean;
   readonly metadataChanged: boolean;
+  readonly diffPath: string | null;
+  readonly previewPath: null;
   readonly before: CandidateIdentity | null;
   readonly after: CandidateIdentity | null;
 }
@@ -212,7 +214,7 @@ export function ServerWikiReleaseReviewDetailClient({ candidateId }: { readonly 
       {pageLoading ? <div className="grid min-h-32 place-items-center"><Loader2 className="size-5 animate-spin text-emerald-300" aria-label="후보 문서 불러오는 중" /></div> : null}
       {!pageLoading && pageError ? <div className="p-5 text-sm text-red-200" role="alert"><p>{pageError}</p><button type="button" onClick={() => void loadPages(pageFilter)} className="btn-secondary mt-3 min-h-11"><RefreshCw className="size-4" />문서 다시 시도</button></div> : null}
       {!pageLoading && !pageError ? <ul className="divide-y divide-white/10">
-        {pages.map((page) => { const identity = page.after ?? page.before; return <li key={page.pageId} className="p-5"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="flex items-center gap-2 font-semibold text-white"><FilePenLine className="size-4 shrink-0 text-sky-300" />{identity?.displayTitle ?? identity?.title ?? `문서 ${page.pageId}`}</p><p className="mt-1 break-all text-xs text-slate-500">{page.before && page.after && page.before.localPath !== page.after.localPath ? `${page.before.localPath} → ${page.after.localPath}` : identity?.localPath}</p></div><span className="shrink-0 text-xs font-semibold text-slate-400">{kindLabel(page.kind)}</span></div>{page.contentChanged && page.before && page.after ? <Link href={`/wiki/diff/${page.before.revisionId}/${page.after.revisionId}?returnTo=${encodeURIComponent(`/wiki/release-reviews/${candidateId}`)}`} className="mt-3 inline-flex min-h-11 items-center text-xs font-semibold text-emerald-300">본문 변경 비교</Link> : null}</li>; })}
+        {pages.map((page) => { const identity = page.after ?? page.before; return <li key={page.pageId} className="p-5"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="flex items-center gap-2 font-semibold text-white"><FilePenLine className="size-4 shrink-0 text-sky-300" />{identity?.displayTitle ?? identity?.title ?? `문서 ${page.pageId}`}</p><p className="mt-1 break-all text-xs text-slate-500">{page.before && page.after && page.before.localPath !== page.after.localPath ? `${page.before.localPath} → ${page.after.localPath}` : identity?.localPath}</p></div><span className="shrink-0 text-xs font-semibold text-slate-400">{kindLabel(page.kind)}</span></div>{page.diffPath ? <Link href={page.diffPath} className="mt-3 inline-flex min-h-11 items-center text-xs font-semibold text-emerald-300">본문 변경 비교</Link> : null}</li>; })}
       </ul> : null}
       {!pageLoading && !pageError && pages.length === 0 ? <p className="p-6 text-sm text-slate-400"><CheckCircle2 className="mr-2 inline size-4" />이 필터에 해당하는 문서가 없습니다.</p> : null}
       {!pageLoading && !pageError && pageCursor ? <div className="border-t border-white/10 p-5"><button type="button" disabled={pageLoadingMore} onClick={() => void loadPages(pageFilter, pageCursor, true)} className="btn-secondary min-h-11 w-full">{pageLoadingMore ? <Loader2 className="size-4 animate-spin" /> : null}문서 더 불러오기</button></div> : null}

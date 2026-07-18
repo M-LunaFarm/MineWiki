@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 test('reviewers can discover and approve immutable server wiki candidates without knowing a server UUID', async () => {
-  const [client, queuePage, detailPage, badge, header] = await Promise.all([
+  const [client, queuePage, detailPage, badge, header, diffPage] = await Promise.all([
     readFile(new URL('../components/wiki/server-wiki-release-review-client.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../app/wiki/release-reviews/page.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../app/wiki/release-reviews/[candidateId]/page.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/layout/wiki-review-queue-badge.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/layout/site-header.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../app/wiki/release-reviews/[candidateId]/pages/[pageId]/diff/page.tsx', import.meta.url), 'utf8'),
   ]);
 
   assert.match(client, /\/v1\/wiki\/release-reviews/u);
@@ -18,6 +19,9 @@ test('reviewers can discover and approve immutable server wiki candidates withou
   assert.match(client, /candidateId: detail\.candidateId/u);
   assert.match(client, /candidateToken: detail\.candidateToken/u);
   assert.match(client, /본문 변경 비교/u);
+  assert.doesNotMatch(client, /\/wiki\/diff\/\$\{page\.before\.revisionId\}/u);
+  assert.match(diffPage, /fetchServerWikiReleaseCandidateDiff/u);
+  assert.match(diffPage, /저장 후보 본문 비교/u);
   assert.match(client, /대기 중인 릴리스 검토가 없습니다/u);
   assert.match(client, /더 불러오기/u);
   assert.match(queuePage, /ServerWikiReleaseReviewQueueClient/u);

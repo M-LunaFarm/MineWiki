@@ -96,6 +96,13 @@ export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Pr
   return readWikiResponse<WikiRevisionDiffResponse>(response, 'Failed to load wiki diff.');
 }
 
+export async function fetchServerWikiReleaseCandidateDiff(candidateId: string, pageId: string): Promise<WikiRevisionDiffResponse> {
+  const response = await wikiFetch(
+    `/v1/wiki/release-reviews/${encodeURIComponent(candidateId)}/pages/${encodeURIComponent(pageId)}/diff`,
+  );
+  return readWikiResponse<WikiRevisionDiffResponse>(response, 'Failed to load release candidate diff.');
+}
+
 export async function fetchWikiRecent(input: { readonly cursor?: string; readonly changeType?: string; readonly namespace?: string; readonly spaceId?: string; readonly minor?: string } = {}): Promise<WikiRecentChangeListResponse> {
   const params = new URLSearchParams({ limit: '30' });
   if (input.cursor) params.set('cursor', input.cursor);

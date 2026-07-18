@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle2, ExternalLink, FilePenLine, FilePlus2, FolderSync, Globe2, Loader2, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
+import { CheckCircle2, ExternalLink, FilePenLine, Globe2, Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { csrfHeaders } from '../../lib/csrf';
@@ -66,7 +66,7 @@ interface CandidateState {
   readonly baselineReleaseId: string | null;
   readonly generatedAt: string;
   readonly counts: Readonly<Record<CandidateKind, number>>;
-  readonly pages: readonly CandidatePage[];
+  readonly totalPageCount: number;
   readonly presentation: {
     readonly navigationChanged: boolean;
     readonly contentSettingsChanged: boolean;
@@ -77,29 +77,6 @@ interface CandidateState {
 }
 
 type CandidateKind = 'added' | 'updated' | 'moved' | 'removed' | 'unchanged';
-
-interface CandidatePage {
-  readonly pageId: string;
-  readonly kind: CandidateKind;
-  readonly contentChanged: boolean;
-  readonly identityChanged: boolean;
-  readonly metadataChanged: boolean;
-  readonly before: CandidateIdentity | null;
-  readonly after: CandidateIdentity | null;
-  readonly updatedAt: string;
-}
-
-interface CandidateIdentity {
-  readonly revisionId: string;
-  readonly title: string;
-  readonly displayTitle: string;
-  readonly localPath: string;
-  readonly routePath: string;
-  readonly pageType: string;
-  readonly protectionLevel: string;
-  readonly status: string;
-  readonly updatedAt: string;
-}
 
 const STATUS_COPY: Record<PublicationStatus, { readonly label: string; readonly description: string }> = {
   draft: { label: '초안', description: '권한 있는 소유자와 협업자만 같은 주소에서 미리 볼 수 있습니다.' },
@@ -318,8 +295,7 @@ function ReleaseCandidateManifest({
   readonly saving: boolean;
   readonly onApproval: (approve: boolean) => void;
 }) {
-  const changedPages = candidate.pages.filter((page) => page.kind !== 'unchanged');
-  const visiblePages = changedPages.slice(0, 50);
+  const changedPageCount = candidate.counts.added + candidate.counts.updated + candidate.counts.moved + candidate.counts.removed;
   const presentationChanges = [
     candidate.presentation.navigationChanged ? '문서 구조' : null,
     candidate.presentation.contentSettingsChanged ? '정책·문서 안내' : null,
@@ -329,33 +305,17 @@ function ReleaseCandidateManifest({
   return <section className="mt-5 overflow-hidden rounded-lg border border-white/10 bg-black/15" aria-labelledby="release-candidate-title">
     <header className="flex flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-center sm:justify-between">
       <div><h3 id="release-candidate-title" className="font-semibold text-white">검토할 릴리스 후보</h3><p className="mt-1 text-xs leading-5 text-slate-400">마지막 공개 릴리스와 현재 작업본을 비교했습니다. 아래 후보가 바뀌면 공개 요청은 자동으로 거부됩니다.</p></div>
-      <span className={`inline-flex items-center gap-2 self-start rounded-full border px-3 py-1 text-xs font-semibold ${candidate.hasChanges ? 'border-sky-300/25 text-sky-200' : 'border-emerald-300/25 text-emerald-200'}`}>{candidate.hasChanges ? <FilePenLine className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}{candidate.hasChanges ? `변경 ${changedPages.length}건` : '공개본과 동일'}</span>
+      <span className={`inline-flex items-center gap-2 self-start rounded-full border px-3 py-1 text-xs font-semibold ${candidate.hasChanges ? 'border-sky-300/25 text-sky-200' : 'border-emerald-300/25 text-emerald-200'}`}>{candidate.hasChanges ? <FilePenLine className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}{candidate.hasChanges ? `변경 ${changedPageCount.toLocaleString('ko-KR')}건` : '공개본과 동일'}</span>
     </header>
     <div className="grid grid-cols-2 gap-px bg-white/10 sm:grid-cols-5">
       {(['added', 'updated', 'moved', 'removed', 'unchanged'] as const).map((kind) => <div key={kind} className="bg-[#111821] p-3 text-center"><p className="text-lg font-bold text-white">{candidate.counts[kind].toLocaleString('ko-KR')}</p><p className="mt-1 text-[11px] text-slate-500">{candidateKindLabel(kind)}</p></div>)}
     </div>
     {presentationChanges.length > 0 ? <p className="border-t border-white/10 px-4 py-3 text-xs text-slate-300">사이트 설정 변경: {presentationChanges.join(' · ')}</p> : null}
     {review.required || review.canApprove ? <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-white">독립 검토 {review.approved ? '승인 완료' : '대기 중'}</p><p className="mt-1 text-xs text-slate-400">{review.required ? `활성 reviewer의 승인이 있어야 공개할 수 있습니다. 현재 승인 ${review.approvals.length.toLocaleString('ko-KR')}건` : '현재 등록된 reviewer가 없어 독립 승인 없이 공개할 수 있습니다.'}</p></div>{review.canApprove ? <button type="button" disabled={saving || !candidate.hasChanges} onClick={() => onApproval(!review.viewerApproved)} className="btn-secondary min-h-11 shrink-0 disabled:opacity-50">{review.viewerApproved ? '내 승인 취소' : '이 후보 승인'}</button> : null}</div> : null}
-    {visiblePages.length > 0 ? <ul className="divide-y divide-white/10 border-t border-white/10">
-      {visiblePages.map((page) => {
-        const identity = page.after ?? page.before;
-        return <li key={page.pageId} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <span className="min-w-0"><span className="flex items-center gap-2 text-sm font-semibold text-white">{candidateKindIcon(page.kind)}<span className="truncate">{identity?.displayTitle ?? identity?.title ?? `문서 ${page.pageId}`}</span></span>{page.before && page.after && page.before.localPath !== page.after.localPath ? <span className="mt-1 block truncate text-xs text-slate-500">{page.before.localPath} → {page.after.localPath}</span> : <span className="mt-1 block truncate text-xs text-slate-500">{identity?.localPath}</span>}</span>
-          <span className="shrink-0 text-xs text-slate-500">{candidateKindLabel(page.kind)}{page.contentChanged && page.kind === 'moved' ? ' · 본문 수정' : ''}{page.metadataChanged ? ' · 공개 메타데이터 변경' : ''}</span>
-        </li>;
-      })}
-    </ul> : <p className="border-t border-white/10 px-4 py-5 text-sm text-slate-400">문서 변경이 없습니다.</p>}
-    {changedPages.length > visiblePages.length ? <p className="border-t border-white/10 px-4 py-3 text-xs text-amber-200">변경 {changedPages.length.toLocaleString('ko-KR')}건 중 처음 {visiblePages.length.toLocaleString('ko-KR')}건을 표시합니다.</p> : null}
+    <p className="border-t border-white/10 px-4 py-4 text-xs text-slate-400">후보 manifest에는 전체 {candidate.totalPageCount.toLocaleString('ko-KR')}개 문서의 상태가 고정되어 있습니다. 문서별 변경 내용은 reviewer 전용 검토 화면에서 서명된 페이지 단위로 불러옵니다.</p>
   </section>;
 }
 
 function candidateKindLabel(kind: CandidateKind): string {
   return ({ added: '추가', updated: '본문 수정', moved: '이동·이름 변경', removed: '삭제', unchanged: '변경 없음' } as const)[kind];
-}
-
-function candidateKindIcon(kind: CandidateKind) {
-  if (kind === 'added') return <FilePlus2 className="size-4 shrink-0 text-emerald-300" aria-hidden="true" />;
-  if (kind === 'removed') return <Trash2 className="size-4 shrink-0 text-rose-300" aria-hidden="true" />;
-  if (kind === 'moved') return <FolderSync className="size-4 shrink-0 text-amber-300" aria-hidden="true" />;
-  return <FilePenLine className="size-4 shrink-0 text-sky-300" aria-hidden="true" />;
 }
