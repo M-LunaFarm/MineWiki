@@ -114,6 +114,57 @@ test('expands a readable include with AST-safe parameters and disables nested in
   assert.equal(permissionCalls[0]?.requestIp, '192.0.2.44');
 });
 
+test('server wiki includes resolve from the same immutable release instead of the draft revision', async () => {
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 3 }; } },
+    serverWikiReleaseItem: {
+      async findFirst() {
+        return {
+          releaseId: 70n,
+          namespaceId: 3,
+          pageId: 2n,
+          revisionId: 20n,
+          spaceId: 10n,
+          localPath: 'luna/template',
+          title: 'luna/template',
+          protectionLevel: 'open',
+          pageStatus: 'normal',
+          createdBy: 1n,
+          ownerProfileId: null,
+        };
+      },
+    },
+    wikiPage: {
+      async findUnique() {
+        return { id: 2n, currentRevisionId: 99n, contentRaw: '절대 노출되면 안 되는 작업본' };
+      },
+    },
+    wikiPageRevision: {
+      async findFirst(input: { where: { id: bigint } }) {
+        return input.where.id === 20n
+          ? { id: 20n, pageId: 2n, contentRaw: '고정된 공개 릴리스', visibility: 'public' }
+          : null;
+      },
+    },
+  };
+  const service = new WikiIncludeService(prisma as never, {
+    async assertCanReadPage() {},
+  } as never);
+  const parsed = parseMarkup('[include(템플릿)]');
+  const result = await service.expand({
+    ast: parsed.ast,
+    accountId: null,
+    sourcePageId: 1n,
+    sourceNamespace: 'server',
+    sourceLocalPath: 'luna/home',
+    releaseId: 70n,
+  });
+
+  const html = renderDocument(result.ast);
+  assert.match(html, /고정된 공개 릴리스/u);
+  assert.doesNotMatch(html, /작업본/u);
+});
+
 test('renders denied and missing include targets identically without target disclosure', async () => {
   const privateTemplate: FixturePage = {
     ...basePage,

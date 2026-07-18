@@ -29,6 +29,8 @@ CREATE TABLE `server_wiki_release_items` (
   `page_type` VARCHAR(32) NOT NULL,
   `protection_level` VARCHAR(32) NOT NULL,
   `page_status` VARCHAR(32) NOT NULL,
+  `created_by` BIGINT UNSIGNED NULL,
+  `owner_profile_id` BIGINT UNSIGNED NULL,
   `page_updated_at` DATETIME(3) NOT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),

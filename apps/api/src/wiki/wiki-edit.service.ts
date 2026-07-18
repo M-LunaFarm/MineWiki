@@ -2228,6 +2228,7 @@ export class WikiEditService {
     if (!revision || revision.pageId !== page.id || revision.visibility !== 'public') {
       throw new NotFoundException('Wiki revision not found.');
     }
+    await this.wikiPermissions.assertCanReadPage({ ...access, page, revision });
     return this.toRevisionResponse(revision);
   }
 

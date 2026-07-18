@@ -40,6 +40,7 @@ export class WikiIncludeService {
     readonly sourcePageId: bigint;
     readonly sourceNamespace: string;
     readonly sourceLocalPath: string;
+    readonly releaseId?: bigint;
   }): Promise<WikiIncludeExpansion> {
     let occurrence = 0;
     let includedSourceBytes = 0;
@@ -80,7 +81,8 @@ export class WikiIncludeService {
         sourcePromise = this.loadSource(target.namespace, target.title, {
           accountId: input.accountId,
           actor: input.actor,
-          requestIp: input.requestIp
+          requestIp: input.requestIp,
+          releaseId: input.releaseId,
         });
         memo.set(targetKey, sourcePromise);
       }
@@ -117,6 +119,7 @@ export class WikiIncludeService {
       readonly accountId: string | null;
       readonly actor?: WikiPermissionActor | null;
       readonly requestIp?: string | null;
+      readonly releaseId?: bigint;
     }
   ): Promise<IncludeSource | null> {
     try {
@@ -125,15 +128,37 @@ export class WikiIncludeService {
         select: { id: true }
       });
       if (!namespace) return null;
-      const page = await this.prisma.wikiPage.findUnique({
-        where: {
-          namespaceId_slug: {
-            namespaceId: namespace.id,
-            slug: slugifyTitle(title)
+      const releasedItem = access.releaseId && namespaceCode === 'server'
+        ? await this.prisma.serverWikiReleaseItem.findFirst({
+            where: {
+              releaseId: access.releaseId,
+              namespaceId: namespace.id,
+              slug: slugifyTitle(title),
+            },
+          })
+        : null;
+      const page = releasedItem
+        ? {
+            id: releasedItem.pageId,
+            namespaceId: releasedItem.namespaceId,
+            spaceId: releasedItem.spaceId,
+            localPath: releasedItem.localPath,
+            title: releasedItem.title,
+            protectionLevel: releasedItem.protectionLevel,
+            status: releasedItem.pageStatus,
+            createdBy: releasedItem.createdBy,
+            ownerProfileId: releasedItem.ownerProfileId,
+            currentRevisionId: releasedItem.revisionId,
           }
-        }
-      });
-      if (!page?.currentRevisionId) return null;
+        : await this.prisma.wikiPage.findUnique({
+            where: {
+              namespaceId_slug: {
+                namespaceId: namespace.id,
+                slug: slugifyTitle(title)
+              }
+            }
+          });
+      if (!page?.currentRevisionId || (access.releaseId && namespaceCode === 'server' && !releasedItem)) return null;
       const revision = await this.prisma.wikiPageRevision.findFirst({
         where: {
           id: page.currentRevisionId,

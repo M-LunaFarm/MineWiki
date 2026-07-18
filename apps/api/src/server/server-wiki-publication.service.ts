@@ -432,6 +432,8 @@ export class ServerWikiPublicationService {
         pageType: true,
         protectionLevel: true,
         status: true,
+        createdBy: true,
+        ownerProfileId: true,
         updatedAt: true,
       },
     });
@@ -475,6 +477,8 @@ export class ServerWikiPublicationService {
         pageType: page.pageType,
         protectionLevel: page.protectionLevel,
         pageStatus: page.status,
+        createdBy: page.createdBy,
+        ownerProfileId: page.ownerProfileId,
         pageUpdatedAt: page.updatedAt,
         createdAt: now,
       })),

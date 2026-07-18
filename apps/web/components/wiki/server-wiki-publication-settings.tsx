@@ -26,6 +26,12 @@ interface PublicationState {
   readonly unpublishedAt: string | null;
   readonly updatedAt: string | null;
   readonly wikiUrl: string;
+  readonly release: {
+    readonly id: string;
+    readonly version: number;
+    readonly publishedAt: string;
+    readonly pageCount: number;
+  } | null;
   readonly readiness: {
     readonly ready: boolean;
     readonly blockers: readonly ReadinessBlocker[];
@@ -34,7 +40,7 @@ interface PublicationState {
 
 const STATUS_COPY: Record<PublicationStatus, { readonly label: string; readonly description: string }> = {
   draft: { label: '초안', description: '권한 있는 소유자와 협업자만 같은 주소에서 미리 볼 수 있습니다.' },
-  published: { label: '공개', description: '검색과 서버 위키 주소에서 누구나 문서를 읽을 수 있습니다.' },
+  published: { label: '공개', description: '방문자는 마지막 공개 릴리스를 읽습니다. 이후 편집·이동·삭제는 변경사항을 다시 공개할 때까지 작업본에만 남습니다.' },
   unpublished: { label: '비공개', description: '내용과 협업자 설정은 보존되며 권한 있는 사용자만 미리 볼 수 있습니다.' },
 };
 
@@ -109,9 +115,8 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
   if (!publication) return <section className="rounded-xl border border-red-300/25 bg-red-400/10 p-4 text-sm text-red-100">{message?.text ?? '공개 상태를 불러오지 못했습니다.'}<button type="button" onClick={() => void load()} className="mt-3 flex min-h-11 items-center gap-2 rounded-lg border border-red-200/30 px-4"><RefreshCw className="size-4" />다시 시도</button></section>;
 
   const copy = STATUS_COPY[publication.status];
-  const targetStatus = publication.status === 'published' ? 'unpublished' : 'published';
-  const canSubmit = reason.trim().length >= 5
-    && (targetStatus === 'published' ? publication.readiness.ready : confirmation === '비공개');
+  const canPublish = reason.trim().length >= 5 && publication.readiness.ready;
+  const canUnpublish = reason.trim().length >= 5 && confirmation === '비공개';
 
   return (
     <section className="rounded-xl border border-emerald-300/20 bg-emerald-400/[0.04] p-4 sm:p-6" aria-labelledby="server-wiki-publication-title">
@@ -124,7 +129,10 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
             <a href={publication.wikiUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-emerald-300 hover:text-emerald-200"><ExternalLink className="size-4" />위키 주소 열기</a>
           </div>
         </div>
-        <p className="text-xs text-slate-500">상태 버전 {publication.version}</p>
+        <div className="text-right text-xs leading-5 text-slate-500">
+          <p>상태 버전 {publication.version}</p>
+          {publication.release ? <p>공개 릴리스 v{publication.release.version} · 문서 {publication.release.pageCount}개</p> : null}
+        </div>
       </div>
 
       {!publication.readiness.ready ? <div className="mt-5 rounded-lg border border-amber-300/25 bg-amber-400/10 p-4"><p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><ShieldAlert className="size-4" />공개 전 확인이 필요합니다</p><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-amber-100/80">{publication.readiness.blockers.map((blocker) => <li key={blocker}>{BLOCKER_COPY[blocker]}</li>)}</ul></div> : null}
@@ -134,10 +142,13 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
         <label className="text-xs font-semibold text-slate-300">변경 사유
           <input value={reason} onChange={(event) => setReason(event.target.value)} minLength={5} maxLength={500} placeholder="5자 이상 입력" className="mt-1.5 min-h-11 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white outline-none focus:border-emerald-300/50" />
         </label>
-        {targetStatus === 'unpublished' ? <label className="text-xs font-semibold text-slate-300">확인 문구: 비공개
+        {publication.status === 'published' ? <label className="text-xs font-semibold text-slate-300">확인 문구: 비공개
           <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="비공개" className="mt-1.5 min-h-11 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white outline-none focus:border-amber-300/50" />
         </label> : <div className="hidden lg:block" />}
-        <button type="button" onClick={() => void changeStatus(targetStatus)} disabled={!canSubmit || saving} className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg px-5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto ${targetStatus === 'published' ? 'bg-emerald-400 text-emerald-950' : 'border border-amber-300/35 text-amber-100 hover:bg-amber-300/10'}`}>{saving ? <Loader2 className="size-4 animate-spin" /> : null}{targetStatus === 'published' ? '위키 공개' : '비공개 전환'}</button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button type="button" onClick={() => void changeStatus('published')} disabled={!canPublish || saving} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-emerald-400 px-5 text-sm font-bold text-emerald-950 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto">{saving ? <Loader2 className="size-4 animate-spin" /> : null}{publication.status === 'published' ? '변경사항 공개' : '위키 공개'}</button>
+          {publication.status === 'published' ? <button type="button" onClick={() => void changeStatus('unpublished')} disabled={!canUnpublish || saving} className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-amber-300/35 px-5 text-sm font-bold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto">비공개 전환</button> : null}
+        </div>
       </div>
     </section>
   );

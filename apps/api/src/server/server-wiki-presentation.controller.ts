@@ -25,15 +25,31 @@ export class ServerWikiPresentationController {
     const parsedSlug = slugSchema.parse(slug);
     const wiki = await this.prisma.serverWiki.findUnique({
       where: { slug: parsedSlug },
-      select: { spaceId: true }
+      select: { spaceId: true, publicationStatus: true, publishedReleaseId: true }
     });
+    let canPreview = false;
     if (wiki) {
       await this.wikiPermissions.assertCanReadSpace({
         accountId: request.sessionPayload?.userId ?? null,
         spaceId: wiki.spaceId,
         requestIp: request.clientIp ?? request.sessionPayload?.requestIp ?? null,
       });
+      const session = request.sessionPayload;
+      const profile = session
+        ? await this.prisma.wikiProfile.findUnique({
+            where: { accountId: session.userId },
+            select: { id: true, status: true },
+          })
+        : null;
+      canPreview = await this.wikiPermissions.canPreviewServerWikiSpace({
+        accountId: session?.userId ?? null,
+        actor: session && profile ? this.wikiPermissions.actorFromSession(session, profile) : null,
+        spaceId: wiki.spaceId,
+      });
     }
-    return this.servers.getWikiPresentationBySlug(parsedSlug);
+    const releaseId = !canPreview && wiki?.publicationStatus === 'published'
+      ? wiki.publishedReleaseId ?? undefined
+      : undefined;
+    return this.servers.getWikiPresentationBySlug(parsedSlug, releaseId);
   }
 }

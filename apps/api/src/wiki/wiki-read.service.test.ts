@@ -100,7 +100,8 @@ test('revision reads build an ACL actor from browser sessions while bare account
       async findMany() { return []; }
     },
     wikiPage: { async findUnique() { return page; } },
-    wikiPageRevision: { async findMany() { return []; } }
+    wikiPageRevision: { async findMany() { return []; } },
+    serverWiki: { async findFirst() { return null; } },
   } as unknown as PrismaService;
   const readInputs: Array<Record<string, unknown>> = [];
   const actorInputs: Array<{ readonly session: SessionPayload; readonly profile: { readonly id: bigint; readonly status: string } }> = [];
@@ -469,7 +470,17 @@ test('server wiki search resolves the slug to a mandatory tenant space filter', 
   const rawQueries: Array<{ sql: string; values: unknown[] }> = [];
   const prisma = {
     serverWiki: {
-      async findFirst() { return { spaceId: 5643n, status: 'active' }; },
+      async findFirst() {
+        return {
+          id: 99n,
+          spaceId: 5643n,
+          slug: '4cfjfkz-ac256525',
+          siteSlug: null,
+          status: 'active',
+          publicationStatus: 'published',
+          publishedReleaseId: 100n,
+        };
+      },
     },
     wikiNamespace: {
       async findUnique() { return { id: 7, code: 'server' }; },
@@ -482,6 +493,7 @@ test('server wiki search resolves the slug to a mandatory tenant space filter', 
 
   const permissions = {
     async filterReadablePages({ pages }: { pages: unknown[] }) { return pages; },
+    async canPreviewServerWikiSpace() { return true; },
   } as unknown as WikiPermissionService;
   const result = await new WikiReadService(prisma, permissions).search({
     q: '명령어',
@@ -495,6 +507,104 @@ test('server wiki search resolves the slug to a mandatory tenant space filter', 
   assert.match(rawQueries[0]!.sql, /p\.status IN \('normal', 'active', 'published', 'protected'\)/u);
   assert.equal(rawQueries[0]!.values.includes(7), true);
   assert.equal(rawQueries[0]!.values.includes(5643n), true);
+});
+
+test('public server wiki reads resolve immutable release items while collaborators keep the draft', async () => {
+  let preview = false;
+  const item = {
+    id: 1n,
+    releaseId: 70n,
+    serverWikiId: 50n,
+    spaceId: 40n,
+    namespaceId: 7,
+    pageId: 30n,
+    revisionId: 20n,
+    localPath: 'luna/guide',
+    slug: 'luna/guide',
+    title: 'luna/guide',
+    displayTitle: 'Guide',
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 10n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-19T00:00:00.000Z'),
+    createdAt: new Date('2026-07-19T00:00:00.000Z'),
+  };
+  const prisma = {
+    serverWiki: {
+      async findUnique() {
+        return { id: 50n, spaceId: 40n, status: 'active', publicationStatus: 'published', publishedReleaseId: 70n };
+      },
+    },
+    serverWikiReleaseItem: { async findFirst() { return item; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return preview; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions) as unknown as {
+    resolveReleasedServerWikiPage(namespace: string, namespaceId: number, title: string, access: unknown): Promise<{
+      releaseId: bigint;
+      revisionId: bigint;
+      page: { id: bigint; currentRevisionId: bigint; localPath: string };
+    } | null | undefined>;
+  };
+
+  const released = await service.resolveReleasedServerWikiPage('server', 7, 'luna/guide', {});
+  assert.equal(released?.releaseId, 70n);
+  assert.equal(released?.revisionId, 20n);
+  assert.equal(released?.page.currentRevisionId, 20n);
+  assert.equal(released?.page.localPath, 'luna/guide');
+
+  preview = true;
+  assert.equal(await service.resolveReleasedServerWikiPage('server', 7, 'luna/guide', {}), undefined);
+});
+
+test('released server wiki search matches only the snapshotted revision', async () => {
+  const releaseItem = {
+    id: 1n,
+    releaseId: 70n,
+    serverWikiId: 50n,
+    spaceId: 40n,
+    namespaceId: 7,
+    pageId: 30n,
+    revisionId: 20n,
+    localPath: 'luna/guide',
+    slug: 'luna/guide',
+    title: 'luna/guide',
+    displayTitle: '공개 가이드',
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 10n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-19T00:00:00.000Z'),
+  };
+  const prisma = {
+    serverWikiReleaseItem: { async findMany() { return [releaseItem]; } },
+    wikiPageRevision: {
+      async findMany() { return [{ id: 20n, pageId: 30n, contentRaw: '공개 릴리스에만 있는 명령어 안내' }]; },
+    },
+  } as unknown as PrismaService;
+  const permissions = {
+    async filterReadablePages({ pages }: { pages: unknown[] }) { return pages; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions) as unknown as {
+    searchReleasedServerWiki(input: unknown): Promise<{ items: Array<{ pageId: string; snippet: string; routePath: string }> }>;
+  };
+  const result = await service.searchReleasedServerWiki({
+    wiki: { id: 50n, spaceId: 40n, slug: 'luna', siteSlug: 'luna-docs', publishedReleaseId: 70n },
+    namespaceId: 7,
+    query: '명령어',
+    target: 'all',
+    limit: 20,
+    cursor: null,
+    access: { accountId: null },
+  });
+
+  assert.equal(result.items[0]?.pageId, '30');
+  assert.match(result.items[0]?.snippet ?? '', /명령어/u);
+  assert.equal(result.items[0]?.routePath, '/serverWiki/luna-docs/guide');
 });
 
 test('wiki search batches current revisions and returns a continuation cursor', async () => {
@@ -681,7 +791,8 @@ test('revision history uses a stable revision number cursor beyond the first pag
   const prisma = {
     wikiPage: { async findUnique() { return page; } },
     wikiPageRevision: { async findMany(args: { where: unknown }) { revisionWhere = args.where; return [makeRevision(4), makeRevision(3), makeRevision(2)]; } },
-    wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'editor' }]; } }
+    wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'editor' }]; } },
+    serverWiki: { async findFirst() { return null; } },
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage() {}, async assertCanUsePageAction() {} } as unknown as WikiPermissionService;
   const result = await new WikiReadService(prisma, permissions).getRevisions('1', null, '5', 2);
@@ -855,7 +966,8 @@ test('historical revision rendering keeps raw source private and applies read pl
     wikiPage: { async findUnique() { return page; }, async findFirst() { return { namespaceId: 1 }; } },
     wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
     wikiPageRevision: { async findFirst(input: { where: { id: bigint } }) { return input.where.id === 11n ? revision : null; } },
-    wikiPageRenderCache: { async findUnique() { return null; }, async create() { return {}; } }
+    wikiPageRenderCache: { async findUnique() { return null; }, async create() { return {}; } },
+    serverWiki: { async findFirst() { return null; } },
   } as unknown as PrismaService;
   const actions: string[] = [];
   let readRevisionId: bigint | undefined;
@@ -923,7 +1035,9 @@ test('recent changes use filters, a stable cursor, and one page visibility check
       }
     },
     serverWiki: {
-      async findMany() { return [{ spaceId: 1n, slug: 'alpha' }]; }
+      async findMany(args: { select?: { publishedReleaseId?: boolean } }) {
+        return args.select?.publishedReleaseId ? [] : [{ spaceId: 1n, slug: 'alpha' }];
+      }
     }
   } as unknown as PrismaService;
   const checked = new Map<bigint, number>();
@@ -963,6 +1077,7 @@ test('recent changes expose only public deletion snapshots with a generic reason
     wikiPageRevision: { async findMany() { return [{ id: 70n, editSummaryHidden: false, actorType: 'user', visibility: 'public' }]; } },
     wikiProfile: { async findMany() { return [{ id: 9n, username: 'editor', displayName: '편집자' }]; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    serverWiki: { async findMany() { return []; } },
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage() { throw new Error('deleted'); } } as unknown as WikiPermissionService;
 

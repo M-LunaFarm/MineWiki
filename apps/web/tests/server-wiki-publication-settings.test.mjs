@@ -20,7 +20,10 @@ test('server wiki settings exposes a mobile-safe publication lifecycle', async (
     'missing_official_channel',
     'search_index_not_ready',
   ]) assert.match(publication, new RegExp(blocker, 'u'));
-  assert.match(publication, /confirmation !== '비공개'/u);
+  assert.match(publication, /confirmation === '비공개'/u);
+  assert.match(publication, /publication\.release\.pageCount/u);
+  assert.match(publication, /변경사항 공개/u);
+  assert.match(publication, /마지막 공개 릴리스/u);
   assert.match(publication, /min-h-11 w-full/u);
   assert.match(publication, /aria-live="polite"/u);
 });

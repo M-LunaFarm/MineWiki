@@ -8,9 +8,14 @@ test('presentation applies the shared space publication policy before returning 
   const calls: string[] = [];
   const controller = new ServerWikiPresentationController(
     { async getWikiPresentationBySlug() { calls.push('presentation'); return { slug: 'example' }; } } as never,
-    { serverWiki: { async findUnique() { calls.push('lookup'); return { spaceId: 10n }; } } } as never,
+    {
+      serverWiki: { async findUnique() { calls.push('lookup'); return { spaceId: 10n, publicationStatus: 'published', publishedReleaseId: 50n }; } },
+      wikiProfile: { async findUnique() { calls.push('profile'); return { id: 20n, status: 'active' }; } },
+    } as never,
     { async assertCanReadSpace(input: { accountId: string | null; spaceId: bigint }) {
       calls.push(`policy:${input.accountId}:${input.spaceId}`);
+    }, actorFromSession() { return { profileId: 20n, status: 'active' }; }, async canPreviewServerWikiSpace() {
+      calls.push('preview'); return false;
     } } as never,
   );
 
@@ -19,7 +24,7 @@ test('presentation applies the shared space publication policy before returning 
     clientIp: '203.0.113.8',
   } as never);
 
-  assert.deepEqual(calls, ['lookup', 'policy:account-1:10', 'presentation']);
+  assert.deepEqual(calls, ['lookup', 'policy:account-1:10', 'profile', 'preview', 'presentation']);
   assert.deepEqual(result, { slug: 'example' });
 });
 

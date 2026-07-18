@@ -657,7 +657,7 @@ test('raw revision and diff reads preserve browser session ACL claims and reques
   await edits.getRevision('11', browserSession);
   await edits.getRevisionDiff('11', '11', browserSession);
 
-  assert.equal(readInputs.length, 4);
+  assert.equal(readInputs.length, 5);
   assert.equal(readInputs.every((input) => input.accountId === 'account'), true);
   assert.equal(readInputs.every((input) => input.actor === actor), true);
   assert.equal(readInputs.every((input) => input.requestIp === '198.51.100.8'), true);

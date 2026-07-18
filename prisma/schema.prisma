@@ -2019,6 +2019,8 @@ model ServerWikiReleaseItem {
   pageType        String   @map("page_type") @db.VarChar(32)
   protectionLevel String   @map("protection_level") @db.VarChar(32)
   pageStatus      String   @map("page_status") @db.VarChar(32)
+  createdBy       BigInt?  @map("created_by") @db.UnsignedBigInt
+  ownerProfileId  BigInt?  @map("owner_profile_id") @db.UnsignedBigInt
   pageUpdatedAt   DateTime @map("page_updated_at") @db.DateTime(3)
   createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
 

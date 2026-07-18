@@ -2093,7 +2093,7 @@ export class ServerService {
     return toWikiContentSettingsResponse(updated);
   }
 
-  async getWikiPresentationBySlug(slug: string) {
+  async getWikiPresentationBySlug(slug: string, releaseId?: bigint) {
     const settings = await this.prisma.serverWiki.findUnique({
       where: { slug },
       select: {
@@ -2105,17 +2105,43 @@ export class ServerService {
         requireContributionPolicyAck: true,
         contributionPolicyVersion: true,
         contentSettingsVersion: true,
+        publishedRelease: releaseId
+          ? {
+              select: { id: true, presentationSnapshot: true },
+            }
+          : false,
       },
     });
     if (!settings) throw new NotFoundException('Server wiki not found.');
-    const rendered = renderServerWikiPresentation(settings);
+    if (releaseId && settings.publishedRelease?.id !== releaseId) {
+      throw new NotFoundException('Server wiki release not found.');
+    }
+    const snapshot = settings.publishedRelease?.presentationSnapshot
+      && typeof settings.publishedRelease.presentationSnapshot === 'object'
+      && !Array.isArray(settings.publishedRelease.presentationSnapshot)
+      ? settings.publishedRelease.presentationSnapshot as Record<string, Prisma.JsonValue>
+      : null;
+    const presentationSettings = snapshot
+      ? {
+          contributionPolicySource: jsonNullableString(snapshot.contributionPolicySource),
+          editHelpSource: jsonNullableString(snapshot.editHelpSource),
+          topNoticeSource: jsonNullableString(snapshot.topNoticeSource),
+          bottomNoticeSource: jsonNullableString(snapshot.bottomNoticeSource),
+          requireContributionPolicyAck: snapshot.requireContributionPolicyAck === true,
+        }
+      : settings;
+    const rendered = renderServerWikiPresentation(presentationSettings);
     return {
       slug: settings.slug,
-      settingsVersion: settings.contentSettingsVersion,
+      settingsVersion: snapshot && typeof snapshot.contentSettingsVersion === 'number'
+        ? snapshot.contentSettingsVersion
+        : settings.contentSettingsVersion,
       policy: {
         html: rendered.policyHtml,
-        version: settings.contributionPolicyVersion,
-        required: settings.requireContributionPolicyAck && Boolean(rendered.policyHtml),
+        version: snapshot && typeof snapshot.contributionPolicyVersion === 'number'
+          ? snapshot.contributionPolicyVersion
+          : settings.contributionPolicyVersion,
+        required: presentationSettings.requireContributionPolicyAck && Boolean(rendered.policyHtml),
       },
       editHelpHtml: rendered.editHelpHtml,
       topNoticeHtml: rendered.topNoticeHtml,
@@ -2191,6 +2217,10 @@ export class ServerService {
     }
     throw new Error('Failed to generate unique server short code.');
   }
+}
+
+function jsonNullableString(value: Prisma.JsonValue | undefined): string | null {
+  return typeof value === 'string' ? value : null;
 }
 
 export function downsamplePingSamples<T>(samples: readonly T[], maxSamples = 96): T[] {

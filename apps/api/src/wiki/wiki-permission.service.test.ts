@@ -24,6 +24,7 @@ function createService(options: {
     slug?: string;
     status?: string;
     publicationStatus?: string;
+    publishedReleaseId?: bigint | null;
     serverName?: string;
     host?: string | null;
   } | null;
@@ -67,6 +68,7 @@ function createService(options: {
         slug: 'server-one',
         status: 'active',
         publicationStatus: 'published',
+        publishedReleaseId: 30n,
         serverName: 'Server One',
         host: 'play.server-one.test',
         ...options.serverWiki,
@@ -127,6 +129,16 @@ function createService(options: {
       async findMany() {
         return normalizedServer ? [normalizedServer] : [];
       }
+    },
+    serverWikiReleaseItem: {
+      async findFirst(input: { where: { pageId: bigint; revisionId?: bigint } }) {
+        if (input.where.pageId !== 1n) return null;
+        if (input.where.revisionId !== undefined && input.where.revisionId !== 11n) return null;
+        return { revisionId: 11n };
+      },
+      async findMany(input: { where: { pageId: { in: bigint[] } } }) {
+        return input.where.pageId.in.includes(1n) ? [{ spaceId: 10n, pageId: 1n }] : [];
+      },
     },
     modWiki: {
       async findFirst() {
@@ -709,6 +721,28 @@ test('published server wiki stays private without a canonical active ranking par
       .canReadPage({ actor: null, page: target }),
     { allowed: false, reason: 'server_wiki_not_published' }
   );
+});
+
+test('published server wiki hides pages and revisions absent from the active release', async () => {
+  const service = createService({
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki', rootPageId: 1n },
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n, publicationStatus: 'published' },
+    server: { ownerAccountId: 'account-1' },
+  });
+
+  assert.deepEqual(
+    await service.canReadPage({ actor: null, page: page({ id: 2n }), revision: { id: 12n, visibility: 'public' } }),
+    { allowed: false, reason: 'server_wiki_page_not_released' },
+  );
+  assert.deepEqual(
+    await service.canReadPage({ actor: null, page: page(), revision: { id: 12n, visibility: 'public' } }),
+    { allowed: false, reason: 'server_wiki_page_not_released' },
+  );
+  assert.equal((await service.canReadPage({
+    actor: null,
+    page: page(),
+    revision: { id: 11n, visibility: 'public' },
+  })).allowed, true);
 });
 
 test('linked server wiki authority ignores provenance and follows active canonical server ownership', async () => {

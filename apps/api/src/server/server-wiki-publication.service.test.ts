@@ -101,6 +101,8 @@ function createFixture(options: FixtureOptions = {}) {
     status: 'normal',
     pageType: 'article',
     protectionLevel: 'open',
+    createdBy: 1n,
+    ownerProfileId: null,
     currentRevisionId: BigInt(200 + index),
     updatedAt: now,
     searchDocument: {
