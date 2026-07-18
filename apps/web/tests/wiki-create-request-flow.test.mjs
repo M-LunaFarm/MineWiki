@@ -8,7 +8,8 @@ const queue = readFileSync(resolve(import.meta.dirname, '../components/wiki/wiki
 const api = readFileSync(resolve(import.meta.dirname, '../lib/wiki-api.ts'), 'utf8');
 
 test('missing-document editor exposes the reviewed creation mutation', () => {
-  assert.match(editor, /createWikiPageRequest\(\{ namespace, title, contentRaw, editSummary, isMinor, captchaToken:/u);
+  assert.match(editor, /createWikiPageRequest\(\{ namespace, title, spaceId: createContext\?\.spaceId, contentRaw, editSummary, isMinor, captchaToken:/u);
+  assert.match(editor, /createContext\?\.canRequest/u);
   assert.match(editor, /새 문서 검토 요청/u);
   assert.match(api, /mutateWikiBrowser<WikiEditRequestSummary>\('\/v1\/wiki\/edit-requests', 'POST', input\)/u);
 });

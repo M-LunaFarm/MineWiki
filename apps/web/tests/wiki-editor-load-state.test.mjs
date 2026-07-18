@@ -16,7 +16,7 @@ test('revision failures keep every mutation path closed until the source reload 
   assert.match(editorSource, /const \[sourceReady, setSourceReady\] = useState\(false\)/);
   assert.match(editorSource, /setSourceReady\(false\);[\s\S]*setSourceLoadError\(null\)/);
   assert.match(editorSource, /setSourceLoadError\(error instanceof Error/);
-  assert.match(editorSource, /account && sourceReady && contentRaw\.trim\(\)/);
+  assert.match(editorSource, /account && \(page \|\| createContext\) && sourceReady && contentRaw\.trim\(\)/);
   assert.match(editorSource, /if \(sourceLoadError\)[\s\S]*<WikiEditorLoadError/);
   assert.match(editorSource, /onRetry=\{\(\) => setSourceReloadKey/);
 });
