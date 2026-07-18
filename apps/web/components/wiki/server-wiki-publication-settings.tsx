@@ -1,6 +1,6 @@
 'use client';
 
-import { ExternalLink, Globe2, Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, ExternalLink, FilePenLine, FilePlus2, FolderSync, Globe2, Loader2, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { csrfHeaders } from '../../lib/csrf';
@@ -36,6 +36,40 @@ interface PublicationState {
     readonly ready: boolean;
     readonly blockers: readonly ReadinessBlocker[];
   };
+  readonly candidate: {
+    readonly token: string;
+    readonly baselineReleaseId: string | null;
+    readonly generatedAt: string;
+    readonly counts: Readonly<Record<CandidateKind, number>>;
+    readonly pages: readonly CandidatePage[];
+    readonly presentation: {
+      readonly navigationChanged: boolean;
+      readonly contentSettingsChanged: boolean;
+      readonly layoutChanged: boolean;
+      readonly linkGraphChanged: boolean;
+    };
+    readonly hasChanges: boolean;
+  };
+}
+
+type CandidateKind = 'added' | 'updated' | 'moved' | 'removed' | 'unchanged';
+
+interface CandidatePage {
+  readonly pageId: string;
+  readonly kind: CandidateKind;
+  readonly contentChanged: boolean;
+  readonly identityChanged: boolean;
+  readonly before: CandidateIdentity | null;
+  readonly after: CandidateIdentity | null;
+  readonly updatedAt: string;
+}
+
+interface CandidateIdentity {
+  readonly revisionId: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly localPath: string;
+  readonly routePath: string;
 }
 
 const STATUS_COPY: Record<PublicationStatus, { readonly label: string; readonly description: string }> = {
@@ -96,10 +130,18 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
-        body: JSON.stringify({ status, expectedVersion: publication.version, reason: reason.trim() }),
+        body: JSON.stringify({
+          status,
+          expectedVersion: publication.version,
+          ...(status === 'published' ? { expectedCandidateToken: publication.candidate.token } : {}),
+          reason: reason.trim(),
+        }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.message ?? '공개 상태를 변경하지 못했습니다.');
+      if (!response.ok) {
+        if (body.code === 'SERVER_WIKI_RELEASE_CANDIDATE_CHANGED') await load();
+        throw new Error(body.message ?? '공개 상태를 변경하지 못했습니다.');
+      }
       setPublication(body as PublicationState);
       setReason('');
       setConfirmation('');
@@ -115,7 +157,7 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
   if (!publication) return <section className="rounded-xl border border-red-300/25 bg-red-400/10 p-4 text-sm text-red-100">{message?.text ?? '공개 상태를 불러오지 못했습니다.'}<button type="button" onClick={() => void load()} className="mt-3 flex min-h-11 items-center gap-2 rounded-lg border border-red-200/30 px-4"><RefreshCw className="size-4" />다시 시도</button></section>;
 
   const copy = STATUS_COPY[publication.status];
-  const canPublish = reason.trim().length >= 5 && publication.readiness.ready;
+  const canPublish = reason.trim().length >= 5 && publication.readiness.ready && publication.candidate.hasChanges;
   const canUnpublish = reason.trim().length >= 5 && confirmation === '비공개';
 
   return (
@@ -136,6 +178,7 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
       </div>
 
       {!publication.readiness.ready ? <div className="mt-5 rounded-lg border border-amber-300/25 bg-amber-400/10 p-4"><p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><ShieldAlert className="size-4" />공개 전 확인이 필요합니다</p><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-amber-100/80">{publication.readiness.blockers.map((blocker) => <li key={blocker}>{BLOCKER_COPY[blocker]}</li>)}</ul></div> : null}
+      <ReleaseCandidateManifest candidate={publication.candidate} />
       {message ? <p className={`mt-4 text-sm ${message.tone === 'error' ? 'text-red-200' : 'text-emerald-200'}`} role="status">{message.text}</p> : null}
 
       <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,280px)_auto] lg:items-end">
@@ -152,4 +195,46 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
       </div>
     </section>
   );
+}
+
+function ReleaseCandidateManifest({ candidate }: { readonly candidate: PublicationState['candidate'] }) {
+  const changedPages = candidate.pages.filter((page) => page.kind !== 'unchanged');
+  const visiblePages = changedPages.slice(0, 50);
+  const presentationChanges = [
+    candidate.presentation.navigationChanged ? '문서 구조' : null,
+    candidate.presentation.contentSettingsChanged ? '정책·문서 안내' : null,
+    candidate.presentation.layoutChanged ? '레이아웃' : null,
+    candidate.presentation.linkGraphChanged ? '문서 링크 그래프' : null,
+  ].filter((value): value is string => Boolean(value));
+  return <section className="mt-5 overflow-hidden rounded-lg border border-white/10 bg-black/15" aria-labelledby="release-candidate-title">
+    <header className="flex flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div><h3 id="release-candidate-title" className="font-semibold text-white">검토할 릴리스 후보</h3><p className="mt-1 text-xs leading-5 text-slate-400">마지막 공개 릴리스와 현재 작업본을 비교했습니다. 아래 후보가 바뀌면 공개 요청은 자동으로 거부됩니다.</p></div>
+      <span className={`inline-flex items-center gap-2 self-start rounded-full border px-3 py-1 text-xs font-semibold ${candidate.hasChanges ? 'border-sky-300/25 text-sky-200' : 'border-emerald-300/25 text-emerald-200'}`}>{candidate.hasChanges ? <FilePenLine className="size-3.5" /> : <CheckCircle2 className="size-3.5" />}{candidate.hasChanges ? `변경 ${changedPages.length}건` : '공개본과 동일'}</span>
+    </header>
+    <div className="grid grid-cols-2 gap-px bg-white/10 sm:grid-cols-5">
+      {(['added', 'updated', 'moved', 'removed', 'unchanged'] as const).map((kind) => <div key={kind} className="bg-[#111821] p-3 text-center"><p className="text-lg font-bold text-white">{candidate.counts[kind].toLocaleString('ko-KR')}</p><p className="mt-1 text-[11px] text-slate-500">{candidateKindLabel(kind)}</p></div>)}
+    </div>
+    {presentationChanges.length > 0 ? <p className="border-t border-white/10 px-4 py-3 text-xs text-slate-300">사이트 설정 변경: {presentationChanges.join(' · ')}</p> : null}
+    {visiblePages.length > 0 ? <ul className="divide-y divide-white/10 border-t border-white/10">
+      {visiblePages.map((page) => {
+        const identity = page.after ?? page.before;
+        return <li key={page.pageId} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <span className="min-w-0"><span className="flex items-center gap-2 text-sm font-semibold text-white">{candidateKindIcon(page.kind)}<span className="truncate">{identity?.displayTitle ?? identity?.title ?? `문서 ${page.pageId}`}</span></span>{page.before && page.after && page.before.localPath !== page.after.localPath ? <span className="mt-1 block truncate text-xs text-slate-500">{page.before.localPath} → {page.after.localPath}</span> : <span className="mt-1 block truncate text-xs text-slate-500">{identity?.localPath}</span>}</span>
+          <span className="shrink-0 text-xs text-slate-500">{candidateKindLabel(page.kind)}{page.contentChanged && page.kind === 'moved' ? ' · 본문 수정' : ''}</span>
+        </li>;
+      })}
+    </ul> : <p className="border-t border-white/10 px-4 py-5 text-sm text-slate-400">문서 변경이 없습니다.</p>}
+    {changedPages.length > visiblePages.length ? <p className="border-t border-white/10 px-4 py-3 text-xs text-amber-200">변경 {changedPages.length.toLocaleString('ko-KR')}건 중 처음 {visiblePages.length.toLocaleString('ko-KR')}건을 표시합니다.</p> : null}
+  </section>;
+}
+
+function candidateKindLabel(kind: CandidateKind): string {
+  return ({ added: '추가', updated: '본문 수정', moved: '이동·이름 변경', removed: '삭제', unchanged: '변경 없음' } as const)[kind];
+}
+
+function candidateKindIcon(kind: CandidateKind) {
+  if (kind === 'added') return <FilePlus2 className="size-4 shrink-0 text-emerald-300" aria-hidden="true" />;
+  if (kind === 'removed') return <Trash2 className="size-4 shrink-0 text-rose-300" aria-hidden="true" />;
+  if (kind === 'moved') return <FolderSync className="size-4 shrink-0 text-amber-300" aria-hidden="true" />;
+  return <FilePenLine className="size-4 shrink-0 text-sky-300" aria-hidden="true" />;
 }

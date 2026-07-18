@@ -60,6 +60,7 @@ test('controller trims and forwards publication mutations with canonical session
   await controller.update(serverId, {
     status: 'published',
     expectedVersion: 3,
+    expectedCandidateToken: 'a'.repeat(64),
     reason: '  owner approved launch  ',
   }, session);
 
@@ -69,6 +70,7 @@ test('controller trims and forwards publication mutations with canonical session
     ['update', serverId, {
       status: 'published',
       expectedVersion: 3,
+      expectedCandidateToken: 'a'.repeat(64),
       reason: 'owner approved launch',
     }, actor],
   ]);
@@ -79,8 +81,10 @@ test('controller rejects draft transitions, missing versions, short reasons, and
   for (const body of [
     { status: 'draft', expectedVersion: 0, reason: 'return to draft state' },
     { status: 'published', reason: 'owner approved launch' },
+    { status: 'published', expectedVersion: 0, reason: 'owner approved launch' },
+    { status: 'published', expectedVersion: 0, expectedCandidateToken: 'ABC', reason: 'owner approved launch' },
     { status: 'unpublished', expectedVersion: 0, reason: 'no' },
-    { status: 'published', expectedVersion: 0, reason: 'owner approved launch', force: true },
+    { status: 'published', expectedVersion: 0, expectedCandidateToken: 'a'.repeat(64), reason: 'owner approved launch', force: true },
   ]) {
     assert.throws(() => controller.update(serverId, body, session), ZodError);
   }

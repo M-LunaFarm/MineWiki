@@ -14,8 +14,17 @@ import {
 const updatePublicationSchema = z.object({
   status: z.enum(['published', 'unpublished']),
   expectedVersion: z.number().int().min(0).max(4_294_967_295),
+  expectedCandidateToken: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
   reason: z.string().trim().min(5).max(500),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (value.status === 'published' && !value.expectedCandidateToken) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['expectedCandidateToken'],
+      message: 'expectedCandidateToken is required when publishing.',
+    });
+  }
+});
 
 @Controller('v1/servers/:serverId/wiki-publication')
 @UseGuards(SessionGuard)

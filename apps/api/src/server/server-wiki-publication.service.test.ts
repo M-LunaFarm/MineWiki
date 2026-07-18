@@ -48,6 +48,7 @@ function createFixture(options: FixtureOptions = {}) {
       id: bigint;
       version: number;
       publishedAt: Date;
+      presentationSnapshot: Prisma.JsonValue;
       _count: { items: number };
     } | null,
     layoutKey: 'docs',
@@ -216,23 +217,26 @@ function createFixture(options: FixtureOptions = {}) {
       },
     },
     serverWikiRelease: {
-      async create(args: { data: { version: number; publishedAt: Date } }) {
+      async create(args: { data: { version: number; publishedAt: Date; presentationSnapshot: Prisma.JsonValue } }) {
         const release = {
           id: BigInt(900 + args.data.version),
           version: args.data.version,
           publishedAt: args.data.publishedAt,
+          presentationSnapshot: args.data.presentationSnapshot,
         };
         wiki.publishedRelease = { ...release, _count: { items: documentRows.length } };
         return release;
       },
     },
     serverWikiReleaseItem: {
+      async findMany() { return releaseItems; },
       async createMany(args: { data: Array<Record<string, unknown>> }) {
         releaseItems.push(...args.data);
         return { count: args.data.length };
       },
     },
     serverWikiReleaseLink: {
+      async findMany() { return releaseLinks; },
       async createMany(args: { data: Array<Record<string, unknown>> }) {
         releaseLinks.push(...args.data);
         return { count: args.data.length };
@@ -263,8 +267,10 @@ function createFixture(options: FixtureOptions = {}) {
       return operation(tx);
     },
   };
+  const service = new ServerWikiPublicationService(prisma as never);
   return {
-    service: new ServerWikiPublicationService(prisma as never),
+    service,
+    async candidateToken() { return (await service.get(serverId, actor)).candidate.token; },
     actor,
     wiki,
     audits,
@@ -273,14 +279,60 @@ function createFixture(options: FixtureOptions = {}) {
     isolationLevels,
     lockQueries,
     now,
+    documentRows,
+    revisionRows,
   };
 }
+
+test('release candidate manifest is deterministic and classifies the initial publish as added', async () => {
+  const fixture = createFixture();
+  const first = await fixture.service.get(serverId, fixture.actor);
+  const second = await fixture.service.get(serverId, fixture.actor);
+
+  assert.match(first.candidate.token, /^[0-9a-f]{64}$/u);
+  assert.equal(first.candidate.token, second.candidate.token);
+  assert.equal(first.candidate.baselineReleaseId, null);
+  assert.deepEqual(first.candidate.counts, { added: 4, updated: 0, moved: 0, removed: 0, unchanged: 0 });
+  assert.equal(first.candidate.hasChanges, true);
+  assert.ok(first.candidate.pages.every((item) => item.kind === 'added' && item.before === null));
+  assert.equal(first.candidate.pages[0]?.after?.routePath, '/serverWiki/test-server');
+  assert.equal(first.candidate.pages[1]?.after?.routePath, '/serverWiki/test-server/%EC%8B%9C%EC%9E%91%ED%95%98%EA%B8%B0');
+});
+
+test('publish rejects a candidate token after the reviewed page revision changes', async () => {
+  const fixture = createFixture();
+  const reviewedToken = await fixture.candidateToken();
+  const root = fixture.documentRows[0]!;
+  root.currentRevisionId = 999n;
+  root.searchDocument.revisionId = 999n;
+  fixture.revisionRows.push({
+    ...fixture.revisionRows[0]!,
+    id: 999n,
+    contentRaw: '= changed after review =',
+    contentHash: hashContent('= changed after review ='),
+  });
+
+  await assert.rejects(
+    () => fixture.service.update(serverId, {
+      status: 'published',
+      expectedVersion: 0,
+      expectedCandidateToken: reviewedToken,
+      reason: 'publish stale reviewed candidate',
+    }, fixture.actor),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_CANDIDATE_CHANGED'),
+  );
+  assert.equal(fixture.releaseItems.length, 0);
+  assert.equal(fixture.audits.length, 0);
+  assert.equal(fixture.wiki.publishedReleaseId, null);
+});
 
 test('owner publishes a ready draft atomically with version, timestamps, and an audit reason', async () => {
   const fixture = createFixture();
   const result = await fixture.service.update(serverId, {
     status: 'published',
     expectedVersion: 0,
+    expectedCandidateToken: await fixture.candidateToken(),
     reason: 'owner approved launch',
   }, fixture.actor);
 
@@ -307,21 +359,45 @@ test('owner publishes a ready draft atomically with version, timestamps, and an 
   assert.match(JSON.stringify(fixture.audits[0]?.metadata), /owner approved launch/u);
 });
 
+test('an unchanged published snapshot cannot create a meaningless second release', async () => {
+  const fixture = createFixture();
+  const published = await fixture.service.update(serverId, {
+    status: 'published',
+    expectedVersion: 0,
+    expectedCandidateToken: await fixture.candidateToken(),
+    reason: 'publish reviewed initial candidate',
+  }, fixture.actor);
+  assert.equal(published.candidate.hasChanges, false);
+  assert.deepEqual(published.candidate.counts, { added: 0, updated: 0, moved: 0, removed: 0, unchanged: 4 });
+
+  await assert.rejects(
+    () => fixture.service.update(serverId, {
+      status: 'published',
+      expectedVersion: 1,
+      expectedCandidateToken: published.candidate.token,
+      reason: 'attempt duplicate no-op release',
+    }, fixture.actor),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_CANDIDATE_EMPTY'),
+  );
+  assert.equal(fixture.audits.length, 1);
+});
+
 test('manager and server.admin can transition publication while editor cannot', async () => {
   const manager = createFixture({ actorAccountId: managerAccountId, actorRole: 'manager' });
   assert.equal((await manager.service.update(serverId, {
-    status: 'published', expectedVersion: 0, reason: 'manager approved launch',
+    status: 'published', expectedVersion: 0, expectedCandidateToken: await manager.candidateToken(), reason: 'manager approved launch',
   }, manager.actor)).access.authority, 'manager');
 
   const admin = createFixture({ actorAccountId: editorAccountId, actorRole: 'editor', actorPermissions: ['server.admin'] });
   assert.equal((await admin.service.update(serverId, {
-    status: 'published', expectedVersion: 0, reason: 'global admin approved launch',
+    status: 'published', expectedVersion: 0, expectedCandidateToken: await admin.candidateToken(), reason: 'global admin approved launch',
   }, admin.actor)).access.authority, 'server_admin');
 
   const editor = createFixture({ actorAccountId: editorAccountId, actorRole: 'editor' });
   await assert.rejects(
     () => editor.service.update(serverId, {
-      status: 'published', expectedVersion: 0, reason: 'editor attempted launch',
+      status: 'published', expectedVersion: 0, expectedCandidateToken: '0'.repeat(64), reason: 'editor attempted launch',
     }, editor.actor),
     ForbiddenException,
   );
@@ -332,7 +408,7 @@ test('publish fails closed when readiness is incomplete but unpublish preserves 
   const missingRoot = createFixture({ missingRoot: true });
   await assert.rejects(
     () => missingRoot.service.update(serverId, {
-      status: 'published', expectedVersion: 0, reason: 'launch without root page',
+      status: 'published', expectedVersion: 0, expectedCandidateToken: '0'.repeat(64), reason: 'launch without root page',
     }, missingRoot.actor),
     (error: unknown) => error instanceof ConflictException
       && JSON.stringify(error.getResponse()).includes('missing_root_page'),
@@ -357,7 +433,7 @@ test('publish blocks thin starter content, missing channels, and stale search in
 
   await assert.rejects(
     () => fixture.service.update(serverId, {
-      status: 'published', expectedVersion: 0, reason: 'attempted thin content launch',
+      status: 'published', expectedVersion: 0, expectedCandidateToken: '0'.repeat(64), reason: 'attempted thin content launch',
     }, fixture.actor),
     (error: unknown) => {
       if (!(error instanceof ConflictException)) return false;
@@ -373,7 +449,7 @@ test('publish blocks thin starter content, missing channels, and stale search in
   const missingDocument = createFixture({ missingRequiredDocument: true });
   await assert.rejects(
     () => missingDocument.service.update(serverId, {
-      status: 'published', expectedVersion: 0, reason: 'attempted incomplete document launch',
+      status: 'published', expectedVersion: 0, expectedCandidateToken: '0'.repeat(64), reason: 'attempted incomplete document launch',
     }, missingDocument.actor),
     (error: unknown) => error instanceof ConflictException
       && JSON.stringify(error.getResponse()).includes('missing_required_documents'),
@@ -385,7 +461,7 @@ test('stale versions, repeated unpublish, and inconsistent links fail without au
   const stale = createFixture({ publicationVersion: 4 });
   await assert.rejects(
     () => stale.service.update(serverId, {
-      status: 'published', expectedVersion: 3, reason: 'stale launch request',
+      status: 'published', expectedVersion: 3, expectedCandidateToken: '0'.repeat(64), reason: 'stale launch request',
     }, stale.actor),
     (error: unknown) => error instanceof ConflictException
       && JSON.stringify(error.getResponse()).includes('currentVersion'),
@@ -393,7 +469,7 @@ test('stale versions, repeated unpublish, and inconsistent links fail without au
 
   const republish = createFixture({ publicationStatus: 'published' });
   const republished = await republish.service.update(serverId, {
-    status: 'published', expectedVersion: 0, reason: 'publish reviewed changes',
+    status: 'published', expectedVersion: 0, expectedCandidateToken: await republish.candidateToken(), reason: 'publish reviewed changes',
   }, republish.actor);
   assert.equal(republished.status, 'published');
   assert.equal(republished.release?.version, 1);

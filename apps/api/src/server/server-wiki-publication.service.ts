@@ -12,6 +12,12 @@ import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
 import { writeAuditRecord } from '../events/audit-event-writer';
 import { buildServerWikiMainPage, buildServerWikiStarterPages, type ServerWikiScaffoldInput } from './server-wiki-scaffold';
+import {
+  buildServerWikiReleaseCandidate,
+  type ReleaseCandidateSnapshot,
+  type ServerWikiPresentationSnapshot,
+  type ServerWikiReleaseCandidate,
+} from './server-wiki-release-candidate';
 
 export const SERVER_WIKI_PUBLICATION_STATUSES = ['draft', 'published', 'unpublished'] as const;
 export type ServerWikiPublicationStatus = (typeof SERVER_WIKI_PUBLICATION_STATUSES)[number];
@@ -24,6 +30,7 @@ export interface ServerWikiPublicationActor {
 export interface UpdateServerWikiPublicationInput {
   readonly status: 'published' | 'unpublished';
   readonly expectedVersion: number;
+  readonly expectedCandidateToken?: string;
   readonly reason: string;
 }
 
@@ -51,6 +58,7 @@ export interface ServerWikiPublicationResponse {
     readonly ready: boolean;
     readonly blockers: readonly ServerWikiPublicationReadinessBlocker[];
   };
+  readonly candidate: ServerWikiReleaseCandidate;
 }
 
 export type ServerWikiPublicationReadinessBlocker =
@@ -88,22 +96,10 @@ interface PublicationContext {
       readonly version: number;
       readonly publishedAt: Date;
       readonly pageCount: number;
+      readonly presentationSnapshot: Prisma.JsonValue;
     } | null;
   };
   readonly presentation: ServerWikiPresentationSnapshot;
-}
-
-interface ServerWikiPresentationSnapshot {
-  readonly layoutKey: string;
-  readonly navigationOrder: Prisma.JsonValue | null;
-  readonly contributionPolicySource: string | null;
-  readonly editHelpSource: string | null;
-  readonly topNoticeSource: string | null;
-  readonly bottomNoticeSource: string | null;
-  readonly requireContributionPolicyAck: boolean;
-  readonly contributionPolicyVersion: number;
-  readonly contentSettingsVersion: number;
-  readonly navigationVersion: number;
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -112,6 +108,7 @@ const MAX_CANONICAL_ACCOUNT_DEPTH = 16;
 const MAX_SERIALIZABLE_ATTEMPTS = 3;
 const REASON_MIN_LENGTH = 5;
 const REASON_MAX_LENGTH = 500;
+const CANDIDATE_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
 
 @Injectable()
 export class ServerWikiPublicationService {
@@ -124,7 +121,8 @@ export class ServerWikiPublicationService {
     const serverId = parseServerId(serverIdInput);
     const context = await this.resolveContext(this.prisma, serverId, actor, false);
     const blockers = await this.readinessBlockers(this.prisma, context);
-    return toResponse(context, blockers);
+    const snapshot = await buildServerWikiReleaseCandidate(this.prisma, candidateInput(context), false);
+    return toResponse(context, blockers, snapshot.candidate);
   }
 
   async update(
@@ -135,6 +133,9 @@ export class ServerWikiPublicationService {
     const serverId = parseServerId(serverIdInput);
     const status = parseMutationStatus(input.status);
     const expectedVersion = parseVersion(input.expectedVersion);
+    const expectedCandidateToken = status === 'published'
+      ? parseCandidateToken(input.expectedCandidateToken)
+      : null;
     const reason = parseReason(input.reason);
 
     try {
@@ -159,10 +160,25 @@ export class ServerWikiPublicationService {
           });
         }
 
+        const snapshot = status === 'published'
+          ? await buildServerWikiReleaseCandidate(tx, candidateInput(context), true)
+          : null;
+        if (snapshot && snapshot.candidate.token !== expectedCandidateToken) {
+          throw candidateChanged(snapshot.candidate);
+        }
+        if (snapshot && !snapshot.candidate.hasChanges) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'SERVER_WIKI_RELEASE_CANDIDATE_EMPTY',
+            message: 'Server wiki release candidate has no changes.',
+            candidate: snapshot.candidate,
+          });
+        }
+
         const now = new Date();
         const version = expectedVersion + 1;
         const release = status === 'published'
-          ? await this.createRelease(tx, context, version, reason, now)
+          ? await this.createRelease(tx, context, snapshot!, version, reason, now)
           : context.publication.publishedRelease;
         const changed = await tx.serverWiki.updateMany({
           where: {
@@ -207,13 +223,17 @@ export class ServerWikiPublicationService {
               version,
               releaseId: release?.id ?? null,
               releasePageCount: release?.pageCount ?? null,
+              candidateToken: snapshot?.candidate.token ?? null,
+              candidateBaselineReleaseId: snapshot?.candidate.baselineReleaseId ?? null,
+              candidateCounts: snapshot?.candidate.counts ?? null,
+              candidatePresentation: snapshot?.candidate.presentation ?? null,
               reason,
               authority: context.authority,
             }),
           },
         });
 
-        return toResponse({
+        const responseContext = {
           ...context,
           publication: {
             status,
@@ -224,7 +244,9 @@ export class ServerWikiPublicationService {
             updatedBy: context.actorProfileId,
             publishedRelease: release,
           },
-        }, blockers);
+        };
+        const responseCandidate = (await buildServerWikiReleaseCandidate(tx, candidateInput(responseContext), false)).candidate;
+        return toResponse(responseContext, blockers, responseCandidate);
       });
     } catch (error) {
       if (prismaCode(error) === 'P2034') throw publicationConflict(expectedVersion + 1);
@@ -301,6 +323,7 @@ export class ServerWikiPublicationService {
             id: true,
             version: true,
             publishedAt: true,
+            presentationSnapshot: true,
             _count: { select: { items: true } },
           },
         },
@@ -385,6 +408,7 @@ export class ServerWikiPublicationService {
               version: wiki.publishedRelease.version,
               publishedAt: wiki.publishedRelease.publishedAt,
               pageCount: wiki.publishedRelease._count.items,
+              presentationSnapshot: wiki.publishedRelease.presentationSnapshot,
             }
           : null,
       },
@@ -406,70 +430,16 @@ export class ServerWikiPublicationService {
   private async createRelease(
     tx: Prisma.TransactionClient,
     context: PublicationContext,
+    snapshot: ReleaseCandidateSnapshot,
     version: number,
     reason: string,
     now: Date,
   ): Promise<NonNullable<PublicationContext['publication']['publishedRelease']>> {
-    await tx.$queryRaw<Array<{ id: bigint }>>`
-      SELECT id FROM pages WHERE space_id = ${context.spaceId} ORDER BY id FOR UPDATE
-    `;
-    const pages = await tx.wikiPage.findMany({
-      where: {
-        spaceId: context.spaceId,
-        status: { in: ['normal', 'active', 'published', 'protected'] },
-        currentRevisionId: { not: null },
-      },
-      orderBy: [{ id: 'asc' }],
-      select: {
-        id: true,
-        namespaceId: true,
-        spaceId: true,
-        localPath: true,
-        slug: true,
-        title: true,
-        displayTitle: true,
-        currentRevisionId: true,
-        pageType: true,
-        protectionLevel: true,
-        status: true,
-        createdBy: true,
-        ownerProfileId: true,
-        updatedAt: true,
-      },
-    });
-    const revisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
-    const revisions = revisionIds.length > 0
-      ? await tx.wikiPageRevision.findMany({
-          where: { id: { in: revisionIds }, visibility: 'public' },
-          select: { id: true, pageId: true, contentRaw: true },
-        })
-      : [];
-    const revisionKeys = new Set(revisions.map((revision) => `${revision.pageId}:${revision.id}`));
-    const revisionByKey = new Map(revisions.map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
-    const releasedPages = pages.filter((page) => page.currentRevisionId !== null
-      && revisionKeys.has(`${page.id}:${page.currentRevisionId}`));
+    const releasedPages = snapshot.pages;
     if (releasedPages.length === 0 || releasedPages.some((page) => page.spaceId !== context.spaceId)) {
       throw new ConflictException('Server wiki release snapshot is empty or inconsistent.');
     }
-    const releasedRevisionByPageId = new Map(releasedPages.map((page) => [page.id, page.currentRevisionId!]));
-    const releaseLinks = await tx.wikiPageLink.findMany({
-      where: {
-        OR: releasedPages.map((page) => ({
-          sourcePageId: page.id,
-          sourceRevisionId: page.currentRevisionId!,
-        })),
-      },
-      select: {
-        sourcePageId: true,
-        sourceRevisionId: true,
-        targetNamespaceCode: true,
-        targetSlug: true,
-        linkType: true,
-      },
-    });
-    if (releaseLinks.some((link) => releasedRevisionByPageId.get(link.sourcePageId) !== link.sourceRevisionId)) {
-      throw new ConflictException('Server wiki release link snapshot is inconsistent.');
-    }
+    const releaseLinks = snapshot.links;
     const release = await tx.serverWikiRelease.create({
       data: {
         serverWikiId: context.serverWikiId,
@@ -505,7 +475,7 @@ export class ServerWikiPublicationService {
           page.displayTitle,
           page.slug,
           page.localPath,
-          revisionByKey.get(`${page.id}:${page.currentRevisionId}`)?.contentRaw ?? '',
+          snapshot.revisionContentByPageId.get(page.id) ?? '',
         ]),
         createdAt: now,
       })),
@@ -525,7 +495,11 @@ export class ServerWikiPublicationService {
         })),
       });
     }
-    return { ...release, pageCount: releasedPages.length };
+    return {
+      ...release,
+      pageCount: releasedPages.length,
+      presentationSnapshot: context.presentation as unknown as Prisma.JsonValue,
+    };
   }
 
   private async managerAuthority(
@@ -694,6 +668,7 @@ export class ServerWikiPublicationService {
 function toResponse(
   context: PublicationContext,
   blockers: readonly ServerWikiPublicationReadinessBlocker[],
+  candidate: ServerWikiReleaseCandidate,
 ): ServerWikiPublicationResponse {
   if (!SERVER_WIKI_PUBLICATION_STATUSES.includes(context.publication.status as ServerWikiPublicationStatus)) {
     throw new ConflictException('Server wiki publication state is invalid.');
@@ -718,6 +693,18 @@ function toResponse(
     wikiUrl: `/serverWiki/${encodeURIComponent(context.siteSlug)}`,
     access: { authority: context.authority, canPublish: true },
     readiness: { ready: blockers.length === 0, blockers },
+    candidate,
+  };
+}
+
+function candidateInput(context: PublicationContext) {
+  return {
+    serverWikiId: context.serverWikiId,
+    spaceId: context.spaceId,
+    siteSlug: context.siteSlug,
+    contentSlug: context.contentSlug,
+    publishedRelease: context.publication.publishedRelease,
+    presentation: context.presentation,
   };
 }
 
@@ -753,6 +740,13 @@ function parseReason(value: string): string {
   return reason;
 }
 
+function parseCandidateToken(value: string | undefined): string {
+  if (typeof value !== 'string' || !CANDIDATE_TOKEN_PATTERN.test(value)) {
+    throw new BadRequestException('expectedCandidateToken must be a 64-character lowercase SHA-256 token.');
+  }
+  return value;
+}
+
 function invalidLink(): ConflictException {
   return new ConflictException({
     statusCode: 409,
@@ -772,6 +766,15 @@ function publicationConflict(currentVersion: number): ConflictException {
     code: 'SERVER_WIKI_PUBLICATION_CONFLICT',
     message: 'Server wiki publication changed concurrently. Refresh and retry.',
     currentVersion,
+  });
+}
+
+function candidateChanged(candidate: ServerWikiReleaseCandidate): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    code: 'SERVER_WIKI_RELEASE_CANDIDATE_CHANGED',
+    message: 'Server wiki release candidate changed. Review the latest manifest and retry.',
+    candidate,
   });
 }
 
