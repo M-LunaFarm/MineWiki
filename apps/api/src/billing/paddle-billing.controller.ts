@@ -55,8 +55,10 @@ export class PaddleBillingController {
     @CurrentSession() session: SessionPayload,
   ) {
     await this.assertOwner(serverId, session);
+    const onlineCheckout = this.config.get('PADDLE_MODE', 'off') === 'live';
     return {
-      onlineCheckout: this.config.get('PADDLE_MODE', 'off') === 'live',
+      onlineCheckout,
+      portalAvailable: onlineCheckout && await this.portal.isAvailable(serverId),
       environment: this.config.get('PADDLE_ENV', 'sandbox'),
     };
   }

@@ -11,6 +11,18 @@ export class PaddlePortalService {
     private readonly paddle: PaddleClient,
   ) {}
 
+  async isAvailable(serverId: string): Promise<boolean> {
+    const subscription = await this.prisma.paddleSubscriptionShadow.findFirst({
+      where: {
+        billingSubject: { serverWiki: { voteServerId: serverId } },
+        providerCustomerId: { not: null },
+      },
+      orderBy: { lastEventOccurredAt: 'desc' },
+      select: { id: true },
+    });
+    return Boolean(subscription);
+  }
+
   async create(serverId: string) {
     if (this.config.get('PADDLE_MODE', 'off') !== 'live') {
       throw new ServiceUnavailableException('Paddle customer portal is not enabled.');
@@ -21,7 +33,7 @@ export class PaddlePortalService {
     });
     if (!subject) throw new NotFoundException('No billing account exists for this server wiki.');
     const subscription = await this.prisma.paddleSubscriptionShadow.findFirst({
-      where: { billingSubjectId: subject.id },
+      where: { billingSubjectId: subject.id, providerCustomerId: { not: null } },
       orderBy: { lastEventOccurredAt: 'desc' },
       select: { providerCustomerId: true, providerSubscriptionId: true },
     });
