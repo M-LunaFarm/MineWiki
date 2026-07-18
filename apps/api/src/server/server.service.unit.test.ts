@@ -423,7 +423,7 @@ test('server list preserves rank when only historical valid votes remain', async
   assert.equal(server.rank?.current, 1);
 });
 
-test('server list conceals stale aggregated rank when the server has zero valid votes', async () => {
+test('server list conceals the unranked sentinel even when historical vote totals remain', async () => {
   const serverId = randomUUID();
   const calculatedAt = new Date('2026-07-17T00:45:00.000Z');
   const prisma = {
@@ -431,7 +431,7 @@ test('server list conceals stale aggregated rank when the server has zero valid 
       findMany: async () => [
         {
           id: serverId,
-          name: 'Zero Vote Server',
+          name: 'Unranked Historical Server',
           joinHost: 'zero.example.com',
           joinPort: 25565,
           edition: 'java',
@@ -452,10 +452,10 @@ test('server list conceals stale aggregated rank when the server has zero valid 
           isOnline: true,
           latencyMs: 30,
           stats: {
-            rankCurrent: 9,
+            rankCurrent: 0,
             rankDelta24h: 0,
-            rankBest: 9,
-            votesTotal: 0,
+            rankBest: 0,
+            votesTotal: 1,
             rankCalculatedAt: calculatedAt,
             lastUpdatedAt: calculatedAt,
           },
@@ -723,6 +723,7 @@ test('paginated rankings apply server-side filters and return page metadata', as
       rankCurrent: 2,
       rankDelta24h: 3,
       rankBest: 1,
+      votesTotal: 300,
       rankCalculatedAt: new Date('2026-07-11T00:45:00.000Z'),
       lastUpdatedAt: new Date('2026-07-11T01:00:00.000Z'),
     },

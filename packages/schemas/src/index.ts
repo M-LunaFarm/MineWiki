@@ -407,9 +407,9 @@ export const serverPingSampleSchema = z.object({
 export const serverStatsSchema = z.object({
   serverId: z.string().uuid(),
   rank: z.object({
-    current: z.number().int().positive(),
+    current: z.number().int().nonnegative(),
     delta24h: z.number().int(),
-    best: z.number().int().positive(),
+    best: z.number().int().nonnegative(),
   }),
   votes: z.object({
     last24h: z.number().int().nonnegative(),

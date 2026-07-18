@@ -2276,7 +2276,9 @@ function toSummary(server: {
     rank:
       server.stats &&
       server.stats.rankCalculatedAt &&
-      server.stats.votesTotal > 0
+      server.stats.votesTotal > 0 &&
+      server.stats.rankCurrent > 0 &&
+      server.stats.rankBest > 0
       ? {
           current: server.stats.rankCurrent,
           delta24h: server.stats.rankDelta24h,
