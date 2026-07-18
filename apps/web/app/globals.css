@@ -386,6 +386,15 @@ html[data-theme='light'] .wiki-rendered pre {
   color: #1f5f46;
 }
 
+html[data-theme='light'] .wiki-rendered :is(th, td) {
+  border-color: #6f7d72;
+}
+
+html[data-theme='light'] .wiki-rendered th {
+  background-color: #eef2ed;
+  color: #253129;
+}
+
 html[data-theme='light'] .chip-muted {
   border-color: rgba(37, 49, 41, 0.15);
   background: #eef1ed;

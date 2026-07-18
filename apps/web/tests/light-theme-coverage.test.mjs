@@ -89,6 +89,12 @@ test('server hero follows light mode instead of forcing a dark surface', async (
   assert.match(css, /\.server-hero-overlay-primary/u);
 });
 
+test('light wiki tables keep readable headers and cell boundaries', async () => {
+  const css = await readFile(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /html\[data-theme='light'\] \.wiki-rendered :is\(th, td\)\s*\{[^}]*border-color: #6f7d72;/su);
+  assert.match(css, /html\[data-theme='light'\] \.wiki-rendered th\s*\{[^}]*background-color: #eef2ed;[^}]*color: #253129;/su);
+});
+
 test('theme contrast corrections cover shared links, metadata and provider labels', async () => {
   const [css, providers, claim, serverList, reviewsHeader, policyViewer, dropdown, authForms] = await Promise.all([
     readFile(new URL('../app/globals.css', import.meta.url), 'utf8'),
