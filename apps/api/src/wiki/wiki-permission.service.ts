@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException, Optional } from '@ne
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiAclService, type WikiAclAction, type WikiAclDecision, type WikiThreadAclAction } from './wiki-acl.service';
+import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
 
 type WikiPermissionStore = Pick<
   PrismaService,
@@ -1048,7 +1049,15 @@ export class WikiPermissionService {
 
     const wikis = await store.serverWiki.findMany({
       where: { spaceId },
-      select: { id: true, spaceId: true, voteServerId: true, slug: true, status: true }
+      select: {
+        id: true,
+        spaceId: true,
+        voteServerId: true,
+        slug: true,
+        status: true,
+        serverName: true,
+        host: true,
+      }
     });
     if (wikis.length === 0) return null;
     if (wikis.length !== 1) return { state: 'inconsistent', isOwner: false };
@@ -1060,10 +1069,18 @@ export class WikiPermissionService {
     }
     const server = await store.server.findUnique({
       where: { id: wiki.voteServerId },
-      select: { id: true, ownerAccountId: true, wikiSpaceId: true, wikiPageId: true, wikiSlug: true }
+      select: {
+        id: true,
+        name: true,
+        joinHost: true,
+        ownerAccountId: true,
+        wikiSpaceId: true,
+        wikiPageId: true,
+        wikiSlug: true,
+      }
     });
     if (!server || server.wikiSpaceId !== space.id || server.wikiPageId !== space.rootPageId ||
-        server.wikiSlug !== wiki.slug || !server.ownerAccountId) {
+        server.wikiSlug !== wiki.slug || !server.ownerAccountId || serverWikiIdentityConflicts(wiki, server)) {
       return { state: 'inconsistent', isOwner: false };
     }
 

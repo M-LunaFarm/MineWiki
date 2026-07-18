@@ -22,9 +22,13 @@ function createService(options: {
     createdBy: bigint | null;
     slug?: string;
     status?: string;
+    serverName?: string;
+    host?: string | null;
   } | null;
   readonly server?: {
     id?: string;
+    name?: string;
+    joinHost?: string;
     ownerAccountId: string | null;
     wikiSpaceId?: bigint | null;
     wikiPageId?: bigint | null;
@@ -53,10 +57,26 @@ function createService(options: {
       ? { ...defaultSpace, ...options.space }
       : null;
   const normalizedServerWiki = options.serverWiki
-    ? { id: 20n, spaceId: 10n, slug: 'server-one', status: 'active', ...options.serverWiki }
+    ? {
+        id: 20n,
+        spaceId: 10n,
+        slug: 'server-one',
+        status: 'active',
+        serverName: 'Server One',
+        host: 'play.server-one.test',
+        ...options.serverWiki,
+      }
     : null;
   const normalizedServer = options.server
-    ? { id: 'server-1', wikiSpaceId: 10n, wikiPageId: 1n, wikiSlug: 'server-one', ...options.server }
+    ? {
+        id: 'server-1',
+        name: 'Server One',
+        joinHost: 'play.server-one.test',
+        wikiSpaceId: 10n,
+        wikiPageId: 1n,
+        wikiSlug: 'server-one',
+        ...options.server,
+      }
     : null;
   const accounts = options.accounts ?? [
     { id: 'account-1', canonicalAccountId: null, lifecycleStatus: 'active' },
@@ -658,6 +678,25 @@ test('linked server wiki management fails closed when the canonical linkage inva
     serverWiki: { voteServerId: null, createdBy: 300n, status: 'archived' }
   });
   assert.equal(await archivedSpace.canManagePage({ actor: actor({ profileId: 300n }), page: historicalPage }), false);
+
+  const identityCollision = createService({
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki', rootPageId: 1n },
+    roles: ['manager'],
+    serverWiki: {
+      voteServerId: 'server-1',
+      createdBy: 300n,
+      serverName: 'LunaFarm',
+      host: 'lunaf.kr',
+    },
+    server: {
+      ownerAccountId: 'account-1',
+      name: 'CreeperWiki',
+      joinHost: 'creeper.wiki',
+    },
+  });
+  assert.equal(await identityCollision.canManagePage({ actor: actor(), page: historicalPage }), false);
+  assert.equal(await identityCollision.canManageSpace({ actor: actor(), spaceId: 10n }), false);
+  assert.equal((await identityCollision.canEditPage({ actor: actor(), page: historicalPage })).allowed, false);
 });
 
 test('legacy unlinked server wiki keeps its narrow provenance fallback', async () => {
