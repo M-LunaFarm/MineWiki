@@ -6,6 +6,7 @@ import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import { WikiDiscussionService, type WikiDiscussionPollInput, type WikiDiscussionStatus, type WikiDiscussionStatusFilter, type WikiRecentThreadListResponse, type WikiThreadDetail, type WikiThreadListResponse, type WikiThreadSummary } from './wiki-discussion.service';
+import type { WikiRecentDiscussionSort } from './wiki-discussion-recent-cursor';
 import { WikiCaptchaService } from './wiki-captcha.service';
 
 @Controller('v1/wiki')
@@ -17,9 +18,22 @@ export class WikiDiscussionController {
   recent(
     @Req() request: FastifyRequest,
     @Query('cursor') cursor?: string,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('status') status?: string,
+    @Query('sort') sort?: string,
   ): Promise<WikiRecentThreadListResponse> {
-    return this.discussions.listRecent(request.sessionPayload ?? null, cursor, limit ?? 30);
+    if (status !== undefined && !['all', 'active', 'open', 'paused', 'closed'].includes(status)) {
+      throw new BadRequestException('Invalid recent discussion status filter.');
+    }
+    if (sort !== undefined && sort !== 'newest' && sort !== 'oldest') {
+      throw new BadRequestException('Invalid recent discussion sort order.');
+    }
+    return this.discussions.listRecent(request.sessionPayload ?? null, {
+      cursor,
+      limit: limit ?? 30,
+      status: (status ?? 'all') as WikiDiscussionStatusFilter,
+      sort: (sort ?? 'newest') as WikiRecentDiscussionSort,
+    });
   }
 
   @Get('pages/:pageId/discussions')

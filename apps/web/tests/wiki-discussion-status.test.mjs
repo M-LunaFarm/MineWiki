@@ -6,6 +6,9 @@ import {
   wikiDiscussionFilterCount,
   wikiDiscussionMatchesStatusFilter,
   wikiDiscussionStatusLabel,
+  normalizeWikiRecentDiscussionFilters,
+  wikiRecentDiscussionHref,
+  wikiRecentDiscussionQuery,
 } from '../lib/wiki-discussion-status.mjs';
 
 test('paused discussions remain active but are distinct from open and closed', () => {
@@ -13,6 +16,13 @@ test('paused discussions remain active but are distinct from open and closed', (
   assert.equal(wikiDiscussionMatchesStatusFilter('paused', 'active'), true);
   assert.equal(wikiDiscussionMatchesStatusFilter('paused', 'open'), false);
   assert.equal(wikiDiscussionMatchesStatusFilter('closed', 'active'), false);
+});
+
+test('recent discussion filters serialize status, order and cursor without losing scope', () => {
+  assert.deepEqual(normalizeWikiRecentDiscussionFilters({ status: 'deleted', sort: 'popular' }), { status: 'all', sort: 'newest' });
+  assert.equal(wikiRecentDiscussionQuery({ status: 'paused', sort: 'oldest', cursor: 'signed.cursor' }), 'limit=30&status=paused&sort=oldest&cursor=signed.cursor');
+  assert.equal(wikiRecentDiscussionHref('closed', 'oldest'), '/wiki/discussions?status=closed&sort=oldest');
+  assert.equal(wikiRecentDiscussionHref('all', 'newest'), '/wiki/discussions');
 });
 
 test('status counts preserve unknown rolling-deployment values in the total', () => {

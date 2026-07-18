@@ -6,6 +6,33 @@ export const WIKI_DISCUSSION_STATUS_FILTERS = Object.freeze([
   { value: 'closed', label: '닫힘' },
 ]);
 
+export const WIKI_RECENT_DISCUSSION_SORTS = Object.freeze([
+  { value: 'newest', label: '최근 활동순' },
+  { value: 'oldest', label: '오래된 활동순' },
+]);
+
+export function normalizeWikiRecentDiscussionFilters(input = {}) {
+  const status = WIKI_DISCUSSION_STATUS_FILTERS.some((item) => item.value === input.status) ? input.status : 'all';
+  const sort = WIKI_RECENT_DISCUSSION_SORTS.some((item) => item.value === input.sort) ? input.sort : 'newest';
+  return { status, sort };
+}
+
+export function wikiRecentDiscussionQuery(input = {}) {
+  const filters = normalizeWikiRecentDiscussionFilters(input);
+  const params = new URLSearchParams({ limit: '30', status: filters.status, sort: filters.sort });
+  if (input.cursor) params.set('cursor', input.cursor);
+  return params.toString();
+}
+
+export function wikiRecentDiscussionHref(status, sort) {
+  const filters = normalizeWikiRecentDiscussionFilters({ status, sort });
+  const params = new URLSearchParams();
+  if (filters.status !== 'all') params.set('status', filters.status);
+  if (filters.sort !== 'newest') params.set('sort', filters.sort);
+  const query = params.toString();
+  return `/wiki/discussions${query ? `?${query}` : ''}`;
+}
+
 export function wikiDiscussionStatusLabel(status) {
   if (status === 'open') return '열림';
   if (status === 'paused') return '일시 중지';

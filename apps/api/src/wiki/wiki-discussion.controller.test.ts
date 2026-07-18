@@ -64,3 +64,17 @@ test('discussion list endpoint validates and forwards status filters', async () 
   assert.throws(() => controller.listPage('10', request, undefined, 'deleted', 20), BadRequestException);
   assert.throws(() => controller.listPage('10', request, undefined, 'all', 20, 'full'), BadRequestException);
 });
+
+test('recent discussion endpoint validates and forwards global discovery filters', async () => {
+  let received: unknown;
+  const service = {
+    async listRecent(_viewer: unknown, options: unknown) { received = options; return { items: [], nextCursor: null }; },
+  } as unknown as WikiDiscussionService;
+  const controller = new WikiDiscussionController(service, captchaStub);
+  const request = { sessionPayload: session } as FastifyRequest;
+
+  await controller.recent(request, 'cursor', 20, 'paused', 'oldest');
+  assert.deepEqual(received, { cursor: 'cursor', limit: 20, status: 'paused', sort: 'oldest' });
+  assert.throws(() => controller.recent(request, undefined, 20, 'deleted', 'newest'), BadRequestException);
+  assert.throws(() => controller.recent(request, undefined, 20, 'all', 'popular'), BadRequestException);
+});

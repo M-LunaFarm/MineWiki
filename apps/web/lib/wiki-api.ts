@@ -1,5 +1,6 @@
 import { normalizeApiBaseUrl } from './runtime-config';
 import { csrfHeaders } from './csrf';
+import { wikiRecentDiscussionQuery } from './wiki-discussion-status.mjs';
 
 function apiBaseUrl(): string {
   return normalizeApiBaseUrl();
@@ -1372,10 +1373,18 @@ export function wikiDiscussionEventsUrl(threadId: string): string {
   return `${apiBaseUrl()}/v1/wiki/discussions/${encodeURIComponent(threadId)}/events`;
 }
 
-export async function fetchRecentWikiThreads(cursor?: string): Promise<WikiRecentThreadListResponse> {
-  const params = new URLSearchParams({ limit: '30' });
-  if (cursor) params.set('cursor', cursor);
-  return readWikiBrowser<WikiRecentThreadListResponse>(`/v1/wiki/discussions/recent?${params.toString()}`);
+export async function fetchRecentWikiThreads(input: {
+  readonly cursor?: string;
+  readonly status?: 'all' | 'active' | 'open' | 'paused' | 'closed';
+  readonly sort?: 'newest' | 'oldest';
+  readonly signal?: AbortSignal;
+} = {}): Promise<WikiRecentThreadListResponse> {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/discussions/recent?${wikiRecentDiscussionQuery(input)}`, {
+    credentials: 'include', signal: input.signal,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.message ?? 'Failed to load recent wiki discussions.');
+  return body as WikiRecentThreadListResponse;
 }
 
 export async function createWikiThread(input: { pageId: string; title: string; content: string; poll?: WikiDiscussionPollInput; captchaToken?: string }): Promise<WikiThreadDetail> {

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { ConfigService } from '@minewiki/config';
 import { renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
-import { Prisma, type WikiDiscussionThread } from '@prisma/client';
+import { Prisma, type WikiDiscussionThread, type WikiPage } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
@@ -11,6 +12,12 @@ import { buildServerWikiPagePath, buildServerWikiToolPath } from './wiki-read.se
 import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
 import { extractDiscussionMentions, uniqueDiscussionMentionUsernames } from './wiki-discussion-mention';
 import { wikiLinkResolutionContext } from './wiki-link-context';
+import {
+  decodeWikiRecentDiscussionCursor,
+  encodeWikiRecentDiscussionCursor,
+  type WikiRecentDiscussionCursorScope,
+  type WikiRecentDiscussionSort,
+} from './wiki-discussion-recent-cursor';
 
 export interface WikiThreadSummary {
   readonly id: string;
@@ -69,6 +76,13 @@ export interface WikiRecentThreadSummary extends WikiThreadSummary {
 export interface WikiRecentThreadListResponse {
   readonly items: WikiRecentThreadSummary[];
   readonly nextCursor: string | null;
+}
+
+export interface WikiRecentThreadListOptions {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly status?: WikiDiscussionStatusFilter;
+  readonly sort?: WikiRecentDiscussionSort;
 }
 
 export interface WikiThreadDetail extends WikiThreadSummary {
@@ -169,6 +183,8 @@ interface ThreadPreviewRow {
 const THREAD_PAGE_CANDIDATE_BATCH_SIZE = 50;
 const MAX_THREAD_PAGE_CANDIDATE_SCAN = 250;
 const MAX_STATUS_COUNT_SCAN = 1_000;
+const GLOBAL_RECENT_CANDIDATE_BATCH_SIZE = 50;
+const MAX_GLOBAL_RECENT_CANDIDATE_SCAN = 250;
 
 @Injectable()
 export class WikiDiscussionService {
@@ -178,7 +194,8 @@ export class WikiDiscussionService {
     private readonly wikiPermissions: WikiPermissionService,
     @Optional() private readonly events?: BusinessEventService,
     @Optional() private readonly notifications?: WikiNotificationService,
-    @Optional() private readonly live?: WikiDiscussionLiveService
+    @Optional() private readonly live?: WikiDiscussionLiveService,
+    @Optional() private readonly config?: ConfigService,
   ) {
     // Keep isolated service tests and rolling deployments compatible with the
     // pre-thread-ACL permission surface. The concrete WikiPermissionService
@@ -239,7 +256,10 @@ export class WikiDiscussionService {
     const accountId = this.viewerAccountId(viewer);
     const page = await this.readablePage(pageId, accountId);
     const limit = Math.min(Math.max(requestedLimit, 1), 50);
-    const decoded = cursor ? this.decodeRecentCursor(cursor) : null;
+    const cursorScope: WikiRecentDiscussionCursorScope = {
+      kind: 'page', pageId: page.id.toString(), status: statusFilter, sort: 'newest',
+    };
+    const decoded = cursor ? this.decodeRecentCursor(cursor, cursorScope) : null;
     const snapshotAt = decoded?.snapshotAt ?? new Date();
     const status = statusFilter === 'all'
       ? { not: 'deleted' as const }
@@ -359,7 +379,7 @@ export class WikiDiscussionService {
           profileById
         ) : undefined
       )),
-      nextCursor: hasMore && last ? this.encodeRecentCursor(snapshotAt, last.updatedAt, last.id) : null,
+      nextCursor: hasMore && last ? this.encodeRecentCursor(snapshotAt, last.updatedAt, last.id, cursorScope) : null,
       statusCounts: {
         total,
         open: statusCount.get('open') ?? 0,
@@ -390,33 +410,70 @@ export class WikiDiscussionService {
 
   async listRecent(
     viewer: WikiDiscussionViewer,
-    cursor?: string,
-    requestedLimit = 30
+    options: WikiRecentThreadListOptions = {},
   ): Promise<WikiRecentThreadListResponse> {
     const accountId = this.viewerAccountId(viewer);
-    const limit = Math.min(Math.max(requestedLimit, 1), 50);
-    const decoded = cursor ? this.decodeRecentCursor(cursor) : null;
+    const limit = Math.min(Math.max(options.limit ?? 30, 1), 50);
+    const statusFilter = options.status ?? 'all';
+    const sort = options.sort ?? 'newest';
+    const cursorScope: WikiRecentDiscussionCursorScope = { kind: 'global', status: statusFilter, sort };
+    const decoded = options.cursor ? this.decodeRecentCursor(options.cursor, cursorScope) : null;
     const snapshotAt = decoded?.snapshotAt ?? new Date();
-    const position = decoded ? { updatedAt: decoded.updatedAt, id: decoded.id } : null;
-    const where: Prisma.WikiDiscussionThreadWhereInput = {
-      status: { not: 'deleted' },
+    const status = statusFilter === 'all'
+      ? { not: 'deleted' as const }
+      : statusFilter === 'active'
+        ? { in: ['open', 'paused'] }
+        : statusFilter;
+    const candidateWhere = (position: { readonly updatedAt: Date; readonly id: bigint } | null): Prisma.WikiDiscussionThreadWhereInput => ({
+      status,
       updatedAt: { lte: snapshotAt },
       ...(position ? {
         OR: [
-          { updatedAt: { lt: position.updatedAt } },
-          { updatedAt: position.updatedAt, id: { lt: position.id } }
+          { updatedAt: { [sort === 'newest' ? 'lt' : 'gt']: position.updatedAt } },
+          { updatedAt: position.updatedAt, id: { [sort === 'newest' ? 'lt' : 'gt']: position.id } }
         ]
       } : {})
-    };
-    const take = Math.min(limit * 5 + 1, 251);
-    const threads = await this.prisma.wikiDiscussionThread.findMany({
-      where,
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take
     });
-    if (threads.length === 0) return { items: [], nextCursor: null };
-    const pages = await this.prisma.wikiPage.findMany({ where: { id: { in: [...new Set(threads.map((thread) => thread.pageId))] } } });
-    const pageById = new Map(pages.map((page) => [page.id, page]));
+    const order = sort === 'newest' ? 'desc' as const : 'asc' as const;
+    const actor = await this.viewerActor(viewer);
+    const visibleRows: Array<{ thread: WikiDiscussionThread; page: WikiPage }> = [];
+    let scanPosition = decoded ? { updatedAt: decoded.updatedAt, id: decoded.id } : null;
+    let lastScanned: WikiDiscussionThread | undefined;
+    let scannedCandidateCount = 0;
+    let candidatesExhausted = false;
+    while (visibleRows.length <= limit && scannedCandidateCount < MAX_GLOBAL_RECENT_CANDIDATE_SCAN) {
+      const take = Math.min(GLOBAL_RECENT_CANDIDATE_BATCH_SIZE, MAX_GLOBAL_RECENT_CANDIDATE_SCAN - scannedCandidateCount);
+      const candidates = await this.prisma.wikiDiscussionThread.findMany({
+        where: candidateWhere(scanPosition), orderBy: [{ updatedAt: order }, { id: order }], take,
+      });
+      if (candidates.length === 0) { candidatesExhausted = true; break; }
+      scannedCandidateCount += candidates.length;
+      lastScanned = candidates.at(-1);
+      scanPosition = lastScanned ? { updatedAt: lastScanned.updatedAt, id: lastScanned.id } : scanPosition;
+      const batchPages = await this.prisma.wikiPage.findMany({
+        where: { id: { in: [...new Set(candidates.map((thread) => thread.pageId))] } },
+      });
+      const batchPageById = new Map(batchPages.map((page) => [page.id, page]));
+      const readable = await this.wikiPermissions.filterReadableThreads({
+        accountId,
+        actor,
+        items: candidates.flatMap((thread) => {
+          const page = batchPageById.get(thread.pageId);
+          return page && page.status !== 'deleted' ? [{ thread, page }] : [];
+        }),
+      });
+      visibleRows.push(...readable);
+      if (candidates.length < take) { candidatesExhausted = true; break; }
+    }
+    const hasUnscannedCandidates = visibleRows.length <= limit && !candidatesExhausted && lastScanned
+      ? (await this.prisma.wikiDiscussionThread.findMany({
+          where: candidateWhere({ updatedAt: lastScanned.updatedAt, id: lastScanned.id }),
+          orderBy: [{ updatedAt: order }, { id: order }], take: 1,
+        })).length > 0
+      : false;
+    const pageRows = visibleRows.slice(0, limit);
+    if (pageRows.length === 0 && !hasUnscannedCandidates) return { items: [], nextCursor: null };
+    const pages = pageRows.map((row) => row.page);
     const namespaces = await this.prisma.wikiNamespace.findMany({
       where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
       select: { id: true, code: true }
@@ -427,21 +484,11 @@ export class WikiDiscussionService {
       ? await this.prisma.serverWiki.findMany({ where: { spaceId: { in: serverSpaces } }, select: { spaceId: true, slug: true } })
       : [];
     const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
-    const actor = await this.viewerActor(viewer);
-    const visibleThreads = await this.wikiPermissions.filterReadableThreads({
-      accountId,
-      actor,
-      items: threads.flatMap((thread) => {
-        const page = pageById.get(thread.pageId);
-        return page && page.status !== 'deleted' ? [{ thread, page }] : [];
-      })
-    });
-    const pageRows = visibleThreads.slice(0, limit);
     const profileById = await this.profileNames(pageRows.map(({ thread }) => thread.createdBy));
     const countRows = pageRows.length > 0
       ? await this.prisma.wikiDiscussionComment.groupBy({
           by: ['threadId'],
-          where: { threadId: { in: pageRows.map(({ thread }) => thread.id) }, entryType: 'comment' },
+          where: { threadId: { in: pageRows.map(({ thread }) => thread.id) }, entryType: 'comment', status: 'normal' },
           _count: { _all: true }
         })
       : [];
@@ -462,11 +509,13 @@ export class WikiDiscussionService {
           : `/wiki/discuss/${page.id.toString()}?returnTo=${encodeURIComponent(routePath)}&thread=${thread.id.toString()}`
       };
     });
-    const cursorRow = pageRows.at(-1)?.thread ?? threads.at(-1);
-    const hasMore = visibleThreads.length > limit || threads.length === take;
+    const cursorRow = visibleRows.length > limit ? pageRows.at(-1)?.thread : hasUnscannedCandidates ? lastScanned : undefined;
+    const hasMore = visibleRows.length > limit || hasUnscannedCandidates;
     return {
       items,
-      nextCursor: hasMore && cursorRow ? this.encodeRecentCursor(snapshotAt, cursorRow.updatedAt, cursorRow.id) : null
+      nextCursor: hasMore && cursorRow
+        ? this.encodeRecentCursor(snapshotAt, cursorRow.updatedAt, cursorRow.id, cursorScope)
+        : null,
     };
   }
 
@@ -1635,20 +1684,23 @@ export class WikiDiscussionService {
     return BigInt(value);
   }
 
-  private encodeRecentCursor(snapshotAt: Date, updatedAt: Date, id: bigint): string {
-    return Buffer.from(JSON.stringify({ snapshotAt: snapshotAt.toISOString(), updatedAt: updatedAt.toISOString(), id: id.toString() })).toString('base64url');
+  private encodeRecentCursor(snapshotAt: Date, updatedAt: Date, id: bigint, scope: WikiRecentDiscussionCursorScope): string {
+    return encodeWikiRecentDiscussionCursor(this.recentCursorSecret(), scope, { snapshotAt, updatedAt, id });
   }
 
-  private decodeRecentCursor(value: string): { snapshotAt: Date; updatedAt: Date; id: bigint } {
+  private decodeRecentCursor(value: string, scope: WikiRecentDiscussionCursorScope): { snapshotAt: Date; updatedAt: Date; id: bigint } {
     try {
-      const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as { snapshotAt?: string; updatedAt?: string; id?: string };
-      const snapshotAt = new Date(decoded.snapshotAt ?? '');
-      const updatedAt = new Date(decoded.updatedAt ?? '');
-      if (Number.isNaN(snapshotAt.getTime()) || Number.isNaN(updatedAt.getTime()) || !decoded.id || !/^\d+$/.test(decoded.id)) throw new Error('invalid');
-      return { snapshotAt, updatedAt, id: BigInt(decoded.id) };
+      return decodeWikiRecentDiscussionCursor(this.recentCursorSecret(), scope, value);
     } catch {
       throw new BadRequestException('Invalid recent discussion cursor.');
     }
+  }
+
+  private recentCursorSecret(): string {
+    const configured = this.config?.get('APP_ENCRYPTION_KEY') ?? process.env.APP_ENCRYPTION_KEY;
+    if (configured) return configured;
+    if (process.env.NODE_ENV === 'test') return 'minewiki-test-recent-discussion-cursor-secret';
+    throw new Error('APP_ENCRYPTION_KEY is required for recent discussion cursors.');
   }
 
   private async audit(

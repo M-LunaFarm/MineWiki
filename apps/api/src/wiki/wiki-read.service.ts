@@ -2556,15 +2556,6 @@ export function buildServerWikiNavigation(
   });
 }
 
-function serverWikiPageRelativePath(
-  serverSlug: string,
-  page: { readonly title: string; readonly localPath: string }
-): string {
-  return slugifyTitle(page.title) === slugifyTitle(serverSlug)
-    ? ''
-    : serverWikiRelativePath(serverSlug, page.localPath);
-}
-
 function serverWikiNavigationTitle(serverSlug: string, displayTitle: string): string {
   const title = displayTitle.trim();
   const duplicatedPrefix = `${serverSlug.trim()}/`;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import type { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import type { WikiPermissionService } from './wiki-permission.service';
@@ -621,7 +622,97 @@ test('hidden comment raw source is available only to a page manager', async () =
 
 test('recent discussion cursors fail closed when tampered', async () => {
   const discussions = service();
-  await assert.rejects(discussions.listRecent(null, 'not-a-valid-cursor'), BadRequestException);
+  await assert.rejects(discussions.listRecent(null, { cursor: 'not-a-valid-cursor' }), BadRequestException);
+});
+
+test('global recent discussions filter status, support both keyset orders, and bind cursors to filters', async () => {
+  const rows = [
+    { ...thread, id: 31n, status: 'closed', updatedAt: new Date('2026-07-18T03:00:00Z') },
+    { ...thread, id: 30n, status: 'paused', updatedAt: new Date('2026-07-18T02:00:00Z') },
+    { ...thread, id: 29n, status: 'open', updatedAt: new Date('2026-07-18T01:00:00Z') },
+  ];
+  const queries: Array<{ where: Prisma.WikiDiscussionThreadWhereInput; orderBy: unknown }> = [];
+  const store = {
+    wikiDiscussionThread: {
+      async findMany(args: { where: Prisma.WikiDiscussionThreadWhereInput; orderBy: Array<{ updatedAt?: 'asc' | 'desc'; id?: 'asc' | 'desc' }>; take: number }) {
+        queries.push({ where: args.where, orderBy: args.orderBy });
+        const status = args.where.status as string | { in?: string[]; not?: string };
+        let result = rows.filter((row) => typeof status === 'string'
+          ? row.status === status
+          : status.in ? status.in.includes(row.status) : row.status !== status.not);
+        const idConstraint = (args.where.OR as Array<{ id?: { lt?: bigint; gt?: bigint } }> | undefined)
+          ?.find((entry) => entry.id)?.id;
+        if (idConstraint?.lt !== undefined) {
+          result = result.filter((row) => row.id < idConstraint.lt!);
+        } else if (idConstraint?.gt !== undefined) {
+          result = result.filter((row) => row.id > idConstraint.gt!);
+        }
+        const descending = args.orderBy[0]?.updatedAt === 'desc';
+        result = [...result].sort((left, right) => descending ? Number(right.id - left.id) : Number(left.id - right.id));
+        return result.slice(0, args.take);
+      },
+    },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: page.namespaceId, code: 'main' }]; } },
+    serverWiki: { async findMany() { return []; } },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } },
+  };
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    { async filterReadableThreads<T>({ items }: { items: T[] }) { return items; } } as unknown as WikiPermissionService,
+  );
+
+  const newest = await discussions.listRecent(null, { limit: 1, status: 'active', sort: 'newest' });
+  assert.deepEqual(newest.items.map((item) => item.id), ['30']);
+  assert.ok(newest.nextCursor);
+  assert.deepEqual(queries[0]?.orderBy, [{ updatedAt: 'desc' }, { id: 'desc' }]);
+  assert.deepEqual(queries[0]?.where.status, { in: ['open', 'paused'] });
+  await assert.rejects(
+    discussions.listRecent(null, { cursor: newest.nextCursor ?? undefined, limit: 1, status: 'closed', sort: 'newest' }),
+    BadRequestException,
+  );
+  await assert.rejects(
+    discussions.listRecent(null, { cursor: newest.nextCursor ?? undefined, limit: 1, status: 'active', sort: 'oldest' }),
+    BadRequestException,
+  );
+
+  const oldest = await discussions.listRecent(null, { limit: 1, status: 'all', sort: 'oldest' });
+  assert.deepEqual(oldest.items.map((item) => item.id), ['29']);
+  assert.deepEqual(queries.at(-1)?.orderBy, [{ updatedAt: 'asc' }, { id: 'asc' }]);
+});
+
+test('global recent discussions scan past ACL-hidden batches without revealing them', async () => {
+  const updatedAt = new Date('2026-07-18T03:00:00Z');
+  const rows = Array.from({ length: 61 }, (_, index) => ({ ...thread, id: BigInt(100 - index), updatedAt }));
+  let threadQueries = 0;
+  const store = {
+    wikiDiscussionThread: {
+      async findMany(args: { where: { OR?: Array<{ id?: { lt?: bigint } }> }; take: number }) {
+        threadQueries += 1;
+        const cursorId = args.where.OR?.find((entry) => entry.id?.lt)?.id?.lt;
+        return (cursorId === undefined ? rows : rows.filter((row) => row.id < cursorId)).slice(0, args.take);
+      },
+    },
+    wikiPage: { async findMany() { return [page]; } },
+    wikiNamespace: { async findMany() { return [{ id: page.namespaceId, code: 'main' }]; } },
+    serverWiki: { async findMany() { return []; } },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } },
+  };
+  const permissions = {
+    async filterReadableThreads<T extends { thread: { id: bigint } }>({ items }: { items: T[] }) {
+      return items.filter((item) => item.thread.id <= 50n);
+    },
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(store as unknown as PrismaService, {} as WikiProfileService, permissions);
+
+  const result = await discussions.listRecent(null, { limit: 10, status: 'all', sort: 'newest' });
+  assert.deepEqual(result.items.map((item) => item.id), ['50', '49', '48', '47', '46', '45', '44', '43', '42', '41']);
+  assert.equal(result.items.some((item) => BigInt(item.id) > 50n), false);
+  assert.ok(result.nextCursor);
+  assert.equal(threadQueries, 2);
 });
 
 test('page discussion lists paginate beyond the legacy one-hundred thread window', async () => {
@@ -882,7 +973,7 @@ test('recent server discussions deep-link through the canonical tool route', asy
     {} as WikiProfileService,
     { async assertCanReadPage() {} } as unknown as WikiPermissionService
   );
-  const result = await discussions.listRecent(null, undefined, 30);
+  const result = await discussions.listRecent(null, { limit: 30 });
   assert.equal(
     result.items[0]?.discussionHref,
     '/server/luna/_tools/discuss/API/requests?thread=30'
