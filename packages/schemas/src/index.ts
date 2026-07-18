@@ -359,6 +359,7 @@ export const serverSummarySchema = z.object({
 });
 
 export const serverDetailSchema = serverSummarySchema.extend({
+  wikiUrl: z.string().min(1).nullable(),
   longDescription: z.string().min(1),
   bannerUrl: z.string().url().nullable(),
   websiteUrl: z.string().url().nullable(),

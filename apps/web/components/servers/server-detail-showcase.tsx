@@ -101,7 +101,7 @@ export function ServerDetailShowcase({
   const compactTimelineEntries = timelineEntries.slice(0, 4);
   const reportUrl = buildVoteReportSupportUrl(detail, serverId);
   const correctionUrl = buildServerCorrectionSupportUrl(detail, serverId);
-  const wikiHref = detail.wikiSlug ? `/server/${encodeURIComponent(detail.wikiSlug)}` : null;
+  const wikiHref = detail.wikiUrl;
   const hasExternalLinks = Boolean(detail.discordUrl || detail.websiteUrl);
 
   const onlinePlayers = stats?.players.online ?? detail.playersOnline ?? 0;
@@ -336,7 +336,7 @@ export function ServerDetailShowcase({
             serverId={serverId}
             apiBaseUrl={apiBaseUrl}
             initialPolicy={detail.voteRequiresOwnership ?? false}
-            initialWikiSlug={detail.wikiSlug ?? null}
+            initialWikiUrl={detail.wikiUrl}
             initialProfile={detail}
             className="mt-8"
           />

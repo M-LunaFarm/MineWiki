@@ -165,6 +165,7 @@ test('server detail hides a stale cross-brand wiki link', async () => {
   assert.equal(detail.wikiSpaceId, null);
   assert.equal(detail.wikiPageId, null);
   assert.equal(detail.wikiSlug, null);
+  assert.equal(detail.wikiUrl, null);
 });
 
 test('server wiki public slug is tenant-owned, validated, and audited independently of content paths', async () => {

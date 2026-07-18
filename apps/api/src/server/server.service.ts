@@ -248,19 +248,18 @@ export class ServerService {
         .map((method) => method.method)
         .filter(isSupportedClaimMethod)
         .filter((method, index, array) => array.indexOf(method) === index);
-      const hasPublicWiki = Boolean(
-        serverWiki
-        && serverWiki.status === 'active'
-        && serverWiki.slug === server.wikiSlug
-        && serverWiki.spaceId === server.wikiSpaceId
-        && !serverWikiIdentityConflicts(serverWiki, server),
-      );
-      const detail = toDetail(
+      const hasPublicWiki = hasCanonicalServerWikiLink(server, serverWiki);
+      const detail = {
+        ...toDetail(
         hasPublicWiki
           ? server
           : { ...server, wikiSpaceId: null, wikiPageId: null, wikiSlug: null },
         verificationMethods.length > 0 ? verificationMethods : ALL_METHODS,
-      );
+        ),
+        wikiUrl: hasPublicWiki && serverWiki
+          ? `/serverWiki/${encodeURIComponent(serverWiki.siteSlug ?? serverWiki.slug)}`
+          : null,
+      };
       void this.telemetry.record('get', 'servers', Date.now() - startedAt, true);
       return detail;
     } catch (error) {
@@ -674,6 +673,12 @@ export class ServerService {
   async getServerWikiLink(serverId: string): Promise<ServerWikiLinkResponse> {
     const server = await this.ensureExists(serverId);
     const serverWiki = await this.findServerWikiForServer(server.id, server.wikiSpaceId);
+    if (!hasCanonicalServerWikiLink(server, serverWiki)) {
+      return toServerWikiLinkResponse(
+        { ...server, wikiSpaceId: null, wikiPageId: null, wikiSlug: null },
+        null,
+      );
+    }
     return toServerWikiLinkResponse(server, serverWiki);
   }
 
@@ -685,6 +690,9 @@ export class ServerService {
     const server = await this.ensureExists(serverId);
     const existing = await this.findServerWikiForServer(server.id, server.wikiSpaceId);
     if (existing) {
+      if (serverWikiIdentityConflicts(existing, server)) {
+        throw new ConflictException('Server wiki identity is inconsistent and requires repair.');
+      }
       if (server.wikiSpaceId && server.wikiPageId && server.wikiSlug) {
         return toServerWikiLinkResponse(server, existing);
       }
@@ -2202,6 +2210,19 @@ function toServerWikiLinkResponse(
     serverDirectoryPath: buildServerDirectoryPath(server),
     status: linked ? 'linked' : 'unlinked',
   };
+}
+
+function hasCanonicalServerWikiLink(
+  server: { wikiSpaceId?: bigint | null; wikiSlug?: string | null; name: string; joinHost: string },
+  serverWiki: Pick<ServerWiki, 'spaceId' | 'slug' | 'status' | 'serverName' | 'host'> | null,
+): boolean {
+  return Boolean(
+    serverWiki
+    && serverWiki.status === 'active'
+    && serverWiki.slug === server.wikiSlug
+    && serverWiki.spaceId === server.wikiSpaceId
+    && !serverWikiIdentityConflicts(serverWiki, server),
+  );
 }
 
 function buildServerDirectoryPath(server: { id: string; shortCode?: string | null }): string {

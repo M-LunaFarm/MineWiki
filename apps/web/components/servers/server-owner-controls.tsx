@@ -15,7 +15,7 @@ interface ServerOwnerControlsProps {
   readonly serverId: string;
   readonly apiBaseUrl?: string;
   readonly initialPolicy: boolean;
-  readonly initialWikiSlug?: string | null;
+  readonly initialWikiUrl?: string | null;
   readonly initialProfile: Pick<
     ServerDetail,
     | 'name'
@@ -78,7 +78,7 @@ function createDefaultTargets(): EditableTarget[] {
 }
 
 function serverWikiUrl(slug?: string | null): string | null {
-  return slug ? `/server/${encodeURIComponent(slug)}` : null;
+  return slug ? `/serverWiki/${encodeURIComponent(slug)}` : null;
 }
 
 function mergeTargets(targets: ReadonlyArray<VotifierTarget>): EditableTarget[] {
@@ -138,7 +138,7 @@ export function ServerOwnerControls({
   serverId,
   apiBaseUrl,
   initialPolicy,
-  initialWikiSlug,
+  initialWikiUrl,
   initialProfile,
   className,
 }: ServerOwnerControlsProps) {
@@ -146,7 +146,7 @@ export function ServerOwnerControls({
   const router = useRouter();
   const [isOwner, setIsOwner] = useState(false);
   const [requiresOwnership, setRequiresOwnership] = useState(initialPolicy);
-  const [wikiUrl, setWikiUrl] = useState<string | null>(() => serverWikiUrl(initialWikiSlug));
+  const [wikiUrl, setWikiUrl] = useState<string | null>(initialWikiUrl ?? null);
   const [creatingWiki, setCreatingWiki] = useState(false);
   const [wikiFeedback, setWikiFeedback] = useState<FeedbackState | null>(null);
   const [saving, setSaving] = useState(false);
@@ -229,9 +229,9 @@ export function ServerOwnerControls({
   }, [initialPolicy]);
 
   useEffect(() => {
-    setWikiUrl(serverWikiUrl(initialWikiSlug));
+    setWikiUrl(initialWikiUrl ?? null);
     setWikiFeedback(null);
-  }, [initialWikiSlug]);
+  }, [initialWikiUrl]);
 
   useEffect(() => {
     if (!account) {

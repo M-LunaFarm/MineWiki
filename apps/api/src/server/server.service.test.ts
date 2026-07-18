@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
+import { ConflictException } from '@nestjs/common';
 import { ServerService } from './server.service';
 import { UploadService } from '../upload/upload.service';
 import { PrismaService } from '../common/prisma.service';
@@ -185,6 +186,7 @@ if (!hasDatabase) {
       assert.equal(detail.wikiSpaceId, link.wikiSpaceId);
       assert.equal(detail.wikiPageId, link.wikiPageId);
       assert.equal(detail.wikiSlug, link.wikiSlug);
+      assert.equal(detail.wikiUrl, link.wikiUrl);
       const storedServer = await prisma.server.findUnique({ where: { id: server.id } });
       assert.equal(typeof storedServer?.wikiSpaceId, 'bigint');
       assert.equal(typeof storedServer?.wikiPageId, 'bigint');
@@ -224,6 +226,14 @@ if (!hasDatabase) {
       assert.equal(conflictingDetail.wikiSpaceId, null);
       assert.equal(conflictingDetail.wikiPageId, null);
       assert.equal(conflictingDetail.wikiSlug, null);
+      assert.equal(conflictingDetail.wikiUrl, null);
+      const conflictingLink = await service.getServerWikiLink(server.id);
+      assert.equal(conflictingLink.status, 'unlinked');
+      assert.equal(conflictingLink.wikiUrl, null);
+      await assert.rejects(
+        () => service.createServerWiki(server.id, account.id),
+        ConflictException,
+      );
     } finally {
       if (serverId) {
         await prisma.server.update({
