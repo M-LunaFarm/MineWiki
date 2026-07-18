@@ -297,6 +297,11 @@ export interface WikiDeletedPageSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiDeletedPageListResponse {
+  readonly items: WikiDeletedPageSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiDeletedPageRecoveryResponse {
   readonly page: WikiDeletedPageSummary & {
     readonly pageType: string;
@@ -1711,7 +1716,9 @@ export class WikiReadService {
     readonly accountId: string;
     readonly profileId: bigint;
     readonly includeAll?: boolean;
-  }): Promise<WikiDeletedPageSummary[]> {
+    readonly cursor?: string;
+    readonly limit?: string | number;
+  }): Promise<WikiDeletedPageListResponse> {
     let managedSpaceIds: bigint[] = [];
     if (!input.includeAll) {
       const [spaces, roles, servers, verifiedMods] = await Promise.all([
@@ -1744,34 +1751,46 @@ export class WikiReadService {
         ...verifiedMods.map((wiki) => wiki.spaceId)
       ])];
     }
+    const cursor = input.cursor ? decodeDeletedPageCursor(input.cursor) : null;
+    const limit = Math.min(Math.max(Number(input.limit ?? 50) || 50, 1), 100);
+    const scope = !input.includeAll
+      ? {
+          OR: [
+            { createdBy: input.profileId },
+            ...(managedSpaceIds.length > 0 ? [{ spaceId: { in: managedSpaceIds } }] : [])
+          ]
+        }
+      : {};
     const pages = await this.prisma.wikiPage.findMany({
       where: {
         status: 'deleted',
-        ...(!input.includeAll
-          ? {
-              OR: [
-                { createdBy: input.profileId },
-                ...(managedSpaceIds.length > 0 ? [{ spaceId: { in: managedSpaceIds } }] : [])
-              ]
-            }
-          : {})
+        AND: [
+          scope,
+          ...(cursor ? [{ OR: [{ updatedAt: { lt: cursor.updatedAt } }, { updatedAt: cursor.updatedAt, id: { lt: cursor.id } }] }] : [])
+        ]
       },
-      orderBy: [{ updatedAt: 'desc' }],
-      take: 100
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1
     });
-    const namespaceIds = [...new Set(pages.map((page) => page.namespaceId))];
+    const pageRows = pages.slice(0, limit);
+    const namespaceIds = [...new Set(pageRows.map((page) => page.namespaceId))];
     const namespaces = namespaceIds.length > 0
       ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } } })
       : [];
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    return pages.map((page) => ({
-      id: page.id.toString(),
-      namespace: namespaceById.get(page.namespaceId) ?? 'main',
-      title: page.title,
-      displayTitle: page.displayTitle,
-      spaceId: page.spaceId.toString(),
-      updatedAt: page.updatedAt.toISOString()
-    }));
+    return {
+      items: pageRows.map((page) => ({
+        id: page.id.toString(),
+        namespace: namespaceById.get(page.namespaceId) ?? 'main',
+        title: page.title,
+        displayTitle: page.displayTitle,
+        spaceId: page.spaceId.toString(),
+        updatedAt: page.updatedAt.toISOString()
+      })),
+      nextCursor: pages.length > limit && pageRows.length > 0
+        ? encodeDeletedPageCursor(pageRows.at(-1)!)
+        : null
+    };
   }
 
   async getDeletedPageRecovery(input: {
@@ -3080,6 +3099,25 @@ function randomBigIntBetween(minimum: bigint, maximum: bigint): bigint {
   const span = maximum - minimum + 1n;
   if (span <= 1n) return minimum;
   return minimum + (randomBytes(8).readBigUInt64BE() % span);
+}
+
+function encodeDeletedPageCursor(page: { readonly updatedAt: Date; readonly id: bigint }): string {
+  return Buffer.from(JSON.stringify([page.updatedAt.toISOString(), page.id.toString()]), 'utf8').toString('base64url');
+}
+
+function decodeDeletedPageCursor(value: string): { readonly updatedAt: Date; readonly id: bigint } {
+  if (!/^[A-Za-z0-9_-]{8,256}$/u.test(value)) throw new BadRequestException('Invalid deleted page cursor.');
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== 2 || typeof parsed[0] !== 'string' || typeof parsed[1] !== 'string' || !/^\d+$/u.test(parsed[1])) {
+      throw new Error('invalid cursor');
+    }
+    const updatedAt = new Date(parsed[0]);
+    if (!Number.isFinite(updatedAt.getTime()) || updatedAt.toISOString() !== parsed[0]) throw new Error('invalid cursor');
+    return { updatedAt, id: BigInt(parsed[1]) };
+  } catch {
+    throw new BadRequestException('Invalid deleted page cursor.');
+  }
 }
 
 const SPECIAL_SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT = 500;

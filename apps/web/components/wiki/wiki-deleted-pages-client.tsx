@@ -7,17 +7,33 @@ import { fetchWikiDeletedPages, type WikiDeletedPageSummary } from '../../lib/wi
 
 export function WikiDeletedPagesClient() {
   const [pages, setPages] = useState<WikiDeletedPageSummary[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void fetchWikiDeletedPages()
-      .then((result) => { if (active) setPages(result); })
+      .then((result) => { if (active) { setPages(result.items); setCursor(result.nextCursor); } })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '삭제 문서함을 불러오지 못했습니다.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
+
+  async function loadMore() {
+    if (!cursor || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetchWikiDeletedPages(cursor);
+      setPages((current) => [...current, ...result.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      setCursor(result.nextCursor);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '이전 삭제 문서를 불러오지 못했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
@@ -41,6 +57,7 @@ export function WikiDeletedPagesClient() {
           ))}
         </section>
       ) : null}
+      {cursor ? <button type="button" onClick={() => void loadMore()} disabled={loading} className="btn-secondary min-h-11 self-start disabled:opacity-50">{loading ? <Loader2 className="size-4 animate-spin" /> : null} 이전 삭제 문서 더 보기</button> : null}
     </main>
   );
 }

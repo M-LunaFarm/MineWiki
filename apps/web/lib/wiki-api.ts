@@ -702,6 +702,11 @@ export interface WikiDeletedPageSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiDeletedPageListResponse {
+  readonly items: WikiDeletedPageSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiDeletedPageRecoveryResponse {
   readonly page: WikiDeletedPageSummary & {
     readonly pageType: string;
@@ -1438,8 +1443,10 @@ export async function unregisterWikiPushSubscription(): Promise<{ readonly remov
   return mutateWikiBrowser<{ readonly removed: boolean }>('/v1/wiki/notifications/push/subscription', 'DELETE', {});
 }
 
-export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]> {
-  const response = await fetch(`${apiBaseUrl()}/v1/wiki/me/deleted-pages`, {
+export async function fetchWikiDeletedPages(cursor?: string): Promise<WikiDeletedPageListResponse> {
+  const params = new URLSearchParams({ limit: '50' });
+  if (cursor) params.set('cursor', cursor);
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/me/deleted-pages?${params.toString()}`, {
     credentials: 'include',
   });
   if (!response.ok) {

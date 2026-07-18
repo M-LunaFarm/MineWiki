@@ -7,6 +7,8 @@ const root = new URL('../', import.meta.url);
 test('deleted page list requires review before restoration', async () => {
   const list = await readFile(new URL('components/wiki/wiki-deleted-pages-client.tsx', root), 'utf8');
   assert.match(list, /이력 검토 및 복구/u);
+  assert.match(list, /이전 삭제 문서 더 보기/u);
+  assert.match(list, /fetchWikiDeletedPages\(cursor\)/u);
   assert.match(list, /\/wiki\/deleted\/\$\{encodeURIComponent\(page\.id\)\}/u);
   assert.doesNotMatch(list, /restoreWikiPage/u);
 });

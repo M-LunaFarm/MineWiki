@@ -747,6 +747,32 @@ test('deleted-page recovery hides page existence from an unrelated authenticated
   assert.equal(revisionsQueried, false);
 });
 
+test('deleted page inbox uses a stable updated-at and id cursor beyond the first hundred records', async () => {
+  const firstAt = new Date('2026-07-19T02:00:00.000Z');
+  const secondAt = new Date('2026-07-19T01:00:00.000Z');
+  const pages = [
+    { id: 30n, namespaceId: 1, spaceId: 1n, title: 'A', displayTitle: 'A', updatedAt: firstAt },
+    { id: 20n, namespaceId: 1, spaceId: 1n, title: 'B', displayTitle: 'B', updatedAt: secondAt },
+    { id: 10n, namespaceId: 1, spaceId: 1n, title: 'C', displayTitle: 'C', updatedAt: secondAt }
+  ];
+  const whereInputs: unknown[] = [];
+  const prisma = {
+    wikiPage: { async findMany(input: { where: unknown }) { whereInputs.push(input.where); return pages; } },
+    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } }
+  } as unknown as PrismaService;
+  const service = new WikiReadService(prisma, {} as WikiPermissionService);
+
+  const first = await service.getDeletedPages({ accountId: 'admin', profileId: 1n, includeAll: true, limit: 2 });
+  assert.deepEqual(first.items.map((page) => page.id), ['30', '20']);
+  assert.ok(first.nextCursor);
+
+  await service.getDeletedPages({ accountId: 'admin', profileId: 1n, includeAll: true, limit: 2, cursor: first.nextCursor! });
+  assert.deepEqual(whereInputs[1], {
+    status: 'deleted',
+    AND: [{}, { OR: [{ updatedAt: { lt: secondAt } }, { updatedAt: secondAt, id: { lt: 20n } }] }]
+  });
+});
+
 test('deleted-page recovery never previews a hidden or foreign source revision', async () => {
   const now = new Date('2026-07-19T00:00:00Z');
   const page = { id: 1n, namespaceId: 1, spaceId: 2n, localPath: 'deleted', slug: 'deleted', title: 'Deleted', displayTitle: 'Deleted', currentRevisionId: 10n, pageType: 'article', protectionLevel: 'open', status: 'deleted', createdBy: 3n, createdAt: now, updatedAt: now };

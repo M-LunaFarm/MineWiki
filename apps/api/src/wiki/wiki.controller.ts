@@ -29,7 +29,7 @@ import {
   type WikiCategoryResponse,
   type WikiDocumentTemplateSummary,
   type WikiContributionResponse,
-  type WikiDeletedPageSummary,
+  type WikiDeletedPageListResponse,
   type WikiDeletedPageRecoveryResponse,
   type WikiPageResponse,
   type WikiPageLifecycleEventListResponse,
@@ -510,12 +510,18 @@ export class WikiController {
 
   @Get('me/deleted-pages')
   @UseGuards(SessionGuard)
-  async getMyDeletedPages(@CurrentSession() session: SessionPayload): Promise<WikiDeletedPageSummary[]> {
+  async getMyDeletedPages(
+    @CurrentSession() session: SessionPayload,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiDeletedPageListResponse> {
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     return this.wikiRead.getDeletedPages({
       accountId: session.userId,
       profileId: profile.id,
-      includeAll: session.permissions?.includes('wiki.admin') === true || session.groups?.includes('admin') === true
+      includeAll: session.permissions?.includes('wiki.admin') === true || session.groups?.includes('admin') === true,
+      cursor,
+      limit
     });
   }
 
