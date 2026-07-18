@@ -216,7 +216,7 @@ export function VoteModal({
         )}
       </button>
 
-      {isOpen ? createPortal(
+      {isOpen && typeof document !== 'undefined' ? createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           {/* Backdrop */}
           <div
