@@ -235,8 +235,9 @@ test('public server wiki rendering fails closed when a persisted premium layout 
       port: true,
       edition: true,
       supportedVersions: true,
-      genres: true,
-      layoutKey: true,
+        genres: true,
+        layoutKey: true,
+        navigationOrder: true,
     },
   });
 
@@ -363,7 +364,7 @@ test('server wiki navigation keeps every document beyond the former 100 item cap
   assert.equal(navigation.length, 150);
   assert.equal(navigation[0]?.path, '/server/luna');
   assert.equal(navigation[0]?.hasChildren, true);
-  assert.equal(navigation[1]?.depth, 2);
+  assert.equal(navigation[1]?.depth, 1);
   assert.equal(navigation.at(-1)?.current, true);
 });
 
@@ -387,6 +388,20 @@ test('server wiki navigation keeps legacy root tree labels but links canonical d
   assert.equal(navigation[0]?.current, true);
   assert.equal(navigation[0]?.depth, 0);
   assert.equal(navigation[1]?.path, '/serverWiki/example/%EC%B2%98%EC%9D%8C_%EC%8B%9C%EC%9E%91%ED%95%98%EA%B8%B0');
+});
+
+test('server wiki navigation applies persisted sibling order without flattening descendants', () => {
+  const navigation = buildServerWikiNavigation('luna', [
+    { id: 1n, title: 'luna', localPath: '대문', displayTitle: '루나 서버' },
+    { id: 2n, title: 'luna/guide', localPath: '가이드', displayTitle: '가이드' },
+    { id: 3n, title: 'luna/guide/install', localPath: '가이드/설치', displayTitle: '설치' },
+    { id: 4n, title: 'luna/rules', localPath: '규칙', displayTitle: '규칙' },
+  ], 3n, 'luna', '/serverWiki', ['4', '3', '2', '1']);
+
+  assert.deepEqual(navigation.map((item) => item.id), ['1', '4', '2', '3']);
+  assert.deepEqual(navigation.map((item) => item.depth), [0, 1, 1, 2]);
+  assert.equal(navigation[0]?.hasChildren, true);
+  assert.equal(navigation[2]?.hasChildren, true);
 });
 
 test('wiki search cursor is stable and rejects tampering', () => {

@@ -27,6 +27,7 @@ import { resolveEffectiveServerWikiLayout } from '../server/server-wiki-layout-p
 import { publicWikiRecentChangeSummary, publicWikiRevisionEditSummary } from './wiki-revision-summary';
 import { wikiLinkResolutionContext } from './wiki-link-context';
 import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
+import { resolveServerWikiNavigationTree } from './server-wiki-navigation-order';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -75,9 +76,10 @@ export interface WikiPageResponse {
     readonly playersMax: number | null;
     readonly layout: 'docs' | 'handbook' | 'brand';
     readonly navigation: ReadonlyArray<{
+      readonly kind: 'group' | 'page';
       readonly id: string;
       readonly title: string;
-      readonly path: string;
+      readonly path: string | null;
       readonly current: boolean;
       readonly depth: number;
       readonly hasChildren: boolean;
@@ -2300,7 +2302,8 @@ export class WikiReadService {
         edition: true,
         supportedVersions: true,
         genres: true,
-        layoutKey: true
+        layoutKey: true,
+        navigationOrder: true
       }
     });
     if (!serverWiki) {
@@ -2362,7 +2365,8 @@ export class WikiReadService {
       readablePages,
       currentPageId,
       siteSlug,
-      '/serverWiki'
+      '/serverWiki',
+      serverWiki.navigationOrder
     );
     return {
       directoryPath: server ? `/servers/${server.shortCode?.trim() || server.id}` : null,
@@ -2522,29 +2526,32 @@ export function buildServerWikiNavigation(
   pages: ReadonlyArray<{ id: bigint; title: string; localPath: string; displayTitle: string }>,
   currentPageId: bigint,
   routeSlug = serverSlug,
-  routePrefix: '/server' | '/serverWiki' = '/server'
+  routePrefix: '/server' | '/serverWiki' = '/server',
+  storedOrder: unknown = null
 ) {
-  const navigationPages = [...pages].sort((left, right) => {
-    const leftRoot = serverWikiPageRelativePath(serverSlug, left) ? 0 : -1;
-    const rightRoot = serverWikiPageRelativePath(serverSlug, right) ? 0 : -1;
-    return leftRoot - rightRoot || left.localPath.localeCompare(right.localPath, 'ko');
-  });
-  const parentPaths = new Set<string>();
-  for (const item of navigationPages) {
-    const parts = serverWikiPageRelativePath(serverSlug, item).split('/').filter(Boolean);
-    for (let index = 0; index < parts.length; index += 1) {
-      parentPaths.add(parts.slice(0, index).join('/'));
+  const navigationTree = resolveServerWikiNavigationTree(serverSlug, pages, storedOrder);
+  const parentIds = new Set(navigationTree.flatMap((entry) => entry.parentId ? [entry.parentId] : []));
+  return navigationTree.map((node) => {
+    if (node.kind === 'group') {
+      return {
+        kind: 'group' as const,
+        id: node.id,
+        title: node.title,
+        path: null,
+        current: false,
+        depth: node.depth,
+        hasChildren: parentIds.has(node.id),
+      };
     }
-  }
-  return navigationPages.map((item) => {
-    const relativePath = serverWikiPageRelativePath(serverSlug, item);
+    const item = node.page;
     return {
+      kind: 'page' as const,
       id: item.id.toString(),
       title: serverWikiNavigationTitle(serverSlug, item.displayTitle),
       path: buildCanonicalServerWikiPath(routeSlug, item.title, serverSlug, routePrefix),
       current: item.id === currentPageId,
-      depth: relativePath ? relativePath.split('/').filter(Boolean).length : 0,
-      hasChildren: parentPaths.has(relativePath)
+      depth: node.depth,
+      hasChildren: parentIds.has(node.id)
     };
   });
 }

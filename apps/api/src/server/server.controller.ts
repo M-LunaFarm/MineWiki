@@ -80,6 +80,27 @@ const serverWikiContentSettingsPayloadSchema = z.object({
   bottomNoticeSource: z.string().nullable(),
   requireContributionPolicyAck: z.boolean(),
 });
+const serverWikiNavigationDocumentSchema = z.object({
+  version: z.literal(1),
+  nodes: z.array(z.discriminatedUnion('kind', [
+    z.object({
+      id: z.string().regex(/^group:[a-z0-9][a-z0-9_-]{0,63}$/),
+      kind: z.literal('group'),
+      title: z.string().trim().min(1).max(80),
+      parentId: z.string().nullable(),
+    }).strict(),
+    z.object({
+      id: z.string().regex(/^page:\d+$/),
+      kind: z.literal('page'),
+      pageId: z.string().regex(/^\d+$/),
+      parentId: z.string().nullable(),
+    }).strict(),
+  ])).max(10_100),
+}).strict();
+const serverWikiNavigationPayloadSchema = z.object({
+  expectedVersion: z.number().int().min(0),
+  document: serverWikiNavigationDocumentSchema,
+}).strict();
 export const serverProfilePayloadSchema = z.object({
   name: z.string().trim().min(3).max(32),
   tags: z.array(z.string().trim().min(1).max(32)).max(12).transform((tags) => [
@@ -226,6 +247,16 @@ export class ServerController {
     return withWikiSettingsAccess(settings, authority);
   }
 
+  @UseGuards(SessionGuard)
+  @Get(':id/wiki-navigation')
+  async wikiNavigation(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    await this.authorizeWikiContentSettings(id, session);
+    return this.serverService.getWikiNavigationSettings(id);
+  }
+
   @RequireStepUp('server_admin')
   @UseGuards(SessionGuard)
   @Patch(':id/wiki-settings')
@@ -239,6 +270,25 @@ export class ServerController {
     const payload = serverWikiContentSettingsPayloadSchema.parse(body) as ServerWikiContentSettingsInput;
     const settings = await this.serverService.updateWikiContentSettings(id, payload, authority.accountId);
     return withWikiSettingsAccess(settings, authority);
+  }
+
+  @RequireStepUp('server_admin')
+  @UseGuards(SessionGuard)
+  @Patch(':id/wiki-navigation')
+  @Throttle({ default: { limit: 12, ttl: 60 } })
+  async updateWikiNavigation(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    const authority = await this.authorizeWikiContentSettings(id, session);
+    const payload = serverWikiNavigationPayloadSchema.parse(body);
+    return this.serverService.updateWikiNavigationSettings(
+      id,
+      payload.expectedVersion,
+      payload.document,
+      authority.accountId,
+    );
   }
 
   @RequireStepUp('server_admin')

@@ -1818,6 +1818,10 @@ model ServerWiki {
   contentSettingsVersion       Int                   @default(0) @map("content_settings_version") @db.UnsignedInt
   contentSettingsUpdatedAt     DateTime?             @map("content_settings_updated_at")
   contentSettingsUpdatedBy     BigInt?               @map("content_settings_updated_by") @db.UnsignedBigInt
+  navigationOrder              Json?                 @map("navigation_order")
+  navigationVersion            Int                   @default(0) @map("navigation_version") @db.UnsignedInt
+  navigationUpdatedAt          DateTime?             @map("navigation_updated_at")
+  navigationUpdatedBy          BigInt?               @map("navigation_updated_by") @db.UnsignedBigInt
   createdBy                    BigInt?               @map("created_by") @db.UnsignedBigInt
   createdAt                    DateTime              @map("created_at")
   updatedAt                    DateTime              @map("updated_at")

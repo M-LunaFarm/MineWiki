@@ -47,6 +47,13 @@ import {
 import { serverWikiIdentityConflicts } from './server-wiki-identity';
 import { buildServerWikiMainPage, buildServerWikiStarterPages } from './server-wiki-scaffold';
 import { WikiLinkIndexService } from '../wiki/wiki-link-index.service';
+import {
+  resolveServerWikiNavigationTree,
+  serverWikiPageRelativePath,
+  validateServerWikiNavigationDocument,
+  type ServerWikiNavigationDocument,
+} from '../wiki/server-wiki-navigation-order';
+import { buildCanonicalServerWikiPath } from '../wiki/wiki-route-path.resolver';
 
 const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
@@ -1852,6 +1859,117 @@ export class ServerService {
     return toWikiContentSettingsResponse(settings);
   }
 
+  async getWikiNavigationSettings(serverId: string) {
+    const serverWiki = await this.prisma.serverWiki.findUnique({
+      where: { voteServerId: serverId },
+      select: {
+        id: true,
+        spaceId: true,
+        slug: true,
+        siteSlug: true,
+        navigationOrder: true,
+        navigationVersion: true,
+        navigationUpdatedAt: true,
+        navigationUpdatedBy: true,
+      },
+    });
+    if (!serverWiki) throw new NotFoundException('Server wiki not found.');
+    const pages = await this.prisma.wikiPage.findMany({
+      where: { spaceId: serverWiki.spaceId, pageType: { not: 'redirect' } },
+      select: { id: true, title: true, localPath: true, displayTitle: true, status: true },
+      orderBy: [{ localPath: 'asc' }, { id: 'asc' }],
+    });
+    return toWikiNavigationSettingsResponse(serverWiki, pages);
+  }
+
+  async updateWikiNavigationSettings(
+    serverId: string,
+    expectedVersion: number,
+    document: unknown,
+    actorAccountId: string,
+  ) {
+    const current = await this.prisma.serverWiki.findUnique({
+      where: { voteServerId: serverId },
+      select: {
+        id: true,
+        spaceId: true,
+        slug: true,
+        siteSlug: true,
+        navigationVersion: true,
+      },
+    });
+    if (!current) throw new NotFoundException('Server wiki not found.');
+    if (current.navigationVersion !== expectedVersion) {
+      throwWikiNavigationConflict(current.navigationVersion);
+    }
+    const pages = await this.prisma.wikiPage.findMany({
+      where: { spaceId: current.spaceId, pageType: { not: 'redirect' } },
+      select: { id: true, title: true, localPath: true, displayTitle: true, status: true },
+      orderBy: [{ localPath: 'asc' }, { id: 'asc' }],
+    });
+    let normalized: ServerWikiNavigationDocument;
+    try {
+      normalized = validateServerWikiNavigationDocument(
+        document,
+        pages.map((page) => page.id.toString()),
+        8,
+        pages.find((page) => serverWikiPageRelativePath(current.slug, page) === '')?.id.toString(),
+      );
+    } catch (error) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: error instanceof Error ? error.message : 'SERVER_WIKI_NAVIGATION_INVALID_DOCUMENT',
+        message: '서버 위키 문서 구조가 올바르지 않습니다.',
+      });
+    }
+    const actor = await this.wikiProfiles.ensureWikiProfile(actorAccountId);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const changed = await tx.serverWiki.updateMany({
+        where: { id: current.id, navigationVersion: expectedVersion },
+        data: {
+          navigationOrder: normalized as unknown as Prisma.InputJsonValue,
+          navigationVersion: { increment: 1 },
+          navigationUpdatedAt: new Date(),
+          navigationUpdatedBy: actor.id,
+        },
+      });
+      if (changed.count !== 1) {
+        const latest = await tx.serverWiki.findUnique({
+          where: { id: current.id },
+          select: { navigationVersion: true },
+        });
+        throwWikiNavigationConflict(latest?.navigationVersion ?? expectedVersion + 1);
+      }
+      return tx.serverWiki.findUniqueOrThrow({
+        where: { id: current.id },
+        select: {
+          id: true,
+          spaceId: true,
+          slug: true,
+          siteSlug: true,
+          navigationOrder: true,
+          navigationVersion: true,
+          navigationUpdatedAt: true,
+          navigationUpdatedBy: true,
+        },
+      });
+    });
+    await this.events?.audit('server.wiki.navigation.update', {
+      category: 'server',
+      actorAccountId,
+      actorProfileId: actor.id,
+      subjectType: 'server_wiki',
+      subjectId: current.id,
+      metadata: {
+        previousVersion: expectedVersion,
+        version: updated.navigationVersion,
+        pageCount: pages.length,
+        groupCount: normalized.nodes.filter((node) => node.kind === 'group').length,
+      },
+    });
+    return toWikiNavigationSettingsResponse(updated, pages);
+  }
+
   async updateWikiContentSettings(
     serverId: string,
     input: ServerWikiContentSettingsInput,
@@ -2134,6 +2252,55 @@ interface ServerWikiContentSettingsRecord {
   readonly contentSettingsUpdatedBy: bigint | null;
 }
 
+interface ServerWikiNavigationSettingsRecord {
+  readonly id: bigint;
+  readonly spaceId: bigint;
+  readonly slug: string;
+  readonly siteSlug: string | null;
+  readonly navigationOrder: Prisma.JsonValue | null;
+  readonly navigationVersion: number;
+  readonly navigationUpdatedAt: Date | null;
+  readonly navigationUpdatedBy: bigint | null;
+}
+
+function toWikiNavigationSettingsResponse(
+  settings: ServerWikiNavigationSettingsRecord,
+  pages: ReadonlyArray<{
+    readonly id: bigint;
+    readonly title: string;
+    readonly localPath: string;
+    readonly displayTitle: string;
+    readonly status: string;
+  }>,
+) {
+  const siteSlug = settings.siteSlug ?? settings.slug;
+  const tree = resolveServerWikiNavigationTree(settings.slug, pages, settings.navigationOrder);
+  return {
+    serverWikiId: settings.id.toString(),
+    version: settings.navigationVersion,
+    updatedAt: settings.navigationUpdatedAt?.toISOString() ?? null,
+    updatedByProfileId: settings.navigationUpdatedBy?.toString() ?? null,
+    document: {
+      version: 1 as const,
+      nodes: tree.map((node) => node.kind === 'group'
+        ? { id: node.id, kind: 'group' as const, title: node.title, parentId: node.parentId }
+        : { id: node.id, kind: 'page' as const, pageId: node.page.id.toString(), parentId: node.parentId }),
+    },
+    items: tree.map((node) => node.kind === 'group'
+      ? { id: node.id, kind: 'group' as const, title: node.title, parentId: node.parentId, depth: node.depth }
+      : {
+          id: node.id,
+          kind: 'page' as const,
+          pageId: node.page.id.toString(),
+          title: node.page.displayTitle,
+          path: buildCanonicalServerWikiPath(siteSlug, node.page.title, settings.slug, '/serverWiki'),
+          status: node.page.status,
+          parentId: node.parentId,
+          depth: node.depth,
+        }),
+  };
+}
+
 function toWikiContentSettingsResponse(settings: ServerWikiContentSettingsRecord) {
   return {
     serverWikiId: settings.id.toString(),
@@ -2157,6 +2324,15 @@ function throwWikiSettingsConflict(currentVersion: number): never {
     statusCode: 409,
     code: 'SERVER_WIKI_SETTINGS_CONFLICT',
     message: '다른 관리자가 서버 위키 설정을 먼저 변경했습니다.',
+    currentVersion,
+  });
+}
+
+function throwWikiNavigationConflict(currentVersion: number): never {
+  throw new ConflictException({
+    statusCode: 409,
+    code: 'SERVER_WIKI_NAVIGATION_CONFLICT',
+    message: '다른 관리자가 서버 위키 문서 구조를 먼저 변경했습니다.',
     currentVersion,
   });
 }

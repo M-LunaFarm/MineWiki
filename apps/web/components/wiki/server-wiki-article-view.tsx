@@ -35,9 +35,10 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
     timeStyle: 'short',
     timeZone: 'Asia/Seoul',
   }).format(new Date(page.updatedAt));
-  const currentIndex = wiki.navigation.findIndex((item) => item.current);
-  const previous = currentIndex > 0 ? wiki.navigation[currentIndex - 1] : null;
-  const next = currentIndex >= 0 ? wiki.navigation[currentIndex + 1] ?? null : null;
+  const pageNavigation = wiki.navigation.filter((item) => item.kind === 'page' && item.path !== null);
+  const currentIndex = pageNavigation.findIndex((item) => item.current);
+  const previous = currentIndex > 0 ? pageNavigation[currentIndex - 1] : null;
+  const next = currentIndex >= 0 ? pageNavigation[currentIndex + 1] ?? null : null;
   const address = wiki.host ? `${wiki.host}${wiki.port && wiki.port !== 25565 ? `:${wiki.port}` : ''}` : null;
   const isHandbook = wiki.layout === 'handbook';
   const isBrand = wiki.layout === 'brand';
@@ -49,7 +50,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
   const editPath = buildServerWikiToolPath(routePath, 'edit');
   const isWikiHome = currentIndex === 0;
   const startHereDocuments = isWikiHome
-    ? wiki.navigation.filter((item) => !item.current).slice(0, 6)
+    ? pageNavigation.filter((item) => !item.current).slice(0, 6)
     : [];
 
   return (

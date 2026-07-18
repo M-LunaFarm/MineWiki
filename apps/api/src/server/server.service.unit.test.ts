@@ -701,6 +701,75 @@ test('server wiki settings reject a stale expected version', async () => {
   );
 });
 
+test('server wiki navigation persists versioned groups with optimistic concurrency and audit metadata', async () => {
+  const serverId = randomUUID();
+  const actorAccountId = randomUUID();
+  const current = {
+    id: 5n,
+    spaceId: 41n,
+    slug: 'sample-server',
+    siteSlug: 'sample',
+    navigationOrder: null as Prisma.JsonValue | null,
+    navigationVersion: 0,
+    navigationUpdatedAt: null as Date | null,
+    navigationUpdatedBy: null as bigint | null,
+  };
+  const pages = [
+    { id: 10n, title: 'sample-server', localPath: '대문', displayTitle: '샘플 서버', status: 'normal' },
+    { id: 11n, title: 'sample-server/규칙', localPath: '규칙', displayTitle: '규칙', status: 'normal' },
+  ];
+  const audits: Array<Record<string, unknown>> = [];
+  const serverWiki = {
+    async findUnique() { return { ...current }; },
+    async updateMany({ where, data }: { where: { navigationVersion: number }; data: Record<string, unknown> }) {
+      if (where.navigationVersion !== current.navigationVersion) return { count: 0 };
+      current.navigationOrder = data.navigationOrder as Prisma.JsonValue;
+      current.navigationVersion += 1;
+      current.navigationUpdatedAt = data.navigationUpdatedAt as Date;
+      current.navigationUpdatedBy = data.navigationUpdatedBy as bigint;
+      return { count: 1 };
+    },
+    async findUniqueOrThrow() { return { ...current }; },
+  };
+  const prisma = {
+    serverWiki,
+    wikiPage: { async findMany() { return pages; } },
+    async $transaction(callback: (tx: { serverWiki: typeof serverWiki }) => Promise<unknown>) {
+      return callback({ serverWiki });
+    },
+  };
+  const service = new ServerService(
+    {} as never,
+    prisma as never,
+    { async ensureWikiProfile() { return { id: 9n }; } } as never,
+    undefined,
+    { async audit(action: string, input: Record<string, unknown>) { audits.push({ action, ...input }); } } as never,
+  );
+  const document = {
+    version: 1 as const,
+    nodes: [
+      { id: 'page:10', kind: 'page' as const, pageId: '10', parentId: null },
+      { id: 'group:rules', kind: 'group' as const, title: '운영 안내', parentId: 'page:10' },
+      { id: 'page:11', kind: 'page' as const, pageId: '11', parentId: 'group:rules' },
+    ],
+  };
+
+  const result = await service.updateWikiNavigationSettings(serverId, 0, document, actorAccountId);
+
+  assert.equal(result.version, 1);
+  assert.deepEqual(result.items.map((item) => [item.kind, item.title, item.depth]), [
+    ['page', '샘플 서버', 0],
+    ['group', '운영 안내', 1],
+    ['page', '규칙', 2],
+  ]);
+  assert.equal(result.items[2]?.kind === 'page' ? result.items[2].path : null, '/serverWiki/sample/%EA%B7%9C%EC%B9%99');
+  assert.deepEqual(audits[0]?.metadata, { previousVersion: 0, version: 1, pageCount: 2, groupCount: 1 });
+  await assert.rejects(
+    () => service.updateWikiNavigationSettings(serverId, 0, document, actorAccountId),
+    /다른 관리자가 서버 위키 문서 구조를 먼저 변경했습니다/u,
+  );
+});
+
 test('Votifier settings never return the stored v2 token', async () => {
   const service = new ServerService(
     {} as never,

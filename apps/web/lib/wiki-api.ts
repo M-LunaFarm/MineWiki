@@ -74,9 +74,10 @@ export interface WikiPageResponse {
     readonly playersMax: number | null;
     readonly layout: 'docs' | 'handbook' | 'brand';
     readonly navigation: ReadonlyArray<{
+      readonly kind: 'group' | 'page';
       readonly id: string;
       readonly title: string;
-      readonly path: string;
+      readonly path: string | null;
       readonly current: boolean;
       readonly depth: number;
       readonly hasChildren: boolean;
