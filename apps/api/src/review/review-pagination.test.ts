@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BadRequestException } from '@nestjs/common';
-import { serverReviewPageSchema } from '@minewiki/schemas';
+import { serverReviewFeedPageSchema, serverReviewPageSchema } from '@minewiki/schemas';
 import { Prisma } from '@prisma/client';
 import { ReviewService } from './review.service';
 
@@ -114,6 +114,76 @@ test('review pages use a stable rating/date/id cursor and bind it to filters', a
     BadRequestException,
   );
   assert.equal(calls.length, 2, 'a mismatched cursor must fail before querying reviews');
+});
+
+test('staff and personal feeds are bounded snapshots with scope-bound cursors', async () => {
+  const viewerAccountId = '22222222-2222-4222-8222-222222222222';
+  const rows = [
+    review('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 5, '2026-07-15T00:03:00.000Z'),
+    review('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 4, '2026-07-15T00:02:00.000Z'),
+    review('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 3, '2026-07-15T00:01:00.000Z'),
+  ];
+  const reviewQueries: Array<Record<string, unknown>> = [];
+  const prisma = {
+    async $transaction<T>(callback: (transaction: typeof prisma) => Promise<T>) {
+      return callback(prisma);
+    },
+    async $queryRaw() {
+      return [{ id: viewerAccountId }];
+    },
+    account: {
+      async findUnique() {
+        return { id: viewerAccountId, canonicalAccountId: null };
+      },
+      async findMany() {
+        return [{ id: viewerAccountId, canonicalAccountId: null }];
+      },
+    },
+    accountLink: { async findMany() { return []; } },
+    serverReview: {
+      async findMany(args: Record<string, unknown>) {
+        reviewQueries.push(args);
+        return reviewQueries.length === 1 ? rows : [rows[2]];
+      },
+      async groupBy() {
+        return [
+          { rating: 3, _count: { _all: 1 } },
+          { rating: 4, _count: { _all: 1 } },
+          { rating: 5, _count: { _all: 1 } },
+        ];
+      },
+    },
+    reviewHelpfulVote: { async findMany() { return []; } },
+    reviewReport: { async findMany() { return []; } },
+  };
+  const service = new ReviewService(
+    { async ensureExists() {} } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    prisma as never,
+  );
+
+  const first = await service.listStaffPage(serverId, viewerAccountId, { limit: 2 });
+  assert.deepEqual(first.items.map((item) => item.id), rows.slice(0, 2).map((item) => item.id));
+  assert.ok(first.nextCursor);
+  assert.deepEqual(serverReviewFeedPageSchema.parse(first), first);
+  assert.equal((reviewQueries[0]?.where as { authorAccountId?: unknown }).authorAccountId, undefined);
+  assert.equal(reviewQueries[0]?.take, 3);
+
+  const second = await service.listStaffPage(serverId, viewerAccountId, {
+    limit: 2,
+    cursor: first.nextCursor,
+  });
+  assert.equal(second.items[0]?.id, rows[2]?.id);
+  assert.equal(second.nextCursor, null);
+
+  await assert.rejects(
+    service.listMinePage(serverId, viewerAccountId, { cursor: first.nextCursor }),
+    BadRequestException,
+  );
+  assert.equal(reviewQueries.length, 2, 'a cursor from another feed must fail before reading reviews');
 });
 
 test('review aggregate covers every snapshot-visible public review regardless of page filters', async () => {

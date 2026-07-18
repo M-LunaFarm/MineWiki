@@ -104,11 +104,12 @@ test('review reply accepts only a strict bounded body after owner authorization'
 
 test('authenticated authors can load their own review receipts', async () => {
   const calls: unknown[] = [];
+  const page = { items: [], nextCursor: null };
   const controller = new ReviewController(
     {
-      async listMine(...args: unknown[]) {
+      async listMinePage(...args: unknown[]) {
         calls.push(args);
-        return [];
+        return page;
       },
     } as never,
     {} as never,
@@ -121,6 +122,50 @@ test('authenticated authors can load their own review receipts', async () => {
     authenticatedAt: new Date().toISOString(),
   };
 
-  assert.deepEqual(await controller.listMine(serverId, session), []);
-  assert.deepEqual(calls, [[serverId, accountId]]);
+  assert.deepEqual(
+    await controller.listMinePage(serverId, session, 'cursor-1', 20, undefined, undefined, 'newest', 'staff'),
+    page,
+  );
+  assert.deepEqual(calls, [[serverId, accountId, {
+    cursor: 'cursor-1',
+    limit: 20,
+    rating: undefined,
+    tag: undefined,
+    sort: 'newest',
+    visibility: 'staff',
+  }]]);
+});
+
+test('staff review feed authorizes ownership before returning a bounded page', async () => {
+  const calls: unknown[] = [];
+  const page = { items: [], nextCursor: null };
+  const controller = new ReviewController(
+    {
+      async listStaffPage(...args: unknown[]) {
+        calls.push(args);
+        return page;
+      },
+    } as never,
+    {} as never,
+    { isOwner: async () => true } as never,
+  );
+  const session = {
+    sessionId: '44444444-4444-4444-8444-444444444444',
+    userId: accountId,
+    isElevated: false,
+    authenticatedAt: new Date().toISOString(),
+  };
+
+  assert.deepEqual(
+    await controller.listStaffPage(serverId, session, undefined, 25, undefined, undefined, 'newest', 'all'),
+    page,
+  );
+  assert.deepEqual(calls, [[serverId, accountId, {
+    cursor: undefined,
+    limit: 25,
+    rating: undefined,
+    tag: undefined,
+    sort: 'newest',
+    visibility: 'all',
+  }]]);
 });

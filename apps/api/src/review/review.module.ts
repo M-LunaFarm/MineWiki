@@ -10,10 +10,11 @@ import { AuthModule } from '../auth/auth.module';
 import { ClaimModule } from '../claim/claim.module';
 import { ReviewModerationController } from './review-moderation.controller';
 import { ReviewModerationService } from './review-moderation.service';
+import { ReviewFeedCursorCodec } from './review-feed-cursor';
 
 @Module({
   imports: [ServerModule, EventsModule, VoteModule, MinecraftModule, SessionModule, AuthModule, ClaimModule],
-  providers: [ReviewService, ReviewModerationService],
+  providers: [ReviewService, ReviewModerationService, ReviewFeedCursorCodec],
   controllers: [ReviewController, ReviewModerationController]
 })
 export class ReviewModule {}

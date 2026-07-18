@@ -18,6 +18,8 @@ import { Throttle } from '@nestjs/throttler';
 import type { ServerReview } from '@minewiki/schemas';
 import {
   ReviewService,
+  type ReviewFeedPageOptions,
+  type ReviewFeedPageResponse,
   type ReviewListOptions,
   type ReviewPageResponse,
   type ReviewSort,
@@ -120,7 +122,7 @@ export class ReviewController {
     if (!(await this.claims.isOwner(serverId, session.userId))) {
       throw new ForbiddenException('서버 리뷰를 조회할 권한이 없습니다.');
     }
-    return this.reviewService.listAll(serverId, session.userId);
+    return (await this.reviewService.listStaffPage(serverId, session.userId, { limit: 50 })).items;
   }
 
   @UseGuards(SessionGuard)
@@ -129,7 +131,50 @@ export class ReviewController {
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @CurrentSession() session: SessionPayload
   ): Promise<ServerReview[]> {
-    return this.reviewService.listMine(serverId, session.userId);
+    return (await this.reviewService.listMinePage(serverId, session.userId, { limit: 50 })).items;
+  }
+
+  @UseGuards(SessionGuard)
+  @Get('staff/page')
+  async listStaffPage(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @CurrentSession() session: SessionPayload,
+    @Query('cursor') cursor?: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('rating', new ParseIntPipe({ optional: true })) rating?: number,
+    @Query('tag') tag?: string | string[],
+    @Query('sort') sort?: string,
+    @Query('visibility') visibility?: string
+  ): Promise<ReviewFeedPageResponse> {
+    assertReviewFeedCursorLength(cursor);
+    if (!(await this.claims.isOwner(serverId, session.userId))) {
+      throw new ForbiddenException('서버 리뷰를 조회할 권한이 없습니다.');
+    }
+    return this.reviewService.listStaffPage(
+      serverId,
+      session.userId,
+      normalizeReviewFeedOptions({ cursor, limit, rating, tag, sort, visibility }),
+    );
+  }
+
+  @UseGuards(SessionGuard)
+  @Get('mine/page')
+  async listMinePage(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @CurrentSession() session: SessionPayload,
+    @Query('cursor') cursor?: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('rating', new ParseIntPipe({ optional: true })) rating?: number,
+    @Query('tag') tag?: string | string[],
+    @Query('sort') sort?: string,
+    @Query('visibility') visibility?: string
+  ): Promise<ReviewFeedPageResponse> {
+    assertReviewFeedCursorLength(cursor);
+    return this.reviewService.listMinePage(
+      serverId,
+      session.userId,
+      normalizeReviewFeedOptions({ cursor, limit, rating, tag, sort, visibility }),
+    );
   }
 
   @UseGuards(SessionGuard)
@@ -238,4 +283,46 @@ function extractSessionToken(request: FastifyRequest): string | undefined {
     }
   }
   return undefined;
+}
+
+function assertReviewFeedCursorLength(cursor?: string): void {
+  if (cursor && cursor.length > 2048) {
+    throw new BadRequestException('리뷰 피드 커서가 너무 깁니다.');
+  }
+}
+
+function normalizeReviewFeedOptions(input: {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly rating?: number;
+  readonly tag?: string | string[];
+  readonly sort?: string;
+  readonly visibility?: string;
+}): ReviewFeedPageOptions {
+  const normalizedTag = Array.isArray(input.tag) ? input.tag.at(0) : input.tag;
+  if (input.limit !== undefined && (input.limit < 1 || input.limit > 50)) {
+    throw new BadRequestException('리뷰 피드 limit은 1에서 50 사이여야 합니다.');
+  }
+  if (input.rating !== undefined && (input.rating < 1 || input.rating > 5)) {
+    throw new BadRequestException('리뷰 평점 필터는 1에서 5 사이여야 합니다.');
+  }
+  if (normalizedTag && !isReviewTag(normalizedTag)) {
+    throw new BadRequestException('지원하지 않는 리뷰 태그입니다.');
+  }
+  if (input.sort && !REVIEW_SORTS.includes(input.sort as ReviewSort)) {
+    throw new BadRequestException('지원하지 않는 리뷰 정렬입니다.');
+  }
+  if (input.visibility && !['all', 'public', 'staff'].includes(input.visibility)) {
+    throw new BadRequestException('지원하지 않는 리뷰 공개 범위입니다.');
+  }
+  return {
+    cursor: input.cursor,
+    limit: input.limit,
+    rating: input.rating,
+    tag: isReviewTag(normalizedTag) ? normalizedTag : undefined,
+    sort: normalizeReviewSort(input.sort),
+    visibility: input.visibility === 'public' || input.visibility === 'staff'
+      ? input.visibility
+      : 'all' as const,
+  };
 }

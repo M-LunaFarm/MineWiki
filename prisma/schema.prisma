@@ -748,6 +748,12 @@ model ServerReview {
 
   @@index([serverId, createdAt])
   @@index([serverId, visibility])
+  @@index([serverId, createdAt, id], map: "idx_review_staff_newest")
+  @@index([serverId, rating, createdAt, id], map: "idx_review_staff_rating")
+  @@index([serverId, visibility, createdAt, id], map: "idx_review_visibility_newest")
+  @@index([serverId, visibility, rating, createdAt, id], map: "idx_review_visibility_rating")
+  @@index([serverId, authorAccountId, visibility, createdAt, id], map: "idx_review_author_visibility_newest")
+  @@index([serverId, authorAccountId, visibility, rating, createdAt, id], map: "idx_review_author_visibility_rating")
   @@index([evidenceMinecraftUuid])
 }
 

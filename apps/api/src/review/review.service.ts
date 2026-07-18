@@ -1,4 +1,4 @@
-﻿import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+﻿import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
   createReviewSchema,
@@ -7,6 +7,7 @@ import {
   type ReviewGateStatus,
   type ServerReview,
   type ServerReviewAggregate,
+  type ServerReviewFeedPage,
   type ServerReviewPage
 } from '@minewiki/schemas';
 import { Prisma } from '@prisma/client';
@@ -19,6 +20,12 @@ import { MinecraftService } from '../minecraft/minecraft.service';
 import { AccountSeparationService } from '../auth/account-separation.service';
 import { withCanonicalAccountGroups } from '../auth/account-lifecycle-fence';
 import type { SessionPayload } from '../session/session.service';
+import {
+  ReviewFeedCursorCodec,
+  type ReviewFeedCursorBinding,
+  type ReviewFeedScope,
+  type ReviewVisibilityFilter,
+} from './review-feed-cursor';
 
 const REVIEW_COOLDOWN_MS = 1000 * 60 * 60 * 24; // 24시간
 const RECENT_VOTE_WINDOW_MS = 1000 * 60 * 60 * 24; // 24시간 내 투표 필요
@@ -42,6 +49,11 @@ export interface ReviewPageOptions extends ReviewListOptions {
 }
 
 export type ReviewPageResponse = ServerReviewPage;
+export type ReviewFeedPageResponse = ServerReviewFeedPage;
+
+export interface ReviewFeedPageOptions extends ReviewPageOptions {
+  readonly visibility?: ReviewVisibilityFilter;
+}
 
 const REVIEW_TAG_SET = new Set(reviewTagSchema.options);
 const REVIEW_VISIBILITY_SET = new Set(reviewVisibilitySchema.options);
@@ -52,7 +64,7 @@ const updateReviewSchema = z.object({
 });
 const reviewReportReasonSchema = z.string().trim().min(3).max(500);
 const adminReplyBodySchema = z.string().trim().max(300);
-const reviewCursorSchema = z.object({
+const legacyReviewCursorSchema = z.object({
   version: z.literal(1),
   sort: z.enum(['wilson', 'newest']),
   ratingFilter: z.number().int().min(1).max(5).nullable(),
@@ -60,11 +72,8 @@ const reviewCursorSchema = z.object({
   snapshotAt: z.string().datetime(),
   createdAt: z.string().datetime(),
   id: z.string().uuid(),
-  rating: z.number().int().min(1).max(5)
+  rating: z.number().int().min(1).max(5),
 }).strict();
-
-type ReviewCursor = z.infer<typeof reviewCursorSchema>;
-
 export function isReviewTag(
   value?: string | null
 ): value is ServerReview['tags'][number] {
@@ -112,7 +121,8 @@ export class ReviewService {
     private readonly voteStore: VoteStore,
     private readonly minecraft: MinecraftService,
     private readonly accounts: AccountSeparationService,
-    private readonly prisma: PrismaService
+    private readonly prisma: PrismaService,
+    @Optional() private readonly feedCursors: ReviewFeedCursorCodec = new ReviewFeedCursorCodec()
   ) {}
 
   async list(
@@ -139,8 +149,17 @@ export class ReviewService {
       : null;
     const tagFilter = options.tag ?? null;
     const sort: ReviewSort = options.sort ?? 'wilson';
+    const cursorBinding: ReviewFeedCursorBinding = {
+      scope: 'public',
+      serverId,
+      subject: 'public',
+      visibility: 'public',
+      sort,
+      ratingFilter,
+      tagFilter,
+    };
     const cursor = options.cursor
-      ? this.decodeReviewCursor(options.cursor, { sort, ratingFilter, tagFilter })
+      ? this.decodePublicReviewCursor(options.cursor, cursorBinding)
       : null;
     const snapshotAt = cursor ? new Date(cursor.snapshotAt) : new Date();
     const position = cursor
@@ -206,11 +225,7 @@ export class ReviewService {
         ),
       ),
       nextCursor: hasMore && last
-        ? this.encodeReviewCursor({
-            version: 1,
-            sort,
-            ratingFilter,
-            tagFilter,
+        ? this.feedCursors.encode(cursorBinding, {
             snapshotAt: snapshotAt.toISOString(),
             createdAt: last.createdAt.toISOString(),
             id: last.id,
@@ -221,75 +236,147 @@ export class ReviewService {
     };
   }
 
-  async listAll(serverId: string, viewerAccountId?: string): Promise<ServerReview[]> {
+  async listStaffPage(
+    serverId: string,
+    viewerAccountId: string,
+    options: ReviewFeedPageOptions = {}
+  ): Promise<ReviewFeedPageResponse> {
+    return this.listScopedFeedPage(serverId, viewerAccountId, 'staff', options);
+  }
+
+  async listMinePage(
+    serverId: string,
+    viewerAccountId: string,
+    options: ReviewFeedPageOptions = {}
+  ): Promise<ReviewFeedPageResponse> {
+    return this.listScopedFeedPage(serverId, viewerAccountId, 'mine', options);
+  }
+
+  private async listScopedFeedPage(
+    serverId: string,
+    viewerAccountId: string,
+    scope: Exclude<ReviewFeedScope, 'public'>,
+    options: ReviewFeedPageOptions
+  ): Promise<ReviewFeedPageResponse> {
     await this.serverService.ensureExists(serverId);
-    const reviews = await this.prisma.serverReview.findMany({
-      where: { serverId },
-      orderBy: { createdAt: 'desc' }
-    });
+    const limit = Math.min(Math.max(options.limit ?? 12, 1), 50);
+    const ratingFilter = options.rating && options.rating >= 1 && options.rating <= 5
+      ? options.rating
+      : null;
+    const tagFilter = options.tag ?? null;
+    const sort: ReviewSort = options.sort ?? 'newest';
+    const visibility = options.visibility ?? 'all';
+    const viewerGroup = await this.resolveAccountGroup(viewerAccountId);
+    if (!viewerGroup) return { items: [], nextCursor: null };
+    const cursorBinding: ReviewFeedCursorBinding = {
+      scope,
+      serverId,
+      subject: viewerGroup.canonicalAccountId,
+      visibility,
+      sort,
+      ratingFilter,
+      tagFilter,
+    };
+    const cursor = options.cursor ? this.feedCursors.decode(options.cursor, cursorBinding) : null;
+    const snapshotAt = cursor ? new Date(cursor.snapshotAt) : new Date();
+    const positionFilter: Prisma.ServerReviewWhereInput | undefined = cursor
+      ? sort === 'newest'
+        ? {
+          OR: [
+            { createdAt: { lt: new Date(cursor.createdAt) } },
+            { createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } }
+          ]
+        }
+        : {
+            OR: [
+              { rating: { lt: cursor.rating } },
+              { rating: cursor.rating, createdAt: { lt: new Date(cursor.createdAt) } },
+              { rating: cursor.rating, createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } }
+            ]
+          }
+      : undefined;
+    const scopeWhere = {
+        serverId,
+        createdAt: { lte: snapshotAt },
+        updatedAt: { lte: snapshotAt },
+        visibility: visibility === 'all' ? undefined : visibility,
+        authorAccountId: scope === 'mine' ? { in: [...viewerGroup.accountIds] } : undefined,
+    } satisfies Prisma.ServerReviewWhereInput;
+    const [rows, aggregateRows] = await this.prisma.$transaction(async (transaction) => {
+      const pageRows = await transaction.serverReview.findMany({
+        where: {
+          ...scopeWhere,
+          rating: ratingFilter ?? undefined,
+          tags: tagFilter ? { array_contains: [tagFilter] } : undefined,
+          AND: positionFilter,
+        },
+        orderBy: sort === 'newest'
+          ? [{ createdAt: 'desc' }, { id: 'desc' }]
+          : [{ rating: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+      });
+      const ratingGroups = await transaction.serverReview.groupBy({
+        by: ['rating'],
+        where: scopeWhere,
+        _count: { _all: true },
+      });
+      return [pageRows, ratingGroups] as const;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    const hasMore = rows.length > limit;
+    const reviews = rows.slice(0, limit);
+    const last = reviews.at(-1);
     const viewer = await this.resolveViewerReviewContext(
       viewerAccountId,
       reviews.map((review) => review.id),
+      viewerGroup.accountIds,
     );
-    return reviews.map((review) =>
-      toReviewResponse(
-        review,
-        viewer.accountIds,
-        viewer.helpfulReviewIds.has(review.id),
-        viewer.reportStatusByReviewId.get(review.id) ?? 'none',
-        true,
+    return {
+      items: reviews.map((review) =>
+        toReviewResponse(
+          review,
+          viewer.accountIds,
+          viewer.helpfulReviewIds.has(review.id),
+          viewer.reportStatusByReviewId.get(review.id) ?? 'none',
+          scope === 'staff',
+        ),
       ),
-    );
+      nextCursor: hasMore && last
+        ? this.feedCursors.encode(cursorBinding, {
+            snapshotAt: snapshotAt.toISOString(),
+            createdAt: last.createdAt.toISOString(),
+            id: last.id,
+            rating: last.rating,
+          })
+        : null,
+      aggregate: toReviewAggregate(aggregateRows),
+    };
   }
 
-  async listMine(serverId: string, viewerAccountId: string): Promise<ServerReview[]> {
-    await this.serverService.ensureExists(serverId);
-    const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
-    if (viewerAccountIds.length === 0) {
-      return [];
-    }
-    const reviews = await this.prisma.serverReview.findMany({
-      where: { serverId, authorAccountId: { in: [...viewerAccountIds] } },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: 50,
-    });
-    const viewer = await this.resolveViewerReviewContext(
-      viewerAccountId,
-      reviews.map((review) => review.id),
-      viewerAccountIds,
-    );
-    return reviews.map((review) =>
-      toReviewResponse(
-        review,
-        viewer.accountIds,
-        viewer.helpfulReviewIds.has(review.id),
-        viewer.reportStatusByReviewId.get(review.id) ?? 'none',
-      ),
-    );
-  }
-
-  private encodeReviewCursor(cursor: ReviewCursor): string {
-    return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
-  }
-
-  private decodeReviewCursor(
-    encoded: string,
-    filters: Pick<ReviewCursor, 'sort' | 'ratingFilter' | 'tagFilter'>
-  ): ReviewCursor {
-    let cursor: ReviewCursor;
+  private decodePublicReviewCursor(
+    value: string,
+    binding: ReviewFeedCursorBinding,
+  ) {
+    if (value.includes('.')) return this.feedCursors.decode(value, binding);
     try {
-      cursor = reviewCursorSchema.parse(JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')));
+      const legacy = legacyReviewCursorSchema.parse(
+        JSON.parse(Buffer.from(value, 'base64url').toString('utf8')),
+      );
+      if (
+        legacy.sort !== binding.sort
+        || legacy.ratingFilter !== binding.ratingFilter
+        || legacy.tagFilter !== binding.tagFilter
+      ) {
+        throw new Error('binding');
+      }
+      return {
+        snapshotAt: legacy.snapshotAt,
+        createdAt: legacy.createdAt,
+        id: legacy.id,
+        rating: legacy.rating,
+      };
     } catch {
       throw new BadRequestException('유효하지 않은 리뷰 페이지 커서입니다.');
     }
-    if (
-      cursor.sort !== filters.sort ||
-      cursor.ratingFilter !== filters.ratingFilter ||
-      cursor.tagFilter !== filters.tagFilter
-    ) {
-      throw new BadRequestException('리뷰 필터가 변경되어 페이지를 이어갈 수 없습니다.');
-    }
-    return cursor;
   }
 
   async create(
@@ -766,6 +853,18 @@ export class ReviewService {
     return withCanonicalAccountGroups(this.prisma, [accountId], async (_transaction, groups) =>
       groups[0]?.accountIds ?? []
     );
+  }
+
+  private async resolveAccountGroup(accountId: string): Promise<{
+    readonly canonicalAccountId: string;
+    readonly accountIds: readonly string[];
+  } | null> {
+    return withCanonicalAccountGroups(this.prisma, [accountId], async (_transaction, groups) => {
+      const group = groups[0];
+      return group
+        ? { canonicalAccountId: group.canonicalAccountId, accountIds: group.accountIds }
+        : null;
+    });
   }
 
   private async resolveViewerReviewContext(

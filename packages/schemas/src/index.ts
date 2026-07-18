@@ -516,6 +516,12 @@ export const serverReviewPageSchema = z.object({
   aggregate: serverReviewAggregateSchema,
 });
 
+export const serverReviewFeedPageSchema = z.object({
+  items: z.array(serverReviewSchema),
+  nextCursor: z.string().min(1).max(2048).nullable(),
+  aggregate: serverReviewAggregateSchema,
+});
+
 export const createReviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
   body: z.string().min(1).max(80),
@@ -754,6 +760,7 @@ export type ServerUpdate = z.infer<typeof serverUpdateSchema>;
 export type ServerReview = z.infer<typeof serverReviewSchema>;
 export type ServerReviewAggregate = z.infer<typeof serverReviewAggregateSchema>;
 export type ServerReviewPage = z.infer<typeof serverReviewPageSchema>;
+export type ServerReviewFeedPage = z.infer<typeof serverReviewFeedPageSchema>;
 export type CreateReviewPayload = z.infer<typeof createReviewSchema>;
 export type ReviewVisibility = z.infer<typeof reviewVisibilitySchema>;
 export type ReviewAdminReply = z.infer<typeof reviewAdminReplySchema>;
