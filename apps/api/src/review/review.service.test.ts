@@ -189,7 +189,7 @@ if (!hasDatabase) {
     assert.equal(review.trustLabels.includes('vote_ack'), true);
     assert.equal(review.isAnonymous, false);
     assert.equal(review.visibility, 'public');
-    assert.equal(review.reports, 0);
+    assert.equal(review.reportCount, undefined);
     assert.equal(review.adminReply, null);
     const countedServer = await prisma.server.findUniqueOrThrow({ where: { id: server.id } });
     assert.equal(countedServer.reviewsCount, 1);
@@ -243,6 +243,67 @@ if (!hasDatabase) {
     const stored = await prisma.serverReview.findUniqueOrThrow({ where: { id: review.id } });
     assert.equal(stored.reports, 0);
     assert.equal(stored.helpfulCount, 0);
+  });
+
+  test('preserves finalized report cases and creates a new case only after review edits', async () => {
+    const { review, server, author } = await createEligibleReview();
+    const reporter = await createAccount('Reporter');
+
+    const firstReceipt = await reviewService.report(
+      server.id,
+      review.id,
+      reporter.id,
+      '운영 정책을 확인해 주세요.',
+    );
+    assert.equal(firstReceipt.viewerReportStatus, 'open');
+    assert.equal(firstReceipt.reportCount, undefined);
+
+    const firstCase = await prisma.reviewReport.findFirstOrThrow({
+      where: { reviewId: review.id, accountId: reporter.id },
+    });
+    const finalizedAt = new Date();
+    await prisma.reviewReport.update({
+      where: { id: firstCase.id },
+      data: {
+        status: 'resolved',
+        statusUpdatedAt: finalizedAt,
+        resolvedAt: finalizedAt,
+        resolution: '검토 완료',
+      },
+    });
+
+    const duplicateFinalReceipt = await reviewService.report(
+      server.id,
+      review.id,
+      reporter.id,
+      '같은 내용 재신고',
+    );
+    assert.equal(duplicateFinalReceipt.viewerReportStatus, 'resolved');
+    assert.equal(await prisma.reviewReport.count({ where: { reviewId: review.id } }), 1);
+
+    await reviewService.update(
+      server.id,
+      review.id,
+      { rating: 4, body: '신고 처리 뒤 수정한 리뷰', tags: ['community'] },
+      createSession(author.id),
+    );
+    const editedReceipt = (await reviewService.list(server.id, {}, reporter.id))
+      .find((item) => item.id === review.id);
+    assert.equal(editedReceipt?.viewerReportStatus, 'none');
+
+    const secondReceipt = await reviewService.report(
+      server.id,
+      review.id,
+      reporter.id,
+      '수정된 내용에 대한 새 신고',
+    );
+    assert.equal(secondReceipt.viewerReportStatus, 'open');
+    assert.equal(await prisma.reviewReport.count({ where: { reviewId: review.id } }), 2);
+    const storedReview = await prisma.serverReview.findUniqueOrThrow({ where: { id: review.id } });
+    assert.equal(storedReview.reports, 2);
+
+    await reviewService.report(server.id, review.id, reporter.id, '열린 사건 중복 신고');
+    assert.equal(await prisma.reviewReport.count({ where: { reviewId: review.id } }), 2);
   });
 
   test('removing a review decrements only the public review counter', async () => {

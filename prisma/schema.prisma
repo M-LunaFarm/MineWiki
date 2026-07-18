@@ -795,7 +795,7 @@ model ReviewReport {
   reporter Account      @relation("ReviewReportReporter", fields: [accountId], references: [id], onDelete: Cascade)
   assignee Account?     @relation("ReviewReportAssignee", fields: [assigneeAccountId], references: [id], onDelete: SetNull)
 
-  @@unique([reviewId, accountId])
+  @@index([reviewId, accountId, status])
   @@index([accountId])
   @@index([status, createdAt])
   @@index([assigneeAccountId, status])

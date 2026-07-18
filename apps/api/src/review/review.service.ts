@@ -23,7 +23,6 @@ import type { SessionPayload } from '../session/session.service';
 const REVIEW_COOLDOWN_MS = 1000 * 60 * 60 * 24; // 24시간
 const RECENT_VOTE_WINDOW_MS = 1000 * 60 * 60 * 24; // 24시간 내 투표 필요
 const OWNERSHIP_VERIFICATION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 180; // 180일
-const WILSON_Z = 1.96;
 const HELPFUL_COOLDOWN_MS = 1000 * 60 * 5; // 5분
 const ADMIN_REPLY_AUTHOR_FALLBACK = '운영진';
 // Keep matching the legacy mojibake value without reintroducing unreadable source text.
@@ -75,17 +74,6 @@ export function isReviewTag(
   return REVIEW_TAG_SET.has(value as ServerReview['tags'][number]);
 }
 
-function calculateWilsonScore(rating: number): number {
-  const positive = Math.max(0, Math.min(5, rating));
-  const total = 5;
-  const p = positive / total;
-  const z = WILSON_Z;
-  const denominator = 1 + (z * z) / total;
-  const centreAdjustment = (z * z) / (2 * total);
-  const adjustedStandardDeviation = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * total)) / total);
-  return Math.max(0, (p + centreAdjustment - adjustedStandardDeviation) / denominator);
-}
-
 function toReviewAggregate(
   rows: Array<{ rating: number; _count: { _all: number } }>
 ): ServerReviewAggregate {
@@ -132,49 +120,11 @@ export class ReviewService {
     options: ReviewListOptions = {},
     viewerAccountId?: string
   ): Promise<ServerReview[]> {
-    await this.serverService.ensureExists(serverId);
-
-    const ratingFilter = options.rating && options.rating >= 1 && options.rating <= 5
-      ? options.rating
-      : undefined;
-    const tagFilter = options.tag;
-    const sortMode: ReviewSort = options.sort ?? 'wilson';
-
-    const reviews = await this.prisma.serverReview.findMany({
-      where: {
-        serverId,
-        visibility: 'public',
-        rating: ratingFilter
-      },
-      orderBy: {
-        createdAt: 'desc'
-      }
-    });
-
-    const filtered = tagFilter
-      ? reviews.filter((review) => normalizeReviewTags(review.tags).includes(tagFilter))
-      : reviews;
-    const viewer = await this.resolveViewerReviewContext(
-      viewerAccountId,
-      filtered.map((review) => review.id),
-    );
-    const mapped = filtered.map((review) =>
-      toReviewResponse(review, viewer.accountIds, viewer.helpfulReviewIds.has(review.id)),
-    );
-    const sorted = sortMode === 'wilson'
-      ? [...mapped].sort((a, b) => {
-          const diff = calculateWilsonScore(b.rating) - calculateWilsonScore(a.rating);
-          if (Math.abs(diff) > Number.EPSILON) {
-            return diff > 0 ? 1 : -1;
-          }
-          return Date.parse(b.createdAt) - Date.parse(a.createdAt);
-        })
-      : mapped;
-
-    if (options.limit && options.limit > 0) {
-      return sorted.slice(0, options.limit);
-    }
-    return sorted;
+    const page = await this.listPage(serverId, {
+      ...options,
+      limit: Math.min(Math.max(options.limit ?? 12, 1), 50),
+    }, viewerAccountId);
+    return page.items;
   }
 
   async listPage(
@@ -248,7 +198,12 @@ export class ReviewService {
     );
     return {
       items: pageRows.map((review) =>
-        toReviewResponse(review, viewer.accountIds, viewer.helpfulReviewIds.has(review.id)),
+        toReviewResponse(
+          review,
+          viewer.accountIds,
+          viewer.helpfulReviewIds.has(review.id),
+          viewer.reportStatusByReviewId.get(review.id) ?? 'none',
+        ),
       ),
       nextCursor: hasMore && last
         ? this.encodeReviewCursor({
@@ -277,7 +232,13 @@ export class ReviewService {
       reviews.map((review) => review.id),
     );
     return reviews.map((review) =>
-      toReviewResponse(review, viewer.accountIds, viewer.helpfulReviewIds.has(review.id)),
+      toReviewResponse(
+        review,
+        viewer.accountIds,
+        viewer.helpfulReviewIds.has(review.id),
+        viewer.reportStatusByReviewId.get(review.id) ?? 'none',
+        true,
+      ),
     );
   }
 
@@ -298,7 +259,12 @@ export class ReviewService {
       viewerAccountIds,
     );
     return reviews.map((review) =>
-      toReviewResponse(review, viewer.accountIds, viewer.helpfulReviewIds.has(review.id)),
+      toReviewResponse(
+        review,
+        viewer.accountIds,
+        viewer.helpfulReviewIds.has(review.id),
+        viewer.reportStatusByReviewId.get(review.id) ?? 'none',
+      ),
     );
   }
 
@@ -474,19 +440,45 @@ export class ReviewService {
     const outcome = await withCanonicalAccountGroups(this.prisma, [reporterAccountId], async (transaction, groups) => {
       const group = groups[0];
       if (!group) throw new ForbiddenException('계정 정보를 찾을 수 없습니다.');
-      const review = await transaction.serverReview.findFirst({
-        where: { id: reviewId, serverId, visibility: 'public' },
-      });
+      const [review] = await transaction.$queryRaw<Array<{
+        id: string;
+        authorAccountId: string;
+        updatedAt: Date;
+      }>>(Prisma.sql`
+        SELECT id, authorAccountId, updatedAt
+        FROM ServerReview
+        WHERE id = ${reviewId}
+          AND serverId = ${serverId}
+          AND visibility = 'public'
+        FOR UPDATE
+      `);
       if (!review) {
         throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
       }
       if (group.accountIds.includes(review.authorAccountId)) {
         throw new ForbiddenException('본인이 작성한 리뷰는 신고할 수 없습니다.');
       }
-      const duplicate = await transaction.reviewReport.findFirst({
-        where: { reviewId, accountId: { in: [...group.accountIds] } }
+      const activeReport = await transaction.reviewReport.findFirst({
+        where: {
+          reviewId,
+          accountId: { in: [...group.accountIds] },
+          status: { in: ['open', 'in_review'] },
+        },
+        orderBy: [{ statusUpdatedAt: 'desc' }, { id: 'desc' }],
       });
-      if (!duplicate) {
+      const latestFinalizedReport = activeReport
+        ? null
+        : await transaction.reviewReport.findFirst({
+            where: {
+              reviewId,
+              accountId: { in: [...group.accountIds] },
+              status: { in: ['resolved', 'dismissed'] },
+            },
+            orderBy: [{ statusUpdatedAt: 'desc' }, { id: 'desc' }],
+          });
+      const mayCreateCase = !activeReport
+        && (!latestFinalizedReport || review.updatedAt > latestFinalizedReport.statusUpdatedAt);
+      if (mayCreateCase) {
         await transaction.reviewReport.create({
           data: {
             reviewId,
@@ -502,7 +494,13 @@ export class ReviewService {
         });
       }
       const updated = await transaction.serverReview.findUnique({ where: { id: reviewId } });
-      return { created: !duplicate, updated, actorAccountId: group.canonicalAccountId, accountIds: group.accountIds };
+      return {
+        created: mayCreateCase,
+        createdAfterFinalizedCase: mayCreateCase && Boolean(latestFinalizedReport),
+        updated,
+        actorAccountId: group.canonicalAccountId,
+        accountIds: group.accountIds,
+      };
     });
 
     const updated = outcome.updated;
@@ -516,7 +514,11 @@ export class ReviewService {
         actorAccountId: outcome.actorAccountId,
         subjectType: 'review_report',
         subjectId: reviewId,
-        metadata: { serverId, reviewId },
+        metadata: {
+          serverId,
+          reviewId,
+          createdAfterFinalizedCase: outcome.createdAfterFinalizedCase,
+        },
       });
     }
     const viewer = await this.resolveViewerReviewContext(
@@ -524,7 +526,12 @@ export class ReviewService {
       [reviewId],
       outcome.accountIds,
     );
-    return toReviewResponse(updated, viewer.accountIds, viewer.helpfulReviewIds.has(reviewId));
+    return toReviewResponse(
+      updated,
+      viewer.accountIds,
+      viewer.helpfulReviewIds.has(reviewId),
+      viewer.reportStatusByReviewId.get(reviewId) ?? 'none',
+    );
   }
 
   async setAdminReply(
@@ -620,7 +627,17 @@ export class ReviewService {
       return { updated, accountIds: group.accountIds };
     });
 
-    return toReviewResponse(outcome.updated, outcome.accountIds, isHelpful);
+    const viewer = await this.resolveViewerReviewContext(
+      voterAccountId,
+      [reviewId],
+      outcome.accountIds,
+    );
+    return toReviewResponse(
+      outcome.updated,
+      outcome.accountIds,
+      isHelpful,
+      viewer.reportStatusByReviewId.get(reviewId) ?? 'none',
+    );
   }
 
   async getGateStatus(serverId: string, session?: SessionPayload): Promise<ReviewGateStatus> {
@@ -755,22 +772,57 @@ export class ReviewService {
     accountId: string | undefined,
     reviewIds: readonly string[],
     resolvedAccountIds?: readonly string[],
-  ): Promise<{ readonly accountIds: readonly string[]; readonly helpfulReviewIds: ReadonlySet<string> }> {
+  ): Promise<{
+    readonly accountIds: readonly string[];
+    readonly helpfulReviewIds: ReadonlySet<string>;
+    readonly reportStatusByReviewId: ReadonlyMap<string, ServerReview['viewerReportStatus']>;
+  }> {
     const accountIds = resolvedAccountIds ?? await this.resolveAccountGroupIds(accountId);
     if (accountIds.length === 0 || reviewIds.length === 0) {
-      return { accountIds, helpfulReviewIds: new Set<string>() };
+      return {
+        accountIds,
+        helpfulReviewIds: new Set<string>(),
+        reportStatusByReviewId: new Map(),
+      };
     }
-    const helpfulVotes = await this.prisma.reviewHelpfulVote.findMany({
-      where: {
-        reviewId: { in: [...new Set(reviewIds)] },
-        accountId: { in: [...accountIds] },
-        isHelpful: true,
-      },
-      select: { reviewId: true },
-    });
+    const uniqueReviewIds = [...new Set(reviewIds)];
+    const [helpfulVotes, reports] = await Promise.all([
+      this.prisma.reviewHelpfulVote.findMany({
+        where: {
+          reviewId: { in: uniqueReviewIds },
+          accountId: { in: [...accountIds] },
+          isHelpful: true,
+        },
+        select: { reviewId: true },
+      }),
+      this.prisma.reviewReport.findMany({
+        where: {
+          reviewId: { in: uniqueReviewIds },
+          accountId: { in: [...accountIds] },
+        },
+        select: {
+          reviewId: true,
+          status: true,
+          statusUpdatedAt: true,
+          review: { select: { updatedAt: true } },
+        },
+        orderBy: [{ statusUpdatedAt: 'desc' }, { id: 'desc' }],
+      }),
+    ]);
+    const reportStatusByReviewId = new Map<string, ServerReview['viewerReportStatus']>();
+    for (const report of reports) {
+      if (reportStatusByReviewId.has(report.reviewId)) continue;
+      const wasEditedAfterFinalization = ['resolved', 'dismissed'].includes(report.status)
+        && report.review.updatedAt > report.statusUpdatedAt;
+      reportStatusByReviewId.set(
+        report.reviewId,
+        wasEditedAfterFinalization ? 'none' : report.status,
+      );
+    }
     return {
       accountIds,
       helpfulReviewIds: new Set(helpfulVotes.map((vote) => vote.reviewId)),
+      reportStatusByReviewId,
     };
   }
 }
@@ -830,7 +882,9 @@ function toReviewResponse(review: {
   evidenceVoteId?: string | null;
   evidenceVerifiedAt?: Date | null;
   evidencePolicyVersion?: string | null;
-}, viewerAccountIds: readonly string[] = [], viewerHelpful = false): ServerReview {
+}, viewerAccountIds: readonly string[] = [], viewerHelpful = false,
+viewerReportStatus: ServerReview['viewerReportStatus'] = 'none',
+includeModerationCounts = false): ServerReview {
   const tags = normalizeReviewTags(review.tags);
   const adminReplyAuthor = normalizeAdminReplyAuthor(review.adminReplyAuthor);
   return {
@@ -846,7 +900,8 @@ function toReviewResponse(review: {
         : [],
     helpfulCount: review.helpfulCount,
     viewerHelpful,
-    reports: review.reports,
+    viewerReportStatus,
+    reportCount: includeModerationCounts ? review.reports : undefined,
     visibility: review.visibility,
     isAnonymous: review.isAnonymous,
     adminReply: review.adminReplyBody

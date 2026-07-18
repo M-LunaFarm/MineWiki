@@ -382,6 +382,8 @@ export function ServerReviewSection({
         trustLabelCopy={trustLabelCopy}
         newReview={latestReview}
         isOwner={isOwner}
+        isLoggedIn={gateStatus.isLoggedIn}
+        loginHref={`/login?returnTo=${encodeURIComponent(`${serverPath ?? `/servers/${serverId}`}#reviews`)}`}
         onReviewUpdated={handleReviewUpdated}
         onReviewDeleted={handleReviewDeleted}
       />

@@ -464,6 +464,13 @@ export const reviewTrustLabelSchema = z.enum([
 ]);
 
 export const reviewVisibilitySchema = z.enum(['public', 'staff']);
+export const viewerReviewReportStatusSchema = z.enum([
+  'none',
+  'open',
+  'in_review',
+  'resolved',
+  'dismissed',
+]);
 
 export const reviewAdminReplySchema = z.object({
   authorDisplayName: z.string().min(1).max(32),
@@ -481,7 +488,8 @@ export const serverReviewSchema = z.object({
   trustLabels: z.array(reviewTrustLabelSchema),
   helpfulCount: z.number().int().nonnegative(),
   viewerHelpful: z.boolean(),
-  reports: z.number().int().nonnegative(),
+  viewerReportStatus: viewerReviewReportStatusSchema.optional(),
+  reportCount: z.number().int().nonnegative().optional(),
   visibility: reviewVisibilitySchema,
   isAnonymous: z.boolean(),
   adminReply: reviewAdminReplySchema.nullable(),

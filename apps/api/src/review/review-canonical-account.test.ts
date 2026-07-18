@@ -43,6 +43,7 @@ test('a linked account can manage a review owned by its canonical account', asyn
     $queryRaw: async () => accounts.map(({ id }) => ({ id })),
     serverReview: {
       findMany: async () => [review],
+      groupBy: async () => [{ rating: review.rating, _count: { _all: 1 } }],
       findFirst: async () => review,
       update: async ({ data }: { data: { rating: number; body: string; tags: string[] } }) =>
         Object.assign(review, data),
@@ -52,6 +53,7 @@ test('a linked account can manage a review owned by its canonical account', asyn
     $transaction: async (callback: (tx: typeof transaction) => Promise<unknown>) => callback(transaction),
     serverReview: transaction.serverReview,
     reviewHelpfulVote: { findMany: async () => [] },
+    reviewReport: { findMany: async () => [] },
   } as unknown as PrismaService;
   const service = new ReviewService(
     { ensureExists: async () => undefined } as never,

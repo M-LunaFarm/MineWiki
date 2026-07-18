@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { ServerReview } from '@minewiki/schemas';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { csrfHeaders } from '../../lib/csrf';
@@ -12,6 +13,8 @@ interface ReviewListProps {
   readonly trustLabelCopy?: Record<string, string>;
   readonly newReview?: ServerReview | null;
   readonly isOwner?: boolean;
+  readonly isLoggedIn?: boolean;
+  readonly loginHref?: string;
   readonly onReviewUpdated?: (nextReview: ServerReview, previousReview: ServerReview) => void;
   readonly onReviewDeleted?: (deletedReview: ServerReview) => void;
 }
@@ -51,6 +54,8 @@ export function ReviewList({
   trustLabelCopy,
   newReview,
   isOwner = false,
+  isLoggedIn = false,
+  loginHref = '/login',
   onReviewUpdated,
   onReviewDeleted,
 }: ReviewListProps) {
@@ -65,6 +70,7 @@ export function ReviewList({
   const [editSubmitting, setEditSubmitting] = useState<string | null>(null);
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [deletePending, setDeletePending] = useState<string | null>(null);
+  const [actionMessages, setActionMessages] = useState<Record<string, string>>({});
   const initialLength = initialReviews.length || 10;
 
   useEffect(() => {
@@ -111,6 +117,7 @@ export function ReviewList({
       return;
     }
     setReporting(reviewId);
+    setActionMessages((current) => ({ ...current, [reviewId]: '' }));
     try {
       const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews/${reviewId}/report`, {
         method: 'POST',
@@ -123,8 +130,14 @@ export function ReviewList({
       }
       const data = (await response.json()) as ServerReview;
       setReviews((current) => current.map((item) => (item.id === reviewId ? data : item)));
+      setActionMessages((current) => ({ ...current, [reviewId]: '신고가 접수되었습니다. 처리 상태는 이 카드에서 확인할 수 있습니다.' }));
     } catch (error) {
-      console.warn('리뷰 신고에 실패했습니다.', error);
+      setActionMessages((current) => ({
+        ...current,
+        [reviewId]: error instanceof Error && error.message.includes('401')
+          ? '로그인이 만료되었습니다. 다시 로그인한 뒤 신고해 주세요.'
+          : '신고를 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      }));
     } finally {
       setReporting(null);
     }
@@ -169,6 +182,7 @@ export function ReviewList({
     const nextHelpful = !alreadyHelpful;
 
     setPending(reviewId);
+    setActionMessages((current) => ({ ...current, [reviewId]: '' }));
 
     const applyLocalUpdate = (helpful: boolean) => {
       setReviews((current) =>
@@ -214,9 +228,18 @@ export function ReviewList({
       }
       const data = (await response.json()) as ServerReview;
       setReviews((current) => current.map((review) => (review.id === reviewId ? data : review)));
+      setActionMessages((current) => ({
+        ...current,
+        [reviewId]: nextHelpful ? '도움 표시를 남겼습니다.' : '도움 표시를 취소했습니다.',
+      }));
     } catch (error) {
-      console.warn('도움돼요 업데이트 실패', error);
       revertLocalUpdate();
+      setActionMessages((current) => ({
+        ...current,
+        [reviewId]: error instanceof Error && error.message.includes('401')
+          ? '로그인이 만료되었습니다. 다시 로그인해 주세요.'
+          : '도움 표시를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      }));
     } finally {
       setPending(null);
     }
@@ -369,6 +392,9 @@ export function ReviewList({
           const showStaffBadge = review.visibility === 'staff';
           const canManage = review.canManage === true;
           const canInteract = review.visibility === 'public' && !canManage;
+          const reportStatus = review.viewerReportStatus ?? 'none';
+          const hasActiveReport = reportStatus === 'open' || reportStatus === 'in_review';
+          const hasFinalReport = reportStatus === 'resolved' || reportStatus === 'dismissed';
           const isEditing = editingReviewId === review.id;
           const draft = editDrafts[review.id] ?? createEditDraft(review);
 
@@ -527,14 +553,30 @@ export function ReviewList({
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[#9ca3af]">
                 <span className="flex items-center gap-2">
                   <span>도움돼요 {helpfulCount.toLocaleString('ko-KR')}회</span>
-                  {review.reports > 0 ? (
+                  {isOwner && (review.reportCount ?? 0) > 0 ? (
                     <span className="rounded-full border border-rose-400/40 bg-rose-500/10 px-2 py-[2px] text-[10px] font-semibold text-rose-200">
-                      신고 {review.reports}
+                      신고 {review.reportCount}
                     </span>
                   ) : null}
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
-                  {canInteract ? (
+                  {canInteract && !isLoggedIn ? (
+                    <>
+                      <Link
+                        href={loginHref}
+                        className="rounded-full border border-[#30343b] px-3 py-1 text-xs font-semibold text-white hover:bg-[#202632]"
+                      >
+                        로그인 후 도움 표시
+                      </Link>
+                      <Link
+                        href={loginHref}
+                        className="rounded-full border border-rose-500/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/10"
+                      >
+                        로그인 후 신고
+                      </Link>
+                    </>
+                  ) : null}
+                  {canInteract && isLoggedIn ? (
                     <>
                       <button
                         type="button"
@@ -544,14 +586,20 @@ export function ReviewList({
                       >
                         {buttonLabel}
                       </button>
-                      <button
-                        type="button"
-                        className="rounded-full border border-rose-500/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-60"
-                        onClick={() => void handleReport(review.id)}
-                        disabled={reporting === review.id}
-                      >
-                        신고
-                      </button>
+                      {hasActiveReport || hasFinalReport ? (
+                        <span className="rounded-full border border-rose-500/30 bg-rose-500/5 px-3 py-1 text-xs font-semibold text-rose-200">
+                          {hasActiveReport ? '신고 접수됨' : '신고 처리됨'}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="rounded-full border border-rose-500/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-60"
+                          onClick={() => void handleReport(review.id)}
+                          disabled={reporting === review.id}
+                        >
+                          신고
+                        </button>
+                      )}
                     </>
                   ) : null}
                   {canManage ? (
@@ -576,6 +624,11 @@ export function ReviewList({
                   ) : null}
                 </div>
               </div>
+              {actionMessages[review.id] ? (
+                <p className="mt-3 text-xs text-sky-200" role="status" aria-live="polite">
+                  {actionMessages[review.id]}
+                </p>
+              ) : null}
 
               {isOwner ? (
                 <div className="mt-3 space-y-2">
