@@ -2361,6 +2361,16 @@ export class WikiReadService {
       return { type, items: [], generation: null, generatedAt: null, isRebuilding: true, isStale: true };
     }
     const snapshotItems = parseSpecialSnapshotItems(snapshot.items);
+    if (snapshotItems === null) {
+      return {
+        type,
+        items: [],
+        generation: snapshot.generation,
+        generatedAt: snapshot.generatedAt.toISOString(),
+        isRebuilding: true,
+        isStale: true,
+      };
+    }
     const aggregateType = type === 'wanted' || type === 'categories';
     const identifiedViewer = access.accountId !== null;
     const eligibleSnapshotItems = aggregateType && identifiedViewer
@@ -3827,10 +3837,12 @@ function decodeDeletedPageCursor(value: string): { readonly updatedAt: Date; rea
 
 const SPECIAL_SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT = 500;
 
-function parseSpecialSnapshotItems(value: unknown): ParsedWikiSpecialSnapshotItem[] {
-  if (!Array.isArray(value)) return [];
+function parseSpecialSnapshotItems(value: unknown): ParsedWikiSpecialSnapshotItem[] | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const envelope = value as Record<string, unknown>;
+  if (envelope.projectionVersion !== 2 || !Array.isArray(envelope.items)) return null;
   const items: ParsedWikiSpecialSnapshotItem[] = [];
-  for (const candidate of value.slice(0, 500)) {
+  for (const candidate of envelope.items.slice(0, 500)) {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
     const item = candidate as Record<string, unknown>;
     const pageId = item.pageId === null ? null : typeof item.pageId === 'string' && /^\d+$/.test(item.pageId) ? item.pageId : undefined;

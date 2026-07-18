@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { slugifyTitle, wikiUrl, type NamespaceCode } from '@minewiki/wiki-core';
+import { parseLinkTarget, parseMarkup, slugifyTitle, wikiUrl, type NamespaceCode, type WikiLinkResolutionContext } from '@minewiki/wiki-core';
 
 const SNAPSHOT_ITEM_LIMIT = 500;
 const SNAPSHOT_SOURCE_CONTRIBUTION_LIMIT = 500;
+export const WIKI_SPECIAL_SNAPSHOT_PROJECTION_VERSION = 2;
 const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published']);
 const PUBLIC_READ_PROTECTION_LEVELS = new Set([
   'open', 'login_required', 'review_required', 'autoconfirmed_only', 'trusted_only',
@@ -71,13 +72,52 @@ export interface SnapshotRow {
   readonly generatedAt: Date;
 }
 
+export interface SnapshotServerWiki {
+  readonly id: bigint;
+  readonly spaceId: bigint;
+  readonly slug: string;
+  readonly siteSlug: string | null;
+  readonly status: string;
+  readonly publicationStatus: string;
+  readonly publishedReleaseId: bigint | null;
+}
+
+export interface SnapshotReleaseItem {
+  readonly releaseId: bigint;
+  readonly serverWikiId: bigint;
+  readonly spaceId: bigint;
+  readonly namespaceId: number;
+  readonly pageId: bigint;
+  readonly revisionId: bigint;
+  readonly localPath: string;
+  readonly slug: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly pageType: string;
+  readonly protectionLevel: string;
+  readonly pageStatus: string;
+  readonly pageUpdatedAt: Date;
+}
+
+export interface SnapshotRevision {
+  readonly id: bigint;
+  readonly pageId: bigint;
+  readonly visibility: string;
+  readonly contentRaw: string;
+}
+
+interface SnapshotServerRoute {
+  readonly siteSlug: string;
+  readonly contentRootSlug: string;
+}
+
 export function buildWikiSpecialSnapshotRows(input: {
   readonly pages: readonly SnapshotPage[];
   readonly links: readonly SnapshotLink[];
   readonly namespaces: ReadonlyArray<{ readonly id: number; readonly code: string }>;
   readonly activeSpaceIds: ReadonlySet<bigint>;
   readonly rootPageIds: ReadonlySet<bigint>;
-  readonly serverSlugBySpaceId: ReadonlyMap<bigint, string>;
+  readonly serverRouteBySpaceId: ReadonlyMap<bigint, SnapshotServerRoute>;
   readonly aclRules: readonly SnapshotAclRule[];
   readonly generatedAt?: Date;
   readonly generation?: string;
@@ -117,13 +157,13 @@ export function buildWikiSpecialSnapshotRows(input: {
       scopeLinks,
       namespaceById,
       input.rootPageIds,
-      input.serverSlugBySpaceId
+      input.serverRouteBySpaceId
     ), scopePages, scopeLinks, generation, generatedAt));
     rows.push(snapshotRow('wanted', namespaceCode, wantedItems(
       scopeLinks,
       visiblePageById,
       existingPageKeys,
-      input.serverSlugBySpaceId
+      input.serverRouteBySpaceId
     ), scopePages, scopeLinks, generation, generatedAt));
     rows.push(snapshotRow('categories', namespaceCode, categoryItems(scopeLinks), scopePages, scopeLinks, generation, generatedAt));
     if (!namespaceCode || namespaceCode === 'category') {
@@ -133,7 +173,7 @@ export function buildWikiSpecialSnapshotRows(input: {
       rows.push(snapshotRow('orphaned_categories', namespaceCode, orphanedCategoryItems(
         categoryPages,
         categoryLinks,
-        input.serverSlugBySpaceId
+        input.serverRouteBySpaceId
       ), categoryPages, categoryLinks, generation, generatedAt));
     }
   }
@@ -171,8 +211,15 @@ export async function rebuildWikiSpecialSnapshots(prisma: PrismaClient): Promise
       select: { id: true, rootPageId: true }
     }),
     prisma.serverWiki.findMany({
-      where: { status: { not: 'disabled' } },
-      select: { spaceId: true, slug: true }
+      select: {
+        id: true,
+        spaceId: true,
+        slug: true,
+        siteSlug: true,
+        status: true,
+        publicationStatus: true,
+        publishedReleaseId: true,
+      }
     }),
     prisma.aclRule.findMany({
       where: {
@@ -185,14 +232,60 @@ export async function rebuildWikiSpecialSnapshots(prisma: PrismaClient): Promise
       }
     })
   ]);
-  const generation = randomUUID();
-  const rows = buildWikiSpecialSnapshotRows({
+  const publishedWikis = serverWikis.filter((wiki) =>
+    wiki.status === 'active'
+    && wiki.publicationStatus === 'published'
+    && wiki.publishedReleaseId !== null);
+  const releaseItems = publishedWikis.length > 0
+    ? await prisma.serverWikiReleaseItem.findMany({
+        where: {
+          OR: publishedWikis.map((wiki) => ({
+            releaseId: wiki.publishedReleaseId!,
+            serverWikiId: wiki.id,
+            spaceId: wiki.spaceId,
+          })),
+        },
+        select: {
+          releaseId: true,
+          serverWikiId: true,
+          spaceId: true,
+          namespaceId: true,
+          pageId: true,
+          revisionId: true,
+          localPath: true,
+          slug: true,
+          title: true,
+          displayTitle: true,
+          pageType: true,
+          protectionLevel: true,
+          pageStatus: true,
+          pageUpdatedAt: true,
+        },
+      })
+    : [];
+  const revisionIds = [...new Set(releaseItems.map((item) => item.revisionId))];
+  const releaseRevisions = revisionIds.length > 0
+    ? await prisma.wikiPageRevision.findMany({
+        where: { id: { in: revisionIds }, visibility: 'public' },
+        select: { id: true, pageId: true, visibility: true, contentRaw: true },
+      })
+    : [];
+  const projection = projectWikiSpecialSnapshotSources({
     pages,
     links,
     namespaces,
+    serverWikis,
+    releaseItems,
+    releaseRevisions,
+  });
+  const generation = randomUUID();
+  const rows = buildWikiSpecialSnapshotRows({
+    pages: projection.pages,
+    links: projection.links,
+    namespaces,
     activeSpaceIds: new Set(spaces.map((space) => space.id)),
     rootPageIds: new Set(spaces.flatMap((space) => space.rootPageId ? [space.rootPageId] : [])),
-    serverSlugBySpaceId: new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug])),
+    serverRouteBySpaceId: projection.serverRouteBySpaceId,
     aclRules,
     generatedAt: now,
     generation
@@ -203,20 +296,174 @@ export async function rebuildWikiSpecialSnapshots(prisma: PrismaClient): Promise
       type: row.type,
       namespaceCode: row.namespaceCode,
       generation: row.generation,
-      items: row.items as unknown as Prisma.InputJsonValue,
+      items: snapshotEnvelope(row.items) as unknown as Prisma.InputJsonValue,
       sourcePageCount: row.sourcePageCount,
       sourceLinkCount: row.sourceLinkCount,
       generatedAt: row.generatedAt
     },
     update: {
       generation: row.generation,
-      items: row.items as unknown as Prisma.InputJsonValue,
+      items: snapshotEnvelope(row.items) as unknown as Prisma.InputJsonValue,
       sourcePageCount: row.sourcePageCount,
       sourceLinkCount: row.sourceLinkCount,
       generatedAt: row.generatedAt
     }
   })));
-  return { generation, rows: rows.length, sourcePages: pages.length, sourceLinks: links.length };
+  return {
+    generation,
+    rows: rows.length,
+    sourcePages: projection.pages.length,
+    sourceLinks: projection.links.length,
+  };
+}
+
+export function projectWikiSpecialSnapshotSources(input: {
+  readonly pages: readonly SnapshotPage[];
+  readonly links: readonly SnapshotLink[];
+  readonly namespaces: ReadonlyArray<{ readonly id: number; readonly code: string }>;
+  readonly serverWikis: readonly SnapshotServerWiki[];
+  readonly releaseItems: readonly SnapshotReleaseItem[];
+  readonly releaseRevisions: readonly SnapshotRevision[];
+}): {
+  readonly pages: SnapshotPage[];
+  readonly links: SnapshotLink[];
+  readonly serverRouteBySpaceId: ReadonlyMap<bigint, SnapshotServerRoute>;
+} {
+  const namespaceById = new Map(input.namespaces.map((namespace) => [namespace.id, namespace.code]));
+  const serverSpaceIds = new Set(input.serverWikis.map((wiki) => wiki.spaceId));
+  const ordinaryPages = input.pages.filter((page) =>
+    namespaceById.get(page.namespaceId) !== 'server' && !serverSpaceIds.has(page.spaceId));
+  const ordinaryPageIds = new Set(ordinaryPages.map((page) => page.id));
+  const ordinaryLinks = input.links.filter((link) => ordinaryPageIds.has(link.sourcePageId));
+  const publishedWikiBySpaceId = new Map(input.serverWikis
+    .filter((wiki) => wiki.status === 'active'
+      && wiki.publicationStatus === 'published'
+      && wiki.publishedReleaseId !== null)
+    .map((wiki) => [wiki.spaceId, wiki]));
+  const revisionByKey = new Map(input.releaseRevisions
+    .filter((revision) => revision.visibility === 'public')
+    .map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
+  const releasedPages: SnapshotPage[] = [];
+  const releasedLinks: SnapshotLink[] = [];
+  const acceptedWikiSpaceIds = new Set<bigint>();
+  for (const wiki of publishedWikiBySpaceId.values()) {
+    const wikiItems = input.releaseItems.filter((item) =>
+      item.spaceId === wiki.spaceId
+      && item.serverWikiId === wiki.id
+      && item.releaseId === wiki.publishedReleaseId);
+    if (wikiItems.length === 0) continue;
+    const wikiProjection: Array<{ page: SnapshotPage; contentRaw: string }> = [];
+    let validRelease = true;
+    for (const item of wikiItems) {
+      const revision = revisionByKey.get(`${item.pageId}:${item.revisionId}`);
+      if (!revision) {
+        validRelease = false;
+        break;
+      }
+      wikiProjection.push({
+        page: {
+          id: item.pageId,
+          namespaceId: item.namespaceId,
+          spaceId: item.spaceId,
+          localPath: item.localPath,
+          slug: item.slug,
+          title: item.title,
+          displayTitle: item.displayTitle,
+          currentRevisionId: item.revisionId,
+          pageType: item.pageType,
+          protectionLevel: item.protectionLevel,
+          status: item.pageStatus,
+          updatedAt: item.pageUpdatedAt,
+        },
+        contentRaw: revision.contentRaw,
+      });
+    }
+    if (!validRelease) continue;
+    for (const projected of wikiProjection) {
+      releasedPages.push(projected.page);
+      releasedLinks.push(...linksFromReleasedRevision(projected.page, projected.contentRaw, namespaceById));
+    }
+    acceptedWikiSpaceIds.add(wiki.spaceId);
+  }
+  const serverRouteBySpaceId = new Map<bigint, SnapshotServerRoute>();
+  for (const spaceId of acceptedWikiSpaceIds) {
+    const wiki = publishedWikiBySpaceId.get(spaceId);
+    if (!wiki) continue;
+    serverRouteBySpaceId.set(spaceId, {
+      siteSlug: wiki.siteSlug ?? wiki.slug,
+      contentRootSlug: wiki.slug,
+    });
+  }
+  return {
+    pages: [...ordinaryPages, ...releasedPages],
+    links: [...ordinaryLinks, ...releasedLinks],
+    serverRouteBySpaceId,
+  };
+}
+
+function snapshotEnvelope(items: readonly SnapshotItem[]) {
+  return { projectionVersion: WIKI_SPECIAL_SNAPSHOT_PROJECTION_VERSION, items };
+}
+
+function linksFromReleasedRevision(
+  page: SnapshotPage,
+  contentRaw: string,
+  namespaceById: ReadonlyMap<number, string>,
+): SnapshotLink[] {
+  const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
+  const parsed = parseMarkup(contentRaw, { linkResolution: snapshotLinkResolutionContext(namespaceCode, page.localPath) });
+  const links = new Map<string, SnapshotLink>();
+  for (const target of parsed.links) {
+    if (containsIncludePlaceholder(target)) continue;
+    const resolved = parseLinkTarget(target);
+    const targetNamespaceCode = namespaceCode === 'server'
+      && resolved.namespace === 'main'
+      && !target.includes(':')
+      ? 'server'
+      : resolved.namespace;
+    const [contentRootSlug = ''] = slugifyTitle(page.localPath).split('/');
+    const targetSlug = targetNamespaceCode === 'server' && resolved.namespace === 'main'
+      ? slugifyTitle(`${contentRootSlug}/${resolved.title}`)
+      : slugifyTitle(resolved.title);
+    if (!targetSlug || targetSlug.length > 255 || targetNamespaceCode.length > 32) continue;
+    const link: SnapshotLink = {
+      sourcePageId: page.id,
+      sourceRevisionId: page.currentRevisionId!,
+      targetNamespaceCode,
+      targetSlug,
+      linkType: 'link',
+    };
+    links.set(`link:${targetNamespaceCode}:${targetSlug}`, link);
+  }
+  for (const category of parsed.categories) {
+    if (containsIncludePlaceholder(category)) continue;
+    const targetSlug = slugifyTitle(category);
+    if (!targetSlug || targetSlug.length > 255) continue;
+    links.set(`category:category:${targetSlug}`, {
+      sourcePageId: page.id,
+      sourceRevisionId: page.currentRevisionId!,
+      targetNamespaceCode: 'category',
+      targetSlug,
+      linkType: 'category',
+    });
+  }
+  return [...links.values()];
+}
+
+function snapshotLinkResolutionContext(namespaceCode: string, localPath: string): WikiLinkResolutionContext {
+  const normalizedPath = localPath.trim().replace(/^\/+|\/+$/gu, '');
+  if (namespaceCode === 'server') {
+    const [, ...relativeSegments] = normalizedPath.split('/');
+    return { currentDocumentPath: relativeSegments.join('/'), namespace: 'main' };
+  }
+  return {
+    currentDocumentPath: normalizedPath,
+    namespace: namespaceCode as NamespaceCode,
+  };
+}
+
+function containsIncludePlaceholder(value: string): boolean {
+  return /@[A-Za-z0-9가-힣_]+(?:=[^@\n]*)?@/u.test(value);
 }
 
 function snapshotRow(
@@ -244,7 +491,7 @@ function orphanedItems(
   links: readonly SnapshotLink[],
   namespaceById: ReadonlyMap<number, string>,
   rootPageIds: ReadonlySet<bigint>,
-  serverSlugBySpaceId: ReadonlyMap<bigint, string>
+  serverRouteBySpaceId: ReadonlyMap<bigint, SnapshotServerRoute>
 ): SnapshotItem[] {
   const incoming = new Set(links
     .filter((link) => link.linkType === 'link')
@@ -252,14 +499,14 @@ function orphanedItems(
   return pages
     .filter((page) => !rootPageIds.has(page.id) && !incoming.has(`${namespaceById.get(page.namespaceId) ?? 'main'}:${page.slug}`))
     .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime() || compareBigInt(right.id, left.id))
-    .map((page) => pageItem(page, namespaceById.get(page.namespaceId) ?? 'main', serverSlugBySpaceId));
+    .map((page) => pageItem(page, namespaceById.get(page.namespaceId) ?? 'main', serverRouteBySpaceId));
 }
 
 function wantedItems(
   links: readonly SnapshotLink[],
   pageById: ReadonlyMap<bigint, SnapshotPage>,
   existingPageKeys: ReadonlySet<string>,
-  serverSlugBySpaceId: ReadonlyMap<bigint, string>
+  serverRouteBySpaceId: ReadonlyMap<bigint, SnapshotServerRoute>
 ): SnapshotItem[] {
   const counts = new Map<string, {
     namespace: string;
@@ -296,7 +543,7 @@ function wantedItems(
       namespace: target.namespace,
       title: target.slug,
       displayTitle: (target.slug.split('/').at(-1) ?? target.slug).replace(/_/g, ' '),
-      routePath: targetRoutePath(target.namespace, target.slug, target.sourcePage, serverSlugBySpaceId),
+      routePath: targetRoutePath(target.namespace, target.slug, target.sourcePage, serverRouteBySpaceId),
       value: target.count,
       updatedAt: null,
       ...sourceContributionMetadata(target.sourceCounts)
@@ -347,7 +594,7 @@ function sourceContributionMetadata(sourceCounts: ReadonlyMap<bigint, number>): 
 function orphanedCategoryItems(
   pages: readonly SnapshotPage[],
   links: readonly SnapshotLink[],
-  serverSlugBySpaceId: ReadonlyMap<bigint, string>
+  serverRouteBySpaceId: ReadonlyMap<bigint, SnapshotServerRoute>
 ): SnapshotItem[] {
   const pageById = new Map(pages.map((page) => [page.id, page]));
   const pageBySlug = new Map(pages.map((page) => [page.slug, page]));
@@ -374,13 +621,13 @@ function orphanedCategoryItems(
   return pages
     .filter((page) => page.slug !== rootSlug && !reachable.has(page.slug))
     .sort((left, right) => left.displayTitle.localeCompare(right.displayTitle, 'ko'))
-    .map((page) => pageItem(page, 'category', serverSlugBySpaceId));
+    .map((page) => pageItem(page, 'category', serverRouteBySpaceId));
 }
 
 function pageItem(
   page: SnapshotPage,
   namespace: string,
-  serverSlugBySpaceId: ReadonlyMap<bigint, string>
+  serverRouteBySpaceId: ReadonlyMap<bigint, SnapshotServerRoute>
 ): SnapshotItem {
   return {
     id: `page:${page.id.toString()}`,
@@ -388,7 +635,7 @@ function pageItem(
     namespace,
     title: page.title,
     displayTitle: page.displayTitle,
-    routePath: pageRoutePath(page, namespace, serverSlugBySpaceId),
+    routePath: pageRoutePath(page, namespace, serverRouteBySpaceId),
     value: null,
     updatedAt: page.updatedAt.toISOString()
   };
@@ -401,11 +648,11 @@ function pageKey(namespace: string, slug: string, spaceId: bigint): string {
 function pageRoutePath(
   page: SnapshotPage,
   namespace: string,
-  serverSlugBySpaceId: ReadonlyMap<bigint, string>
+  serverRouteBySpaceId: ReadonlyMap<bigint, SnapshotServerRoute>
 ): string {
   if (namespace === 'server') {
-    const serverSlug = serverSlugBySpaceId.get(page.spaceId);
-    if (serverSlug) return canonicalServerPath(serverSlug, page.localPath);
+    const route = serverRouteBySpaceId.get(page.spaceId);
+    if (route) return canonicalServerPath(route, page.title);
   }
   return wikiUrl(namespace as NamespaceCode, page.title);
 }
@@ -414,17 +661,18 @@ function targetRoutePath(
   namespace: string,
   slug: string,
   sourcePage: SnapshotPage,
-  serverSlugBySpaceId: ReadonlyMap<bigint, string>
+  serverRouteBySpaceId: ReadonlyMap<bigint, SnapshotServerRoute>
 ): string {
   if (namespace === 'server') {
-    const serverSlug = serverSlugBySpaceId.get(sourcePage.spaceId);
-    if (serverSlug) return canonicalServerPath(serverSlug, slug);
+    const route = serverRouteBySpaceId.get(sourcePage.spaceId);
+    if (route) return canonicalServerPath(route, slug);
   }
   return wikiUrl(namespace as NamespaceCode, slug);
 }
 
-function canonicalServerPath(serverSlug: string, localPath: string): string {
-  const normalizedSlug = slugifyTitle(serverSlug);
+function canonicalServerPath(route: SnapshotServerRoute, localPath: string): string {
+  const normalizedSiteSlug = slugifyTitle(route.siteSlug);
+  const normalizedSlug = slugifyTitle(route.contentRootSlug);
   const normalizedPath = slugifyTitle(localPath);
   const relative = normalizedPath === normalizedSlug
     ? ''
@@ -432,7 +680,9 @@ function canonicalServerPath(serverSlug: string, localPath: string): string {
       ? normalizedPath.slice(normalizedSlug.length + 1)
       : normalizedPath;
   const encode = (value: string) => value.split('/').filter(Boolean).map(encodeURIComponent).join('/');
-  return relative ? `/server/${encode(normalizedSlug)}/${encode(relative)}` : `/server/${encode(normalizedSlug)}`;
+  return relative
+    ? `/serverWiki/${encode(normalizedSiteSlug)}/${encode(relative)}`
+    : `/serverWiki/${encode(normalizedSiteSlug)}`;
 }
 
 function indexAclRules(rules: readonly SnapshotAclRule[]): ReadonlyMap<string, readonly SnapshotAclRule[]> {

@@ -1289,9 +1289,9 @@ test('special wanted documents aggregate unresolved current links', async () => 
   const prisma = {
     wikiNamespace: { async findUnique() { return null; } },
     wikiSpecialSnapshot: { async findUnique() { return {
-      generation: 'generation-1', generatedAt: now, items: [
+      generation: 'generation-1', generatedAt: now, items: { projectionVersion: 2, items: [
         { id: 'wanted:main:없는_문서', pageId: null, namespace: 'main', title: '없는_문서', displayTitle: '없는_문서', routePath: '/wiki/%EC%97%86%EB%8A%94_%EB%AC%B8%EC%84%9C', value: 2, updatedAt: null }
-      ]
+      ] }
     }; } },
     wikiPageLink: { async findMany() { linkReads += 1; return []; } }
   } as unknown as PrismaService;
@@ -1310,10 +1310,10 @@ test('special category list counts only current categories from readable documen
   const prisma = {
     wikiNamespace: { async findUnique() { return null; } },
     wikiSpecialSnapshot: { async findUnique() { return {
-      generation: 'generation-2', generatedAt: now, items: [
+      generation: 'generation-2', generatedAt: now, items: { projectionVersion: 2, items: [
         { id: 'category:가이드', pageId: null, namespace: 'category', title: '가이드', displayTitle: '가이드', routePath: '/wiki/category/%EA%B0%80%EC%9D%B4%EB%93%9C', value: 1, updatedAt: null },
         { id: 'category:초보자', pageId: null, namespace: 'category', title: '초보자', displayTitle: '초보자', routePath: '/wiki/category/%EC%B4%88%EB%B3%B4%EC%9E%90', value: 1, updatedAt: null }
-      ]
+      ] }
     }; } },
     wikiPageLink: { async findMany() { linkReads += 1; return []; } }
   } as unknown as PrismaService;
@@ -1372,7 +1372,7 @@ test('identified special snapshot reads remove denied source contributions from 
         return {
           generation: `generation-${args.where.type_namespaceCode.type}`,
           generatedAt: now,
-          items: snapshots[args.where.type_namespaceCode.type]
+          items: { projectionVersion: 2, items: snapshots[args.where.type_namespaceCode.type] }
         };
       }
     },
@@ -1401,7 +1401,7 @@ test('identified special snapshot reads remove denied source contributions from 
   assert.equal(JSON.stringify([wanted, categories]).includes('902'), false);
 });
 
-test('identified special snapshot reads fail closed for legacy or truncated aggregate metadata', async () => {
+test('identified special snapshot reads fail closed for legacy snapshot envelopes', async () => {
   const now = new Date('2026-07-17T00:00:00Z');
   const prisma = {
     wikiProfile: { async findUnique() { return { id: 7n, status: 'active' }; } },
@@ -1432,6 +1432,8 @@ test('identified special snapshot reads fail closed for legacy or truncated aggr
   assert.deepEqual(result.items, []);
   assert.equal(result.generation, 'legacy-generation');
   assert.equal(result.generatedAt, now.toISOString());
+  assert.equal(result.isRebuilding, true);
+  assert.equal(result.isStale, true);
 });
 
 test('blame keeps attribution for lines preserved across later revisions', async () => {
@@ -1845,10 +1847,10 @@ test('special orphaned categories excludes descendants reachable from the root',
     wikiNamespace: { async findUnique() { return { id: 2, code: 'category' }; } },
     wikiPage: { async findMany() { return pages; } },
     wikiSpecialSnapshot: { async findUnique() { return {
-      generation: 'generation-3', generatedAt: now, items: pages.slice(2).map((item) => ({
+      generation: 'generation-3', generatedAt: now, items: { projectionVersion: 2, items: pages.slice(2).map((item) => ({
         id: `page:${item.id}`, pageId: item.id.toString(), namespace: 'category', title: item.title,
         displayTitle: item.displayTitle, routePath: `/wiki/category/${encodeURIComponent(item.slug)}`, value: null, updatedAt: now.toISOString()
-      }))
+      })) }
     }; } }
   } as unknown as PrismaService;
   const permissions = { async filterReadablePages({ pages: candidates }: { pages: typeof pages }) { return [...candidates]; } } as unknown as WikiPermissionService;

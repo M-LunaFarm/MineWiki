@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWikiSpecialSnapshotRows, type SnapshotPage } from './wiki-special-snapshots';
+import { buildWikiSpecialSnapshotRows, projectWikiSpecialSnapshotSources, type SnapshotPage } from './wiki-special-snapshots';
 
 const now = new Date('2026-07-15T12:00:00.000Z');
 const page = (id: bigint, namespaceId: number, slug: string, revisionId: bigint): SnapshotPage => ({
@@ -39,7 +39,7 @@ test('wiki special snapshots exclude generic guest-denied source pages and prese
     namespaces: [{ id: 1, code: 'main' }, { id: 2, code: 'category' }],
     activeSpaceIds: new Set([1n, 2n]),
     rootPageIds: new Set([1n, 4n]),
-    serverSlugBySpaceId: new Map(),
+    serverRouteBySpaceId: new Map(),
     aclRules: [{
       targetType: 'page', targetId: 3n, subjectType: 'perm', subjectValue: 'guest',
       effect: 'deny', sortOrder: 0
@@ -57,6 +57,127 @@ test('wiki special snapshots exclude generic guest-denied source pages and prese
   assert.equal(rows.every((row) => row.generation === 'test-generation'), true);
 });
 
+test('server wiki special snapshots use released identities and pinned revision links instead of live drafts', () => {
+  const ordinary = page(1n, 1, '대문', 11n);
+  const draftServerPage: SnapshotPage = {
+    ...page(20n, 7, 'luna/draft-guide', 201n),
+    spaceId: 40n,
+    localPath: 'luna/draft-guide',
+    title: 'luna/draft-guide',
+    displayTitle: '비공개 초안 가이드',
+  };
+  const unpublishedServerPage: SnapshotPage = {
+    ...page(30n, 7, 'hidden/draft', 301n),
+    spaceId: 50n,
+    localPath: 'hidden/draft',
+    title: 'hidden/draft',
+    displayTitle: '미발행 초안',
+  };
+  const projection = projectWikiSpecialSnapshotSources({
+    pages: [ordinary, draftServerPage, unpublishedServerPage],
+    links: [
+      { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'main', targetSlug: '일반_누락', linkType: 'link' },
+      { sourcePageId: 20n, sourceRevisionId: 201n, targetNamespaceCode: 'server', targetSlug: 'luna/SECRET_ROADMAP', linkType: 'link' },
+      { sourcePageId: 20n, sourceRevisionId: 201n, targetNamespaceCode: 'category', targetSlug: 'SECRET_LAUNCH', linkType: 'category' },
+      { sourcePageId: 30n, sourceRevisionId: 301n, targetNamespaceCode: 'server', targetSlug: 'hidden/SECRET', linkType: 'link' },
+    ],
+    namespaces: [{ id: 1, code: 'main' }, { id: 7, code: 'server' }],
+    serverWikis: [
+      { id: 50n, spaceId: 40n, slug: 'luna', siteSlug: 'luna-docs', status: 'active', publicationStatus: 'published', publishedReleaseId: 70n },
+      { id: 60n, spaceId: 50n, slug: 'hidden', siteSlug: null, status: 'active', publicationStatus: 'draft', publishedReleaseId: null },
+    ],
+    releaseItems: [{
+      releaseId: 70n,
+      serverWikiId: 50n,
+      spaceId: 40n,
+      namespaceId: 7,
+      pageId: 20n,
+      revisionId: 200n,
+      localPath: 'luna/guide',
+      slug: 'luna/guide',
+      title: 'luna/guide',
+      displayTitle: '공개 가이드',
+      pageType: 'article',
+      protectionLevel: 'open',
+      pageStatus: 'normal',
+      pageUpdatedAt: now,
+    }],
+    releaseRevisions: [{
+      id: 200n,
+      pageId: 20n,
+      visibility: 'public',
+      contentRaw: '[[공개_대상]]\n[[분류:공개_분류]]',
+    }],
+  });
+
+  assert.deepEqual(projection.pages.map((candidate) => [candidate.id, candidate.currentRevisionId, candidate.title]), [
+    [1n, 11n, '대문'],
+    [20n, 200n, 'luna/guide'],
+  ]);
+  assert.deepEqual(projection.links.map((link) => [link.sourceRevisionId, link.targetNamespaceCode, link.targetSlug]), [
+    [11n, 'main', '일반_누락'],
+    [200n, 'server', 'luna/공개_대상'],
+    [200n, 'category', '공개_분류'],
+  ]);
+  assert.equal(JSON.stringify(projection, (_, value) => typeof value === 'bigint' ? value.toString() : value).includes('SECRET'), false);
+
+  const rows = buildWikiSpecialSnapshotRows({
+    pages: projection.pages,
+    links: projection.links,
+    namespaces: [{ id: 1, code: 'main' }, { id: 7, code: 'server' }],
+    activeSpaceIds: new Set([1n, 40n, 50n]),
+    rootPageIds: new Set([1n]),
+    serverRouteBySpaceId: projection.serverRouteBySpaceId,
+    aclRules: [],
+    generatedAt: now,
+    generation: 'release-projection',
+  });
+  const serverOrphaned = rows.find((row) => row.type === 'orphaned' && row.namespaceCode === 'server');
+  const serverWanted = rows.find((row) => row.type === 'wanted' && row.namespaceCode === 'server');
+  assert.deepEqual(serverOrphaned?.items.map((item) => [item.displayTitle, item.routePath]), [
+    ['공개 가이드', '/serverWiki/luna-docs/guide'],
+  ]);
+  assert.deepEqual(serverWanted?.items.map((item) => item.title), ['luna/공개_대상']);
+});
+
+test('server wiki special snapshots fail closed for an incomplete release revision set', () => {
+  const projection = projectWikiSpecialSnapshotSources({
+    pages: [],
+    links: [],
+    namespaces: [{ id: 7, code: 'server' }],
+    serverWikis: [{
+      id: 50n,
+      spaceId: 40n,
+      slug: 'luna',
+      siteSlug: 'luna-docs',
+      status: 'active',
+      publicationStatus: 'published',
+      publishedReleaseId: 70n,
+    }],
+    releaseItems: [200n, 201n].map((revisionId, index) => ({
+      releaseId: 70n,
+      serverWikiId: 50n,
+      spaceId: 40n,
+      namespaceId: 7,
+      pageId: BigInt(20 + index),
+      revisionId,
+      localPath: `luna/page-${index}`,
+      slug: `luna/page-${index}`,
+      title: `luna/page-${index}`,
+      displayTitle: `Page ${index}`,
+      pageType: 'article',
+      protectionLevel: 'open',
+      pageStatus: 'normal',
+      pageUpdatedAt: now,
+    })),
+    releaseRevisions: [{ id: 200n, pageId: 20n, visibility: 'public', contentRaw: 'public' }],
+  });
+
+  assert.deepEqual(projection.pages, []);
+  assert.deepEqual(projection.links, []);
+  assert.equal(projection.serverRouteBySpaceId.size, 0);
+});
+
 test('page-specific guest allow overrides a broader site deny in public snapshots', () => {
   const allowed = page(10n, 1, '공개', 100n);
   const denied = page(11n, 1, '차단', 110n);
@@ -66,7 +187,7 @@ test('page-specific guest allow overrides a broader site deny in public snapshot
     namespaces: [{ id: 1, code: 'main' }],
     activeSpaceIds: new Set([1n]),
     rootPageIds: new Set(),
-    serverSlugBySpaceId: new Map(),
+    serverRouteBySpaceId: new Map(),
     aclRules: [
       { targetType: 'site', targetId: null, subjectType: 'perm', subjectValue: 'guest', effect: 'deny', sortOrder: 0 },
       { targetType: 'page', targetId: 10n, subjectType: 'perm', subjectValue: 'guest', effect: 'allow', sortOrder: 0 }
@@ -95,7 +216,7 @@ test('aggregate snapshots persist bounded per-source counts for viewer ACL recom
     namespaces: [{ id: 1, code: 'main' }],
     activeSpaceIds: new Set([1n]),
     rootPageIds: new Set(),
-    serverSlugBySpaceId: new Map(),
+    serverRouteBySpaceId: new Map(),
     aclRules: [],
     generatedAt: now,
     generation: 'bounded-generation'
