@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { isPublicWikiPageStatus, PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
 import { writeAuditRecord } from '../events/audit-event-writer';
@@ -72,7 +73,6 @@ interface PublicationContext {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SITE_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/u;
-const ACTIVE_PAGE_STATUSES = ['normal', 'active', 'published', 'protected'] as const;
 const MAX_CANONICAL_ACCOUNT_DEPTH = 16;
 const MAX_SERIALIZABLE_ATTEMPTS = 3;
 const REASON_MIN_LENGTH = 5;
@@ -340,7 +340,7 @@ export class ServerWikiPublicationService {
         })
       : null;
     if (
-      !ACTIVE_PAGE_STATUSES.includes(root.status as (typeof ACTIVE_PAGE_STATUSES)[number])
+      !isPublicWikiPageStatus(root.status)
       || !rootRevision
       || rootRevision.pageId !== root.id
       || rootRevision.visibility !== 'public'
@@ -349,7 +349,7 @@ export class ServerWikiPublicationService {
     const documents = await store.wikiPage.findMany({
       where: {
         spaceId: context.spaceId,
-        status: { in: [...ACTIVE_PAGE_STATUSES] },
+        status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
         currentRevisionId: { not: null },
       },
       select: { id: true, currentRevisionId: true },

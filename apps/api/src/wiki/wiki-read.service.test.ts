@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMarkup, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
+import { PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
 import type { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import type { WikiPermissionService } from './wiki-permission.service';
@@ -19,7 +20,7 @@ import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
 
 test('public pagecount filters revisions, ACLs, and namespaces without request-specific address context', async () => {
   const pages = [
-    { id: 1n, namespaceId: 1, spaceId: 10n, title: '공개', protectionLevel: 'open', status: 'normal', currentRevisionId: 11n },
+    { id: 1n, namespaceId: 1, spaceId: 10n, title: '보호된 공개 문서', protectionLevel: 'official_only', status: 'protected', currentRevisionId: 11n },
     { id: 2n, namespaceId: 1, spaceId: 10n, title: '비공개 리비전', protectionLevel: 'open', status: 'normal', currentRevisionId: 12n },
     { id: 3n, namespaceId: 1, spaceId: 10n, title: 'ACL 차단', protectionLevel: 'open', status: 'normal', currentRevisionId: 13n },
     { id: 4n, namespaceId: 1, spaceId: 10n, title: '교차 연결', protectionLevel: 'open', status: 'normal', currentRevisionId: 14n }
@@ -54,7 +55,7 @@ test('public pagecount filters revisions, ACLs, and namespaces without request-s
   assert.deepEqual(pageQueries, [{
     where: {
       namespaceId: 1,
-      status: { in: ['normal', 'active', 'published'] },
+      status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
       currentRevisionId: { not: null }
     },
     orderBy: { id: 'asc' },
@@ -490,6 +491,7 @@ test('server wiki search resolves the slug to a mandatory tenant space filter', 
   assert.equal(rawQueries.length, 1);
   assert.match(rawQueries[0]!.sql, /p\.namespace_id = \?/u);
   assert.match(rawQueries[0]!.sql, /p\.space_id = \?/u);
+  assert.match(rawQueries[0]!.sql, /p\.status IN \('normal', 'active', 'published', 'protected'\)/u);
   assert.equal(rawQueries[0]!.values.includes(7), true);
   assert.equal(rawQueries[0]!.values.includes(5643n), true);
 });
@@ -649,7 +651,7 @@ test('wiki suggestions rank exact and prefix title matches without reading docum
   const now = new Date('2026-07-14T00:00:00Z');
   const pages = [
     { id: 2n, namespaceId: 1, spaceId: 1n, localPath: '대문 안내', slug: '대문 안내', title: '대문 안내', displayTitle: '대문 안내', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now },
-    { id: 1n, namespaceId: 1, spaceId: 1n, localPath: '대문', slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: new Date('2025-01-01T00:00:00Z') },
+    { id: 1n, namespaceId: 1, spaceId: 1n, localPath: '대문', slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 11n, pageType: 'article', protectionLevel: 'official_only', status: 'protected', createdBy: 1n, createdAt: now, updatedAt: new Date('2025-01-01T00:00:00Z') },
     { id: 3n, namespaceId: 2, spaceId: 2n, localPath: '대문', slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 13n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now }
   ];
   let pageQuery: unknown;
@@ -667,6 +669,7 @@ test('wiki suggestions rank exact and prefix title matches without reading docum
   assert.equal(result.exactMatch?.pageId, '1');
   assert.deepEqual(result.items.map((item) => item.pageId), ['1', '3', '2']);
   assert.equal(JSON.stringify(pageQuery).includes('contentRaw'), false);
+  assert.deepEqual((pageQuery as { where: { status: { in: string[] } } }).where.status.in, [...PUBLIC_WIKI_PAGE_STATUSES]);
 });
 
 test('revision history uses a stable revision number cursor beyond the first page', async () => {
@@ -862,7 +865,7 @@ test('special long documents are sorted by current public source size', async ()
   const now = new Date('2026-07-13T00:00:00Z');
   const pages = [
     { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'short', slug: 'short', title: '짧음', displayTitle: '짧음', currentRevisionId: 11n, currentContentSize: 5, currentCategoryCount: 0, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now },
-    { id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'long', slug: 'long', title: '김', displayTitle: '김', currentRevisionId: 12n, currentContentSize: 500, currentCategoryCount: 0, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now }
+    { id: 2n, namespaceId: 1, spaceId: 1n, localPath: 'long', slug: 'long', title: '김', displayTitle: '김', currentRevisionId: 12n, currentContentSize: 500, currentCategoryCount: 0, pageType: 'article', protectionLevel: 'official_only', status: 'protected', createdBy: 1n, createdAt: now, updatedAt: now }
   ];
   let pageQuery: unknown;
   const prisma = {
@@ -875,6 +878,7 @@ test('special long documents are sorted by current public source size', async ()
   assert.deepEqual(result.items.map((item) => [item.pageId, item.value]), [['2', 500], ['1', 5]]);
   assert.deepEqual((pageQuery as { orderBy: unknown }).orderBy, [{ currentContentSize: 'desc' }, { id: 'desc' }]);
   assert.equal((pageQuery as { take: number }).take, 250);
+  assert.deepEqual((pageQuery as { where: { status: { in: string[] } } }).where.status.in, [...PUBLIC_WIKI_PAGE_STATUSES]);
   assert.equal(JSON.stringify(pageQuery).includes('contentRaw'), false);
 });
 
@@ -1212,7 +1216,7 @@ test('backlinks use deterministic title cursors in both directions and bind them
 
 test('category membership exposes only current readable documents', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
-  const current = { id: 20n, namespaceId: 1, spaceId: 1n, slug: '가이드', title: '가이드', displayTitle: '가이드', currentRevisionId: 200n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now, localPath: '가이드' };
+  const current = { id: 20n, namespaceId: 1, spaceId: 1n, slug: '가이드', title: '가이드', displayTitle: '가이드', currentRevisionId: 200n, pageType: 'article', protectionLevel: 'official_only', status: 'protected', createdBy: 1n, createdAt: now, updatedAt: now, localPath: '가이드' };
   const stale = { ...current, id: 30n, slug: '과거', title: '과거', displayTitle: '과거', currentRevisionId: 301n };
   const hidden = { ...current, id: 40n, slug: '비공개', title: '비공개', displayTitle: '비공개', currentRevisionId: 400n };
   const prisma = {
@@ -1228,7 +1232,10 @@ test('category membership exposes only current readable documents', async () => 
     },
     wikiPage: {
       async findUnique() { return null; },
-      async findMany() { return [current, stale, hidden]; }
+      async findMany(args: { where: { status: { in: string[] } } }) {
+        assert.deepEqual(args.where.status.in, [...PUBLIC_WIKI_PAGE_STATUSES]);
+        return [current, stale, hidden];
+      }
     },
     wikiNamespace: {
       async findUnique() { return { id: 2, code: 'category' }; },

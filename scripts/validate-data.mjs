@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { PrismaClient } = require('@prisma/client');
+const { PUBLIC_WIKI_PAGE_STATUS_SQL_LIST } = require('../packages/wiki-core/page-status.js');
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -105,7 +106,7 @@ async function runValidation() {
       LEFT JOIN wiki_search_documents sd
         ON sd.page_id = p.id
        AND sd.revision_id = p.current_revision_id
-      WHERE p.status IN ('normal', 'active', 'published')
+      WHERE p.status IN (${PUBLIC_WIKI_PAGE_STATUS_SQL_LIST})
         AND r.visibility = 'public'
         AND sd.page_id IS NULL
       LIMIT ${args.sampleLimit}

@@ -6,6 +6,10 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { PrismaClient } = require('@prisma/client');
 const { buildWikiSearchVector } = require('../packages/wiki-core/dist/index.js');
+const {
+  PUBLIC_WIKI_PAGE_STATUSES,
+  PUBLIC_WIKI_PAGE_STATUS_SQL_LIST,
+} = require('../packages/wiki-core/page-status.js');
 
 const prisma = new PrismaClient();
 const batchSize = 100;
@@ -17,7 +21,7 @@ try {
     const pages = await prisma.wikiPage.findMany({
       where: {
         currentRevisionId: { not: null },
-        status: { in: ['normal', 'active', 'published'] }
+        status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] }
       },
       select: {
         id: true,
@@ -73,7 +77,7 @@ try {
        OR r.id IS NULL
        OR r.page_id <> p.id
        OR p.current_revision_id <> sd.revision_id
-       OR p.status NOT IN ('normal', 'active', 'published')
+       OR p.status NOT IN (${PUBLIC_WIKI_PAGE_STATUS_SQL_LIST})
        OR r.visibility <> 'public'
   `);
   process.stdout.write(`Indexed ${indexedPages} current public wiki search documents.\n`);

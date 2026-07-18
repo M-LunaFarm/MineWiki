@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { isPublicWikiPageStatus } from '@minewiki/wiki-core/page-status';
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiAclService, type WikiAclAction, type WikiAclDecision, type WikiThreadAclAction } from './wiki-acl.service';
@@ -76,10 +77,6 @@ const EDITOR_ROLES = new Set(['owner', 'manager', 'editor', 'maintainer', 'trust
 const OWNER_ROLES = new Set(['owner', 'manager', 'maintainer']);
 const REVIEWER_ROLES = new Set(['reviewer']);
 const PUBLICATION_PREVIEW_ROLES = new Set([...EDITOR_ROLES, ...REVIEWER_ROLES]);
-// `protected` is a published document state. Mutation authority is enforced
-// independently through protectionLevel and ACLs, so hiding these pages would
-// turn edit protection into an unintended public-read outage.
-const PUBLIC_PAGE_STATUSES = new Set(['normal', 'active', 'published', 'protected']);
 const PUBLIC_REVISION_VISIBILITIES = new Set(['public']);
 const ACTIVE_SPACE_STATUSES = new Set(['active']);
 const ACTIVE_PROFILE_STATUSES = new Set(['active']);
@@ -176,7 +173,7 @@ export class WikiPermissionService {
     const normalCandidates = input.pages.filter((page) =>
       activeSpaceIds.has(page.spaceId) &&
       isPublicSpace(page.spaceId) &&
-      PUBLIC_PAGE_STATUSES.has(page.status) &&
+      isPublicWikiPageStatus(page.status) &&
       PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)
     );
     const aclDecisions = this.wikiAcl
@@ -201,7 +198,7 @@ export class WikiPermissionService {
       .map((page) => page.id));
     const unusual = input.pages.filter((page) =>
       activeSpaceIds.has(page.spaceId) &&
-      PUBLIC_PAGE_STATUSES.has(page.status) &&
+      isPublicWikiPageStatus(page.status) &&
       (!PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel) || !isPublicSpace(page.spaceId))
     );
     for (const page of unusual) {
@@ -316,7 +313,7 @@ export class WikiPermissionService {
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) {
       return deny('space_not_active');
     }
-    if (!PUBLIC_PAGE_STATUSES.has(page.status)) {
+    if (!isPublicWikiPageStatus(page.status)) {
       return deny('page_not_public');
     }
     if (input.revision && !PUBLIC_REVISION_VISIBILITIES.has(input.revision.visibility)) {
@@ -379,7 +376,7 @@ export class WikiPermissionService {
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) {
       return deny('space_not_active');
     }
-    if (!PUBLIC_PAGE_STATUSES.has(page.status)) {
+    if (!isPublicWikiPageStatus(page.status)) {
       return deny('page_not_editable');
     }
     const protectionLevel = page.protectionLevel || 'open';
@@ -949,7 +946,7 @@ export class WikiPermissionService {
     const { actor, page } = input;
     if (!actor) return deny('actor_required');
     if (!ACTIVE_PROFILE_STATUSES.has(actor.status)) return deny('actor_not_active');
-    if (!page || !PUBLIC_PAGE_STATUSES.has(page.status)) return deny('page_not_manageable');
+    if (!page || !isPublicWikiPageStatus(page.status)) return deny('page_not_manageable');
     const space = await store.wikiSpace.findUnique({
       where: { id: page.spaceId },
       select: { id: true, status: true }

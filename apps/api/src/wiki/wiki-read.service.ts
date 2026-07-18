@@ -15,6 +15,7 @@ import {
   wikiUrl,
   WIKI_RENDERER_VERSION
 } from '@minewiki/wiki-core';
+import { PUBLIC_WIKI_PAGE_STATUSES, PUBLIC_WIKI_PAGE_STATUS_SQL_LIST } from '@minewiki/wiki-core/page-status';
 import { PrismaService } from '../common/prisma.service';
 import { fileReadDecision } from '../file/file-permission.service';
 import type { SessionPayload } from '../session/session.service';
@@ -502,7 +503,7 @@ export class WikiReadService {
         where: {
           ...(cursor !== null ? { id: { gt: cursor } } : {}),
           ...(namespaceId !== undefined ? { namespaceId } : {}),
-          status: { in: ['normal', 'active', 'published'] },
+          status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
           currentRevisionId: { not: null }
         },
         orderBy: { id: 'asc' },
@@ -1094,7 +1095,7 @@ export class WikiReadService {
           where: {
             id: { in: childPageIds },
             namespaceId: categoryNamespace.id,
-            status: { in: ['normal', 'active', 'published'] },
+            status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
             pageType: { not: 'redirect' }
           }
         })
@@ -1144,7 +1145,7 @@ export class WikiReadService {
               : categoryNamespace
                 ? { namespaceId: { not: categoryNamespace.id } }
                 : {}),
-            status: { in: ['normal', 'active', 'published'] },
+            status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
             pageType: { not: 'redirect' }
           }
         })
@@ -1861,7 +1862,7 @@ export class WikiReadService {
     const scanBudget = Math.min(Math.max(limit * 5, 50), 500);
     const where = {
       namespaceId,
-      status: { in: ['normal', 'active', 'published'] },
+      status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
       pageType: { not: 'redirect' },
       currentRevisionId: { not: null },
       ...(type === 'uncategorized' ? { currentCategoryCount: 0 } : {})
@@ -2154,7 +2155,7 @@ export class WikiReadService {
     const slug = slugifyTitle(query);
     const pages = await this.prisma.wikiPage.findMany({
       where: {
-        status: { in: ['normal', 'active', 'published'] },
+        status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
         pageType: { not: 'redirect' },
         currentRevisionId: { not: null },
         OR: [
@@ -2780,7 +2781,7 @@ async function findCurrentSearchMatchIds(
   const booleanQuery = buildWikiSearchBooleanQuery(input.query);
   if (!booleanQuery) return [];
   const where = [
-    "p.status IN ('normal', 'active', 'published')",
+    `p.status IN (${PUBLIC_WIKI_PAGE_STATUS_SQL_LIST})`,
     "r.visibility = 'public'",
     'MATCH(sd.search_vector) AGAINST (? IN BOOLEAN MODE)'
   ];

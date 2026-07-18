@@ -6,7 +6,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./page-status": {
+      "types": "./page-status.d.ts",
+      "default": "./page-status.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
