@@ -607,6 +607,95 @@ test('released server wiki search matches only the snapshotted revision', async 
   assert.equal(result.items[0]?.routePath, '/serverWiki/luna-docs/guide');
 });
 
+test('global search and suggestions project server wikis from the active release unless the viewer can preview', async () => {
+  const now = new Date('2026-07-19T03:00:00.000Z');
+  const draftPage = {
+    id: 30n,
+    namespaceId: 7,
+    spaceId: 40n,
+    localPath: 'luna/draft-guide',
+    slug: 'luna/draft-guide',
+    title: 'luna/draft-guide',
+    displayTitle: '초안 가이드',
+    currentRevisionId: 21n,
+    pageType: 'article',
+    protectionLevel: 'open',
+    status: 'normal',
+    createdBy: 10n,
+    ownerProfileId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const releaseItem = {
+    id: 80n,
+    releaseId: 70n,
+    serverWikiId: 50n,
+    spaceId: 40n,
+    namespaceId: 7,
+    pageId: 30n,
+    revisionId: 20n,
+    localPath: 'luna/public-guide',
+    slug: 'luna/public-guide',
+    title: 'luna/public-guide',
+    displayTitle: '공개 가이드',
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 10n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-18T03:00:00.000Z'),
+    searchVector: '공개 가이드 released-only-command',
+    createdAt: new Date('2026-07-18T03:00:00.000Z'),
+    release: { serverWiki: { slug: 'luna', siteSlug: 'luna-docs' } },
+  };
+  let preview = false;
+  const prisma = {
+    async $queryRawUnsafe(sql: string) {
+      return sql.includes('server_wiki_release_items AS i') ? [{ id: releaseItem.id }] : [{ id: draftPage.id }];
+    },
+    wikiNamespace: {
+      async findUnique() { return { id: 7, code: 'server' }; },
+      async findMany() { return [{ id: 7, code: 'server' }]; },
+    },
+    wikiPage: { async findMany() { return [draftPage]; } },
+    wikiPageRevision: {
+      async findMany() {
+        return [
+          { id: 20n, pageId: 30n, contentRaw: '공개 본문 released-only-command' },
+          { id: 21n, pageId: 30n, contentRaw: '비공개 초안 draft-only-secret' },
+        ];
+      },
+    },
+    serverWikiReleaseItem: { async findMany() { return [releaseItem]; } },
+    serverWiki: {
+      async findMany() { return [{ spaceId: 40n, slug: 'luna', siteSlug: 'luna-docs' }]; },
+    },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return preview; },
+    async filterReadablePages({ pages }: { pages: unknown[] }) { return pages; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const hiddenDraft = await service.search({ q: 'draft-only-secret' });
+  const publicRelease = await service.search({ q: 'released-only-command' });
+  const publicSuggestions = await service.suggest({ q: '가이드' });
+
+  assert.deepEqual(hiddenDraft.items, []);
+  assert.deepEqual(publicRelease.items.map((item) => item.displayTitle), ['공개 가이드']);
+  assert.equal(publicRelease.items[0]?.routePath, '/serverWiki/luna-docs/public-guide');
+  assert.deepEqual(publicSuggestions.items.map((item) => item.displayTitle), ['공개 가이드']);
+
+  preview = true;
+  const visibleDraft = await service.search({ q: 'draft-only-secret' });
+  const hiddenOldRelease = await service.search({ q: 'released-only-command' });
+  const previewSuggestions = await service.suggest({ q: '가이드' });
+
+  assert.deepEqual(visibleDraft.items.map((item) => item.displayTitle), ['초안 가이드']);
+  assert.deepEqual(hiddenOldRelease.items, []);
+  assert.deepEqual(previewSuggestions.items.map((item) => item.displayTitle), ['초안 가이드']);
+});
+
 test('wiki search batches current revisions and returns a continuation cursor', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const pages = Array.from({ length: 6 }, (_, index) => ({
@@ -643,9 +732,8 @@ test('wiki search batches current revisions and returns a continuation cursor', 
   } as unknown as WikiPermissionService;
   const result = await new WikiReadService(prisma, permissions).search({ q: '검색', limit: 2 });
   assert.equal(currentSearchQueryCount, 1);
-  assert.equal(revisionQueryCount, 2);
-  assert.equal(JSON.stringify(revisionSelects[0]).includes('contentRaw'), false);
-  assert.equal(JSON.stringify(revisionSelects[1]).includes('contentRaw'), true);
+  assert.equal(revisionQueryCount, 1);
+  assert.equal(JSON.stringify(revisionSelects[0]).includes('contentRaw'), true);
   assert.equal(result.items.length, 2);
   assert.deepEqual(result.items[0]?.highlights.title, [[0, 2]]);
   assert.deepEqual(result.items[0]?.highlights.snippet, [[3, 2]]);
@@ -676,7 +764,10 @@ test('wiki search target filters distinguish title and body matches', async () =
       return pages.map((page) => ({ id: page.id }));
     },
     wikiPage: { async findMany() { return pages; } },
-    wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }]; } },
+    wikiNamespace: {
+      async findUnique() { return null; },
+      async findMany() { return [{ id: 1, code: 'main' }]; }
+    },
     wikiPageRevision: {
       async findMany(input: { select?: { contentRaw?: boolean } }) {
         return input.select?.contentRaw
@@ -768,11 +859,12 @@ test('wiki suggestions rank exact and prefix title matches without reading docum
   let pageQuery: unknown;
   const prisma = {
     wikiPage: { async findMany(args: unknown) { pageQuery = args; return pages; } },
+    serverWikiReleaseItem: { async findMany() { return []; } },
     wikiNamespace: { async findMany() { return [{ id: 1, code: 'main' }, { id: 2, code: 'help' }]; } }
   } as unknown as PrismaService;
   const permissions = {
-    async assertCanReadPage() {},
-    async filterReadableThreads({ items }: { items: unknown[] }) { return items; }
+    async filterReadablePages({ pages: candidates }: { pages: typeof pages }) { return [...candidates]; },
+    async canPreviewServerWikiSpace() { return false; }
   } as unknown as WikiPermissionService;
 
   const result = await new WikiReadService(prisma, permissions).suggest({ q: '대문', limit: 8 });

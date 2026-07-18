@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { isPublicWikiPageStatus } from '@minewiki/wiki-core/page-status';
-import { hashContent } from '@minewiki/wiki-core';
+import { buildWikiSearchVector, hashContent } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
 import { writeAuditRecord } from '../events/audit-event-writer';
@@ -441,10 +441,11 @@ export class ServerWikiPublicationService {
     const revisions = revisionIds.length > 0
       ? await tx.wikiPageRevision.findMany({
           where: { id: { in: revisionIds }, visibility: 'public' },
-          select: { id: true, pageId: true },
+          select: { id: true, pageId: true, contentRaw: true },
         })
       : [];
     const revisionKeys = new Set(revisions.map((revision) => `${revision.pageId}:${revision.id}`));
+    const revisionByKey = new Map(revisions.map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
     const releasedPages = pages.filter((page) => page.currentRevisionId !== null
       && revisionKeys.has(`${page.id}:${page.currentRevisionId}`));
     if (releasedPages.length === 0 || releasedPages.some((page) => page.spaceId !== context.spaceId)) {
@@ -480,6 +481,13 @@ export class ServerWikiPublicationService {
         createdBy: page.createdBy,
         ownerProfileId: page.ownerProfileId,
         pageUpdatedAt: page.updatedAt,
+        searchVector: buildWikiSearchVector([
+          page.title,
+          page.displayTitle,
+          page.slug,
+          page.localPath,
+          revisionByKey.get(`${page.id}:${page.currentRevisionId}`)?.contentRaw ?? '',
+        ]),
         createdAt: now,
       })),
     });

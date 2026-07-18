@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { hashContent } from '@minewiki/wiki-core';
+import { buildWikiSearchVector, hashContent } from '@minewiki/wiki-core';
 import { ServerWikiPublicationService } from './server-wiki-publication.service';
 import { buildServerWikiMainPage, buildServerWikiStarterPages } from './server-wiki-scaffold';
 
@@ -113,6 +113,7 @@ function createFixture(options: FixtureOptions = {}) {
     id: BigInt(200 + index),
     pageId: BigInt(100 + index),
     visibility: index === 0 ? options.rootVisibility ?? 'public' : 'public',
+    contentRaw: document.contentRaw,
     contentHash: hashContent(document.contentRaw),
   }));
   const audits: Array<Record<string, unknown>> = [];
@@ -274,6 +275,9 @@ test('owner publishes a ready draft atomically with version, timestamps, and an 
   assert.ok(result.release?.id);
   assert.equal(fixture.releaseItems.length, 4);
   assert.ok(fixture.releaseItems.every((item) => item.releaseId === BigInt(result.release!.id)));
+  assert.ok(fixture.releaseItems.every((item) => typeof item.searchVector === 'string' && item.searchVector.length > 0));
+  assert.ok(buildWikiSearchVector(['owner-provided']).split(' ')
+    .every((term) => String(fixture.releaseItems[0]?.searchVector).split(' ').includes(term)));
   assert.deepEqual(fixture.isolationLevels, [Prisma.TransactionIsolationLevel.Serializable]);
   assert.ok(fixture.lockQueries.some((query) => query.includes('server_wikis')));
   assert.equal(fixture.audits.length, 1);

@@ -2022,6 +2022,7 @@ model ServerWikiReleaseItem {
   createdBy       BigInt?  @map("created_by") @db.UnsignedBigInt
   ownerProfileId  BigInt?  @map("owner_profile_id") @db.UnsignedBigInt
   pageUpdatedAt   DateTime @map("page_updated_at") @db.DateTime(3)
+  searchVector    String   @map("search_vector") @db.LongText
   createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
 
   release  ServerWikiRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
@@ -2033,6 +2034,7 @@ model ServerWikiReleaseItem {
   @@index([serverWikiId, releaseId], map: "idx_server_wiki_release_item_wiki")
   @@index([spaceId, releaseId], map: "idx_server_wiki_release_item_space")
   @@index([revisionId, pageId], map: "idx_server_wiki_release_item_revision")
+  @@fulltext([searchVector], map: "idx_server_wiki_release_items_search")
   @@map("server_wiki_release_items")
 }
 

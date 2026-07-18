@@ -2548,13 +2548,13 @@ export class WikiReadService {
     if (namespaceCode && !namespace) {
       return { items: [], nextCursor: null };
     }
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.viewer ?? input.accountId ?? null,
+    );
 
     if (releasedSearchWiki && namespace) {
-      const access = await resolveWikiAccessContext(
-        this.prisma,
-        this.wikiPermissions,
-        input.viewer ?? input.accountId ?? null,
-      );
       const canPreview = await this.wikiPermissions.canPreviewServerWikiSpace({
         ...access,
         spaceId: releasedSearchWiki.spaceId,
@@ -2577,59 +2577,110 @@ export class WikiReadService {
     }
 
     const scanLimit = Math.max(limit * 4, 50);
-    const currentMatchIds = await findCurrentSearchMatchIds(this.prisma, {
-      query,
-      namespaceId: namespace?.id ?? null,
-      spaceId: spaceId ?? null,
-      cursor,
-      limit: scanLimit + 1
-    });
-    const hasCandidateSentinel = currentMatchIds.length > scanLimit;
+    const serverNamespace = namespaceCode === 'server' && namespace
+      ? namespace
+      : !namespaceCode
+        ? await this.prisma.wikiNamespace.findUnique({ where: { code: 'server' } })
+        : null;
+    const [currentMatchIds, releasedMatchIds] = await Promise.all([
+      findCurrentSearchMatchIds(this.prisma, {
+        query,
+        namespaceId: namespace?.id ?? null,
+        spaceId: spaceId ?? null,
+        cursor,
+        limit: scanLimit + 1,
+      }),
+      serverNamespace && spaceId === undefined && !releasedSearchWiki
+        ? findReleasedServerWikiSearchMatchIds(this.prisma, {
+            query,
+            namespaceId: serverNamespace.id,
+            cursor,
+            limit: scanLimit + 1,
+          })
+        : Promise.resolve([]),
+    ]);
+    const hasCandidateSentinel = currentMatchIds.length > scanLimit || releasedMatchIds.length > scanLimit;
     const candidateIds = currentMatchIds.slice(0, scanLimit);
+    const releaseCandidateIds = releasedMatchIds.slice(0, scanLimit);
     const unorderedPages = candidateIds.length > 0
       ? await this.prisma.wikiPage.findMany({ where: { id: { in: candidateIds } } })
+      : [];
+    const unorderedReleaseItems = releaseCandidateIds.length > 0
+      ? await this.prisma.serverWikiReleaseItem.findMany({
+          where: { id: { in: releaseCandidateIds } },
+          include: { release: { select: { serverWiki: { select: { slug: true, siteSlug: true } } } } },
+        })
       : [];
     const pageById = new Map(unorderedPages.map((page) => [page.id, page]));
     const pages = candidateIds.flatMap((id) => {
       const page = pageById.get(id);
       return page && (spaceId === undefined || page.spaceId === spaceId) ? [page] : [];
     });
-    const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
-    const revisionVisibility = currentRevisionIds.length > 0
+    const releaseItemById = new Map(unorderedReleaseItems.map((item) => [item.id, item]));
+    const releaseItems = releaseCandidateIds.flatMap((id) => {
+      const item = releaseItemById.get(id);
+      return item ? [item] : [];
+    });
+    const serverSpaceIds = [...new Set([
+      ...pages.filter((page) => page.namespaceId === serverNamespace?.id).map((page) => page.spaceId),
+      ...releaseItems.map((item) => item.spaceId),
+    ])];
+    const previewSpaceIds = new Set<bigint>();
+    for (const candidateSpaceId of serverSpaceIds) {
+      if (await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: candidateSpaceId })) {
+        previewSpaceIds.add(candidateSpaceId);
+      }
+    }
+    const currentPages = pages.filter((page) =>
+      page.namespaceId !== serverNamespace?.id || previewSpaceIds.has(page.spaceId));
+    const publicReleaseItems = releaseItems.filter((item) => !previewSpaceIds.has(item.spaceId));
+    const revisionIds = [
+      ...currentPages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []),
+      ...publicReleaseItems.map((item) => item.revisionId),
+    ];
+    const revisions = revisionIds.length > 0
       ? await this.prisma.wikiPageRevision.findMany({
-          where: {
-            id: { in: currentRevisionIds },
-            visibility: 'public'
-          },
-          select: { id: true, pageId: true, visibility: true }
+          where: { id: { in: revisionIds }, visibility: 'public' },
+          select: { id: true, pageId: true, contentRaw: true },
         })
       : [];
-    const publicRevisionKeys = new Set(revisionVisibility.map((revision) => `${revision.pageId}:${revision.id}`));
-    let publicPages = pages.filter((page) => page.currentRevisionId && publicRevisionKeys.has(`${page.id}:${page.currentRevisionId}`));
-    if (target === 'title') {
-      publicPages = publicPages.filter((page) => wikiSearchTextMatches(
-        [page.title, page.displayTitle, page.slug, page.localPath].join(' '),
-        query
-      ));
-    } else if (target === 'content' && publicPages.length > 0) {
-      const candidateRevisionIds = publicPages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
-      const candidateRevisions = await this.prisma.wikiPageRevision.findMany({
-        where: { id: { in: candidateRevisionIds }, visibility: 'public' },
-        select: { id: true, pageId: true, contentRaw: true }
-      });
-      const matchingRevisionIds = new Set(candidateRevisions
-        .filter((revision) => wikiSearchTextMatches(revision.contentRaw, query))
-        .map((revision) => `${revision.pageId}:${revision.id}`));
-      publicPages = publicPages.filter((page) => page.currentRevisionId && matchingRevisionIds.has(`${page.id}:${page.currentRevisionId}`));
-    }
-    const access = await resolveWikiAccessContext(
-      this.prisma,
-      this.wikiPermissions,
-      input.viewer ?? input.accountId ?? null
-    );
-    const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
-    const resultPages = readablePages.slice(0, limit);
-    const namespaceIds = [...new Set(resultPages.map((page) => page.namespaceId))];
+    const revisionByKey = new Map(revisions.map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
+    const matchesTarget = (identity: { title: string; displayTitle: string; slug: string; localPath: string }, contentRaw: string) => {
+      const titleMatch = wikiSearchTextMatches(
+        [identity.title, identity.displayTitle, identity.slug, identity.localPath].join(' '),
+        query,
+      );
+      const contentMatch = wikiSearchTextMatches(contentRaw, query);
+      return target === 'title' ? titleMatch : target === 'content' ? contentMatch : titleMatch || contentMatch;
+    };
+    const currentCandidates = currentPages.flatMap((page) => {
+      const revision = page.currentRevisionId ? revisionByKey.get(`${page.id}:${page.currentRevisionId}`) : null;
+      return revision && matchesTarget(page, revision.contentRaw) ? [{ kind: 'current' as const, page, revision }] : [];
+    });
+    const releaseCandidates = publicReleaseItems.flatMap((item) => {
+      const revision = revisionByKey.get(`${item.pageId}:${item.revisionId}`);
+      return revision && matchesTarget(item, revision.contentRaw)
+        ? [{ kind: 'release' as const, page: pageFromServerWikiReleaseItem(item), revision, item }]
+        : [];
+    });
+    const readableCurrent = await this.wikiPermissions.filterReadablePages({
+      ...access,
+      pages: currentCandidates.map((candidate) => candidate.page),
+    });
+    const readableReleased = await this.wikiPermissions.filterReadablePages({
+      ...access,
+      pages: releaseCandidates.map((candidate) => candidate.page),
+    });
+    const readableCurrentIds = new Set(readableCurrent.map((page) => page.id));
+    const readableReleasedIds = new Set(readableReleased.map((page) => page.id));
+    const projections = [...currentCandidates, ...releaseCandidates]
+      .sort((left, right) => right.page.updatedAt.getTime() - left.page.updatedAt.getTime()
+        || (right.page.id > left.page.id ? 1 : right.page.id < left.page.id ? -1 : 0));
+    const readableProjections = projections.filter((projection) => projection.kind === 'current'
+      ? readableCurrentIds.has(projection.page.id)
+      : readableReleasedIds.has(projection.page.id));
+    const resultProjections = readableProjections.slice(0, limit);
+    const namespaceIds = [...new Set(resultProjections.map((projection) => projection.page.namespaceId))];
     const namespaces = namespaceIds.length > 0
       ? await this.prisma.wikiNamespace.findMany({
           where: { id: { in: namespaceIds } },
@@ -2637,19 +2688,13 @@ export class WikiReadService {
         })
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
-    const routePaths = await this.routePaths.preload(resultPages, namespaceById);
-    const resultRevisionIds = resultPages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
-    const revisions = resultRevisionIds.length > 0
-      ? await this.prisma.wikiPageRevision.findMany({
-          where: { id: { in: resultRevisionIds }, visibility: 'public' },
-          select: { id: true, pageId: true, contentRaw: true }
-        })
-      : [];
-    const revisionByPage = new Map(revisions.map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
+    const currentResultPages = resultProjections
+      .filter((projection) => projection.kind === 'current')
+      .map((projection) => projection.page);
+    const routePaths = await this.routePaths.preload(currentResultPages, namespaceById);
     const items: WikiSearchResult[] = [];
-    for (const page of resultPages) {
-      const revision = page.currentRevisionId ? revisionByPage.get(`${page.id}:${page.currentRevisionId}`) : null;
-      if (!revision) continue;
+    for (const projection of resultProjections) {
+      const { page, revision } = projection;
       const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
       const snippet = makeSearchSnippet(revision.contentRaw, query, page.displayTitle);
       items.push({
@@ -2657,7 +2702,14 @@ export class WikiReadService {
         namespace: namespaceCode,
         title: page.title,
         displayTitle: page.displayTitle,
-        routePath: routePaths.routePath(page, namespaceCode),
+        routePath: projection.kind === 'release'
+          ? buildCanonicalServerWikiPath(
+              projection.item.release.serverWiki.siteSlug ?? projection.item.release.serverWiki.slug,
+              page.title,
+              projection.item.release.serverWiki.slug,
+              '/serverWiki',
+            )
+          : routePaths.routePath(page, namespaceCode),
         snippet,
         highlights: {
           title: findSearchHighlights(page.displayTitle, query),
@@ -2666,13 +2718,15 @@ export class WikiReadService {
         updatedAt: page.updatedAt.toISOString()
       });
     }
-    const lastVisiblePage = resultPages.at(-1);
-    const lastScannedPage = pages.at(-1);
-    const hasMore = readablePages.length > limit || hasCandidateSentinel;
-    const cursorPage = readablePages.length > limit ? lastVisiblePage : lastScannedPage;
+    const lastVisible = resultProjections.at(-1);
+    const lastScanned = projections.at(-1);
+    const hasMore = readableProjections.length > limit || hasCandidateSentinel;
+    const cursorProjection = readableProjections.length > limit ? lastVisible : lastScanned;
     return {
       items,
-      nextCursor: hasMore && cursorPage ? encodeWikiSearchCursor(cursorPage.updatedAt, cursorPage.id) : null
+      nextCursor: hasMore && cursorProjection
+        ? encodeWikiSearchCursor(cursorProjection.page.updatedAt, cursorProjection.page.id)
+        : null,
     };
   }
 
@@ -2778,41 +2832,75 @@ export class WikiReadService {
     if (!query) return { items: [], exactMatch: null };
     const limit = Math.min(Math.max(Number(input.limit ?? 8) || 8, 1), 20);
     const slug = slugifyTitle(query);
-    const pages = await this.prisma.wikiPage.findMany({
-      where: {
-        status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
-        pageType: { not: 'redirect' },
-        currentRevisionId: { not: null },
-        OR: [
-          { title: { contains: query } },
-          { displayTitle: { contains: query } },
-          ...(slug ? [{ slug: { contains: slug } }, { localPath: { contains: slug } }] : [])
-        ]
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: 200
-    });
-    const namespaces = pages.length > 0
+    const [pages, releaseItems] = await Promise.all([
+      this.prisma.wikiPage.findMany({
+        where: {
+          status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
+          pageType: { not: 'redirect' },
+          currentRevisionId: { not: null },
+          OR: [
+            { title: { contains: query } },
+            { displayTitle: { contains: query } },
+            ...(slug ? [{ slug: { contains: slug } }, { localPath: { contains: slug } }] : []),
+          ],
+        },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take: 200,
+      }),
+      this.prisma.serverWikiReleaseItem.findMany({
+        where: {
+          release: {
+            publishedFor: { is: { status: 'active', publicationStatus: 'published' } },
+          },
+          OR: [
+            { title: { contains: query } },
+            { displayTitle: { contains: query } },
+            ...(slug ? [{ slug: { contains: slug } }, { localPath: { contains: slug } }] : []),
+          ],
+        },
+        include: { release: { select: { serverWiki: { select: { slug: true, siteSlug: true } } } } },
+        orderBy: [{ pageUpdatedAt: 'desc' }, { pageId: 'desc' }],
+        take: 200,
+      }),
+    ]);
+    const namespaces = pages.length > 0 || releaseItems.length > 0
       ? await this.prisma.wikiNamespace.findMany({
-          where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } },
-          select: { id: true, code: true }
+          where: { id: { in: [...new Set([...pages, ...releaseItems].map((page) => page.namespaceId))] } },
+          select: { id: true, code: true },
         })
       : [];
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    const routePaths = await this.routePaths.preload(pages, namespaceById);
     const access = await resolveWikiAccessContext(
       this.prisma,
       this.wikiPermissions,
-      input.viewer ?? input.accountId ?? null
+      input.viewer ?? input.accountId ?? null,
     );
+    const serverNamespaceId = namespaces.find((namespace) => namespace.code === 'server')?.id;
+    const serverSpaceIds = [...new Set([
+      ...pages.filter((page) => page.namespaceId === serverNamespaceId).map((page) => page.spaceId),
+      ...releaseItems.map((item) => item.spaceId),
+    ])];
+    const previewSpaceIds = new Set<bigint>();
+    for (const candidateSpaceId of serverSpaceIds) {
+      if (await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: candidateSpaceId })) {
+        previewSpaceIds.add(candidateSpaceId);
+      }
+    }
+    const currentPages = pages.filter((page) =>
+      page.namespaceId !== serverNamespaceId || previewSpaceIds.has(page.spaceId));
+    const publicReleaseItems = releaseItems.filter((item) => !previewSpaceIds.has(item.spaceId));
+    const releasePages = publicReleaseItems.map(pageFromServerWikiReleaseItem);
+    const [readableCurrent, readableReleased] = await Promise.all([
+      this.wikiPermissions.filterReadablePages({ ...access, pages: currentPages }),
+      this.wikiPermissions.filterReadablePages({ ...access, pages: releasePages }),
+    ]);
+    const readableCurrentIds = new Set(readableCurrent.map((page) => page.id));
+    const readableReleasedIds = new Set(readableReleased.map((page) => page.id));
+    const routePaths = await this.routePaths.preload(currentPages, namespaceById);
     const normalized = query.toLocaleLowerCase('ko-KR');
     const ranked: Array<{ score: number; exact: boolean; item: WikiSearchResult }> = [];
-    for (const page of pages) {
-      try {
-        await this.wikiPermissions.assertCanReadPage({ ...access, page });
-      } catch {
-        continue;
-      }
+    for (const page of currentPages) {
+      if (!readableCurrentIds.has(page.id)) continue;
       const candidates = [page.displayTitle, page.title, page.slug, page.localPath]
         .map((value) => value.toLocaleLowerCase('ko-KR'));
       const namespace = namespaceById.get(page.namespaceId) ?? 'main';
@@ -2828,6 +2916,28 @@ export class WikiReadService {
           highlights: { title: findSearchHighlights(page.displayTitle, query), snippet: [] },
           updatedAt: page.updatedAt.toISOString()
         }
+      });
+    }
+    for (const item of publicReleaseItems) {
+      if (!readableReleasedIds.has(item.pageId)) continue;
+      const candidates = [item.displayTitle, item.title, item.slug, item.localPath]
+        .map((value) => value.toLocaleLowerCase('ko-KR'));
+      const exact = candidates.some((value) => value === normalized);
+      const matchRank = exact ? 0 : candidates.some((value) => value.startsWith(normalized)) ? 2 : 4;
+      const siteSlug = item.release.serverWiki.siteSlug ?? item.release.serverWiki.slug;
+      ranked.push({
+        score: matchRank + 1,
+        exact,
+        item: {
+          pageId: item.pageId.toString(),
+          namespace: 'server',
+          title: item.title,
+          displayTitle: item.displayTitle,
+          routePath: buildCanonicalServerWikiPath(siteSlug, item.title, item.release.serverWiki.slug, '/serverWiki'),
+          snippet: '',
+          highlights: { title: findSearchHighlights(item.displayTitle, query), snippet: [] },
+          updatedAt: item.pageUpdatedAt.toISOString(),
+        },
       });
     }
     ranked.sort((left, right) => left.score - right.score || right.item.updatedAt.localeCompare(left.item.updatedAt) || left.item.pageId.localeCompare(right.item.pageId));
@@ -3557,6 +3667,44 @@ async function findCurrentSearchMatchIds(
       LIMIT ${limit}
     `,
     ...values
+  );
+  return rows.map((row) => BigInt(row.id));
+}
+
+async function findReleasedServerWikiSearchMatchIds(
+  prisma: PrismaService,
+  input: {
+    readonly query: string;
+    readonly namespaceId: number;
+    readonly cursor: { readonly updatedAt: Date; readonly id: bigint } | null;
+    readonly limit: number;
+  },
+): Promise<bigint[]> {
+  const booleanQuery = buildWikiSearchBooleanQuery(input.query);
+  if (!booleanQuery) return [];
+  const cursorSql = input.cursor
+    ? 'AND (i.page_updated_at < ? OR (i.page_updated_at = ? AND i.page_id < ?))'
+    : '';
+  const values: unknown[] = [input.namespaceId, booleanQuery];
+  if (input.cursor) values.push(input.cursor.updatedAt, input.cursor.updatedAt, input.cursor.id);
+  const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 201);
+  const rows = await prisma.$queryRawUnsafe<Array<{ id: bigint | number | string }>>(
+    `
+      SELECT i.id
+      FROM server_wiki_release_items AS i
+      INNER JOIN server_wikis AS sw
+        ON sw.published_release_id = i.release_id
+       AND sw.id = i.server_wiki_id
+       AND sw.space_id = i.space_id
+      WHERE sw.status = 'active'
+        AND sw.publication_status = 'published'
+        AND i.namespace_id = ?
+        AND MATCH(i.search_vector) AGAINST (? IN BOOLEAN MODE)
+        ${cursorSql}
+      ORDER BY i.page_updated_at DESC, i.page_id DESC
+      LIMIT ${limit}
+    `,
+    ...values,
   );
   return rows.map((row) => BigInt(row.id));
 }
