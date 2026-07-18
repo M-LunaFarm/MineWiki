@@ -105,7 +105,7 @@ test('server profile updates sync linked wiki identity and write a bounded audit
   });
 });
 
-test('server detail hides a stale cross-brand wiki link', async () => {
+test('server detail exposes only a canonical published wiki release', async () => {
   const now = new Date('2026-07-17T00:00:00.000Z');
   const server = {
     id: randomUUID(),
@@ -143,6 +143,12 @@ test('server detail hides a stale cross-brand wiki link', async () => {
     latencyMs: null,
     stats: null,
   };
+  let wikiState = {
+    serverName: 'Unrelated Brand',
+    host: 'play.unrelated.test',
+    publicationStatus: 'published',
+    publishedReleaseId: 70n as bigint | null,
+  };
   const prisma = {
     server: { async findUnique() { return server; } },
     serverClaimMethod: { async findMany() { return [{ method: 'plugin' }]; } },
@@ -154,8 +160,7 @@ test('server detail hides a stale cross-brand wiki link', async () => {
           spaceId: server.wikiSpaceId,
           slug: server.wikiSlug,
           status: 'active',
-          serverName: 'Unrelated Brand',
-          host: 'play.unrelated.test',
+          ...wikiState,
         };
       },
     },
@@ -169,6 +174,21 @@ test('server detail hides a stale cross-brand wiki link', async () => {
   assert.equal(detail.wikiSlug, null);
   assert.equal(detail.wikiUrl, null);
   assert.deepEqual(detail.verificationMethods, ['dns', 'motd']);
+
+  wikiState = {
+    serverName: server.name,
+    host: server.joinHost,
+    publicationStatus: 'unpublished',
+    publishedReleaseId: null,
+  };
+  const unpublished = await service.detail(server.id);
+  assert.equal(unpublished.wikiUrl, null);
+  assert.equal(unpublished.wikiSlug, null);
+
+  wikiState = { ...wikiState, publicationStatus: 'published', publishedReleaseId: 70n };
+  const published = await service.detail(server.id);
+  assert.equal(published.wikiUrl, '/serverWiki/foreign-docs');
+  assert.equal(published.wikiSlug, server.wikiSlug);
 });
 
 test('server wiki readiness points owners to the first incomplete factual document', async () => {

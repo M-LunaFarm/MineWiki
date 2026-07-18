@@ -281,7 +281,7 @@ export class ServerService {
         .map((method) => method.method)
         .filter(isSupportedClaimMethod)
         .filter((method, index, array) => array.indexOf(method) === index);
-      const hasPublicWiki = hasCanonicalServerWikiLink(server, serverWiki);
+      const hasPublicWiki = hasCanonicalPublishedServerWikiLink(server, serverWiki);
       const detail = {
         ...toDetail(
           hasPublicWiki
@@ -2591,6 +2591,15 @@ function hasCanonicalServerWikiLink(
     && serverWiki.spaceId === server.wikiSpaceId
     && !serverWikiIdentityConflicts(serverWiki, server),
   );
+}
+
+function hasCanonicalPublishedServerWikiLink(
+  server: { wikiSpaceId?: bigint | null; wikiSlug?: string | null; name: string; joinHost: string },
+  serverWiki: Pick<ServerWiki, 'spaceId' | 'slug' | 'status' | 'serverName' | 'host' | 'publicationStatus' | 'publishedReleaseId'> | null,
+): boolean {
+  return hasCanonicalServerWikiLink(server, serverWiki)
+    && serverWiki?.publicationStatus === 'published'
+    && serverWiki.publishedReleaseId !== null;
 }
 
 function emptyServerWikiReadiness(

@@ -183,10 +183,10 @@ if (!hasDatabase) {
       assert.equal(link.wikiUrl, `/serverWiki/${encodeURIComponent(link.wikiSlug ?? '')}`);
 
       const detail = await service.detail(server.id, account.id);
-      assert.equal(detail.wikiSpaceId, link.wikiSpaceId);
-      assert.equal(detail.wikiPageId, link.wikiPageId);
-      assert.equal(detail.wikiSlug, link.wikiSlug);
-      assert.equal(detail.wikiUrl, link.wikiUrl);
+      assert.equal(detail.wikiSpaceId, null);
+      assert.equal(detail.wikiPageId, null);
+      assert.equal(detail.wikiSlug, null);
+      assert.equal(detail.wikiUrl, null);
       const storedServer = await prisma.server.findUnique({ where: { id: server.id } });
       assert.equal(typeof storedServer?.wikiSpaceId, 'bigint');
       assert.equal(typeof storedServer?.wikiPageId, 'bigint');
