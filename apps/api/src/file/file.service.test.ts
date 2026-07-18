@@ -79,6 +79,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     linkedSpaceId?: string;
   }> = [];
   const deletedFileDocuments: string[] = [];
+  const fileVersions: Array<Record<string, unknown>> = [];
   let deleteAttempts = 0;
   const wikiPages = new Map<bigint, { id: bigint; status: string }>([
     [7n, { id: 7n, status: 'normal' }]
@@ -174,6 +175,12 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
         return next;
       }
     },
+    wikiFileVersion: {
+      async create({ data }: { data: Record<string, unknown> }) {
+        fileVersions.push(data);
+        return { id: BigInt(fileVersions.length), ...data };
+      }
+    },
     wikiPage: {
       async findUnique(args: { where: { id: bigint } }) {
         return wikiPages.get(args.where.id) ?? null;
@@ -224,7 +231,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     ) {
       if (options.failFileDocument) throw new Error('File document failed.');
       fileDocuments.push(request);
-      return { pageId: '99' };
+      return { pageId: '99', revisionId: '101', revisionNo: 1 };
     },
     async deleteFileDocumentAfterAuthorizedUpload(_session: unknown, filename: string) {
       deletedFileDocuments.push(filename);
@@ -236,13 +243,14 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     wikiPages,
     actionCalls,
     fileDocuments,
+    fileVersions,
     deletedFileDocuments,
     getDeleteAttempts: () => deleteAttempts
   };
 }
 
 test('file service stores canonical image metadata', async () => {
-  const { service, actionCalls, fileDocuments } = createService();
+  const { service, actionCalls, fileDocuments, fileVersions } = createService();
   const uploaded = await service.createImage('account-1', {
     data: 'data:image/png;base64,aW1hZ2U=',
     filename: 'wiki.png',
@@ -260,6 +268,15 @@ test('file service stores canonical image metadata', async () => {
   assert.equal(uploaded.ownerAccountId, 'account-1');
   assert.equal(uploaded.usageContext, 'wiki_editor');
   assert.equal(uploaded.visibility, 'restricted');
+  assert.deepEqual(fileVersions[0], {
+    filePageId: 99n,
+    pageRevisionId: 101n,
+    uploadedFileId: 'file-1',
+    versionNo: 1,
+    isCurrent: true,
+    createdByAccountId: 'account-1',
+    createdAt: new Date('2026-07-05T00:00:00.000Z'),
+  });
   assert.equal(uploaded.license, 'self-created');
   assert.equal(uploaded.sourceText, '업로더 직접 제작');
   assert.deepEqual(actionCalls, ['upload_file']);

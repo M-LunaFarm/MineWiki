@@ -1082,30 +1082,31 @@ model PluginServer {
 }
 
 model UploadedFile {
-  id                 String    @id @default(uuid()) @db.Char(36)
-  ownerAccountId     String?   @map("owner_account_id") @db.Char(36)
-  filename           String    @db.VarChar(255)
-  wikiFilename       String?   @unique(map: "uk_uploaded_files_wiki_filename") @map("wiki_filename") @db.VarChar(255)
-  originalName       String?   @map("original_name") @db.VarChar(255)
-  mimeType           String    @map("mime_type") @db.VarChar(128)
-  sizeBytes          Int       @map("size_bytes") @db.UnsignedInt
-  width              Int?      @db.UnsignedInt
-  height             Int?      @db.UnsignedInt
-  sha256             String    @db.Char(64)
-  storagePath        String    @map("storage_path") @db.VarChar(1024)
-  publicPath         String    @map("public_path") @db.VarChar(1024)
-  usageContext       String    @default("general") @map("usage_context") @db.VarChar(64)
-  visibility         String    @default("public") @db.VarChar(32)
-  license            String?   @db.VarChar(64)
-  sourceUrl          String?   @map("source_url") @db.VarChar(1024)
-  sourceText         String?   @map("source_text") @db.VarChar(255)
-  linkedResourceType String?   @map("linked_resource_type") @db.VarChar(64)
-  linkedResourceId   String?   @map("linked_resource_id") @db.VarChar(128)
-  status             String    @default("active") @db.VarChar(32)
-  deletedAt          DateTime? @map("deleted_at") @db.DateTime(3)
-  retainedUntil      DateTime? @map("retained_until") @db.DateTime(3)
-  createdAt          DateTime  @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt          DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  id                 String           @id @default(uuid()) @db.Char(36)
+  ownerAccountId     String?          @map("owner_account_id") @db.Char(36)
+  filename           String           @db.VarChar(255)
+  wikiFilename       String?          @unique(map: "uk_uploaded_files_wiki_filename") @map("wiki_filename") @db.VarChar(255)
+  originalName       String?          @map("original_name") @db.VarChar(255)
+  mimeType           String           @map("mime_type") @db.VarChar(128)
+  sizeBytes          Int              @map("size_bytes") @db.UnsignedInt
+  width              Int?             @db.UnsignedInt
+  height             Int?             @db.UnsignedInt
+  sha256             String           @db.Char(64)
+  storagePath        String           @map("storage_path") @db.VarChar(1024)
+  publicPath         String           @map("public_path") @db.VarChar(1024)
+  usageContext       String           @default("general") @map("usage_context") @db.VarChar(64)
+  visibility         String           @default("public") @db.VarChar(32)
+  license            String?          @db.VarChar(64)
+  sourceUrl          String?          @map("source_url") @db.VarChar(1024)
+  sourceText         String?          @map("source_text") @db.VarChar(255)
+  linkedResourceType String?          @map("linked_resource_type") @db.VarChar(64)
+  linkedResourceId   String?          @map("linked_resource_id") @db.VarChar(128)
+  status             String           @default("active") @db.VarChar(32)
+  deletedAt          DateTime?        @map("deleted_at") @db.DateTime(3)
+  retainedUntil      DateTime?        @map("retained_until") @db.DateTime(3)
+  createdAt          DateTime         @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.DateTime(3)
+  wikiFileVersion    WikiFileVersion?
 
   @@index([ownerAccountId])
   @@index([usageContext])
@@ -1115,6 +1116,23 @@ model UploadedFile {
   @@index([status])
   @@index([status, retainedUntil])
   @@map("uploaded_files")
+}
+
+model WikiFileVersion {
+  id                 BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  filePageId         BigInt   @map("file_page_id") @db.UnsignedBigInt
+  pageRevisionId     BigInt   @unique @map("page_revision_id") @db.UnsignedBigInt
+  uploadedFileId     String   @unique @map("uploaded_file_id") @db.Char(36)
+  versionNo          Int      @map("version_no") @db.UnsignedInt
+  isCurrent          Boolean  @default(false) @map("is_current")
+  createdByAccountId String?  @map("created_by_account_id") @db.Char(36)
+  createdAt          DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  uploadedFile UploadedFile @relation(fields: [uploadedFileId], references: [id], onDelete: Restrict)
+
+  @@unique([filePageId, versionNo])
+  @@index([filePageId, isCurrent])
+  @@map("wiki_file_versions")
 }
 
 model LunaGuild {

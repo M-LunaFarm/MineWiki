@@ -20,7 +20,8 @@ import type { SessionPayload } from '../session/session.service';
 import {
   FileService,
   type FileImageUploadResponse,
-  type FileMetadataResponse
+  type FileMetadataResponse,
+  type WikiFileVersionResponse,
 } from './file.service';
 
 @Controller('v1/files')
@@ -67,6 +68,15 @@ export class FileController {
   @UseGuards(OptionalSessionGuard)
   getFile(@Param('id') id: string, @Req() request: FastifyRequest): Promise<FileMetadataResponse> {
     return this.files.getFile(id, request.sessionPayload ?? null);
+  }
+
+  @Get(':id/versions')
+  @UseGuards(OptionalSessionGuard)
+  listWikiFileVersions(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<WikiFileVersionResponse[]> {
+    return this.files.listWikiFileVersions(id, request.sessionPayload ?? null);
   }
 
   @Get(':id/raw')

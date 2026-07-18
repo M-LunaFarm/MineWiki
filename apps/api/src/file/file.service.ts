@@ -67,6 +67,21 @@ export interface FileImageUploadResponse extends FileMetadataResponse {
   readonly url: string;
 }
 
+export interface WikiFileVersionResponse {
+  readonly id: string;
+  readonly fileId: string;
+  readonly pageId: string;
+  readonly pageRevisionId: string;
+  readonly versionNo: number;
+  readonly isCurrent: boolean;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly width: number | null;
+  readonly height: number | null;
+  readonly hash: string;
+  readonly createdAt: string;
+}
+
 export interface RawFileResponse {
   readonly buffer?: Buffer;
   readonly redirectUrl?: string;
@@ -209,16 +224,29 @@ export class FileService {
       }
       let documentCreated = false;
       try {
-        await this.wikiEdits.createFileDocumentAfterAuthorizedUpload(session, {
+        const document = await this.wikiEdits.createFileDocumentAfterAuthorizedUpload(session, {
           filename: created.wikiFilename!,
           ...(linkedResource!.type === 'wiki_page'
             ? { linkedPageId: linkedResource!.id }
             : { linkedSpaceId: linkedResource!.id })
         });
         documentCreated = true;
-        created = await this.prisma.uploadedFile.update({
-          where: { id: created.id },
-          data: { status: 'active' }
+        created = await this.prisma.$transaction(async (tx) => {
+          await tx.wikiFileVersion.create({
+            data: {
+              filePageId: BigInt(document.pageId),
+              pageRevisionId: BigInt(document.revisionId),
+              uploadedFileId: created.id,
+              versionNo: 1,
+              isCurrent: true,
+              createdByAccountId: accountId,
+              createdAt: created.createdAt,
+            },
+          });
+          return tx.uploadedFile.update({
+            where: { id: created.id },
+            data: { status: 'active' },
+          });
         });
       } catch (error) {
         if (documentCreated) {
@@ -259,6 +287,38 @@ export class FileService {
     const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
     await this.permissions.assertCanRead(file, session);
     return toFileMetadata(file);
+  }
+
+  async listWikiFileVersions(
+    id: string,
+    session?: SessionPayload | null,
+  ): Promise<WikiFileVersionResponse[]> {
+    const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
+    await this.permissions.assertCanRead(file, session);
+    const anchor = await this.prisma.wikiFileVersion.findUnique({
+      where: { uploadedFileId: file.id },
+      select: { filePageId: true },
+    });
+    if (!anchor) return [];
+    const versions = await this.prisma.wikiFileVersion.findMany({
+      where: { filePageId: anchor.filePageId },
+      orderBy: { versionNo: 'desc' },
+      include: { uploadedFile: true },
+    });
+    return versions.map((version) => ({
+      id: version.id.toString(),
+      fileId: version.uploadedFileId,
+      pageId: version.filePageId.toString(),
+      pageRevisionId: version.pageRevisionId.toString(),
+      versionNo: version.versionNo,
+      isCurrent: version.isCurrent,
+      mimeType: version.uploadedFile.mimeType,
+      size: version.uploadedFile.sizeBytes,
+      width: version.uploadedFile.width,
+      height: version.uploadedFile.height,
+      hash: version.uploadedFile.sha256,
+      createdAt: version.createdAt.toISOString(),
+    }));
   }
 
   async listFiles(input: {
