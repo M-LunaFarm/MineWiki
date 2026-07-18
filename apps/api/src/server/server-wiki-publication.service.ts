@@ -216,7 +216,11 @@ export class ServerWikiPublicationService {
           metadata: toAuditJson({
             serverId: context.serverId, serverWikiId: context.serverWikiId,
             candidateId: submission.id, candidateToken: submission.token,
-            candidateCounts: submission.candidate.counts, requiredApprovals, reason,
+            candidateCounts: submission.candidate.counts,
+            requiredApprovals: submission.candidate.requiredApprovals,
+            configuredRequiredApprovals: requiredApprovals,
+            reviewPolicy: requiredApprovals > 0 ? 'sticky_reviewer_history' : 'no_reviewer_configured',
+            reason,
           }),
         },
       });
@@ -1022,6 +1026,7 @@ function emptyReviewState(): ServerWikiReleaseReviewState {
   return {
     required: false,
     approved: false,
+    reviewerAvailable: false,
     canApprove: false,
     viewerApproved: false,
     approvals: [],

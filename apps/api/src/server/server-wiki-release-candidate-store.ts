@@ -90,6 +90,16 @@ export async function submitServerWikiReleaseCandidate(
   },
   snapshot: ReleaseCandidateSnapshot,
 ): Promise<StoredServerWikiReleaseCandidate> {
+  await store.$queryRaw<Array<{ id: bigint }>>`
+    SELECT id FROM server_wiki_release_candidates
+    WHERE server_wiki_id = ${input.serverWikiId} AND token = ${snapshot.candidate.token}
+    FOR UPDATE
+  `;
+  const existing = await store.serverWikiReleaseCandidate.findUnique({
+    where: { serverWikiId_token: { serverWikiId: input.serverWikiId, token: snapshot.candidate.token } },
+    select: { requiredApprovals: true },
+  });
+  const requiredApprovals = Math.max(input.requiredApprovals, existing?.requiredApprovals ?? 0);
   const record = await store.serverWikiReleaseCandidate.upsert({
     where: { serverWikiId_token: { serverWikiId: input.serverWikiId, token: snapshot.candidate.token } },
     create: {
@@ -103,7 +113,7 @@ export async function submitServerWikiReleaseCandidate(
       token: snapshot.candidate.token,
       siteSlug: input.siteSlug,
       contentSlug: input.contentSlug,
-      requiredApprovals: input.requiredApprovals,
+      requiredApprovals,
       submissionReason: input.submissionReason,
       manifestSnapshot: snapshot.candidate as unknown as Prisma.InputJsonValue,
       releaseSnapshot: serializeReleaseSnapshot(snapshot),
@@ -113,7 +123,7 @@ export async function submitServerWikiReleaseCandidate(
     update: {
       sourcePublicationVersion: input.sourcePublicationVersion,
       status: 'pending_review',
-      requiredApprovals: input.requiredApprovals,
+      requiredApprovals,
       submissionReason: input.submissionReason,
       createdBy: input.actorProfileId,
       submittedAt: input.submittedAt,

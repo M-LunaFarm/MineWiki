@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, type WikiProfile } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+import { lockServerWikiReviewerPolicy } from './server-wiki-release-review';
 import { toAuditJson } from '../events/business-event.service';
 import { writeAuditRecord } from '../events/audit-event-writer';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
@@ -178,6 +179,7 @@ export class ServerWikiCollaboratorService {
 
     return this.serializable(async (tx) => {
       const context = await this.lockServerWiki(tx, serverId, actor, preparedActor.accountId);
+      if (role === 'reviewer') await lockServerWikiReviewerPolicy(tx, context.spaceId);
       const target = await this.resolveAssignableProfileByUsername(tx, username);
       this.assertNotServerOwner(context, target);
       const rows = await this.lockTargetRoleRows(tx, context.spaceId, target.profile.id);
@@ -219,6 +221,7 @@ export class ServerWikiCollaboratorService {
 
     return this.serializable(async (tx) => {
       const context = await this.lockServerWiki(tx, serverId, actor, preparedActor.accountId);
+      if (role === 'reviewer' || expectedRole === 'reviewer') await lockServerWikiReviewerPolicy(tx, context.spaceId);
       const target = await this.resolveAssignableProfileById(tx, profileId);
       this.assertNotServerOwner(context, target);
       const rows = await this.lockTargetRoleRows(tx, context.spaceId, target.profile.id);
@@ -265,6 +268,7 @@ export class ServerWikiCollaboratorService {
 
     return this.serializable(async (tx) => {
       const context = await this.lockServerWiki(tx, serverId, actor, preparedActor.accountId);
+      if (expectedRole === 'reviewer') await lockServerWikiReviewerPolicy(tx, context.spaceId);
       const targetProfile = await this.resolveProfileForRemoval(tx, profileId);
       const rows = await this.lockTargetRoleRows(tx, context.spaceId, targetProfile.id);
       this.assertUnambiguousMutationRoles(rows);

@@ -13,6 +13,7 @@ export interface ServerWikiReleaseReviewContext {
 export interface ServerWikiReleaseReviewState {
   readonly required: boolean;
   readonly approved: boolean;
+  readonly reviewerAvailable: boolean;
   readonly canApprove: boolean;
   readonly viewerApproved: boolean;
   readonly approvals: readonly {
@@ -29,8 +30,7 @@ export async function requiredServerWikiReleaseApprovalCount(
   if (lock) {
     await lockReviewerRoles(store, context.spaceId);
   }
-  const reviewerIds = await activeReviewerIds(store, context.spaceId);
-  return reviewerIds.size > 0 ? 1 : 0;
+  return configuredReviewerApprovalCount(store, context.spaceId);
 }
 
 export async function serverWikiReleaseReviewState(
@@ -49,6 +49,8 @@ export async function serverWikiReleaseReviewState(
     `;
   }
   const reviewerIds = await activeReviewerIds(store, context.spaceId);
+  const configuredApprovals = await configuredReviewerApprovalCount(store, context.spaceId);
+  const effectiveRequiredApprovals = Math.max(requiredApprovals, configuredApprovals);
   const approvalRows = reviewerIds.size > 0
     ? await store.serverWikiReleaseApproval.findMany({
         where: {
@@ -63,8 +65,9 @@ export async function serverWikiReleaseReviewState(
       })
     : [];
   return {
-    required: requiredApprovals > 0,
-    approved: approvalRows.length >= requiredApprovals,
+    required: effectiveRequiredApprovals > 0,
+    approved: approvalRows.length >= effectiveRequiredApprovals,
+    reviewerAvailable: reviewerIds.size > 0,
     canApprove: context.authority === 'reviewer',
     viewerApproved: context.actorProfileId !== null
       && approvalRows.some((approval) => approval.reviewerProfileId === context.actorProfileId),
@@ -73,6 +76,15 @@ export async function serverWikiReleaseReviewState(
       approvedAt: approval.approvedAt.toISOString(),
     })),
   };
+}
+
+async function configuredReviewerApprovalCount(store: ReviewStore, spaceId: bigint): Promise<number> {
+  const configured = await store.subwikiRole.findMany({
+    where: { spaceId, role: 'reviewer' },
+    select: { id: true },
+    take: 1,
+  });
+  return configured.length > 0 ? 1 : 0;
 }
 
 async function activeReviewerIds(store: ReviewStore, spaceId: bigint): Promise<Set<bigint>> {
@@ -90,10 +102,14 @@ async function activeReviewerIds(store: ReviewStore, spaceId: bigint): Promise<S
   return new Set(profiles.map((profile) => profile.id));
 }
 
-async function lockReviewerRoles(store: ReviewStore, spaceId: bigint): Promise<void> {
+export async function lockServerWikiReviewerPolicy(store: ReviewStore, spaceId: bigint): Promise<void> {
   await store.$queryRaw<Array<{ id: bigint }>>`
     SELECT id FROM subwiki_roles
-    WHERE space_id = ${spaceId} AND role = 'reviewer' AND status = 'active'
+    WHERE space_id = ${spaceId} AND role = 'reviewer'
     ORDER BY id FOR UPDATE
   `;
+}
+
+async function lockReviewerRoles(store: ReviewStore, spaceId: bigint): Promise<void> {
+  await lockServerWikiReviewerPolicy(store, spaceId);
 }

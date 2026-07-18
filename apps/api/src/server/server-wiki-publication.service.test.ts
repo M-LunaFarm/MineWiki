@@ -159,6 +159,7 @@ function createFixture(options: FixtureOptions = {}) {
   ]);
   const actorAccountId = options.actorAccountId ?? ownerAccountId;
   let reviewerEnabled = options.reviewerConfigured ?? false;
+  let reviewerEverConfigured = reviewerEnabled;
   const actor = { accountId: actorAccountId, permissions: options.actorPermissions ?? [] };
   const tx = {
     async $queryRaw(strings: TemplateStringsArray) {
@@ -227,9 +228,12 @@ function createFixture(options: FixtureOptions = {}) {
       },
     },
     subwikiRole: {
-      async findMany(args: { where: { userId?: bigint; role?: string } }) {
+      async findMany(args: { where: { userId?: bigint; role?: string; status?: string } }) {
         if (args.where.role === 'reviewer') {
-          return reviewerEnabled ? [{ userId: 4n, role: 'reviewer' }] : [];
+          if (args.where.status === 'active') return reviewerEnabled ? [{ id: 40n, userId: 4n, role: 'reviewer', status: 'active' }] : [];
+          return reviewerEverConfigured
+            ? [{ id: 40n, userId: 4n, role: 'reviewer', status: reviewerEnabled ? 'active' : 'revoked' }]
+            : [];
         }
         const profile = profiles.get(actorAccountId);
         if (args.where.userId === 4n && reviewerEnabled) return [{ role: 'reviewer' }];
@@ -395,7 +399,7 @@ function createFixture(options: FixtureOptions = {}) {
     revisionRows,
     approvals,
     candidates,
-    setReviewerEnabled(value: boolean) { reviewerEnabled = value; },
+    setReviewerEnabled(value: boolean) { reviewerEnabled = value; if (value) reviewerEverConfigured = true; },
   };
 }
 
@@ -617,6 +621,46 @@ test('removing every reviewer never lowers the approval requirement fixed at sub
     () => fixture.service.update(serverId, {
       status: 'published', expectedVersion: 0, candidateId: submission.id,
       expectedCandidateToken: submission.token, reason: 'attempt reviewer removal bypass',
+    }, fixture.actor),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_REVIEW_REQUIRED'),
+  );
+});
+
+test('same-token resubmission cannot lower sticky reviewer policy after role removal', async () => {
+  const fixture = createFixture({ reviewerConfigured: true });
+  const first = await fixture.submitCandidate('first independently reviewed submission');
+  fixture.setReviewerEnabled(false);
+  const second = await fixture.submitCandidate('retry after reviewer role removal');
+  assert.equal(second.id, first.id);
+  assert.equal(second.token, first.token);
+  assert.equal(second.requiredApprovals, 1);
+  const state = await fixture.service.get(serverId, fixture.actor);
+  assert.equal(state.review.required, true);
+  assert.equal(state.review.reviewerAvailable, false);
+  await assert.rejects(
+    () => fixture.service.update(serverId, {
+      status: 'published', expectedVersion: 0, candidateId: second.id,
+      expectedCandidateToken: second.token, reason: 'attempt same candidate policy downgrade',
+    }, fixture.actor),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_REVIEW_REQUIRED'),
+  );
+});
+
+test('reviewer history floors a legacy pending candidate stored with zero approvals', async () => {
+  const fixture = createFixture({ reviewerConfigured: true });
+  const submission = await fixture.submitCandidate();
+  fixture.candidates[0]!.requiredApprovals = 0;
+  fixture.setReviewerEnabled(false);
+  const state = await fixture.service.get(serverId, fixture.actor);
+  assert.equal(state.review.required, true);
+  assert.equal(state.review.approved, false);
+  assert.equal(state.review.reviewerAvailable, false);
+  await assert.rejects(
+    () => fixture.service.update(serverId, {
+      status: 'published', expectedVersion: 0, candidateId: submission.id,
+      expectedCandidateToken: submission.token, reason: 'attempt legacy zero policy bypass',
     }, fixture.actor),
     (error: unknown) => error instanceof ConflictException
       && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_REVIEW_REQUIRED'),
