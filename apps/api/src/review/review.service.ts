@@ -52,6 +52,7 @@ const updateReviewSchema = z.object({
   tags: z.array(reviewTagSchema).max(3)
 });
 const reviewReportReasonSchema = z.string().trim().min(3).max(500);
+const adminReplyBodySchema = z.string().trim().max(300);
 const reviewCursorSchema = z.object({
   version: z.literal(1),
   sort: z.enum(['wilson', 'newest']),
@@ -262,6 +263,20 @@ export class ReviewService {
       orderBy: { createdAt: 'desc' }
     });
     const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
+    return reviews.map((review) => toReviewResponse(review, viewerAccountIds));
+  }
+
+  async listMine(serverId: string, viewerAccountId: string): Promise<ServerReview[]> {
+    await this.serverService.ensureExists(serverId);
+    const viewerAccountIds = await this.resolveAccountGroupIds(viewerAccountId);
+    if (viewerAccountIds.length === 0) {
+      return [];
+    }
+    const reviews = await this.prisma.serverReview.findMany({
+      where: { serverId, authorAccountId: { in: [...viewerAccountIds] } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 50,
+    });
     return reviews.map((review) => toReviewResponse(review, viewerAccountIds));
   }
 
@@ -497,7 +512,7 @@ export class ReviewService {
       throw new NotFoundException(`Review ${reviewId} not found for server ${serverId}`);
     }
 
-    const trimmed = body.trim();
+    const trimmed = adminReplyBodySchema.parse(body);
     const updated = await this.prisma.serverReview.update({
       where: { id: reviewId },
       data: trimmed.length === 0

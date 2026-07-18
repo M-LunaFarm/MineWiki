@@ -34,6 +34,9 @@ import { z } from 'zod';
 const reviewReportRequestSchema = z
   .object({ reason: z.string().trim().min(3).max(500) })
   .strict();
+const reviewReplyRequestSchema = z
+  .object({ body: z.string().trim().max(300) })
+  .strict();
 
 @Controller('v1/servers/:serverId/reviews')
 export class ReviewController {
@@ -118,6 +121,15 @@ export class ReviewController {
   }
 
   @UseGuards(SessionGuard)
+  @Get('mine')
+  async listMine(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @CurrentSession() session: SessionPayload
+  ): Promise<ServerReview[]> {
+    return this.reviewService.listMine(serverId, session.userId);
+  }
+
+  @UseGuards(SessionGuard)
   @Post()
   @Throttle({ default: { limit: 3, ttl: 60 } })
   async create(
@@ -183,14 +195,21 @@ export class ReviewController {
   async reply(
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Param('reviewId', new ParseUUIDPipe()) reviewId: string,
-    @Body('body') body: string,
+    @Body() body: unknown,
     @CurrentSession() session: SessionPayload
   ): Promise<ServerReview> {
     if (!(await this.claims.isOwner(serverId, session.userId))) {
       throw new ForbiddenException('서버 리뷰에 답글을 남길 권한이 없습니다.');
     }
+    const payload = reviewReplyRequestSchema.parse(body);
     const responder = '운영진';
-    return this.reviewService.setAdminReply(serverId, reviewId, responder, body ?? '', session.userId);
+    return this.reviewService.setAdminReply(
+      serverId,
+      reviewId,
+      responder,
+      payload.body,
+      session.userId,
+    );
   }
 }
 

@@ -254,6 +254,9 @@ if (!hasDatabase) {
     const replied = await reviewService.setAdminReply(server.id, review.id, '???', '??????.');
     assert.equal(replied.adminReply?.authorDisplayName, '???');
     assert.equal(replied.adminReply?.body, '??????.');
+    await assert.rejects(
+      () => reviewService.setAdminReply(server.id, review.id, '???', 'x'.repeat(301)),
+    );
     const cleared = await reviewService.setAdminReply(server.id, review.id, '???', '   ');
     assert.equal(cleared.adminReply, null);
   });

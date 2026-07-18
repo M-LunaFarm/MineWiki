@@ -62,6 +62,7 @@ export function ServerReviewSection({
   const [tags, setTags] = useState(availableTags);
   const [gateStatus, setGateStatus] = useState<ReviewGateStatus>(EMPTY_STATUS);
   const [reviews, setReviews] = useState(initialReviews);
+  const [viewerReceipts, setViewerReceipts] = useState<ServerReview[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor);
   const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
@@ -163,6 +164,30 @@ export function ServerReviewSection({
   }, [baseUrl, isOwner, serverId]);
 
   useEffect(() => {
+    if (!gateStatus.isLoggedIn || isOwner) {
+      setViewerReceipts([]);
+      return;
+    }
+    let cancelled = false;
+    const loadViewerReceipts = async () => {
+      try {
+        const response = await fetch(`${baseUrl}/v1/servers/${serverId}/reviews/mine`, {
+          credentials: 'include',
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as ServerReview[];
+        if (!cancelled) setViewerReceipts(payload);
+      } catch (error) {
+        console.warn('내 리뷰 영수증 로드 실패', error);
+      }
+    };
+    void loadViewerReceipts();
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, gateStatus.isLoggedIn, isOwner, serverId]);
+
+  useEffect(() => {
     if (isOwner) {
       return;
     }
@@ -211,6 +236,17 @@ export function ServerReviewSection({
     4: aggregate.histogram['4'],
     5: aggregate.histogram['5'],
   }), [aggregate.histogram]);
+  const displayedReviews = useMemo(() => {
+    const privateReceipts = viewerReceipts.filter((review) => review.visibility === 'staff');
+    const byId = new Map(privateReceipts.map((review) => [review.id, review]));
+    for (const review of reviews) {
+      byId.set(review.id, review);
+    }
+    return [...byId.values()];
+  }, [reviews, viewerReceipts]);
+  const privateReceiptCount = viewerReceipts.filter(
+    (review) => review.visibility === 'staff',
+  ).length;
   const canCompose =
     gateStatus.isLoggedIn && gateStatus.isMinecraftOwned && gateStatus.hasRecentVote;
   const composeLabel = gateStatus.isLoggedIn
@@ -238,6 +274,7 @@ export function ServerReviewSection({
       }
       return [review, ...current];
     });
+    setViewerReceipts((current) => [review, ...current.filter((item) => item.id !== review.id)]);
     void refreshPublicAggregate();
     setTags((current) => {
       const next = new Set(current);
@@ -256,6 +293,9 @@ export function ServerReviewSection({
       });
       return next;
     });
+    setViewerReceipts((current) =>
+      current.map((item) => (item.id === nextReview.id ? nextReview : item)),
+    );
     void refreshPublicAggregate();
   };
 
@@ -269,6 +309,7 @@ export function ServerReviewSection({
       });
       return next;
     });
+    setViewerReceipts((current) => current.filter((item) => item.id !== deletedReview.id));
     void refreshPublicAggregate();
   };
 
@@ -329,9 +370,14 @@ export function ServerReviewSection({
         currentRating={currentRating}
         currentTag={currentTag}
       />
+      {privateReceiptCount > 0 ? (
+        <p className="mb-4 rounded-lg border border-sky-300/20 bg-sky-300/5 px-4 py-3 text-sm text-sky-100">
+          운영진에게만 보낸 내 리뷰 {privateReceiptCount.toLocaleString('ko-KR')}개도 함께 표시합니다.
+        </p>
+      ) : null}
       <ReviewList
         serverId={serverId}
-        initialReviews={reviews}
+        initialReviews={displayedReviews}
         apiBaseUrl={baseUrl}
         trustLabelCopy={trustLabelCopy}
         newReview={latestReview}
