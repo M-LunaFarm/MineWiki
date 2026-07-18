@@ -5,11 +5,13 @@ import { useRouter } from 'next/navigation';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { buildWikiFileMarkup } from '../../lib/wiki-file-markup.mjs';
 import { buildWikiEditorDraftKey, readWikiEditorDraft, removeWikiEditorDraft, writeWikiEditorDraft } from '../../lib/wiki-editor-draft.mjs';
+import { applyWikiEditorFormat, wikiEditorShortcutAction } from '../../lib/wiki-editor-formatting.mjs';
 import { AlertTriangle, Eye, FileImage, ImagePlus, LayoutTemplate, Loader2, Save } from 'lucide-react';
-import { type ChangeEvent, type MouseEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { type ChangeEvent, type KeyboardEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useAuth } from '../providers/auth-context';
 import { CaptchaChallenge, isCaptchaConfigured } from '../security/captcha-challenge';
 import { WikiEditorLoadError } from './wiki-editor-load-error';
+import { WikiEditorToolbar, type WikiEditorFormatAction } from './wiki-editor-toolbar';
 import {
   fetchWikiRevision,
   fetchWikiSection,
@@ -53,6 +55,7 @@ interface WikiEditorDraft {
 export function WikiEditorClient({ page, namespace, title, createSpaceId, routePath, presentation, presentationLoadFailed }: WikiEditorClientProps) {
   const router = useRouter();
   const { account, loading } = useAuth();
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const draftSourceTokenRef = useRef('');
   const loadedSourceTokenRef = useRef('');
@@ -105,6 +108,30 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
   const policyAcceptance: WikiPolicyAcceptance | undefined = policyRequired && policyAccepted && presentation
     ? { version: presentation.policy.version, accepted: true }
     : undefined;
+
+  const applyEditorFormat = useCallback((action: WikiEditorFormatAction) => {
+    const textarea = textareaRef.current;
+    const result = applyWikiEditorFormat({
+      value: contentRaw,
+      selectionStart: textarea?.selectionStart ?? contentRaw.length,
+      selectionEnd: textarea?.selectionEnd ?? contentRaw.length,
+    }, action);
+    setContentRaw(result.value);
+    setBlockingErrors([]);
+    requestAnimationFrame(() => {
+      const current = textareaRef.current;
+      if (!current) return;
+      current.focus();
+      current.setSelectionRange(result.selectionStart, result.selectionEnd);
+    });
+  }, [contentRaw]);
+
+  const handleEditorKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const action = wikiEditorShortcutAction(event);
+    if (!action) return;
+    event.preventDefault();
+    applyEditorFormat(action as WikiEditorFormatAction);
+  }, [applyEditorFormat]);
 
   useEffect(() => {
     setPolicyAccepted(false);
@@ -670,13 +697,19 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               </div>
             </div>
           ) : null}
+          <WikiEditorToolbar
+            disabled={loadingRevision || saving}
+            onApply={applyEditorFormat}
+          />
           <textarea
+            ref={textareaRef}
             aria-label={sectionAnchor ? '위키 섹션 본문' : '위키 문서 본문'}
             value={contentRaw}
             onChange={(event) => {
               setContentRaw(event.target.value);
               setBlockingErrors([]);
             }}
+            onKeyDown={handleEditorKeyDown}
             disabled={loadingRevision || saving}
             className="min-h-[520px] w-full resize-y rounded-lg border border-white/10 bg-[#0d1219] p-4 font-mono text-sm leading-6 text-slate-100 outline-none transition focus:border-emerald-300/50"
             spellCheck={false}
