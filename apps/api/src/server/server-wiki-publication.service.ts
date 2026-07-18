@@ -34,6 +34,21 @@ export interface UpdateServerWikiPublicationInput {
   readonly reason: string;
 }
 
+export interface ReviewServerWikiReleaseCandidateInput {
+  readonly candidateToken: string;
+}
+
+export interface ServerWikiReleaseReviewState {
+  readonly required: boolean;
+  readonly approved: boolean;
+  readonly canApprove: boolean;
+  readonly viewerApproved: boolean;
+  readonly approvals: readonly {
+    readonly reviewerProfileId: string;
+    readonly approvedAt: string;
+  }[];
+}
+
 export interface ServerWikiPublicationResponse {
   readonly serverId: string;
   readonly serverWikiId: string;
@@ -51,14 +66,16 @@ export interface ServerWikiPublicationResponse {
   } | null;
   readonly wikiUrl: string;
   readonly access: {
-    readonly authority: 'server_admin' | 'owner' | 'manager';
-    readonly canPublish: true;
+    readonly authority: 'server_admin' | 'owner' | 'manager' | 'reviewer';
+    readonly canPublish: boolean;
+    readonly canApprove: boolean;
   };
   readonly readiness: {
     readonly ready: boolean;
     readonly blockers: readonly ServerWikiPublicationReadinessBlocker[];
   };
   readonly candidate: ServerWikiReleaseCandidate;
+  readonly review: ServerWikiReleaseReviewState;
 }
 
 export type ServerWikiPublicationReadinessBlocker =
@@ -83,7 +100,7 @@ interface PublicationContext {
   readonly serverContent: ServerWikiScaffoldInput;
   readonly actorAccountId: string;
   readonly actorProfileId: bigint | null;
-  readonly authority: 'server_admin' | 'owner' | 'manager';
+  readonly authority: 'server_admin' | 'owner' | 'manager' | 'reviewer';
   readonly publication: {
     readonly status: string;
     readonly version: number;
@@ -122,7 +139,92 @@ export class ServerWikiPublicationService {
     const context = await this.resolveContext(this.prisma, serverId, actor, false);
     const blockers = await this.readinessBlockers(this.prisma, context);
     const snapshot = await buildServerWikiReleaseCandidate(this.prisma, candidateInput(context), false);
-    return toResponse(context, blockers, snapshot.candidate);
+    const review = await this.releaseReviewState(this.prisma, context, snapshot.candidate.token, false);
+    return toResponse(context, blockers, snapshot.candidate, review);
+  }
+
+  async approveCandidate(
+    serverIdInput: string,
+    input: ReviewServerWikiReleaseCandidateInput,
+    actor: ServerWikiPublicationActor,
+  ): Promise<ServerWikiReleaseReviewState> {
+    return this.changeCandidateApproval(serverIdInput, input, actor, true);
+  }
+
+  async revokeCandidateApproval(
+    serverIdInput: string,
+    input: ReviewServerWikiReleaseCandidateInput,
+    actor: ServerWikiPublicationActor,
+  ): Promise<ServerWikiReleaseReviewState> {
+    return this.changeCandidateApproval(serverIdInput, input, actor, false);
+  }
+
+  private async changeCandidateApproval(
+    serverIdInput: string,
+    input: ReviewServerWikiReleaseCandidateInput,
+    actor: ServerWikiPublicationActor,
+    approve: boolean,
+  ): Promise<ServerWikiReleaseReviewState> {
+    const serverId = parseServerId(serverIdInput);
+    const candidateToken = parseCandidateToken(input.candidateToken);
+    return this.serializable(async (tx) => {
+      const context = await this.resolveContext(tx, serverId, actor, true);
+      if (context.authority !== 'reviewer' || context.actorProfileId === null) throw reviewForbidden();
+      const snapshot = await buildServerWikiReleaseCandidate(tx, candidateInput(context), true);
+      if (snapshot.candidate.token !== candidateToken) throw candidateChanged(snapshot.candidate);
+      const now = new Date();
+      if (approve) {
+        await tx.serverWikiReleaseApproval.upsert({
+          where: {
+            serverWikiId_candidateToken_reviewerProfileId: {
+              serverWikiId: context.serverWikiId,
+              candidateToken,
+              reviewerProfileId: context.actorProfileId,
+            },
+          },
+          create: {
+            serverWikiId: context.serverWikiId,
+            spaceId: context.spaceId,
+            candidateToken,
+            reviewerProfileId: context.actorProfileId,
+            approvedAt: now,
+            revokedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+          update: { approvedAt: now, revokedAt: null, updatedAt: now },
+        });
+      } else {
+        await tx.serverWikiReleaseApproval.updateMany({
+          where: {
+            serverWikiId: context.serverWikiId,
+            spaceId: context.spaceId,
+            candidateToken,
+            reviewerProfileId: context.actorProfileId,
+            revokedAt: null,
+          },
+          data: { revokedAt: now, updatedAt: now },
+        });
+      }
+      await writeAuditRecord(tx, {
+        data: {
+          category: 'server',
+          action: approve ? 'server.wiki.release.approve' : 'server.wiki.release.approval_revoke',
+          severity: 'info',
+          actorAccountId: context.actorAccountId,
+          actorProfileId: context.actorProfileId,
+          subjectType: 'server_wiki',
+          subjectId: context.serverWikiId.toString(),
+          metadata: toAuditJson({
+            serverId: context.serverId,
+            serverWikiId: context.serverWikiId,
+            candidateToken,
+            candidateCounts: snapshot.candidate.counts,
+          }),
+        },
+      });
+      return this.releaseReviewState(tx, context, candidateToken, false);
+    });
   }
 
   async update(
@@ -141,6 +243,7 @@ export class ServerWikiPublicationService {
     try {
       return await this.serializable(async (tx) => {
         const context = await this.resolveContext(tx, serverId, actor, true);
+        if (context.authority === 'reviewer') throw publicationForbidden();
         if (context.publication.version !== expectedVersion) {
           throw publicationConflict(context.publication.version);
         }
@@ -172,6 +275,17 @@ export class ServerWikiPublicationService {
             code: 'SERVER_WIKI_RELEASE_CANDIDATE_EMPTY',
             message: 'Server wiki release candidate has no changes.',
             candidate: snapshot.candidate,
+          });
+        }
+        const review = snapshot
+          ? await this.releaseReviewState(tx, context, snapshot.candidate.token, true)
+          : null;
+        if (snapshot && review?.required && !review.approved) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'SERVER_WIKI_RELEASE_REVIEW_REQUIRED',
+            message: 'An independent reviewer must approve this release candidate before publishing.',
+            review,
           });
         }
 
@@ -246,7 +360,8 @@ export class ServerWikiPublicationService {
           },
         };
         const responseCandidate = (await buildServerWikiReleaseCandidate(tx, candidateInput(responseContext), false)).candidate;
-        return toResponse(responseContext, blockers, responseCandidate);
+        const responseReview = await this.releaseReviewState(tx, responseContext, responseCandidate.token, false);
+        return toResponse(responseContext, blockers, responseCandidate, responseReview);
       });
     } catch (error) {
       if (prismaCode(error) === 'P2034') throw publicationConflict(expectedVersion + 1);
@@ -371,7 +486,7 @@ export class ServerWikiPublicationService {
       ? 'server_admin'
       : ownerAccountId !== null && ownerAccountId === actorAccountId
         ? 'owner'
-        : await this.managerAuthority(store, wiki.spaceId, actorProfile, lock);
+        : await this.collaboratorAuthority(store, wiki.spaceId, actorProfile, lock);
 
     return {
       serverId: server.id,
@@ -502,12 +617,75 @@ export class ServerWikiPublicationService {
     };
   }
 
-  private async managerAuthority(
+  private async releaseReviewState(
+    store: Prisma.TransactionClient | PrismaService,
+    context: PublicationContext,
+    candidateToken: string,
+    lock: boolean,
+  ): Promise<ServerWikiReleaseReviewState> {
+    if (lock) {
+      await store.$queryRaw<Array<{ id: bigint }>>`
+        SELECT id
+        FROM subwiki_roles
+        WHERE space_id = ${context.spaceId} AND role = 'reviewer' AND status = 'active'
+        ORDER BY id
+        FOR UPDATE
+      `;
+      await store.$queryRaw<Array<{ id: bigint }>>`
+        SELECT id
+        FROM server_wiki_release_approvals
+        WHERE server_wiki_id = ${context.serverWikiId} AND candidate_token = ${candidateToken}
+        ORDER BY id
+        FOR UPDATE
+      `;
+    }
+    const reviewerRoles = await store.subwikiRole.findMany({
+      where: { spaceId: context.spaceId, role: 'reviewer', status: 'active' },
+      select: { userId: true },
+    });
+    const reviewerProfileIds = [...new Set(reviewerRoles.map((role) => role.userId))];
+    const activeProfiles = reviewerProfileIds.length > 0
+      ? await store.wikiProfile.findMany({
+          where: { id: { in: reviewerProfileIds }, status: 'active', mergedIntoProfileId: null },
+          select: { id: true },
+        })
+      : [];
+    const activeReviewerIds = new Set(activeProfiles.map((profile) => profile.id));
+    const approvalRows = activeReviewerIds.size > 0
+      ? await store.serverWikiReleaseApproval.findMany({
+          where: {
+            serverWikiId: context.serverWikiId,
+            spaceId: context.spaceId,
+            candidateToken,
+            reviewerProfileId: { in: [...activeReviewerIds] },
+            revokedAt: null,
+          },
+          orderBy: [{ approvedAt: 'asc' }, { id: 'asc' }],
+          select: { reviewerProfileId: true, approvedAt: true },
+        })
+      : [];
+    const approvals = approvalRows.map((approval) => ({
+      reviewerProfileId: approval.reviewerProfileId.toString(),
+      approvedAt: approval.approvedAt.toISOString(),
+    }));
+    const viewerApproved = context.actorProfileId !== null
+      && approvalRows.some((approval) => approval.reviewerProfileId === context.actorProfileId);
+    const approved = approvalRows.length > 0;
+    return {
+      required: activeReviewerIds.size > 0,
+      approved,
+      canApprove: context.authority === 'reviewer',
+      viewerApproved,
+      approvals,
+    };
+  }
+
+  private async collaboratorAuthority(
     store: Prisma.TransactionClient | PrismaService,
     spaceId: bigint,
     profile: { readonly id: bigint; readonly status: string; readonly mergedIntoProfileId: bigint | null } | null,
     lock: boolean,
-  ): Promise<'manager'> {
+  ): Promise<'manager' | 'reviewer'> {
     if (!profile || profile.status !== 'active' || profile.mergedIntoProfileId !== null) throw publicationForbidden();
     if (lock) {
       await store.$queryRaw<Array<{ id: bigint }>>`
@@ -523,8 +701,9 @@ export class ServerWikiPublicationService {
       select: { role: true },
     });
     const collaboratorRoles = roles.filter((row) => ['manager', 'editor', 'reviewer'].includes(row.role));
-    if (collaboratorRoles.length !== 1 || collaboratorRoles[0]?.role !== 'manager') throw publicationForbidden();
-    return 'manager';
+    const role = collaboratorRoles.length === 1 ? collaboratorRoles[0]?.role : null;
+    if (role !== 'manager' && role !== 'reviewer') throw publicationForbidden();
+    return role;
   }
 
   private async readinessBlockers(
@@ -669,6 +848,7 @@ function toResponse(
   context: PublicationContext,
   blockers: readonly ServerWikiPublicationReadinessBlocker[],
   candidate: ServerWikiReleaseCandidate,
+  review: ServerWikiReleaseReviewState,
 ): ServerWikiPublicationResponse {
   if (!SERVER_WIKI_PUBLICATION_STATUSES.includes(context.publication.status as ServerWikiPublicationStatus)) {
     throw new ConflictException('Server wiki publication state is invalid.');
@@ -691,9 +871,14 @@ function toResponse(
         }
       : null,
     wikiUrl: `/serverWiki/${encodeURIComponent(context.siteSlug)}`,
-    access: { authority: context.authority, canPublish: true },
+    access: {
+      authority: context.authority,
+      canPublish: context.authority !== 'reviewer',
+      canApprove: context.authority === 'reviewer',
+    },
     readiness: { ready: blockers.length === 0, blockers },
     candidate,
+    review,
   };
 }
 
@@ -758,6 +943,10 @@ function invalidLink(): ConflictException {
 
 function publicationForbidden(): ForbiddenException {
   return new ForbiddenException('Server wiki publication requires the server owner, a wiki manager, or server.admin.');
+}
+
+function reviewForbidden(): ForbiddenException {
+  return new ForbiddenException('Server wiki release review requires an active reviewer role.');
 }
 
 function publicationConflict(currentVersion: number): ConflictException {

@@ -13,7 +13,10 @@ test('server wiki settings exposes a mobile-safe publication lifecycle', async (
   assert.match(publication, /expectedVersion: publication\.version/u);
   assert.match(publication, /expectedCandidateToken: publication\.candidate\.token/u);
   assert.match(publication, /SERVER_WIKI_RELEASE_CANDIDATE_CHANGED/u);
-  assert.match(publication, /<ReleaseCandidateManifest candidate=\{publication\.candidate\} \/>/u);
+  assert.match(publication, /<ReleaseCandidateManifest/u);
+  assert.match(publication, /wiki-publication\/approval/u);
+  assert.match(publication, /review\.viewerApproved/u);
+  assert.match(publication, /review\.required/u);
   assert.match(publication, /candidate\.counts\[kind\]/u);
   assert.match(publication, /candidate\.hasChanges/u);
   assert.match(publication, /publication\.readiness\.ready/u);

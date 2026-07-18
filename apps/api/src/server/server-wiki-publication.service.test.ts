@@ -10,6 +10,7 @@ const serverId = '11111111-1111-4111-8111-111111111111';
 const ownerAccountId = '22222222-2222-4222-8222-222222222222';
 const managerAccountId = '33333333-3333-4333-8333-333333333333';
 const editorAccountId = '44444444-4444-4444-8444-444444444444';
+const reviewerAccountId = '55555555-5555-4555-8555-555555555555';
 
 interface FixtureOptions {
   readonly publicationStatus?: string;
@@ -26,6 +27,7 @@ interface FixtureOptions {
   readonly shortIntroduction?: boolean;
   readonly missingOfficialChannel?: boolean;
   readonly staleSearchIndex?: boolean;
+  readonly reviewerConfigured?: boolean;
 }
 
 function createFixture(options: FixtureOptions = {}) {
@@ -120,12 +122,22 @@ function createFixture(options: FixtureOptions = {}) {
   const audits: Array<Record<string, unknown>> = [];
   const releaseItems: Array<Record<string, unknown>> = [];
   const releaseLinks: Array<Record<string, unknown>> = [];
+  const approvals: Array<{
+    id: bigint;
+    serverWikiId: bigint;
+    spaceId: bigint;
+    candidateToken: string;
+    reviewerProfileId: bigint;
+    approvedAt: Date;
+    revokedAt: Date | null;
+  }> = [];
   const isolationLevels: string[] = [];
   const lockQueries: string[] = [];
   const profiles = new Map([
     [ownerAccountId, { id: 1n, status: 'active', mergedIntoProfileId: null }],
     [managerAccountId, { id: 2n, status: 'active', mergedIntoProfileId: null }],
     [editorAccountId, { id: 3n, status: 'active', mergedIntoProfileId: null }],
+    [reviewerAccountId, { id: 4n, status: 'active', mergedIntoProfileId: null }],
   ]);
   const actorAccountId = options.actorAccountId ?? ownerAccountId;
   const actor = { accountId: actorAccountId, permissions: options.actorPermissions ?? [] };
@@ -180,7 +192,7 @@ function createFixture(options: FixtureOptions = {}) {
     },
     account: {
       async findUnique(args: { where: { id: string } }) {
-        if (![ownerAccountId, managerAccountId, editorAccountId].includes(args.where.id)) return null;
+        if (![ownerAccountId, managerAccountId, editorAccountId, reviewerAccountId].includes(args.where.id)) return null;
         return { id: args.where.id, canonicalAccountId: null, lifecycleStatus: 'active' };
       },
     },
@@ -188,10 +200,17 @@ function createFixture(options: FixtureOptions = {}) {
       async findUnique(args: { where: { accountId: string } }) {
         return profiles.get(args.where.accountId) ?? null;
       },
+      async findMany(args: { where: { id: { in: bigint[] } } }) {
+        return [...profiles.values()].filter((profile) => args.where.id.in.includes(profile.id));
+      },
     },
     subwikiRole: {
-      async findMany(args: { where: { userId: bigint } }) {
+      async findMany(args: { where: { userId?: bigint; role?: string } }) {
+        if (args.where.role === 'reviewer') {
+          return options.reviewerConfigured ? [{ userId: 4n, role: 'reviewer' }] : [];
+        }
         const profile = profiles.get(actorAccountId);
+        if (args.where.userId === 4n && options.reviewerConfigured) return [{ role: 'reviewer' }];
         if (!profile || profile.id !== args.where.userId || !options.actorRole) return [];
         return [{ role: options.actorRole }];
       },
@@ -242,6 +261,32 @@ function createFixture(options: FixtureOptions = {}) {
         return { count: args.data.length };
       },
     },
+    serverWikiReleaseApproval: {
+      async findMany(args: { where: { candidateToken: string; revokedAt: null } }) {
+        return approvals.filter((approval) => approval.candidateToken === args.where.candidateToken && approval.revokedAt === null);
+      },
+      async upsert(args: {
+        where: { serverWikiId_candidateToken_reviewerProfileId: { candidateToken: string; reviewerProfileId: bigint } };
+        create: Omit<(typeof approvals)[number], 'id'> & { createdAt: Date; updatedAt: Date };
+        update: { approvedAt: Date; revokedAt: null };
+      }) {
+        const key = args.where.serverWikiId_candidateToken_reviewerProfileId;
+        const existing = approvals.find((approval) => approval.candidateToken === key.candidateToken && approval.reviewerProfileId === key.reviewerProfileId);
+        if (existing) { existing.approvedAt = args.update.approvedAt; existing.revokedAt = null; return existing; }
+        const created = { id: BigInt(approvals.length + 1), ...args.create };
+        approvals.push(created);
+        return created;
+      },
+      async updateMany(args: { where: { candidateToken: string; reviewerProfileId: bigint }; data: { revokedAt: Date } }) {
+        let count = 0;
+        for (const approval of approvals) {
+          if (approval.candidateToken === args.where.candidateToken && approval.reviewerProfileId === args.where.reviewerProfileId && approval.revokedAt === null) {
+            approval.revokedAt = args.data.revokedAt; count += 1;
+          }
+        }
+        return { count };
+      },
+    },
     wikiPageRevision: {
       async findUnique() {
         return options.missingRoot
@@ -281,6 +326,7 @@ function createFixture(options: FixtureOptions = {}) {
     now,
     documentRows,
     revisionRows,
+    approvals,
   };
 }
 
@@ -402,6 +448,68 @@ test('manager and server.admin can transition publication while editor cannot', 
     ForbiddenException,
   );
   assert.equal(editor.audits.length, 0);
+});
+
+test('an active reviewer approves the exact candidate before a manager can publish it', async () => {
+  const fixture = createFixture({
+    actorAccountId: managerAccountId,
+    actorRole: 'manager',
+    reviewerConfigured: true,
+  });
+  const managerState = await fixture.service.get(serverId, fixture.actor);
+  assert.equal(managerState.review.required, true);
+  assert.equal(managerState.review.approved, false);
+  assert.equal(managerState.access.canPublish, true);
+
+  await assert.rejects(
+    () => fixture.service.update(serverId, {
+      status: 'published', expectedVersion: 0,
+      expectedCandidateToken: managerState.candidate.token,
+      reason: 'manager attempted unreviewed release',
+    }, fixture.actor),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_REVIEW_REQUIRED'),
+  );
+
+  const reviewerActor = { accountId: reviewerAccountId, permissions: [] };
+  const reviewerState = await fixture.service.get(serverId, reviewerActor);
+  assert.equal(reviewerState.access.authority, 'reviewer');
+  assert.equal(reviewerState.access.canPublish, false);
+  assert.equal(reviewerState.review.canApprove, true);
+  const approved = await fixture.service.approveCandidate(serverId, {
+    candidateToken: reviewerState.candidate.token,
+  }, reviewerActor);
+  assert.equal(approved.approved, true);
+  assert.equal(approved.viewerApproved, true);
+  assert.equal(approved.approvals[0]?.reviewerProfileId, '4');
+
+  const published = await fixture.service.update(serverId, {
+    status: 'published', expectedVersion: 0,
+    expectedCandidateToken: managerState.candidate.token,
+    reason: 'manager published independently reviewed release',
+  }, fixture.actor);
+  assert.equal(published.status, 'published');
+  assert.equal(fixture.audits.filter((audit) => audit.action === 'server.wiki.release.approve').length, 1);
+  assert.equal(fixture.audits.filter((audit) => audit.action === 'server.wiki.publication.publish').length, 1);
+});
+
+test('editors cannot approve release candidates and reviewer approval can be revoked', async () => {
+  const fixture = createFixture({ reviewerConfigured: true });
+  const token = await fixture.candidateToken();
+  await assert.rejects(
+    () => fixture.service.approveCandidate(serverId, { candidateToken: token }, {
+      accountId: editorAccountId,
+      permissions: [],
+    }),
+    ForbiddenException,
+  );
+
+  const reviewerActor = { accountId: reviewerAccountId, permissions: [] };
+  await fixture.service.approveCandidate(serverId, { candidateToken: token }, reviewerActor);
+  const revoked = await fixture.service.revokeCandidateApproval(serverId, { candidateToken: token }, reviewerActor);
+  assert.equal(revoked.approved, false);
+  assert.equal(revoked.viewerApproved, false);
+  assert.equal(fixture.approvals[0]?.revokedAt instanceof Date, true);
 });
 
 test('publish fails closed when readiness is incomplete but unpublish preserves content readiness', async () => {

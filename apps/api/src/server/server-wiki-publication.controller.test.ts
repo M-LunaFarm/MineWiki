@@ -25,6 +25,8 @@ test('publication endpoints require a session and mutations require server_admin
     Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, ServerWikiPublicationController.prototype.update),
     'server_admin',
   );
+  assert.equal(Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, ServerWikiPublicationController.prototype.approveCandidate), 'server_admin');
+  assert.equal(Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, ServerWikiPublicationController.prototype.revokeCandidateApproval), 'server_admin');
   const mutationGuards = Reflect.getMetadata(
     GUARDS_METADATA,
     ServerWikiPublicationController.prototype.update,
@@ -41,6 +43,8 @@ test('publication endpoints have bounded operation-specific throttles', () => {
     Reflect.getMetadata('THROTTLER:LIMITdefault', ServerWikiPublicationController.prototype.update),
     8,
   );
+  assert.equal(Reflect.getMetadata('THROTTLER:LIMITdefault', ServerWikiPublicationController.prototype.approveCandidate), 12);
+  assert.equal(Reflect.getMetadata('THROTTLER:LIMITdefault', ServerWikiPublicationController.prototype.revokeCandidateApproval), 12);
 });
 
 test('controller trims and forwards publication mutations with canonical session identity only', async () => {
@@ -54,6 +58,8 @@ test('controller trims and forwards publication mutations with canonical session
       calls.push(['update', ...args]);
       return { status: 'published' };
     },
+    async approveCandidate(...args: unknown[]) { calls.push(['approve', ...args]); return { approved: true }; },
+    async revokeCandidateApproval(...args: unknown[]) { calls.push(['revoke', ...args]); return { approved: false }; },
   } as never);
 
   await controller.get(serverId, session);
@@ -63,6 +69,8 @@ test('controller trims and forwards publication mutations with canonical session
     expectedCandidateToken: 'a'.repeat(64),
     reason: '  owner approved launch  ',
   }, session);
+  await controller.approveCandidate(serverId, { candidateToken: 'b'.repeat(64) }, session);
+  await controller.revokeCandidateApproval(serverId, { candidateToken: 'b'.repeat(64) }, session);
 
   const actor = { accountId: session.userId, permissions: ['server.admin'] };
   assert.deepEqual(calls, [
@@ -73,6 +81,8 @@ test('controller trims and forwards publication mutations with canonical session
       expectedCandidateToken: 'a'.repeat(64),
       reason: 'owner approved launch',
     }, actor],
+    ['approve', serverId, { candidateToken: 'b'.repeat(64) }, actor],
+    ['revoke', serverId, { candidateToken: 'b'.repeat(64) }, actor],
   ]);
 });
 
@@ -87,5 +97,8 @@ test('controller rejects draft transitions, missing versions, short reasons, and
     { status: 'published', expectedVersion: 0, expectedCandidateToken: 'a'.repeat(64), reason: 'owner approved launch', force: true },
   ]) {
     assert.throws(() => controller.update(serverId, body, session), ZodError);
+  }
+  for (const body of [{}, { candidateToken: 'ABC' }, { candidateToken: 'a'.repeat(64), extra: true }]) {
+    assert.throws(() => controller.approveCandidate(serverId, body, session), ZodError);
   }
 });

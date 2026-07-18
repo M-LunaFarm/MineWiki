@@ -36,6 +36,11 @@ interface PublicationState {
     readonly ready: boolean;
     readonly blockers: readonly ReadinessBlocker[];
   };
+  readonly access: {
+    readonly authority: 'server_admin' | 'owner' | 'manager' | 'reviewer';
+    readonly canPublish: boolean;
+    readonly canApprove: boolean;
+  };
   readonly candidate: {
     readonly token: string;
     readonly baselineReleaseId: string | null;
@@ -49,6 +54,13 @@ interface PublicationState {
       readonly linkGraphChanged: boolean;
     };
     readonly hasChanges: boolean;
+  };
+  readonly review: {
+    readonly required: boolean;
+    readonly approved: boolean;
+    readonly canApprove: boolean;
+    readonly viewerApproved: boolean;
+    readonly approvals: readonly { readonly reviewerProfileId: string; readonly approvedAt: string }[];
   };
 }
 
@@ -153,11 +165,40 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
     }
   }
 
+  async function changeApproval(approve: boolean) {
+    if (!publication || saving || !publication.review.canApprove) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${baseUrl}/v1/servers/${encodeURIComponent(serverId)}/wiki-publication/approval`, {
+        method: approve ? 'POST' : 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+        body: JSON.stringify({ candidateToken: publication.candidate.token }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (body.code === 'SERVER_WIKI_RELEASE_CANDIDATE_CHANGED') await load();
+        throw new Error(body.message ?? '릴리스 검토 상태를 변경하지 못했습니다.');
+      }
+      setPublication((current) => current ? { ...current, review: body as PublicationState['review'] } : current);
+      setMessage({ tone: 'success', text: approve ? '현재 릴리스 후보를 승인했습니다.' : '릴리스 후보 승인을 취소했습니다.' });
+    } catch (error) {
+      setMessage({ tone: 'error', text: error instanceof Error ? error.message : '릴리스 검토 상태를 변경하지 못했습니다.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) return <section className="flex min-h-28 items-center justify-center rounded-xl border border-white/10 bg-white/[0.025]"><Loader2 className="size-5 animate-spin text-emerald-300" aria-label="공개 상태 불러오는 중" /></section>;
   if (!publication) return <section className="rounded-xl border border-red-300/25 bg-red-400/10 p-4 text-sm text-red-100">{message?.text ?? '공개 상태를 불러오지 못했습니다.'}<button type="button" onClick={() => void load()} className="mt-3 flex min-h-11 items-center gap-2 rounded-lg border border-red-200/30 px-4"><RefreshCw className="size-4" />다시 시도</button></section>;
 
   const copy = STATUS_COPY[publication.status];
-  const canPublish = reason.trim().length >= 5 && publication.readiness.ready && publication.candidate.hasChanges;
+  const canPublish = publication.access.canPublish
+    && reason.trim().length >= 5
+    && publication.readiness.ready
+    && publication.candidate.hasChanges
+    && (!publication.review.required || publication.review.approved);
   const canUnpublish = reason.trim().length >= 5 && confirmation === '비공개';
 
   return (
@@ -178,7 +219,12 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
       </div>
 
       {!publication.readiness.ready ? <div className="mt-5 rounded-lg border border-amber-300/25 bg-amber-400/10 p-4"><p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><ShieldAlert className="size-4" />공개 전 확인이 필요합니다</p><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-amber-100/80">{publication.readiness.blockers.map((blocker) => <li key={blocker}>{BLOCKER_COPY[blocker]}</li>)}</ul></div> : null}
-      <ReleaseCandidateManifest candidate={publication.candidate} />
+      <ReleaseCandidateManifest
+        candidate={publication.candidate}
+        review={publication.review}
+        saving={saving}
+        onApproval={(approve) => void changeApproval(approve)}
+      />
       {message ? <p className={`mt-4 text-sm ${message.tone === 'error' ? 'text-red-200' : 'text-emerald-200'}`} role="status">{message.text}</p> : null}
 
       <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,280px)_auto] lg:items-end">
@@ -197,7 +243,17 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
   );
 }
 
-function ReleaseCandidateManifest({ candidate }: { readonly candidate: PublicationState['candidate'] }) {
+function ReleaseCandidateManifest({
+  candidate,
+  review,
+  saving,
+  onApproval,
+}: {
+  readonly candidate: PublicationState['candidate'];
+  readonly review: PublicationState['review'];
+  readonly saving: boolean;
+  readonly onApproval: (approve: boolean) => void;
+}) {
   const changedPages = candidate.pages.filter((page) => page.kind !== 'unchanged');
   const visiblePages = changedPages.slice(0, 50);
   const presentationChanges = [
@@ -215,6 +271,7 @@ function ReleaseCandidateManifest({ candidate }: { readonly candidate: Publicati
       {(['added', 'updated', 'moved', 'removed', 'unchanged'] as const).map((kind) => <div key={kind} className="bg-[#111821] p-3 text-center"><p className="text-lg font-bold text-white">{candidate.counts[kind].toLocaleString('ko-KR')}</p><p className="mt-1 text-[11px] text-slate-500">{candidateKindLabel(kind)}</p></div>)}
     </div>
     {presentationChanges.length > 0 ? <p className="border-t border-white/10 px-4 py-3 text-xs text-slate-300">사이트 설정 변경: {presentationChanges.join(' · ')}</p> : null}
+    {review.required || review.canApprove ? <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-white">독립 검토 {review.approved ? '승인 완료' : '대기 중'}</p><p className="mt-1 text-xs text-slate-400">{review.required ? `활성 reviewer의 승인이 있어야 공개할 수 있습니다. 현재 승인 ${review.approvals.length.toLocaleString('ko-KR')}건` : '현재 등록된 reviewer가 없어 독립 승인 없이 공개할 수 있습니다.'}</p></div>{review.canApprove ? <button type="button" disabled={saving || !candidate.hasChanges} onClick={() => onApproval(!review.viewerApproved)} className="btn-secondary min-h-11 shrink-0 disabled:opacity-50">{review.viewerApproved ? '내 승인 취소' : '이 후보 승인'}</button> : null}</div> : null}
     {visiblePages.length > 0 ? <ul className="divide-y divide-white/10 border-t border-white/10">
       {visiblePages.map((page) => {
         const identity = page.after ?? page.before;
