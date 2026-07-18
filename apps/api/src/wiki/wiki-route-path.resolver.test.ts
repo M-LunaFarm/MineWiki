@@ -13,6 +13,22 @@ test('canonical server wiki paths remove only the owning server slug prefix', ()
   );
 });
 
+test('route resolver uses the canonical document title instead of legacy display-tree paths', async () => {
+  const prisma = {
+    wikiNamespace: { async findMany() { return []; } },
+    serverWiki: {
+      async findMany() { return [{ spaceId: 41n, slug: 'example', siteSlug: 'example' }]; }
+    }
+  } as unknown as PrismaService;
+  const root = { id: 711n, namespaceId: 1, spaceId: 41n, title: 'example', localPath: '대문' };
+  const child = { id: 712n, namespaceId: 1, spaceId: 41n, title: 'example/처음 시작하기', localPath: '처음 시작하기' };
+
+  const routes = await new WikiRoutePathResolver(prisma).preload([root, child], new Map([[1, 'server']]));
+
+  assert.equal(routes.routePath(root), '/serverWiki/example');
+  assert.equal(routes.routePath(child), '/serverWiki/example/%EC%B2%98%EC%9D%8C_%EC%8B%9C%EC%9E%91%ED%95%98%EA%B8%B0');
+});
+
 test('route resolver batch-loads namespaces and server slugs without cross-space collisions', async () => {
   let namespaceQueries = 0;
   let serverWikiQueries = 0;

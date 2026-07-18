@@ -34,7 +34,7 @@ export class WikiRoutePathBatch {
       const serverWiki = this.serverWikiBySpaceId.get(page.spaceId);
       if (serverWiki) return buildCanonicalServerWikiPath(
         serverWiki.siteSlug,
-        page.localPath,
+        page.title,
         serverWiki.slug,
         '/serverWiki'
       );

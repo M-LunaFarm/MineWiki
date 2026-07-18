@@ -355,6 +355,7 @@ test('server wiki API deep links use the reserved tool prefix', () => {
 test('server wiki navigation keeps every document beyond the former 100 item cap', () => {
   const pages = Array.from({ length: 150 }, (_, index) => ({
     id: BigInt(index + 1),
+    title: index === 0 ? 'luna' : `luna/guide/doc-${String(index).padStart(3, '0')}`,
     localPath: index === 0 ? 'luna' : `luna/guide/doc-${String(index).padStart(3, '0')}`,
     displayTitle: `문서 ${index}`,
   }));
@@ -368,12 +369,24 @@ test('server wiki navigation keeps every document beyond the former 100 item cap
 
 test('server wiki navigation removes a duplicated server slug from labels', () => {
   const navigation = buildServerWikiNavigation('luna', [
-    { id: 1n, localPath: 'luna', displayTitle: '루나 서버' },
-    { id: 2n, localPath: 'luna/guide', displayTitle: 'luna/가이드' },
-    { id: 3n, localPath: 'luna/guide/install', displayTitle: '설치' },
+    { id: 1n, title: 'luna', localPath: 'luna', displayTitle: '루나 서버' },
+    { id: 2n, title: 'luna/guide', localPath: 'luna/guide', displayTitle: 'luna/가이드' },
+    { id: 3n, title: 'luna/guide/install', localPath: 'luna/guide/install', displayTitle: '설치' },
   ], 3n);
   assert.deepEqual(navigation.map((item) => item.title), ['루나 서버', '가이드', '설치']);
   assert.deepEqual(navigation.map((item) => item.depth), [0, 1, 2]);
+});
+
+test('server wiki navigation keeps legacy root tree labels but links canonical document identities', () => {
+  const navigation = buildServerWikiNavigation('example', [
+    { id: 711n, title: 'example', localPath: '대문', displayTitle: '크리퍼타운 SMP' },
+    { id: 712n, title: 'example/처음 시작하기', localPath: '처음 시작하기', displayTitle: '처음 시작하기' },
+  ], 711n, 'example', '/serverWiki');
+
+  assert.equal(navigation[0]?.path, '/serverWiki/example');
+  assert.equal(navigation[0]?.current, true);
+  assert.equal(navigation[0]?.depth, 0);
+  assert.equal(navigation[1]?.path, '/serverWiki/example/%EC%B2%98%EC%9D%8C_%EC%8B%9C%EC%9E%91%ED%95%98%EA%B8%B0');
 });
 
 test('wiki search cursor is stable and rejects tampering', () => {

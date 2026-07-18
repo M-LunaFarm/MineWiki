@@ -2519,34 +2519,43 @@ export function serverWikiNavigationDepth(serverSlug: string, localPath: string)
 
 export function buildServerWikiNavigation(
   serverSlug: string,
-  pages: ReadonlyArray<{ id: bigint; localPath: string; displayTitle: string }>,
+  pages: ReadonlyArray<{ id: bigint; title: string; localPath: string; displayTitle: string }>,
   currentPageId: bigint,
   routeSlug = serverSlug,
   routePrefix: '/server' | '/serverWiki' = '/server'
 ) {
   const navigationPages = [...pages].sort((left, right) => {
-    const leftRoot = serverWikiRelativePath(serverSlug, left.localPath) ? 0 : -1;
-    const rightRoot = serverWikiRelativePath(serverSlug, right.localPath) ? 0 : -1;
+    const leftRoot = serverWikiPageRelativePath(serverSlug, left) ? 0 : -1;
+    const rightRoot = serverWikiPageRelativePath(serverSlug, right) ? 0 : -1;
     return leftRoot - rightRoot || left.localPath.localeCompare(right.localPath, 'ko');
   });
   const parentPaths = new Set<string>();
   for (const item of navigationPages) {
-    const parts = serverWikiRelativePath(serverSlug, item.localPath).split('/').filter(Boolean);
+    const parts = serverWikiPageRelativePath(serverSlug, item).split('/').filter(Boolean);
     for (let index = 0; index < parts.length; index += 1) {
       parentPaths.add(parts.slice(0, index).join('/'));
     }
   }
   return navigationPages.map((item) => {
-    const relativePath = serverWikiRelativePath(serverSlug, item.localPath);
+    const relativePath = serverWikiPageRelativePath(serverSlug, item);
     return {
       id: item.id.toString(),
       title: serverWikiNavigationTitle(serverSlug, item.displayTitle),
-      path: buildCanonicalServerWikiPath(routeSlug, item.localPath, serverSlug, routePrefix),
+      path: buildCanonicalServerWikiPath(routeSlug, item.title, serverSlug, routePrefix),
       current: item.id === currentPageId,
-      depth: serverWikiNavigationDepth(serverSlug, item.localPath),
+      depth: relativePath ? relativePath.split('/').filter(Boolean).length : 0,
       hasChildren: parentPaths.has(relativePath)
     };
   });
+}
+
+function serverWikiPageRelativePath(
+  serverSlug: string,
+  page: { readonly title: string; readonly localPath: string }
+): string {
+  return slugifyTitle(page.title) === slugifyTitle(serverSlug)
+    ? ''
+    : serverWikiRelativePath(serverSlug, page.localPath);
 }
 
 function serverWikiNavigationTitle(serverSlug: string, displayTitle: string): string {
