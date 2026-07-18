@@ -18,12 +18,19 @@ if (!hasDatabase) {
   const read = new WikiReadService(prisma, {
     assertCanReadPage: async () => undefined
   } as unknown as WikiPermissionService);
+  let createdMainNamespaceId: number | null = null;
 
   before(async () => {
     await prisma.$connect();
+    const namespace = await prisma.wikiNamespace.findUnique({ where: { code: 'main' } });
+    if (!namespace) {
+      const created = await prisma.wikiNamespace.create({ data: { code: 'main', displayName: '일반', pathPrefix: '', isContent: true } });
+      createdMainNamespaceId = created.id;
+    }
   });
 
   after(async () => {
+    if (createdMainNamespaceId) await prisma.wikiNamespace.delete({ where: { id: createdMainNamespaceId } });
     await prisma.$disconnect();
   });
 
@@ -85,6 +92,7 @@ if (!hasDatabase) {
           username: `merge_source_${suffix}`,
           displayName: 'Merge source',
           status: 'blocked',
+          usernameChangedAt: new Date(now.getTime() - 60_000),
           createdAt: new Date(now.getTime() - 1_000),
           updatedAt: now
         }
@@ -102,6 +110,10 @@ if (!hasDatabase) {
       targetProfileId = target.id;
       sourceProfileId = source.id;
       foreignProfileId = foreign.id;
+      const preservedUsername = `merge_old_${suffix}`;
+      await prisma.wikiUsernameAlias.create({
+        data: { oldUsername: preservedUsername, profileId: source.id, createdAt: now }
+      });
 
       await prisma.wikiRecentChange.create({
         data: {
@@ -340,15 +352,17 @@ if (!hasDatabase) {
       assert.equal(completed.transferred.ownedPages, 1);
       assert.equal(completed.transferred.ownedSpaces, 1);
       assert.equal(completed.transferred.pendingUserDocuments, 1);
+      assert.equal(completed.transferred.usernameAliases, 1);
       assert.equal(completed.transferred.watches, 1);
       assert.equal(completed.transferred.subwikiRoles, 3);
       assert.equal(completed.transferred.aclMemberships, 1);
       assert.equal(completed.transferred.wikiGroups, 1);
 
-      const [mergedSource, blockedTarget, alias, historicalChange, movedNotification, movedAcl] = await Promise.all([
+      const [mergedSource, blockedTarget, alias, usernameAlias, historicalChange, movedNotification, movedAcl] = await Promise.all([
         prisma.wikiProfile.findUnique({ where: { id: source.id } }),
         prisma.wikiProfile.findUnique({ where: { id: target.id } }),
         prisma.wikiProfileAlias.findUnique({ where: { sourceProfileId: source.id } }),
+        prisma.wikiUsernameAlias.findUnique({ where: { oldUsername: preservedUsername } }),
         prisma.wikiRecentChange.findFirst({ where: { title: `Merge history ${suffix}` } }),
         prisma.wikiNotification.findUnique({ where: { id: notification.id } }),
         prisma.aclRule.findUnique({ where: { id: directAcl.id } })
@@ -357,6 +371,8 @@ if (!hasDatabase) {
       assert.equal(mergedSource?.mergedIntoProfileId, target.id);
       assert.equal(blockedTarget?.status, 'blocked');
       assert.equal(alias?.targetProfileId, target.id);
+      assert.equal(usernameAlias?.profileId, target.id);
+      assert.equal(blockedTarget?.usernameChangedAt?.toISOString(), source.usernameChangedAt?.toISOString());
       assert.equal(historicalChange?.actorId, source.id);
       assert.equal(movedNotification?.profileId, target.id);
       assert.equal(movedAcl?.subjectValue, target.id.toString());

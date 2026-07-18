@@ -26,9 +26,14 @@ export function buildWikiExportSections(
       select: {
         id: true, accountId: true, username: true, displayName: true, email: true,
         emailVerifiedAt: true, status: true, mergedIntoProfileId: true,
-        mergedAt: true, createdAt: true, updatedAt: true,
+        mergedAt: true, usernameChangedAt: true, createdAt: true, updatedAt: true,
       },
     })),
+    staticSection('wikiUsernameAliases', async () => (await prisma.wikiUsernameAlias.findMany({
+      where: { profileId: { in: profileIds } },
+      orderBy: [{ profileId: 'asc' }, { createdAt: 'asc' }],
+      select: { oldUsername: true, profileId: true, createdAt: true },
+    })).map((alias) => ({ id: alias.oldUsername, ...alias }))),
     filteredPagedSection('wikiRevisions', (after) => prisma.wikiPageRevision.findMany({
       where: {
         OR: [{ createdBy: { in: profileIds } }, { actorUserId: { in: profileIds } }],

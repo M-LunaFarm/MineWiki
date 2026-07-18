@@ -344,7 +344,7 @@ export class WikiEditService {
       );
       if (namespaceCode === 'user') {
         const currentOwner = await this.wikiPermissions.resolveUserDocumentOwner(tx, title);
-        if (!currentOwner || currentOwner.id !== createTarget.ownerProfileId) {
+        if (!currentOwner || currentOwner.isAlias || currentOwner.id !== createTarget.ownerProfileId) {
           throw new ConflictException('The user document owner changed. Reload and try again.');
         }
         await this.wikiPermissions.assertCanCreatePage({
@@ -453,7 +453,7 @@ export class WikiEditService {
     const owner = namespaceCode === 'user'
       ? await this.wikiPermissions.resolveUserDocumentOwner(store, title)
       : null;
-    if (namespaceCode === 'user' && !owner) {
+    if (namespaceCode === 'user' && (!owner || owner.isAlias)) {
       throw new BadRequestException('User document paths must start with an active canonical username.');
     }
     const slug = slugifyTitle(title);
@@ -841,7 +841,7 @@ export class WikiEditService {
       const currentOwner = namespace.code === 'user'
         ? await this.wikiPermissions.resolveUserDocumentOwner(tx, request.targetTitle)
         : null;
-      if (namespace.code === 'user' && (!currentOwner || request.targetOwnerProfileId !== currentOwner.id)) {
+      if (namespace.code === 'user' && (!currentOwner || currentOwner.isAlias || request.targetOwnerProfileId !== currentOwner.id)) {
         throw new ConflictException('The requested user document owner is no longer valid.');
       }
       if (existing) {

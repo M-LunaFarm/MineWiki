@@ -489,6 +489,21 @@ export class WikiProfileMergeService {
       where: { targetOwnerProfileId: sourceId, status: 'pending' },
       data: { targetOwnerProfileId: targetId, updatedAt: now }
     });
+    const usernameAliases = await tx.wikiUsernameAlias.updateMany({
+      where: { profileId: sourceId },
+      data: { profileId: targetId }
+    });
+    const [sourceProfile, targetProfile] = await Promise.all([
+      tx.wikiProfile.findUnique({ where: { id: sourceId }, select: { usernameChangedAt: true } }),
+      tx.wikiProfile.findUnique({ where: { id: targetId }, select: { usernameChangedAt: true } }),
+    ]);
+    if (sourceProfile?.usernameChangedAt &&
+        (!targetProfile?.usernameChangedAt || sourceProfile.usernameChangedAt > targetProfile.usernameChangedAt)) {
+      await tx.wikiProfile.update({
+        where: { id: targetId },
+        data: { usernameChangedAt: sourceProfile.usernameChangedAt, updatedAt: now }
+      });
+    }
 
     const sourceWatches = await tx.wikiPageWatch.findMany({ where: { profileId: sourceId } });
     let watches = 0;
@@ -578,6 +593,7 @@ export class WikiProfileMergeService {
       ownedPages: ownedPages.count,
       ownedSpaces: ownedSpaces.count,
       pendingUserDocuments: pendingUserDocuments.count,
+      usernameAliases: usernameAliases.count,
       watches,
       discussionSubscriptions: subscriptions,
       pollVotes,

@@ -7,6 +7,7 @@ import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
 type WikiPermissionStore = Pick<
   PrismaService,
   | 'wikiProfile'
+  | 'wikiUsernameAlias'
   | 'account'
   | 'wikiSpace'
   | 'subwikiRole'
@@ -1199,7 +1200,7 @@ export class WikiPermissionService {
   async resolveUserDocumentOwner(
     store: WikiPermissionStore,
     title: string
-  ): Promise<{ readonly id: bigint; readonly username: string } | null> {
+  ): Promise<{ readonly id: bigint; readonly username: string; readonly isAlias: boolean } | null> {
     const [rawRoot = ''] = title.split('/');
     const root = rawRoot.normalize('NFKC');
     const hasControlCharacter = [...root].some((character) => {
@@ -1207,14 +1208,26 @@ export class WikiPermissionService {
       return codePoint <= 0x1f || codePoint === 0x7f;
     });
     if (!root || root === '.' || root === '..' || root.includes('\\') || hasControlCharacter) return null;
-    const profile = await store.wikiProfile.findUnique({
+    let profile = await store.wikiProfile.findUnique({
       where: { username: root },
       select: { id: true, username: true, status: true }
     });
+    let isAlias = false;
+    if (!profile) {
+      const alias = await store.wikiUsernameAlias.findUnique({
+        where: { oldUsername: root },
+        select: { profileId: true }
+      });
+      profile = alias ? await store.wikiProfile.findUnique({
+        where: { id: alias.profileId },
+        select: { id: true, username: true, status: true }
+      }) : null;
+      isAlias = alias !== null;
+    }
     if (!profile || !ACTIVE_PROFILE_STATUSES.has(profile.status)) return null;
-    return profile.username === rawRoot
-      ? { id: profile.id, username: profile.username }
-      : null;
+    return !isAlias && profile.username !== rawRoot
+      ? null
+      : { id: profile.id, username: profile.username, isAlias };
   }
 
   private async hasAnySubwikiRole(

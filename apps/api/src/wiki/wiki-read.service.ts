@@ -539,6 +539,35 @@ export class WikiReadService {
       }
     });
     if (!page) {
+      if (normalizedNamespace === 'user' && options.followRedirects) {
+        const [requestedRoot = '', ...suffixParts] = normalizedTitle.split('/');
+        if (requestedRoot.normalize('NFKC') !== requestedRoot) throw new NotFoundException('Wiki page not found.');
+        const alias = await this.prisma.wikiUsernameAlias.findUnique({
+          where: { oldUsername: requestedRoot.normalize('NFKC') },
+          select: { profileId: true }
+        });
+        const canonical = alias ? await this.prisma.wikiProfile.findUnique({
+          where: { id: alias.profileId },
+          select: { username: true, status: true }
+        }) : null;
+        if (canonical?.status === 'active' && canonical.username !== requestedRoot) {
+          const canonicalTitle = suffixParts.length > 0
+            ? `${canonical.username}/${suffixParts.join('/')}`
+            : canonical.username;
+          const redirected = await this.getPageInternal('user', canonicalTitle, access, {
+            followRedirects: true,
+            redirectTrail: [...options.redirectTrail, pageKey]
+          });
+          return {
+            ...redirected,
+            redirectedFrom: redirected.redirectedFrom ?? {
+              namespace: 'user',
+              title: normalizedTitle,
+              path: wikiUrl('user', normalizedTitle)
+            }
+          };
+        }
+      }
       throw new NotFoundException('Wiki page not found.');
     }
     return this.renderPage(namespace.code, page, access, options);

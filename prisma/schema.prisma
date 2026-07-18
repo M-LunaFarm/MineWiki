@@ -1191,6 +1191,7 @@ model WikiProfile {
   status                  String                 @default("active") @db.VarChar(32)
   mergedIntoProfileId     BigInt?                @map("merged_into_profile_id") @db.UnsignedBigInt
   mergedAt                DateTime?              @map("merged_at") @db.DateTime(3)
+  usernameChangedAt       DateTime?              @map("username_changed_at") @db.DateTime(3)
   createdAt               DateTime               @map("created_at")
   updatedAt               DateTime               @map("updated_at")
   pushSubscriptions       WikiPushSubscription[]
@@ -1198,6 +1199,15 @@ model WikiProfile {
   @@index([createdAt])
   @@index([mergedIntoProfileId], map: "idx_users_merged_into")
   @@map("users")
+}
+
+model WikiUsernameAlias {
+  oldUsername String   @id @map("old_username") @db.VarChar(64)
+  profileId   BigInt   @map("profile_id") @db.UnsignedBigInt
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([profileId, createdAt], map: "idx_wiki_username_aliases_profile")
+  @@map("wiki_username_aliases")
 }
 
 model WikiProfileAlias {

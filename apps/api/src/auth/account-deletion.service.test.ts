@@ -14,8 +14,29 @@ if (!hasDatabase) {
 } else {
   const prisma = new PrismaService();
   const service = new AccountDeletionService(prisma);
-  before(async () => prisma.$connect());
-  after(async () => prisma.$disconnect());
+  let createdUserNamespaceId: number | null = null;
+  let createdUserSpaceId: bigint | null = null;
+  before(async () => {
+    await prisma.$connect();
+    const namespace = await prisma.wikiNamespace.findUnique({ where: { code: 'user' } });
+    if (!namespace) {
+      const created = await prisma.wikiNamespace.create({ data: { code: 'user', displayName: '사용자', pathPrefix: 'user', isContent: true } });
+      createdUserNamespaceId = created.id;
+    }
+    const space = await prisma.wikiSpace.findUnique({ where: { code: 'user' } });
+    if (!space) {
+      const created = await prisma.wikiSpace.create({ data: {
+        code: 'user', name: '사용자', title: '사용자', rootNamespaceCode: 'user', rootPath: 'user',
+        status: 'active', createdAt: new Date(), updatedAt: new Date(),
+      } });
+      createdUserSpaceId = created.id;
+    }
+  });
+  after(async () => {
+    if (createdUserSpaceId) await prisma.wikiSpace.delete({ where: { id: createdUserSpaceId } });
+    if (createdUserNamespaceId) await prisma.wikiNamespace.delete({ where: { id: createdUserNamespaceId } });
+    await prisma.$disconnect();
+  });
 
   async function createGroup() {
     const firstId = randomUUID();
@@ -265,12 +286,13 @@ if (!hasDatabase) {
       const completed = await service.process(requested.id, randomUUID(), 'user document privacy test');
       assert.equal(completed.status, 'completed');
 
-      const [storedProfile, storedRoot, storedChild, recent, storedEditRequest] = await Promise.all([
+      const [storedProfile, storedRoot, storedChild, recent, storedEditRequest, usernameAlias] = await Promise.all([
         prisma.wikiProfile.findUniqueOrThrow({ where: { id: profile.id } }),
         prisma.wikiPage.findUniqueOrThrow({ where: { id: root.id } }),
         prisma.wikiPage.findUniqueOrThrow({ where: { id: child.id } }),
         prisma.wikiRecentChange.findFirstOrThrow({ where: { pageId: root.id } }),
         prisma.wikiEditRequest.findUniqueOrThrow({ where: { id: editRequest.id } }),
+        prisma.wikiUsernameAlias.findUnique({ where: { oldUsername: profile.username } }),
       ]);
       assert.equal(storedProfile.username, `deleted-${profile.id}`);
       assert.equal(storedProfile.status, 'closed');
@@ -284,6 +306,7 @@ if (!hasDatabase) {
       assert.equal(storedEditRequest.status, 'closed');
       assert.equal(storedEditRequest.targetTitle, `deleted-${profile.id}`);
       assert.equal(storedEditRequest.targetSlug, `deleted-${profile.id}`);
+      assert.equal(usernameAlias?.profileId, profile.id);
       assert.doesNotMatch(`${storedRoot.title}/${storedChild.title}`, new RegExp(profile.username, 'u'));
     } finally {
       const pageIds = [root.id, child.id];

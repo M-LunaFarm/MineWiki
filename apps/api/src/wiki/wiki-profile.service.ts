@@ -71,7 +71,14 @@ export class WikiProfileService {
     if (!canonicalUsername || canonicalUsername !== username || canonicalUsername.includes('/')) {
       throw new NotFoundException('Wiki user not found.');
     }
-    const requestedProfile = await this.prisma.wikiProfile.findUnique({ where: { username: canonicalUsername } });
+    const directProfile = await this.prisma.wikiProfile.findUnique({ where: { username: canonicalUsername } });
+    const usernameAlias = directProfile ? null : await this.prisma.wikiUsernameAlias.findUnique({
+      where: { oldUsername: canonicalUsername },
+      select: { profileId: true }
+    });
+    const requestedProfile = directProfile ?? (usernameAlias
+      ? await this.prisma.wikiProfile.findUnique({ where: { id: usernameAlias.profileId } })
+      : null);
     if (!requestedProfile) {
       throw new NotFoundException('Wiki user not found.');
     }
@@ -101,7 +108,7 @@ export class WikiProfileService {
       canEditDocument: isOwner && profile.status === 'active',
       requestedUsername: canonicalUsername,
       canonicalUsername: profile.username,
-      isAlias: requestedProfile.id !== profile.id
+      isAlias: usernameAlias !== null || requestedProfile.id !== profile.id
     };
   }
 

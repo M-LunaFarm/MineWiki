@@ -38,6 +38,20 @@ export interface WikiSwapResponse {
   readonly target: WikiSwapResponsePage;
 }
 
+export interface WikiUsernameState {
+  readonly username: string;
+  readonly changedAt: string | null;
+  readonly nextChangeAt: string | null;
+  readonly canChange: boolean;
+  readonly cooldownDays: number;
+  readonly documentCount: number;
+}
+
+export interface WikiUsernameChangeResponse extends WikiUsernameState {
+  readonly previousUsername: string;
+  readonly movedDocumentCount: number;
+}
+
 export class WikiApiError extends Error {
   constructor(
     message: string,
@@ -2039,6 +2053,32 @@ export async function swapWikiPages(input: {
     sourceTitleConfirmation: input.sourceTitleConfirmation,
     targetTitleConfirmation: input.targetTitleConfirmation,
   });
+}
+
+export async function fetchWikiUsernameState(): Promise<WikiUsernameState> {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/me/username`, {
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw wikiApiError(response, body, 'Wiki 아이디 정보를 불러오지 못했습니다.');
+  return body as WikiUsernameState;
+}
+
+export async function changeWikiUsername(input: {
+  readonly username: string;
+  readonly confirmation: string;
+  readonly password?: string;
+}): Promise<WikiUsernameChangeResponse> {
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/me/username`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+    body: JSON.stringify(input),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw wikiApiError(response, body, 'Wiki 아이디를 변경하지 못했습니다.');
+  return body as WikiUsernameChangeResponse;
 }
 
 export async function deleteWikiPage(input: { pageId: string; reason: string }): Promise<{ pageId: string; status: string }> {

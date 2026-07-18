@@ -74,6 +74,40 @@ test('a fresh wiki profile retains the account email when it is unused', async (
   assert.equal(createdData?.email, account.email);
 });
 
+test('public profiles resolve a preserved username alias to the canonical profile', async () => {
+  const profile = {
+    id: 42n,
+    accountId: 'account-owner',
+    username: 'newname',
+    displayName: 'Owner',
+    status: 'active',
+    mergedIntoProfileId: null,
+    createdAt: new Date('2026-01-02T03:04:05.000Z'),
+  };
+  const prisma = {
+    wikiProfile: {
+      async findUnique({ where }: { where: { username?: string; id?: bigint } }) {
+        return where.id === profile.id ? profile : null;
+      }
+    },
+    wikiUsernameAlias: {
+      async findUnique({ where }: { where: { oldUsername: string } }) {
+        return where.oldUsername === 'oldname' ? { profileId: profile.id } : null;
+      }
+    },
+    wikiNamespace: { async findUnique() { return { id: 7 }; } },
+    wikiPage: { async findUnique() { return null; } },
+  } as unknown as PrismaService;
+
+  const result = await new WikiProfileService(prisma).getPublicProfile('oldname', null);
+
+  assert.equal(result.username, 'newname');
+  assert.equal(result.requestedUsername, 'oldname');
+  assert.equal(result.canonicalUsername, 'newname');
+  assert.equal(result.isAlias, true);
+  assert.equal(result.documentPath, '/user/newname');
+});
+
 function serviceWithProfile(status = 'active') {
   const profile = {
     id: 42n,

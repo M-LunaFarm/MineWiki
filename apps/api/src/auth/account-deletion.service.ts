@@ -283,6 +283,10 @@ export class AccountDeletionService {
       await tx.accountRole.deleteMany({ where: { accountId: { in: accountIds } } });
       await tx.accountLink.deleteMany({ where: { OR: [{ primaryAccountId: { in: accountIds } }, { linkedAccountId: { in: accountIds } }] } });
       for (const profile of profiles) {
+        await tx.wikiUsernameAlias.createMany({
+          data: [{ oldUsername: profile.username, profileId: profile.id, createdAt: now }],
+          skipDuplicates: true
+        });
         await tx.wikiProfile.update({
           where: { id: profile.id },
           data: { accountId: null, username: `deleted-${profile.id}`, displayName: '탈퇴한 사용자', email: null, emailVerifiedAt: null, passwordHash: null, status: 'closed', updatedAt: now },

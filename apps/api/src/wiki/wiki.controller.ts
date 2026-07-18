@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Optional, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
@@ -47,6 +47,12 @@ import {
   type WikiPageSwapRequest,
   type WikiPageSwapResponse,
 } from './wiki-page-swap.service';
+import {
+  WikiUsernameService,
+  type WikiUsernameChangeRequest,
+  type WikiUsernameChangeResponse,
+  type WikiUsernameStateResponse,
+} from './wiki-username.service';
 
 @Controller('v1/wiki')
 export class WikiController {
@@ -56,6 +62,7 @@ export class WikiController {
     private readonly wikiEdit: WikiEditService,
     private readonly wikiCaptcha: WikiCaptchaService,
     private readonly wikiPageSwap: WikiPageSwapService,
+    @Optional() private readonly wikiUsernames?: WikiUsernameService,
   ) {}
 
   @Get('stats')
@@ -442,6 +449,24 @@ export class WikiController {
   @UseGuards(SessionGuard)
   getMe(@CurrentSession() session: SessionPayload): Promise<WikiMeResponse> {
     return this.wikiProfiles.getMe(session.userId);
+  }
+
+  @Get('me/username')
+  @UseGuards(SessionGuard)
+  getMyUsername(@CurrentSession() session: SessionPayload): Promise<WikiUsernameStateResponse> {
+    if (!this.wikiUsernames) throw new Error('Wiki username service is unavailable.');
+    return this.wikiUsernames.getState(session);
+  }
+
+  @Post('me/username')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 5, ttl: 300 } })
+  changeMyUsername(
+    @CurrentSession() session: SessionPayload,
+    @Body() body: WikiUsernameChangeRequest,
+  ): Promise<WikiUsernameChangeResponse> {
+    if (!this.wikiUsernames) throw new Error('Wiki username service is unavailable.');
+    return this.wikiUsernames.change(session, body);
   }
 
   @Get('me/deleted-pages')

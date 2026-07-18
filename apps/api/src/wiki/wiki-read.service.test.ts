@@ -1874,13 +1874,16 @@ test('wiki read rejects expanded include output beyond the rendered HTML limit',
   await assert.rejects(service.getPage('main', '대문'), /exceeds the size limit/);
 });
 
-function createRedirectReadService(pages: Record<string, { id: bigint; title: string; contentRaw: string }>) {
+function createRedirectReadService(
+  pages: Record<string, { id: bigint; title: string; contentRaw: string }>,
+  usernameAliases: Record<string, string> = {},
+) {
   const now = new Date('2026-07-05T00:00:00.000Z');
   let currentSlug = '대문';
   const prisma = {
     wikiNamespace: {
-      async findUnique() {
-        return { id: 1, code: 'main' };
+      async findUnique(args: { where: { code?: string; id?: number } }) {
+        return { id: 1, code: args.where.code ?? 'user' };
       }
     },
     wikiPage: {
@@ -1893,6 +1896,8 @@ function createRedirectReadService(pages: Record<string, { id: bigint; title: st
         return {
           id: page.id,
           spaceId: 20n,
+          namespaceId: 1,
+          localPath: currentSlug,
           slug: currentSlug,
           title: page.title,
           displayTitle: page.title,
@@ -1902,6 +1907,17 @@ function createRedirectReadService(pages: Record<string, { id: bigint; title: st
           status: 'normal',
           updatedAt: now
         };
+      }
+    },
+    wikiUsernameAlias: {
+      async findUnique(args: { where: { oldUsername: string } }) {
+        return usernameAliases[args.where.oldUsername] ? { profileId: 99n } : null;
+      }
+    },
+    wikiProfile: {
+      async findUnique() {
+        const username = Object.values(usernameAliases)[0];
+        return username ? { username, status: 'active' } : null;
       }
     },
     wikiPageRevision: {
@@ -1958,6 +1974,21 @@ function createRedirectReadService(pages: Record<string, { id: bigint; title: st
     permissions as unknown as WikiPermissionService
   );
 }
+
+test('wiki username aliases redirect both the root and descendant paths to the canonical tree', async () => {
+  const service = createRedirectReadService({
+    newname: { id: 20n, title: 'newname', contentRaw: 'root' },
+    'newname/child': { id: 21n, title: 'newname/child', contentRaw: 'child' },
+  }, { oldname: 'newname' });
+
+  const root = await service.getPage('user', 'oldname');
+  const child = await service.getPage('user', 'oldname/child');
+
+  assert.equal(root.title, 'newname');
+  assert.equal(root.redirectedFrom?.title, 'oldname');
+  assert.equal(child.title, 'newname/child');
+  assert.equal(child.redirectedFrom?.title, 'oldname/child');
+});
 
 test('wiki read follows redirect pages by default', async () => {
   const service = createRedirectReadService({
