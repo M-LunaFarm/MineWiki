@@ -1806,6 +1806,12 @@ model ServerWiki {
   genres                       String?               @db.VarChar(255)
   verifiedStatus               String                @default("none") @map("verified_status") @db.VarChar(32)
   status                       String                @default("active") @db.VarChar(32)
+  publicationStatus            String                @default("draft") @map("publication_status") @db.VarChar(16)
+  publicationVersion           Int                   @default(0) @map("publication_version") @db.UnsignedInt
+  publishedAt                  DateTime?             @map("published_at") @db.DateTime(3)
+  unpublishedAt                DateTime?             @map("unpublished_at") @db.DateTime(3)
+  publicationUpdatedAt         DateTime?             @map("publication_updated_at") @db.DateTime(3)
+  publicationUpdatedBy         BigInt?               @map("publication_updated_by") @db.UnsignedBigInt
   layoutKey                    String                @default("docs") @map("layout_key") @db.VarChar(32)
   layoutUpdatedAt              DateTime?             @map("layout_updated_at")
   layoutUpdatedBy              BigInt?               @map("layout_updated_by") @db.UnsignedBigInt
@@ -1829,6 +1835,7 @@ model ServerWiki {
   billingSubject               PaddleBillingSubject?
 
   @@index([status])
+  @@index([publicationStatus])
   @@index([verifiedStatus])
   @@map("server_wikis")
 }

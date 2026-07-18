@@ -73,6 +73,7 @@ export interface WikiPageResponse {
     readonly isOnline: boolean | null;
     readonly playersOnline: number | null;
     readonly playersMax: number | null;
+    readonly publicationStatus: 'draft' | 'published' | 'unpublished';
     readonly layout: 'docs' | 'handbook' | 'brand';
     readonly navigation: ReadonlyArray<{
       readonly kind: 'group' | 'page';

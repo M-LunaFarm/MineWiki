@@ -10,6 +10,7 @@ import { PrivilegedActionGate } from '../auth/privileged-action-gate';
 import { ServerWikiCollaboratorsContent } from './server-wiki-collaborators';
 import { ServerWikiLayoutPlansContent } from './server-wiki-layout-plans';
 import { ServerWikiNavigationSettings } from './server-wiki-navigation-settings';
+import { ServerWikiPublicationSettings } from './server-wiki-publication-settings';
 
 interface ContentSettings {
   readonly serverWikiId: string;
@@ -124,6 +125,7 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
         <h1 className="mt-3 text-3xl font-extrabold text-white">서버 위키 설정</h1>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">{access?.canManageLayout || access?.canManageCollaborators ? 'GitBook처럼 문서 전체에 적용할 운영 정책과 안내, 협업자 권한을 관리하고 서버 브랜드에 맞는 레이아웃을 선택합니다.' : '문서 전체에 적용할 기여 정책, 편집 도움말과 상단·하단 안내를 관리합니다.'}</p>
       </header>
+      <ServerWikiPublicationSettings serverId={serverId} />
       <div className="grid rounded-xl border border-white/10 bg-white/[0.025] p-1" style={{ gridTemplateColumns: `repeat(${settingsTabs.length}, minmax(0, 1fr))` }} role="tablist" aria-label="서버 위키 설정 분류">
         <Tab
           id={tabId('content')}

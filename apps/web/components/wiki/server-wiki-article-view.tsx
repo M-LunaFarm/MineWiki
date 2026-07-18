@@ -56,6 +56,11 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
   return (
     <div className="server-wiki-layout min-h-screen bg-white text-[#333]">
       <ServerWikiHeader page={page} />
+      {wiki.publicationStatus !== 'published' ? (
+        <aside className="border-y border-amber-300/40 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-950" role="status">
+          {wiki.publicationStatus === 'draft' ? '초안 미리보기' : '비공개 미리보기'} · 권한이 있는 협업자에게만 표시됩니다.
+        </aside>
+      ) : null}
       <main className={`mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
         <ServerWikiSidebar page={page} />
 

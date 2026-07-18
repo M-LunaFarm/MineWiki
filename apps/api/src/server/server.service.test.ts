@@ -195,6 +195,9 @@ if (!hasDatabase) {
         where: { voteServerId: server.id }
       });
       assert.equal(serverWiki?.slug, link.wikiSlug);
+      assert.equal(serverWiki?.publicationStatus, 'draft');
+      assert.equal(serverWiki?.publicationVersion, 0);
+      assert.equal(serverWiki?.publishedAt, null);
 
       const createdPages = await prisma.wikiPage.findMany({
         where: { spaceId: BigInt(link.wikiSpaceId ?? '0') },

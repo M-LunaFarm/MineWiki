@@ -22,6 +22,7 @@ function createService(options: {
     createdBy: bigint | null;
     slug?: string;
     status?: string;
+    publicationStatus?: string;
     serverName?: string;
     host?: string | null;
   } | null;
@@ -62,6 +63,7 @@ function createService(options: {
         spaceId: 10n,
         slug: 'server-one',
         status: 'active',
+        publicationStatus: 'published',
         serverName: 'Server One',
         host: 'play.server-one.test',
         ...options.serverWiki,
@@ -586,6 +588,54 @@ test('linked server owner can edit owner-only server wiki page', async () => {
   });
 
   assert.equal(decision.allowed, true);
+});
+
+test('server wiki publication hides drafts while preserving owner and collaborator preview', async () => {
+  const linked = {
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki', rootPageId: 1n },
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n, publicationStatus: 'draft' },
+    server: { ownerAccountId: 'account-1' }
+  } as const;
+  const target = page();
+
+  assert.deepEqual(
+    await createService(linked).canReadPage({ actor: null, page: target }),
+    { allowed: false, reason: 'server_wiki_not_published' }
+  );
+  assert.equal((await createService(linked).canReadPage({
+    actor: actor({ accountId: 'account-2', profileId: 200n }),
+    page: target
+  })).allowed, false);
+  assert.equal((await createService(linked).canReadPage({
+    actor: actor({ accountId: 'account-1', profileId: 300n }),
+    page: target
+  })).allowed, true);
+  assert.equal((await createService({ ...linked, roles: ['reviewer'] }).canReadPage({
+    actor: actor({ accountId: 'account-2', profileId: 200n }),
+    page: target
+  })).allowed, true);
+  assert.equal((await createService(linked).canReadPage({
+    actor: actor({ accountId: 'account-2', profileId: 200n, permissions: ['server.admin'] }),
+    page: target
+  })).allowed, true);
+});
+
+test('batch page visibility applies the same publication gate as direct reads', async () => {
+  const options = {
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki', rootPageId: 1n },
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n, publicationStatus: 'unpublished' },
+    server: { ownerAccountId: 'account-1' }
+  } as const;
+  const target = page();
+
+  assert.deepEqual(await createService(options).filterReadablePages({ actor: null, pages: [target] }), []);
+  assert.deepEqual(
+    await createService({ ...options, roles: ['editor'] }).filterReadablePages({
+      actor: actor({ accountId: 'account-2', profileId: 200n }),
+      pages: [target]
+    }),
+    [target]
+  );
 });
 
 test('linked server wiki authority ignores provenance and follows active canonical server ownership', async () => {
@@ -1173,15 +1223,21 @@ test('wiki roles keep reviewer least-privileged while editor and manager retain 
   const manager = actor({ profileId: 200n });
   const reviewerService = createService({
     roles: ['reviewer'],
-    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' }
+    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' },
+    serverWiki: { voteServerId: 'server-1', createdBy: 999n },
+    server: { ownerAccountId: 'account-2' }
   });
   const editorService = createService({
     roles: ['editor'],
-    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' }
+    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' },
+    serverWiki: { voteServerId: 'server-1', createdBy: 999n },
+    server: { ownerAccountId: 'account-2' }
   });
   const managerService = createService({
     roles: ['manager'],
-    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' }
+    space: { id: 10n, status: 'active', ownerUserId: 999n, createdBy: 999n, spaceType: 'server_wiki' },
+    serverWiki: { voteServerId: 'server-1', createdBy: 999n },
+    server: { ownerAccountId: 'account-2' }
   });
   const createTarget = {
     namespaceId: 1,

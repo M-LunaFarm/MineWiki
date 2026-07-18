@@ -74,6 +74,7 @@ export interface WikiSectionLockPolicy {
 const EDITOR_ROLES = new Set(['owner', 'manager', 'editor', 'maintainer', 'trusted']);
 const OWNER_ROLES = new Set(['owner', 'manager', 'maintainer']);
 const REVIEWER_ROLES = new Set(['reviewer']);
+const PUBLICATION_PREVIEW_ROLES = new Set([...EDITOR_ROLES, ...REVIEWER_ROLES]);
 // `protected` is a published document state. Mutation authority is enforced
 // independently through protectionLevel and ACLs, so hiding these pages would
 // turn edit protection into an unintended public-read outage.
@@ -148,14 +149,32 @@ export class WikiPermissionService {
     const spaceIds = [...new Set(input.pages.map((page) => page.spaceId))];
     const spaces = await store.wikiSpace.findMany({
       where: { id: { in: spaceIds } },
-      select: { id: true, status: true }
+      select: { id: true, status: true, spaceType: true }
     });
     const activeSpaceIds = new Set(spaces
       .filter((space) => ACTIVE_SPACE_STATUSES.has(space.status))
       .map((space) => space.id));
     const actor = input.actor === undefined ? await this.resolveActor(input.accountId, store) : input.actor;
+    const serverSpaceIds = spaces
+      .filter((space) => space.spaceType === 'server_wiki')
+      .map((space) => space.id);
+    const serverWikis = serverSpaceIds.length > 0
+      ? await store.serverWiki.findMany({
+          where: { spaceId: { in: serverSpaceIds } },
+          select: { spaceId: true, status: true, publicationStatus: true }
+        })
+      : [];
+    const publicServerSpaceIds = new Set(serverWikis
+      .filter((wiki) => wiki.status === 'active' && wiki.publicationStatus === 'published')
+      .map((wiki) => wiki.spaceId));
+    const spaceById = new Map(spaces.map((space) => [space.id, space]));
+    const isPublicSpace = (spaceId: bigint) => {
+      const space = spaceById.get(spaceId);
+      return space?.spaceType !== 'server_wiki' || publicServerSpaceIds.has(spaceId);
+    };
     const normalCandidates = input.pages.filter((page) =>
       activeSpaceIds.has(page.spaceId) &&
+      isPublicSpace(page.spaceId) &&
       PUBLIC_PAGE_STATUSES.has(page.status) &&
       PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)
     );
@@ -182,7 +201,7 @@ export class WikiPermissionService {
     const unusual = input.pages.filter((page) =>
       activeSpaceIds.has(page.spaceId) &&
       PUBLIC_PAGE_STATUSES.has(page.status) &&
-      !PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)
+      (!PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel) || !isPublicSpace(page.spaceId))
     );
     for (const page of unusual) {
       const decision = await this.canReadPage({
@@ -210,6 +229,9 @@ export class WikiPermissionService {
       throw new NotFoundException('Wiki space not found.');
     }
     const actor = input.actor ?? await this.resolveActor(input.accountId, store);
+    if (!(await this.canReadServerWikiPublication(store, actor, space))) {
+      throw new NotFoundException('Wiki space not found.');
+    }
     const acl = await this.evaluateAcl('read', actor, {
       spaceId: space.id,
       namespaceCode: space.rootNamespaceCode,
@@ -260,7 +282,7 @@ export class WikiPermissionService {
     }
     const space = await store.wikiSpace.findUnique({
       where: { id: page.spaceId },
-      select: { id: true, status: true }
+      select: { id: true, status: true, spaceType: true, rootPageId: true }
     });
     if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) {
       return deny('space_not_active');
@@ -272,6 +294,9 @@ export class WikiPermissionService {
       return deny('revision_not_public');
     }
     const actor = input.actor === undefined ? await this.resolveActor(input.accountId, store) : input.actor;
+    if (!(await this.canReadServerWikiPublication(store, actor, space))) {
+      return deny('server_wiki_not_published');
+    }
     if (!PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)) {
       if (!actor || !(await this.canManagePageArea(store, actor, page))) {
         return deny('protection_not_readable');
@@ -1022,6 +1047,37 @@ export class WikiPermissionService {
       return true;
     }
     return false;
+  }
+
+  private async canReadServerWikiPublication(
+    store: WikiPermissionStore,
+    actor: WikiPermissionActor | null,
+    space: {
+      readonly id: bigint;
+      readonly status: string;
+      readonly spaceType: string;
+      readonly rootPageId?: bigint | null;
+    }
+  ): Promise<boolean> {
+    if (space.spaceType !== 'server_wiki') return true;
+    const wikis = await store.serverWiki.findMany({
+      where: { spaceId: space.id },
+      select: { status: true, publicationStatus: true }
+    });
+    if (wikis.length !== 1 || wikis[0]?.status !== 'active') return false;
+    if (wikis[0].publicationStatus === 'published') return true;
+    if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status)) return false;
+    if (this.isAdminActor(actor) || actor.permissions?.includes('server.admin') === true) return true;
+
+    const authority = await this.linkedServerWikiAuthority(store, actor, space.id, space);
+    if (authority?.state === 'inconsistent') return false;
+    if (authority?.state === 'consistent' && authority.isOwner) return true;
+    return this.hasAnySubwikiRole(
+      store,
+      actor.profileId,
+      space.id,
+      PUBLICATION_PREVIEW_ROLES
+    );
   }
 
   /**

@@ -882,6 +882,7 @@ export class ServerService {
           genres: normalizeStringArray(server.tags).join(', ') || null,
           verifiedStatus: server.verificationGrade === 'Unverified' ? 'none' : 'verified',
           status: 'active',
+          publicationStatus: 'draft',
           createdBy: actor.id,
           createdAt: now,
           updatedAt: now,

@@ -10,7 +10,7 @@ interface PageProps {
   readonly searchParams: Promise<{ q?: string; target?: string; cursor?: string }>;
 }
 
-export const revalidate = 60;
+export const dynamic = 'force-dynamic';
 
 export default async function ServerWikiSitePage({ params, searchParams }: PageProps) {
   const resolvedParams = await params;

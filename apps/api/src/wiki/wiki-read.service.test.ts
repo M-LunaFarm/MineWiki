@@ -204,6 +204,7 @@ test('public server wiki rendering fails closed when a persisted premium layout 
           edition: 'java',
           supportedVersions: ['1.21'],
           genres: ['survival'],
+          publicationStatus: 'published',
           layoutKey: 'brand',
         };
       },
@@ -236,6 +237,7 @@ test('public server wiki rendering fails closed when a persisted premium layout 
       edition: true,
       supportedVersions: true,
         genres: true,
+        publicationStatus: true,
         layoutKey: true,
         navigationOrder: true,
     },

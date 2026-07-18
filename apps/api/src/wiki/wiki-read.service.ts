@@ -74,6 +74,7 @@ export interface WikiPageResponse {
     readonly isOnline: boolean | null;
     readonly playersOnline: number | null;
     readonly playersMax: number | null;
+    readonly publicationStatus: 'draft' | 'published' | 'unpublished';
     readonly layout: 'docs' | 'handbook' | 'brand';
     readonly navigation: ReadonlyArray<{
       readonly kind: 'group' | 'page';
@@ -2302,6 +2303,7 @@ export class WikiReadService {
         edition: true,
         supportedVersions: true,
         genres: true,
+        publicationStatus: true,
         layoutKey: true,
         navigationOrder: true
       }
@@ -2382,6 +2384,7 @@ export class WikiReadService {
         isOnline: server?.isOnline ?? null,
         playersOnline: server?.playersOnline ?? null,
         playersMax: server?.playersMax ?? null,
+        publicationStatus: serverWiki.publicationStatus as 'draft' | 'published' | 'unpublished',
         layout: resolveEffectiveServerWikiLayout(serverWiki.layoutKey, layoutEntitlements, now),
         navigation
       }

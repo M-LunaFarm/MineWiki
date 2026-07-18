@@ -1,0 +1,49 @@
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { z } from 'zod';
+import { CurrentSession } from '../session/session.decorator';
+import { SessionGuard } from '../session/session.guard';
+import type { SessionPayload } from '../session/session.service';
+import { RequireStepUp } from '../session/step-up.decorator';
+import {
+  ServerWikiPublicationService,
+  type ServerWikiPublicationActor,
+  type UpdateServerWikiPublicationInput,
+} from './server-wiki-publication.service';
+
+const updatePublicationSchema = z.object({
+  status: z.enum(['published', 'unpublished']),
+  expectedVersion: z.number().int().min(0).max(4_294_967_295),
+  reason: z.string().trim().min(5).max(500),
+}).strict();
+
+@Controller('v1/servers/:serverId/wiki-publication')
+@UseGuards(SessionGuard)
+export class ServerWikiPublicationController {
+  constructor(private readonly publication: ServerWikiPublicationService) {}
+
+  @Get()
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  get(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    return this.publication.get(serverId, actorFromSession(session));
+  }
+
+  @Patch()
+  @RequireStepUp('server_admin')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  update(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    const input = updatePublicationSchema.parse(body) as UpdateServerWikiPublicationInput;
+    return this.publication.update(serverId, input, actorFromSession(session));
+  }
+}
+
+function actorFromSession(session: SessionPayload): ServerWikiPublicationActor {
+  return { accountId: session.userId, permissions: session.permissions };
+}
