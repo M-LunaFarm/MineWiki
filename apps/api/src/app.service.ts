@@ -88,7 +88,11 @@ export class AppService implements OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     if (this.redis && this.redis.status !== 'end') {
-      await this.redis.quit().catch(() => this.redis?.disconnect());
+      if (this.redis.status === 'ready') {
+        await this.redis.quit().catch(() => this.redis?.disconnect());
+      } else {
+        this.redis.disconnect();
+      }
     }
   }
 }

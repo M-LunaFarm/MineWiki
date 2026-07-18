@@ -192,5 +192,9 @@ function parseTransportEvent(raw: string): TransportEvent | null {
 
 async function closeRedis(client?: Redis): Promise<void> {
   if (!client || client.status === 'end') return;
-  await client.quit().catch(() => client.disconnect());
+  if (client.status === 'ready') {
+    await client.quit().catch(() => client.disconnect());
+  } else {
+    client.disconnect();
+  }
 }

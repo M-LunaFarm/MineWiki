@@ -31,6 +31,12 @@ export class VoteQueueService implements OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     await this.queue.close();
-    await this.connection.quit();
+    if (this.connection.status !== 'end') {
+      if (this.connection.status === 'ready') {
+        await this.connection.quit().catch(() => this.connection.disconnect());
+      } else {
+        this.connection.disconnect();
+      }
+    }
   }
 }
