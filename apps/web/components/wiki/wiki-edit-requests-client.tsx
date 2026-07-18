@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   changeWikiEditRequestState,
+  claimWikiEditRequest,
   fetchWikiEditRequest,
   fetchWikiEditRequestContext,
   fetchWikiEditRequestDiff,
@@ -87,6 +88,10 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
   async function changeState(requestId: string, action: 'close' | 'reopen') {
     if (action === 'close' && !window.confirm('이 편집 요청을 닫을까요?')) return;
     await run(`${requestId}:${action}`, async () => replace(await changeWikiEditRequestState(requestId, action)));
+  }
+
+  async function claim(requestId: string) {
+    await run(`${requestId}:claim`, async () => replace(await claimWikiEditRequest(requestId)));
   }
 
   async function loadDiff(requestId: string) {
@@ -175,7 +180,7 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
     {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
     {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}
     <div className="space-y-4">{data.items.map((item) => {
-      const isAuthor = item.createdBy !== null && data.viewerProfileId === item.createdBy;
+      const isAuthor = item.viewerOwns;
       const isMutable = ['pending', 'stale', 'closed'].includes(item.status);
       const isStale = item.requestKind === 'edit' && isMutable && (item.status === 'stale' || !data.currentRevisionId || item.baseRevisionId !== data.currentRevisionId);
       const canEdit = isAuthor && ['pending', 'closed'].includes(item.status) && !isStale;
@@ -192,6 +197,7 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
             {data.canReview && item.status === 'pending' ? <Action disabled={Boolean(working)} onClick={() => void review(item.id, 'reject')} icon={<X />}>반려</Action> : null}
             {canRebase ? <Action disabled={Boolean(working)} onClick={() => void rebase(item)} accent icon={<RotateCcw />}>최신 판으로 재배치</Action> : null}
             {canEdit ? <Action disabled={Boolean(working)} onClick={() => startEditing(item)} icon={<Pencil />}>수정</Action> : null}
+            {item.viewerOwns && item.createdBy === null && data.viewerProfileId ? <Action disabled={Boolean(working)} onClick={() => void claim(item.id)} accent icon={<Check />}>계정에 연결</Action> : null}
             {isAuthor && ['pending', 'stale'].includes(item.status) ? <Action disabled={Boolean(working)} onClick={() => void changeState(item.id, 'close')} icon={<X />}>닫기</Action> : null}
             {isAuthor && item.status === 'closed' && !isStale ? <Action disabled={Boolean(working)} onClick={() => void changeState(item.id, 'reopen')} icon={<RotateCcw />}>다시 열기</Action> : null}
           </div>

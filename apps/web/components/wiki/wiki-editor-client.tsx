@@ -65,6 +65,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
   const [isMinor, setIsMinor] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [submittedRequestId, setSubmittedRequestId] = useState<string | null>(null);
   const [blockingErrors, setBlockingErrors] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
@@ -455,7 +456,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
     startSaveTransition(async () => {
       try {
         if (page && baseRevisionId) {
-          await createWikiEditRequest({
+          const request = await createWikiEditRequest({
             pageId: page.id,
             baseRevisionId,
             contentRaw,
@@ -464,6 +465,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
             captchaToken: anonymousReviewEnabled ? captchaToken ?? undefined : undefined,
             policyAcceptance,
           });
+          setSubmittedRequestId(request.id);
         } else {
           await createWikiPageRequest({ namespace, title, spaceId: createContext?.spaceId, contentRaw, editSummary, isMinor, captchaToken: captchaToken ?? undefined, policyAcceptance });
         }
@@ -641,7 +643,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
       {feedback ? (
         <div className="flex gap-3 rounded-lg border border-amber-300/25 bg-amber-500/10 p-4 text-sm text-amber-100" role="status" aria-live="polite">
           <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
-          <p className="whitespace-pre-wrap">{feedback}</p>
+          <div><p className="whitespace-pre-wrap">{feedback}</p>{submittedRequestId && page ? <Link className="mt-2 inline-flex font-semibold underline underline-offset-4" href={`/wiki/edit-requests/${page.id}?request=${submittedRequestId}&returnTo=${encodeURIComponent(routePath)}`}>내 요청 보기</Link> : null}</div>
         </div>
       ) : null}
       {blockingErrors.length > 0 ? (

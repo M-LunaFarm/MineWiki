@@ -54,7 +54,7 @@ export function WikiEditRequestQueueClient({
   return (
     <div className="space-y-4">
       {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
-      {data.items.map((item) => <QueueCard key={item.id} item={item} viewerProfileId={data.viewerProfileId} />)}
+      {data.items.map((item) => <QueueCard key={item.id} item={item} />)}
       {data.items.length === 0 && !error ? <p className="border border-dashed border-white/10 p-8 text-center text-sm text-slate-500">조건에 맞는 편집 요청이 없습니다.</p> : null}
       {data.nextCursor ? (
         <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="btn-secondary min-h-11">
@@ -65,7 +65,7 @@ export function WikiEditRequestQueueClient({
   );
 }
 
-function QueueCard({ item, viewerProfileId }: { readonly item: WikiEditRequestQueueItem; readonly viewerProfileId: string | null }) {
+function QueueCard({ item }: { readonly item: WikiEditRequestQueueItem }) {
   return (
     <article className="surface-flat p-4 sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -75,7 +75,7 @@ function QueueCard({ item, viewerProfileId }: { readonly item: WikiEditRequestQu
             <span>·</span>
             <span>{statusLabel(item.status)}</span>
             {item.canReview ? <span className="chip chip-accent">검토 가능</span> : null}
-            {item.createdBy !== null && viewerProfileId === item.createdBy ? <span className="chip chip-muted">내 요청</span> : null}
+            {item.viewerOwns ? <span className="chip chip-muted">내 요청</span> : null}
           </div>
           <h2 className="mt-2 break-words text-lg font-semibold text-white"><Link href={item.detailPath} className="hover:text-emerald-200">{item.pageDisplayTitle}</Link></h2>
           <p className="mt-2 break-words text-sm text-slate-300"><WikiEditSummary summary={item.editSummary} hidden={item.editSummaryHidden} /></p>

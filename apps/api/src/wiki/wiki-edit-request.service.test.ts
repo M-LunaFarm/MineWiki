@@ -73,6 +73,14 @@ test('anonymous edit request stores only canonical private IP attribution and no
           };
         },
       },
+      wikiAnonymousContributorSession: {
+        async findFirst() { return null; },
+        async create(args: { data: Record<string, unknown> }) {
+          assert.match(String(args.data.tokenDigest), /^[a-f0-9]{64}$/u);
+          return { id: 900n, ...args.data };
+        },
+        async update() { throw new Error('new capability should not require refresh'); },
+      },
       wikiProfile: { async findMany() { return []; } },
       wikiPageRevision: { async findMany() { return []; } },
     } as unknown as PrismaService;
@@ -104,13 +112,15 @@ test('anonymous edit request stores only canonical private IP attribution and no
     baseRevisionId: '30', contentRaw: '다른 제안', editSummary: '익명 수정 2',
   }, '::ffff:192.0.2.44');
 
-  assert.equal(first.createdBy, null);
-  assert.equal(first.createdByName, '익명 기여자');
-  assert.equal(mapped.createdByName, '익명 기여자');
+  assert.equal(first.request.createdBy, null);
+  assert.equal(first.request.createdByName, '익명 기여자');
+  assert.equal(first.request.viewerOwns, true);
+  assert.equal(mapped.request.createdByName, '익명 기여자');
+  assert.match(first.ownerToken, /^[A-Za-z0-9_-]{43}$/u);
   assert.equal(hashes[0], hashes[1]);
   assert.match(hashes[0] ?? '', /^[a-f0-9]{64}$/u);
-  assert.ok(!JSON.stringify(first).includes('192.0.2.44'));
-  assert.ok(!JSON.stringify(first).includes((hashes[0] ?? '').slice(0, 8)));
+  assert.ok(!JSON.stringify(first.request).includes('192.0.2.44'));
+  assert.ok(!JSON.stringify(first.request).includes((hashes[0] ?? '').slice(0, 8)));
 });
 
 test('anonymous edit request rejects stronger page protection before ACL fallback', async () => {

@@ -1870,32 +1870,34 @@ model WikiDiscussionSubscription {
 }
 
 model WikiEditRequest {
-  id                        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  requestKind               String    @default("edit") @map("request_kind") @db.VarChar(16)
-  pageId                    BigInt?   @map("page_id") @db.UnsignedBigInt
-  baseRevisionId            BigInt?   @map("base_revision_id") @db.UnsignedBigInt
-  targetNamespaceId         Int?      @map("target_namespace_id") @db.UnsignedInt
-  targetNamespaceCode       String?   @map("target_namespace_code") @db.VarChar(32)
-  targetSpaceId             BigInt?   @map("target_space_id") @db.UnsignedBigInt
-  targetTitle               String?   @map("target_title") @db.VarChar(255)
-  targetSlug                String?   @map("target_slug") @db.VarChar(255)
-  targetDisplayTitle        String?   @map("target_display_title") @db.VarChar(255)
-  targetPageType            String?   @map("target_page_type") @db.VarChar(32)
-  targetOwnerProfileId      BigInt?   @map("target_owner_profile_id") @db.UnsignedBigInt
-  proposedContent           String    @map("proposed_content") @db.MediumText
-  editSummary               String    @map("edit_summary") @db.VarChar(255)
-  isMinor                   Boolean   @default(false) @map("is_minor")
-  status                    String    @default("pending") @db.VarChar(32)
-  createdBy                 BigInt?   @map("created_by") @db.UnsignedBigInt
-  submitterType             String    @default("user") @map("submitter_type") @db.VarChar(16)
-  submitterIpHash           String?   @map("submitter_ip_hash") @db.Char(64)
-  reviewedBy                BigInt?   @map("reviewed_by") @db.UnsignedBigInt
-  reviewNote                String?   @map("review_note") @db.VarChar(1000)
-  acceptedRevisionId        BigInt?   @map("accepted_revision_id") @db.UnsignedBigInt
-  createdAt                 DateTime  @map("created_at")
-  updatedAt                 DateTime  @map("updated_at")
-  reviewedAt                DateTime? @map("reviewed_at")
-  contributionPolicyVersion Int?      @map("contribution_policy_version")
+  id                        BigInt                           @id @default(autoincrement()) @db.UnsignedBigInt
+  requestKind               String                           @default("edit") @map("request_kind") @db.VarChar(16)
+  pageId                    BigInt?                          @map("page_id") @db.UnsignedBigInt
+  baseRevisionId            BigInt?                          @map("base_revision_id") @db.UnsignedBigInt
+  targetNamespaceId         Int?                             @map("target_namespace_id") @db.UnsignedInt
+  targetNamespaceCode       String?                          @map("target_namespace_code") @db.VarChar(32)
+  targetSpaceId             BigInt?                          @map("target_space_id") @db.UnsignedBigInt
+  targetTitle               String?                          @map("target_title") @db.VarChar(255)
+  targetSlug                String?                          @map("target_slug") @db.VarChar(255)
+  targetDisplayTitle        String?                          @map("target_display_title") @db.VarChar(255)
+  targetPageType            String?                          @map("target_page_type") @db.VarChar(32)
+  targetOwnerProfileId      BigInt?                          @map("target_owner_profile_id") @db.UnsignedBigInt
+  proposedContent           String                           @map("proposed_content") @db.MediumText
+  editSummary               String                           @map("edit_summary") @db.VarChar(255)
+  isMinor                   Boolean                          @default(false) @map("is_minor")
+  status                    String                           @default("pending") @db.VarChar(32)
+  createdBy                 BigInt?                          @map("created_by") @db.UnsignedBigInt
+  submitterType             String                           @default("user") @map("submitter_type") @db.VarChar(16)
+  submitterIpHash           String?                          @map("submitter_ip_hash") @db.Char(64)
+  anonymousOwnerId          BigInt?                          @map("anonymous_owner_id") @db.UnsignedBigInt
+  anonymousOwner            WikiAnonymousContributorSession? @relation(fields: [anonymousOwnerId], references: [id], onDelete: SetNull)
+  reviewedBy                BigInt?                          @map("reviewed_by") @db.UnsignedBigInt
+  reviewNote                String?                          @map("review_note") @db.VarChar(1000)
+  acceptedRevisionId        BigInt?                          @map("accepted_revision_id") @db.UnsignedBigInt
+  createdAt                 DateTime                         @map("created_at")
+  updatedAt                 DateTime                         @map("updated_at")
+  reviewedAt                DateTime?                        @map("reviewed_at")
+  contributionPolicyVersion Int?                             @map("contribution_policy_version")
 
   @@index([pageId, status, createdAt], map: "idx_wiki_edit_requests_page")
   @@index([targetNamespaceId, targetSlug, status, createdAt], map: "idx_wiki_edit_requests_target")
@@ -1903,8 +1905,22 @@ model WikiEditRequest {
   @@index([targetNamespaceId, targetOwnerProfileId, targetSlug, status], map: "idx_wiki_edit_requests_user_owner")
   @@index([createdBy, status, createdAt], map: "idx_wiki_edit_requests_creator")
   @@index([submitterIpHash, status, createdAt], map: "idx_wiki_edit_requests_ip")
+  @@index([anonymousOwnerId, status, createdAt], map: "idx_wiki_edit_requests_anonymous_owner")
   @@index([reviewedBy, reviewedAt], map: "idx_wiki_edit_requests_reviewer")
   @@map("wiki_edit_requests")
+}
+
+model WikiAnonymousContributorSession {
+  id          BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+  tokenDigest String            @unique @map("token_digest") @db.Char(64)
+  createdAt   DateTime          @map("created_at") @db.DateTime(3)
+  lastUsedAt  DateTime          @map("last_used_at") @db.DateTime(3)
+  expiresAt   DateTime          @map("expires_at") @db.DateTime(3)
+  revokedAt   DateTime?         @map("revoked_at") @db.DateTime(3)
+  requests    WikiEditRequest[]
+
+  @@index([expiresAt, revokedAt], map: "idx_wiki_anonymous_contributor_sessions_expiry")
+  @@map("wiki_anonymous_contributor_sessions")
 }
 
 model WikiRecentChange {

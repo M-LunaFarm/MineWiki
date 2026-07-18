@@ -57,7 +57,7 @@ test('anonymous existing-page requests require captcha and forward only the vali
     assertAnonymousSubmissionEnabled() {},
     async createAnonymous(pageId: string, body: unknown, requestIp: string) {
       received = { pageId, body, requestIp };
-      return { id: '73' };
+      return { request: { id: '73' }, ownerToken: 'a'.repeat(43) };
     },
   } as unknown as WikiEditRequestService;
   const controller = new WikiEditRequestController(service, {
@@ -67,7 +67,9 @@ test('anonymous existing-page requests require captcha and forward only the vali
 
   await controller.create('10', {
     baseRevisionId: '20', contentRaw: '제안', editSummary: '수정', captchaToken: 'verified-token',
-  }, { clientIp: '2001:db8::23', sessionPayload: null } as unknown as FastifyRequest);
+  }, { clientIp: '2001:db8::23', sessionPayload: null, headers: {} } as unknown as FastifyRequest, {
+    header() {},
+  } as unknown as import('fastify').FastifyReply);
 
   assert.deepEqual(captchaInput, { token: 'verified-token', ip: '2001:db8::23' });
   assert.deepEqual(received, {

@@ -959,6 +959,7 @@ export interface WikiEditRequestSummary {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly reviewedAt: string | null;
+  readonly viewerOwns: boolean;
 }
 
 export interface WikiEditRequestListResponse {
@@ -1743,6 +1744,10 @@ export async function rebaseWikiEditRequest(
 
 export async function changeWikiEditRequestState(requestId: string, action: 'close' | 'reopen'): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}/${action}`, 'POST', {});
+}
+
+export async function claimWikiEditRequest(requestId: string): Promise<WikiEditRequestSummary> {
+  return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}/claim`, 'POST', {});
 }
 
 export async function fetchWikiEditRequestDiff(requestId: string): Promise<WikiEditRequestDiffResponse> {

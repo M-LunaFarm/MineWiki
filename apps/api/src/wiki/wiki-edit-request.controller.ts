@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, ServiceUnavailableException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, Res, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
@@ -8,6 +8,7 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiEditRequestService } from './wiki-edit-request.service';
 import { WikiCaptchaService } from './wiki-captcha.service';
 import type { WikiPolicyAcceptance } from './wiki-contribution-policy.service';
+import { clearWikiAnonymousContributorCookie, readWikiAnonymousContributorToken, serializeWikiAnonymousContributorCookie } from './wiki-anonymous-contributor';
 
 @Controller('v1/wiki')
 export class WikiEditRequestController {
@@ -23,7 +24,7 @@ export class WikiEditRequestController {
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string
   ) {
-    return this.requests.listGlobal(request.sessionPayload ?? null, { status, scope, namespace, cursor, limit });
+    return this.requests.listGlobal(request.sessionPayload ?? null, { status, scope, namespace, cursor, limit }, readWikiAnonymousContributorToken(request.headers?.cookie));
   }
 
   @Get('edit-requests/reviewable-summary')
@@ -36,19 +37,19 @@ export class WikiEditRequestController {
   @Get('pages/:pageId/edit-requests')
   @UseGuards(OptionalSessionGuard)
   list(@Param('pageId') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string) {
-    return this.requests.list(pageId, request.sessionPayload ?? null, cursor, limit);
+    return this.requests.list(pageId, request.sessionPayload ?? null, cursor, limit, readWikiAnonymousContributorToken(request.headers?.cookie));
   }
 
   @Get('edit-requests/:requestId')
   @UseGuards(OptionalSessionGuard)
   get(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {
-    return this.requests.get(requestId, request.sessionPayload?.userId ?? null);
+    return this.requests.get(requestId, request.sessionPayload?.userId ?? null, readWikiAnonymousContributorToken(request.headers?.cookie));
   }
 
   @Get('edit-requests/:requestId/context')
   @UseGuards(OptionalSessionGuard)
   context(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {
-    return this.requests.context(requestId, request.sessionPayload ?? null);
+    return this.requests.context(requestId, request.sessionPayload ?? null, readWikiAnonymousContributorToken(request.headers?.cookie));
   }
 
   @Get('edit-requests/:requestId/diff')
@@ -63,7 +64,8 @@ export class WikiEditRequestController {
   async create(
     @Param('pageId') pageId: string,
     @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; captchaToken?: string; policyAcceptance?: WikiPolicyAcceptance },
-    @Req() request: FastifyRequest
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     const session = request.sessionPayload ?? null;
     if (session) {
@@ -83,7 +85,14 @@ export class WikiEditRequestController {
     await this.wikiCaptcha.assertVerified(body.captchaToken, requestIp);
     const anonymousBody = { ...body };
     delete anonymousBody.captchaToken;
-    return this.requests.createAnonymous(pageId, anonymousBody, requestIp);
+    const result = await this.requests.createAnonymous(
+      pageId,
+      anonymousBody,
+      requestIp,
+      readWikiAnonymousContributorToken(request.headers?.cookie),
+    );
+    reply.header('Set-Cookie', serializeWikiAnonymousContributorCookie(result.ownerToken));
+    return result.request;
   }
 
   @Post('edit-requests')
@@ -115,34 +124,48 @@ export class WikiEditRequestController {
   }
 
   @Patch('edit-requests/:requestId')
-  @UseGuards(SessionGuard)
+  @UseGuards(OptionalSessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })
-  update(@Param('requestId') requestId: string, @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; policyAcceptance?: WikiPolicyAcceptance }, @CurrentSession() session: SessionPayload) {
-    return this.requests.update(session, requestId, body);
+  update(@Param('requestId') requestId: string, @Body() body: { baseRevisionId?: string; contentRaw?: string; editSummary?: string; isMinor?: boolean; policyAcceptance?: WikiPolicyAcceptance }, @Req() request: FastifyRequest) {
+    return this.requests.update(request.sessionPayload ?? null, requestId, body, readWikiAnonymousContributorToken(request.headers?.cookie), request.clientIp);
   }
 
   @Post('edit-requests/:requestId/rebase')
-  @UseGuards(SessionGuard)
+  @UseGuards(OptionalSessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })
   rebase(
     @Param('requestId') requestId: string,
     @Body() body: { contentRaw?: string; currentRevisionId?: string; editSummary?: string; isMinor?: boolean; policyAcceptance?: WikiPolicyAcceptance },
-    @CurrentSession() session: SessionPayload
+    @Req() request: FastifyRequest,
   ) {
-    return this.requests.rebase(session, requestId, body);
+    return this.requests.rebase(request.sessionPayload ?? null, requestId, body, readWikiAnonymousContributorToken(request.headers?.cookie), request.clientIp);
   }
 
   @Post('edit-requests/:requestId/close')
-  @UseGuards(SessionGuard)
+  @UseGuards(OptionalSessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })
-  close(@Param('requestId') requestId: string, @CurrentSession() session: SessionPayload) {
-    return this.requests.close(session, requestId);
+  close(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {
+    return this.requests.close(request.sessionPayload ?? null, requestId, readWikiAnonymousContributorToken(request.headers?.cookie), request.clientIp);
   }
 
   @Post('edit-requests/:requestId/reopen')
+  @UseGuards(OptionalSessionGuard)
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  reopen(@Param('requestId') requestId: string, @Req() request: FastifyRequest) {
+    return this.requests.reopen(request.sessionPayload ?? null, requestId, readWikiAnonymousContributorToken(request.headers?.cookie), request.clientIp);
+  }
+
+  @Post('edit-requests/:requestId/claim')
   @UseGuards(SessionGuard)
   @Throttle({ default: { limit: 8, ttl: 60 } })
-  reopen(@Param('requestId') requestId: string, @CurrentSession() session: SessionPayload) {
-    return this.requests.reopen(session, requestId);
+  async claim(
+    @Param('requestId') requestId: string,
+    @CurrentSession() session: SessionPayload,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const result = await this.requests.claim(session, requestId, readWikiAnonymousContributorToken(request.headers?.cookie));
+    if (result.capabilityRevoked) reply.header('Set-Cookie', clearWikiAnonymousContributorCookie());
+    return result.request;
   }
 }

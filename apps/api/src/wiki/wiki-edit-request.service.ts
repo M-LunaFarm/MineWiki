@@ -15,6 +15,11 @@ import { WikiNotificationService } from './wiki-notification.service';
 import { buildCanonicalServerWikiToolPath, WikiRoutePathResolver } from './wiki-route-path.resolver';
 import { publicWikiRecentChangeSummary } from './wiki-revision-summary';
 import {
+  createWikiAnonymousContributorToken,
+  WIKI_ANONYMOUS_CONTRIBUTOR_TTL_SECONDS,
+  wikiAnonymousContributorDigest,
+} from './wiki-anonymous-contributor';
+import {
   WikiContributionPolicyService,
   type WikiPolicyAcceptance,
 } from './wiki-contribution-policy.service';
@@ -43,6 +48,7 @@ export interface WikiEditRequestSummary {
   readonly updatedAt: string;
   readonly reviewedAt: string | null;
   readonly contributionPolicyVersion: number | null;
+  readonly viewerOwns: boolean;
 }
 
 export interface WikiEditRequestListResponse {
@@ -81,6 +87,11 @@ export interface WikiEditRequestReviewableSummary {
   readonly capped: boolean;
 }
 
+export interface WikiAnonymousEditRequestResult {
+  readonly request: WikiEditRequestSummary;
+  readonly ownerToken: string;
+}
+
 interface WikiEditRequestQueueCandidate {
   readonly request: WikiEditRequest;
   readonly canReview: boolean;
@@ -92,6 +103,10 @@ interface WikiEditRequestQueueCandidate {
   readonly currentRevisionId: string | null;
   readonly isStale: boolean;
 }
+
+type WikiEditRequestOwner =
+  | { readonly kind: 'profile'; readonly profileId: bigint; readonly session: SessionPayload }
+  | { readonly kind: 'anonymous'; readonly anonymousOwnerId: bigint; readonly requestIp: string };
 
 @Injectable()
 export class WikiEditRequestService {
@@ -129,7 +144,8 @@ export class WikiEditRequestService {
       readonly namespace?: string;
       readonly cursor?: string;
       readonly limit?: string | number;
-    } = {}
+    } = {},
+    anonymousToken?: string | null,
   ): Promise<WikiEditRequestQueueResponse> {
     const status = input.status?.trim() || 'open';
     const allowedStatuses = new Set(['open', 'all', 'pending', 'reviewing', 'stale', 'accepted', 'rejected', 'closed']);
@@ -143,8 +159,12 @@ export class WikiEditRequestService {
     const limit = Math.min(Math.max(Number(input.limit) || 30, 1), 50);
     const cursor = input.cursor ? this.id(input.cursor, 'cursor') : null;
     const profile = session ? await this.profiles.ensureWikiProfile(session.userId) : null;
-    if ((scope === 'mine' || scope === 'reviewable') && !profile) {
+    const anonymousOwnerId = await this.resolveAnonymousOwnerId(anonymousToken);
+    if (scope === 'reviewable' && !profile) {
       throw new ForbiddenException('Sign in to view scoped edit requests.');
+    }
+    if (scope === 'mine' && !profile && anonymousOwnerId === null) {
+      throw new ForbiddenException('This browser has no edit requests to track.');
     }
     const statusFilter = status === 'all'
       ? undefined
@@ -153,7 +173,12 @@ export class WikiEditRequestService {
         : status;
     const baseWhere: Prisma.WikiEditRequestWhereInput = {
       ...(statusFilter ? { status: statusFilter } : {}),
-      ...(scope === 'mine' && profile ? { createdBy: profile.id } : {})
+      ...(scope === 'mine' ? {
+        OR: [
+          ...(profile ? [{ createdBy: profile.id }] : []),
+          ...(anonymousOwnerId !== null ? [{ anonymousOwnerId }] : []),
+        ],
+      } : {})
     };
     const visible: WikiEditRequestQueueCandidate[] = [];
     let scanCursor = cursor;
@@ -179,7 +204,10 @@ export class WikiEditRequestService {
       }
     }
     const returned = visible.slice(0, limit);
-    const summaries = new Map((await this.present(returned.map((item) => item.request))).map((item) => [item.id, item]));
+    const summaries = new Map((await this.present(returned.map((item) => item.request), {
+      profileId: profile?.id ?? null,
+      anonymousOwnerId,
+    })).map((item) => [item.id, item]));
     const items = returned.flatMap((item): WikiEditRequestQueueItem[] => {
       const summary = summaries.get(item.request.id.toString());
       if (!summary) return [];
@@ -337,7 +365,7 @@ export class WikiEditRequestService {
     };
   }
 
-  async list(pageId: string, session: SessionPayload | null, cursor?: string, requestedLimit: string | number = 30): Promise<WikiEditRequestListResponse> {
+  async list(pageId: string, session: SessionPayload | null, cursor?: string, requestedLimit: string | number = 30, anonymousToken?: string | null): Promise<WikiEditRequestListResponse> {
     const page = await this.page(pageId);
     await this.permissions.assertCanReadPage({ accountId: session?.userId ?? null, page });
     await this.permissions.assertCanUsePageAction({ accountId: session?.userId ?? null, action: 'raw', page });
@@ -357,18 +385,25 @@ export class WikiEditRequestService {
     }
     const hasMore = requests.length > limit;
     const pageRows = requests.slice(0, limit);
-    return { items: await this.present(pageRows), canReview, viewerProfileId, nextCursor: hasMore ? pageRows.at(-1)?.id.toString() ?? null : null, currentRevisionId: page.currentRevisionId?.toString() ?? null };
+    return { items: await this.present(pageRows, {
+      profileId: viewerProfileId ? BigInt(viewerProfileId) : null,
+      anonymousOwnerId: await this.resolveAnonymousOwnerId(anonymousToken),
+    }), canReview, viewerProfileId, nextCursor: hasMore ? pageRows.at(-1)?.id.toString() ?? null : null, currentRevisionId: page.currentRevisionId?.toString() ?? null };
   }
 
-  async get(requestId: string, accountId?: string | null): Promise<WikiEditRequestSummary> {
+  async get(requestId: string, accountId?: string | null, anonymousToken?: string | null): Promise<WikiEditRequestSummary> {
     const request = await this.request(requestId);
     await this.assertCanViewRequest(request, accountId ?? null);
-    const [presented] = await this.present([request]);
+    const profile = accountId ? await this.profiles.ensureWikiProfile(accountId) : null;
+    const [presented] = await this.present([request], {
+      profileId: profile?.id ?? null,
+      anonymousOwnerId: await this.resolveAnonymousOwnerId(anonymousToken),
+    });
     if (!presented) throw new NotFoundException('Wiki edit request not found.');
     return presented;
   }
 
-  async context(requestId: string, session: SessionPayload | null): Promise<WikiEditRequestListResponse> {
+  async context(requestId: string, session: SessionPayload | null, anonymousToken?: string | null): Promise<WikiEditRequestListResponse> {
     const request = await this.request(requestId);
     await this.assertCanViewRequest(request, session?.userId ?? null);
     const page = request.pageId === null ? null : await this.page(request.pageId.toString());
@@ -390,7 +425,10 @@ export class WikiEditRequestService {
       }
     }
     return {
-      items: await this.present([request]),
+      items: await this.present([request], {
+        profileId: viewerProfileId ? BigInt(viewerProfileId) : null,
+        anonymousOwnerId: await this.resolveAnonymousOwnerId(anonymousToken),
+      }),
       canReview,
       viewerProfileId,
       nextCursor: null,
@@ -477,7 +515,8 @@ export class WikiEditRequestService {
       readonly policyAcceptance?: WikiPolicyAcceptance;
     },
     requestIp: string,
-  ): Promise<WikiEditRequestSummary> {
+    existingOwnerToken?: string | null,
+  ): Promise<WikiAnonymousEditRequestResult> {
     this.assertAnonymousSubmissionEnabled();
     const parsedPageId = this.id(pageId, 'pageId');
     const baseRevisionId = this.id(this.required(input.baseRevisionId, 'baseRevisionId'), 'baseRevisionId');
@@ -488,7 +527,7 @@ export class WikiEditRequestService {
     if (summary.length > 255) throw new BadRequestException('editSummary is too long.');
     const ipHash = this.anonymousIpHash(requestIp);
     const now = new Date();
-    const request = await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await this.lockPage(tx, parsedPageId);
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page || page.status !== 'normal' || page.pageType !== 'article' || page.ownerProfileId !== null
@@ -520,16 +559,34 @@ export class WikiEditRequestService {
           message: '이 문서의 익명 편집 요청 검토 대기열이 가득 찼습니다.',
         }, HttpStatus.TOO_MANY_REQUESTS);
       }
+      const existingDigest = existingOwnerToken ? wikiAnonymousContributorDigest(existingOwnerToken) : null;
+      let owner = existingDigest ? await tx.wikiAnonymousContributorSession.findFirst({
+        where: { tokenDigest: existingDigest, revokedAt: null, expiresAt: { gt: now } },
+      }) : null;
+      let ownerToken = existingOwnerToken ?? '';
+      if (!owner) {
+        ownerToken = createWikiAnonymousContributorToken();
+        owner = await tx.wikiAnonymousContributorSession.create({
+          data: {
+            tokenDigest: wikiAnonymousContributorDigest(ownerToken)!,
+            createdAt: now,
+            lastUsedAt: now,
+            expiresAt: new Date(now.getTime() + WIKI_ANONYMOUS_CONTRIBUTOR_TTL_SECONDS * 1000),
+          },
+        });
+      } else {
+        await tx.wikiAnonymousContributorSession.update({ where: { id: owner.id }, data: { lastUsedAt: now } });
+      }
       const duplicate = await tx.wikiEditRequest.findFirst({
         where: {
           pageId: page.id,
-          submitterIpHash: ipHash,
+          OR: [{ submitterIpHash: ipHash }, { anonymousOwnerId: owner.id }],
           status: { in: ['pending', 'reviewing'] },
         },
         select: { id: true },
       });
       if (duplicate) throw new ConflictException('This anonymous contributor already has an open edit request for this document.');
-      return tx.wikiEditRequest.create({
+      const request = await tx.wikiEditRequest.create({
         data: {
           pageId: page.id,
           baseRevisionId,
@@ -540,20 +597,25 @@ export class WikiEditRequestService {
           createdBy: null,
           submitterType: 'ip',
           submitterIpHash: ipHash,
+          anonymousOwnerId: owner.id,
           contributionPolicyVersion,
           createdAt: now,
           updatedAt: now,
         },
       });
+      return { request, ownerToken };
     });
     await this.events?.audit('wiki.edit_request.create_anonymous', {
       category: 'wiki',
       subjectType: 'wiki_edit_request',
-      subjectId: request.id.toString(),
+      subjectId: result.request.id.toString(),
       ipAddress: requestIp,
       metadata: { pageId: parsedPageId.toString(), submitterType: 'ip' },
     });
-    return (await this.present([request]))[0]!;
+    return {
+      request: (await this.present([result.request], { profileId: null, anonymousOwnerId: result.request.anonymousOwnerId }))[0]!,
+      ownerToken: result.ownerToken,
+    };
   }
 
   async createForNewPage(
@@ -724,23 +786,25 @@ export class WikiEditRequestService {
     return (await this.present([updated]))[0]!;
   }
 
-  async update(session: SessionPayload, requestId: string, input: {
+  async update(session: SessionPayload | null, requestId: string, input: {
     readonly baseRevisionId?: string;
     readonly contentRaw?: string;
     readonly editSummary?: string;
     readonly isMinor?: boolean;
     readonly policyAcceptance?: WikiPolicyAcceptance;
-  }): Promise<WikiEditRequestSummary> {
+  }, anonymousToken?: string | null, requestIp?: string | null): Promise<WikiEditRequestSummary> {
     const parsedRequestId = this.id(requestId, 'requestId');
     const initialRequest = await this.request(requestId);
     if (initialRequest.requestKind === 'create') {
+      if (!session) throw new ForbiddenException('Anonymous contributors cannot create new-page requests.');
       return this.updateCreateRequest(session, parsedRequestId, initialRequest, input);
     }
     if (initialRequest.pageId === null || initialRequest.baseRevisionId === null) {
       throw new NotFoundException('Wiki edit request target not found.');
     }
-    const profile = await this.profiles.ensureWikiProfile(session.userId);
-    if (profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot edit requests.');
+    const owner = await this.resolveRequestOwner(session, anonymousToken, requestIp);
+    const profile = owner.kind === 'profile' ? await this.profiles.ensureWikiProfile(owner.session.userId) : null;
+    if (profile && profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot edit requests.');
     const baseRevisionId = this.id(this.required(input.baseRevisionId, 'baseRevisionId'), 'baseRevisionId');
     const content = this.required(input.contentRaw, 'contentRaw');
     if (hasWikiConflictMarkers(content)) throw new BadRequestException('Resolve every wiki edit conflict marker before saving.');
@@ -755,9 +819,17 @@ export class WikiEditRequestService {
       ]);
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
       if (!request || request.pageId !== page.id) throw new NotFoundException('Wiki edit request not found.');
-      await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
-      await this.permissions.assertCanUsePageAction({ accountId: session.userId, action: 'edit_request', page, store: tx });
-      if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can edit this request.');
+      await this.permissions.assertCanReadPage({
+        accountId: owner.kind === 'profile' ? owner.session.userId : null,
+        ...(owner.kind === 'anonymous' ? { actor: null, requestIp: owner.requestIp } : {}),
+        page, store: tx,
+      });
+      await this.permissions.assertCanUsePageAction({
+        accountId: owner.kind === 'profile' ? owner.session.userId : null,
+        ...(owner.kind === 'anonymous' ? { actor: null, requestIp: owner.requestIp } : {}),
+        action: 'edit_request', page, store: tx,
+      });
+      if (!this.ownerMatches(request, owner)) throw new ForbiddenException('Only the author can edit this request.');
       if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be edited.');
       const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
         page.spaceId,
@@ -767,9 +839,9 @@ export class WikiEditRequestService {
       if (baseRevisionId !== request.baseRevisionId) throw new ConflictException('Rebase the edit request before changing its base revision.');
       if (page.currentRevisionId !== request.baseRevisionId) throw new ConflictException('The document changed. Rebase this request before editing it.');
       const nextStatus = request.status === 'stale' ? 'pending' : request.status;
-      if (nextStatus === 'pending') await this.assertNoOtherOpenRequest(tx, page.id, profile.id, request.id);
+      if (nextStatus === 'pending') await this.assertNoOtherOpenRequestForOwner(tx, page.id, owner, request.id);
       const updated = await tx.wikiEditRequest.updateMany({
-        where: { id: request.id, createdBy: profile.id, status: request.status, updatedAt: request.updatedAt },
+        where: { id: request.id, ...this.ownerWhere(owner), status: request.status, updatedAt: request.updatedAt },
         data: {
           baseRevisionId, proposedContent: content, editSummary: summary, isMinor: Boolean(input.isMinor),
           contributionPolicyVersion,
@@ -780,12 +852,12 @@ export class WikiEditRequestService {
       if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
       return tx.wikiEditRequest.findUniqueOrThrow({ where: { id: request.id } });
     });
-    await this.audit('wiki.edit_request.update', session, profile.id, result.pageId, result.id);
-    return (await this.present([result]))[0]!;
+    await this.auditOwner('wiki.edit_request.update', owner, result.pageId, result.id);
+    return (await this.present([result], this.viewerFor(owner)))[0]!;
   }
 
   async rebase(
-    session: SessionPayload,
+    session: SessionPayload | null,
     requestId: string,
     input: {
       readonly contentRaw?: string;
@@ -793,14 +865,17 @@ export class WikiEditRequestService {
       readonly editSummary?: string;
       readonly isMinor?: boolean;
       readonly policyAcceptance?: WikiPolicyAcceptance;
-    } = {}
+    } = {},
+    anonymousToken?: string | null,
+    requestIp?: string | null,
   ): Promise<WikiEditRequestSummary> {
     const parsedRequestId = this.id(requestId, 'requestId');
     const initialRequest = await this.request(requestId);
     if (initialRequest.requestKind === 'create') throw new BadRequestException('New-page requests do not have a base revision to rebase.');
     if (initialRequest.pageId === null || initialRequest.baseRevisionId === null) throw new NotFoundException('Wiki edit request target not found.');
-    const profile = await this.profiles.ensureWikiProfile(session.userId);
-    if (profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot rebase requests.');
+    const owner = await this.resolveRequestOwner(session, anonymousToken, requestIp);
+    const profile = owner.kind === 'profile' ? await this.profiles.ensureWikiProfile(owner.session.userId) : null;
+    if (profile && profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot rebase requests.');
     const resolvedContent = input.contentRaw?.trim() ? input.contentRaw : null;
     if (resolvedContent !== null) {
       if (hasWikiConflictMarkers(resolvedContent)) throw new BadRequestException('Resolve every wiki edit conflict marker before rebasing.');
@@ -821,10 +896,12 @@ export class WikiEditRequestService {
       ]);
       if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
       if (!request || request.pageId !== page.id) throw new NotFoundException('Wiki edit request not found.');
-      await this.permissions.assertCanReadPage({ accountId: session.userId, page, store: tx });
-      await this.permissions.assertCanUsePageAction({ accountId: session.userId, action: 'raw', page, store: tx });
-      await this.permissions.assertCanUsePageAction({ accountId: session.userId, action: 'edit_request', page, store: tx });
-      if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can rebase this request.');
+      const accountId = owner.kind === 'profile' ? owner.session.userId : null;
+      const anonymousPermission = owner.kind === 'anonymous' ? { actor: null, requestIp: owner.requestIp } : {};
+      await this.permissions.assertCanReadPage({ accountId, ...anonymousPermission, page, store: tx });
+      await this.permissions.assertCanUsePageAction({ accountId, ...anonymousPermission, action: 'raw', page, store: tx });
+      await this.permissions.assertCanUsePageAction({ accountId, ...anonymousPermission, action: 'edit_request', page, store: tx });
+      if (!this.ownerMatches(request, owner)) throw new ForbiddenException('Only the author can rebase this request.');
       if (!['pending', 'stale', 'closed'].includes(request.status)) throw new ConflictException('This edit request can no longer be rebased.');
       const contributionPolicyVersion = await this.contributionPolicies.assertAccepted(
         page.spaceId,
@@ -869,10 +946,10 @@ export class WikiEditRequestService {
         }
       }
       const nextStatus = request.status === 'stale' ? 'pending' : request.status;
-      if (nextStatus === 'pending') await this.assertNoOtherOpenRequest(tx, page.id, profile.id, request.id);
+      if (nextStatus === 'pending') await this.assertNoOtherOpenRequestForOwner(tx, page.id, owner, request.id);
       const updated = await tx.wikiEditRequest.updateMany({
         where: {
-          id: request.id, createdBy: profile.id, status: request.status,
+          id: request.id, ...this.ownerWhere(owner), status: request.status,
           baseRevisionId: request.baseRevisionId, updatedAt: request.updatedAt
         },
         data: {
@@ -892,9 +969,9 @@ export class WikiEditRequestService {
       };
     });
     if (transactionResult.auditAction) {
-      await this.audit(transactionResult.auditAction, session, profile.id, transactionResult.request.pageId, transactionResult.request.id);
+      await this.auditOwner(transactionResult.auditAction, owner, transactionResult.request.pageId, transactionResult.request.id);
     }
-    return (await this.present([transactionResult.request]))[0]!;
+    return (await this.present([transactionResult.request], this.viewerFor(owner)))[0]!;
   }
 
   private async updateCreateRequest(
@@ -969,39 +1046,41 @@ export class WikiEditRequestService {
     return (await this.present([result]))[0]!;
   }
 
-  async close(session: SessionPayload, requestId: string): Promise<WikiEditRequestSummary> {
+  async close(session: SessionPayload | null, requestId: string, anonymousToken?: string | null, requestIp?: string | null): Promise<WikiEditRequestSummary> {
     const request = await this.request(requestId);
-    await this.assertCanViewRequest(request, session.userId);
-    const profile = await this.profiles.ensureWikiProfile(session.userId);
-    if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can close this request.');
+    await this.assertCanViewRequest(request, session?.userId ?? null);
+    const owner = await this.resolveRequestOwner(session, anonymousToken, requestIp);
+    if (!this.ownerMatches(request, owner)) throw new ForbiddenException('Only the author can close this request.');
     if (!['pending', 'stale'].includes(request.status)) throw new ConflictException('This edit request cannot be closed.');
     const updated = await this.prisma.wikiEditRequest.updateMany({
-      where: { id: request.id, createdBy: profile.id, status: request.status },
+      where: { id: request.id, ...this.ownerWhere(owner), status: request.status },
       data: { status: 'closed', updatedAt: new Date() }
     });
     if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
     const result = await this.request(requestId);
-    await this.audit('wiki.edit_request.close', session, profile.id, request.pageId, request.id, this.targetAuditMetadata(request));
-    return (await this.present([result]))[0]!;
+    await this.auditOwner('wiki.edit_request.close', owner, request.pageId, request.id, this.targetAuditMetadata(request));
+    return (await this.present([result], this.viewerFor(owner)))[0]!;
   }
 
-  async reopen(session: SessionPayload, requestId: string): Promise<WikiEditRequestSummary> {
+  async reopen(session: SessionPayload | null, requestId: string, anonymousToken?: string | null, requestIp?: string | null): Promise<WikiEditRequestSummary> {
     const request = await this.request(requestId);
-    await this.assertCanViewRequest(request, session.userId);
-    const profile = await this.profiles.ensureWikiProfile(session.userId);
-    if (profile.id !== request.createdBy) throw new ForbiddenException('Only the author can reopen this request.');
-    if (profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot reopen requests.');
+    await this.assertCanViewRequest(request, session?.userId ?? null);
+    const owner = await this.resolveRequestOwner(session, anonymousToken, requestIp);
+    if (!this.ownerMatches(request, owner)) throw new ForbiddenException('Only the author can reopen this request.');
+    const profile = owner.kind === 'profile' ? await this.profiles.ensureWikiProfile(owner.session.userId) : null;
+    if (profile && profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot reopen requests.');
     if (request.status !== 'closed') throw new ConflictException('This edit request is not closed.');
     if (request.requestKind === 'create') {
+      if (owner.kind !== 'profile' || !profile) throw new ForbiddenException('Anonymous contributors cannot create new-page requests.');
       if (!this.hasCreateTarget(request)) throw new NotFoundException('Wiki edit request target not found.');
       const result = await this.prisma.$transaction(async (tx) => {
         await this.lockNamespace(tx, request.targetNamespaceId);
         const current = await tx.wikiEditRequest.findUnique({ where: { id: request.id } });
         if (!current || !this.hasCreateTarget(current)) throw new NotFoundException('Wiki edit request target not found.');
-        if (current.createdBy !== profile.id) throw new ForbiddenException('Only the author can reopen this request.');
+        if (!this.ownerMatches(current, owner)) throw new ForbiddenException('Only the author can reopen this request.');
         if (current.status !== 'closed') throw new ConflictException('This edit request is not closed.');
         await this.permissions.assertCanUseCreateTargetAction({
-          accountId: session.userId,
+          accountId: owner.session.userId,
           action: 'edit_request',
           namespaceId: current.targetNamespaceId,
           namespaceCode: current.targetNamespaceCode,
@@ -1022,8 +1101,8 @@ export class WikiEditRequestService {
         if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
         return tx.wikiEditRequest.findUniqueOrThrow({ where: { id: current.id } });
       });
-      await this.audit('wiki.edit_request.reopen', session, profile.id, null, request.id, this.targetAuditMetadata(request));
-      return (await this.present([result]))[0]!;
+      await this.auditOwner('wiki.edit_request.reopen', owner, null, request.id, this.targetAuditMetadata(request));
+      return (await this.present([result], this.viewerFor(owner)))[0]!;
     }
     if (request.pageId === null) throw new NotFoundException('Wiki edit request target not found.');
     const pageId = request.pageId;
@@ -1036,31 +1115,81 @@ export class WikiEditRequestService {
       if (!page || page.status === 'deleted' || !current || current.pageId !== page.id) {
         throw new NotFoundException('Wiki edit request target not found.');
       }
-      if (current.createdBy !== profile.id) throw new ForbiddenException('Only the author can reopen this request.');
+      if (!this.ownerMatches(current, owner)) throw new ForbiddenException('Only the author can reopen this request.');
       if (current.status !== 'closed') throw new ConflictException('This edit request is not closed.');
       if (page.currentRevisionId !== current.baseRevisionId) {
         throw new ConflictException('The document changed. Update the request before reopening it.');
       }
       await this.permissions.assertCanUsePageAction({
-        accountId: session.userId,
+        accountId: owner.kind === 'profile' ? owner.session.userId : null,
+        ...(owner.kind === 'anonymous' ? { actor: null, requestIp: owner.requestIp } : {}),
         action: 'edit_request',
         page,
         store: tx
       });
       const duplicate = await tx.wikiEditRequest.findFirst({
-        where: { pageId: page.id, createdBy: profile.id, status: { in: ['pending', 'reviewing'] }, id: { not: current.id } },
+        where: { pageId: page.id, ...this.ownerWhere(owner), status: { in: ['pending', 'reviewing'] }, id: { not: current.id } },
         select: { id: true }
       });
       if (duplicate) throw new ConflictException('You already have an open edit request for this document.');
       const updated = await tx.wikiEditRequest.updateMany({
-        where: { id: current.id, createdBy: profile.id, status: 'closed', updatedAt: current.updatedAt },
+        where: { id: current.id, ...this.ownerWhere(owner), status: 'closed', updatedAt: current.updatedAt },
         data: { status: 'pending', updatedAt: new Date() }
       });
       if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
       return tx.wikiEditRequest.findUniqueOrThrow({ where: { id: current.id } });
     });
-    await this.audit('wiki.edit_request.reopen', session, profile.id, result.pageId, result.id, this.targetAuditMetadata(result));
-    return (await this.present([result]))[0]!;
+    await this.auditOwner('wiki.edit_request.reopen', owner, result.pageId, result.id, this.targetAuditMetadata(result));
+    return (await this.present([result], this.viewerFor(owner)))[0]!;
+  }
+
+  async claim(session: SessionPayload, requestId: string, anonymousToken?: string | null): Promise<{ request: WikiEditRequestSummary; capabilityRevoked: boolean }> {
+    const anonymousOwnerId = await this.resolveAnonymousOwnerId(anonymousToken);
+    if (anonymousOwnerId === null) throw new ForbiddenException('This browser does not own the edit request.');
+    const profile = await this.profiles.ensureWikiProfile(session.userId);
+    if (profile.status !== 'active') throw new ForbiddenException('Blocked wiki users cannot claim requests.');
+    await this.assertCanViewRequest(await this.request(requestId), session.userId);
+    const id = this.id(requestId, 'requestId');
+    const result = await this.prisma.$transaction(async (tx) => {
+      const request = await tx.wikiEditRequest.findUnique({ where: { id } });
+      if (!request || request.createdBy !== null || request.anonymousOwnerId !== anonymousOwnerId) {
+        throw new ForbiddenException('This browser does not own the edit request.');
+      }
+      if (request.pageId !== null && ['pending', 'reviewing'].includes(request.status)) {
+        const duplicate = await tx.wikiEditRequest.findFirst({
+          where: { pageId: request.pageId, createdBy: profile.id, status: { in: ['pending', 'reviewing'] } },
+          select: { id: true },
+        });
+        if (duplicate) throw new ConflictException('Your account already has an open edit request for this document.');
+      }
+      const updated = await tx.wikiEditRequest.updateMany({
+        where: { id, createdBy: null, anonymousOwnerId, updatedAt: request.updatedAt },
+        data: {
+          createdBy: profile.id,
+          submitterType: 'user',
+          submitterIpHash: null,
+          anonymousOwnerId: null,
+          updatedAt: new Date(),
+        },
+      });
+      if (updated.count !== 1) throw new ConflictException('This edit request changed concurrently.');
+      const remaining = await tx.wikiEditRequest.count({ where: { anonymousOwnerId } });
+      if (remaining === 0) {
+        await tx.wikiAnonymousContributorSession.updateMany({
+          where: { id: anonymousOwnerId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return {
+        request: await tx.wikiEditRequest.findUniqueOrThrow({ where: { id } }),
+        capabilityRevoked: remaining === 0,
+      };
+    });
+    await this.audit('wiki.edit_request.claim', session, profile.id, result.request.pageId, result.request.id);
+    return {
+      request: (await this.present([result.request], { profileId: profile.id, anonymousOwnerId: null }))[0]!,
+      capabilityRevoked: result.capabilityRevoked,
+    };
   }
 
   private async page(pageId: string) {
@@ -1075,7 +1204,10 @@ export class WikiEditRequestService {
     return request;
   }
 
-  private async present(requests: readonly WikiEditRequest[]): Promise<WikiEditRequestSummary[]> {
+  private async present(
+    requests: readonly WikiEditRequest[],
+    viewer: { readonly profileId: bigint | null; readonly anonymousOwnerId: bigint | null } = { profileId: null, anonymousOwnerId: null },
+  ): Promise<WikiEditRequestSummary[]> {
     const ids = [...new Set(requests.flatMap((request) => [request.createdBy, request.reviewedBy].filter((id): id is bigint => typeof id === 'bigint')))];
     const acceptedRevisionIds = [...new Set(requests.flatMap((request) => request.acceptedRevisionId === null ? [] : [request.acceptedRevisionId]))];
     const [profiles, acceptedRevisions] = await Promise.all([
@@ -1113,6 +1245,8 @@ export class WikiEditRequestService {
         reviewedBy: request.reviewedBy?.toString() ?? null, reviewedByName: request.reviewedBy ? names.get(request.reviewedBy) ?? '알 수 없는 사용자' : null,
         reviewNote: request.reviewNote, acceptedRevisionId: request.acceptedRevisionId?.toString() ?? null,
         contributionPolicyVersion: request.contributionPolicyVersion,
+        viewerOwns: (viewer.profileId !== null && request.createdBy === viewer.profileId)
+          || (viewer.anonymousOwnerId !== null && request.anonymousOwnerId === viewer.anonymousOwnerId),
         createdAt: request.createdAt.toISOString(), updatedAt: request.updatedAt.toISOString(), reviewedAt: request.reviewedAt?.toISOString() ?? null
       };
     });
@@ -1130,6 +1264,45 @@ export class WikiEditRequestService {
       throw new ForbiddenException('Anonymous edit request attribution is unavailable.');
     }
     return createHmac('sha256', key).update(`wiki-edit-request-ip:v1:${normalized}`).digest('hex');
+  }
+  private async resolveAnonymousOwnerId(token?: string | null): Promise<bigint | null> {
+    const digest = token ? wikiAnonymousContributorDigest(token) : null;
+    if (!digest) return null;
+    const owner = await this.prisma.wikiAnonymousContributorSession.findFirst({
+      where: { tokenDigest: digest, revokedAt: null, expiresAt: { gt: new Date() } },
+      select: { id: true },
+    });
+    return owner?.id ?? null;
+  }
+  private async resolveRequestOwner(
+    session: SessionPayload | null,
+    token?: string | null,
+    requestIp?: string | null,
+  ): Promise<WikiEditRequestOwner> {
+    if (session) {
+      const profile = await this.profiles.ensureWikiProfile(session.userId);
+      return { kind: 'profile', profileId: profile.id, session };
+    }
+    const anonymousOwnerId = await this.resolveAnonymousOwnerId(token);
+    if (anonymousOwnerId === null || !requestIp) {
+      throw new ForbiddenException('This browser does not own the edit request.');
+    }
+    return { kind: 'anonymous', anonymousOwnerId, requestIp };
+  }
+  private ownerMatches(request: WikiEditRequest, owner: WikiEditRequestOwner): boolean {
+    return owner.kind === 'profile'
+      ? request.createdBy === owner.profileId
+      : request.createdBy === null && request.anonymousOwnerId === owner.anonymousOwnerId;
+  }
+  private ownerWhere(owner: WikiEditRequestOwner): Prisma.WikiEditRequestWhereInput {
+    return owner.kind === 'profile'
+      ? { createdBy: owner.profileId }
+      : { createdBy: null, anonymousOwnerId: owner.anonymousOwnerId };
+  }
+  private viewerFor(owner: WikiEditRequestOwner): { profileId: bigint | null; anonymousOwnerId: bigint | null } {
+    return owner.kind === 'profile'
+      ? { profileId: owner.profileId, anonymousOwnerId: null }
+      : { profileId: null, anonymousOwnerId: owner.anonymousOwnerId };
   }
   private id(value: string, label: string) { if (!/^\d+$/.test(value)) throw new BadRequestException(`${label} must be an unsigned integer.`); return BigInt(value); }
   private note(value?: string) { const note = value?.trim() || null; if (note && note.length > 1000) throw new BadRequestException('reviewNote is too long.'); return note; }
@@ -1220,6 +1393,23 @@ export class WikiEditRequestService {
     });
     if (duplicate) throw new ConflictException('You already have an open edit request for this document.');
   }
+  private async assertNoOtherOpenRequestForOwner(
+    tx: Prisma.TransactionClient,
+    pageId: bigint,
+    owner: WikiEditRequestOwner,
+    excludeId?: bigint,
+  ): Promise<void> {
+    const duplicate = await tx.wikiEditRequest.findFirst({
+      where: {
+        pageId,
+        ...this.ownerWhere(owner),
+        status: { in: ['pending', 'reviewing'] },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (duplicate) throw new ConflictException('You already have an open edit request for this document.');
+  }
   private async markStale(request: WikiEditRequest) {
     await this.prisma.wikiEditRequest.updateMany({
       where: { id: request.id, status: 'pending', baseRevisionId: request.baseRevisionId },
@@ -1250,6 +1440,25 @@ export class WikiEditRequestService {
       category: 'wiki', actorAccountId: session.userId, actorProfileId: profileId,
       subjectType: 'wiki_edit_request', subjectId: requestId.toString(),
       metadata: { pageId: pageId?.toString() ?? null, ...(target ?? {}) }
+    });
+  }
+  private async auditOwner(
+    action: string,
+    owner: WikiEditRequestOwner,
+    pageId: bigint | null,
+    requestId: bigint,
+    target?: Record<string, string | null>,
+  ): Promise<void> {
+    if (owner.kind === 'profile') {
+      await this.audit(action, owner.session, owner.profileId, pageId, requestId, target);
+      return;
+    }
+    await this.events?.audit(action, {
+      category: 'wiki',
+      subjectType: 'wiki_edit_request',
+      subjectId: requestId.toString(),
+      ipAddress: owner.requestIp,
+      metadata: { pageId: pageId?.toString() ?? null, submitterType: 'anonymous_capability', ...(target ?? {}) },
     });
   }
 }
