@@ -923,6 +923,79 @@ export class WikiReadService {
     return item;
   }
 
+  private async projectDerivedPages(
+    pages: readonly WikiPage[],
+    namespaceById: ReadonlyMap<number, string>,
+    access: WikiAccessContext,
+  ): Promise<Array<ReturnType<typeof pageFromServerWikiReleaseItem> | WikiPage>> {
+    const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
+    const publicRevisions = currentRevisionIds.length > 0
+      ? await this.prisma.wikiPageRevision.findMany({
+          where: { id: { in: currentRevisionIds }, visibility: 'public' },
+          select: { id: true },
+        })
+      : [];
+    const publicRevisionIds = new Set(publicRevisions.map((revision) => revision.id));
+    const serverSpaceIds = [...new Set(pages
+      .filter((page) => namespaceById.get(page.namespaceId) === 'server')
+      .map((page) => page.spaceId))];
+    const serverWikis = serverSpaceIds.length > 0
+      ? await this.prisma.serverWiki.findMany({
+          where: { spaceId: { in: serverSpaceIds }, status: 'active' },
+          select: { id: true, spaceId: true, publicationStatus: true, publishedReleaseId: true },
+        })
+      : [];
+    const serverWikiBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki]));
+    const previewSpaceIds = new Set<bigint>();
+    for (const wiki of serverWikis) {
+      if (await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: wiki.spaceId })) {
+        previewSpaceIds.add(wiki.spaceId);
+      }
+    }
+    const publicReleaseWikis = serverWikis.filter((wiki) =>
+      !previewSpaceIds.has(wiki.spaceId)
+      && wiki.publicationStatus === 'published'
+      && wiki.publishedReleaseId !== null);
+    const releasedItems = publicReleaseWikis.length > 0 && pages.length > 0
+      ? await this.prisma.serverWikiReleaseItem.findMany({
+          where: {
+            pageId: { in: pages.map((page) => page.id) },
+            OR: publicReleaseWikis.map((wiki) => ({
+              releaseId: wiki.publishedReleaseId!,
+              serverWikiId: wiki.id,
+              spaceId: wiki.spaceId,
+            })),
+          },
+        })
+      : [];
+    const releasedItemByPageId = new Map(releasedItems.flatMap((item) => {
+      const wiki = serverWikiBySpace.get(item.spaceId);
+      return wiki
+        && wiki.publishedReleaseId === item.releaseId
+        && wiki.id === item.serverWikiId
+        ? [[item.pageId, item] as const]
+        : [];
+    }));
+    return pages.flatMap((page) => {
+      const isServerPage = namespaceById.get(page.namespaceId) === 'server';
+      const serverWiki = serverWikiBySpace.get(page.spaceId);
+      if (!isServerPage || (serverWiki && previewSpaceIds.has(page.spaceId))) {
+        return page.currentRevisionId
+          && publicRevisionIds.has(page.currentRevisionId)
+          && PUBLIC_WIKI_PAGE_STATUSES.includes(page.status as (typeof PUBLIC_WIKI_PAGE_STATUSES)[number])
+          && page.pageType !== 'redirect'
+          ? [page]
+          : [];
+      }
+      const releasedItem = releasedItemByPageId.get(page.id);
+      return releasedItem
+        && PUBLIC_WIKI_PAGE_STATUSES.includes(releasedItem.pageStatus as (typeof PUBLIC_WIKI_PAGE_STATUSES)[number])
+        && releasedItem.pageType !== 'redirect'
+        ? [pageFromServerWikiReleaseItem(releasedItem)]
+        : [];
+    });
+  }
+
   async getPageLifecycleEvents(
     pageId: string,
     viewer?: WikiAccessViewer,
@@ -1234,13 +1307,26 @@ export class WikiReadService {
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
     const selectedTypes = parseBacklinkTypes(input.types);
     const requestedNamespace = parseBacklinkNamespace(input.namespace);
-    const links = await this.prisma.wikiPageLink.findMany({
+    const currentLinks = await this.prisma.wikiPageLink.findMany({
       where: {
         targetNamespaceCode: namespace.code,
         targetSlug: projectedTarget.slug,
         linkType: { in: [...ALL_BACKLINK_TYPES] }
       }
     });
+    const releasedLinks = namespace.code === 'server'
+      ? await this.prisma.serverWikiReleaseLink.findMany({
+          where: {
+            targetNamespaceCode: namespace.code,
+            targetSlug: projectedTarget.slug,
+            linkType: { in: [...ALL_BACKLINK_TYPES] },
+            release: {
+              publishedFor: { is: { status: 'active', publicationStatus: 'published' } },
+            },
+          },
+        })
+      : [];
+    const links = [...currentLinks, ...releasedLinks];
     const pageIds = [...new Set(links.map((link) => link.sourcePageId))];
     const pages = pageIds.length > 0
       ? await this.prisma.wikiPage.findMany({
@@ -1255,75 +1341,8 @@ export class WikiReadService {
       ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } } })
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
-    const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
-    const publicRevisions = currentRevisionIds.length > 0
-      ? await this.prisma.wikiPageRevision.findMany({
-          where: { id: { in: currentRevisionIds }, visibility: 'public' },
-          select: { id: true }
-        })
-      : [];
-    const publicRevisionIds = new Set(publicRevisions.map((revision) => revision.id));
-    const sourceSpaceIds = [...new Set(pages
-      .filter((page) => namespaceById.get(page.namespaceId) === 'server')
-      .map((page) => page.spaceId))];
-    const serverWikis = sourceSpaceIds.length > 0
-      ? await this.prisma.serverWiki.findMany({
-          where: { spaceId: { in: sourceSpaceIds }, status: 'active' },
-          select: {
-            id: true,
-            spaceId: true,
-            slug: true,
-            siteSlug: true,
-            publicationStatus: true,
-            publishedReleaseId: true,
-          },
-        })
-      : [];
-    const serverWikiBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki]));
-    const previewSpaceIds = new Set<bigint>();
-    for (const wiki of serverWikis) {
-      if (await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: wiki.spaceId })) {
-        previewSpaceIds.add(wiki.spaceId);
-      }
-    }
-    const publicReleaseWikis = serverWikis.filter((wiki) =>
-      !previewSpaceIds.has(wiki.spaceId)
-      && wiki.publicationStatus === 'published'
-      && wiki.publishedReleaseId !== null);
-    const releasedSources = publicReleaseWikis.length > 0 && pages.length > 0
-      ? await this.prisma.serverWikiReleaseItem.findMany({
-          where: {
-            pageId: { in: pages.map((page) => page.id) },
-            OR: publicReleaseWikis.map((wiki) => ({
-              releaseId: wiki.publishedReleaseId!,
-              serverWikiId: wiki.id,
-              spaceId: wiki.spaceId,
-            })),
-          },
-        })
-      : [];
-    const releasedSourceByPageId = new Map(releasedSources.flatMap((item) => {
-      const wiki = serverWikiBySpace.get(item.spaceId);
-      return wiki
-        && wiki.publishedReleaseId === item.releaseId
-        && wiki.id === item.serverWikiId
-        ? [[item.pageId, item] as const]
-        : [];
-    }));
-    const projectedSourceByPageId = new Map<bigint, ReturnType<typeof pageFromServerWikiReleaseItem> | WikiPage>();
-    for (const page of pages) {
-      const isServerSource = namespaceById.get(page.namespaceId) === 'server';
-      const serverWiki = serverWikiBySpace.get(page.spaceId);
-      if (!isServerSource || (serverWiki && previewSpaceIds.has(page.spaceId))) {
-        if (page.currentRevisionId && publicRevisionIds.has(page.currentRevisionId)) {
-          projectedSourceByPageId.set(page.id, page);
-        }
-        continue;
-      }
-      const releasedSource = releasedSourceByPageId.get(page.id);
-      if (releasedSource) projectedSourceByPageId.set(page.id, pageFromServerWikiReleaseItem(releasedSource));
-    }
-    const projectedSources = [...projectedSourceByPageId.values()];
+    const projectedSources = await this.projectDerivedPages(pages, namespaceById, access);
+    const projectedSourceByPageId = new Map(projectedSources.map((page) => [page.id, page]));
     const routePaths = await this.routePaths.preload(projectedSources, namespaceById);
     const readableSourceIds = new Set<bigint>();
     for (const source of projectedSources) {

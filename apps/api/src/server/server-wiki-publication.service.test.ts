@@ -118,6 +118,7 @@ function createFixture(options: FixtureOptions = {}) {
   }));
   const audits: Array<Record<string, unknown>> = [];
   const releaseItems: Array<Record<string, unknown>> = [];
+  const releaseLinks: Array<Record<string, unknown>> = [];
   const isolationLevels: string[] = [];
   const lockQueries: string[] = [];
   const profiles = new Map([
@@ -203,6 +204,17 @@ function createFixture(options: FixtureOptions = {}) {
         return options.missingRoot ? [] : documentRows;
       },
     },
+    wikiPageLink: {
+      async findMany() {
+        return documentRows.slice(1).map((page, index) => ({
+          sourcePageId: page.id,
+          sourceRevisionId: page.currentRevisionId,
+          targetNamespaceCode: 'server',
+          targetSlug: documentRows[index]!.slug,
+          linkType: 'link',
+        }));
+      },
+    },
     serverWikiRelease: {
       async create(args: { data: { version: number; publishedAt: Date } }) {
         const release = {
@@ -217,6 +229,12 @@ function createFixture(options: FixtureOptions = {}) {
     serverWikiReleaseItem: {
       async createMany(args: { data: Array<Record<string, unknown>> }) {
         releaseItems.push(...args.data);
+        return { count: args.data.length };
+      },
+    },
+    serverWikiReleaseLink: {
+      async createMany(args: { data: Array<Record<string, unknown>> }) {
+        releaseLinks.push(...args.data);
         return { count: args.data.length };
       },
     },
@@ -251,6 +269,7 @@ function createFixture(options: FixtureOptions = {}) {
     wiki,
     audits,
     releaseItems,
+    releaseLinks,
     isolationLevels,
     lockQueries,
     now,
@@ -278,6 +297,8 @@ test('owner publishes a ready draft atomically with version, timestamps, and an 
   assert.ok(fixture.releaseItems.every((item) => typeof item.searchVector === 'string' && item.searchVector.length > 0));
   assert.ok(buildWikiSearchVector(['owner-provided']).split(' ')
     .every((term) => String(fixture.releaseItems[0]?.searchVector).split(' ').includes(term)));
+  assert.equal(fixture.releaseLinks.length, 3);
+  assert.ok(fixture.releaseLinks.every((link) => link.releaseId === BigInt(result.release!.id)));
   assert.deepEqual(fixture.isolationLevels, [Prisma.TransactionIsolationLevel.Serializable]);
   assert.ok(fixture.lockQueries.some((query) => query.includes('server_wikis')));
   assert.equal(fixture.audits.length, 1);

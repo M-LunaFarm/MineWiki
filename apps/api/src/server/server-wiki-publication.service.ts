@@ -451,6 +451,25 @@ export class ServerWikiPublicationService {
     if (releasedPages.length === 0 || releasedPages.some((page) => page.spaceId !== context.spaceId)) {
       throw new ConflictException('Server wiki release snapshot is empty or inconsistent.');
     }
+    const releasedRevisionByPageId = new Map(releasedPages.map((page) => [page.id, page.currentRevisionId!]));
+    const releaseLinks = await tx.wikiPageLink.findMany({
+      where: {
+        OR: releasedPages.map((page) => ({
+          sourcePageId: page.id,
+          sourceRevisionId: page.currentRevisionId!,
+        })),
+      },
+      select: {
+        sourcePageId: true,
+        sourceRevisionId: true,
+        targetNamespaceCode: true,
+        targetSlug: true,
+        linkType: true,
+      },
+    });
+    if (releaseLinks.some((link) => releasedRevisionByPageId.get(link.sourcePageId) !== link.sourceRevisionId)) {
+      throw new ConflictException('Server wiki release link snapshot is inconsistent.');
+    }
     const release = await tx.serverWikiRelease.create({
       data: {
         serverWikiId: context.serverWikiId,
@@ -491,6 +510,21 @@ export class ServerWikiPublicationService {
         createdAt: now,
       })),
     });
+    if (releaseLinks.length > 0) {
+      await tx.serverWikiReleaseLink.createMany({
+        data: releaseLinks.map((link) => ({
+          releaseId: release.id,
+          serverWikiId: context.serverWikiId,
+          spaceId: context.spaceId,
+          sourcePageId: link.sourcePageId,
+          sourceRevisionId: link.sourceRevisionId,
+          targetNamespaceCode: link.targetNamespaceCode,
+          targetSlug: link.targetSlug,
+          linkType: link.linkType,
+          createdAt: now,
+        })),
+      });
+    }
     return { ...release, pageCount: releasedPages.length };
   }
 

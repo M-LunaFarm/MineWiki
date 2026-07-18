@@ -1998,6 +1998,7 @@ model ServerWikiRelease {
   serverWiki   ServerWiki              @relation("ServerWikiReleaseHistory", fields: [serverWikiId], references: [id], onDelete: Cascade)
   publishedFor ServerWiki?             @relation("PublishedServerWikiRelease")
   items        ServerWikiReleaseItem[]
+  links        ServerWikiReleaseLink[]
 
   @@unique([serverWikiId, version], map: "uq_server_wiki_release_version")
   @@index([serverWikiId, publishedAt], map: "idx_server_wiki_release_published")
@@ -2036,6 +2037,28 @@ model ServerWikiReleaseItem {
   @@index([revisionId, pageId], map: "idx_server_wiki_release_item_revision")
   @@fulltext([searchVector], map: "idx_server_wiki_release_items_search")
   @@map("server_wiki_release_items")
+}
+
+model ServerWikiReleaseLink {
+  id                  BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  releaseId           BigInt   @map("release_id") @db.UnsignedBigInt
+  serverWikiId        BigInt   @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId             BigInt   @map("space_id") @db.UnsignedBigInt
+  sourcePageId        BigInt   @map("source_page_id") @db.UnsignedBigInt
+  sourceRevisionId    BigInt   @map("source_revision_id") @db.UnsignedBigInt
+  targetNamespaceCode String   @map("target_namespace_code") @db.VarChar(32)
+  targetSlug          String   @map("target_slug") @db.VarChar(255)
+  linkType            String   @map("link_type") @db.VarChar(32)
+  createdAt           DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  release ServerWikiRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, sourcePageId, targetNamespaceCode, targetSlug, linkType], map: "uq_server_wiki_release_link")
+  @@index([releaseId, sourcePageId], map: "idx_server_wiki_release_link_source")
+  @@index([serverWikiId, releaseId], map: "idx_server_wiki_release_link_wiki")
+  @@index([spaceId, releaseId], map: "idx_server_wiki_release_link_space")
+  @@index([targetNamespaceCode, targetSlug, linkType], map: "idx_server_wiki_release_link_target")
+  @@map("server_wiki_release_links")
 }
 
 model ServerWikiLayoutEntitlement {

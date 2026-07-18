@@ -1625,10 +1625,12 @@ test('public server wiki backlinks use released target and source identities whi
     wikiPageLink: {
       async findMany(args: { where: Record<string, unknown> }) {
         linkQueries.push(args.where);
-        return [
-          { id: 2n, sourcePageId: 20n, sourceRevisionId: 201n, linkType: 'link' },
-          { id: 1n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'link' },
-        ];
+        return [{ id: 2n, sourcePageId: 20n, sourceRevisionId: 201n, linkType: 'link' }];
+      },
+    },
+    serverWikiReleaseLink: {
+      async findMany() {
+        return [{ id: 1n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'link' }];
       },
     },
     serverWiki: {
