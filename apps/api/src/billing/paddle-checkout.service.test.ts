@@ -26,12 +26,20 @@ test('checkout persists an immutable intent before calling Paddle and attaches i
   const service = new PaddleCheckoutService(
     prisma as never,
     config('live') as never,
-    { getProviderPriceId() { return 'pri_handbook'; } } as never,
+    {
+      getProviderPriceId() { return 'pri_handbook'; },
+      getProduct() { return { productCode: 'server_wiki_handbook', layoutKey: 'handbook', displayName: 'Handbook', serviceScope: 'recurring_server_wiki_layout' }; },
+    } as never,
     paddle as never,
   );
-  const result = await service.create('11111111-1111-4111-8111-111111111111', 'handbook', 'account-id');
+  const result = await service.create('11111111-1111-4111-8111-111111111111', 'handbook', 'account-id', '2026-07-19-v2.0');
   assert.deepEqual(operations, ['subject', 'intent', 'provider', 'attach']);
   assert.equal(intent?.configuredPriceId, 'pri_handbook');
+  assert.equal(intent?.policyVersion, '2026-07-19-v2.0');
+  assert.equal(intent?.termsAcceptedAt instanceof Date, true);
+  assert.deepEqual(intent?.productSnapshot, {
+    productCode: 'server_wiki_handbook', layoutKey: 'handbook', displayName: 'Handbook', serviceScope: 'recurring_server_wiki_layout',
+  });
   assert.equal(intent?.providerTransactionId, 'txn_test');
   assert.deepEqual(result, {
     checkoutUrl: 'https://checkout.paddle.com/test',
@@ -47,9 +55,24 @@ test('checkout is unavailable without live mode and never touches persistence', 
     {} as never,
   );
   await assert.rejects(
-    () => service.create('11111111-1111-4111-8111-111111111111', 'brand', 'account-id'),
+    () => service.create('11111111-1111-4111-8111-111111111111', 'brand', 'account-id', '2026-07-19-v2.0'),
     /not enabled/,
   );
+});
+
+test('checkout rejects stale policy consent before persistence or provider access', async () => {
+  let persistenceTouched = false;
+  const service = new PaddleCheckoutService(
+    { serverWiki: { async findUnique() { persistenceTouched = true; } } } as never,
+    config('live') as never,
+    {} as never,
+    {} as never,
+  );
+  await assert.rejects(
+    () => service.create('11111111-1111-4111-8111-111111111111', 'handbook', 'account-id', '2026-02-17-v1.0'),
+    /billing policy changed/i,
+  );
+  assert.equal(persistenceTouched, false);
 });
 
 function config(mode: string) {

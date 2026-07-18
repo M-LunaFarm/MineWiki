@@ -17,6 +17,7 @@
     "typescript": "^5.4.2"
   },
   "dependencies": {
+    "@minewiki/schemas": "workspace:*",
     "dotenv": "^16.4.5",
     "zod": "^3.23.0"
   }

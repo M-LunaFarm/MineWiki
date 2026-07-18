@@ -60,7 +60,7 @@ test('Paddle live mode requires the complete private billing configuration', () 
   live.PADDLE_MODE = 'live';
   assert.throws(
     () => new ConfigService(live),
-    /PADDLE_WEBHOOK_SECRET is required.*PADDLE_API_KEY is required.*PADDLE_PRICE_HANDBOOK is required.*PADDLE_PRICE_BRAND is required.*PADDLE_CHECKOUT_URL is required/s,
+    /PADDLE_WEBHOOK_SECRET is required.*PADDLE_API_KEY is required.*PADDLE_PRICE_HANDBOOK is required.*PADDLE_PRICE_BRAND is required.*PADDLE_CHECKOUT_URL is required.*PADDLE_POLICY_VERSION is required/s,
   );
 
   Object.assign(live, validPaddleLiveEnv());
@@ -76,6 +76,15 @@ test('Paddle live mode rejects a price id shared by two layouts', () => {
     PADDLE_PRICE_BRAND: 'pri_handbook',
   };
   assert.throws(() => new ConfigService(live), /PADDLE_PRICE_HANDBOOK and PADDLE_PRICE_BRAND must be distinct/);
+});
+
+test('Paddle live mode is pinned to the current billing policy contract', () => {
+  const live = {
+    ...validProductionEnv(),
+    ...validPaddleLiveEnv(),
+    PADDLE_POLICY_VERSION: '2026-02-17-v1.0',
+  };
+  assert.throws(() => new ConfigService(live), /PADDLE_POLICY_VERSION must equal 2026-07-19-v2.0/);
 });
 
 test('WebAuthn config requires an exact validated origin and related RP ID', () => {
@@ -314,5 +323,6 @@ function validPaddleLiveEnv() {
     PADDLE_PRICE_HANDBOOK: 'pri_handbook',
     PADDLE_PRICE_BRAND: 'pri_brand',
     PADDLE_CHECKOUT_URL: 'https://minewiki.kr/server/billing/checkout',
+    PADDLE_POLICY_VERSION: '2026-07-19-v2.0',
   };
 }

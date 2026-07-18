@@ -14,6 +14,12 @@ test('billing catalog maps only configured handbook and brand prices', () => {
   assert.equal(catalog.getProviderPriceId('brand'), 'pri_brand');
   assert.equal(catalog.findLayoutByProviderPriceId('pri_handbook'), 'handbook');
   assert.equal(catalog.findLayoutByProviderPriceId('pri_unknown'), null);
+  assert.deepEqual(catalog.getProduct('handbook'), {
+    productCode: 'server_wiki_handbook',
+    layoutKey: 'handbook',
+    displayName: 'Handbook',
+    serviceScope: 'recurring_server_wiki_layout',
+  });
   assert.deepEqual(
     billingCatalogEntry(config({
       PADDLE_MODE: 'live',

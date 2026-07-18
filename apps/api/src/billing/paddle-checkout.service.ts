@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../common/prisma.service';
 import { BillingCatalog, type PaddleBillableLayoutKey } from './billing-catalog';
 import { PaddleClient } from './paddle-client';
+import { BILLING_POLICY_VERSION } from '@minewiki/schemas/billing-contract';
 
 const INTENT_LIFETIME_MS = 30 * 60 * 1000;
 
@@ -16,11 +17,25 @@ export class PaddleCheckoutService {
     private readonly paddle: PaddleClient,
   ) {}
 
-  async create(serverId: string, layoutKey: PaddleBillableLayoutKey, accountId: string) {
+  async create(
+    serverId: string,
+    layoutKey: PaddleBillableLayoutKey,
+    accountId: string,
+    policyVersion: string,
+  ) {
     if (this.config.get('PADDLE_MODE', 'off') !== 'live') {
       throw new ServiceUnavailableException('Online checkout is not enabled.');
     }
+    if (policyVersion !== BILLING_POLICY_VERSION) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'BILLING_POLICY_STALE',
+        message: 'The billing policy changed. Review and accept the current version.',
+        currentPolicyVersion: BILLING_POLICY_VERSION,
+      });
+    }
     const priceId = this.catalog.getProviderPriceId(layoutKey);
+    const product = this.catalog.getProduct(layoutKey);
     const serverWiki = await this.prisma.serverWiki.findUnique({
       where: { voteServerId: serverId },
       select: { id: true },
@@ -47,6 +62,7 @@ export class PaddleCheckoutService {
     if (active) throw new ConflictException('This server wiki already has an active Paddle subscription.');
 
     const intentId = randomUUID();
+    const termsAcceptedAt = new Date();
     await this.prisma.paddleCheckoutIntent.create({
       data: {
         id: intentId,
@@ -54,6 +70,9 @@ export class PaddleCheckoutService {
         environment: this.config.get('PADDLE_ENV', 'sandbox'),
         layoutKey,
         configuredPriceId: priceId,
+        policyVersion: BILLING_POLICY_VERSION,
+        termsAcceptedAt,
+        productSnapshot: product,
         status: 'pending',
         expiresAt: new Date(Date.now() + INTENT_LIFETIME_MS),
       },

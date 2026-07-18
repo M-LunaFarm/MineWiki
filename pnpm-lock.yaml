@@ -402,6 +402,9 @@ importers:
 
   packages/config:
     dependencies:
+      '@minewiki/schemas':
+        specifier: workspace:*
+        version: link:../schemas
       dotenv:
         specifier: ^16.4.5
         version: 16.6.1

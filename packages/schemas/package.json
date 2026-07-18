@@ -10,6 +10,10 @@
     "./claim-methods": {
       "types": "./claim-methods.d.ts",
       "default": "./claim-methods.js"
+    },
+    "./billing-contract": {
+      "types": "./billing-contract.d.ts",
+      "default": "./billing-contract.js"
     }
   },
   "scripts": {

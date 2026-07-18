@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
+import {
+  BILLING_PRODUCTS,
+  billingProductForLayout,
+  type BillingProduct,
+} from '@minewiki/schemas/billing-contract';
 
-export const PADDLE_BILLABLE_LAYOUT_KEYS = ['handbook', 'brand'] as const;
+export const PADDLE_BILLABLE_LAYOUT_KEYS = BILLING_PRODUCTS.map((product) => product.layoutKey);
 
 export type PaddleBillableLayoutKey = (typeof PADDLE_BILLABLE_LAYOUT_KEYS)[number];
 export type BillableServerWikiLayout = PaddleBillableLayoutKey;
@@ -46,6 +51,12 @@ export class BillingCatalog {
 
   listBillableLayouts(): readonly PaddleBillableLayoutKey[] {
     return PADDLE_BILLABLE_LAYOUT_KEYS;
+  }
+
+  getProduct(layoutKey: PaddleBillableLayoutKey): BillingProduct {
+    const product = billingProductForLayout(layoutKey);
+    if (!product) throw new Error(`Unknown Paddle billing product: ${layoutKey}`);
+    return product;
   }
 
   getProviderPriceId(layoutKey: PaddleBillableLayoutKey): string {

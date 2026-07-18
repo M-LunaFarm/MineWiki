@@ -3,6 +3,7 @@ import { createECDH } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import { BILLING_POLICY_VERSION } from '@minewiki/schemas/billing-contract';
 
 export { assertSupportedQueueServer } from './redis-compat';
 
@@ -85,6 +86,7 @@ const envSchema = z.object({
   PADDLE_PRICE_HANDBOOK: z.string().optional(),
   PADDLE_PRICE_BRAND: z.string().optional(),
   PADDLE_CHECKOUT_URL: optionalUrl,
+  PADDLE_POLICY_VERSION: z.string().optional(),
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().optional(),
@@ -291,6 +293,7 @@ function validateProductionEnvironment(env: EnvSchema): void {
           'PADDLE_PRICE_HANDBOOK',
           'PADDLE_PRICE_BRAND',
           'PADDLE_CHECKOUT_URL',
+          'PADDLE_POLICY_VERSION',
         ],
         'Paddle live billing',
         failures,
@@ -300,6 +303,9 @@ function validateProductionEnvironment(env: EnvSchema): void {
         && env.PADDLE_PRICE_HANDBOOK === env.PADDLE_PRICE_BRAND
       ) {
         failures.push('PADDLE_PRICE_HANDBOOK and PADDLE_PRICE_BRAND must be distinct');
+      }
+      if (!isBlank(env.PADDLE_POLICY_VERSION) && env.PADDLE_POLICY_VERSION !== BILLING_POLICY_VERSION) {
+        failures.push(`PADDLE_POLICY_VERSION must equal ${BILLING_POLICY_VERSION}`);
       }
     }
   }

@@ -9,8 +9,17 @@ import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import { PaddleCheckoutService } from './paddle-checkout.service';
 import { PaddlePortalService } from './paddle-portal.service';
+import {
+  BILLING_POLICY_EFFECTIVE_DATE,
+  BILLING_POLICY_PATH,
+  BILLING_POLICY_VERSION,
+  BILLING_PRODUCTS,
+} from '@minewiki/schemas/billing-contract';
 
-const checkoutSchema = z.object({ layoutKey: z.enum(['handbook', 'brand']) }).strict();
+const checkoutSchema = z.object({
+  layoutKey: z.enum(['handbook', 'brand']),
+  policyVersion: z.string().min(1).max(64),
+}).strict();
 
 @Controller('v1/servers/:serverId/billing')
 @UseGuards(SessionGuard)
@@ -32,7 +41,8 @@ export class PaddleBillingController {
     @CurrentSession() session: SessionPayload,
   ) {
     await this.assertOwner(serverId, session);
-    return this.checkout.create(serverId, checkoutSchema.parse(body).layoutKey, session.userId);
+    const input = checkoutSchema.parse(body);
+    return this.checkout.create(serverId, input.layoutKey, session.userId, input.policyVersion);
   }
 
   @Post('portal')
@@ -55,11 +65,21 @@ export class PaddleBillingController {
     @CurrentSession() session: SessionPayload,
   ) {
     await this.assertOwner(serverId, session);
-    const onlineCheckout = this.config.get('PADDLE_MODE', 'off') === 'live';
+    const modeLive = this.config.get('PADDLE_MODE', 'off') === 'live';
+    const policyReady = this.config.get('PADDLE_POLICY_VERSION', '') === BILLING_POLICY_VERSION;
+    const ready = modeLive && policyReady;
     return {
-      onlineCheckout,
-      portalAvailable: onlineCheckout && await this.portal.isAvailable(serverId),
+      onlineCheckout: ready,
+      ready,
+      reasonCode: ready ? null : modeLive ? 'policy_version_mismatch' : 'billing_disabled',
+      portalAvailable: modeLive && await this.portal.isAvailable(serverId),
       environment: this.config.get('PADDLE_ENV', 'sandbox'),
+      policy: {
+        version: BILLING_POLICY_VERSION,
+        effectiveDate: BILLING_POLICY_EFFECTIVE_DATE,
+        path: BILLING_POLICY_PATH,
+      },
+      products: BILLING_PRODUCTS,
     };
   }
 

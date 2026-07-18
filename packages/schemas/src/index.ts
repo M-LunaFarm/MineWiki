@@ -4,6 +4,14 @@ import { SUPPORTED_CLAIM_METHODS } from '../claim-methods';
 export * from './worker-health';
 export { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '../claim-methods';
 export type { ClaimMethod } from '../claim-methods';
+export {
+  BILLING_POLICY_EFFECTIVE_DATE,
+  BILLING_POLICY_PATH,
+  BILLING_POLICY_VERSION,
+  BILLING_PRODUCTS,
+  billingProductForLayout,
+} from '../billing-contract';
+export type { BillingProduct } from '../billing-contract';
 
 export const CURRENT_POLICY_VERSIONS = {
   terms: {
