@@ -28,7 +28,7 @@ test('server wiki uses its own documentation shell and enriches the root documen
   assert.ok(article > header);
   assert.ok(startHere > article);
   assert.match(wiki, /const isWikiHome = currentIndex === 0/u);
-  assert.match(wiki, /wiki\.navigation\.filter\(\(item\) => !item\.current\)\.slice\(0, 6\)/u);
+  assert.match(wiki, /pageNavigation\.filter\(\(item\) => !item\.current\)\.slice\(0, 6\)/u);
   assert.match(wikiHeader, /Documentation/u);
   assert.match(wikiHeader, /서버 문서 검색/u);
   assert.match(wikiHeader, /서버 정보/u);

@@ -37,7 +37,7 @@ test('management UI guards conflicts, byte limits, and unsaved changes', async (
 test('manager access keeps content controls while hiding owner-only commercial and roster tabs', async () => {
   const settings = await readFile(new URL('../components/wiki/server-wiki-settings.tsx', import.meta.url), 'utf8');
 
-  assert.match(settings, /const allowed: SettingsTab\[\] = \['content'\]/u);
+  assert.match(settings, /const allowed: SettingsTab\[\] = \['content', 'structure'\]/u);
   assert.match(settings, /access\?\.canManageLayout \? <Tab[\s\S]*레이아웃·요금제/u);
   assert.match(settings, /access\?\.canManageCollaborators \? <Tab[\s\S]*협업자/u);
   assert.match(settings, /access\?\.canManageLayout \? <TabPanel[\s\S]*ServerWikiLayoutPlansContent/u);
