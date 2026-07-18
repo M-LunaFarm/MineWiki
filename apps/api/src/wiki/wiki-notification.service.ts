@@ -43,6 +43,7 @@ interface PendingNotificationDelivery {
 }
 
 const MAX_DISCUSSION_NOTIFICATION_RECIPIENTS = 500;
+const MAX_RELEASE_REVIEW_NOTIFICATION_RECIPIENTS = 500;
 const DISCUSSION_ACL_RECIPIENT_CHUNK = 20;
 const UNREAD_DISCUSSION_PURGE_BATCH = 200;
 
@@ -130,6 +131,30 @@ export class WikiNotificationService {
         })
       : [];
     const visibleThreadIds = new Set(visibleDiscussionRows.map((item) => item.thread.id));
+    const releaseCandidateIds = rows.flatMap((row) =>
+      row.sourceType === 'server_wiki_release_candidate' && /^\d+$/u.test(row.sourceId)
+        ? [BigInt(row.sourceId)]
+        : []
+    );
+    const releaseCandidates = releaseCandidateIds.length > 0
+      ? await this.prisma.serverWikiReleaseCandidate.findMany({
+          where: { id: { in: [...new Set(releaseCandidateIds)] } },
+          select: { id: true, spaceId: true, status: true, createdBy: true },
+        })
+      : [];
+    const releaseCandidateById = new Map(releaseCandidates.map((candidate) => [candidate.id, candidate]));
+    const reviewerRoles = releaseCandidates.length > 0
+      ? await this.prisma.subwikiRole.findMany({
+          where: {
+            userId: profile.id,
+            spaceId: { in: [...new Set(releaseCandidates.map((candidate) => candidate.spaceId))] },
+            role: 'reviewer',
+            status: 'active',
+          },
+          select: { spaceId: true },
+        })
+      : [];
+    const reviewerSpaceIds = new Set(reviewerRoles.map((role) => role.spaceId));
     const visible = [];
     const hiddenIds: bigint[] = [];
     for (const row of rows) {
@@ -143,6 +168,20 @@ export class WikiNotificationService {
       if (canFilterDiscussions && row.sourceType === 'discussion_comment') {
         const comment = /^\d+$/.test(row.sourceId) ? commentById.get(BigInt(row.sourceId)) : undefined;
         if (!comment || comment.status !== 'normal' || !visibleThreadIds.has(comment.threadId)) {
+          hiddenIds.push(row.id);
+          continue;
+        }
+      }
+      if (row.sourceType === 'server_wiki_release_candidate') {
+        const candidate = /^\d+$/u.test(row.sourceId)
+          ? releaseCandidateById.get(BigInt(row.sourceId))
+          : undefined;
+        const canReviewPendingCandidate = row.type === 'server_wiki_release_submitted'
+          && candidate?.status === 'pending_review'
+          && reviewerSpaceIds.has(candidate.spaceId);
+        const ownsReviewedCandidate = (row.type === 'server_wiki_release_approved' || row.type === 'server_wiki_release_revoked')
+          && candidate?.createdBy === profile.id;
+        if (!canReviewPendingCandidate && !ownsReviewedCandidate) {
           hiddenIds.push(row.id);
           continue;
         }
@@ -395,6 +434,109 @@ export class WikiNotificationService {
         readAt: null,
         createdAt: new Date()
       }]);
+  }
+
+  async notifyServerWikiReleaseSubmitted(tx: Prisma.TransactionClient, input: {
+    readonly candidateId: bigint;
+    readonly spaceId: bigint;
+    readonly actorProfileId: bigint | null;
+    readonly serverName: string;
+    readonly submittedAt: Date;
+  }): Promise<void> {
+    const roles = await tx.subwikiRole.findMany({
+      where: {
+        spaceId: input.spaceId,
+        role: 'reviewer',
+        status: 'active',
+        ...(input.actorProfileId ? { userId: { not: input.actorProfileId } } : {}),
+      },
+      select: { userId: true },
+      orderBy: { id: 'asc' },
+      take: MAX_RELEASE_REVIEW_NOTIFICATION_RECIPIENTS,
+    });
+    const recipients = await this.activeCanonicalProfileIds(tx, roles.map((role) => role.userId));
+    const href = `/wiki/release-reviews/${input.candidateId.toString()}`;
+    const submittedAtKey = input.submittedAt.getTime().toString();
+    await this.persistDeliveries(
+      tx,
+      `server-wiki-release:${input.candidateId.toString()}:submitted:${submittedAtKey}`,
+      'server_wiki_release_submitted',
+      recipients.map((profileId) => ({
+        profileId,
+        type: 'server_wiki_release_submitted',
+        pageId: null,
+        actorProfileId: input.actorProfileId,
+        sourceType: 'server_wiki_release_candidate',
+        sourceId: input.candidateId.toString(),
+        title: input.serverName,
+        message: '검토할 서버 위키 릴리스 후보가 제출되었습니다.',
+        href,
+        dedupeKey: `server-wiki-release:${input.candidateId.toString()}:submitted:${submittedAtKey}:profile:${profileId.toString()}`,
+        readAt: null,
+        createdAt: input.submittedAt,
+      })),
+    );
+  }
+
+  async notifyServerWikiReleaseReviewChanged(tx: Prisma.TransactionClient, input: {
+    readonly candidateId: bigint;
+    readonly submitterProfileId: bigint | null;
+    readonly reviewerProfileId: bigint;
+    readonly serverName: string;
+    readonly state: 'approved' | 'revoked';
+    readonly changedAt: Date;
+  }): Promise<void> {
+    if (input.submitterProfileId === null || input.submitterProfileId === input.reviewerProfileId) return;
+    const recipients = await this.activeCanonicalProfileIds(tx, [input.submitterProfileId]);
+    if (recipients.length === 0) return;
+    const href = `/wiki/release-reviews/${input.candidateId.toString()}`;
+    await this.persistDeliveries(
+      tx,
+      `server-wiki-release:${input.candidateId.toString()}:${input.state}:reviewer:${input.reviewerProfileId.toString()}`,
+      `server_wiki_release_${input.state}`,
+      [{
+        profileId: recipients[0]!,
+        type: `server_wiki_release_${input.state}`,
+        pageId: null,
+        actorProfileId: input.reviewerProfileId,
+        sourceType: 'server_wiki_release_candidate',
+        sourceId: input.candidateId.toString(),
+        title: input.serverName,
+        message: input.state === 'approved'
+          ? '서버 위키 릴리스 후보가 승인되었습니다.'
+          : '서버 위키 릴리스 후보 승인이 취소되었습니다.',
+        href,
+        dedupeKey: `server-wiki-release:${input.candidateId.toString()}:${input.state}:reviewer:${input.reviewerProfileId.toString()}:profile:${recipients[0]!.toString()}`,
+        readAt: null,
+        createdAt: input.changedAt,
+      }],
+    );
+  }
+
+  private async activeCanonicalProfileIds(
+    tx: Prisma.TransactionClient,
+    profileIds: readonly bigint[],
+  ): Promise<bigint[]> {
+    const uniqueProfileIds = [...new Set(profileIds)];
+    if (uniqueProfileIds.length === 0) return [];
+    const profiles = await tx.wikiProfile.findMany({
+      where: {
+        id: { in: uniqueProfileIds },
+        status: 'active',
+        mergedIntoProfileId: null,
+        accountId: { not: null },
+      },
+      select: { id: true, accountId: true },
+    });
+    const accountIds = profiles.flatMap((profile) => profile.accountId ? [profile.accountId] : []);
+    const accounts = accountIds.length > 0 ? await tx.account.findMany({
+      where: { id: { in: accountIds }, lifecycleStatus: 'active' },
+      select: { id: true, canonicalAccountId: true },
+    }) : [];
+    const activeAccountIds = new Set(accounts
+      .filter((account) => !account.canonicalAccountId || account.canonicalAccountId === account.id)
+      .map((account) => account.id));
+    return profiles.filter((profile) => profile.accountId && activeAccountIds.has(profile.accountId)).map((profile) => profile.id);
   }
 
   private async editRequestHref(

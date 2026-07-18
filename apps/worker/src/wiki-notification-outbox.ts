@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 
 const MAX_ATTEMPTS = 10;
 const LEASE_MS = 5 * 60 * 1000;
@@ -41,9 +41,10 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
     const event = await prisma.wikiNotificationEvent.findUnique({ where: { id: candidate.id } });
     if (!event) continue;
     try {
-      const deliveries = parseDeliveries(event.payloadJson);
+      const parsedDeliveries = parseDeliveries(event.payloadJson);
       await prisma.$transaction(async (tx) => {
-        await tx.wikiNotification.createMany({
+        const deliveries = await filterAuthorizedReleaseReviewDeliveries(tx, parsedDeliveries);
+        if (deliveries.length > 0) await tx.wikiNotification.createMany({
           data: deliveries.map((delivery) => ({
             profileId: BigInt(delivery.profileId), type: delivery.type,
             pageId: delivery.pageId ? BigInt(delivery.pageId) : null,
@@ -54,10 +55,10 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
           })),
           skipDuplicates: true
         });
-        const persistedNotifications = await tx.wikiNotification.findMany({
+        const persistedNotifications = deliveries.length > 0 ? await tx.wikiNotification.findMany({
           where: { dedupeKey: { in: deliveries.map((delivery) => delivery.dedupeKey) } },
           select: { id: true, profileId: true, createdAt: true },
-        });
+        }) : [];
         if (persistedNotifications.length > 0) {
           const profileIds = [...new Set(persistedNotifications.map((notification) => notification.profileId))];
           const subscriptions = await tx.wikiPushSubscription.findMany({
@@ -125,6 +126,69 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
     }
   }
   return processed;
+}
+
+async function filterAuthorizedReleaseReviewDeliveries(
+  tx: Prisma.TransactionClient,
+  deliveries: readonly DeliveryPayload[],
+): Promise<DeliveryPayload[]> {
+  const releaseDeliveries = deliveries.filter((delivery) => delivery.sourceType === 'server_wiki_release_candidate');
+  if (releaseDeliveries.length === 0) return [...deliveries];
+  const candidateIds = [...new Set(releaseDeliveries
+    .filter((delivery) => /^\d+$/u.test(delivery.sourceId))
+    .map((delivery) => BigInt(delivery.sourceId)))];
+  const candidates = candidateIds.length > 0 ? await tx.serverWikiReleaseCandidate.findMany({
+    where: { id: { in: candidateIds } },
+    select: { id: true, spaceId: true, status: true, createdBy: true },
+  }) : [];
+  const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const recipientIds = [...new Set(releaseDeliveries.map((delivery) => BigInt(delivery.profileId)))];
+  const profiles = recipientIds.length > 0 ? await tx.wikiProfile.findMany({
+    where: { id: { in: recipientIds }, status: 'active', mergedIntoProfileId: null, accountId: { not: null } },
+    select: { id: true, accountId: true },
+  }) : [];
+  const accountIds = profiles.flatMap((profile) => profile.accountId ? [profile.accountId] : []);
+  const accounts = accountIds.length > 0 ? await tx.account.findMany({
+    where: { id: { in: accountIds }, lifecycleStatus: 'active' },
+    select: { id: true, canonicalAccountId: true },
+  }) : [];
+  const activeCanonicalAccountIds = new Set(accounts
+    .filter((account) => !account.canonicalAccountId || account.canonicalAccountId === account.id)
+    .map((account) => account.id));
+  const activeCanonicalProfileIds = new Set(profiles
+    .filter((profile) => profile.accountId && activeCanonicalAccountIds.has(profile.accountId))
+    .map((profile) => profile.id));
+  const submittedPairs = releaseDeliveries.flatMap((delivery) => {
+    if (delivery.type !== 'server_wiki_release_submitted' || !/^\d+$/u.test(delivery.sourceId)) return [];
+    const candidate = candidateById.get(BigInt(delivery.sourceId));
+    return candidate ? [{ profileId: BigInt(delivery.profileId), spaceId: candidate.spaceId }] : [];
+  });
+  const reviewerRoles = submittedPairs.length > 0 ? await tx.subwikiRole.findMany({
+    where: {
+      userId: { in: [...new Set(submittedPairs.map((pair) => pair.profileId))] },
+      spaceId: { in: [...new Set(submittedPairs.map((pair) => pair.spaceId))] },
+      role: 'reviewer',
+      status: 'active',
+    },
+    select: { userId: true, spaceId: true },
+  }) : [];
+  const reviewerKeys = new Set(reviewerRoles.map((role) => `${role.userId.toString()}:${role.spaceId.toString()}`));
+  return deliveries.filter((delivery) => {
+    if (delivery.sourceType !== 'server_wiki_release_candidate') return true;
+    if (!/^\d+$/u.test(delivery.sourceId)) return false;
+    const profileId = BigInt(delivery.profileId);
+    if (!activeCanonicalProfileIds.has(profileId)) return false;
+    const candidate = candidateById.get(BigInt(delivery.sourceId));
+    if (!candidate) return false;
+    if (delivery.type === 'server_wiki_release_submitted') {
+      return candidate.status === 'pending_review'
+        && reviewerKeys.has(`${profileId.toString()}:${candidate.spaceId.toString()}`);
+    }
+    if (delivery.type === 'server_wiki_release_approved' || delivery.type === 'server_wiki_release_revoked') {
+      return candidate.createdBy === profileId;
+    }
+    return false;
+  });
 }
 
 function parseDeliveries(payload: unknown): DeliveryPayload[] {

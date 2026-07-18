@@ -137,6 +137,32 @@ test('notification inbox removes notifications whose source comment is hidden', 
   assert.equal(purgeQuery?.take, 200);
 });
 
+test('release review inbox drops submissions after reviewer access is revoked', async () => {
+  const deletedIds: bigint[] = [];
+  const row = { id: 44n, profileId: 8n, type: 'server_wiki_release_submitted', pageId: null, actorProfileId: 7n, sourceType: 'server_wiki_release_candidate', sourceId: '12', title: 'Luna', message: null, href: '/wiki/release-reviews/12', dedupeKey: 'release:12', readAt: null, createdAt: now };
+  const prisma = {
+    wikiNotification: {
+      async findMany() { return [row]; },
+      async count() { return 0; },
+      async deleteMany(args: { where: { id: { in: bigint[] } } }) {
+        deletedIds.push(...args.where.id.in);
+        return { count: args.where.id.in.length };
+      },
+    },
+    serverWikiReleaseCandidate: {
+      async findMany() { return [{ id: 12n, spaceId: 3n, status: 'pending_review', createdBy: 7n }]; },
+    },
+    subwikiRole: { async findMany() { return []; } },
+    wikiProfile: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const profiles = { async ensureWikiProfile() { return { id: 8n }; } } as unknown as WikiProfileService;
+
+  const result = await new WikiNotificationService(prisma, profiles, {} as WikiPermissionService).list(session);
+
+  assert.deepEqual(result.items, []);
+  assert.deepEqual(deletedIds, [44n]);
+});
+
 test('watched revision notifications exclude the editor and deduplicate per recipient', async () => {
   let deliveries: Array<{ profileId: string; dedupeKey: string }> = [];
   const tx = {
@@ -204,6 +230,93 @@ test('server wiki edit request review notifications keep the canonical detail ro
   });
 
   assert.equal(href, '/server/luna/_tools/requests/API/requests?request=44');
+});
+
+test('release submission notifications fan out only to active canonical reviewers in the same space', async () => {
+  let roleQuery: unknown;
+  let event: { eventKey: string; eventType: string; payloadJson: { deliveries: Array<{ profileId: string; href: string; dedupeKey: string }> } } | null = null;
+  const tx = {
+    subwikiRole: {
+      async findMany(args: unknown) {
+        roleQuery = args;
+        return [{ userId: 8n }, { userId: 9n }, { userId: 10n }];
+      },
+    },
+    wikiProfile: {
+      async findMany() {
+        return [
+          { id: 8n, accountId: 'account-8' },
+          { id: 9n, accountId: 'account-9' },
+        ];
+      },
+    },
+    account: {
+      async findMany() {
+        return [
+          { id: 'account-8', canonicalAccountId: null },
+          { id: 'account-9', canonicalAccountId: 'canonical-9' },
+        ];
+      },
+    },
+    wikiNotificationEvent: {
+      async createMany(args: { data: typeof event[] }) { event = args.data[0] ?? null; return { count: 1 }; },
+    },
+  };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+
+  await service.notifyServerWikiReleaseSubmitted(tx as never, {
+    candidateId: 44n,
+    spaceId: 77n,
+    actorProfileId: 7n,
+    serverName: 'Luna',
+    submittedAt: now,
+  });
+
+  assert.deepEqual((roleQuery as { where: unknown }).where, {
+    spaceId: 77n, role: 'reviewer', status: 'active', userId: { not: 7n },
+  });
+  assert.equal(event?.eventType, 'server_wiki_release_submitted');
+  assert.deepEqual(event?.payloadJson.deliveries.map((delivery) => delivery.profileId), ['8']);
+  assert.equal(event?.payloadJson.deliveries[0]?.href, '/wiki/release-reviews/44');
+  assert.match(event?.payloadJson.deliveries[0]?.dedupeKey ?? '', /candidate|server-wiki-release:44/u);
+});
+
+test('release review changes notify the active submitter once and never notify the reviewer themself', async () => {
+  const events: Array<{ eventKey: string; payloadJson: { deliveries: Array<{ profileId: string; actorProfileId: string }> } }> = [];
+  const tx = {
+    wikiProfile: { async findMany() { return [{ id: 8n, accountId: 'account-8' }]; } },
+    account: { async findMany() { return [{ id: 'account-8', canonicalAccountId: null }]; } },
+    wikiNotificationEvent: {
+      async createMany(args: { data: typeof events }) { events.push(...args.data); return { count: args.data.length }; },
+    },
+  };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+
+  await service.notifyServerWikiReleaseReviewChanged(tx as never, {
+    candidateId: 44n, submitterProfileId: 8n, reviewerProfileId: 7n,
+    serverName: 'Luna', state: 'approved', changedAt: now,
+  });
+  await service.notifyServerWikiReleaseReviewChanged(tx as never, {
+    candidateId: 45n, submitterProfileId: 7n, reviewerProfileId: 7n,
+    serverName: 'Luna', state: 'revoked', changedAt: now,
+  });
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.eventKey, 'server-wiki-release:44:approved:reviewer:7');
+  assert.deepEqual(events[0]?.payloadJson.deliveries[0], {
+    profileId: '8',
+    type: 'server_wiki_release_approved',
+    pageId: null,
+    actorProfileId: '7',
+    sourceType: 'server_wiki_release_candidate',
+    sourceId: '44',
+    title: 'Luna',
+    message: '서버 위키 릴리스 후보가 승인되었습니다.',
+    href: '/wiki/release-reviews/44',
+    dedupeKey: 'server-wiki-release:44:approved:reviewer:7:profile:8',
+    readAt: null,
+    createdAt: now.toISOString(),
+  });
 });
 
 test('rejected new-page requests notify the author through the request identity route', async () => {

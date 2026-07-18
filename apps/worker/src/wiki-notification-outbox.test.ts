@@ -56,3 +56,74 @@ test('wiki notification outbox claims, delivers, and completes an event', async 
   assert.equal(pushDeliveries[0]?.subscriptionId, 'subscription-1');
   assert.equal(completed, true);
 });
+
+test('release submission delivery is discarded when reviewer access was revoked', async () => {
+  let delivered = false;
+  let completed = false;
+  const event = {
+    id: 2n, status: 'processing', attempts: 1,
+    payloadJson: { deliveries: [{ profileId: '8', type: 'server_wiki_release_submitted', pageId: null, actorProfileId: '7', sourceType: 'server_wiki_release_candidate', sourceId: '12', title: 'Luna', message: null, href: '/wiki/release-reviews/12', dedupeKey: 'release:12:profile:8', createdAt: new Date().toISOString() }] },
+  };
+  const eventStore = {
+    async updateMany(args: { where: { id?: bigint; status?: string }; data: { status?: string } }) {
+      if (args.where.id === 2n && args.where.status === 'pending') return { count: 1 };
+      if (args.where.id === 2n && args.where.status === 'processing' && args.data.status === 'processed') { completed = true; return { count: 1 }; }
+      return { count: 0 };
+    },
+    async findMany() { return [{ id: 2n }]; },
+    async findUnique() { return event; },
+  };
+  const tx = {
+    serverWikiReleaseCandidate: { async findMany() { return [{ id: 12n, spaceId: 3n, status: 'pending_review', createdBy: 7n }]; } },
+    wikiProfile: { async findMany() { return [{ id: 8n, accountId: 'account-8' }]; } },
+    account: { async findMany() { return [{ id: 'account-8', canonicalAccountId: null }]; } },
+    subwikiRole: { async findMany() { return []; } },
+    wikiNotification: {
+      async createMany() { delivered = true; return { count: 1 }; },
+      async findMany() { return []; },
+    },
+    wikiNotificationEvent: eventStore,
+  };
+  const prisma = {
+    wikiNotificationEvent: eventStore,
+    async $transaction(callback: (store: typeof tx) => Promise<void>) { await callback(tx); },
+  } as unknown as PrismaClient;
+
+  assert.equal(await processWikiNotificationOutbox(prisma, 'worker-2'), 1);
+  assert.equal(delivered, false);
+  assert.equal(completed, true);
+});
+
+test('release submission delivery reaches only a current same-space reviewer', async () => {
+  let delivered: Array<{ profileId: bigint }> = [];
+  const event = {
+    id: 3n, status: 'processing', attempts: 1,
+    payloadJson: { deliveries: [{ profileId: '8', type: 'server_wiki_release_submitted', pageId: null, actorProfileId: '7', sourceType: 'server_wiki_release_candidate', sourceId: '12', title: 'Luna', message: null, href: '/wiki/release-reviews/12', dedupeKey: 'release:12:profile:8', createdAt: new Date().toISOString() }] },
+  };
+  const eventStore = {
+    async updateMany(args: { where: { id?: bigint; status?: string } }) {
+      if (args.where.id === 3n && (args.where.status === 'pending' || args.where.status === 'processing')) return { count: 1 };
+      return { count: 0 };
+    },
+    async findMany() { return [{ id: 3n }]; },
+    async findUnique() { return event; },
+  };
+  const tx = {
+    serverWikiReleaseCandidate: { async findMany() { return [{ id: 12n, spaceId: 3n, status: 'pending_review', createdBy: 7n }]; } },
+    wikiProfile: { async findMany() { return [{ id: 8n, accountId: 'account-8' }]; } },
+    account: { async findMany() { return [{ id: 'account-8', canonicalAccountId: null }]; } },
+    subwikiRole: { async findMany() { return [{ userId: 8n, spaceId: 3n }]; } },
+    wikiNotification: {
+      async createMany(args: { data: typeof delivered }) { delivered = args.data; return { count: args.data.length }; },
+      async findMany() { return []; },
+    },
+    wikiNotificationEvent: eventStore,
+  };
+  const prisma = {
+    wikiNotificationEvent: eventStore,
+    async $transaction(callback: (store: typeof tx) => Promise<void>) { await callback(tx); },
+  } as unknown as PrismaClient;
+
+  assert.equal(await processWikiNotificationOutbox(prisma, 'worker-3'), 1);
+  assert.equal(delivered[0]?.profileId, 8n);
+});

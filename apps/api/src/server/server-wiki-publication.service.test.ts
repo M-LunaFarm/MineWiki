@@ -28,6 +28,10 @@ interface FixtureOptions {
   readonly missingOfficialChannel?: boolean;
   readonly staleSearchIndex?: boolean;
   readonly reviewerConfigured?: boolean;
+  readonly notifications?: {
+    notifyServerWikiReleaseSubmitted(tx: unknown, input: unknown): Promise<void>;
+    notifyServerWikiReleaseReviewChanged(tx: unknown, input: unknown): Promise<void>;
+  };
 }
 
 function createFixture(options: FixtureOptions = {}) {
@@ -381,7 +385,7 @@ function createFixture(options: FixtureOptions = {}) {
       return operation(tx);
     },
   };
-  const service = new ServerWikiPublicationService(prisma as never);
+  const service = new ServerWikiPublicationService(prisma as never, options.notifications as never);
   return {
     service,
     async candidateToken() { return (await service.get(serverId, actor)).candidate.token; },
@@ -620,6 +624,42 @@ test('editors cannot approve release candidates and reviewer approval can be rev
   assert.equal(revoked.approved, false);
   assert.equal(revoked.viewerApproved, false);
   assert.equal(fixture.approvals[0]?.revokedAt instanceof Date, true);
+});
+
+test('release submission, approval, and revocation emit transactional review notifications', async () => {
+  const submitted: Array<Record<string, unknown>> = [];
+  const changed: Array<Record<string, unknown>> = [];
+  const fixture = createFixture({
+    reviewerConfigured: true,
+    notifications: {
+      async notifyServerWikiReleaseSubmitted(_tx, input) {
+        submitted.push(input as Record<string, unknown>);
+      },
+      async notifyServerWikiReleaseReviewChanged(_tx, input) {
+        changed.push(input as Record<string, unknown>);
+      },
+    },
+  });
+  const submission = await fixture.submitCandidate();
+  const reviewerActor = { accountId: reviewerAccountId, permissions: [] };
+
+  await fixture.service.approveCandidate(serverId, {
+    candidateId: submission.id,
+    candidateToken: submission.token,
+  }, reviewerActor);
+  await fixture.service.revokeCandidateApproval(serverId, {
+    candidateId: submission.id,
+    candidateToken: submission.token,
+  }, reviewerActor);
+
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0]?.candidateId, BigInt(submission.id));
+  assert.equal(submitted[0]?.spaceId, 77n);
+  assert.equal(submitted[0]?.actorProfileId, 1n);
+  assert.deepEqual(changed.map((event) => event.state), ['approved', 'revoked']);
+  assert.ok(changed.every((event) => event.candidateId === BigInt(submission.id)));
+  assert.ok(changed.every((event) => event.submitterProfileId === 1n));
+  assert.ok(changed.every((event) => event.reviewerProfileId === 4n));
 });
 
 test('removing every reviewer never lowers the approval requirement fixed at submission', async () => {

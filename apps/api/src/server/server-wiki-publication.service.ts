@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { isPublicWikiPageStatus } from '@minewiki/wiki-core/page-status';
@@ -31,6 +32,7 @@ import {
   type ServerWikiReleaseReviewState,
 } from './server-wiki-release-review';
 import { buildServerWikiReleaseNavigation } from '../wiki/server-wiki-navigation-order';
+import { WikiNotificationService } from '../wiki/wiki-notification.service';
 
 export const SERVER_WIKI_PUBLICATION_STATUSES = ['draft', 'published', 'unpublished'] as const;
 export type ServerWikiPublicationStatus = (typeof SERVER_WIKI_PUBLICATION_STATUSES)[number];
@@ -148,7 +150,10 @@ const CANDIDATE_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
 
 @Injectable()
 export class ServerWikiPublicationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly notifications?: WikiNotificationService,
+  ) {}
 
   async get(
     serverIdInput: string,
@@ -224,6 +229,13 @@ export class ServerWikiPublicationService {
             reason,
           }),
         },
+      });
+      await this.notifications?.notifyServerWikiReleaseSubmitted(tx, {
+        candidateId: submission.id,
+        spaceId: context.spaceId,
+        actorProfileId: context.actorProfileId,
+        serverName: context.serverContent.name,
+        submittedAt: now,
       });
       const review = await serverWikiReleaseReviewState(tx, context, submission.id, requiredApprovals, false);
       return toResponse(context, blockers, snapshot.candidate, submission.candidate, review);
@@ -316,6 +328,16 @@ export class ServerWikiPublicationService {
             candidateCounts: submission.candidate.counts,
           }),
         },
+      });
+      await this.notifications?.notifyServerWikiReleaseReviewChanged(tx, {
+        candidateId,
+        submitterProfileId: submission.candidate.submittedByProfileId
+          ? BigInt(submission.candidate.submittedByProfileId)
+          : null,
+        reviewerProfileId: context.actorProfileId,
+        serverName: context.serverContent.name,
+        state: approve ? 'approved' : 'revoked',
+        changedAt: now,
       });
       return serverWikiReleaseReviewState(tx, context, candidateId, submission.candidate.requiredApprovals, false);
     });
