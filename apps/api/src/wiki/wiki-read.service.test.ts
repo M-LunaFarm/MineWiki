@@ -1742,10 +1742,11 @@ test('category membership exposes only current readable documents', async () => 
         ];
       }
     },
+    serverWikiReleaseLink: { async findMany() { return []; } },
+    wikiPageRevision: { async findMany() { return [{ id: 200n }, { id: 301n }, { id: 400n }]; } },
     wikiPage: {
       async findUnique() { return null; },
-      async findMany(args: { where: { status: { in: string[] } } }) {
-        assert.deepEqual(args.where.status.in, [...PUBLIC_WIKI_PAGE_STATUSES]);
+      async findMany() {
         return [current, stale, hidden];
       }
     },
@@ -1761,6 +1762,108 @@ test('category membership exposes only current readable documents', async () => 
   assert.equal(response.category, '초보자');
   assert.deepEqual(response.items.map((item) => item.pageId), ['20']);
   assert.equal(response.items[0]?.routePath, '/wiki/%EA%B0%80%EC%9D%B4%EB%93%9C');
+});
+
+test('category membership mixes released and preview server spaces without exposing draft links', async () => {
+  const now = new Date('2026-07-19T08:00:00.000Z');
+  const serverPage = (id: bigint, spaceId: bigint, revisionId: bigint, title: string) => ({
+    id, namespaceId: 7, spaceId, slug: title, title, displayTitle: title,
+    currentRevisionId: revisionId, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 1n, ownerProfileId: null, createdAt: now, updatedAt: now, localPath: title,
+  });
+  const publicDraft = serverPage(20n, 40n, 201n, '공개 공간 초안');
+  const previewDraft = serverPage(21n, 41n, 301n, '미리보기 초안');
+  const wiki = (id: bigint, spaceId: bigint, releaseId: bigint, siteSlug: string) => ({
+    id, spaceId, releaseId, siteSlug, slug: siteSlug, status: 'active', publicationStatus: 'published', publishedReleaseId: releaseId,
+  });
+  const publicWiki = wiki(50n, 40n, 70n, 'public-docs');
+  const previewWiki = wiki(51n, 41n, 71n, 'preview-docs');
+  const releasedPublic = {
+    id: 80n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, pageId: 20n, revisionId: 200n,
+    namespaceId: 7, slug: '공개-배포', title: '공개 배포', displayTitle: '공개 배포', localPath: '공개-배포',
+    pageType: 'article', protectionLevel: 'open', pageStatus: 'normal', createdBy: 1n, ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-18T08:00:00.000Z'), searchVector: '', createdAt: now,
+  };
+  const currentLinks = [
+    { id: 1n, sourcePageId: 20n, sourceRevisionId: 201n, linkType: 'category' },
+    { id: 2n, sourcePageId: 21n, sourceRevisionId: 301n, linkType: 'category' },
+  ];
+  const releasedLinks = [
+    { id: 1n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'category' },
+    { id: 2n, releaseId: 71n, serverWikiId: 51n, spaceId: 41n, sourcePageId: 21n, sourceRevisionId: 300n, linkType: 'category' },
+  ];
+  const prisma = {
+    wikiNamespace: {
+      async findUnique() { return { id: 2, code: 'category' }; },
+      async findMany() { return [{ id: 7, code: 'server' }]; },
+    },
+    wikiPage: { async findUnique() { return null; }, async findMany() { return [publicDraft, previewDraft]; } },
+    wikiPageRevision: { async findMany() { return [{ id: 201n }, { id: 301n }]; } },
+    wikiPageLink: { async findMany(args: { take?: number }) { return args.take === 501 ? [] : currentLinks; } },
+    serverWikiReleaseLink: { async findMany() { return releasedLinks; } },
+    serverWiki: { async findMany() { return [publicWiki, previewWiki]; } },
+    serverWikiReleaseItem: { async findMany() { return [releasedPublic]; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace({ spaceId }: { spaceId: bigint }) { return spaceId === 41n; },
+    async assertCanReadPage() {},
+  } as unknown as WikiPermissionService;
+
+  const response = await new WikiReadService(prisma, permissions).getCategoryMembers({ category: '초보자' });
+
+  assert.deepEqual(response.items.map((item) => [item.id, item.displayTitle]), [
+    ['21', '미리보기 초안'],
+    ['20', '공개 배포'],
+  ]);
+  assert.equal(new Set(response.items.map((item) => item.id)).size, 2);
+  assert.equal(response.items.some((item) => item.displayTitle === '공개 공간 초안'), false);
+});
+
+test('category membership cursor is deterministic, ACL-complete, and bound to publication filters', async () => {
+  const page = (id: bigint, updatedAt: string) => ({
+    id, namespaceId: 1, spaceId: 1n, slug: `문서-${id}`, title: `문서 ${id}`, displayTitle: `문서 ${id}`,
+    currentRevisionId: id * 10n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 1n, createdAt: new Date(updatedAt), updatedAt: new Date(updatedAt), localPath: `문서-${id}`,
+  });
+  const pages = [
+    page(24n, '2026-07-19T04:00:00.000Z'),
+    page(23n, '2026-07-19T03:00:00.000Z'),
+    page(22n, '2026-07-19T03:00:00.000Z'),
+    page(21n, '2026-07-19T02:00:00.000Z'),
+  ];
+  const prisma = {
+    wikiNamespace: {
+      async findUnique(args: { where: { code: string } }) { return args.where.code === 'category' ? { id: 2, code: 'category' } : null; },
+      async findMany() { return [{ id: 1, code: 'main' }]; },
+    },
+    wikiPage: { async findUnique() { return null; }, async findMany() { return pages; } },
+    wikiPageRevision: { async findMany() { return pages.map((item) => ({ id: item.currentRevisionId })); } },
+    wikiPageLink: {
+      async findMany(args: { take?: number }) {
+        return args.take === 501 ? [] : pages.map((item) => ({ id: item.id, sourcePageId: item.id, sourceRevisionId: item.currentRevisionId, linkType: 'category' }));
+      },
+    },
+    serverWikiReleaseLink: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async assertCanReadPage({ page: candidate }: { page: { id: bigint } }) { if (candidate.id === 23n) throw new Error('hidden'); },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const first = await service.getCategoryMembers({ category: '초보자', limit: 2 });
+  assert.deepEqual(first.items.map((item) => item.pageId), ['24', '22']);
+  assert.ok(first.nextCursor);
+  const second = await service.getCategoryMembers({ category: '초보자', limit: 2, cursor: first.nextCursor! });
+  assert.deepEqual(second.items.map((item) => item.pageId), ['21']);
+  assert.equal(second.nextCursor, null);
+  await assert.rejects(
+    () => service.getCategoryMembers({ category: '다른 분류', limit: 2, cursor: first.nextCursor! }),
+    /cursor is invalid for the selected category filters or publication state/u,
+  );
+  await assert.rejects(
+    () => service.getCategoryMembers({ category: '초보자', cursor: '24' }),
+    /cursor is invalid for the selected category filters or publication state/u,
+  );
 });
 
 test('category hierarchy exposes its document, parents, and current readable subcategories', async () => {
@@ -1787,7 +1890,9 @@ test('category hierarchy exposes its document, parents, and current readable sub
         if (args.where.sourcePageId === category.id) return [parentLink];
         return [childLink, memberLink];
       }
-    }
+    },
+    serverWikiReleaseLink: { async findMany() { return []; } },
+    wikiPageRevision: { async findMany() { return [{ id: 200n }]; } }
   } as unknown as PrismaService;
   const permissions = {
     async assertCanReadPage() {},
@@ -1828,7 +1933,9 @@ test('category hierarchy detects a cycle that cannot reach the root', async () =
         if (args.where.sourcePageId === categoryB.id) return [linkBtoA];
         return [linkBtoA];
       }
-    }
+    },
+    serverWikiReleaseLink: { async findMany() { return []; } },
+    wikiPageRevision: { async findMany() { return []; } }
   } as unknown as PrismaService;
   const permissions = { async assertCanReadPage() {} } as unknown as WikiPermissionService;
 

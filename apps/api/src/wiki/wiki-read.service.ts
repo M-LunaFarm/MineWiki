@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { Prisma, ServerWikiReleaseItem, WikiPage } from '@prisma/client';
 import {
   type AstNode,
@@ -928,6 +928,18 @@ export class WikiReadService {
     namespaceById: ReadonlyMap<number, string>,
     access: WikiAccessContext,
   ): Promise<Array<ReturnType<typeof pageFromServerWikiReleaseItem> | WikiPage>> {
+    return (await this.projectDerivedPagesWithContext(pages, namespaceById, access)).pages;
+  }
+
+  private async projectDerivedPagesWithContext(
+    pages: readonly WikiPage[],
+    namespaceById: ReadonlyMap<number, string>,
+    access: WikiAccessContext,
+  ): Promise<{
+    readonly pages: Array<ReturnType<typeof pageFromServerWikiReleaseItem> | WikiPage>;
+    readonly signature: string;
+    readonly sourceByPageId: ReadonlyMap<bigint, DerivedPageProjectionSource>;
+  }> {
     const currentRevisionIds = pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []);
     const publicRevisions = currentRevisionIds.length > 0
       ? await this.prisma.wikiPageRevision.findMany({
@@ -976,24 +988,46 @@ export class WikiReadService {
         ? [[item.pageId, item] as const]
         : [];
     }));
-    return pages.flatMap((page) => {
+    const sourceByPageId = new Map<bigint, DerivedPageProjectionSource>();
+    const projectedPages = pages.flatMap((page) => {
       const isServerPage = namespaceById.get(page.namespaceId) === 'server';
       const serverWiki = serverWikiBySpace.get(page.spaceId);
       if (!isServerPage || (serverWiki && previewSpaceIds.has(page.spaceId))) {
-        return page.currentRevisionId
+        const visible = page.currentRevisionId
           && publicRevisionIds.has(page.currentRevisionId)
           && PUBLIC_WIKI_PAGE_STATUSES.includes(page.status as (typeof PUBLIC_WIKI_PAGE_STATUSES)[number])
-          && page.pageType !== 'redirect'
-          ? [page]
-          : [];
+          && page.pageType !== 'redirect';
+        if (!visible) return [];
+        sourceByPageId.set(page.id, { kind: 'current' });
+        return [page];
       }
       const releasedItem = releasedItemByPageId.get(page.id);
-      return releasedItem
+      const visible = releasedItem
         && PUBLIC_WIKI_PAGE_STATUSES.includes(releasedItem.pageStatus as (typeof PUBLIC_WIKI_PAGE_STATUSES)[number])
-        && releasedItem.pageType !== 'redirect'
-        ? [pageFromServerWikiReleaseItem(releasedItem)]
-        : [];
+        && releasedItem.pageType !== 'redirect';
+      if (!visible) return [];
+      sourceByPageId.set(page.id, {
+        kind: 'release',
+        releaseId: releasedItem.releaseId,
+        serverWikiId: releasedItem.serverWikiId,
+        spaceId: releasedItem.spaceId,
+      });
+      return [pageFromServerWikiReleaseItem(releasedItem)];
     });
+    const projectionState = serverWikis
+      .map((wiki) => [
+        wiki.id.toString(),
+        wiki.spaceId.toString(),
+        previewSpaceIds.has(wiki.spaceId) ? 'preview' : wiki.publicationStatus,
+        previewSpaceIds.has(wiki.spaceId) ? 'current' : wiki.publishedReleaseId?.toString() ?? 'none',
+      ].join(':'))
+      .sort()
+      .join('|');
+    return {
+      pages: projectedPages,
+      signature: createHash('sha256').update(projectionState || 'no-server-projection').digest('base64url').slice(0, 22),
+      sourceByPageId,
+    };
   }
 
   async getPageLifecycleEvents(
@@ -1522,18 +1556,24 @@ export class WikiReadService {
       ? await this.categoryParentsReachRoot(parentLinks.map((link) => link.targetSlug), categoryNamespace.id, access)
       : false);
     const limit = Math.min(Math.max(Number(input.limit ?? 30) || 30, 1), 100);
-    const cursor = input.cursor ? this.parseBigIntId(input.cursor, 'cursor') : null;
-    const scanLimit = Math.min(limit * 4 + 1, 401);
-    const links = await this.prisma.wikiPageLink.findMany({
+    const currentLinks = await this.prisma.wikiPageLink.findMany({
+      where: {
+        targetNamespaceCode: 'category',
+        targetSlug: categorySlug,
+        linkType: 'category'
+      },
+    });
+    const releasedLinks = await this.prisma.serverWikiReleaseLink.findMany({
       where: {
         targetNamespaceCode: 'category',
         targetSlug: categorySlug,
         linkType: 'category',
-        ...(cursor ? { id: { lt: cursor } } : {})
+        release: {
+          publishedFor: { is: { status: 'active', publicationStatus: 'published' } },
+        },
       },
-      orderBy: [{ id: 'desc' }],
-      take: scanLimit
     });
+    const links = [...currentLinks, ...releasedLinks];
     const pageIds = [...new Set(links.map((link) => link.sourcePageId))];
     const pages = pageIds.length > 0
       ? await this.prisma.wikiPage.findMany({
@@ -1543,9 +1583,7 @@ export class WikiReadService {
               ? { namespaceId: namespace.id }
               : categoryNamespace
                 ? { namespaceId: { not: categoryNamespace.id } }
-                : {}),
-            status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
-            pageType: { not: 'redirect' }
+                : {})
           }
         })
       : [];
@@ -1554,32 +1592,57 @@ export class WikiReadService {
       ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } }, select: { id: true, code: true } })
       : [];
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
-    const pageById = new Map(pages.map((page) => [page.id, page]));
-    const routePaths = await this.routePaths.preload(pages, namespaceById);
-    const items: WikiCategoryResponse['items'][number][] = [];
-    let lastScannedId: bigint | null = null;
-    for (const link of links) {
-      lastScannedId = link.id;
-      const page = pageById.get(link.sourcePageId);
-      if (!page || page.currentRevisionId !== link.sourceRevisionId) continue;
+    const projection = await this.projectDerivedPagesWithContext(pages, namespaceById, access);
+    const routePaths = await this.routePaths.preload(projection.pages, namespaceById);
+    const currentLinkKeys = new Set(currentLinks.map((link) => `${link.sourcePageId}:${link.sourceRevisionId}`));
+    const releaseLinkKeys = new Set(releasedLinks.map((link) => [
+      link.releaseId,
+      link.serverWikiId,
+      link.spaceId,
+      link.sourcePageId,
+      link.sourceRevisionId,
+    ].join(':')));
+    const visiblePages: typeof projection.pages = [];
+    for (const page of projection.pages) {
+      if (!page.currentRevisionId) continue;
+      const source = projection.sourceByPageId.get(page.id);
+      const hasMatchingLink = source?.kind === 'release'
+        ? releaseLinkKeys.has([
+            source.releaseId,
+            source.serverWikiId,
+            source.spaceId,
+            page.id,
+            page.currentRevisionId,
+          ].join(':'))
+        : currentLinkKeys.has(`${page.id}:${page.currentRevisionId}`);
+      if (!hasMatchingLink) continue;
       try {
         await this.wikiPermissions.assertCanReadPage({ ...access, page });
       } catch {
         continue;
       }
+      visiblePages.push(page);
+    }
+    visiblePages.sort(compareCategoryPages);
+    const cursor = parseCategoryCursor(input.cursor, categorySlug, namespace?.code ?? null, projection.signature);
+    const afterCursor = cursor
+      ? visiblePages.filter((page) => compareCategoryPageToCursor(page, cursor) > 0)
+      : visiblePages;
+    const hasMore = afterCursor.length > limit;
+    const pageRows = afterCursor.slice(0, limit);
+    const items: WikiCategoryResponse['items'][number][] = pageRows.map((page) => {
       const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
-      items.push({
-        id: link.id.toString(),
+      return {
+        id: page.id.toString(),
         pageId: page.id.toString(),
         namespace: namespaceCode,
         title: page.title,
         displayTitle: page.displayTitle,
         routePath: routePaths.routePath(page, namespaceCode),
         updatedAt: page.updatedAt.toISOString()
-      });
-      if (items.length >= limit) break;
-    }
-    const mayHaveMore = links.length > 0 && (items.length >= limit || links.length >= scanLimit);
+      };
+    });
+    const last = pageRows.at(-1);
     return {
       category,
       document: readableCategoryPage ? {
@@ -1591,7 +1654,9 @@ export class WikiReadService {
       isRoot,
       isOrphan: Boolean(readableCategoryPage && !reachesRoot),
       items,
-      nextCursor: mayHaveMore ? lastScannedId?.toString() ?? null : null
+      nextCursor: hasMore && last
+        ? encodeCategoryCursor(last, categorySlug, namespace?.code ?? null, projection.signature)
+        : null
     };
   }
 
@@ -4043,6 +4108,15 @@ type BacklinkSortEntry = {
   };
 };
 
+type DerivedPageProjectionSource =
+  | { readonly kind: 'current' }
+  | {
+      readonly kind: 'release';
+      readonly releaseId: bigint;
+      readonly serverWikiId: bigint;
+      readonly spaceId: bigint;
+    };
+
 type BacklinkCursor = {
   readonly direction: 'prev' | 'next';
   readonly key: string;
@@ -4093,5 +4167,66 @@ function parseBacklinkCursor(value: string | undefined, namespace: string | null
     return { direction: parsed.d, key: parsed.k, id: BigInt(parsed.i) };
   } catch {
     throw new BadRequestException('cursor is invalid for the selected backlink filters.');
+  }
+}
+
+type CategorySortPage = {
+  readonly id: bigint;
+  readonly updatedAt: Date;
+};
+
+type CategoryCursor = {
+  readonly updatedAt: number;
+  readonly pageId: bigint;
+};
+
+function compareCategoryPages(left: CategorySortPage, right: CategorySortPage): number {
+  const updatedOrder = right.updatedAt.getTime() - left.updatedAt.getTime();
+  if (updatedOrder !== 0) return updatedOrder;
+  return left.id > right.id ? -1 : left.id < right.id ? 1 : 0;
+}
+
+function compareCategoryPageToCursor(page: CategorySortPage, cursor: CategoryCursor): number {
+  const updatedOrder = cursor.updatedAt - page.updatedAt.getTime();
+  if (updatedOrder !== 0) return updatedOrder;
+  return page.id > cursor.pageId ? -1 : page.id < cursor.pageId ? 1 : 0;
+}
+
+function categoryCursorFilter(categorySlug: string, namespace: string | null, projectionSignature: string): string {
+  return `${categorySlug}|${namespace ?? ''}|${projectionSignature}`;
+}
+
+function encodeCategoryCursor(
+  page: CategorySortPage,
+  categorySlug: string,
+  namespace: string | null,
+  projectionSignature: string,
+): string {
+  return Buffer.from(JSON.stringify({
+    v: 1,
+    t: page.updatedAt.getTime(),
+    i: page.id.toString(),
+    f: categoryCursorFilter(categorySlug, namespace, projectionSignature),
+  })).toString('base64url');
+}
+
+function parseCategoryCursor(
+  value: string | undefined,
+  categorySlug: string,
+  namespace: string | null,
+  projectionSignature: string,
+): CategoryCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Record<string, unknown>;
+    if (
+      parsed.v !== 1
+      || typeof parsed.t !== 'number' || !Number.isSafeInteger(parsed.t) || parsed.t < 0
+      || typeof parsed.i !== 'string' || !/^\d+$/.test(parsed.i)
+      || parsed.f !== categoryCursorFilter(categorySlug, namespace, projectionSignature)
+    ) throw new Error('invalid');
+    return { updatedAt: parsed.t, pageId: BigInt(parsed.i) };
+  } catch {
+    throw new BadRequestException('cursor is invalid for the selected category filters or publication state.');
   }
 }
