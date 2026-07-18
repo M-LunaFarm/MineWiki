@@ -259,6 +259,7 @@ export interface WikiLifecycleIdentity {
 export interface WikiPageLifecycleEventSummary {
   readonly id: string;
   readonly eventType: 'move' | 'delete' | 'restore';
+  readonly sourceRevisionId: string | null;
   readonly actorProfileId: string | null;
   readonly actorName: string | null;
   readonly actorUsername: string | null;
@@ -699,6 +700,20 @@ export interface WikiDeletedPageSummary {
   readonly displayTitle: string;
   readonly spaceId: string;
   readonly updatedAt: string;
+}
+
+export interface WikiDeletedPageRecoveryResponse {
+  readonly page: WikiDeletedPageSummary & {
+    readonly pageType: string;
+    readonly latestPublicRevisionId: string;
+    readonly canSelectHistoricalRevision: boolean;
+  };
+  readonly revisions: WikiRevisionListResponse;
+  readonly lifecycle: WikiPageLifecycleEventListResponse;
+  readonly selectedRevision: WikiRevisionSummary & {
+    readonly html: string;
+    readonly headings: WikiPageResponse['headings'];
+  };
 }
 
 export interface WikiThreadSummary {
@@ -1434,6 +1449,20 @@ export async function fetchWikiDeletedPages(): Promise<WikiDeletedPageSummary[]>
   return response.json();
 }
 
+export async function fetchWikiDeletedPageRecovery(input: {
+  readonly pageId: string;
+  readonly revisionId?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+}): Promise<WikiDeletedPageRecoveryResponse> {
+  const params = new URLSearchParams();
+  if (input.revisionId) params.set('revisionId', input.revisionId);
+  if (input.cursor) params.set('cursor', input.cursor);
+  if (input.limit) params.set('limit', input.limit.toString());
+  const query = params.size > 0 ? `?${params.toString()}` : '';
+  return readWikiBrowser(`/v1/wiki/me/deleted-pages/${encodeURIComponent(input.pageId)}/recovery${query}`);
+}
+
 export async function fetchWikiThreads(pageId: string, cursor?: string, status: WikiDiscussionStatusFilter = 'all'): Promise<WikiThreadListResponse> {
   const params = new URLSearchParams({ limit: '30', preview: 'first-latest' });
   if (cursor) params.set('cursor', cursor);
@@ -2155,8 +2184,8 @@ export async function deleteWikiPage(input: { pageId: string; reason: string }):
   return mutateWikiPage(input.pageId, 'delete', { reason: input.reason });
 }
 
-export async function restoreWikiPage(input: { pageId: string; reason: string }): Promise<{ pageId: string; status: string }> {
-  return mutateWikiPage(input.pageId, 'restore', { reason: input.reason });
+export async function restoreWikiPage(input: { pageId: string; reason: string; revisionId?: string }): Promise<{ pageId: string; status: string; revisionId?: string; sourceRevisionId?: string | null }> {
+  return mutateWikiPage(input.pageId, 'restore', { reason: input.reason, revisionId: input.revisionId });
 }
 
 export async function revertWikiPage(input: { pageId: string; revisionId: string; baseRevisionId: string; reason: string }): Promise<WikiMutationResponse> {

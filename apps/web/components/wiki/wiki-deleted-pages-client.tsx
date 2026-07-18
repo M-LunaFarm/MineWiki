@@ -2,13 +2,12 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArchiveRestore, Loader2 } from 'lucide-react';
-import { fetchWikiDeletedPages, restoreWikiPage, type WikiDeletedPageSummary } from '../../lib/wiki-api';
+import { ArchiveRestore, History, Loader2 } from 'lucide-react';
+import { fetchWikiDeletedPages, type WikiDeletedPageSummary } from '../../lib/wiki-api';
 
 export function WikiDeletedPagesClient() {
   const [pages, setPages] = useState<WikiDeletedPageSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [workingId, setWorkingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -19,19 +18,6 @@ export function WikiDeletedPagesClient() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
-
-  async function restore(page: WikiDeletedPageSummary) {
-    setWorkingId(page.id);
-    setError(null);
-    try {
-      await restoreWikiPage({ pageId: page.id, reason: '삭제 문서함에서 복구' });
-      setPages((current) => current.filter((item) => item.id !== page.id));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '문서를 복구하지 못했습니다.');
-    } finally {
-      setWorkingId(null);
-    }
-  }
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
@@ -48,9 +34,9 @@ export function WikiDeletedPagesClient() {
           {pages.map((page) => (
             <article key={page.id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
               <div className="min-w-0"><h2 className="truncate font-semibold text-white">{page.displayTitle}</h2><p className="mt-2 break-all text-xs text-slate-500">{page.namespace}:{page.title}</p></div>
-              <button type="button" onClick={() => void restore(page)} disabled={workingId !== null} className="btn-secondary inline-flex shrink-0 items-center gap-2 self-start disabled:opacity-50 sm:self-auto">
-                {workingId === page.id ? <Loader2 className="size-4 animate-spin" /> : <ArchiveRestore className="size-4" />} 복구
-              </button>
+              <Link href={`/wiki/deleted/${encodeURIComponent(page.id)}`} className="btn-secondary inline-flex shrink-0 items-center gap-2 self-start sm:self-auto">
+                <History className="size-4" /> 이력 검토 및 복구
+              </Link>
             </article>
           ))}
         </section>
