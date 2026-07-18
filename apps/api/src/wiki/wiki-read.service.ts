@@ -1976,6 +1976,7 @@ export class WikiReadService {
     readonly actorProfileIds: bigint[];
     readonly requestedProfileId: bigint;
     readonly accountId: string | null;
+    readonly session: SessionPayload | null;
     readonly cursor: bigint | null;
     readonly limit: number;
   }, reviews: boolean): Promise<WikiContributionResponse> {
@@ -1993,9 +1994,15 @@ export class WikiReadService {
     const pageIds = [...new Set(requests.flatMap((request) => request.pageId === null ? [] : [request.pageId]))];
     const pages = pageIds.length > 0 ? await this.prisma.wikiPage.findMany({ where: { id: { in: pageIds } } }) : [];
     const namespaces = pages.length > 0 ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: [...new Set(pages.map((page) => page.namespaceId))] } } }) : [];
-    const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    const routePaths = await this.routePaths.preload(pages, namespaceById);
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.session ?? input.accountId ?? null,
+    );
+    const projection = await this.projectDerivedPagesWithContext(pages, namespaceById, access);
+    const pageById = new Map(projection.pages.map((page) => [page.id, page]));
+    const routePaths = await this.routePaths.preload(projection.pages, namespaceById);
     const readable = new Map<bigint, boolean>();
     const items: WikiContributionItem[] = [];
     let lastScannedId: bigint | null = null;
@@ -2008,7 +2015,14 @@ export class WikiReadService {
       let routePath: string;
       let href: string;
       if (page) {
-        if (!(await this.canReadContributionPage(page, input.accountId, readable))) continue;
+        const source = projection.sourceByPageId.get(page.id);
+        const activityAt = reviews ? request.reviewedAt ?? request.updatedAt : request.createdAt;
+        if (source?.kind === 'release' && (
+          !source.publishedAt
+          || activityAt > source.publishedAt
+          || request.acceptedRevisionId === null
+        )) continue;
+        if (!(await this.canReadContributionPage(page, access, readable))) continue;
         pageId = page.id.toString();
         namespace = namespaceById.get(page.namespaceId) ?? 'main';
         title = page.displayTitle;
@@ -2033,9 +2047,13 @@ export class WikiReadService {
           targetTitle === null ||
           targetDisplayTitle === null
         ) continue;
+        if (targetNamespaceCode === 'server') {
+          const canPreview = await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: targetSpaceId });
+          if (!canPreview) continue;
+        }
         try {
           await this.wikiPermissions.assertCanReadCreateTarget({
-            accountId: input.accountId,
+            ...access,
             namespaceId: targetNamespaceId,
             namespaceCode: targetNamespaceCode,
             spaceId: targetSpaceId,
@@ -2073,11 +2091,15 @@ export class WikiReadService {
     );
   }
 
-  private async canReadContributionPage(page: Parameters<WikiPermissionService['assertCanReadPage']>[0]['page'] & { id: bigint }, accountId: string | null, cache: Map<bigint, boolean>): Promise<boolean> {
+  private async canReadContributionPage(
+    page: Parameters<WikiPermissionService['assertCanReadPage']>[0]['page'] & { id: bigint },
+    access: WikiAccessContext,
+    cache: Map<bigint, boolean>,
+  ): Promise<boolean> {
     const cached = cache.get(page.id);
     if (cached !== undefined) return cached;
     try {
-      await this.wikiPermissions.assertCanReadPage({ accountId, page });
+      await this.wikiPermissions.assertCanReadPage({ ...access, page });
       cache.set(page.id, true);
       return true;
     } catch {

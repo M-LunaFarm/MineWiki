@@ -2053,6 +2053,59 @@ test('server wiki edit contributions stop at the release and use its immutable p
   assert.equal(previewResult.items[0]?.title, '초안 문서');
 });
 
+test('server wiki edit-request contributions expose only accepted release-era work outside preview', async () => {
+  const publishedAt = new Date('2026-07-19T05:00:00.000Z');
+  const draftPage = {
+    id: 20n, namespaceId: 7, spaceId: 40n, slug: 'draft-page', title: '초안 문서', displayTitle: '초안 문서',
+    currentRevisionId: 201n, pageType: 'article', protectionLevel: 'open', status: 'normal',
+    createdBy: 5n, ownerProfileId: null, createdAt: publishedAt, updatedAt: new Date('2026-07-19T06:00:00.000Z'), localPath: 'luna/draft-page',
+  };
+  const wiki = {
+    id: 50n, spaceId: 40n, slug: 'luna', siteSlug: 'public-docs', status: 'active',
+    publicationStatus: 'published', publishedReleaseId: 70n, publishedRelease: { publishedAt },
+  };
+  const releaseItem = {
+    id: 80n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, pageId: 20n, revisionId: 200n,
+    namespaceId: 7, slug: 'luna/public-page', title: 'luna/public-page', displayTitle: '공개 문서', localPath: 'luna/public-page',
+    pageType: 'article', protectionLevel: 'open', pageStatus: 'normal', createdBy: 5n, ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-19T04:00:00.000Z'), searchVector: '', createdAt: publishedAt,
+  };
+  const request = (id: bigint, acceptedRevisionId: bigint | null, createdAt: Date) => ({
+    id, requestKind: 'edit', pageId: 20n, baseRevisionId: 199n, proposedContent: '제안 본문', editSummary: `제안 ${id}`,
+    isMinor: false, status: acceptedRevisionId ? 'accepted' : 'pending', createdBy: 5n, reviewedBy: acceptedRevisionId ? 5n : null,
+    reviewNote: acceptedRevisionId ? '승인' : null, acceptedRevisionId, createdAt, updatedAt: createdAt,
+    reviewedAt: acceptedRevisionId ? createdAt : null,
+  });
+  const requests = [
+    request(32n, null, new Date('2026-07-19T06:00:00.000Z')),
+    request(31n, 200n, new Date('2026-07-19T04:00:00.000Z')),
+  ];
+  let preview = false;
+  const prisma = {
+    wikiProfile: { async findUnique() { return { id: 5n, username: 'editor', displayName: '편집자', status: 'active' }; } },
+    wikiEditRequest: { async findMany() { return requests; } },
+    wikiPageRevision: { async findMany() { return [{ id: 200n, editSummaryHidden: false }, { id: 201n, editSummaryHidden: false }]; } },
+    wikiPage: { async findMany() { return [draftPage]; } },
+    wikiNamespace: { async findMany() { return [{ id: 7, code: 'server' }]; } },
+    serverWiki: { async findMany() { return [wiki]; } },
+    serverWikiReleaseItem: { async findMany() { return [releaseItem]; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return preview; },
+    async assertCanReadPage() {},
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const publicResult = await service.getContributions({ profileId: '5', activity: 'edit-requests' });
+  assert.deepEqual(publicResult.items.map((item) => [item.id, item.title]), [['31', '공개 문서']]);
+  assert.equal(publicResult.items[0]?.href, '/serverWiki/public-docs/_tools/requests/public-page?request=31');
+
+  preview = true;
+  const previewResult = await service.getContributions({ profileId: '5', activity: 'edit-requests' });
+  assert.deepEqual(previewResult.items.map((item) => item.id), ['32', '31']);
+  assert.equal(previewResult.items[0]?.title, '초안 문서');
+});
+
 test('contributions redact a hidden revision summary even when the activity copy still contains it', async () => {
   const now = new Date('2026-07-17T00:00:00Z');
   const page = {
