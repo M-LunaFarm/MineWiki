@@ -41,20 +41,16 @@ interface PublicationState {
     readonly canPublish: boolean;
     readonly canApprove: boolean;
   };
-  readonly candidate: {
-    readonly token: string;
-    readonly baselineReleaseId: string | null;
-    readonly generatedAt: string;
-    readonly counts: Readonly<Record<CandidateKind, number>>;
-    readonly pages: readonly CandidatePage[];
-    readonly presentation: {
-      readonly navigationChanged: boolean;
-      readonly contentSettingsChanged: boolean;
-      readonly layoutChanged: boolean;
-      readonly linkGraphChanged: boolean;
-    };
-    readonly hasChanges: boolean;
-  };
+  readonly candidate: CandidateState;
+  readonly submission: (CandidateState & {
+    readonly id: string;
+    readonly status: string;
+    readonly sourcePublicationVersion: number;
+    readonly requiredApprovals: number;
+    readonly submissionReason: string;
+    readonly submittedAt: string;
+    readonly submittedByProfileId: string | null;
+  }) | null;
   readonly review: {
     readonly required: boolean;
     readonly approved: boolean;
@@ -64,6 +60,21 @@ interface PublicationState {
   };
 }
 
+interface CandidateState {
+  readonly token: string;
+  readonly baselineReleaseId: string | null;
+  readonly generatedAt: string;
+  readonly counts: Readonly<Record<CandidateKind, number>>;
+  readonly pages: readonly CandidatePage[];
+  readonly presentation: {
+    readonly navigationChanged: boolean;
+    readonly contentSettingsChanged: boolean;
+    readonly layoutChanged: boolean;
+    readonly linkGraphChanged: boolean;
+  };
+  readonly hasChanges: boolean;
+}
+
 type CandidateKind = 'added' | 'updated' | 'moved' | 'removed' | 'unchanged';
 
 interface CandidatePage {
@@ -71,6 +82,7 @@ interface CandidatePage {
   readonly kind: CandidateKind;
   readonly contentChanged: boolean;
   readonly identityChanged: boolean;
+  readonly metadataChanged: boolean;
   readonly before: CandidateIdentity | null;
   readonly after: CandidateIdentity | null;
   readonly updatedAt: string;
@@ -82,6 +94,10 @@ interface CandidateIdentity {
   readonly displayTitle: string;
   readonly localPath: string;
   readonly routePath: string;
+  readonly pageType: string;
+  readonly protectionLevel: string;
+  readonly status: string;
+  readonly updatedAt: string;
 }
 
 const STATUS_COPY: Record<PublicationStatus, { readonly label: string; readonly description: string }> = {
@@ -134,6 +150,7 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
 
   async function changeStatus(status: 'published' | 'unpublished') {
     if (!publication || saving || reason.trim().length < 5) return;
+    if (status === 'published' && !publication.submission) return;
     if (status === 'unpublished' && confirmation !== '비공개') return;
     setSaving(true);
     setMessage(null);
@@ -145,7 +162,10 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
         body: JSON.stringify({
           status,
           expectedVersion: publication.version,
-          ...(status === 'published' ? { expectedCandidateToken: publication.candidate.token } : {}),
+          ...(status === 'published' ? {
+            candidateId: publication.submission!.id,
+            expectedCandidateToken: publication.submission!.token,
+          } : {}),
           reason: reason.trim(),
         }),
       });
@@ -165,8 +185,38 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
     }
   }
 
+  async function submitCandidate() {
+    if (!publication || saving || !publication.access.canPublish || reason.trim().length < 5) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${baseUrl}/v1/servers/${encodeURIComponent(serverId)}/wiki-publication/candidate`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+        body: JSON.stringify({
+          expectedVersion: publication.version,
+          expectedCandidateToken: publication.candidate.token,
+          reason: reason.trim(),
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (body.code === 'SERVER_WIKI_RELEASE_CANDIDATE_CHANGED') await load();
+        throw new Error(body.message ?? '릴리스 검토 요청을 제출하지 못했습니다.');
+      }
+      setPublication(body as PublicationState);
+      setReason('');
+      setMessage({ tone: 'success', text: '현재 작업본을 변경되지 않는 릴리스 후보로 제출했습니다.' });
+    } catch (error) {
+      setMessage({ tone: 'error', text: error instanceof Error ? error.message : '릴리스 검토 요청을 제출하지 못했습니다.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function changeApproval(approve: boolean) {
-    if (!publication || saving || !publication.review.canApprove) return;
+    if (!publication || !publication.submission || saving || !publication.review.canApprove) return;
     setSaving(true);
     setMessage(null);
     try {
@@ -174,7 +224,10 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
         method: approve ? 'POST' : 'DELETE',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
-        body: JSON.stringify({ candidateToken: publication.candidate.token }),
+        body: JSON.stringify({
+          candidateId: publication.submission.id,
+          candidateToken: publication.submission.token,
+        }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -194,12 +247,18 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
   if (!publication) return <section className="rounded-xl border border-red-300/25 bg-red-400/10 p-4 text-sm text-red-100">{message?.text ?? '공개 상태를 불러오지 못했습니다.'}<button type="button" onClick={() => void load()} className="mt-3 flex min-h-11 items-center gap-2 rounded-lg border border-red-200/30 px-4"><RefreshCw className="size-4" />다시 시도</button></section>;
 
   const copy = STATUS_COPY[publication.status];
-  const canPublish = publication.access.canPublish
+  const hasCurrentSubmission = publication.submission?.token === publication.candidate.token
+    && publication.submission.sourcePublicationVersion === publication.version;
+  const canSubmit = publication.access.canPublish
     && reason.trim().length >= 5
     && publication.readiness.ready
     && publication.candidate.hasChanges
+    && !hasCurrentSubmission;
+  const canPublish = publication.access.canPublish
+    && publication.submission !== null
+    && reason.trim().length >= 5
     && (!publication.review.required || publication.review.approved);
-  const canUnpublish = reason.trim().length >= 5 && confirmation === '비공개';
+  const canUnpublish = publication.access.canPublish && reason.trim().length >= 5 && confirmation === '비공개';
 
   return (
     <section className="rounded-xl border border-emerald-300/20 bg-emerald-400/[0.04] p-4 sm:p-6" aria-labelledby="server-wiki-publication-title">
@@ -220,14 +279,15 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
 
       {!publication.readiness.ready ? <div className="mt-5 rounded-lg border border-amber-300/25 bg-amber-400/10 p-4"><p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><ShieldAlert className="size-4" />공개 전 확인이 필요합니다</p><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-amber-100/80">{publication.readiness.blockers.map((blocker) => <li key={blocker}>{BLOCKER_COPY[blocker]}</li>)}</ul></div> : null}
       <ReleaseCandidateManifest
-        candidate={publication.candidate}
+        candidate={publication.submission ?? publication.candidate}
         review={publication.review}
         saving={saving}
         onApproval={(approve) => void changeApproval(approve)}
       />
+      {publication.submission ? <p className={`mt-3 rounded-lg border px-4 py-3 text-xs ${hasCurrentSubmission ? 'border-emerald-300/20 bg-emerald-400/5 text-emerald-100' : 'border-amber-300/25 bg-amber-400/10 text-amber-100'}`}>{hasCurrentSubmission ? `검토 요청 #${publication.submission.id} · ${new Date(publication.submission.submittedAt).toLocaleString('ko-KR')}` : '검토 요청을 제출한 뒤 작업본이 변경되었습니다. 기존 후보는 그대로 보존되며, 새 변경까지 포함하려면 다시 제출하세요.'}</p> : null}
       {message ? <p className={`mt-4 text-sm ${message.tone === 'error' ? 'text-red-200' : 'text-emerald-200'}`} role="status">{message.text}</p> : null}
 
-      <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,280px)_auto] lg:items-end">
+      {publication.access.canPublish ? <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,280px)_auto] lg:items-end">
         <label className="text-xs font-semibold text-slate-300">변경 사유
           <input value={reason} onChange={(event) => setReason(event.target.value)} minLength={5} maxLength={500} placeholder="5자 이상 입력" className="mt-1.5 min-h-11 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white outline-none focus:border-emerald-300/50" />
         </label>
@@ -235,10 +295,11 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
           <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="비공개" className="mt-1.5 min-h-11 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-white outline-none focus:border-amber-300/50" />
         </label> : <div className="hidden lg:block" />}
         <div className="flex flex-col gap-2 sm:flex-row">
+          <button type="button" onClick={() => void submitCandidate()} disabled={!canSubmit || saving} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-sky-300/35 px-5 text-sm font-bold text-sky-100 hover:bg-sky-300/10 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto">검토 요청 제출</button>
           <button type="button" onClick={() => void changeStatus('published')} disabled={!canPublish || saving} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-emerald-400 px-5 text-sm font-bold text-emerald-950 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto">{saving ? <Loader2 className="size-4 animate-spin" /> : null}{publication.status === 'published' ? '변경사항 공개' : '위키 공개'}</button>
           {publication.status === 'published' ? <button type="button" onClick={() => void changeStatus('unpublished')} disabled={!canUnpublish || saving} className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-amber-300/35 px-5 text-sm font-bold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto">비공개 전환</button> : null}
         </div>
-      </div>
+      </div> : null}
     </section>
   );
 }
@@ -277,7 +338,7 @@ function ReleaseCandidateManifest({
         const identity = page.after ?? page.before;
         return <li key={page.pageId} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <span className="min-w-0"><span className="flex items-center gap-2 text-sm font-semibold text-white">{candidateKindIcon(page.kind)}<span className="truncate">{identity?.displayTitle ?? identity?.title ?? `문서 ${page.pageId}`}</span></span>{page.before && page.after && page.before.localPath !== page.after.localPath ? <span className="mt-1 block truncate text-xs text-slate-500">{page.before.localPath} → {page.after.localPath}</span> : <span className="mt-1 block truncate text-xs text-slate-500">{identity?.localPath}</span>}</span>
-          <span className="shrink-0 text-xs text-slate-500">{candidateKindLabel(page.kind)}{page.contentChanged && page.kind === 'moved' ? ' · 본문 수정' : ''}</span>
+          <span className="shrink-0 text-xs text-slate-500">{candidateKindLabel(page.kind)}{page.contentChanged && page.kind === 'moved' ? ' · 본문 수정' : ''}{page.metadataChanged ? ' · 공개 메타데이터 변경' : ''}</span>
         </li>;
       })}
     </ul> : <p className="border-t border-white/10 px-4 py-5 text-sm text-slate-400">문서 변경이 없습니다.</p>}
