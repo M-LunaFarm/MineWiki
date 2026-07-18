@@ -13,6 +13,7 @@ function createService(options: {
     createdBy?: bigint | null;
     spaceType?: string;
     rootPageId?: bigint | null;
+    rootNamespaceCode?: string;
   } | null;
   readonly roles?: string[];
   readonly serverWiki?: {
@@ -34,6 +35,7 @@ function createService(options: {
     wikiSpaceId?: bigint | null;
     wikiPageId?: bigint | null;
     wikiSlug?: string | null;
+    listingStatus?: string;
   } | null;
   readonly accounts?: readonly {
     id: string;
@@ -50,7 +52,8 @@ function createService(options: {
     ownerUserId: null,
     createdBy: null,
     spaceType: 'basic',
-    rootPageId: 1n
+    rootPageId: 1n,
+    rootNamespaceCode: 'server'
   };
   const normalizedSpace = options.space === undefined
     ? defaultSpace
@@ -77,6 +80,7 @@ function createService(options: {
         wikiSpaceId: 10n,
         wikiPageId: 1n,
         wikiSlug: 'server-one',
+        listingStatus: 'active',
         ...options.server,
       }
     : null;
@@ -119,6 +123,9 @@ function createService(options: {
     server: {
       async findUnique() {
         return normalizedServer;
+      },
+      async findMany() {
+        return normalizedServer ? [normalizedServer] : [];
       }
     },
     modWiki: {
@@ -675,6 +682,32 @@ test('batch page visibility applies the same publication gate as direct reads', 
       pages: [target]
     }),
     [target]
+  );
+});
+
+test('published server wiki stays private without a canonical active ranking parent', async () => {
+  const target = page();
+  const base = {
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki', rootPageId: 1n },
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n, publicationStatus: 'published' },
+    server: { ownerAccountId: 'account-1' }
+  } as const;
+
+  assert.equal((await createService(base).canReadPage({ actor: null, page: target })).allowed, true);
+  assert.deepEqual(
+    await createService({ ...base, serverWiki: { ...base.serverWiki, voteServerId: null } })
+      .canReadPage({ actor: null, page: target }),
+    { allowed: false, reason: 'server_wiki_not_published' }
+  );
+  assert.deepEqual(
+    await createService({ ...base, server: { ...base.server, listingStatus: 'suspended' } })
+      .filterReadablePages({ actor: null, pages: [target] }),
+    []
+  );
+  assert.deepEqual(
+    await createService({ ...base, server: { ...base.server, wikiPageId: 999n } })
+      .canReadPage({ actor: null, page: target }),
+    { allowed: false, reason: 'server_wiki_not_published' }
   );
 });
 

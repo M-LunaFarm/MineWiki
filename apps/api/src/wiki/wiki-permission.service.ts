@@ -4,6 +4,7 @@ import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiAclService, type WikiAclAction, type WikiAclDecision, type WikiThreadAclAction } from './wiki-acl.service';
 import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
+import { hasCanonicalPublicServerWikiParent } from '../server/server-wiki-public-readiness';
 
 type WikiPermissionStore = Pick<
   PrismaService,
@@ -147,7 +148,7 @@ export class WikiPermissionService {
     const spaceIds = [...new Set(input.pages.map((page) => page.spaceId))];
     const spaces = await store.wikiSpace.findMany({
       where: { id: { in: spaceIds } },
-      select: { id: true, status: true, spaceType: true }
+      select: { id: true, status: true, spaceType: true, rootPageId: true, rootNamespaceCode: true }
     });
     const activeSpaceIds = new Set(spaces
       .filter((space) => ACTIVE_SPACE_STATUSES.has(space.status))
@@ -159,13 +160,44 @@ export class WikiPermissionService {
     const serverWikis = serverSpaceIds.length > 0
       ? await store.serverWiki.findMany({
           where: { spaceId: { in: serverSpaceIds } },
-          select: { spaceId: true, status: true, publicationStatus: true }
+          select: {
+            spaceId: true,
+            voteServerId: true,
+            slug: true,
+            status: true,
+            publicationStatus: true,
+            serverName: true,
+            host: true
+          }
         })
       : [];
-    const publicServerSpaceIds = new Set(serverWikis
-      .filter((wiki) => wiki.status === 'active' && wiki.publicationStatus === 'published')
-      .map((wiki) => wiki.spaceId));
+    const linkedServerIds = serverWikis.flatMap((wiki) => wiki.voteServerId ? [wiki.voteServerId] : []);
+    const linkedServers = linkedServerIds.length > 0
+      ? await store.server.findMany({
+          where: { id: { in: linkedServerIds } },
+          select: {
+            id: true,
+            listingStatus: true,
+            wikiSpaceId: true,
+            wikiPageId: true,
+            wikiSlug: true,
+            name: true,
+            joinHost: true
+          }
+        })
+      : [];
+    const linkedServerById = new Map(linkedServers.map((server) => [server.id, server]));
     const spaceById = new Map(spaces.map((space) => [space.id, space]));
+    const publicServerSpaceIds = new Set(serverWikis
+      .filter((wiki) => {
+        const space = spaceById.get(wiki.spaceId);
+        return Boolean(space && hasCanonicalPublicServerWikiParent({
+          space,
+          wiki,
+          server: wiki.voteServerId ? linkedServerById.get(wiki.voteServerId) : null
+        }));
+      })
+      .map((wiki) => wiki.spaceId));
     const isPublicSpace = (spaceId: bigint) => {
       const space = spaceById.get(spaceId);
       return space?.spaceType !== 'server_wiki' || publicServerSpaceIds.has(spaceId);
@@ -1088,10 +1120,33 @@ export class WikiPermissionService {
     if (space.spaceType !== 'server_wiki') return true;
     const wikis = await store.serverWiki.findMany({
       where: { spaceId: space.id },
-      select: { status: true, publicationStatus: true }
+      select: {
+        spaceId: true,
+        voteServerId: true,
+        slug: true,
+        status: true,
+        publicationStatus: true,
+        serverName: true,
+        host: true
+      }
     });
     if (wikis.length !== 1 || wikis[0]?.status !== 'active') return false;
-    if (wikis[0].publicationStatus === 'published') return true;
+    const wiki = wikis[0];
+    if (wiki.publicationStatus === 'published' && wiki.voteServerId) {
+      const server = await store.server.findUnique({
+        where: { id: wiki.voteServerId },
+        select: {
+          id: true,
+          listingStatus: true,
+          wikiSpaceId: true,
+          wikiPageId: true,
+          wikiSlug: true,
+          name: true,
+          joinHost: true
+        }
+      });
+      if (hasCanonicalPublicServerWikiParent({ space, wiki, server })) return true;
+    }
     if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status)) return false;
     if (this.isAdminActor(actor) || actor.permissions?.includes('server.admin') === true) return true;
 

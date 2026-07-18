@@ -179,6 +179,42 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'published ServerWiki is a canonical child of an active ranked Server',
+    `
+      SELECT sw.id
+      FROM server_wikis sw
+      LEFT JOIN Server s ON s.id = sw.vote_server_id
+      LEFT JOIN wiki_spaces ws ON ws.id = sw.space_id
+      LEFT JOIN pages root ON root.id = ws.root_page_id
+      LEFT JOIN page_revisions revision ON revision.id = root.current_revision_id
+      WHERE sw.status = 'active'
+        AND sw.publication_status = 'published'
+        AND (
+          s.id IS NULL
+          OR s.listingStatus <> 'active'
+          OR ws.id IS NULL
+          OR ws.status <> 'active'
+          OR ws.space_type <> 'server_wiki'
+          OR ws.root_namespace_code <> 'server'
+          OR NOT (s.wikiSpaceId <=> sw.space_id)
+          OR NOT (s.wikiPageId <=> ws.root_page_id)
+          OR NOT (s.wikiSlug <=> sw.slug)
+          OR root.id IS NULL
+          OR NOT (root.space_id <=> ws.id)
+          OR root.status NOT IN (${PUBLIC_WIKI_PAGE_STATUS_SQL_LIST})
+          OR revision.id IS NULL
+          OR revision.page_id <> root.id
+          OR revision.visibility <> 'public'
+          OR (
+            BINARY LOWER(TRIM(sw.server_name)) <> BINARY LOWER(TRIM(s.name))
+            AND LOWER(TRIM(TRAILING '.' FROM sw.host)) <> LOWER(TRIM(TRAILING '.' FROM s.joinHost))
+          )
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'ServerWiki layout keys and premium entitlements are valid',
     `
       SELECT sw.id
