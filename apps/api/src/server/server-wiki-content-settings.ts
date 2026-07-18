@@ -14,7 +14,13 @@ export interface ServerWikiContentSources {
   readonly bottomNoticeSource: string | null;
 }
 
-export interface ServerWikiContentSettingsInput extends ServerWikiContentSources {
+export interface ServerWikiSeoSettings {
+  readonly seoTitle: string | null;
+  readonly seoDescription: string | null;
+  readonly seoIndexingEnabled: boolean;
+}
+
+export interface ServerWikiContentSettingsInput extends ServerWikiContentSources, ServerWikiSeoSettings {
   readonly expectedVersion: number;
   readonly requireContributionPolicyAck: boolean;
 }
@@ -38,6 +44,9 @@ export function normalizeServerWikiContentSettings(
     editHelpSource: normalizeSource(input.editHelpSource),
     topNoticeSource: normalizeSource(input.topNoticeSource),
     bottomNoticeSource: normalizeSource(input.bottomNoticeSource),
+    seoTitle: normalizeSeoText(input.seoTitle ?? null, 70, 'seoTitle'),
+    seoDescription: normalizeSeoText(input.seoDescription ?? null, 200, 'seoDescription'),
+    seoIndexingEnabled: input.seoIndexingEnabled !== false,
     requireContributionPolicyAck: input.requireContributionPolicyAck,
   };
   if (!normalized.contributionPolicySource) {
@@ -45,6 +54,19 @@ export function normalizeServerWikiContentSettings(
   }
   validateSources(normalized);
   return normalized;
+}
+
+function normalizeSeoText(value: string | null, maxLength: number, field: string): string | null {
+  const normalized = value
+    ? Array.from(value, (character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code <= 31 || code === 127 ? ' ' : character;
+      }).join('').replace(/\s+/gu, ' ').trim()
+    : '';
+  if (normalized.length > maxLength) {
+    throw new BadRequestException({ code: 'SERVER_WIKI_SEO_TOO_LONG', field, maxLength });
+  }
+  return normalized || null;
 }
 
 export function renderServerWikiPresentation(sources: ServerWikiContentSources) {

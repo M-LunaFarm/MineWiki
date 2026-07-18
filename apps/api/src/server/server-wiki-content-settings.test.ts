@@ -14,6 +14,9 @@ const emptySettings = {
   topNoticeSource: null,
   bottomNoticeSource: null,
   requireContributionPolicyAck: false,
+  seoTitle: null,
+  seoDescription: null,
+  seoIndexingEnabled: true,
 };
 
 test('server wiki presentation renders only restricted safe markup', () => {
@@ -28,6 +31,22 @@ test('server wiki presentation renders only restricted safe markup', () => {
   assert.match(rendered.policyHtml ?? '', /wiki-list/u);
   assert.match(rendered.editHelpHtml ?? '', /<strong>요약<\/strong>/u);
   assert.match(rendered.topNoticeHtml ?? '', /https:\/\/minewiki\.kr/u);
+});
+
+test('server wiki SEO text is bounded, single-line, and keeps indexing explicit', () => {
+  const normalized = normalizeServerWikiContentSettings({
+    ...emptySettings,
+    seoTitle: '  Example\nWiki\u0000 ',
+    seoDescription: ' Public\t documentation ',
+    seoIndexingEnabled: false,
+  });
+  assert.equal(normalized.seoTitle, 'Example Wiki');
+  assert.equal(normalized.seoDescription, 'Public documentation');
+  assert.equal(normalized.seoIndexingEnabled, false);
+  assert.throws(
+    () => normalizeServerWikiContentSettings({ ...emptySettings, seoTitle: 'a'.repeat(71) }),
+    hasErrorCode('SERVER_WIKI_SEO_TOO_LONG'),
+  );
 });
 
 test('server wiki presentation keeps bounded indentation compatible with restricted content', () => {

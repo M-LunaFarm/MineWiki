@@ -9,6 +9,10 @@ test('server wiki metadata uses the public release path without forwarding previ
   ]);
   assert.match(page, /export async function generateMetadata/u);
   assert.match(page, /fetchPublicWikiPageByPath/u);
+  assert.match(page, /fetchPublicServerWikiPresentation/u);
+  assert.match(page, /presentation\?\.seoTitle/u);
+  assert.match(page, /presentation\?\.seoDescription/u);
+  assert.match(page, /presentation\?\.seoIndexingEnabled === false/u);
   assert.match(page, /publicationStatus !== 'published'/u);
   assert.match(page, /page\.displayTitle/u);
   assert.match(page, /directoryOverview\?\.shortDescription/u);
@@ -19,4 +23,7 @@ test('server wiki metadata uses the public release path without forwarding previ
   const publicFetch = api.slice(api.indexOf('export async function fetchPublicWikiPageByPath'), api.indexOf('export async function fetchServerWikiPresentation'));
   assert.doesNotMatch(publicFetch, /cookies\(\)/u);
   assert.doesNotMatch(publicFetch, /cookieHeader/u);
+  const publicPresentationFetch = api.slice(api.indexOf('export async function fetchPublicServerWikiPresentation'), api.indexOf('export async function fetchServerWikiPresentation'));
+  assert.doesNotMatch(publicPresentationFetch, /cookies\(\)/u);
+  assert.doesNotMatch(publicPresentationFetch, /cookieHeader/u);
 });

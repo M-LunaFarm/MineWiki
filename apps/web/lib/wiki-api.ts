@@ -199,6 +199,9 @@ export interface ServerWikiPresentation {
   readonly editHelpHtml: string | null;
   readonly topNoticeHtml: string | null;
   readonly bottomNoticeHtml: string | null;
+  readonly seoTitle: string | null;
+  readonly seoDescription: string | null;
+  readonly seoIndexingEnabled: boolean;
 }
 
 export interface WikiPolicyAcceptance {

@@ -1864,6 +1864,9 @@ export class ServerService {
         editHelpSource: true,
         topNoticeSource: true,
         bottomNoticeSource: true,
+        seoTitle: true,
+        seoDescription: true,
+        seoIndexingEnabled: true,
         requireContributionPolicyAck: true,
         contributionPolicyVersion: true,
         contentSettingsVersion: true,
@@ -2002,6 +2005,9 @@ export class ServerService {
         editHelpSource: true,
         topNoticeSource: true,
         bottomNoticeSource: true,
+        seoTitle: true,
+        seoDescription: true,
+        seoIndexingEnabled: true,
         requireContributionPolicyAck: true,
         contributionPolicyVersion: true,
         contentSettingsVersion: true,
@@ -2024,6 +2030,9 @@ export class ServerService {
     if (current.requireContributionPolicyAck !== normalized.requireContributionPolicyAck) {
       changedFields.push('requireContributionPolicyAck');
     }
+    for (const field of ['seoTitle', 'seoDescription', 'seoIndexingEnabled'] as const) {
+      if (current[field] !== normalized[field]) changedFields.push(field);
+    }
     const policyChanged =
       current.contributionPolicySource !== normalized.contributionPolicySource
       || current.requireContributionPolicyAck !== normalized.requireContributionPolicyAck;
@@ -2039,6 +2048,9 @@ export class ServerService {
           editHelpSource: normalized.editHelpSource,
           topNoticeSource: normalized.topNoticeSource,
           bottomNoticeSource: normalized.bottomNoticeSource,
+          seoTitle: normalized.seoTitle,
+          seoDescription: normalized.seoDescription,
+          seoIndexingEnabled: normalized.seoIndexingEnabled,
           requireContributionPolicyAck: normalized.requireContributionPolicyAck,
           contributionPolicyVersion: policyChanged ? { increment: 1 } : undefined,
           contentSettingsVersion: { increment: 1 },
@@ -2063,6 +2075,9 @@ export class ServerService {
           editHelpSource: true,
           topNoticeSource: true,
           bottomNoticeSource: true,
+          seoTitle: true,
+          seoDescription: true,
+          seoIndexingEnabled: true,
           requireContributionPolicyAck: true,
           contributionPolicyVersion: true,
           contentSettingsVersion: true,
@@ -2102,6 +2117,9 @@ export class ServerService {
         editHelpSource: true,
         topNoticeSource: true,
         bottomNoticeSource: true,
+        seoTitle: true,
+        seoDescription: true,
+        seoIndexingEnabled: true,
         requireContributionPolicyAck: true,
         contributionPolicyVersion: true,
         contentSettingsVersion: true,
@@ -2128,6 +2146,9 @@ export class ServerService {
           topNoticeSource: jsonNullableString(snapshot.topNoticeSource),
           bottomNoticeSource: jsonNullableString(snapshot.bottomNoticeSource),
           requireContributionPolicyAck: snapshot.requireContributionPolicyAck === true,
+          seoTitle: jsonNullableString(snapshot.seoTitle),
+          seoDescription: jsonNullableString(snapshot.seoDescription),
+          seoIndexingEnabled: snapshot.seoIndexingEnabled !== false,
         }
       : settings;
     const rendered = renderServerWikiPresentation(presentationSettings);
@@ -2146,6 +2167,9 @@ export class ServerService {
       editHelpHtml: rendered.editHelpHtml,
       topNoticeHtml: rendered.topNoticeHtml,
       bottomNoticeHtml: rendered.bottomNoticeHtml,
+      seoTitle: presentationSettings.seoTitle,
+      seoDescription: presentationSettings.seoDescription,
+      seoIndexingEnabled: presentationSettings.seoIndexingEnabled,
     };
   }
 
@@ -2291,6 +2315,9 @@ interface ServerWikiContentSettingsRecord {
   readonly editHelpSource: string | null;
   readonly topNoticeSource: string | null;
   readonly bottomNoticeSource: string | null;
+  readonly seoTitle: string | null;
+  readonly seoDescription: string | null;
+  readonly seoIndexingEnabled: boolean;
   readonly requireContributionPolicyAck: boolean;
   readonly contributionPolicyVersion: number;
   readonly contentSettingsVersion: number;
@@ -2359,6 +2386,9 @@ function toWikiContentSettingsResponse(settings: ServerWikiContentSettingsRecord
     editHelpSource: settings.editHelpSource,
     topNoticeSource: settings.topNoticeSource,
     bottomNoticeSource: settings.bottomNoticeSource,
+    seoTitle: settings.seoTitle,
+    seoDescription: settings.seoDescription,
+    seoIndexingEnabled: settings.seoIndexingEnabled,
     requireContributionPolicyAck: settings.requireContributionPolicyAck,
     updatedAt: settings.contentSettingsUpdatedAt?.toISOString() ?? null,
     updatedByProfileId: settings.contentSettingsUpdatedBy?.toString() ?? null,

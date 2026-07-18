@@ -32,6 +32,11 @@ test('management UI guards conflicts, byte limits, and unsaved changes', async (
   assert.match(settings, /20 \* 1024/u);
   assert.match(settings, /expectedVersion: settings\.version/u);
   assert.match(settings, /PrivilegedActionGate/u);
+  assert.match(settings, /검색 및 링크 공유/u);
+  assert.match(settings, /maxLength=\{70\}/u);
+  assert.match(settings, /maxLength=\{200\}/u);
+  assert.match(settings, /seoIndexingEnabled/u);
+  assert.match(settings, /다음 서버 위키 릴리스가 게시될 때/u);
 });
 
 test('manager access keeps content controls while hiding owner-only commercial and roster tabs', async () => {

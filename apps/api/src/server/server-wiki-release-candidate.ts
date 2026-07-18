@@ -50,6 +50,9 @@ export interface ServerWikiPresentationSnapshot {
   readonly editHelpSource: string | null;
   readonly topNoticeSource: string | null;
   readonly bottomNoticeSource: string | null;
+  readonly seoTitle: string | null;
+  readonly seoDescription: string | null;
+  readonly seoIndexingEnabled: boolean;
   readonly requireContributionPolicyAck: boolean;
   readonly contributionPolicyVersion: number;
   readonly contentSettingsVersion: number;
@@ -331,7 +334,10 @@ function presentationChanges(
     ].some((key) => !jsonEqual(
       baseline[key as keyof ServerWikiPresentationSnapshot] ?? null,
       current[key as keyof ServerWikiPresentationSnapshot] ?? null,
-    )),
+    ))
+      || !jsonEqual(baseline?.seoTitle ?? null, current.seoTitle ?? null)
+      || !jsonEqual(baseline?.seoDescription ?? null, current.seoDescription ?? null)
+      || !jsonEqual(baseline?.seoIndexingEnabled ?? true, current.seoIndexingEnabled ?? true),
     layoutChanged: !baseline || baseline.layoutKey !== current.layoutKey,
     linkGraphChanged: !jsonEqual(linkFingerprint(baselineLinks), linkFingerprint(links)),
   };

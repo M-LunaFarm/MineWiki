@@ -7,7 +7,7 @@ import { ServerWikiSearchPage } from '../../../components/wiki/server-wiki-searc
 import { ServerWikiRecentPage } from '../../../components/wiki/server-wiki-recent-page';
 import { parseServerWikiToolRoute } from '../../../lib/wiki-routes.mjs';
 import { buildWikiRoutePath } from '../../../lib/wiki-routes.mjs';
-import { fetchPublicWikiPageByPath } from '../../../lib/wiki-server-api';
+import { fetchPublicServerWikiPresentation, fetchPublicWikiPageByPath } from '../../../lib/wiki-server-api';
 import { createPageMetadata, DEFAULT_SITE_DESCRIPTION } from '../../../lib/metadata';
 
 interface PageProps {
@@ -33,14 +33,17 @@ export async function generateMetadata({ params }: Pick<PageProps, 'params'>): P
     if (!page?.serverWiki || page.serverWiki.publicationStatus !== 'published') {
       return createPageMetadata({ title: '서버 위키', description: DEFAULT_SITE_DESCRIPTION, path: routePath, noIndex: true });
     }
-    const siteTitle = `${page.serverWiki.name} 위키`;
-    const description = metadataDescription(page.html, page.serverWiki.directoryOverview?.shortDescription);
+    const presentation = await fetchPublicServerWikiPresentation(page.serverWiki.contentSlug);
+    const siteTitle = presentation?.seoTitle ?? `${page.serverWiki.name} 위키`;
+    const description = presentation?.seoDescription
+      ?? metadataDescription(page.html, page.serverWiki.directoryOverview?.shortDescription);
     return createPageMetadata({
       title: `${page.displayTitle} | ${siteTitle}`,
       description,
       path: routePath,
       imageTitle: page.displayTitle,
       imageDescription: description,
+      noIndex: presentation?.seoIndexingEnabled === false,
     });
   } catch {
     return createPageMetadata({ title: '서버 위키', description: DEFAULT_SITE_DESCRIPTION, path: routePath, noIndex: true });

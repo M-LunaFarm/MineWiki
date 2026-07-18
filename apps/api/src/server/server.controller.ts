@@ -78,6 +78,9 @@ const serverWikiContentSettingsPayloadSchema = z.object({
   editHelpSource: z.string().nullable(),
   topNoticeSource: z.string().nullable(),
   bottomNoticeSource: z.string().nullable(),
+  seoTitle: z.string().nullable().optional().default(null),
+  seoDescription: z.string().nullable().optional().default(null),
+  seoIndexingEnabled: z.boolean().optional().default(true),
   requireContributionPolicyAck: z.boolean(),
 });
 const serverWikiNavigationDocumentSchema = z.object({

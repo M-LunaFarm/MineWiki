@@ -24,6 +24,9 @@ interface ContentSettings {
   readonly editHelpSource: string | null;
   readonly topNoticeSource: string | null;
   readonly bottomNoticeSource: string | null;
+  readonly seoTitle: string | null;
+  readonly seoDescription: string | null;
+  readonly seoIndexingEnabled: boolean;
   readonly requireContributionPolicyAck: boolean;
   readonly updatedAt: string | null;
   readonly updatedByProfileId: string | null;
@@ -37,7 +40,7 @@ interface SettingsAccess {
 }
 
 type SourceField = 'contributionPolicySource' | 'editHelpSource' | 'topNoticeSource' | 'bottomNoticeSource';
-type FormState = Pick<ContentSettings, SourceField | 'requireContributionPolicyAck'>;
+type FormState = Pick<ContentSettings, SourceField | 'requireContributionPolicyAck' | 'seoTitle' | 'seoDescription' | 'seoIndexingEnabled'>;
 type SettingsTab = 'content' | 'structure' | 'templates' | 'layout' | 'collaborators';
 
 const FIELD_LIMITS: Record<SourceField, number> = {
@@ -53,6 +56,9 @@ const EMPTY_FORM: FormState = {
   topNoticeSource: null,
   bottomNoticeSource: null,
   requireContributionPolicyAck: false,
+  seoTitle: null,
+  seoDescription: null,
+  seoIndexingEnabled: true,
 };
 
 export function ServerWikiSettings({ serverId }: { readonly serverId: string }) {
@@ -269,6 +275,15 @@ function ContentSettingsForm({ serverId, onAccessLoaded }: { readonly serverId: 
       {notice ? <Message tone="success">{notice}</Message> : null}
       {conflictVersion !== null ? <div className="flex flex-col gap-3 rounded-xl border border-amber-300/25 bg-amber-400/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between"><span>다른 관리자의 변경이 먼저 저장되었습니다. 현재 버전은 {conflictVersion}입니다.</span><button type="button" onClick={() => void load()} className="btn-secondary min-h-11">최신 설정 다시 불러오기</button></div> : null}
       {settings.access.canManageLayout ? <SiteAddressForm serverId={serverId} initialSiteSlug={settings.siteSlug} /> : null}
+      <section className="rounded-xl border border-sky-300/20 bg-sky-400/[0.04] p-4 sm:p-5">
+        <div><strong className="text-sm text-white">검색 및 링크 공유</strong><p className="mt-1 text-xs leading-5 text-slate-400">검색 결과와 Discord 등 링크 미리보기에 사용할 정보입니다. 저장 후 다음 서버 위키 릴리스가 게시될 때 공개됩니다.</p></div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <label className="grid gap-2 text-sm text-slate-300">사이트 제목<input value={form.seoTitle ?? ''} onChange={(event) => setForm((current) => ({ ...current, seoTitle: event.target.value }))} maxLength={70} placeholder="기본값: 서버 이름 + 위키" className="input min-h-11" /></label>
+          <label className="grid gap-2 text-sm text-slate-300">사이트 설명<input value={form.seoDescription ?? ''} onChange={(event) => setForm((current) => ({ ...current, seoDescription: event.target.value }))} maxLength={200} placeholder="비워 두면 공개 문서 내용으로 생성합니다." className="input min-h-11" /></label>
+        </div>
+        <label className="mt-4 flex min-h-11 items-center gap-3 text-sm text-slate-200"><input type="checkbox" checked={form.seoIndexingEnabled} onChange={(event) => setForm((current) => ({ ...current, seoIndexingEnabled: event.target.checked }))} className="h-5 w-5 accent-emerald-400" />공개 릴리스의 검색엔진 색인 허용</label>
+        <div className="mt-4 rounded-lg border border-white/10 bg-[#0d1219] p-4"><p className="text-xs text-slate-500">검색 미리보기</p><p className="mt-2 text-base font-semibold text-sky-300">{form.seoTitle?.trim() || '서버 이름 위키'}</p><p className="mt-1 line-clamp-2 text-sm text-slate-400">{form.seoDescription?.trim() || '공개 문서 내용에서 설명을 자동 생성합니다.'}</p></div>
+      </section>
       <div className="grid gap-6 xl:grid-cols-2">
         <SourceEditor label="기여 정책" description="편집 전에 기여자가 확인할 운영 원칙입니다." field="contributionPolicySource" value={form.contributionPolicySource} bytes={byteCounts.contributionPolicySource} onChange={(value) => setForm((current) => ({ ...current, contributionPolicySource: value }))} />
         <SourceEditor label="편집 도움말" description="문서 문체, 분류와 작성 규칙을 안내합니다." field="editHelpSource" value={form.editHelpSource} bytes={byteCounts.editHelpSource} onChange={(value) => setForm((current) => ({ ...current, editHelpSource: value }))} />
@@ -338,8 +353,8 @@ function Message({ tone, children }: { readonly tone: 'error' | 'success'; reado
   return <div className={`flex gap-3 rounded-xl border p-4 text-sm ${tone === 'error' ? 'border-red-300/20 bg-red-500/10 text-red-100' : 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100'}`}>{tone === 'error' ? <AlertTriangle className="mt-0.5 size-4 flex-none" /> : null}<span>{children}</span></div>;
 }
 
-function toForm(settings: ContentSettings): FormState { return { contributionPolicySource: settings.contributionPolicySource, editHelpSource: settings.editHelpSource, topNoticeSource: settings.topNoticeSource, bottomNoticeSource: settings.bottomNoticeSource, requireContributionPolicyAck: settings.requireContributionPolicyAck }; }
-function normalizeForm(form: FormState): FormState { const clean = (value: string | null) => value?.trim() ? value.replaceAll('\r\n', '\n').trim() : null; const contributionPolicySource = clean(form.contributionPolicySource); return { contributionPolicySource, editHelpSource: clean(form.editHelpSource), topNoticeSource: clean(form.topNoticeSource), bottomNoticeSource: clean(form.bottomNoticeSource), requireContributionPolicyAck: Boolean(contributionPolicySource && form.requireContributionPolicyAck) }; }
+function toForm(settings: ContentSettings): FormState { return { contributionPolicySource: settings.contributionPolicySource, editHelpSource: settings.editHelpSource, topNoticeSource: settings.topNoticeSource, bottomNoticeSource: settings.bottomNoticeSource, requireContributionPolicyAck: settings.requireContributionPolicyAck, seoTitle: settings.seoTitle, seoDescription: settings.seoDescription, seoIndexingEnabled: settings.seoIndexingEnabled }; }
+function normalizeForm(form: FormState): FormState { const clean = (value: string | null) => value?.trim() ? value.replaceAll('\r\n', '\n').trim() : null; const cleanSeo = (value: string | null) => value ? Array.from(value, (character) => { const code = character.codePointAt(0) ?? 0; return code <= 31 || code === 127 ? ' ' : character; }).join('').replace(/\s+/gu, ' ').trim() || null : null; const contributionPolicySource = clean(form.contributionPolicySource); return { contributionPolicySource, editHelpSource: clean(form.editHelpSource), topNoticeSource: clean(form.topNoticeSource), bottomNoticeSource: clean(form.bottomNoticeSource), requireContributionPolicyAck: Boolean(contributionPolicySource && form.requireContributionPolicyAck), seoTitle: cleanSeo(form.seoTitle), seoDescription: cleanSeo(form.seoDescription), seoIndexingEnabled: form.seoIndexingEnabled }; }
 function serializeForm(form: FormState): string { return JSON.stringify(normalizeForm(form)); }
 function bytes(value: string): number { return new TextEncoder().encode(value).byteLength; }
 function settingsAccess(settings: ContentSettings): SettingsAccess {

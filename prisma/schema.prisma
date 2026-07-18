@@ -1978,6 +1978,9 @@ model ServerWiki {
   editHelpSource               String?                      @map("edit_help_source") @db.Text
   topNoticeSource              String?                      @map("top_notice_source") @db.Text
   bottomNoticeSource           String?                      @map("bottom_notice_source") @db.Text
+  seoTitle                     String?                      @map("seo_title") @db.VarChar(70)
+  seoDescription               String?                      @map("seo_description") @db.VarChar(200)
+  seoIndexingEnabled           Boolean                      @default(true) @map("seo_indexing_enabled")
   requireContributionPolicyAck Boolean                      @default(false) @map("require_contribution_policy_ack")
   contributionPolicyVersion    Int                          @default(0) @map("contribution_policy_version") @db.UnsignedInt
   contentSettingsVersion       Int                          @default(0) @map("content_settings_version") @db.UnsignedInt
