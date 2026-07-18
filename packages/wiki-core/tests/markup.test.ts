@@ -1516,7 +1516,7 @@ test('interpolates include parameters through nested lists and advanced table ce
   assert.match(html, /alt="&lt;b&gt;설명&lt;\/b&gt;"/);
 });
 
-test('parses wiki style blocks before generic components and renders only writing-mode', () => {
+test('parses wiki style blocks before generic components and renders writing-mode', () => {
   for (const writingMode of ['horizontal-tb', 'vertical-rl', 'vertical-lr'] as const) {
     const parsed = parseMarkup(`{{{#!wiki style="writing-mode: ${writingMode};"\n세로 본문\n}}}`);
     const node = parsed.ast[0];
@@ -1551,24 +1551,71 @@ test('wiki style blocks preserve recursive links, categories, includes, files an
   }
 });
 
-test('wiki style ignores arbitrary CSS and tag, class, onclick and dark-style attributes', () => {
+test('wiki style keeps safe declarations while ignoring arbitrary CSS and executable attributes', () => {
   const sources = [
-    '{{{#!wiki style="position:fixed;writing-mode:vertical-rl" tag="a" class="admin" onclick="alert(1)"\n본문\n}}}',
-    '{{{#!wiki dark-style="writing-mode:vertical-lr"\n본문\n}}}',
-    '{{{#!wiki style="writing-mode:sideways-rl"\n본문\n}}}',
-    '{{{#!wiki style="writing-mode:vertical-rl;background:url(javascript:alert(1))"\n본문\n}}}'
-  ];
-  for (const source of sources) {
+    ['{{{#!wiki style="position:fixed;writing-mode:vertical-rl" tag="a" class="admin" onclick="alert(1)"\n본문\n}}}', true],
+    ['{{{#!wiki dark-style="writing-mode:vertical-lr"\n본문\n}}}', false],
+    ['{{{#!wiki style="writing-mode:sideways-rl"\n본문\n}}}', false],
+    ['{{{#!wiki style="writing-mode:vertical-rl;background:url(javascript:alert(1))"\n본문\n}}}', true]
+  ] as const;
+  for (const [source, preservesWritingMode] of sources) {
     const parsed = parseMarkup(source);
     const html = renderDocument(parsed.ast);
-    assert.match(html, /^<div class="wiki-style"><p>본문<\/p><\/div>$/);
+    assert.equal(html.includes('writing-mode:vertical-rl'), preservesWritingMode);
     assert.equal(html.includes('position:'), false);
     assert.equal(html.includes('javascript:'), false);
     assert.equal(html.includes('onclick'), false);
     assert.equal(html.includes('dark-style'), false);
     assert.equal(html.includes('class="admin"'), false);
     assert.equal(html.includes('<a'), false);
+    assert.ok(parsed.errors.some((error) => error.includes('지원되지 않는 wiki style')));
   }
+});
+
+test('wiki style renders a bounded layout palette and dark theme colors', () => {
+  const parsed = parseMarkup([
+    '{{{#!wiki style="color:#123456;background-color:white;text-align:center;border:2px solid #336699;border-radius:12px;padding:16px 8px;margin:0 auto;width:80%;max-width:960px" dark-style="color:white;background-color:#101418;border-color:#88aadd"',
+    "'''풍부한 안내'''",
+    '}}}'
+  ].join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.errors.some((error) => error.includes('지원되지 않는 wiki style')), false);
+  assert.match(html, /color:#123456/u);
+  assert.match(html, /background-color:white/u);
+  assert.match(html, /text-align:center/u);
+  assert.match(html, /border:2px solid #336699/u);
+  assert.match(html, /border-radius:12px/u);
+  assert.match(html, /padding:16px 8px/u);
+  assert.match(html, /margin:0 auto/u);
+  assert.match(html, /width:80%/u);
+  assert.match(html, /max-width:960px/u);
+  assert.match(html, /--wiki-dark-color:white/u);
+  assert.match(html, /--wiki-dark-background-color:#101418/u);
+  assert.match(html, /--wiki-dark-border-color:#88aadd/u);
+});
+
+test('wiki style preserves legacy stored AST nodes without optional style fields', () => {
+  const html = renderDocument([{
+    type: 'wiki_style',
+    writingMode: 'vertical-rl',
+    children: [{ type: 'paragraph', children: [{ type: 'text', text: '기존 본문' }] }]
+  }]);
+
+  assert.equal(html, '<div class="wiki-style" style="writing-mode:vertical-rl"><p>기존 본문</p></div>');
+});
+
+test('wiki style rejects resource-loading, positioning, oversized, CSS-wide, and duplicate declarations', () => {
+  const parsed = parseMarkup('{{{#!wiki style="background-color:url(https://evil.example/x);position:fixed;width:960px;padding:999px;color:inherit;color:red"\n안전\n}}}');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(html.includes('evil.example'), false);
+  assert.equal(html.includes('position'), false);
+  assert.equal(html.includes('960px'), false);
+  assert.equal(html.includes('999px'), false);
+  assert.equal(html.includes('color:inherit'), false);
+  assert.equal(html.includes('color:red'), false);
+  assert.ok(parsed.errors.some((error) => error.includes('지원되지 않는 wiki style')));
 });
 
 test('wiki style safely preserves malformed, unclosed and nested block bodies', () => {

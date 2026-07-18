@@ -1017,6 +1017,11 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   html[data-theme='dark'] .wiki-rendered [style*='--wiki-dark-border-color'] {
     border-color: var(--wiki-dark-border-color) !important;
   }
+  .wiki-rendered .wiki-style {
+    box-sizing: border-box;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
   .wiki-rendered .wiki-file:not(.wiki-file-inline) {
     @apply my-5 block max-w-full;
   }

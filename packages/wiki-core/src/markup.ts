@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.24.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.25.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
@@ -181,12 +181,84 @@ function readNestedTripleBraceBlock(lines: readonly string[], startIndex: number
   return { body, endIndex: Math.max(startIndex, lines.length - 1), closed: false };
 }
 
-function parseWikiStyleWritingMode(attributes: string): Extract<AstNode, { type: 'wiki_style' }>['writingMode'] {
-  const styleAttributes = [...attributes.matchAll(/(?:^|\s)style\s*=\s*"([^"]*)"/giu)];
-  if (styleAttributes.length !== 1) return null;
-  const declaration = styleAttributes[0]?.[1]?.trim() ?? '';
-  const match = declaration.match(/^writing-mode\s*:\s*(horizontal-tb|vertical-rl|vertical-lr)\s*;?$/iu);
-  return (match?.[1]?.toLowerCase() as Extract<AstNode, { type: 'wiki_style' }>['writingMode']) ?? null;
+function parseWikiStyleAttributes(attributes: string) {
+  const styleSources = [...attributes.matchAll(/(?:^|\s)style\s*=\s*"([^"]*)"/giu)];
+  const darkSources = [...attributes.matchAll(/(?:^|\s)dark-style\s*=\s*"([^"]*)"/giu)];
+  const knownAttributes = attributes.replace(/(?:^|\s)(?:dark-)?style\s*=\s*"[^"]*"/giu, ' ').trim();
+  const light = parseWikiStyleDeclarations(styleSources.length === 1 ? styleSources[0]?.[1] ?? '' : '', false);
+  const dark = parseWikiStyleDeclarations(darkSources.length === 1 ? darkSources[0]?.[1] ?? '' : '', true);
+  return {
+    writingMode: light.writingMode,
+    style: light.style,
+    darkStyle: dark.style,
+    ignored: knownAttributes.length > 0 || styleSources.length > 1 || darkSources.length > 1 || light.ignored || dark.ignored
+  };
+}
+
+function parseWikiStyleDeclarations(source: string, dark: boolean) {
+  const style: NonNullable<Extract<AstNode, { type: 'wiki_style' }>['style']> = {};
+  let writingMode: Extract<AstNode, { type: 'wiki_style' }>['writingMode'] = null;
+  let ignored = false;
+  const seen = new Set<string>();
+  for (const rawDeclaration of source.split(';')) {
+    const declaration = rawDeclaration.trim();
+    if (!declaration) continue;
+    const separator = declaration.indexOf(':');
+    if (separator <= 0) { ignored = true; continue; }
+    const property = declaration.slice(0, separator).trim().toLowerCase();
+    const value = declaration.slice(separator + 1).trim().toLowerCase();
+    if (seen.has(property)) { ignored = true; continue; }
+    seen.add(property);
+    if (dark && !['color', 'background-color', 'border-color'].includes(property)) { ignored = true; continue; }
+    if (property === 'writing-mode' && !dark && /^(?:horizontal-tb|vertical-rl|vertical-lr)$/u.test(value)) {
+      writingMode = value as typeof writingMode;
+    } else if (property === 'color') {
+      const normalized = normalizeTableColor(value); if (normalized) style.color = normalized; else ignored = true;
+    } else if (property === 'background-color') {
+      const normalized = normalizeTableColor(value); if (normalized) style.backgroundColor = normalized; else ignored = true;
+    } else if (property === 'text-align' && !dark && /^(?:left|center|right|justify)$/u.test(value)) {
+      style.textAlign = value as NonNullable<typeof style.textAlign>;
+    } else if (property === 'border' && !dark) {
+      const normalized = normalizeWikiStyleBorder(value); if (normalized) style.border = normalized; else ignored = true;
+    } else if (property === 'border-color') {
+      const normalized = normalizeTableColor(value); if (normalized) style.borderColor = normalized; else ignored = true;
+    } else if (property === 'border-radius' && !dark) {
+      const normalized = normalizeWikiStyleSpacing(value, false, 1); if (normalized) style.borderRadius = normalized; else ignored = true;
+    } else if (property === 'padding' && !dark) {
+      const normalized = normalizeWikiStyleSpacing(value, false); if (normalized) style.padding = normalized; else ignored = true;
+    } else if (property === 'margin' && !dark) {
+      const normalized = normalizeWikiStyleSpacing(value, true); if (normalized) style.margin = normalized; else ignored = true;
+    } else if ((property === 'width' || property === 'max-width') && !dark) {
+      const normalized = normalizeWikiStyleSize(value, property);
+      if (normalized) style[property === 'width' ? 'width' : 'maxWidth'] = normalized; else ignored = true;
+    } else {
+      ignored = true;
+    }
+  }
+  return { writingMode, style, ignored };
+}
+
+function normalizeWikiStyleBorder(value: string) {
+  const match = /^(0|[1-8]px)\s+(solid|dashed|dotted)\s+(#[0-9a-f]{3,8}|[a-z]{1,32})$/iu.exec(value);
+  const color = normalizeTableColor(match?.[3] ?? '');
+  return match && color ? `${match[1]} ${match[2]?.toLowerCase()} ${color}` : null;
+}
+
+function normalizeWikiStyleSpacing(value: string, allowAuto: boolean, maximumParts = 4) {
+  const parts = value.split(/\s+/u).filter(Boolean);
+  if (parts.length < 1 || parts.length > maximumParts) return null;
+  if (!parts.every((part) => (allowAuto && part === 'auto') || /^(?:0|\d+(?:\.\d+)?(?:px|rem|em|%))$/u.test(part))) return null;
+  if (parts.some((part) => part !== 'auto' && Number.parseFloat(part) > 64)) return null;
+  return parts.join(' ');
+}
+
+function normalizeWikiStyleSize(value: string, property: 'width' | 'max-width') {
+  const match = /^(\d+(?:\.\d+)?)(px|%)$/u.exec(value);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0 || (match[2] === '%' ? amount > 100 : amount > 1920)) return null;
+  if (property === 'width' && match[2] !== '%') return null;
+  return `${amount}${match[2]}`;
 }
 
 function mergeNestedMetadata(
@@ -297,12 +369,12 @@ function parseMarkupDocument(
       const block = readNestedTripleBraceBlock(lines, i);
       const nested = parseMarkupDocument(block.body.join('\n'), options, foldingDepth + 1);
       mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
-      const writingMode = parseWikiStyleWritingMode(wikiStyle[1] ?? '');
-      if ((wikiStyle[1] ?? '').trim() && writingMode === null) {
+      const parsedStyle = parseWikiStyleAttributes(wikiStyle[1] ?? '');
+      if (parsedStyle.ignored) {
         errors.push('지원되지 않는 wiki style 속성을 무시했습니다.');
       }
       if (!block.closed) errors.push('닫히지 않은 wiki style 블록을 문서 끝까지 처리했습니다.');
-      ast.push({ type: 'wiki_style', writingMode, children: nested.ast });
+      ast.push({ type: 'wiki_style', writingMode: parsedStyle.writingMode, style: parsedStyle.style, darkStyle: parsedStyle.darkStyle, children: nested.ast });
       i = block.endIndex;
       continue;
     }
@@ -1412,7 +1484,7 @@ function normalizeTableSize(value: string) {
 function normalizeTableColor(value: string) {
   const color = value.trim().toLowerCase();
   if (/^#[0-9a-f]{3,8}$/i.test(color)) return color;
-  if (/^[a-z]{1,32}$/i.test(color)) return color;
+  if (CSS_NAMED_COLORS.has(color)) return color;
   return null;
 }
 
@@ -1437,7 +1509,10 @@ const WIKI_FILE_OPTION_KEYS = new Set([
   'alt',
   'caption'
 ]);
-const CSS_NAMED_COLORS = new Set('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato transparent turquoise violet wheat white whitesmoke yellow yellowgreen'.split(' '));
+const CSS_NAMED_COLOR_SOURCE = 'aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato transparent turquoise violet wheat white whitesmoke yellow yellowgreen'.split(' ').join('|');
+const CSS_NAMED_COLORS = new Set(CSS_NAMED_COLOR_SOURCE.split('|'));
+const CSS_NAMED_COLOR_PATTERN = new RegExp(`^(?:${CSS_NAMED_COLOR_SOURCE})$`, 'iu');
+const CSS_NAMED_BORDER_PATTERN = new RegExp(`^(?:0|[1-8]px) (?:solid|dashed|dotted) (?:${CSS_NAMED_COLOR_SOURCE})$`, 'iu');
 
 function parseWikiFileMarkup(
   body: string,
@@ -2185,7 +2260,22 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         continue;
       }
       if (node.type === 'wiki_style') {
-        const style = node.writingMode ? ` style="writing-mode:${node.writingMode}"` : '';
+        const style = styleAttribute({
+          color: node.style?.color,
+          'background-color': node.style?.backgroundColor,
+          'text-align': node.style?.textAlign,
+          border: node.style?.border,
+          'border-color': node.style?.borderColor,
+          'border-radius': node.style?.borderRadius,
+          padding: node.style?.padding,
+          margin: node.style?.margin,
+          width: node.style?.width,
+          'max-width': node.style?.maxWidth,
+          'writing-mode': node.writingMode ?? undefined,
+          '--wiki-dark-color': node.darkStyle?.color,
+          '--wiki-dark-background-color': node.darkStyle?.backgroundColor,
+          '--wiki-dark-border-color': node.darkStyle?.borderColor
+        });
         output.push(`<div class="wiki-style"${style}>${renderDocument(node.children, { ...renderOptions, tocHeadings })}</div>`);
         continue;
       }
@@ -2321,9 +2411,21 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       },
       div: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],
+        'max-width': [/^\d+(?:\.\d+)?(?:px|%)$/],
+        margin: [/^(?:(?:0|\d+(?:\.\d+)?(?:px|rem|em|%)|auto)(?:\s+|$)){1,4}$/],
+        padding: [/^(?:(?:0|\d+(?:\.\d+)?(?:px|rem|em|%))(?:\s+|$)){1,4}$/],
         'margin-left': [/^auto$/],
         'margin-right': [/^auto$/],
-        'writing-mode': [/^(?:horizontal-tb|vertical-rl|vertical-lr)$/]
+        color: [/^#[0-9a-f]{3,8}$/i, CSS_NAMED_COLOR_PATTERN],
+        'background-color': [/^#[0-9a-f]{3,8}$/i, CSS_NAMED_COLOR_PATTERN],
+        'text-align': [/^(?:left|center|right|justify)$/],
+        border: [/^(?:0|[1-8]px) (?:solid|dashed|dotted) #[0-9a-f]{3,8}$/i, CSS_NAMED_BORDER_PATTERN],
+        'border-color': [/^#[0-9a-f]{3,8}$/i, CSS_NAMED_COLOR_PATTERN],
+        'border-radius': [/^(?:0|\d+(?:\.\d+)?(?:px|rem|em|%))$/],
+        'writing-mode': [/^(?:horizontal-tb|vertical-rl|vertical-lr)$/],
+        '--wiki-dark-color': [/^#[0-9a-f]{3,8}$/i, CSS_NAMED_COLOR_PATTERN],
+        '--wiki-dark-background-color': [/^#[0-9a-f]{3,8}$/i, CSS_NAMED_COLOR_PATTERN],
+        '--wiki-dark-border-color': [/^#[0-9a-f]{3,8}$/i, CSS_NAMED_COLOR_PATTERN]
       },
       table: {
         width: [/^\d+(?:\.\d+)?(?:px|%)$/],

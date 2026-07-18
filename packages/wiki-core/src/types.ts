@@ -80,6 +80,19 @@ export interface WikiFileDisplayOptions {
   alt?: string;
 }
 
+export interface WikiStyleProperties {
+  color?: string;
+  backgroundColor?: string;
+  textAlign?: 'left' | 'center' | 'right' | 'justify';
+  border?: string;
+  borderColor?: string;
+  borderRadius?: string;
+  padding?: string;
+  margin?: string;
+  width?: string;
+  maxWidth?: string;
+}
+
 export type AstNode =
   | { type: 'heading'; level: number; text: string; id: string; legacyId?: string; folded?: boolean; startLine?: number; endLine?: number }
   | { type: 'paragraph'; children: InlineNode[] }
@@ -92,6 +105,8 @@ export type AstNode =
   | {
       type: 'wiki_style';
       writingMode: 'horizontal-tb' | 'vertical-rl' | 'vertical-lr' | null;
+      style?: WikiStyleProperties;
+      darkStyle?: Pick<WikiStyleProperties, 'color' | 'backgroundColor' | 'borderColor'>;
       children: AstNode[];
     }
   | { type: 'toc'; collapsed: boolean }
