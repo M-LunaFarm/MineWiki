@@ -1531,6 +1531,7 @@ model WikiPageLifecycleEvent {
   pageId                   BigInt   @map("page_id") @db.UnsignedBigInt
   eventType                String   @map("event_type") @db.VarChar(16)
   actorProfileId           BigInt?  @map("actor_profile_id") @db.UnsignedBigInt
+  sourceRevisionId         BigInt?  @map("source_revision_id") @db.UnsignedBigInt
   reason                   String?  @db.VarChar(255)
   sourceNamespaceId        Int?     @map("source_namespace_id") @db.UnsignedInt
   sourceNamespaceCode      String?  @map("source_namespace_code") @db.VarChar(32)
@@ -1545,6 +1546,7 @@ model WikiPageLifecycleEvent {
   createdAt                DateTime @map("created_at") @db.DateTime(3)
 
   @@index([pageId, id], map: "idx_page_lifecycle_page_id")
+  @@index([sourceRevisionId], map: "idx_page_lifecycle_source_revision")
   @@index([createdAt, id], map: "idx_page_lifecycle_created")
   @@map("page_lifecycle_events")
 }

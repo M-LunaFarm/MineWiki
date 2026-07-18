@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import type { WikiPage } from '@prisma/client';
+import type { Prisma, WikiPage } from '@prisma/client';
 import {
   type AstNode,
   buildWikiSearchBooleanQuery,
@@ -253,6 +253,7 @@ export interface WikiLifecycleIdentity {
 export interface WikiPageLifecycleEventSummary {
   readonly id: string;
   readonly eventType: 'move' | 'delete' | 'restore';
+  readonly sourceRevisionId: string | null;
   readonly actorProfileId: string | null;
   readonly actorName: string | null;
   readonly actorUsername: string | null;
@@ -294,6 +295,20 @@ export interface WikiDeletedPageSummary {
   readonly displayTitle: string;
   readonly spaceId: string;
   readonly updatedAt: string;
+}
+
+export interface WikiDeletedPageRecoveryResponse {
+  readonly page: WikiDeletedPageSummary & {
+    readonly pageType: string;
+    readonly latestPublicRevisionId: string;
+    readonly canSelectHistoricalRevision: boolean;
+  };
+  readonly revisions: WikiRevisionListResponse;
+  readonly lifecycle: WikiPageLifecycleEventListResponse;
+  readonly selectedRevision: WikiRevisionSummary & {
+    readonly html: string;
+    readonly headings: WikiPageResponse['headings'];
+  };
 }
 
 export type WikiSpecialDocumentType =
@@ -793,6 +808,7 @@ export class WikiReadService {
       return {
         id: event.id.toString(),
         eventType: event.eventType as 'move' | 'delete' | 'restore',
+        sourceRevisionId: event.sourceRevisionId?.toString() ?? null,
         actorProfileId: event.actorProfileId?.toString() ?? null,
         actorName: actor?.displayName ?? null,
         actorUsername: actor?.username ?? null,
@@ -1758,6 +1774,165 @@ export class WikiReadService {
     }));
   }
 
+  async getDeletedPageRecovery(input: {
+    readonly pageId: string;
+    readonly viewer: SessionPayload;
+    readonly revisionId?: string;
+    readonly cursor?: string;
+    readonly limit?: string | number;
+  }): Promise<WikiDeletedPageRecoveryResponse> {
+    const pageId = this.parseBigIntId(input.pageId, 'pageId');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: pageId } });
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, input.viewer);
+    try {
+      await this.wikiPermissions.assertCanRestorePage({ actor: access.actor ?? null, page });
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw new NotFoundException('Wiki page not found.');
+      throw error;
+    }
+    if (!page || page.status !== 'deleted') throw new NotFoundException('Wiki page not found.');
+    const namespace = await this.prisma.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
+    if (!namespace) throw new NotFoundException('Wiki page not found.');
+
+    const limit = Math.min(Math.max(Number(input.limit ?? 50) || 50, 1), 100);
+    const cursorRevisionNo = input.cursor ? this.parsePositiveInt(input.cursor, 'cursor') : null;
+    const rows = await this.prisma.wikiPageRevision.findMany({
+      where: {
+        pageId,
+        visibility: 'public',
+        ...(cursorRevisionNo ? { revisionNo: { lt: cursorRevisionNo } } : {})
+      },
+      orderBy: [{ revisionNo: 'desc' }],
+      take: limit + 1
+    });
+    const latestPublic = await this.prisma.wikiPageRevision.findFirst({
+      where: { pageId, visibility: 'public' },
+      orderBy: [{ revisionNo: 'desc' }]
+    });
+    if (!latestPublic) throw new ConflictException('A wiki page without a public revision cannot be restored.');
+    const selectedRevisionId = input.revisionId
+      ? this.parseBigIntId(input.revisionId, 'revisionId')
+      : latestPublic.id;
+    const selected = selectedRevisionId === latestPublic.id
+      ? latestPublic
+      : await this.prisma.wikiPageRevision.findUnique({ where: { id: selectedRevisionId } });
+    if (!selected || selected.pageId !== page.id || selected.visibility !== 'public') {
+      throw new NotFoundException('Restore source revision not found.');
+    }
+
+    const pageRows = rows.slice(0, limit);
+    const profileIds = [...new Set(pageRows.flatMap((revision) => revision.createdBy ? [revision.createdBy] : []))];
+    if (selected.createdBy && !profileIds.includes(selected.createdBy)) profileIds.push(selected.createdBy);
+    const profileById = await this.canonicalProfileViews(profileIds);
+    const revisions = pageRows.map((revision, index) => this.recoveryRevisionSummary(
+      revision,
+      rows[index + 1] ?? null,
+      profileById.get(revision.createdBy ?? -1n) ?? null
+    ));
+    const selectedSummary = this.recoveryRevisionSummary(
+      selected,
+      null,
+      profileById.get(selected.createdBy ?? -1n) ?? null
+    );
+    const rendered = await this.renderPage(namespace.code, page, access, {
+      followRedirects: false,
+      redirectTrail: [],
+      revisionId: selected.id,
+      authorizedDeletedRecovery: true
+    });
+    const lifecycleRows = await this.prisma.wikiPageLifecycleEvent.findMany({
+      where: { pageId },
+      orderBy: [{ id: 'desc' }],
+      take: 50
+    });
+    const lifecycle = await this.deletedRecoveryLifecycle(page, lifecycleRows);
+    return {
+      page: {
+        id: page.id.toString(),
+        namespace: namespace.code,
+        title: page.title,
+        displayTitle: page.displayTitle,
+        spaceId: page.spaceId.toString(),
+        updatedAt: page.updatedAt.toISOString(),
+        pageType: page.pageType,
+        latestPublicRevisionId: latestPublic.id.toString(),
+        canSelectHistoricalRevision: namespace.code !== 'file'
+      },
+      revisions: {
+        items: revisions,
+        nextCursor: rows.length > limit ? pageRows.at(-1)?.revisionNo.toString() ?? null : null
+      },
+      lifecycle: { items: lifecycle, nextCursor: null },
+      selectedRevision: {
+        ...selectedSummary,
+        html: rendered.html,
+        headings: rendered.headings
+      }
+    };
+  }
+
+  private recoveryRevisionSummary(
+    revision: Prisma.WikiPageRevisionGetPayload<object>,
+    previous: Prisma.WikiPageRevisionGetPayload<object> | null,
+    profile: { readonly displayName: string; readonly username: string } | null
+  ): WikiRevisionSummary {
+    return {
+      id: revision.id.toString(),
+      revisionNo: revision.revisionNo,
+      ...publicWikiRevisionEditSummary(revision),
+      isMinor: revision.isMinor,
+      createdBy: revision.createdBy?.toString() ?? null,
+      createdByName: revision.actorType === 'ip' ? '익명 기여자' : profile?.displayName ?? null,
+      createdByUsername: revision.actorType === 'ip' ? null : profile?.username ?? null,
+      createdAt: revision.createdAt.toISOString(),
+      contentHash: revision.contentHash,
+      contentSize: revision.contentSize,
+      previousPublicRevisionId: previous?.id.toString() ?? null,
+      sizeDelta: previous ? revision.contentSize - previous.contentSize : null
+    };
+  }
+
+  private async deletedRecoveryLifecycle(
+    page: WikiPage,
+    rows: Prisma.WikiPageLifecycleEventGetPayload<object>[]
+  ): Promise<WikiPageLifecycleEventSummary[]> {
+    const actorIds = [...new Set(rows.flatMap((event) => event.actorProfileId ? [event.actorProfileId] : []))];
+    const profileById = await this.canonicalProfileViews(actorIds);
+    return rows.map((event) => {
+      const sourceVisible = event.sourceNamespaceId === null || event.sourceSpaceId === null
+        ? true
+        : event.sourceNamespaceId === page.namespaceId && event.sourceSpaceId === page.spaceId;
+      const destinationVisible = event.destinationNamespaceId === null || event.destinationSpaceId === null
+        ? true
+        : event.destinationNamespaceId === page.namespaceId && event.destinationSpaceId === page.spaceId;
+      const identityRedacted = !sourceVisible || !destinationVisible;
+      const actor = event.actorProfileId ? profileById.get(event.actorProfileId) : null;
+      return {
+        id: event.id.toString(),
+        eventType: event.eventType as 'move' | 'delete' | 'restore',
+        sourceRevisionId: event.sourceRevisionId?.toString() ?? null,
+        actorProfileId: event.actorProfileId?.toString() ?? null,
+        actorName: actor?.displayName ?? null,
+        actorUsername: actor?.username ?? null,
+        reason: identityRedacted && event.eventType === 'move' ? null : event.reason,
+        source: sourceVisible ? lifecycleIdentity({
+          namespace: event.sourceNamespaceCode,
+          spaceId: event.sourceSpaceId,
+          title: event.sourceTitle,
+          path: event.sourcePath
+        }) : null,
+        destination: destinationVisible ? lifecycleIdentity({
+          namespace: event.destinationNamespaceCode,
+          spaceId: event.destinationSpaceId,
+          title: event.destinationTitle,
+          path: event.destinationPath
+        }) : null,
+        identityRedacted,
+        createdAt: event.createdAt.toISOString()
+      };
+    });
+  }
+
   async getSpecialDocuments(input: {
     readonly type?: string;
     readonly namespace?: string;
@@ -2361,6 +2536,7 @@ export class WikiReadService {
     readonly followRedirects: boolean;
     readonly redirectTrail: readonly string[];
     readonly revisionId?: bigint;
+    readonly authorizedDeletedRecovery?: boolean;
   }): Promise<WikiPageResponse> {
     const revision = options.revisionId
       ? await this.prisma.wikiPageRevision.findFirst({
@@ -2389,11 +2565,15 @@ export class WikiReadService {
     if (!revision) {
       throw new NotFoundException('Public wiki revision not found.');
     }
-    await this.wikiPermissions.assertCanReadPage({
-      ...access,
-      page,
-      revision
-    });
+    if (options.authorizedDeletedRecovery) {
+      if (page.status !== 'deleted') throw new NotFoundException('Wiki page not found.');
+    } else {
+      await this.wikiPermissions.assertCanReadPage({
+        ...access,
+        page,
+        revision
+      });
+    }
     const linkResolution = wikiLinkResolutionContext(namespace, page.localPath);
     const parsed = parseMarkup(revision.contentRaw, {
       linkResolution,

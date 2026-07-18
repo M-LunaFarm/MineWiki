@@ -233,6 +233,23 @@ test('public block history controller is callable without an authenticated sessi
   assert.deepEqual(response, { items: [], nextCursor: null });
 });
 
+test('deleted-page recovery controller forwards the authenticated viewer and selected revision', async () => {
+  const session = { userId: 'account-1', sessionId: 'session-1' } as SessionPayload;
+  let received: unknown;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    { async getDeletedPageRecovery(input: unknown) { received = input; return {}; } } as unknown as WikiReadService,
+    {} as WikiEditService,
+    captchaStub,
+    pageSwapStub,
+    usernameStub,
+  );
+
+  await controller.getDeletedPageRecovery('44', session, '99', '10', '25');
+
+  assert.deepEqual(received, { pageId: '44', viewer: session, revisionId: '99', cursor: '10', limit: '25' });
+});
+
 test('optional browser wiki reads forward the complete session payload', async () => {
   const session = {
     sessionId: 'session-1',

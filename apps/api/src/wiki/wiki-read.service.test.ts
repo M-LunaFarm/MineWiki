@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { parseMarkup, WIKI_RENDERER_VERSION } from '@minewiki/wiki-core';
 import { PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
 import type { PrismaService } from '../common/prisma.service';
@@ -723,6 +724,56 @@ test('page lifecycle history uses an independent id cursor and redacts cross-spa
   assert.equal(result.items[1]?.destination?.title, 'New');
   assert.equal(result.items[1]?.reason, null);
   assert.equal(result.items[1]?.identityRedacted, true);
+});
+
+test('deleted-page recovery hides page existence from an unrelated authenticated actor', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  let revisionsQueried = false;
+  const prisma = {
+    wikiPage: { async findUnique() { return { id: 1n, namespaceId: 1, spaceId: 2n, status: 'deleted', createdBy: 3n, updatedAt: now }; } },
+    wikiProfile: { async findUnique() { return { id: 9n, status: 'active' }; } },
+    wikiPageRevision: { async findMany() { revisionsQueried = true; return []; } }
+  } as unknown as PrismaService;
+  const permissions = {
+    actorFromSession() { return { accountId: 'other', profileId: 9n, status: 'active' }; },
+    async assertCanRestorePage() { throw new ForbiddenException('denied'); }
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  await assert.rejects(
+    service.getDeletedPageRecovery({ pageId: '1', viewer: { userId: 'other' } as SessionPayload }),
+    (error: unknown) => error instanceof NotFoundException
+  );
+  assert.equal(revisionsQueried, false);
+});
+
+test('deleted-page recovery never previews a hidden or foreign source revision', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  const page = { id: 1n, namespaceId: 1, spaceId: 2n, localPath: 'deleted', slug: 'deleted', title: 'Deleted', displayTitle: 'Deleted', currentRevisionId: 10n, pageType: 'article', protectionLevel: 'open', status: 'deleted', createdBy: 3n, createdAt: now, updatedAt: now };
+  const latest = { id: 10n, pageId: 1n, revisionNo: 2, parentRevisionId: 9n, contentRaw: 'latest', contentHash: 'a'.repeat(64), contentSize: 6, syntaxVersion: 'bwm-0.3', editSummary: null, editSummaryHidden: false, isMinor: false, editTags: null, contentAst: null, createdBy: 3n, actorType: 'user', actorUserId: 3n, actorIp: null, actorIpText: null, actorIpHash: null, createdAt: now, visibility: 'public' };
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiProfile: { async findUnique() { return { id: 3n, status: 'active' }; } },
+    wikiNamespace: { async findUnique() { return { id: 1, code: 'main' }; } },
+    wikiPageRevision: {
+      async findMany() { return [latest]; },
+      async findFirst() { return latest; },
+      async findUnique() { return { ...latest, id: 11n, pageId: 99n, visibility: 'hidden' }; }
+    }
+  } as unknown as PrismaService;
+  const permissions = {
+    actorFromSession() { return { accountId: 'owner', profileId: 3n, status: 'active' }; },
+    async assertCanRestorePage() {}
+  } as unknown as WikiPermissionService;
+
+  await assert.rejects(
+    new WikiReadService(prisma, permissions).getDeletedPageRecovery({
+      pageId: '1',
+      viewer: { userId: 'owner' } as SessionPayload,
+      revisionId: '11'
+    }),
+    (error: unknown) => error instanceof NotFoundException
+  );
 });
 
 test('page ACL history keeps a stable cursor and exposes rule snapshots only to ACL managers', async () => {

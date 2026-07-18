@@ -83,6 +83,7 @@ export interface WikiRevertRequest {
 
 export interface WikiStatusMutationRequest {
   readonly reason?: string;
+  readonly revisionId?: string;
 }
 
 export interface WikiMutationResponse {
@@ -171,6 +172,8 @@ export interface WikiMoveResponse extends WikiMutationResponse {
 export interface WikiStatusMutationResponse {
   readonly pageId: string;
   readonly status: 'normal' | 'deleted';
+  readonly revisionId?: string;
+  readonly sourceRevisionId?: string | null;
 }
 
 export interface WikiRevisionResponse {
@@ -1770,6 +1773,9 @@ export class WikiEditService {
     request: WikiStatusMutationRequest
   ): Promise<WikiStatusMutationResponse> {
     const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const requestedRevisionId = status === 'normal' && request.revisionId
+      ? this.parseBigIntId(this.requiredString(request.revisionId, 'revisionId'), 'revisionId')
+      : null;
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1818,6 +1824,41 @@ export class WikiEditService {
       if (status === 'normal' && !latestPublic) {
         throw new ConflictException('A wiki page without a public revision cannot be restored.');
       }
+      let restoredRevision = latestPublic;
+      let sourceRevisionId: bigint | null = null;
+      if (status === 'normal' && requestedRevisionId && latestPublic) {
+        const source = await tx.wikiPageRevision.findUnique({ where: { id: requestedRevisionId } });
+        if (!source || source.pageId !== page.id || source.visibility !== 'public') {
+          throw new NotFoundException('Restore source revision not found.');
+        }
+        if (namespace.code === 'file' && source.id !== latestPublic.id) {
+          throw new ConflictException('File documents can only be restored from their latest public revision.');
+        }
+        await this.assertLockedSectionsUnchanged({
+          actor: permissionActor,
+          page,
+          currentContent: latestPublic.contentRaw,
+          nextContent: source.contentRaw,
+          store: tx
+        });
+        const latestStored = await this.findLatestStoredRevision(tx, page.id);
+        restoredRevision = await this.createRevision(tx, {
+          pageId: page.id,
+          revisionNo: latestStored ? latestStored.revisionNo + 1 : 1,
+          parentRevisionId: latestPublic.id,
+          contentRaw: source.contentRaw,
+          editSummary: this.cleanOptional(request.reason) ?? `r${source.revisionNo} 판을 선택해 문서 복구`,
+          isMinor: false,
+          actorId: actor.id,
+          title: page.displayTitle,
+          namespaceCode: namespace.code,
+          pageTitle: page.title,
+          pageLocalPath: page.localPath,
+          createdAt: now,
+          editTags: { restoredFromRevisionId: source.id.toString() }
+        });
+        sourceRevisionId = source.id;
+      }
       if (namespace.code === 'file') {
         await this.transitionFilePageAsset(tx, page, status, now);
       }
@@ -1825,13 +1866,13 @@ export class WikiEditService {
         where: { id: page.id },
         data: {
           status,
-          ...(latestPublic ? { currentRevisionId: latestPublic.id } : {}),
+          ...(restoredRevision ? { currentRevisionId: restoredRevision.id } : {}),
           updatedAt: now
         }
       });
       await this.insertRecentChange(tx, {
-        pageId: updated.id,
-        revisionId: updated.currentRevisionId,
+          pageId: updated.id,
+          revisionId: restoredRevision?.id ?? updated.currentRevisionId,
         actorId: actor.id,
         changeType: status === 'deleted' ? 'delete' : 'restore',
         title: updated.title,
@@ -1845,6 +1886,7 @@ export class WikiEditService {
           pageId: updated.id,
           eventType: status === 'deleted' ? 'delete' : 'restore',
           actorProfileId: actor.id,
+          sourceRevisionId,
           reason: this.cleanOptional(request.reason),
           ...(status === 'deleted'
             ? {
@@ -1864,7 +1906,12 @@ export class WikiEditService {
           createdAt: now
         }
       });
-      return { pageId: updated.id.toString(), status };
+      return {
+        pageId: updated.id.toString(),
+        status,
+        ...(restoredRevision ? { revisionId: restoredRevision.id.toString() } : {}),
+        ...(status === 'normal' ? { sourceRevisionId: sourceRevisionId?.toString() ?? null } : {})
+      };
     });
     await this.events?.audit(status === 'deleted' ? 'wiki.delete' : 'wiki.restore', {
       category: 'wiki',
@@ -1874,7 +1921,9 @@ export class WikiEditService {
       subjectId: result.pageId,
       metadata: {
         status,
-        reason: this.cleanOptional(request.reason)
+        reason: this.cleanOptional(request.reason),
+        revisionId: result.revisionId ?? null,
+        sourceRevisionId: result.sourceRevisionId ?? null
       }
     });
     return result;

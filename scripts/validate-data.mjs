@@ -114,6 +114,18 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'restore lifecycle source revision belongs to the same page and is public',
+    `
+      SELECT e.id
+      FROM page_lifecycle_events e
+      LEFT JOIN page_revisions r ON r.id = e.source_revision_id
+      WHERE e.source_revision_id IS NOT NULL
+        AND (e.event_type <> 'restore' OR r.id IS NULL OR r.page_id <> e.page_id OR r.visibility <> 'public')
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'Server.wikiSpaceId points to WikiSpace',
     `
       SELECT s.id

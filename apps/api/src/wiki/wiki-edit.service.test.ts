@@ -1279,6 +1279,61 @@ if (!hasDatabase) {
     }
   });
 
+  test('deleted-page recovery previews a public source and restores it as a new monotonic revision', async () => {
+    const fixture = await createFixture();
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        title: `recovery_${fixture.unique}`,
+        spaceId: fixture.space.id.toString(),
+        contentRaw: '안전한 첫 판',
+        editSummary: '첫 판'
+      });
+      pageId = created.pageId;
+      const updated = await edits.updatePage(session(fixture.account.id), created.pageId, {
+        contentRaw: '복구하지 않을 최신 판',
+        editSummary: '두 번째 판',
+        baseRevisionId: created.revisionId
+      });
+      await edits.deletePage(session(fixture.account.id), created.pageId, { reason: '복구 검증 삭제' });
+
+      const recovery = await reads.getDeletedPageRecovery({
+        pageId: created.pageId,
+        viewer: session(fixture.account.id),
+        revisionId: created.revisionId
+      });
+      assert.equal(recovery.selectedRevision.id, created.revisionId);
+      assert.match(recovery.selectedRevision.html, /안전한 첫 판/u);
+      assert.deepEqual(recovery.revisions.items.map((revision) => revision.id), [updated.revisionId, created.revisionId]);
+
+      const restored = await edits.restorePage(session(fixture.account.id), created.pageId, {
+        revisionId: created.revisionId,
+        reason: '첫 판을 검토해 복구'
+      });
+      const [page, revision, lifecycle] = await Promise.all([
+        prisma.wikiPage.findUniqueOrThrow({ where: { id: BigInt(created.pageId) } }),
+        prisma.wikiPageRevision.findUniqueOrThrow({ where: { id: BigInt(restored.revisionId!) } }),
+        prisma.wikiPageLifecycleEvent.findFirstOrThrow({ where: { pageId: BigInt(created.pageId), eventType: 'restore' } })
+      ]);
+      assert.equal(page.status, 'normal');
+      assert.equal(page.currentRevisionId, revision.id);
+      assert.equal(revision.revisionNo, 3);
+      assert.equal(revision.parentRevisionId, BigInt(updated.revisionId));
+      assert.equal(revision.contentRaw, '안전한 첫 판');
+      assert.equal(restored.sourceRevisionId, created.revisionId);
+      assert.equal(lifecycle.sourceRevisionId, BigInt(created.revisionId));
+    } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id,
+        pageId
+      });
+    }
+  });
+
   test('new edits advance beyond hidden revision numbers without changing the public parent', async () => {
     const fixture = await createFixture();
     let pageId: string | undefined;

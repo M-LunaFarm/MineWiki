@@ -30,6 +30,7 @@ import {
   type WikiDocumentTemplateSummary,
   type WikiContributionResponse,
   type WikiDeletedPageSummary,
+  type WikiDeletedPageRecoveryResponse,
   type WikiPageResponse,
   type WikiPageLifecycleEventListResponse,
   type WikiPageAclHistoryEventListResponse,
@@ -516,6 +517,19 @@ export class WikiController {
       profileId: profile.id,
       includeAll: session.permissions?.includes('wiki.admin') === true || session.groups?.includes('admin') === true
     });
+  }
+
+  @Get('me/deleted-pages/:id/recovery')
+  @UseGuards(SessionGuard)
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  getDeletedPageRecovery(
+    @Param('id') pageId: string,
+    @CurrentSession() session: SessionPayload,
+    @Query('revisionId') revisionId?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiDeletedPageRecoveryResponse> {
+    return this.wikiRead.getDeletedPageRecovery({ pageId, viewer: session, revisionId, cursor, limit });
   }
 }
 
