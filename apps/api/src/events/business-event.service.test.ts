@@ -74,3 +74,32 @@ test('audit persists redacted metadata', async () => {
   assert.match(write.data.metadata.verificationUrl, /verifyToken=%5Bredacted%5D|verifyToken=\\[redacted\\]/);
   assert.doesNotMatch(write.data.metadata.verificationUrl, /verifyToken=token/);
 });
+
+test('audit page uses a stable cursor, operational filters, and read-time redaction', async () => {
+  let query: Record<string, unknown> | undefined;
+  const row = (id: string, minute: number) => ({
+    id, category: 'account', action: 'account.contact_email.changed', severity: 'warning',
+    actorAccountId: 'actor-1', actorProfileId: null, subjectType: 'account', subjectId: 'subject-1',
+    requestId: 'request-1', ipAddress: '203.0.113.1', userAgent: 'agent',
+    metadata: { token: 'legacy-secret', outcome: 'confirmed' },
+    createdAt: new Date(`2026-07-18T10:0${minute}:00.000Z`),
+  });
+  const prisma = { auditEvent: {
+    async findMany(input: Record<string, unknown>) { query = input; return [row('event-3', 3), row('event-2', 2), row('event-1', 1)]; },
+    async findUnique() { return { id: 'event-2' }; },
+  } };
+  const service = new BusinessEventService(prisma as never);
+
+  const page = await service.listAuditEventPage({
+    category: 'account', action: 'contact_email', severity: 'warning', actorAccountId: 'actor-1', limit: 2,
+  });
+
+  assert.equal(page.items.length, 2);
+  assert.equal(page.nextCursor, 'event-2');
+  assert.equal(page.items[0]?.ipAddress, null);
+  assert.equal(page.items[0]?.userAgent, null);
+  assert.deepEqual(page.items[0]?.metadata, { token: '[redacted]', outcome: 'confirmed' });
+  assert.deepEqual(query?.orderBy, [{ createdAt: 'desc' }, { id: 'desc' }]);
+  assert.equal(query?.take, 3);
+  assert.deepEqual((query?.where as Record<string, unknown>).action, { contains: 'contact_email' });
+});

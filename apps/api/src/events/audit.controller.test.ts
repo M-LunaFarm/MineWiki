@@ -53,3 +53,32 @@ test('audit log accepts only global administrators or the explicit audit permiss
   assert.deepEqual(await controller.list({ ...elevatedUser, groups: ['admin'] }), []);
   assert.deepEqual(await controller.list({ ...elevatedUser, groups: ['owner'] }), []);
 });
+
+test('audit page forwards filters and restricts sensitive network context to trusted administrators', async () => {
+  const inputs: unknown[] = [];
+  const controller = new AuditController({
+    async listAuditEventPage(input: unknown) { inputs.push(input); return { items: [], nextCursor: null }; }
+  } as never);
+
+  await controller.page(
+    { ...elevatedUser, permissions: ['admin.audit.read'] },
+    'account', 'contact_email', 'warning', 'actor-1', 'account', 'subject-1', 'request-1', undefined, '50',
+  );
+  await controller.page(
+    { ...elevatedUser, groups: ['admin'] },
+    'wiki', undefined, undefined, undefined, undefined, undefined, undefined, 'cursor-1', '25',
+  );
+
+  assert.deepEqual(inputs, [
+    {
+      category: 'account', action: 'contact_email', severity: 'warning', actorAccountId: 'actor-1',
+      subjectType: 'account', subjectId: 'subject-1', requestId: 'request-1', cursor: undefined,
+      limit: '50', includeSensitive: false,
+    },
+    {
+      category: 'wiki', action: undefined, severity: undefined, actorAccountId: undefined,
+      subjectType: undefined, subjectId: undefined, requestId: undefined, cursor: 'cursor-1',
+      limit: '25', includeSensitive: true,
+    },
+  ]);
+});

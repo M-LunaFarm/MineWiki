@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   trackEvent,
@@ -38,6 +38,24 @@ export interface AuditEventResponse {
   readonly userAgent: string | null;
   readonly metadata: Prisma.JsonValue | null;
   readonly createdAt: string;
+}
+
+export interface AuditEventPage {
+  readonly items: AuditEventResponse[];
+  readonly nextCursor: string | null;
+}
+
+export interface AuditEventPageInput {
+  readonly category?: string;
+  readonly action?: string;
+  readonly severity?: string;
+  readonly actorAccountId?: string;
+  readonly subjectType?: string;
+  readonly subjectId?: string;
+  readonly requestId?: string;
+  readonly cursor?: string;
+  readonly limit?: string | number;
+  readonly includeSensitive?: boolean;
 }
 
 @Injectable()
@@ -84,6 +102,7 @@ export class BusinessEventService {
     readonly category?: string;
     readonly action?: string;
     readonly limit?: string | number;
+    readonly includeSensitive?: boolean;
   } = {}): Promise<AuditEventResponse[]> {
     if (!this.prisma) {
       return [];
@@ -97,22 +116,73 @@ export class BusinessEventService {
       orderBy: [{ createdAt: 'desc' }],
       take: limit
     });
-    return rows.map((row) => ({
-      id: row.id,
-      category: row.category,
-      action: row.action,
-      severity: row.severity,
-      actorAccountId: row.actorAccountId,
-      actorProfileId: row.actorProfileId?.toString() ?? null,
-      subjectType: row.subjectType,
-      subjectId: row.subjectId,
-      requestId: row.requestId,
-      ipAddress: row.ipAddress,
-      userAgent: row.userAgent,
-      metadata: row.metadata,
-      createdAt: row.createdAt.toISOString()
-    }));
+    return rows.map((row) => toAuditEventResponse(row, input.includeSensitive === true));
   }
+
+  async listAuditEventPage(input: AuditEventPageInput = {}): Promise<AuditEventPage> {
+    if (!this.prisma) return { items: [], nextCursor: null };
+    const limit = Math.min(Math.max(Number(input.limit ?? 50) || 50, 1), 100);
+    const cursor = input.cursor?.trim();
+    if (cursor && !await this.prisma.auditEvent.findUnique({ where: { id: cursor }, select: { id: true } })) {
+      throw new BadRequestException({ code: 'audit_cursor_invalid', message: '감사 이벤트 커서가 유효하지 않습니다.' });
+    }
+    const rows = await this.prisma.auditEvent.findMany({
+      where: {
+        category: exactFilter(input.category),
+        action: input.action?.trim() ? { contains: input.action.trim() } : undefined,
+        severity: exactFilter(input.severity),
+        actorAccountId: exactFilter(input.actorAccountId),
+        subjectType: exactFilter(input.subjectType),
+        subjectId: exactFilter(input.subjectId),
+        requestId: exactFilter(input.requestId),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: limit + 1,
+    });
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    return {
+      items: pageRows.map((row) => toAuditEventResponse(row, input.includeSensitive === true)),
+      nextCursor: hasMore ? pageRows.at(-1)?.id ?? null : null,
+    };
+  }
+}
+
+function exactFilter(value: string | undefined): string | undefined {
+  return value?.trim() || undefined;
+}
+
+function toAuditEventResponse(row: {
+  id: string;
+  category: string;
+  action: string;
+  severity: string;
+  actorAccountId: string | null;
+  actorProfileId: bigint | null;
+  subjectType: string | null;
+  subjectId: string | null;
+  requestId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  metadata: Prisma.JsonValue | null;
+  createdAt: Date;
+}, includeSensitive = false): AuditEventResponse {
+  return {
+    id: row.id,
+    category: row.category,
+    action: row.action,
+    severity: row.severity,
+    actorAccountId: row.actorAccountId,
+    actorProfileId: row.actorProfileId?.toString() ?? null,
+    subjectType: row.subjectType,
+    subjectId: row.subjectId,
+    requestId: row.requestId,
+    ipAddress: includeSensitive ? row.ipAddress : null,
+    userAgent: includeSensitive ? row.userAgent : null,
+    metadata: redactAuditValue(row.metadata) as Prisma.JsonValue | null,
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 export function toAuditJson(value: unknown): Prisma.InputJsonValue {
