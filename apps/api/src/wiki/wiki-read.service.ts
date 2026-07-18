@@ -954,7 +954,13 @@ export class WikiReadService {
     const serverWikis = serverSpaceIds.length > 0
       ? await this.prisma.serverWiki.findMany({
           where: { spaceId: { in: serverSpaceIds }, status: 'active' },
-          select: { id: true, spaceId: true, publicationStatus: true, publishedReleaseId: true },
+          select: {
+            id: true,
+            spaceId: true,
+            publicationStatus: true,
+            publishedReleaseId: true,
+            publishedRelease: { select: { publishedAt: true } },
+          },
         })
       : [];
     const serverWikiBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki]));
@@ -1011,6 +1017,7 @@ export class WikiReadService {
         releaseId: releasedItem.releaseId,
         serverWikiId: releasedItem.serverWikiId,
         spaceId: releasedItem.spaceId,
+        publishedAt: serverWiki?.publishedRelease?.publishedAt ?? null,
       });
       return [pageFromServerWikiReleaseItem(releasedItem)];
     });
@@ -1819,9 +1826,15 @@ export class WikiReadService {
     const namespaces = namespaceIds.length > 0
       ? await this.prisma.wikiNamespace.findMany({ where: { id: { in: namespaceIds } } })
       : [];
-    const pageById = new Map(pages.map((page) => [page.id, page]));
     const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    const routePaths = await this.routePaths.preload(pages, namespaceById);
+    const access = await resolveWikiAccessContext(
+      this.prisma,
+      this.wikiPermissions,
+      input.session ?? input.accountId ?? null,
+    );
+    const projection = await this.projectDerivedPagesWithContext(pages, namespaceById, access);
+    const pageById = new Map(projection.pages.map((page) => [page.id, page]));
+    const routePaths = await this.routePaths.preload(projection.pages, namespaceById);
     const items: WikiContributionItem[] = [];
     let lastScannedId: bigint | null = null;
     for (const change of changes) {
@@ -1829,8 +1842,10 @@ export class WikiReadService {
       if (!change.pageId) continue;
       const page = pageById.get(change.pageId);
       if (!page) continue;
+      const source = projection.sourceByPageId.get(page.id);
+      if (source?.kind === 'release' && (!source.publishedAt || change.createdAt > source.publishedAt)) continue;
       try {
-        await this.wikiPermissions.assertCanReadPage({ accountId: input.accountId ?? null, page });
+        await this.wikiPermissions.assertCanReadPage({ ...access, page });
       } catch {
         continue;
       }
@@ -1849,7 +1864,9 @@ export class WikiReadService {
         title: page.displayTitle,
         namespace,
         routePath: routePaths.routePath(page, namespace),
-        href: change.revisionId ? `/wiki/revision/${change.revisionId.toString()}` : routePaths.routePath(page, namespace),
+        href: change.revisionId && (source?.kind !== 'release' || change.revisionId === page.currentRevisionId)
+          ? `/wiki/revision/${change.revisionId.toString()}`
+          : routePaths.routePath(page, namespace),
         ...publicSummary,
         isMinor: change.isMinor,
         status: null,
@@ -4115,6 +4132,7 @@ type DerivedPageProjectionSource =
       readonly releaseId: bigint;
       readonly serverWikiId: bigint;
       readonly spaceId: bigint;
+      readonly publishedAt: Date | null;
     };
 
 type BacklinkCursor = {
