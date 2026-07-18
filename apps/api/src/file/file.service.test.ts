@@ -11,6 +11,7 @@ interface TestFile {
   ownerAccountId: string | null;
   filename: string;
   wikiFilename: string | null;
+  currentWikiFilename: string | null;
   originalName: string | null;
   mimeType: string;
   sizeBytes: number;
@@ -120,6 +121,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
           status: 'active',
           visibility: 'public',
           wikiFilename: null,
+          currentWikiFilename: null,
           license: null,
           sourceUrl: null,
           sourceText: null,
@@ -136,6 +138,11 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
       },
       async findUnique(args: { where: { id: string } }) {
         return files.get(args.where.id) ?? null;
+      },
+      async findUniqueOrThrow(args: { where: { id: string } }) {
+        const file = files.get(args.where.id);
+        assert.ok(file);
+        return file;
       },
       async findFirst(args: { where: { filename: string } }) {
         return [...files.values()].find((file) => file.filename === args.where.filename) ?? null;
@@ -235,6 +242,18 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     },
     async deleteFileDocumentAfterAuthorizedUpload(_session: unknown, filename: string) {
       deletedFileDocuments.push(filename);
+    },
+    async replaceFileDocumentAfterAuthorizedUpload(
+      _session: unknown,
+      request: { filename: string; expectedFileId: string; uploadedFileId: string },
+    ) {
+      const previous = files.get(request.expectedFileId);
+      const pending = files.get(request.uploadedFileId);
+      assert.ok(previous);
+      assert.ok(pending);
+      files.set(previous.id, { ...previous, status: 'versioned', currentWikiFilename: null });
+      files.set(pending.id, { ...pending, status: 'active', currentWikiFilename: request.filename });
+      return { pageId: '99', revisionId: '102', revisionNo: 2 };
     }
   };
   return {
@@ -283,6 +302,35 @@ test('file service stores canonical image metadata', async () => {
   assert.deepEqual(fileDocuments, [{ filename: 'wiki.webp', linkedPageId: '7' }]);
   assert.equal(uploaded.wikiDocumentPath, '/file/wiki.webp');
   assert.equal(uploaded.url, 'upload://stored.webp');
+});
+
+test('wiki file replacement preserves the logical name and versions the previous asset', async () => {
+  const { service, files } = createService();
+  const first = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'wiki.png',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7',
+  }, session('account-1'));
+
+  const replacement = await service.createImage('account-1', {
+    data: 'data:image/png;base64,bmV3LWltYWdl',
+    filename: 'replacement.png',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7',
+    replaceFileId: first.id,
+  }, session('account-1'));
+
+  assert.equal(replacement.wikiFilename, first.wikiFilename);
+  assert.equal(replacement.status, 'active');
+  assert.equal(files.get(first.id)?.status, 'versioned');
+  assert.equal(files.get(first.id)?.wikiFilename, first.wikiFilename);
+  assert.equal(files.get(first.id)?.currentWikiFilename, null);
+  assert.equal(files.get(replacement.id)?.currentWikiFilename, first.wikiFilename);
 });
 
 test('standalone wiki uploads can bind to an editable wiki space', async () => {

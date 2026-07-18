@@ -43,6 +43,7 @@ export class FileController {
       sourceText?: string;
       linkedResourceType?: string;
       linkedResourceId?: string;
+      replaceFileId?: string;
     }
   ): Promise<FileImageUploadResponse> {
     return this.files.createImage(session.userId, body, session);

@@ -23,6 +23,7 @@ export interface FileImageUploadRequest {
   readonly sourceText?: string;
   readonly linkedResourceType?: string;
   readonly linkedResourceId?: string;
+  readonly replaceFileId?: string;
 }
 
 export interface FileImageBufferUploadRequest {
@@ -35,6 +36,7 @@ export interface FileImageBufferUploadRequest {
   readonly sourceText?: string;
   readonly linkedResourceType?: string;
   readonly linkedResourceId?: string;
+  readonly replaceFileId?: string;
 }
 
 export interface FileMetadataResponse {
@@ -176,10 +178,13 @@ export class FileService {
   ): Promise<FileImageUploadResponse> {
     const { usageContext, visibility, license, sourceUrl, sourceText, linkedResource } = policy;
     let wikiFilename: string | null = null;
+    let replacement: Awaited<ReturnType<FileService['resolveReplacementTarget']>> = null;
     try {
       wikiFilename = usageContext === 'wiki_editor'
         ? normalizeWikiFilename(request.filename, stored.filename)
         : null;
+      replacement = await this.resolveReplacementTarget(request, policy, session, wikiFilename);
+      if (replacement) wikiFilename = replacement.wikiFilename;
     } catch (error) {
       await this.uploads.deleteObject(stored.storagePath).catch(() => undefined);
       throw error;
@@ -191,6 +196,7 @@ export class FileService {
           ownerAccountId: accountId,
           filename: stored.filename,
           wikiFilename,
+          currentWikiFilename: null,
           originalName: request.filename?.trim() || null,
           mimeType: stored.mimeType,
           sizeBytes: stored.size,
@@ -224,30 +230,39 @@ export class FileService {
       }
       let documentCreated = false;
       try {
-        const document = await this.wikiEdits.createFileDocumentAfterAuthorizedUpload(session, {
-          filename: created.wikiFilename!,
-          ...(linkedResource!.type === 'wiki_page'
-            ? { linkedPageId: linkedResource!.id }
-            : { linkedSpaceId: linkedResource!.id })
-        });
-        documentCreated = true;
-        created = await this.prisma.$transaction(async (tx) => {
-          await tx.wikiFileVersion.create({
-            data: {
-              filePageId: BigInt(document.pageId),
-              pageRevisionId: BigInt(document.revisionId),
-              uploadedFileId: created.id,
-              versionNo: 1,
-              isCurrent: true,
-              createdByAccountId: accountId,
-              createdAt: created.createdAt,
-            },
+        if (replacement) {
+          await this.wikiEdits.replaceFileDocumentAfterAuthorizedUpload(session, {
+            filename: replacement.wikiFilename,
+            expectedFileId: replacement.id,
+            uploadedFileId: created.id,
           });
-          return tx.uploadedFile.update({
-            where: { id: created.id },
-            data: { status: 'active' },
+          created = await this.prisma.uploadedFile.findUniqueOrThrow({ where: { id: created.id } });
+        } else {
+          const document = await this.wikiEdits.createFileDocumentAfterAuthorizedUpload(session, {
+            filename: created.wikiFilename!,
+            ...(linkedResource!.type === 'wiki_page'
+              ? { linkedPageId: linkedResource!.id }
+              : { linkedSpaceId: linkedResource!.id })
           });
-        });
+          documentCreated = true;
+          created = await this.prisma.$transaction(async (tx) => {
+            await tx.wikiFileVersion.create({
+              data: {
+                filePageId: BigInt(document.pageId),
+                pageRevisionId: BigInt(document.revisionId),
+                uploadedFileId: created.id,
+                versionNo: 1,
+                isCurrent: true,
+                createdByAccountId: accountId,
+                createdAt: created.createdAt,
+              },
+            });
+            return tx.uploadedFile.update({
+              where: { id: created.id },
+              data: { status: 'active', currentWikiFilename: created.wikiFilename },
+            });
+          });
+        }
       } catch (error) {
         if (documentCreated) {
           await this.wikiEdits.deleteFileDocumentAfterAuthorizedUpload(session, created.wikiFilename!).catch(() => undefined);
@@ -279,8 +294,38 @@ export class FileService {
   private async releaseFailedWikiUpload(id: string): Promise<void> {
     await this.prisma.uploadedFile.update({
       where: { id },
-      data: { status: 'deleted', wikiFilename: null }
+      data: { status: 'deleted', wikiFilename: null, currentWikiFilename: null }
     });
+  }
+
+  private async resolveReplacementTarget(
+    request: FileImageUploadRequest | FileImageBufferUploadRequest,
+    policy: { readonly usageContext: string; readonly linkedResource: { type: 'wiki_page' | 'wiki_space'; id: string } | null },
+    session: SessionPayload | null,
+    requestedWikiFilename: string | null,
+  ) {
+    const replaceFileId = request.replaceFileId?.trim();
+    if (!replaceFileId) return null;
+    if (policy.usageContext !== 'wiki_editor' || !session || !requestedWikiFilename) {
+      throw new BadRequestException('Only authenticated wiki uploads can replace a file version.');
+    }
+    const current = await this.prisma.uploadedFile.findUnique({ where: { id: replaceFileId } });
+    this.permissions.assertCanDelete(current, session);
+    if (
+      current.usageContext !== 'wiki_editor'
+      || current.status !== 'active'
+      || !current.wikiFilename
+      || current.currentWikiFilename !== current.wikiFilename
+    ) {
+      throw new ConflictException('The selected file is not the current wiki file version.');
+    }
+    if (
+      current.linkedResourceType !== policy.linkedResource?.type
+      || current.linkedResourceId !== policy.linkedResource.id
+    ) {
+      throw new BadRequestException('A replacement must keep the original wiki access scope.');
+    }
+    return current;
   }
 
   async getFile(id: string, session?: SessionPayload | null): Promise<FileMetadataResponse> {
@@ -295,7 +340,7 @@ export class FileService {
   ): Promise<WikiFileVersionResponse[]> {
     const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
     await this.permissions.assertCanRead(file, session);
-    const anchor = await this.prisma.wikiFileVersion.findUnique({
+    const anchor = await this.prisma.wikiFileVersion.findFirst({
       where: { uploadedFileId: file.id },
       select: { filePageId: true },
     });
@@ -463,7 +508,7 @@ export class FileService {
       where: { id },
       data: isWikiAsset
         ? { status: 'retained', deletedAt, retainedUntil: retentionDeadline(deletedAt) }
-        : { status: 'deleted', wikiFilename: null, deletedAt, retainedUntil: null }
+        : { status: 'deleted', wikiFilename: null, currentWikiFilename: null, deletedAt, retainedUntil: null }
     });
     await this.events?.audit('file.delete', {
       category: 'file',

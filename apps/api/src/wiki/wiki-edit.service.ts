@@ -153,6 +153,12 @@ export interface AuthorizedWikiFileDocumentRequest {
   readonly linkedSpaceId?: string;
 }
 
+export interface AuthorizedWikiFileReplacementRequest {
+  readonly filename: string;
+  readonly expectedFileId: string;
+  readonly uploadedFileId: string;
+}
+
 export interface WikiMoveResponse extends WikiMutationResponse {
   readonly previousTitle: string;
   readonly previousNamespace: string;
@@ -275,6 +281,128 @@ export class WikiEditService {
       contentRaw: `== 파일 ==\n[[파일:${filename}|섬네일|업로드 파일]]\n\n== 이용 안내 ==\n라이선스와 출처는 이미지 아래에 표시됩니다.\n\n[[분류:파일]]`,
       editSummary: '위키 파일 업로드'
     }, true);
+  }
+
+  async replaceFileDocumentAfterAuthorizedUpload(
+    session: SessionPayload,
+    request: AuthorizedWikiFileReplacementRequest,
+  ): Promise<WikiMutationResponse> {
+    const filename = this.requiredString(request.filename, 'filename');
+    const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const namespace = await tx.wikiNamespace.findUnique({ where: { code: 'file' } });
+      if (!namespace) throw new NotFoundException('File namespace not found.');
+      const page = await tx.wikiPage.findFirst({
+        where: { namespaceId: namespace.id, title: filename, status: 'normal' },
+      });
+      if (!page) throw new NotFoundException('Wiki file document not found.');
+      await this.lockPageForRevision(tx, page.id);
+      await this.wikiPermissions.assertCanEditPage({
+        actor: this.wikiPermissions.actorFromSession(session, actor),
+        page,
+        store: tx,
+      });
+      await this.wikiPermissions.assertCanUsePageAction({
+        accountId: session.userId,
+        action: 'upload_file',
+        page,
+        store: tx,
+      });
+      const [latest, latestStored, currentVersion, pendingFile] = await Promise.all([
+        this.findCurrentRevision(tx, page),
+        this.findLatestStoredRevision(tx, page.id),
+        tx.wikiFileVersion.findFirst({ where: { filePageId: page.id, isCurrent: true } }),
+        tx.uploadedFile.findUnique({ where: { id: request.uploadedFileId } }),
+      ]);
+      if (!latest || !latestStored || !currentVersion) {
+        throw new ConflictException('The current wiki file version is incomplete.');
+      }
+      if (currentVersion.uploadedFileId !== request.expectedFileId) {
+        throw new ConflictException('The file changed before this replacement was saved.');
+      }
+      if (
+        !pendingFile
+        || pendingFile.status !== 'pending'
+        || pendingFile.wikiFilename !== filename
+        || pendingFile.usageContext !== 'wiki_editor'
+      ) {
+        throw new ConflictException('The replacement upload is not pending for this file.');
+      }
+      const revision = await this.createRevision(tx, {
+        pageId: page.id,
+        revisionNo: latestStored.revisionNo + 1,
+        parentRevisionId: latest.id,
+        contentRaw: latest.contentRaw,
+        editSummary: `파일 버전 ${currentVersion.versionNo + 1} 업로드`,
+        isMinor: false,
+        actorId: actor.id,
+        title: page.displayTitle,
+        namespaceCode: namespace.code,
+        pageTitle: page.title,
+        pageLocalPath: page.localPath,
+        createdAt: now,
+        editTags: { fileVersion: true, uploadedFileId: pendingFile.id },
+      });
+      const claimed = await tx.wikiPage.updateMany({
+        where: { id: page.id, currentRevisionId: latest.id },
+        data: { currentRevisionId: revision.id, updatedAt: now },
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException('The file document changed while replacing its asset.');
+      }
+      await tx.wikiFileVersion.updateMany({
+        where: { filePageId: page.id, isCurrent: true },
+        data: { isCurrent: false },
+      });
+      await tx.uploadedFile.update({
+        where: { id: currentVersion.uploadedFileId },
+        data: { status: 'versioned', currentWikiFilename: null, deletedAt: null, retainedUntil: null },
+      });
+      await tx.wikiFileVersion.create({
+        data: {
+          filePageId: page.id,
+          pageRevisionId: revision.id,
+          uploadedFileId: pendingFile.id,
+          versionNo: currentVersion.versionNo + 1,
+          isCurrent: true,
+          createdByAccountId: session.userId,
+          createdAt: now,
+        },
+      });
+      await tx.uploadedFile.update({
+        where: { id: pendingFile.id },
+        data: { status: 'active', currentWikiFilename: filename },
+      });
+      await this.insertRecentChange(tx, {
+        pageId: page.id,
+        revisionId: revision.id,
+        actorId: actor.id,
+        changeType: 'edit',
+        title: page.title,
+        namespaceCode: namespace.code,
+        summary: revision.editSummary,
+        isMinor: false,
+        createdAt: now,
+      });
+      return {
+        pageId: page.id.toString(),
+        revisionId: revision.id.toString(),
+        revisionNo: revision.revisionNo,
+        namespace: namespace.code,
+        title: page.title,
+        slug: page.slug,
+      };
+    }, { isolationLevel: 'Serializable' });
+    await this.events?.audit('wiki.file_version.replace', {
+      category: 'wiki',
+      actorAccountId: session.userId,
+      actorProfileId: actor.id,
+      subjectType: 'wiki_page',
+      subjectId: result.pageId,
+      metadata: { revisionId: result.revisionId, uploadedFileId: request.uploadedFileId },
+    });
+    return result;
   }
 
   async deleteFileDocumentAfterAuthorizedUpload(
@@ -1570,7 +1698,7 @@ export class WikiEditService {
     now: Date,
   ): Promise<void> {
     const asset = await tx.uploadedFile.findFirst({
-      where: { wikiFilename: page.title, usageContext: 'wiki_editor' },
+      where: { currentWikiFilename: page.title, usageContext: 'wiki_editor' },
     });
     if (status === 'normal') {
       if (!asset || !['active', 'delete_pending', 'retained'].includes(asset.status)) {
