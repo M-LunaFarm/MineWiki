@@ -7,6 +7,7 @@ import { Check, CreditCard, Crown, Loader2, LockKeyhole, Settings2 } from 'lucid
 
 import { csrfHeaders } from '../../lib/csrf';
 import { billingActionError, billingSupportHref, validatedPaddleRedirectUrl } from '../../lib/paddle-billing-client.mjs';
+import { openPaddleTransaction } from '../../lib/paddle-checkout';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
 import { PrivilegedActionGate } from '../auth/privileged-action-gate';
 
@@ -103,9 +104,22 @@ export function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: 
         headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         body: action === 'checkout' ? JSON.stringify({ layoutKey }) : '{}',
       });
-      const body = await response.json().catch(() => ({})) as { checkoutUrl?: unknown; portalUrl?: unknown; message?: unknown };
+      const body = await response.json().catch(() => ({})) as {
+        checkoutUrl?: unknown;
+        transactionId?: unknown;
+        portalUrl?: unknown;
+        message?: unknown;
+      };
       if (!response.ok) {
         throw new Error(billingActionError(response.status, action, body.message));
+      }
+      if (
+        action === 'checkout'
+        && typeof body.transactionId === 'string'
+        && billing
+        && await openPaddleTransaction(body.transactionId, billing.environment)
+      ) {
+        return;
       }
       const target = validatedPaddleRedirectUrl(
         action === 'checkout' ? body.checkoutUrl : body.portalUrl,

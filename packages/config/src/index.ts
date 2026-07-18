@@ -39,6 +39,11 @@ const optionalUrl = z.preprocess(
   z.string().url().optional()
 );
 
+const optionalPaddleClientToken = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().regex(/^(live|test)_[A-Za-z0-9]{8,}$/u).optional()
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   MINEWIKI_SERVICE: z.enum(['all', 'api', 'worker', 'bot', 'migration']).default('all'),
@@ -48,6 +53,7 @@ const envSchema = z.object({
   NEXT_PUBLIC_SITE_URL: z.string().url().optional(),
   NEXT_PUBLIC_MAIN_SITE_URL: z.string().url().optional(),
   NEXT_PUBLIC_VERIFY_URL: z.string().url().optional(),
+  NEXT_PUBLIC_PADDLE_CLIENT_TOKEN: optionalPaddleClientToken,
   WEBAUTHN_ORIGIN: optionalUrl,
   WEBAUTHN_RP_ID: z.preprocess(
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),

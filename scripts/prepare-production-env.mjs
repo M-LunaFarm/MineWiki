@@ -46,6 +46,7 @@ const values = {
   NEXT_PUBLIC_MAIN_SITE_URL: 'https://minewiki.kr',
   NEXT_PUBLIC_VERIFY_URL: 'https://verify.minewiki.kr',
   NEXT_PUBLIC_API_BASE_URL: 'https://minewiki.kr/api',
+  NEXT_PUBLIC_PADDLE_CLIENT_TOKEN: legacy.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN || '',
   WEBAUTHN_ORIGIN: 'https://minewiki.kr',
   WEBAUTHN_RP_ID: 'minewiki.kr',
   INTERNAL_API_BASE_URL: 'http://127.0.0.1:4321',

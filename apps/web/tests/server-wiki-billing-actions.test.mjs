@@ -41,8 +41,22 @@ test('layout plans bind checkout and portal actions to availability, CSRF, and e
   assert.match(source, /\/billing\/\$\{action\}/u);
   assert.match(source, /await csrfHeaders\(\)/u);
   assert.match(source, /validatedPaddleRedirectUrl/u);
+  assert.match(source, /openPaddleTransaction/u);
+  assert.match(source, /body\.transactionId/u);
   assert.match(source, /portalAvailable/u);
   assert.match(source, /entitlementExpiresAt/u);
   assert.match(source, /Paddle 테스트 모드 · 실제 청구 없음/u);
   assert.doesNotMatch(source, /category=billing/u);
+});
+
+test('Paddle.js checkout validates environment-bound public tokens and provider transactions', async () => {
+  const source = await readFile(new URL('../lib/paddle-checkout.ts', import.meta.url), 'utf8');
+  assert.match(source, /NEXT_PUBLIC_PADDLE_CLIENT_TOKEN/u);
+  assert.match(source, /TRANSACTION_ID_PATTERN/u);
+  assert.match(source, /environment === 'production'.*startsWith\('live_'\)/su);
+  assert.match(source, /paddle\.Checkout\.open/u);
+  assert.match(source, /import\('@paddle\/paddle-js'\)/u);
+  assert.doesNotMatch(source, /^import \{ initializePaddle/mu);
+  assert.match(source, /transactionId,/u);
+  assert.match(source, /return false/u);
 });

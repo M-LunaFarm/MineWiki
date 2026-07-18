@@ -33,7 +33,10 @@ test('checkout persists an immutable intent before calling Paddle and attaches i
   assert.deepEqual(operations, ['subject', 'intent', 'provider', 'attach']);
   assert.equal(intent?.configuredPriceId, 'pri_handbook');
   assert.equal(intent?.providerTransactionId, 'txn_test');
-  assert.deepEqual(result, { checkoutUrl: 'https://checkout.paddle.com/test' });
+  assert.deepEqual(result, {
+    checkoutUrl: 'https://checkout.paddle.com/test',
+    transactionId: 'txn_test',
+  });
 });
 
 test('checkout is unavailable without live mode and never touches persistence', async () => {

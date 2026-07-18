@@ -68,6 +68,9 @@ export class PaddleCheckoutService {
       where: { id: intentId },
       data: { providerTransactionId: transaction.transactionId },
     });
-    return { checkoutUrl: transaction.checkoutUrl };
+    return {
+      checkoutUrl: transaction.checkoutUrl,
+      transactionId: transaction.transactionId,
+    };
   }
 }
