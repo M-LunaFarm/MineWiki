@@ -55,6 +55,10 @@ export interface ReviewServerWikiReleaseCandidateInput {
   readonly candidateToken: string;
 }
 
+export interface RequestServerWikiReleaseChangesInput extends ReviewServerWikiReleaseCandidateInput {
+  readonly note: string;
+}
+
 export interface SubmitServerWikiReleaseCandidateInput {
   readonly expectedVersion: number;
   readonly expectedCandidateToken: string;
@@ -146,6 +150,7 @@ const MAX_CANONICAL_ACCOUNT_DEPTH = 16;
 const MAX_SERIALIZABLE_ATTEMPTS = 3;
 const REASON_MIN_LENGTH = 5;
 const REASON_MAX_LENGTH = 500;
+const CHANGE_REQUEST_NOTE_MAX_LENGTH = 1000;
 const CANDIDATE_TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
 
 @Injectable()
@@ -165,7 +170,9 @@ export class ServerWikiPublicationService {
     const snapshot = await buildServerWikiReleaseCandidate(this.prisma, candidateInput(context), false);
     const submission = await loadLatestSubmittedServerWikiReleaseCandidate(this.prisma, context);
     const review = submission
-      ? await serverWikiReleaseReviewState(this.prisma, context, submission.id, submission.candidate.requiredApprovals, false)
+      ? submission.candidate.status === 'pending_review'
+        ? await serverWikiReleaseReviewState(this.prisma, context, submission.id, submission.candidate.requiredApprovals, false)
+        : emptyReviewState()
       : emptyReviewState();
     return toResponse(context, blockers, snapshot.candidate, submission?.candidate ?? null, review);
   }
@@ -258,6 +265,82 @@ export class ServerWikiPublicationService {
     return this.changeCandidateApproval(serverIdInput, input, actor, false);
   }
 
+  async requestCandidateChanges(
+    serverIdInput: string,
+    input: RequestServerWikiReleaseChangesInput,
+    actor: ServerWikiPublicationActor,
+  ): Promise<{ readonly candidateId: string; readonly status: 'changes_requested'; readonly note: string; readonly decidedAt: string }> {
+    const serverId = parseServerId(serverIdInput);
+    const candidateId = parseCandidateId(input.candidateId);
+    const candidateToken = parseCandidateToken(input.candidateToken);
+    const note = parseChangeRequestNote(input.note);
+    return this.serializable(async (tx) => {
+      const context = await this.resolveContext(tx, serverId, actor, true);
+      if (context.authority !== 'reviewer' || context.actorProfileId === null) throw reviewForbidden();
+      const submission = await loadStoredServerWikiReleaseCandidate(tx, {
+        id: candidateId, serverWikiId: context.serverWikiId, spaceId: context.spaceId,
+        token: candidateToken, lock: true,
+      });
+      if (submission.candidate.status !== 'pending_review') throw candidateUnavailable();
+      if (submission.candidate.submittedByProfileId === context.actorProfileId.toString()) throw reviewForbidden();
+      const now = new Date();
+      const transitioned = await tx.serverWikiReleaseCandidate.updateMany({
+        where: {
+          id: candidateId,
+          serverWikiId: context.serverWikiId,
+          spaceId: context.spaceId,
+          token: candidateToken,
+          status: 'pending_review',
+        },
+        data: { status: 'changes_requested' },
+      });
+      if (transitioned.count !== 1) throw candidateUnavailable();
+      await tx.serverWikiReleaseApproval.updateMany({
+        where: { candidateId, serverWikiId: context.serverWikiId, spaceId: context.spaceId, revokedAt: null },
+        data: { revokedAt: now, updatedAt: now },
+      });
+      await tx.serverWikiReleaseChangeRequest.create({
+        data: {
+          candidateId,
+          serverWikiId: context.serverWikiId,
+          spaceId: context.spaceId,
+          candidateToken,
+          note,
+          reviewerProfileId: context.actorProfileId,
+          decidedAt: now,
+          createdAt: now,
+        },
+      });
+      await writeAuditRecord(tx, {
+        data: {
+          category: 'server', action: 'server.wiki.release.changes_requested', severity: 'warning',
+          actorAccountId: context.actorAccountId, actorProfileId: context.actorProfileId,
+          subjectType: 'server_wiki_release_candidate', subjectId: candidateId.toString(),
+          metadata: toAuditJson({
+            serverId: context.serverId,
+            serverWikiId: context.serverWikiId,
+            candidateId,
+            candidateToken,
+            candidateCounts: submission.candidate.counts,
+            note,
+          }),
+        },
+      });
+      await this.notifications?.notifyServerWikiReleaseReviewChanged(tx, {
+        candidateId,
+        serverId: context.serverId,
+        submitterProfileId: submission.candidate.submittedByProfileId
+          ? BigInt(submission.candidate.submittedByProfileId)
+          : null,
+        reviewerProfileId: context.actorProfileId,
+        serverName: context.serverContent.name,
+        state: 'changes_requested',
+        changedAt: now,
+      });
+      return { candidateId: candidateId.toString(), status: 'changes_requested', note, decidedAt: now.toISOString() };
+    });
+  }
+
   private async changeCandidateApproval(
     serverIdInput: string,
     input: ReviewServerWikiReleaseCandidateInput,
@@ -331,6 +414,7 @@ export class ServerWikiPublicationService {
       });
       await this.notifications?.notifyServerWikiReleaseReviewChanged(tx, {
         candidateId,
+        serverId: context.serverId,
         submitterProfileId: submission.candidate.submittedByProfileId
           ? BigInt(submission.candidate.submittedByProfileId)
           : null,
@@ -1049,6 +1133,14 @@ function parseReason(value: string): string {
     throw new BadRequestException(`reason must contain between ${REASON_MIN_LENGTH} and ${REASON_MAX_LENGTH} characters.`);
   }
   return reason;
+}
+
+function parseChangeRequestNote(value: string): string {
+  const note = typeof value === 'string' ? value.trim() : '';
+  if (note.length < REASON_MIN_LENGTH || note.length > CHANGE_REQUEST_NOTE_MAX_LENGTH) {
+    throw new BadRequestException(`note must contain between ${REASON_MIN_LENGTH} and ${CHANGE_REQUEST_NOTE_MAX_LENGTH} characters.`);
+  }
+  return note;
 }
 
 function parseCandidateToken(value: string | undefined): string {

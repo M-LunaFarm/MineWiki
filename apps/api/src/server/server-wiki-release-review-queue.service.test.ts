@@ -77,14 +77,16 @@ function fixture() {
       },
     },
     serverWikiReleaseCandidate: {
-      async findMany(args: { where: { id?: { lt: bigint }; spaceId: { in: bigint[] } }; take: number }) {
+      async findMany(args: { where: { id?: { lt: bigint }; spaceId: { in: bigint[] }; status?: string }; take: number }) {
         return rows.filter((row) => args.where.spaceId.in.includes(row.spaceId)
+          && (!args.where.status || row.status === args.where.status)
           && (!args.where.id || row.id < args.where.id.lt)).slice(0, args.take);
       },
-      async findFirst(args: { where: { id: bigint; spaceId: { in: bigint[] } } }) {
-        return rows.find((row) => row.id === args.where.id && args.where.spaceId.in.includes(row.spaceId)) ?? null;
+      async findFirst(args: { where: { id: bigint; spaceId: { in: bigint[] }; status?: string } }) {
+        return rows.find((row) => row.id === args.where.id && args.where.spaceId.in.includes(row.spaceId)
+          && (!args.where.status || row.status === args.where.status)) ?? null;
       },
-      async count() { return 2; },
+      async count() { return rows.filter((row) => row.spaceId === 77n && row.status === 'pending_review').length; },
     },
     serverWikiReleaseApproval: { async findMany() { return []; } },
     serverWikiReleaseItem: {
@@ -103,6 +105,10 @@ function fixture() {
       },
     } as never),
     revokeReviewer() { reviewerEnabled = false; },
+    requestChanges(candidateId: bigint) {
+      const row = rows.find((item) => item.id === candidateId);
+      if (row) row.status = 'changes_requested';
+    },
   };
 }
 
@@ -124,6 +130,15 @@ test('reviewer discovers only pending candidates from assigned spaces without a 
   assert.deepEqual(second.items.map((item) => item.candidateId), ['2']);
   assert.equal(second.nextCursor, null);
   assert.equal((await service.summary(accountId)).count, 2);
+});
+
+test('a candidate leaves the reviewer queue immediately after changes are requested', async () => {
+  const { service, requestChanges } = fixture();
+  requestChanges(3n);
+  const result = await service.list(accountId);
+  assert.deepEqual(result.items.map((item) => item.candidateId), ['2']);
+  assert.equal((await service.summary(accountId)).count, 1);
+  await assert.rejects(() => service.get(accountId, '3'), NotFoundException);
 });
 
 test('review detail returns only a bounded persisted manifest summary and hides another tenant candidate', async () => {

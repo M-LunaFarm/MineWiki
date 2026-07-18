@@ -179,7 +179,11 @@ export class WikiNotificationService {
         const canReviewPendingCandidate = row.type === 'server_wiki_release_submitted'
           && candidate?.status === 'pending_review'
           && reviewerSpaceIds.has(candidate.spaceId);
-        const ownsReviewedCandidate = (row.type === 'server_wiki_release_approved' || row.type === 'server_wiki_release_revoked')
+        const ownsReviewedCandidate = (
+          row.type === 'server_wiki_release_approved'
+          || row.type === 'server_wiki_release_revoked'
+          || row.type === 'server_wiki_release_changes_requested'
+        )
           && candidate?.createdBy === profile.id;
         if (!canReviewPendingCandidate && !ownsReviewedCandidate) {
           hiddenIds.push(row.id);
@@ -480,16 +484,17 @@ export class WikiNotificationService {
 
   async notifyServerWikiReleaseReviewChanged(tx: Prisma.TransactionClient, input: {
     readonly candidateId: bigint;
+    readonly serverId: string;
     readonly submitterProfileId: bigint | null;
     readonly reviewerProfileId: bigint;
     readonly serverName: string;
-    readonly state: 'approved' | 'revoked';
+    readonly state: 'approved' | 'revoked' | 'changes_requested';
     readonly changedAt: Date;
   }): Promise<void> {
     if (input.submitterProfileId === null || input.submitterProfileId === input.reviewerProfileId) return;
     const recipients = await this.activeCanonicalProfileIds(tx, [input.submitterProfileId]);
     if (recipients.length === 0) return;
-    const href = `/wiki/release-reviews/${input.candidateId.toString()}`;
+    const href = `/servers/${encodeURIComponent(input.serverId)}/wiki-layouts`;
     await this.persistDeliveries(
       tx,
       `server-wiki-release:${input.candidateId.toString()}:${input.state}:reviewer:${input.reviewerProfileId.toString()}`,
@@ -504,7 +509,9 @@ export class WikiNotificationService {
         title: input.serverName,
         message: input.state === 'approved'
           ? '서버 위키 릴리스 후보가 승인되었습니다.'
-          : '서버 위키 릴리스 후보 승인이 취소되었습니다.',
+          : input.state === 'changes_requested'
+            ? '서버 위키 릴리스 후보에 변경 요청이 등록되었습니다.'
+            : '서버 위키 릴리스 후보 승인이 취소되었습니다.',
         href,
         dedupeKey: `server-wiki-release:${input.candidateId.toString()}:${input.state}:reviewer:${input.reviewerProfileId.toString()}:profile:${recipients[0]!.toString()}`,
         readAt: null,

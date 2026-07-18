@@ -20,6 +20,11 @@ export interface PersistedServerWikiReleaseCandidate extends ServerWikiReleaseCa
   readonly submittedByProfileId: string | null;
   readonly siteSlug: string;
   readonly contentSlug: string;
+  readonly changeRequest: {
+    readonly note: string;
+    readonly reviewerProfileId: string;
+    readonly decidedAt: string;
+  } | null;
 }
 
 export interface StoredServerWikiReleaseCandidate {
@@ -97,8 +102,9 @@ export async function submitServerWikiReleaseCandidate(
   `;
   const existing = await store.serverWikiReleaseCandidate.findUnique({
     where: { serverWikiId_token: { serverWikiId: input.serverWikiId, token: snapshot.candidate.token } },
-    select: { requiredApprovals: true },
+    select: { requiredApprovals: true, status: true },
   });
+  if (existing?.status === 'changes_requested') throw candidateChangesRequested();
   const requiredApprovals = Math.max(input.requiredApprovals, existing?.requiredApprovals ?? 0);
   const record = await store.serverWikiReleaseCandidate.upsert({
     where: { serverWikiId_token: { serverWikiId: input.serverWikiId, token: snapshot.candidate.token } },
@@ -171,7 +177,7 @@ export async function loadLatestSubmittedServerWikiReleaseCandidate(
     where: {
       serverWikiId: input.serverWikiId,
       spaceId: input.spaceId,
-      status: 'pending_review',
+      status: { in: ['pending_review', 'changes_requested'] },
     },
     orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
     select: candidateRecordSelection,
@@ -194,6 +200,9 @@ const candidateRecordSelection = {
   contentSlug: true,
   manifestSnapshot: true,
   releaseSnapshot: true,
+  changeRequest: {
+    select: { note: true, reviewerProfileId: true, decidedAt: true },
+  },
 } as const;
 
 function serializeReleaseSnapshot(snapshot: ReleaseCandidateSnapshot): Prisma.InputJsonValue {
@@ -242,6 +251,11 @@ function restoreStoredCandidate(
     readonly contentSlug: string;
     readonly manifestSnapshot: Prisma.JsonValue;
     readonly releaseSnapshot: Prisma.JsonValue;
+    readonly changeRequest: {
+      readonly note: string;
+      readonly reviewerProfileId: bigint;
+      readonly decidedAt: Date;
+    } | null;
   },
   serverWikiId: bigint,
   spaceId: bigint,
@@ -306,6 +320,11 @@ function restoreStoredCandidate(
       submittedByProfileId: record.createdBy?.toString() ?? null,
       siteSlug: record.siteSlug,
       contentSlug: record.contentSlug,
+      changeRequest: record.changeRequest ? {
+        note: record.changeRequest.note,
+        reviewerProfileId: record.changeRequest.reviewerProfileId.toString(),
+        decidedAt: record.changeRequest.decidedAt.toISOString(),
+      } : null,
     },
     snapshot,
   };
@@ -316,6 +335,14 @@ function candidateUnavailable(): ConflictException {
     statusCode: 409,
     code: 'SERVER_WIKI_RELEASE_CANDIDATE_UNAVAILABLE',
     message: 'The selected server wiki release candidate is unavailable.',
+  });
+}
+
+function candidateChangesRequested(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    code: 'SERVER_WIKI_RELEASE_CHANGES_REQUESTED',
+    message: 'This release candidate needs content changes before it can be submitted again.',
   });
 }
 

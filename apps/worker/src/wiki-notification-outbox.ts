@@ -184,7 +184,11 @@ async function filterAuthorizedReleaseReviewDeliveries(
       return candidate.status === 'pending_review'
         && reviewerKeys.has(`${profileId.toString()}:${candidate.spaceId.toString()}`);
     }
-    if (delivery.type === 'server_wiki_release_approved' || delivery.type === 'server_wiki_release_revoked') {
+    if (
+      delivery.type === 'server_wiki_release_approved'
+      || delivery.type === 'server_wiki_release_revoked'
+      || delivery.type === 'server_wiki_release_changes_requested'
+    ) {
       return candidate.createdBy === profileId;
     }
     return false;

@@ -153,7 +153,9 @@ function createFixture(options: FixtureOptions = {}) {
     releaseSnapshot: Prisma.JsonValue;
     createdBy: bigint | null;
     submittedAt: Date;
+    changeRequest: { note: string; reviewerProfileId: bigint; decidedAt: Date } | null;
   }> = [];
+  const changeRequests: Array<{ candidateId: bigint; note: string; reviewerProfileId: bigint; decidedAt: Date }> = [];
   const isolationLevels: string[] = [];
   const lockQueries: string[] = [];
   const profiles = new Map([
@@ -283,33 +285,46 @@ function createFixture(options: FixtureOptions = {}) {
         const key = args.where.serverWikiId_token;
         return candidates.find((candidate) => candidate.serverWikiId === key.serverWikiId && candidate.token === key.token) ?? null;
       },
-      async findFirst(args: { where: { id?: bigint; serverWikiId: bigint; spaceId: bigint; token?: string; status?: string } }) {
+      async findFirst(args: { where: { id?: bigint; serverWikiId: bigint; spaceId: bigint; token?: string; status?: string | { in: string[] } } }) {
         return [...candidates].reverse().find((candidate) => candidate.serverWikiId === args.where.serverWikiId
           && candidate.spaceId === args.where.spaceId
           && (args.where.id === undefined || candidate.id === args.where.id)
           && (args.where.token === undefined || candidate.token === args.where.token)
-          && (args.where.status === undefined || candidate.status === args.where.status)) ?? null;
+          && (args.where.status === undefined || (typeof args.where.status === 'string'
+            ? candidate.status === args.where.status
+            : args.where.status.in.includes(candidate.status)))) ?? null;
       },
       async upsert(args: { create: Omit<(typeof candidates)[number], 'id'>; update: Partial<(typeof candidates)[number]>; where: { serverWikiId_token: { serverWikiId: bigint; token: string } } }) {
         const key = args.where.serverWikiId_token;
         const existing = candidates.find((candidate) => candidate.serverWikiId === key.serverWikiId && candidate.token === key.token);
         if (existing) { Object.assign(existing, args.update); return existing; }
-        const created = { id: BigInt(700 + candidates.length), ...args.create };
+        const created = { id: BigInt(700 + candidates.length), changeRequest: null, ...args.create };
         candidates.push(created);
         return created;
       },
-      async updateMany(args: { where: { id?: bigint; serverWikiId?: bigint; spaceId?: bigint; status?: string; token?: { not: string } }; data: { status: string } }) {
+      async updateMany(args: { where: { id?: bigint; serverWikiId?: bigint; spaceId?: bigint; status?: string; token?: string | { not: string } }; data: { status: string } }) {
         let count = 0;
         for (const candidate of candidates) {
           if ((args.where.id === undefined || candidate.id === args.where.id)
             && (args.where.serverWikiId === undefined || candidate.serverWikiId === args.where.serverWikiId)
             && (args.where.spaceId === undefined || candidate.spaceId === args.where.spaceId)
             && (args.where.status === undefined || candidate.status === args.where.status)
-            && (args.where.token === undefined || candidate.token !== args.where.token.not)) {
+            && (args.where.token === undefined || (typeof args.where.token === 'string'
+              ? candidate.token === args.where.token
+              : candidate.token !== args.where.token.not))) {
             candidate.status = args.data.status; count += 1;
           }
         }
         return { count };
+      },
+    },
+    serverWikiReleaseChangeRequest: {
+      async create(args: { data: { candidateId: bigint; note: string; reviewerProfileId: bigint; decidedAt: Date } }) {
+        const row = { candidateId: args.data.candidateId, note: args.data.note, reviewerProfileId: args.data.reviewerProfileId, decidedAt: args.data.decidedAt };
+        changeRequests.push(row);
+        const candidate = candidates.find((item) => item.id === row.candidateId);
+        if (candidate) candidate.changeRequest = { note: row.note, reviewerProfileId: row.reviewerProfileId, decidedAt: row.decidedAt };
+        return row;
       },
     },
     serverWikiReleaseItem: {
@@ -411,6 +426,7 @@ function createFixture(options: FixtureOptions = {}) {
     revisionRows,
     approvals,
     candidates,
+    changeRequests,
     setReviewerEnabled(value: boolean) { reviewerEnabled = value; if (value) reviewerEverConfigured = true; },
   };
 }
@@ -660,6 +676,58 @@ test('release submission, approval, and revocation emit transactional review not
   assert.ok(changed.every((event) => event.candidateId === BigInt(submission.id)));
   assert.ok(changed.every((event) => event.submitterProfileId === 1n));
   assert.ok(changed.every((event) => event.reviewerProfileId === 4n));
+});
+
+test('reviewer requests changes atomically, revokes approval, and blocks same-manifest resubmission', async () => {
+  const changed: Array<Record<string, unknown>> = [];
+  const fixture = createFixture({
+    reviewerConfigured: true,
+    notifications: {
+      async notifyServerWikiReleaseSubmitted() {},
+      async notifyServerWikiReleaseReviewChanged(_tx, input) {
+        changed.push(input as Record<string, unknown>);
+      },
+    },
+  });
+  const submission = await fixture.submitCandidate();
+  const reviewerActor = { accountId: reviewerAccountId, permissions: [] };
+  await fixture.service.approveCandidate(serverId, {
+    candidateId: submission.id,
+    candidateToken: submission.token,
+  }, reviewerActor);
+
+  const result = await fixture.service.requestCandidateChanges(serverId, {
+    candidateId: submission.id,
+    candidateToken: submission.token,
+    note: '규칙 문서에 제재 단계와 이의 제기 절차를 구체적으로 작성해 주세요.',
+  }, reviewerActor);
+
+  assert.equal(result.status, 'changes_requested');
+  assert.equal(fixture.candidates[0]?.status, 'changes_requested');
+  assert.equal(fixture.approvals[0]?.revokedAt instanceof Date, true);
+  assert.equal(fixture.changeRequests[0]?.candidateId, BigInt(submission.id));
+  assert.equal(fixture.changeRequests[0]?.reviewerProfileId, 4n);
+  assert.equal(changed.at(-1)?.state, 'changes_requested');
+  assert.equal(fixture.audits.at(-1)?.action, 'server.wiki.release.changes_requested');
+  await assert.rejects(
+    () => fixture.submitCandidate('retry unchanged candidate after requested changes'),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_CHANGES_REQUESTED'),
+  );
+});
+
+test('change requests require a bounded review note', async () => {
+  const fixture = createFixture({ reviewerConfigured: true });
+  const submission = await fixture.submitCandidate();
+  await assert.rejects(
+    () => fixture.service.requestCandidateChanges(serverId, {
+      candidateId: submission.id,
+      candidateToken: submission.token,
+      note: '  ',
+    }, { accountId: reviewerAccountId, permissions: [] }),
+    BadRequestException,
+  );
+  assert.equal(fixture.changeRequests.length, 0);
 });
 
 test('removing every reviewer never lowers the approval requirement fixed at submission', async () => {

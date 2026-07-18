@@ -9,6 +9,7 @@ import {
   ServerWikiPublicationService,
   type ServerWikiPublicationActor,
   type ReviewServerWikiReleaseCandidateInput,
+  type RequestServerWikiReleaseChangesInput,
   type SubmitServerWikiReleaseCandidateInput,
   type UpdateServerWikiPublicationInput,
 } from './server-wiki-publication.service';
@@ -39,6 +40,10 @@ const updatePublicationSchema = z.object({
 const reviewCandidateSchema = z.object({
   candidateId: z.string().regex(/^[1-9][0-9]{0,19}$/u),
   candidateToken: z.string().regex(/^[0-9a-f]{64}$/u),
+}).strict();
+
+const requestChangesSchema = reviewCandidateSchema.extend({
+  note: z.string().trim().min(5).max(1000),
 }).strict();
 
 const submitCandidateSchema = z.object({
@@ -107,6 +112,18 @@ export class ServerWikiPublicationController {
   ) {
     const input = reviewCandidateSchema.parse(body) as ReviewServerWikiReleaseCandidateInput;
     return this.publication.revokeCandidateApproval(serverId, input, actorFromSession(session));
+  }
+
+  @Post('changes-request')
+  @RequireStepUp('wiki_release_review')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  requestCandidateChanges(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    const input = requestChangesSchema.parse(body) as RequestServerWikiReleaseChangesInput;
+    return this.publication.requestCandidateChanges(serverId, input, actorFromSession(session));
   }
 }
 

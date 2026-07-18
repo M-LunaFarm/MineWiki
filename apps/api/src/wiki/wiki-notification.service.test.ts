@@ -293,15 +293,19 @@ test('release review changes notify the active submitter once and never notify t
   const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
 
   await service.notifyServerWikiReleaseReviewChanged(tx as never, {
-    candidateId: 44n, submitterProfileId: 8n, reviewerProfileId: 7n,
+    candidateId: 44n, serverId: '11111111-1111-4111-8111-111111111111', submitterProfileId: 8n, reviewerProfileId: 7n,
     serverName: 'Luna', state: 'approved', changedAt: now,
   });
   await service.notifyServerWikiReleaseReviewChanged(tx as never, {
-    candidateId: 45n, submitterProfileId: 7n, reviewerProfileId: 7n,
+    candidateId: 45n, serverId: '11111111-1111-4111-8111-111111111111', submitterProfileId: 7n, reviewerProfileId: 7n,
     serverName: 'Luna', state: 'revoked', changedAt: now,
   });
+  await service.notifyServerWikiReleaseReviewChanged(tx as never, {
+    candidateId: 46n, serverId: '11111111-1111-4111-8111-111111111111', submitterProfileId: 8n, reviewerProfileId: 7n,
+    serverName: 'Luna', state: 'changes_requested', changedAt: now,
+  });
 
-  assert.equal(events.length, 1);
+  assert.equal(events.length, 2);
   assert.equal(events[0]?.eventKey, 'server-wiki-release:44:approved:reviewer:7');
   assert.deepEqual(events[0]?.payloadJson.deliveries[0], {
     profileId: '8',
@@ -312,11 +316,13 @@ test('release review changes notify the active submitter once and never notify t
     sourceId: '44',
     title: 'Luna',
     message: '서버 위키 릴리스 후보가 승인되었습니다.',
-    href: '/wiki/release-reviews/44',
+    href: '/servers/11111111-1111-4111-8111-111111111111/wiki-layouts',
     dedupeKey: 'server-wiki-release:44:approved:reviewer:7:profile:8',
     readAt: null,
     createdAt: now.toISOString(),
   });
+  assert.equal(events[1]?.eventKey, 'server-wiki-release:46:changes_requested:reviewer:7');
+  assert.equal((events[1]?.payloadJson.deliveries[0] as { type?: string } | undefined)?.type, 'server_wiki_release_changes_requested');
 });
 
 test('rejected new-page requests notify the author through the request identity route', async () => {

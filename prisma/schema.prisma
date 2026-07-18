@@ -1998,12 +1998,12 @@ model ServerWikiRelease {
   publishedAt          DateTime @map("published_at") @db.DateTime(3)
   candidateId          BigInt?  @unique @map("candidate_id") @db.UnsignedBigInt
 
-  serverWiki   ServerWiki                  @relation("ServerWikiReleaseHistory", fields: [serverWikiId], references: [id], onDelete: Cascade)
-  publishedFor ServerWiki?                 @relation("PublishedServerWikiRelease")
+  serverWiki   ServerWiki                        @relation("ServerWikiReleaseHistory", fields: [serverWikiId], references: [id], onDelete: Cascade)
+  publishedFor ServerWiki?                       @relation("PublishedServerWikiRelease")
   items        ServerWikiReleaseItem[]
   links        ServerWikiReleaseLink[]
   navigation   ServerWikiReleaseNavigationNode[]
-  candidate    ServerWikiReleaseCandidate? @relation("CandidatePublishedRelease", fields: [candidateId], references: [id], onDelete: Restrict)
+  candidate    ServerWikiReleaseCandidate?       @relation("CandidatePublishedRelease", fields: [candidateId], references: [id], onDelete: Restrict)
 
   @@unique([serverWikiId, version], map: "uq_server_wiki_release_version")
   @@index([serverWikiId, publishedAt], map: "idx_server_wiki_release_published")
@@ -2052,15 +2052,36 @@ model ServerWikiReleaseCandidate {
   submittedAt              DateTime @map("submitted_at") @db.DateTime(3)
   createdAt                DateTime @default(now()) @map("created_at") @db.DateTime(3)
 
-  serverWiki       ServerWiki                  @relation(fields: [serverWikiId], references: [id], onDelete: Cascade)
+  serverWiki       ServerWiki                      @relation(fields: [serverWikiId], references: [id], onDelete: Cascade)
   approvals        ServerWikiReleaseApproval[]
-  publishedRelease ServerWikiRelease?          @relation("CandidatePublishedRelease")
+  changeRequest    ServerWikiReleaseChangeRequest?
+  publishedRelease ServerWikiRelease?              @relation("CandidatePublishedRelease")
 
   @@unique([serverWikiId, token], map: "uq_server_wiki_release_candidate_token")
+  @@unique([id, serverWikiId, spaceId, token], map: "uq_server_wiki_release_candidate_tenant_token")
   @@index([spaceId, createdAt], map: "idx_server_wiki_release_candidate_space")
   @@index([serverWikiId, status, submittedAt], map: "idx_server_wiki_release_candidate_status")
   @@index([serverWikiId, baselineReleaseId, createdAt], map: "idx_server_wiki_release_candidate_baseline")
   @@map("server_wiki_release_candidates")
+}
+
+model ServerWikiReleaseChangeRequest {
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  candidateId       BigInt   @unique @map("candidate_id") @db.UnsignedBigInt
+  serverWikiId      BigInt   @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId           BigInt   @map("space_id") @db.UnsignedBigInt
+  candidateToken    String   @map("candidate_token") @db.Char(64)
+  note              String   @db.VarChar(1000)
+  reviewerProfileId BigInt   @map("reviewer_profile_id") @db.UnsignedBigInt
+  decidedAt         DateTime @map("decided_at") @db.DateTime(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  candidate ServerWikiReleaseCandidate @relation(fields: [candidateId, serverWikiId, spaceId, candidateToken], references: [id, serverWikiId, spaceId, token], onDelete: Cascade)
+
+  @@unique([candidateId, serverWikiId, spaceId, candidateToken], map: "uq_server_wiki_release_change_request_tenant")
+  @@index([serverWikiId, spaceId, decidedAt], map: "idx_server_wiki_release_change_request_tenant")
+  @@index([reviewerProfileId, decidedAt], map: "idx_server_wiki_release_change_request_reviewer")
+  @@map("server_wiki_release_change_requests")
 }
 
 model ServerWikiReleaseItem {
