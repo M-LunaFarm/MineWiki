@@ -1,6 +1,7 @@
 import { Logger } from '@minewiki/logger';
 import { validateOutboundTarget } from '@minewiki/security';
 import type { ClaimVerificationJob } from '@minewiki/schemas';
+import { isSupportedClaimMethod, type ClaimMethod } from '@minewiki/schemas/claim-methods';
 import type { PrismaClient } from '@prisma/client';
 import { resolveTxt } from 'node:dns/promises';
 import { status, statusBedrock } from 'minecraft-server-util';
@@ -9,7 +10,6 @@ import { decryptStoredSecret } from '../stored-secret';
 const CHECK_TIMEOUT_MS = 5000;
 const METHOD_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
-type ClaimMethod = 'plugin' | 'dns' | 'motd';
 type ClaimMethodState = 'pending' | 'verified' | 'expired' | 'failed';
 type VerificationGrade = 'A' | 'B' | 'C' | 'Unverified';
 
@@ -69,6 +69,7 @@ export function createClaimVerifier(
       logger.warn({ serverId: job.serverId, method: job.method }, 'Claim method record missing');
       return { status: 'failed', checkedAt, note: 'method_not_issued' };
     }
+    const snapshot: ClaimSnapshot = { ...methodRecord, method: job.method };
 
     const expiryBasis = methodRecord.verifiedAt ?? methodRecord.issuedAt;
     if (
@@ -80,14 +81,14 @@ export function createClaimVerifier(
         checkedAt,
         note: 'token_expired',
       };
-      const applied = await applyVerificationResult(prisma, methodRecord, result);
+      const applied = await applyVerificationResult(prisma, snapshot, result);
       return applied
         ? result
         : { status: 'pending', checkedAt, note: 'claim_generation_changed' };
     }
 
     const proof = resolveVerificationProof(methodRecord.token, methodRecord.tokenCiphertext);
-    if (job.method !== 'plugin' && !proof) {
+    if (!proof) {
       const result = {
         status: methodRecord.status as ClaimMethodState,
         checkedAt,
@@ -110,7 +111,7 @@ export function createClaimVerifier(
     }
 
     const result = await check(job.method, proof ?? '', job.serverId, prisma);
-    const applied = await applyVerificationResult(prisma, methodRecord, result);
+    const applied = await applyVerificationResult(prisma, snapshot, result);
     return applied
       ? result
       : { status: 'pending', checkedAt, note: 'claim_generation_changed' };
@@ -186,14 +187,6 @@ async function runVerificationCheck(
 ): Promise<ClaimVerificationResult> {
   const checkedAt = new Date().toISOString();
 
-  if (method === 'plugin') {
-    return {
-      status: 'pending',
-      checkedAt,
-      note: 'plugin_callback_required',
-    };
-  }
-
   try {
     if (method === 'dns') {
       const verified = await verifyDnsToken(serverId, token, prisma);
@@ -229,7 +222,9 @@ async function runVerificationCheck(
 function computeGrade(
   methods: Array<{ method: string; status: ClaimMethodState }>,
 ): VerificationGrade {
-  return methods.some((method) => method.status === 'verified') ? 'A' : 'Unverified';
+  return methods.some(
+    (method) => isSupportedClaimMethod(method.method) && method.status === 'verified',
+  ) ? 'A' : 'Unverified';
 }
 
 async function verifyDnsToken(
@@ -327,8 +322,4 @@ function extractMotd(raw: unknown): string {
 
 function stripFormatting(value: string): string {
   return value.replace(/§[0-9A-FK-OR]/gi, '').trim();
-}
-
-function isSupportedClaimMethod(value: string): value is ClaimMethod {
-  return value === 'plugin' || value === 'dns' || value === 'motd';
 }

@@ -202,3 +202,61 @@ test('successful verification activates only a pending listing', async () => {
     data: { listingStatus: 'active' },
   }]);
 });
+
+test('legacy verified plugin rows cannot activate a listing after a supported check fails', async () => {
+  const fixedNow = new Date('2026-07-12T12:00:00.000Z');
+  const gradeUpdates: unknown[] = [];
+  const listingUpdates: unknown[] = [];
+  const record = {
+    id: 'claim-method-1',
+    serverId: 'server-1',
+    accountId: 'account-1',
+    method: 'dns',
+    version: 1,
+    token: 'proof-a',
+    tokenCiphertext: null,
+    issuedAt: new Date(fixedNow.getTime() - 60_000),
+    status: 'pending',
+    verifiedAt: null,
+  };
+  const prisma = {
+    serverClaimMethod: {
+      findUnique: async () => record,
+      updateMany: async () => ({ count: 1 }),
+      findMany: async () => [
+        { method: 'dns', status: 'failed' },
+        { method: 'plugin', status: 'verified' },
+      ],
+    },
+    server: {
+      update: async (query: unknown) => {
+        gradeUpdates.push(query);
+        return {};
+      },
+      updateMany: async (query: unknown) => {
+        listingUpdates.push(query);
+        return { count: 1 };
+      },
+    },
+  };
+
+  const result = await createClaimVerifier(prisma as never, {
+    now: () => fixedNow,
+    runVerificationCheck: async () => ({
+      status: 'failed',
+      checkedAt: fixedNow.toISOString(),
+      note: 'dns_token_not_found',
+    }),
+  }).verify({
+    serverId: 'server-1',
+    method: 'dns',
+    initiatedAt: fixedNow.toISOString(),
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(gradeUpdates, [{
+    where: { id: 'server-1' },
+    data: { verificationGrade: 'Unverified', verifiedAt: null },
+  }]);
+  assert.deepEqual(listingUpdates, []);
+});

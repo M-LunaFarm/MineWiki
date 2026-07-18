@@ -6,7 +6,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./claim-methods": {
+      "types": "./claim-methods.d.ts",
+      "default": "./claim-methods.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"

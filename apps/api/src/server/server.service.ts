@@ -55,8 +55,8 @@ import {
   type ServerWikiNavigationDocument,
 } from '../wiki/server-wiki-navigation-order';
 import { buildCanonicalServerWikiPath } from '../wiki/wiki-route-path.resolver';
+import { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '@minewiki/schemas/claim-methods';
 
-const ALL_METHODS: ClaimMethod[] = ['plugin', 'dns', 'motd'];
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
 const LIVE_PING_TIMEOUT_MS = 5000;
 const SAMPLE_RETENTION_DAYS = 7;
@@ -284,10 +284,10 @@ export class ServerService {
       const hasPublicWiki = hasCanonicalServerWikiLink(server, serverWiki);
       const detail = {
         ...toDetail(
-        hasPublicWiki
-          ? server
-          : { ...server, wikiSpaceId: null, wikiPageId: null, wikiSlug: null },
-        verificationMethods.length > 0 ? verificationMethods : ALL_METHODS,
+          hasPublicWiki
+            ? server
+            : { ...server, wikiSpaceId: null, wikiPageId: null, wikiSlug: null },
+          verificationMethods.length > 0 ? verificationMethods : SUPPORTED_CLAIM_METHODS,
         ),
         wikiUrl: hasPublicWiki && serverWiki
           ? `/serverWiki/${encodeURIComponent(serverWiki.siteSlug ?? serverWiki.slug)}`
@@ -571,7 +571,7 @@ export class ServerService {
         this.prisma.serverClaimMethod.findMany({
           where: {
             serverId: id,
-            method: { in: ALL_METHODS },
+            method: { in: [...SUPPORTED_CLAIM_METHODS] },
             verifiedAt: { not: null },
           },
           orderBy: { verifiedAt: 'desc' },
@@ -1303,7 +1303,7 @@ export class ServerService {
         hasDiscord: input.discordUrl !== null,
       },
     });
-    return toDetail(updated, ALL_METHODS);
+    return toDetail(updated, SUPPORTED_CLAIM_METHODS);
   }
 
   async uploadContentImage(accountId: string, upload: FileImageUploadRequest): Promise<FileImageUploadResponse> {
@@ -1332,7 +1332,7 @@ export class ServerService {
       where: { id },
       data: { voteRequiresOwnership: requiresOwnership },
     });
-    return toDetail(updated, ALL_METHODS);
+    return toDetail(updated, SUPPORTED_CLAIM_METHODS);
   }
 
   async listVotifierTargets(serverId: string): Promise<VotifierTarget[]> {
@@ -1719,7 +1719,7 @@ export class ServerService {
             },
           },
         });
-        return toDetail(server, ALL_METHODS);
+        return toDetail(server, SUPPORTED_CLAIM_METHODS);
       } catch (error) {
         if (isEndpointUniqueConstraintError(error)) {
           throw new ConflictException(
@@ -2801,7 +2801,7 @@ function toDetail(
       lastUpdatedAt: Date;
     } | null;
   },
-  verificationMethods: ClaimMethod[],
+  verificationMethods: readonly ClaimMethod[],
 ): ServerDetail {
   return {
     ...toSummary(server),
@@ -2810,7 +2810,7 @@ function toDetail(
     websiteUrl: server.websiteUrl ?? null,
     discordUrl: server.discordUrl ?? null,
     voteCooldownHours: server.voteCooldownHours,
-    verificationMethods,
+    verificationMethods: [...verificationMethods],
     createdAt: server.createdAt.toISOString(),
     lastUpdatedAt: server.updatedAt.toISOString(),
   };
@@ -2858,9 +2858,6 @@ function ellipsize(value: string, maxLength: number): string {
   return `${trimmed.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
-function isSupportedClaimMethod(value: string): value is ClaimMethod {
-  return value === 'plugin' || value === 'dns' || value === 'motd';
-}
 
 function shouldRefreshLiveStats(lastPingAt: Date | null, sampleCount: number): boolean {
   if (sampleCount === 0) {

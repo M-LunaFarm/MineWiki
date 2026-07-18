@@ -145,7 +145,7 @@ test('server detail hides a stale cross-brand wiki link', async () => {
   };
   const prisma = {
     server: { async findUnique() { return server; } },
-    serverClaimMethod: { async findMany() { return []; } },
+    serverClaimMethod: { async findMany() { return [{ method: 'plugin' }]; } },
     serverWiki: {
       async findUnique() {
         return {
@@ -168,6 +168,7 @@ test('server detail hides a stale cross-brand wiki link', async () => {
   assert.equal(detail.wikiPageId, null);
   assert.equal(detail.wikiSlug, null);
   assert.equal(detail.wikiUrl, null);
+  assert.deepEqual(detail.verificationMethods, ['dns', 'motd']);
 });
 
 test('server wiki readiness points owners to the first incomplete factual document', async () => {

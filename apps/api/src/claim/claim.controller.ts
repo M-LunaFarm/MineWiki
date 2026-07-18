@@ -15,8 +15,8 @@ import type { ClaimMethod, ClaimMethodStatus, ClaimStatusResponse } from './clai
 import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
+import { SUPPORTED_CLAIM_METHODS } from '@minewiki/schemas/claim-methods';
 
-const METHODS: ClaimMethod[] = ['dns', 'motd'];
 interface StartRequest {
   readonly methods?: ClaimMethod[];
 }
@@ -49,7 +49,7 @@ export class ClaimController {
     @Body() body: VerifyRequest,
     @CurrentSession() session: SessionPayload
   ): Promise<ClaimStatusResponse> {
-    if (!body?.method || !METHODS.includes(body.method)) {
+    if (!body?.method || !SUPPORTED_CLAIM_METHODS.includes(body.method)) {
       throw new BadRequestException('허용되지 않는 검증 방식입니다.');
     }
     if (!body.proof || body.proof.trim().length === 0) {
@@ -79,7 +79,7 @@ function validateMethods(methods?: ClaimMethod[]): void {
   if (!methods) {
     return;
   }
-  const invalid = methods.filter((method) => !METHODS.includes(method));
+  const invalid = methods.filter((method) => !SUPPORTED_CLAIM_METHODS.includes(method));
   if (invalid.length > 0) {
     throw new BadRequestException(`허용되지 않는 검증 방식입니다. ${invalid.join(', ')}`);
   }

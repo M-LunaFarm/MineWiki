@@ -20,6 +20,7 @@ import { PrismaService } from '../common/prisma.service';
 import { validateOutboundTarget } from '@minewiki/security';
 import { status, statusBedrock } from 'minecraft-server-util';
 import { encryptAppSecret } from '../common/secret-codec';
+import { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '@minewiki/schemas/claim-methods';
 
 export interface ClaimVerificationResult {
   readonly status: ClaimMethodState;
@@ -27,7 +28,6 @@ export interface ClaimVerificationResult {
   readonly note?: string;
 }
 
-const ALL_METHODS: ClaimMethod[] = ['dns', 'motd'];
 const METHOD_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24h
 type StoredVerificationGrade = 'A' | 'B' | 'C' | 'Unverified';
 
@@ -65,13 +65,16 @@ export class ClaimService {
     ) {
       throw new ForbiddenException('서버를 등록한 계정만 최초 소유권 검증을 시작할 수 있습니다.');
     }
-    const targets = methods && methods.length > 0 ? methods : ALL_METHODS;
-    if (targets.includes('plugin')) {
-      throw new BadRequestException(
-        'Plugin ownership verification is unavailable until an authenticated plugin proof is configured.',
-      );
+    const targets: ClaimMethod[] = methods && methods.length > 0
+      ? [...methods]
+      : [...SUPPORTED_CLAIM_METHODS];
+    const unsupported = targets.filter((method) => !isSupportedClaimMethod(method));
+    if (unsupported.length > 0) {
+      throw new BadRequestException(`허용되지 않는 검증 방식입니다. ${unsupported.join(', ')}`);
     }
-    const issuedTokens = new Map(targets.map((method) => [method, generateToken()]));
+    const issuedTokens = new Map<ClaimMethod, string>(
+      targets.map((method) => [method, generateToken()] as const),
+    );
 
     const now = new Date();
     const updates = await this.prisma.$transaction(
@@ -282,7 +285,11 @@ export class ClaimService {
   private async expireMethodsIfNeeded(serverId: string): Promise<void> {
     const now = Date.now();
     const methods = await this.prisma.serverClaimMethod.findMany({
-      where: { serverId, status: { in: ['pending', 'verified'] } },
+      where: {
+        serverId,
+        method: { in: [...SUPPORTED_CLAIM_METHODS] },
+        status: { in: ['pending', 'verified'] },
+      },
     });
 
     const expired = methods.filter(
@@ -320,7 +327,7 @@ export class ClaimService {
 
   private async syncGrade(serverId: string): Promise<void> {
     const methods = await this.prisma.serverClaimMethod.findMany({
-      where: { serverId },
+      where: { serverId, method: { in: [...SUPPORTED_CLAIM_METHODS] } },
     });
     const grade = this.computeStoredGrade(methods);
     await this.prisma.server.update({
@@ -357,14 +364,6 @@ export class ClaimService {
     serverId: string,
   ): Promise<ClaimVerificationResult> {
     const checkedAt = new Date().toISOString();
-
-    if (method === 'plugin') {
-      return {
-        status: 'pending',
-        checkedAt,
-        note: 'plugin_callback_required',
-      };
-    }
 
     try {
       if (method === 'dns') {
@@ -432,7 +431,9 @@ export class ClaimService {
   private computeStoredGrade(
     methods: Array<{ method: string; status: ClaimMethodState }>,
   ): StoredVerificationGrade {
-    return methods.some((method) => method.status === 'verified') ? 'A' : 'Unverified';
+    return methods.some(
+      (method) => isSupportedClaimMethod(method.method) && method.status === 'verified',
+    ) ? 'A' : 'Unverified';
   }
 
   private computeVerificationStatus(
@@ -550,8 +551,4 @@ function extractMotd(raw: unknown): string {
 
 function stripFormatting(value: string): string {
   return value.replace(/§[0-9A-FK-OR]/gi, '').trim();
-}
-
-function isSupportedClaimMethod(value: string): value is ClaimMethod {
-  return value === 'plugin' || value === 'dns' || value === 'motd';
 }

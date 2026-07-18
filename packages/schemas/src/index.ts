@@ -1,6 +1,9 @@
 import { z } from 'zod';
+import { SUPPORTED_CLAIM_METHODS } from '../claim-methods';
 
 export * from './worker-health';
+export { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '../claim-methods';
+export type { ClaimMethod } from '../claim-methods';
 
 export const CURRENT_POLICY_VERSIONS = {
   terms: {
@@ -334,7 +337,7 @@ export const playerMetricTrustSchema = z.enum([
   'unknown',
 ]);
 export const playerMetricSourceSchema = z.enum(['status_ping']);
-export const claimMethodSchema = z.enum(['plugin', 'dns', 'motd']);
+export const claimMethodSchema = z.enum(SUPPORTED_CLAIM_METHODS);
 export const PUBLIC_SERVER_LISTING_STATUS = 'active' as const;
 
 export const serverSummarySchema = z.object({

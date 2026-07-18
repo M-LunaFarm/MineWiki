@@ -11,7 +11,6 @@ import {
   Database,
   FileText,
   Loader2,
-  Plug,
   RefreshCw,
   Server,
   ShieldCheck,
@@ -22,8 +21,8 @@ import { getApiBaseUrl } from '../../lib/runtime-config';
 import { useAuth } from '../providers/auth-context';
 import { fetchDashboardOverview, type DashboardServerSummary } from '../../lib/dashboard-api';
 import { csrfHeaders } from '../../lib/csrf';
+import { SUPPORTED_CLAIM_METHODS, type ClaimMethod } from '@minewiki/schemas/claim-methods';
 
-type ClaimMethod = 'plugin' | 'dns' | 'motd';
 type ClaimMethodState = 'pending' | 'verified' | 'expired' | 'failed';
 
 interface ClaimMethodStatus {
@@ -48,8 +47,6 @@ interface QueryServerTarget {
   readonly id: string;
   readonly name: string;
 }
-
-const METHOD_ORDER: ClaimMethod[] = ['dns', 'motd'];
 
 const METHOD_OPTIONS: Array<{
   readonly method: ClaimMethod;
@@ -100,8 +97,6 @@ const METHOD_OPTIONS: Array<{
 
 const NOTE_COPY: Record<string, string> = {
   token_issued: '토큰이 발급되었습니다.',
-  plugin_callback_required: '플러그인 콜백을 기다리는 중입니다.',
-  plugin_callback_confirmed: '플러그인 콜백이 확인되었습니다.',
   dns_token_confirmed: 'DNS TXT 토큰이 확인되었습니다.',
   dns_token_not_found: 'DNS TXT 토큰을 찾지 못했습니다.',
   motd_token_confirmed: 'MOTD 토큰이 확인되었습니다.',
@@ -167,7 +162,7 @@ function mergeMethods(
       ...(method.token ? {} : previousMethod?.token ? { token: previousMethod.token } : {}),
     });
   }
-  return METHOD_ORDER.map((method) => map.get(method)).filter(Boolean) as ClaimMethodStatus[];
+  return SUPPORTED_CLAIM_METHODS.map((method) => map.get(method)).filter(Boolean) as ClaimMethodStatus[];
 }
 
 function formatMethodLabel(method: ClaimMethod): string {
@@ -231,8 +226,6 @@ function logDotClass(level: 'success' | 'error' | 'info'): string {
 
 function methodIcon(method: ClaimMethod): LucideIcon {
   switch (method) {
-    case 'plugin':
-      return Plug;
     case 'dns':
       return Database;
     case 'motd':
@@ -592,8 +585,6 @@ export function ClaimWorkflow() {
     return logs.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 20);
   }, [status]);
 
-  const pluginCallbackEndpoint = `${apiBase}/plugin/claim/complete`;
-
   const fetchStatus = useCallback(
     async (silent = false): Promise<ClaimStatusResponse | null> => {
       if (!account || !serverId) {
@@ -694,13 +685,7 @@ export function ClaimWorkflow() {
         grade: current?.grade ?? 'Unverified',
         methods: mergeMethods(current?.methods, methods),
       }));
-      if (selectedMethod === 'plugin') {
-        setNotice(
-          '플러그인 검증 토큰을 발급했습니다. 서버 플러그인이 complete 콜백을 호출한 뒤 상태를 새로고침해 주세요.',
-        );
-      } else {
-        setNotice(`${formatMethodLabel(selectedMethod)} 토큰을 발급했습니다.`);
-      }
+      setNotice(`${formatMethodLabel(selectedMethod)} 토큰을 발급했습니다.`);
       void fetchStatus(true);
     } catch (startError) {
       setError(
@@ -749,10 +734,6 @@ export function ClaimWorkflow() {
       } else if (selected?.status === 'failed') {
         const noteMessage = selected.note ? (NOTE_COPY[selected.note] ?? selected.note) : null;
         setNotice(noteMessage ?? `${formatMethodLabel(selectedMethod)} 검증이 실패했습니다.`);
-      } else if (selectedMethod === 'plugin') {
-        setNotice(
-          '플러그인 콜백 대기 상태입니다. 서버 플러그인에서 complete 호출 후 상태를 새로고침해 주세요.',
-        );
       } else {
         setNotice(`${formatMethodLabel(selectedMethod)} 검증 요청을 처리했습니다.`);
       }
@@ -847,10 +828,6 @@ export function ClaimWorkflow() {
       await handleFetchStatus();
       return;
     }
-    if (selectedMethod === 'plugin' && tokenString && activeMethodStatus?.status !== 'expired') {
-      await handleFetchStatus();
-      return;
-    }
     if (tokenString && activeMethodStatus?.status !== 'expired') {
       await handleVerify();
       return;
@@ -862,9 +839,7 @@ export function ClaimWorkflow() {
       ? '검증 상태 새로고침'
       : activeMethodStatus?.status === 'expired'
         ? '검증 토큰 재발급'
-        : selectedMethod === 'plugin' && tokenString
-          ? '콜백 상태 새로고침'
-          : tokenString
+        : tokenString
             ? activeMethodStatus?.status === 'failed'
               ? '다시 검증 실행'
               : '소유권 검증 실행'
@@ -881,9 +856,8 @@ export function ClaimWorkflow() {
             </div>
             <h1 className="text-3xl font-bold tracking-tight">서버 소유권 검증</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-[#A0A0A0]">
-              서버 설정 권한을 확인하는 절차입니다. DNS TXT 또는 MOTD는 이 화면에서 검증을 실행하고,
-              플러그인은 서버 플러그인이 콜백을 보낸 뒤 상태를 확인합니다. 발급 토큰은 선택한
-              방식에만 사용해 주세요.
+              서버 설정 권한을 확인하는 절차입니다. DNS TXT 또는 MOTD 중 하나를 선택해 토큰을
+              발급하고, 서버 설정에 반영한 뒤 이 화면에서 검증을 실행해 주세요.
             </p>
           </div>
 
@@ -984,7 +958,7 @@ export function ClaimWorkflow() {
               />
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              {METHOD_ORDER.map((method) => {
+              {SUPPORTED_CLAIM_METHODS.map((method) => {
                 const methodStatus = status?.methods.find((item) => item.method === method);
                 const tone = methodStatusTone(methodStatus?.status);
                 return (
@@ -1155,42 +1129,11 @@ export function ClaimWorkflow() {
                       >
                         {isComplete ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium leading-5 text-white">{step}</p>
-                        {index === 1 && selectedMethod === 'plugin' ? (
-                          <p className="mt-1 break-all text-xs text-[#A0A0A0]">
-                            콜백 엔드포인트:{' '}
-                            <code className="text-[#13ec80]">{pluginCallbackEndpoint}</code>
-                          </p>
-                        ) : null}
-                      </div>
+                      <p className="min-w-0 text-sm font-medium leading-5 text-white">{step}</p>
                     </div>
                   );
                 })}
               </div>
-              {selectedMethod === 'plugin' ? (
-                <div className="mt-4 rounded-lg border border-[#333333] bg-[#121212] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-[#777777]">
-                    콜백 요청 형식
-                  </p>
-                  <p className="mt-2 break-all font-mono text-xs text-[#13ec80]">
-                    POST {pluginCallbackEndpoint}
-                  </p>
-                  <pre className="mt-3 overflow-x-auto rounded-md border border-[#333333] bg-[#0f0f0f] p-3 text-xs leading-5 text-[#CFCFCF]">
-                    {JSON.stringify(
-                      {
-                        serverId: serverId || '<serverId>',
-                        token: tokenString || '<token>',
-                      },
-                      null,
-                      2,
-                    )}
-                  </pre>
-                  <p className="mt-2 text-xs leading-5 text-[#A0A0A0]">
-                    요청 본문은 JSON이며, 토큰 값은 발급된 문자열과 정확히 일치해야 합니다.
-                  </p>
-                </div>
-              ) : null}
             </div>
 
             <aside className="border-t border-[#333333] p-6 lg:border-l lg:border-t-0">

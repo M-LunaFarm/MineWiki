@@ -2,6 +2,7 @@
 import type { DashboardOverview } from '@minewiki/schemas';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
+import { isSupportedClaimMethod } from '@minewiki/schemas/claim-methods';
 
 @Injectable()
 export class DashboardService {
@@ -88,10 +89,4 @@ function normalizeReviewTags(
   return items.filter((item): item is DashboardOverview['activity'][number]['tags'][number] => {
     return typeof item === 'string' && item.length > 0;
   });
-}
-
-function isSupportedClaimMethod(
-  value: string
-): value is DashboardOverview['verification'][number]['method'] {
-  return value === 'plugin' || value === 'dns' || value === 'motd';
 }

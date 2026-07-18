@@ -65,15 +65,15 @@ test('token issuance stores a hash plus encrypted proof and reveals the token on
   }
 });
 
-test('plugin claim tokens cannot be issued without an authenticated plugin proof', async () => {
+test('unsupported claim methods cannot be issued through an internal caller', async () => {
   const service = new ClaimService(
     { ensureExists: async () => ({ ownerAccountId: null }) } as never,
     {} as never,
   );
 
   await assert.rejects(
-    () => service.issueTokens('server-1', 'account-1', ['plugin']),
-    /Plugin ownership verification is unavailable/,
+    () => service.issueTokens('server-1', 'account-1', ['plugin'] as never),
+    /허용되지 않는 검증 방식.*plugin/,
   );
 });
 
@@ -143,6 +143,52 @@ test('successful ownership verification promotes registrant to owner atomically'
     { ownerAccountId: 'account-registrant', registrantAccountId: null },
     { listingStatus: 'active' },
   ]);
+});
+
+test('legacy verified plugin rows cannot preserve a public verification grade', async () => {
+  const gradeUpdates: Array<Record<string, unknown>> = [];
+  let listingUpdates = 0;
+  const snapshot = {
+    id: 'claim-method-dns',
+    serverId: 'server-1',
+    accountId: 'account-registrant',
+    method: 'dns',
+    token: hashClaimToken('proof'),
+    issuedAt: new Date(),
+    version: 1,
+  };
+  const prisma = {
+    serverClaimMethod: {
+      updateMany: async () => ({ count: 1 }),
+      findMany: async () => [
+        { method: 'dns', status: 'failed' },
+        { method: 'plugin', status: 'verified' },
+      ],
+    },
+    server: {
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        gradeUpdates.push(data);
+        return {};
+      },
+      updateMany: async () => {
+        listingUpdates += 1;
+        return { count: 1 };
+      },
+    },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+  };
+  const service = new ClaimService(
+    { ensureExists: async () => ({ ownerAccountId: null }) } as never,
+    prisma as never,
+  );
+
+  await service.applyVerificationResult(snapshot, {
+    status: 'failed',
+    checkedAt: new Date().toISOString(),
+  });
+
+  assert.deepEqual(gradeUpdates, [{ verificationGrade: 'Unverified', verifiedAt: null }]);
+  assert.equal(listingUpdates, 0);
 });
 
 test('stale claim verification result cannot promote an owner after proof rotation', async () => {

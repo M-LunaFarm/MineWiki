@@ -43,6 +43,7 @@ import type {
   ServerPingJob,
   VoteDispatchJob,
 } from '@minewiki/schemas';
+import { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '@minewiki/schemas/claim-methods';
 import { terminateOnRunLoopFailure } from './runtime-failure';
 import { triggerAccountDeletionSweep } from './account-deletion-scheduler';
 import { processAccountDeletionDiscordRevocations } from './account-deletion-discord-revocations';
@@ -461,7 +462,7 @@ async function enqueueClaimChecks(): Promise<void> {
   const dueMethods = await prisma.serverClaimMethod.findMany({
     where: {
       method: {
-        in: ['plugin', 'dns', 'motd'],
+        in: [...SUPPORTED_CLAIM_METHODS],
       },
       OR: [
         {
@@ -484,9 +485,11 @@ async function enqueueClaimChecks(): Promise<void> {
   const bucket = Math.floor(Date.now() / CLAIM_SCAN_INTERVAL_MS);
   await Promise.all(
     dueMethods.map((method) => {
+      const claimMethod = method.method;
+      if (!isSupportedClaimMethod(claimMethod)) return Promise.resolve();
       const data: ClaimVerificationJob = {
         serverId: method.serverId,
-        method: method.method,
+        method: claimMethod,
         initiatedAt: now.toISO(),
       };
       return enqueueOrRunDirectly(

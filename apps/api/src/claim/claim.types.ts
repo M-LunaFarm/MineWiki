@@ -1,4 +1,6 @@
-export type ClaimMethod = 'plugin' | 'dns' | 'motd';
+import type { ClaimMethod } from '@minewiki/schemas/claim-methods';
+
+export type { ClaimMethod } from '@minewiki/schemas/claim-methods';
 
 export type ClaimMethodState = 'pending' | 'verified' | 'expired' | 'failed';
 
