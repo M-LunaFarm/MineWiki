@@ -18,6 +18,18 @@ import {
   type ServerWikiPresentationSnapshot,
   type ServerWikiReleaseCandidate,
 } from './server-wiki-release-candidate';
+import {
+  loadLatestSubmittedServerWikiReleaseCandidate,
+  loadStoredServerWikiReleaseCandidate,
+  submitServerWikiReleaseCandidate,
+  type PersistedServerWikiReleaseCandidate,
+  type StoredServerWikiReleaseCandidate,
+} from './server-wiki-release-candidate-store';
+import {
+  requiredServerWikiReleaseApprovalCount,
+  serverWikiReleaseReviewState,
+  type ServerWikiReleaseReviewState,
+} from './server-wiki-release-review';
 
 export const SERVER_WIKI_PUBLICATION_STATUSES = ['draft', 'published', 'unpublished'] as const;
 export type ServerWikiPublicationStatus = (typeof SERVER_WIKI_PUBLICATION_STATUSES)[number];
@@ -31,22 +43,19 @@ export interface UpdateServerWikiPublicationInput {
   readonly status: 'published' | 'unpublished';
   readonly expectedVersion: number;
   readonly expectedCandidateToken?: string;
+  readonly candidateId?: string;
   readonly reason: string;
 }
 
 export interface ReviewServerWikiReleaseCandidateInput {
+  readonly candidateId: string;
   readonly candidateToken: string;
 }
 
-export interface ServerWikiReleaseReviewState {
-  readonly required: boolean;
-  readonly approved: boolean;
-  readonly canApprove: boolean;
-  readonly viewerApproved: boolean;
-  readonly approvals: readonly {
-    readonly reviewerProfileId: string;
-    readonly approvedAt: string;
-  }[];
+export interface SubmitServerWikiReleaseCandidateInput {
+  readonly expectedVersion: number;
+  readonly expectedCandidateToken: string;
+  readonly reason: string;
 }
 
 export interface ServerWikiPublicationResponse {
@@ -75,6 +84,7 @@ export interface ServerWikiPublicationResponse {
     readonly blockers: readonly ServerWikiPublicationReadinessBlocker[];
   };
   readonly candidate: ServerWikiReleaseCandidate;
+  readonly submission: PersistedServerWikiReleaseCandidate | null;
   readonly review: ServerWikiReleaseReviewState;
 }
 
@@ -139,8 +149,72 @@ export class ServerWikiPublicationService {
     const context = await this.resolveContext(this.prisma, serverId, actor, false);
     const blockers = await this.readinessBlockers(this.prisma, context);
     const snapshot = await buildServerWikiReleaseCandidate(this.prisma, candidateInput(context), false);
-    const review = await this.releaseReviewState(this.prisma, context, snapshot.candidate.token, false);
-    return toResponse(context, blockers, snapshot.candidate, review);
+    const submission = await loadLatestSubmittedServerWikiReleaseCandidate(this.prisma, context);
+    const review = submission
+      ? await serverWikiReleaseReviewState(this.prisma, context, submission.id, submission.candidate.requiredApprovals, false)
+      : emptyReviewState();
+    return toResponse(context, blockers, snapshot.candidate, submission?.candidate ?? null, review);
+  }
+
+  async submitCandidate(
+    serverIdInput: string,
+    input: SubmitServerWikiReleaseCandidateInput,
+    actor: ServerWikiPublicationActor,
+  ): Promise<ServerWikiPublicationResponse> {
+    const serverId = parseServerId(serverIdInput);
+    const expectedVersion = parseVersion(input.expectedVersion);
+    const expectedCandidateToken = parseCandidateToken(input.expectedCandidateToken);
+    const reason = parseReason(input.reason);
+    return this.serializable(async (tx) => {
+      const context = await this.resolveContext(tx, serverId, actor, true);
+      if (context.authority === 'reviewer') throw publicationForbidden();
+      if (context.publication.version !== expectedVersion) throw publicationConflict(context.publication.version);
+      const blockers = await this.readinessBlockers(tx, context);
+      if (blockers.length > 0) throw publicationNotReady(blockers);
+      const snapshot = await buildServerWikiReleaseCandidate(tx, candidateInput(context), true);
+      if (snapshot.candidate.token !== expectedCandidateToken) throw candidateChanged(snapshot.candidate);
+      if (!snapshot.candidate.hasChanges) throw candidateEmpty(snapshot.candidate);
+      const requiredApprovals = await requiredServerWikiReleaseApprovalCount(tx, context, true);
+      const now = new Date();
+      await tx.serverWikiReleaseCandidate.updateMany({
+        where: {
+          serverWikiId: context.serverWikiId,
+          spaceId: context.spaceId,
+          status: 'pending_review',
+          token: { not: snapshot.candidate.token },
+        },
+        data: { status: 'superseded' },
+      });
+      const submission = await submitServerWikiReleaseCandidate(tx, {
+        serverWikiId: context.serverWikiId,
+        spaceId: context.spaceId,
+        actorProfileId: context.actorProfileId,
+        sourcePublicationVersion: expectedVersion,
+        siteSlug: context.siteSlug,
+        contentSlug: context.contentSlug,
+        requiredApprovals,
+        submissionReason: reason,
+        submittedAt: now,
+      }, snapshot);
+      await tx.serverWikiReleaseApproval.updateMany({
+        where: { candidateId: submission.id, revokedAt: null },
+        data: { revokedAt: now, updatedAt: now },
+      });
+      await writeAuditRecord(tx, {
+        data: {
+          category: 'server', action: 'server.wiki.release.submit', severity: 'info',
+          actorAccountId: context.actorAccountId, actorProfileId: context.actorProfileId,
+          subjectType: 'server_wiki_release_candidate', subjectId: submission.id.toString(),
+          metadata: toAuditJson({
+            serverId: context.serverId, serverWikiId: context.serverWikiId,
+            candidateId: submission.id, candidateToken: submission.token,
+            candidateCounts: submission.candidate.counts, requiredApprovals, reason,
+          }),
+        },
+      });
+      const review = await serverWikiReleaseReviewState(tx, context, submission.id, requiredApprovals, false);
+      return toResponse(context, blockers, snapshot.candidate, submission.candidate, review);
+    });
   }
 
   async approveCandidate(
@@ -166,19 +240,23 @@ export class ServerWikiPublicationService {
     approve: boolean,
   ): Promise<ServerWikiReleaseReviewState> {
     const serverId = parseServerId(serverIdInput);
+    const candidateId = parseCandidateId(input.candidateId);
     const candidateToken = parseCandidateToken(input.candidateToken);
     return this.serializable(async (tx) => {
       const context = await this.resolveContext(tx, serverId, actor, true);
       if (context.authority !== 'reviewer' || context.actorProfileId === null) throw reviewForbidden();
-      const snapshot = await buildServerWikiReleaseCandidate(tx, candidateInput(context), true);
-      if (snapshot.candidate.token !== candidateToken) throw candidateChanged(snapshot.candidate);
+      const submission = await loadStoredServerWikiReleaseCandidate(tx, {
+        id: candidateId, serverWikiId: context.serverWikiId, spaceId: context.spaceId,
+        token: candidateToken, lock: true,
+      });
+      if (submission.candidate.status !== 'pending_review') throw candidateUnavailable();
+      if (submission.candidate.submittedByProfileId === context.actorProfileId.toString()) throw reviewForbidden();
       const now = new Date();
       if (approve) {
         await tx.serverWikiReleaseApproval.upsert({
           where: {
-            serverWikiId_candidateToken_reviewerProfileId: {
-              serverWikiId: context.serverWikiId,
-              candidateToken,
+            candidateId_reviewerProfileId: {
+              candidateId,
               reviewerProfileId: context.actorProfileId,
             },
           },
@@ -186,6 +264,7 @@ export class ServerWikiPublicationService {
             serverWikiId: context.serverWikiId,
             spaceId: context.spaceId,
             candidateToken,
+            candidateId,
             reviewerProfileId: context.actorProfileId,
             approvedAt: now,
             revokedAt: null,
@@ -200,6 +279,7 @@ export class ServerWikiPublicationService {
             serverWikiId: context.serverWikiId,
             spaceId: context.spaceId,
             candidateToken,
+            candidateId,
             reviewerProfileId: context.actorProfileId,
             revokedAt: null,
           },
@@ -218,12 +298,13 @@ export class ServerWikiPublicationService {
           metadata: toAuditJson({
             serverId: context.serverId,
             serverWikiId: context.serverWikiId,
+            candidateId,
             candidateToken,
-            candidateCounts: snapshot.candidate.counts,
+            candidateCounts: submission.candidate.counts,
           }),
         },
       });
-      return this.releaseReviewState(tx, context, candidateToken, false);
+      return serverWikiReleaseReviewState(tx, context, candidateId, submission.candidate.requiredApprovals, false);
     });
   }
 
@@ -238,6 +319,7 @@ export class ServerWikiPublicationService {
     const expectedCandidateToken = status === 'published'
       ? parseCandidateToken(input.expectedCandidateToken)
       : null;
+    const candidateId = status === 'published' ? parseCandidateId(input.candidateId) : null;
     const reason = parseReason(input.reason);
 
     try {
@@ -263,24 +345,17 @@ export class ServerWikiPublicationService {
           });
         }
 
-        const snapshot = status === 'published'
-          ? await buildServerWikiReleaseCandidate(tx, candidateInput(context), true)
+        const submission = status === 'published'
+          ? await loadStoredServerWikiReleaseCandidate(tx, {
+              id: candidateId!, serverWikiId: context.serverWikiId, spaceId: context.spaceId,
+              token: expectedCandidateToken!, lock: true,
+            })
           : null;
-        if (snapshot && snapshot.candidate.token !== expectedCandidateToken) {
-          throw candidateChanged(snapshot.candidate);
-        }
-        if (snapshot && !snapshot.candidate.hasChanges) {
-          throw new ConflictException({
-            statusCode: 409,
-            code: 'SERVER_WIKI_RELEASE_CANDIDATE_EMPTY',
-            message: 'Server wiki release candidate has no changes.',
-            candidate: snapshot.candidate,
-          });
-        }
-        const review = snapshot
-          ? await this.releaseReviewState(tx, context, snapshot.candidate.token, true)
+        if (submission) this.assertPublishableSubmission(context, submission, expectedVersion);
+        const review = submission
+          ? await serverWikiReleaseReviewState(tx, context, submission.id, submission.candidate.requiredApprovals, true)
           : null;
-        if (snapshot && review?.required && !review.approved) {
+        if (submission && review?.required && !review.approved) {
           throw new ConflictException({
             statusCode: 409,
             code: 'SERVER_WIKI_RELEASE_REVIEW_REQUIRED',
@@ -292,7 +367,7 @@ export class ServerWikiPublicationService {
         const now = new Date();
         const version = expectedVersion + 1;
         const release = status === 'published'
-          ? await this.createRelease(tx, context, snapshot!, version, reason, now)
+          ? await this.createRelease(tx, context, submission!, version, reason, now)
           : context.publication.publishedRelease;
         const changed = await tx.serverWiki.updateMany({
           where: {
@@ -337,10 +412,11 @@ export class ServerWikiPublicationService {
               version,
               releaseId: release?.id ?? null,
               releasePageCount: release?.pageCount ?? null,
-              candidateToken: snapshot?.candidate.token ?? null,
-              candidateBaselineReleaseId: snapshot?.candidate.baselineReleaseId ?? null,
-              candidateCounts: snapshot?.candidate.counts ?? null,
-              candidatePresentation: snapshot?.candidate.presentation ?? null,
+              candidateId: submission?.id ?? null,
+              candidateToken: submission?.candidate.token ?? null,
+              candidateBaselineReleaseId: submission?.candidate.baselineReleaseId ?? null,
+              candidateCounts: submission?.candidate.counts ?? null,
+              candidatePresentation: submission?.candidate.presentation ?? null,
               reason,
               authority: context.authority,
             }),
@@ -359,9 +435,15 @@ export class ServerWikiPublicationService {
             publishedRelease: release,
           },
         };
+        if (submission) {
+          const marked = await tx.serverWikiReleaseCandidate.updateMany({
+            where: { id: submission.id, serverWikiId: context.serverWikiId, status: 'pending_review' },
+            data: { status: 'published' },
+          });
+          if (marked.count !== 1) throw candidateUnavailable();
+        }
         const responseCandidate = (await buildServerWikiReleaseCandidate(tx, candidateInput(responseContext), false)).candidate;
-        const responseReview = await this.releaseReviewState(tx, responseContext, responseCandidate.token, false);
-        return toResponse(responseContext, blockers, responseCandidate, responseReview);
+        return toResponse(responseContext, blockers, responseCandidate, null, emptyReviewState());
       });
     } catch (error) {
       if (prismaCode(error) === 'P2034') throw publicationConflict(expectedVersion + 1);
@@ -545,11 +627,13 @@ export class ServerWikiPublicationService {
   private async createRelease(
     tx: Prisma.TransactionClient,
     context: PublicationContext,
-    snapshot: ReleaseCandidateSnapshot,
+    submission: StoredServerWikiReleaseCandidate,
     version: number,
     reason: string,
     now: Date,
   ): Promise<NonNullable<PublicationContext['publication']['publishedRelease']>> {
+    const snapshot = submission.snapshot;
+    await this.validateStoredReleaseSnapshot(tx, context, snapshot);
     const releasedPages = snapshot.pages;
     if (releasedPages.length === 0 || releasedPages.some((page) => page.spaceId !== context.spaceId)) {
       throw new ConflictException('Server wiki release snapshot is empty or inconsistent.');
@@ -560,10 +644,11 @@ export class ServerWikiPublicationService {
         serverWikiId: context.serverWikiId,
         version,
         reason,
-        presentationSnapshot: context.presentation as unknown as Prisma.InputJsonValue,
+        presentationSnapshot: snapshot.presentation as unknown as Prisma.InputJsonValue,
         createdBy: context.actorProfileId,
         createdAt: now,
         publishedAt: now,
+        candidateId: submission.id,
       },
       select: { id: true, version: true, publishedAt: true },
     });
@@ -613,71 +698,55 @@ export class ServerWikiPublicationService {
     return {
       ...release,
       pageCount: releasedPages.length,
-      presentationSnapshot: context.presentation as unknown as Prisma.JsonValue,
+      presentationSnapshot: snapshot.presentation as unknown as Prisma.JsonValue,
     };
   }
 
-  private async releaseReviewState(
-    store: Prisma.TransactionClient | PrismaService,
+  private async validateStoredReleaseSnapshot(
+    tx: Prisma.TransactionClient,
     context: PublicationContext,
-    candidateToken: string,
-    lock: boolean,
-  ): Promise<ServerWikiReleaseReviewState> {
-    if (lock) {
-      await store.$queryRaw<Array<{ id: bigint }>>`
-        SELECT id
-        FROM subwiki_roles
-        WHERE space_id = ${context.spaceId} AND role = 'reviewer' AND status = 'active'
-        ORDER BY id
-        FOR UPDATE
-      `;
-      await store.$queryRaw<Array<{ id: bigint }>>`
-        SELECT id
-        FROM server_wiki_release_approvals
-        WHERE server_wiki_id = ${context.serverWikiId} AND candidate_token = ${candidateToken}
-        ORDER BY id
-        FOR UPDATE
-      `;
-    }
-    const reviewerRoles = await store.subwikiRole.findMany({
-      where: { spaceId: context.spaceId, role: 'reviewer', status: 'active' },
-      select: { userId: true },
-    });
-    const reviewerProfileIds = [...new Set(reviewerRoles.map((role) => role.userId))];
-    const activeProfiles = reviewerProfileIds.length > 0
-      ? await store.wikiProfile.findMany({
-          where: { id: { in: reviewerProfileIds }, status: 'active', mergedIntoProfileId: null },
+    snapshot: ReleaseCandidateSnapshot,
+  ): Promise<void> {
+    const revisionPairs = snapshot.pages.map((page) => ({ pageId: page.id, revisionId: page.currentRevisionId }));
+    const revisions = revisionPairs.length > 0
+      ? await tx.wikiPageRevision.findMany({
+          where: { id: { in: revisionPairs.map((pair) => pair.revisionId) }, visibility: 'public' },
+          select: { id: true, pageId: true },
+        })
+      : [];
+    const candidatePages = revisionPairs.length > 0
+      ? await tx.wikiPage.findMany({
+          where: { id: { in: revisionPairs.map((pair) => pair.pageId) }, spaceId: context.spaceId },
           select: { id: true },
         })
       : [];
-    const activeReviewerIds = new Set(activeProfiles.map((profile) => profile.id));
-    const approvalRows = activeReviewerIds.size > 0
-      ? await store.serverWikiReleaseApproval.findMany({
-          where: {
-            serverWikiId: context.serverWikiId,
-            spaceId: context.spaceId,
-            candidateToken,
-            reviewerProfileId: { in: [...activeReviewerIds] },
-            revokedAt: null,
-          },
-          orderBy: [{ approvedAt: 'asc' }, { id: 'asc' }],
-          select: { reviewerProfileId: true, approvedAt: true },
-        })
-      : [];
-    const approvals = approvalRows.map((approval) => ({
-      reviewerProfileId: approval.reviewerProfileId.toString(),
-      approvedAt: approval.approvedAt.toISOString(),
-    }));
-    const viewerApproved = context.actorProfileId !== null
-      && approvalRows.some((approval) => approval.reviewerProfileId === context.actorProfileId);
-    const approved = approvalRows.length > 0;
-    return {
-      required: activeReviewerIds.size > 0,
-      approved,
-      canApprove: context.authority === 'reviewer',
-      viewerApproved,
-      approvals,
-    };
+    const validPageIds = new Set(candidatePages.map((page) => page.id));
+    const valid = new Set(revisions
+      .filter((revision) => validPageIds.has(revision.pageId))
+      .map((revision) => `${revision.pageId}:${revision.id}`));
+    if (revisionPairs.length === 0 || revisionPairs.some((pair) => !valid.has(`${pair.pageId}:${pair.revisionId}`))) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'SERVER_WIKI_RELEASE_CANDIDATE_REVISION_UNAVAILABLE',
+        message: 'A revision captured by this release candidate is no longer publishable.',
+      });
+    }
+  }
+
+  private assertPublishableSubmission(
+    context: PublicationContext,
+    submission: StoredServerWikiReleaseCandidate,
+    expectedVersion: number,
+  ): void {
+    const baselineReleaseId = context.publication.publishedRelease?.id.toString() ?? null;
+    if (
+      submission.candidate.status !== 'pending_review'
+      || submission.candidate.sourcePublicationVersion !== expectedVersion
+      || submission.candidate.baselineReleaseId !== baselineReleaseId
+      || submission.candidate.siteSlug !== context.siteSlug
+      || submission.candidate.contentSlug !== context.contentSlug
+      || !submission.candidate.hasChanges
+    ) throw candidateUnavailable();
   }
 
   private async collaboratorAuthority(
@@ -848,6 +917,7 @@ function toResponse(
   context: PublicationContext,
   blockers: readonly ServerWikiPublicationReadinessBlocker[],
   candidate: ServerWikiReleaseCandidate,
+  submission: PersistedServerWikiReleaseCandidate | null,
   review: ServerWikiReleaseReviewState,
 ): ServerWikiPublicationResponse {
   if (!SERVER_WIKI_PUBLICATION_STATUSES.includes(context.publication.status as ServerWikiPublicationStatus)) {
@@ -878,6 +948,7 @@ function toResponse(
     },
     readiness: { ready: blockers.length === 0, blockers },
     candidate,
+    submission,
     review,
   };
 }
@@ -930,6 +1001,51 @@ function parseCandidateToken(value: string | undefined): string {
     throw new BadRequestException('expectedCandidateToken must be a 64-character lowercase SHA-256 token.');
   }
   return value;
+}
+
+function parseCandidateId(value: string | undefined): bigint {
+  if (typeof value !== 'string' || !/^[1-9][0-9]{0,19}$/u.test(value)) {
+    throw new BadRequestException('candidateId must be a positive integer string.');
+  }
+  return BigInt(value);
+}
+
+function emptyReviewState(): ServerWikiReleaseReviewState {
+  return {
+    required: false,
+    approved: false,
+    canApprove: false,
+    viewerApproved: false,
+    approvals: [],
+  };
+}
+
+function publicationNotReady(
+  blockers: readonly ServerWikiPublicationReadinessBlocker[],
+): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    code: 'SERVER_WIKI_PUBLICATION_NOT_READY',
+    message: 'Server wiki is not ready to publish.',
+    blockers,
+  });
+}
+
+function candidateEmpty(candidate: ServerWikiReleaseCandidate): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    code: 'SERVER_WIKI_RELEASE_CANDIDATE_EMPTY',
+    message: 'Server wiki release candidate has no changes.',
+    candidate,
+  });
+}
+
+function candidateUnavailable(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    code: 'SERVER_WIKI_RELEASE_CANDIDATE_UNAVAILABLE',
+    message: 'Submit or refresh the immutable release candidate before continuing.',
+  });
 }
 
 function invalidLink(): ConflictException {

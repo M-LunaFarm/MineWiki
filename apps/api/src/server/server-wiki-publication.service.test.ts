@@ -127,9 +127,27 @@ function createFixture(options: FixtureOptions = {}) {
     serverWikiId: bigint;
     spaceId: bigint;
     candidateToken: string;
+    candidateId: bigint | null;
     reviewerProfileId: bigint;
     approvedAt: Date;
     revokedAt: Date | null;
+  }> = [];
+  const candidates: Array<{
+    id: bigint;
+    serverWikiId: bigint;
+    spaceId: bigint;
+    baselineReleaseId: bigint | null;
+    sourcePublicationVersion: number;
+    status: string;
+    token: string;
+    siteSlug: string;
+    contentSlug: string;
+    requiredApprovals: number;
+    submissionReason: string;
+    manifestSnapshot: Prisma.JsonValue;
+    releaseSnapshot: Prisma.JsonValue;
+    createdBy: bigint | null;
+    submittedAt: Date;
   }> = [];
   const isolationLevels: string[] = [];
   const lockQueries: string[] = [];
@@ -140,6 +158,7 @@ function createFixture(options: FixtureOptions = {}) {
     [reviewerAccountId, { id: 4n, status: 'active', mergedIntoProfileId: null }],
   ]);
   const actorAccountId = options.actorAccountId ?? ownerAccountId;
+  let reviewerEnabled = options.reviewerConfigured ?? false;
   const actor = { accountId: actorAccountId, permissions: options.actorPermissions ?? [] };
   const tx = {
     async $queryRaw(strings: TemplateStringsArray) {
@@ -203,14 +222,17 @@ function createFixture(options: FixtureOptions = {}) {
       async findMany(args: { where: { id: { in: bigint[] } } }) {
         return [...profiles.values()].filter((profile) => args.where.id.in.includes(profile.id));
       },
+      async count(args: { where: { id: { in: bigint[] } } }) {
+        return [...profiles.values()].filter((profile) => args.where.id.in.includes(profile.id)).length;
+      },
     },
     subwikiRole: {
       async findMany(args: { where: { userId?: bigint; role?: string } }) {
         if (args.where.role === 'reviewer') {
-          return options.reviewerConfigured ? [{ userId: 4n, role: 'reviewer' }] : [];
+          return reviewerEnabled ? [{ userId: 4n, role: 'reviewer' }] : [];
         }
         const profile = profiles.get(actorAccountId);
-        if (args.where.userId === 4n && options.reviewerConfigured) return [{ role: 'reviewer' }];
+        if (args.where.userId === 4n && reviewerEnabled) return [{ role: 'reviewer' }];
         if (!profile || profile.id !== args.where.userId || !options.actorRole) return [];
         return [{ role: options.actorRole }];
       },
@@ -247,6 +269,40 @@ function createFixture(options: FixtureOptions = {}) {
         return release;
       },
     },
+    serverWikiReleaseCandidate: {
+      async findUnique(args: { where: { serverWikiId_token: { serverWikiId: bigint; token: string } } }) {
+        const key = args.where.serverWikiId_token;
+        return candidates.find((candidate) => candidate.serverWikiId === key.serverWikiId && candidate.token === key.token) ?? null;
+      },
+      async findFirst(args: { where: { id?: bigint; serverWikiId: bigint; spaceId: bigint; token?: string; status?: string } }) {
+        return [...candidates].reverse().find((candidate) => candidate.serverWikiId === args.where.serverWikiId
+          && candidate.spaceId === args.where.spaceId
+          && (args.where.id === undefined || candidate.id === args.where.id)
+          && (args.where.token === undefined || candidate.token === args.where.token)
+          && (args.where.status === undefined || candidate.status === args.where.status)) ?? null;
+      },
+      async upsert(args: { create: Omit<(typeof candidates)[number], 'id'>; update: Partial<(typeof candidates)[number]>; where: { serverWikiId_token: { serverWikiId: bigint; token: string } } }) {
+        const key = args.where.serverWikiId_token;
+        const existing = candidates.find((candidate) => candidate.serverWikiId === key.serverWikiId && candidate.token === key.token);
+        if (existing) { Object.assign(existing, args.update); return existing; }
+        const created = { id: BigInt(700 + candidates.length), ...args.create };
+        candidates.push(created);
+        return created;
+      },
+      async updateMany(args: { where: { id?: bigint; serverWikiId?: bigint; spaceId?: bigint; status?: string; token?: { not: string } }; data: { status: string } }) {
+        let count = 0;
+        for (const candidate of candidates) {
+          if ((args.where.id === undefined || candidate.id === args.where.id)
+            && (args.where.serverWikiId === undefined || candidate.serverWikiId === args.where.serverWikiId)
+            && (args.where.spaceId === undefined || candidate.spaceId === args.where.spaceId)
+            && (args.where.status === undefined || candidate.status === args.where.status)
+            && (args.where.token === undefined || candidate.token !== args.where.token.not)) {
+            candidate.status = args.data.status; count += 1;
+          }
+        }
+        return { count };
+      },
+    },
     serverWikiReleaseItem: {
       async findMany() { return releaseItems; },
       async createMany(args: { data: Array<Record<string, unknown>> }) {
@@ -262,25 +318,27 @@ function createFixture(options: FixtureOptions = {}) {
       },
     },
     serverWikiReleaseApproval: {
-      async findMany(args: { where: { candidateToken: string; revokedAt: null } }) {
-        return approvals.filter((approval) => approval.candidateToken === args.where.candidateToken && approval.revokedAt === null);
+      async findMany(args: { where: { candidateId: bigint; revokedAt: null } }) {
+        return approvals.filter((approval) => approval.candidateId === args.where.candidateId && approval.revokedAt === null);
       },
       async upsert(args: {
-        where: { serverWikiId_candidateToken_reviewerProfileId: { candidateToken: string; reviewerProfileId: bigint } };
+        where: { candidateId_reviewerProfileId: { candidateId: bigint; reviewerProfileId: bigint } };
         create: Omit<(typeof approvals)[number], 'id'> & { createdAt: Date; updatedAt: Date };
         update: { approvedAt: Date; revokedAt: null };
       }) {
-        const key = args.where.serverWikiId_candidateToken_reviewerProfileId;
-        const existing = approvals.find((approval) => approval.candidateToken === key.candidateToken && approval.reviewerProfileId === key.reviewerProfileId);
+        const key = args.where.candidateId_reviewerProfileId;
+        const existing = approvals.find((approval) => approval.candidateId === key.candidateId && approval.reviewerProfileId === key.reviewerProfileId);
         if (existing) { existing.approvedAt = args.update.approvedAt; existing.revokedAt = null; return existing; }
         const created = { id: BigInt(approvals.length + 1), ...args.create };
         approvals.push(created);
         return created;
       },
-      async updateMany(args: { where: { candidateToken: string; reviewerProfileId: bigint }; data: { revokedAt: Date } }) {
+      async updateMany(args: { where: { candidateId: bigint; reviewerProfileId?: bigint }; data: { revokedAt: Date } }) {
         let count = 0;
         for (const approval of approvals) {
-          if (approval.candidateToken === args.where.candidateToken && approval.reviewerProfileId === args.where.reviewerProfileId && approval.revokedAt === null) {
+          if (approval.candidateId === args.where.candidateId
+            && (args.where.reviewerProfileId === undefined || approval.reviewerProfileId === args.where.reviewerProfileId)
+            && approval.revokedAt === null) {
             approval.revokedAt = args.data.revokedAt; count += 1;
           }
         }
@@ -316,6 +374,15 @@ function createFixture(options: FixtureOptions = {}) {
   return {
     service,
     async candidateToken() { return (await service.get(serverId, actor)).candidate.token; },
+    async submitCandidate(reason = 'submit immutable release candidate') {
+      const candidate = (await service.get(serverId, actor)).candidate;
+      const result = await service.submitCandidate(serverId, {
+        expectedVersion: wiki.publicationVersion,
+        expectedCandidateToken: candidate.token,
+        reason,
+      }, actor);
+      return result.submission!;
+    },
     actor,
     wiki,
     audits,
@@ -327,6 +394,8 @@ function createFixture(options: FixtureOptions = {}) {
     documentRows,
     revisionRows,
     approvals,
+    candidates,
+    setReviewerEnabled(value: boolean) { reviewerEnabled = value; },
   };
 }
 
@@ -345,9 +414,29 @@ test('release candidate manifest is deterministic and classifies the initial pub
   assert.equal(first.candidate.pages[1]?.after?.routePath, '/serverWiki/test-server/%EC%8B%9C%EC%9E%91%ED%95%98%EA%B8%B0');
 });
 
-test('publish rejects a candidate token after the reviewed page revision changes', async () => {
+test('candidate token binds the public site slug and release metadata-only changes remain publishable', async () => {
+  const slugFixture = createFixture();
+  const firstToken = await slugFixture.candidateToken();
+  slugFixture.wiki.siteSlug = 'renamed-test-server';
+  assert.notEqual(await slugFixture.candidateToken(), firstToken);
+
   const fixture = createFixture();
-  const reviewedToken = await fixture.candidateToken();
+  const initial = await fixture.submitCandidate();
+  await fixture.service.update(serverId, {
+    status: 'published', expectedVersion: 0, candidateId: initial.id,
+    expectedCandidateToken: initial.token, reason: 'publish metadata baseline',
+  }, fixture.actor);
+  fixture.documentRows[0]!.protectionLevel = 'manager';
+  fixture.documentRows[0]!.updatedAt = new Date('2026-07-18T01:00:00.000Z');
+  const candidate = (await fixture.service.get(serverId, fixture.actor)).candidate;
+  assert.equal(candidate.hasChanges, true);
+  assert.equal(candidate.counts.updated, 1);
+  assert.equal(candidate.pages.find((page) => page.pageId === '100')?.metadataChanged, true);
+});
+
+test('publish copies the submitted immutable candidate after the working draft changes', async () => {
+  const fixture = createFixture();
+  const submission = await fixture.submitCandidate();
   const root = fixture.documentRows[0]!;
   root.currentRevisionId = 999n;
   root.searchDocument.revisionId = 999n;
@@ -358,27 +447,23 @@ test('publish rejects a candidate token after the reviewed page revision changes
     contentHash: hashContent('= changed after review ='),
   });
 
-  await assert.rejects(
-    () => fixture.service.update(serverId, {
-      status: 'published',
-      expectedVersion: 0,
-      expectedCandidateToken: reviewedToken,
-      reason: 'publish stale reviewed candidate',
-    }, fixture.actor),
-    (error: unknown) => error instanceof ConflictException
-      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_CANDIDATE_CHANGED'),
-  );
-  assert.equal(fixture.releaseItems.length, 0);
-  assert.equal(fixture.audits.length, 0);
-  assert.equal(fixture.wiki.publishedReleaseId, null);
+  const published = await fixture.service.update(serverId, {
+    status: 'published', expectedVersion: 0, candidateId: submission.id,
+    expectedCandidateToken: submission.token, reason: 'publish reviewed immutable candidate',
+  }, fixture.actor);
+  assert.equal(published.status, 'published');
+  assert.equal(fixture.releaseItems[0]?.revisionId, 200n);
+  assert.notEqual(fixture.releaseItems[0]?.revisionId, root.currentRevisionId);
 });
 
 test('owner publishes a ready draft atomically with version, timestamps, and an audit reason', async () => {
   const fixture = createFixture();
+  const submission = await fixture.submitCandidate();
   const result = await fixture.service.update(serverId, {
     status: 'published',
     expectedVersion: 0,
-    expectedCandidateToken: await fixture.candidateToken(),
+    candidateId: submission.id,
+    expectedCandidateToken: submission.token,
     reason: 'owner approved launch',
   }, fixture.actor);
 
@@ -397,53 +482,60 @@ test('owner publishes a ready draft atomically with version, timestamps, and an 
     .every((term) => String(fixture.releaseItems[0]?.searchVector).split(' ').includes(term)));
   assert.equal(fixture.releaseLinks.length, 3);
   assert.ok(fixture.releaseLinks.every((link) => link.releaseId === BigInt(result.release!.id)));
-  assert.deepEqual(fixture.isolationLevels, [Prisma.TransactionIsolationLevel.Serializable]);
+  assert.deepEqual(fixture.isolationLevels, [
+    Prisma.TransactionIsolationLevel.Serializable,
+    Prisma.TransactionIsolationLevel.Serializable,
+  ]);
   assert.ok(fixture.lockQueries.some((query) => query.includes('server_wikis')));
-  assert.equal(fixture.audits.length, 1);
-  assert.equal(fixture.audits[0]?.action, 'server.wiki.publication.publish');
-  assert.equal(fixture.audits[0]?.actorAccountId, ownerAccountId);
-  assert.match(JSON.stringify(fixture.audits[0]?.metadata), /owner approved launch/u);
+  assert.equal(fixture.audits.length, 2);
+  const publishAudit = fixture.audits.find((audit) => audit.action === 'server.wiki.publication.publish');
+  assert.equal(publishAudit?.actorAccountId, ownerAccountId);
+  assert.match(JSON.stringify(publishAudit?.metadata), /owner approved launch/u);
 });
 
-test('an unchanged published snapshot cannot create a meaningless second release', async () => {
+test('an unchanged published snapshot cannot be submitted as a meaningless second release', async () => {
   const fixture = createFixture();
+  const submission = await fixture.submitCandidate();
   const published = await fixture.service.update(serverId, {
     status: 'published',
     expectedVersion: 0,
-    expectedCandidateToken: await fixture.candidateToken(),
+    candidateId: submission.id,
+    expectedCandidateToken: submission.token,
     reason: 'publish reviewed initial candidate',
   }, fixture.actor);
   assert.equal(published.candidate.hasChanges, false);
   assert.deepEqual(published.candidate.counts, { added: 0, updated: 0, moved: 0, removed: 0, unchanged: 4 });
 
   await assert.rejects(
-    () => fixture.service.update(serverId, {
-      status: 'published',
-      expectedVersion: 1,
-      expectedCandidateToken: published.candidate.token,
+    () => fixture.service.submitCandidate(serverId, {
+      expectedVersion: 1, expectedCandidateToken: published.candidate.token,
       reason: 'attempt duplicate no-op release',
     }, fixture.actor),
     (error: unknown) => error instanceof ConflictException
       && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_CANDIDATE_EMPTY'),
   );
-  assert.equal(fixture.audits.length, 1);
+  assert.equal(fixture.audits.length, 2);
 });
 
 test('manager and server.admin can transition publication while editor cannot', async () => {
   const manager = createFixture({ actorAccountId: managerAccountId, actorRole: 'manager' });
+  const managerSubmission = await manager.submitCandidate();
   assert.equal((await manager.service.update(serverId, {
-    status: 'published', expectedVersion: 0, expectedCandidateToken: await manager.candidateToken(), reason: 'manager approved launch',
+    status: 'published', expectedVersion: 0, candidateId: managerSubmission.id,
+    expectedCandidateToken: managerSubmission.token, reason: 'manager approved launch',
   }, manager.actor)).access.authority, 'manager');
 
   const admin = createFixture({ actorAccountId: editorAccountId, actorRole: 'editor', actorPermissions: ['server.admin'] });
+  const adminSubmission = await admin.submitCandidate();
   assert.equal((await admin.service.update(serverId, {
-    status: 'published', expectedVersion: 0, expectedCandidateToken: await admin.candidateToken(), reason: 'global admin approved launch',
+    status: 'published', expectedVersion: 0, candidateId: adminSubmission.id,
+    expectedCandidateToken: adminSubmission.token, reason: 'global admin approved launch',
   }, admin.actor)).access.authority, 'server_admin');
 
   const editor = createFixture({ actorAccountId: editorAccountId, actorRole: 'editor' });
   await assert.rejects(
     () => editor.service.update(serverId, {
-      status: 'published', expectedVersion: 0, expectedCandidateToken: '0'.repeat(64), reason: 'editor attempted launch',
+      status: 'published', expectedVersion: 0, candidateId: '1', expectedCandidateToken: '0'.repeat(64), reason: 'editor attempted launch',
     }, editor.actor),
     ForbiddenException,
   );
@@ -456,6 +548,7 @@ test('an active reviewer approves the exact candidate before a manager can publi
     actorRole: 'manager',
     reviewerConfigured: true,
   });
+  const submission = await fixture.submitCandidate();
   const managerState = await fixture.service.get(serverId, fixture.actor);
   assert.equal(managerState.review.required, true);
   assert.equal(managerState.review.approved, false);
@@ -464,6 +557,7 @@ test('an active reviewer approves the exact candidate before a manager can publi
   await assert.rejects(
     () => fixture.service.update(serverId, {
       status: 'published', expectedVersion: 0,
+      candidateId: submission.id,
       expectedCandidateToken: managerState.candidate.token,
       reason: 'manager attempted unreviewed release',
     }, fixture.actor),
@@ -477,15 +571,16 @@ test('an active reviewer approves the exact candidate before a manager can publi
   assert.equal(reviewerState.access.canPublish, false);
   assert.equal(reviewerState.review.canApprove, true);
   const approved = await fixture.service.approveCandidate(serverId, {
-    candidateToken: reviewerState.candidate.token,
+    candidateId: submission.id,
+    candidateToken: submission.token,
   }, reviewerActor);
   assert.equal(approved.approved, true);
   assert.equal(approved.viewerApproved, true);
   assert.equal(approved.approvals[0]?.reviewerProfileId, '4');
 
   const published = await fixture.service.update(serverId, {
-    status: 'published', expectedVersion: 0,
-    expectedCandidateToken: managerState.candidate.token,
+    status: 'published', expectedVersion: 0, candidateId: submission.id,
+    expectedCandidateToken: submission.token,
     reason: 'manager published independently reviewed release',
   }, fixture.actor);
   assert.equal(published.status, 'published');
@@ -495,9 +590,9 @@ test('an active reviewer approves the exact candidate before a manager can publi
 
 test('editors cannot approve release candidates and reviewer approval can be revoked', async () => {
   const fixture = createFixture({ reviewerConfigured: true });
-  const token = await fixture.candidateToken();
+  const submission = await fixture.submitCandidate();
   await assert.rejects(
-    () => fixture.service.approveCandidate(serverId, { candidateToken: token }, {
+    () => fixture.service.approveCandidate(serverId, { candidateId: submission.id, candidateToken: submission.token }, {
       accountId: editorAccountId,
       permissions: [],
     }),
@@ -505,18 +600,35 @@ test('editors cannot approve release candidates and reviewer approval can be rev
   );
 
   const reviewerActor = { accountId: reviewerAccountId, permissions: [] };
-  await fixture.service.approveCandidate(serverId, { candidateToken: token }, reviewerActor);
-  const revoked = await fixture.service.revokeCandidateApproval(serverId, { candidateToken: token }, reviewerActor);
+  await fixture.service.approveCandidate(serverId, { candidateId: submission.id, candidateToken: submission.token }, reviewerActor);
+  const revoked = await fixture.service.revokeCandidateApproval(serverId, { candidateId: submission.id, candidateToken: submission.token }, reviewerActor);
   assert.equal(revoked.approved, false);
   assert.equal(revoked.viewerApproved, false);
   assert.equal(fixture.approvals[0]?.revokedAt instanceof Date, true);
+});
+
+test('removing every reviewer never lowers the approval requirement fixed at submission', async () => {
+  const fixture = createFixture({ reviewerConfigured: true });
+  const submission = await fixture.submitCandidate();
+  fixture.setReviewerEnabled(false);
+  const state = await fixture.service.get(serverId, fixture.actor);
+  assert.equal(state.review.required, true);
+  assert.equal(state.review.approved, false);
+  await assert.rejects(
+    () => fixture.service.update(serverId, {
+      status: 'published', expectedVersion: 0, candidateId: submission.id,
+      expectedCandidateToken: submission.token, reason: 'attempt reviewer removal bypass',
+    }, fixture.actor),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_REVIEW_REQUIRED'),
+  );
 });
 
 test('publish fails closed when readiness is incomplete but unpublish preserves content readiness', async () => {
   const missingRoot = createFixture({ missingRoot: true });
   await assert.rejects(
     () => missingRoot.service.update(serverId, {
-      status: 'published', expectedVersion: 0, expectedCandidateToken: '0'.repeat(64), reason: 'launch without root page',
+      status: 'published', expectedVersion: 0, candidateId: '1', expectedCandidateToken: '0'.repeat(64), reason: 'launch without root page',
     }, missingRoot.actor),
     (error: unknown) => error instanceof ConflictException
       && JSON.stringify(error.getResponse()).includes('missing_root_page'),
@@ -541,7 +653,7 @@ test('publish blocks thin starter content, missing channels, and stale search in
 
   await assert.rejects(
     () => fixture.service.update(serverId, {
-      status: 'published', expectedVersion: 0, expectedCandidateToken: '0'.repeat(64), reason: 'attempted thin content launch',
+      status: 'published', expectedVersion: 0, candidateId: '1', expectedCandidateToken: '0'.repeat(64), reason: 'attempted thin content launch',
     }, fixture.actor),
     (error: unknown) => {
       if (!(error instanceof ConflictException)) return false;
@@ -557,7 +669,7 @@ test('publish blocks thin starter content, missing channels, and stale search in
   const missingDocument = createFixture({ missingRequiredDocument: true });
   await assert.rejects(
     () => missingDocument.service.update(serverId, {
-      status: 'published', expectedVersion: 0, expectedCandidateToken: '0'.repeat(64), reason: 'attempted incomplete document launch',
+      status: 'published', expectedVersion: 0, candidateId: '1', expectedCandidateToken: '0'.repeat(64), reason: 'attempted incomplete document launch',
     }, missingDocument.actor),
     (error: unknown) => error instanceof ConflictException
       && JSON.stringify(error.getResponse()).includes('missing_required_documents'),
@@ -569,15 +681,17 @@ test('stale versions, repeated unpublish, and inconsistent links fail without au
   const stale = createFixture({ publicationVersion: 4 });
   await assert.rejects(
     () => stale.service.update(serverId, {
-      status: 'published', expectedVersion: 3, expectedCandidateToken: '0'.repeat(64), reason: 'stale launch request',
+      status: 'published', expectedVersion: 3, candidateId: '1', expectedCandidateToken: '0'.repeat(64), reason: 'stale launch request',
     }, stale.actor),
     (error: unknown) => error instanceof ConflictException
       && JSON.stringify(error.getResponse()).includes('currentVersion'),
   );
 
   const republish = createFixture({ publicationStatus: 'published' });
+  const republishSubmission = await republish.submitCandidate();
   const republished = await republish.service.update(serverId, {
-    status: 'published', expectedVersion: 0, expectedCandidateToken: await republish.candidateToken(), reason: 'publish reviewed changes',
+    status: 'published', expectedVersion: 0, candidateId: republishSubmission.id,
+    expectedCandidateToken: republishSubmission.token, reason: 'publish reviewed changes',
   }, republish.actor);
   assert.equal(republished.status, 'published');
   assert.equal(republished.release?.version, 1);
@@ -600,7 +714,7 @@ test('stale versions, repeated unpublish, and inconsistent links fail without au
     stale.audits.length + draftUnpublish.audits.length + inconsistent.audits.length,
     0,
   );
-  assert.equal(republish.audits.length, 1);
+  assert.equal(republish.audits.length, 2);
 });
 
 test('GET reports publication timestamps, readiness blockers, and manager authority without mutation', async () => {

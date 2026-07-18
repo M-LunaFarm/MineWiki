@@ -13,6 +13,10 @@ export interface ServerWikiReleaseCandidatePageIdentity {
   readonly displayTitle: string;
   readonly localPath: string;
   readonly routePath: string;
+  readonly pageType: string;
+  readonly protectionLevel: string;
+  readonly status: string;
+  readonly updatedAt: string;
 }
 
 export interface ServerWikiReleaseCandidate {
@@ -25,6 +29,7 @@ export interface ServerWikiReleaseCandidate {
     readonly kind: ServerWikiReleaseCandidatePageKind;
     readonly contentChanged: boolean;
     readonly identityChanged: boolean;
+    readonly metadataChanged: boolean;
     readonly before: ServerWikiReleaseCandidatePageIdentity | null;
     readonly after: ServerWikiReleaseCandidatePageIdentity | null;
     readonly updatedAt: string;
@@ -78,6 +83,7 @@ export interface ReleaseCandidateLink {
 
 export interface ReleaseCandidateSnapshot {
   readonly candidate: ServerWikiReleaseCandidate;
+  readonly presentation: ServerWikiPresentationSnapshot;
   readonly pages: readonly ReleaseCandidateCurrentPage[];
   readonly revisionContentByPageId: ReadonlyMap<bigint, string>;
   readonly links: readonly ReleaseCandidateLink[];
@@ -161,13 +167,21 @@ export async function buildServerWikiReleaseCandidate(
       || beforePage.title !== afterPage.title
       || beforePage.displayTitle !== afterPage.displayTitle
     ));
+    const metadataChanged = Boolean(beforePage && afterPage && (
+      beforePage.pageType !== afterPage.pageType
+      || beforePage.protectionLevel !== afterPage.protectionLevel
+      || beforePage.pageStatus !== afterPage.status
+      || beforePage.createdBy !== afterPage.createdBy
+      || beforePage.ownerProfileId !== afterPage.ownerProfileId
+      || beforePage.pageUpdatedAt.getTime() !== afterPage.updatedAt.getTime()
+    ));
     const kind: ServerWikiReleaseCandidatePageKind = !beforePage
       ? 'added'
       : !afterPage
         ? 'removed'
         : identityChanged
           ? 'moved'
-          : contentChanged
+          : contentChanged || metadataChanged
             ? 'updated'
             : 'unchanged';
     return {
@@ -175,17 +189,26 @@ export async function buildServerWikiReleaseCandidate(
       kind,
       contentChanged,
       identityChanged,
+      metadataChanged,
       before: beforePage ? candidateIdentity(input, {
         revisionId: beforePage.revisionId,
         title: beforePage.title,
         displayTitle: beforePage.displayTitle,
         localPath: beforePage.localPath,
+        pageType: beforePage.pageType,
+        protectionLevel: beforePage.protectionLevel,
+        status: beforePage.pageStatus,
+        updatedAt: beforePage.pageUpdatedAt,
       }) : null,
       after: afterPage ? candidateIdentity(input, {
         revisionId: afterPage.currentRevisionId,
         title: afterPage.title,
         displayTitle: afterPage.displayTitle,
         localPath: afterPage.localPath,
+        pageType: afterPage.pageType,
+        protectionLevel: afterPage.protectionLevel,
+        status: afterPage.status,
+        updatedAt: afterPage.updatedAt,
       }) : null,
       updatedAt: (afterPage?.updatedAt ?? beforePage?.pageUpdatedAt ?? new Date(0)).toISOString(),
     };
@@ -195,6 +218,8 @@ export async function buildServerWikiReleaseCandidate(
   const presentation = presentationChanges(input.presentation, baselinePresentation, links, baselineLinks);
   const token = createHash('sha256').update(canonicalJson({
     serverWikiId: input.serverWikiId.toString(),
+    siteSlug: input.siteSlug,
+    contentSlug: input.contentSlug,
     baselineReleaseId: input.publishedRelease?.id.toString() ?? null,
     pages: pages.map(tokenPage),
     presentation: input.presentation,
@@ -212,6 +237,7 @@ export async function buildServerWikiReleaseCandidate(
       presentation,
       hasChanges,
     },
+    presentation: input.presentation,
     pages,
     revisionContentByPageId,
     links,
@@ -257,7 +283,16 @@ async function loadCurrentLinks(
 
 function candidateIdentity(
   input: Pick<ReleaseCandidateInput, 'siteSlug' | 'contentSlug'>,
-  page: { readonly revisionId: bigint; readonly title: string; readonly displayTitle: string; readonly localPath: string },
+  page: {
+    readonly revisionId: bigint;
+    readonly title: string;
+    readonly displayTitle: string;
+    readonly localPath: string;
+    readonly pageType: string;
+    readonly protectionLevel: string;
+    readonly status: string;
+    readonly updatedAt: Date;
+  },
 ): ServerWikiReleaseCandidatePageIdentity {
   return {
     revisionId: page.revisionId.toString(),
@@ -265,6 +300,10 @@ function candidateIdentity(
     displayTitle: page.displayTitle,
     localPath: page.localPath,
     routePath: buildCanonicalServerWikiPath(input.siteSlug, page.localPath, input.contentSlug, '/serverWiki'),
+    pageType: page.pageType,
+    protectionLevel: page.protectionLevel,
+    status: page.status,
+    updatedAt: page.updatedAt.toISOString(),
   };
 }
 
@@ -304,6 +343,7 @@ function tokenPage(page: ReleaseCandidateCurrentPage) {
     localPath: page.localPath, slug: page.slug, title: page.title, displayTitle: page.displayTitle,
     pageType: page.pageType, protectionLevel: page.protectionLevel, status: page.status,
     createdBy: page.createdBy?.toString() ?? null, ownerProfileId: page.ownerProfileId?.toString() ?? null,
+    updatedAt: page.updatedAt.toISOString(),
   };
 }
 

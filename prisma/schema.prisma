@@ -1935,50 +1935,51 @@ model WikiRecentChange {
 }
 
 model ServerWiki {
-  id                           BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
-  spaceId                      BigInt                      @unique @map("space_id") @db.UnsignedBigInt
-  voteServerId                 String?                     @unique @map("vote_server_id") @db.Char(36)
-  serverName                   String                      @map("server_name") @db.VarChar(255)
-  slug                         String                      @unique @db.VarChar(255)
-  siteSlug                     String?                     @unique @map("site_slug") @db.VarChar(80)
-  host                         String?                     @db.VarChar(255)
-  port                         Int?                        @db.UnsignedInt
-  edition                      String                      @default("unknown") @db.VarChar(16)
-  supportedVersions            String?                     @map("supported_versions") @db.VarChar(255)
-  genres                       String?                     @db.VarChar(255)
-  verifiedStatus               String                      @default("none") @map("verified_status") @db.VarChar(32)
-  status                       String                      @default("active") @db.VarChar(32)
-  publicationStatus            String                      @default("draft") @map("publication_status") @db.VarChar(16)
-  publicationVersion           Int                         @default(0) @map("publication_version") @db.UnsignedInt
-  publishedAt                  DateTime?                   @map("published_at") @db.DateTime(3)
-  unpublishedAt                DateTime?                   @map("unpublished_at") @db.DateTime(3)
-  publicationUpdatedAt         DateTime?                   @map("publication_updated_at") @db.DateTime(3)
-  publicationUpdatedBy         BigInt?                     @map("publication_updated_by") @db.UnsignedBigInt
-  publishedReleaseId           BigInt?                     @unique @map("published_release_id") @db.UnsignedBigInt
-  layoutKey                    String                      @default("docs") @map("layout_key") @db.VarChar(32)
-  layoutUpdatedAt              DateTime?                   @map("layout_updated_at")
-  layoutUpdatedBy              BigInt?                     @map("layout_updated_by") @db.UnsignedBigInt
-  contributionPolicySource     String?                     @map("contribution_policy_source") @db.Text
-  editHelpSource               String?                     @map("edit_help_source") @db.Text
-  topNoticeSource              String?                     @map("top_notice_source") @db.Text
-  bottomNoticeSource           String?                     @map("bottom_notice_source") @db.Text
-  requireContributionPolicyAck Boolean                     @default(false) @map("require_contribution_policy_ack")
-  contributionPolicyVersion    Int                         @default(0) @map("contribution_policy_version") @db.UnsignedInt
-  contentSettingsVersion       Int                         @default(0) @map("content_settings_version") @db.UnsignedInt
-  contentSettingsUpdatedAt     DateTime?                   @map("content_settings_updated_at")
-  contentSettingsUpdatedBy     BigInt?                     @map("content_settings_updated_by") @db.UnsignedBigInt
-  navigationOrder              Json?                       @map("navigation_order")
-  navigationVersion            Int                         @default(0) @map("navigation_version") @db.UnsignedInt
-  navigationUpdatedAt          DateTime?                   @map("navigation_updated_at")
-  navigationUpdatedBy          BigInt?                     @map("navigation_updated_by") @db.UnsignedBigInt
-  createdBy                    BigInt?                     @map("created_by") @db.UnsignedBigInt
-  createdAt                    DateTime                    @map("created_at")
-  updatedAt                    DateTime                    @map("updated_at")
-  space                        WikiSpace                   @relation("ServerWikiSpace", fields: [spaceId], references: [id], onDelete: Restrict)
+  id                           BigInt                       @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId                      BigInt                       @unique @map("space_id") @db.UnsignedBigInt
+  voteServerId                 String?                      @unique @map("vote_server_id") @db.Char(36)
+  serverName                   String                       @map("server_name") @db.VarChar(255)
+  slug                         String                       @unique @db.VarChar(255)
+  siteSlug                     String?                      @unique @map("site_slug") @db.VarChar(80)
+  host                         String?                      @db.VarChar(255)
+  port                         Int?                         @db.UnsignedInt
+  edition                      String                       @default("unknown") @db.VarChar(16)
+  supportedVersions            String?                      @map("supported_versions") @db.VarChar(255)
+  genres                       String?                      @db.VarChar(255)
+  verifiedStatus               String                       @default("none") @map("verified_status") @db.VarChar(32)
+  status                       String                       @default("active") @db.VarChar(32)
+  publicationStatus            String                       @default("draft") @map("publication_status") @db.VarChar(16)
+  publicationVersion           Int                          @default(0) @map("publication_version") @db.UnsignedInt
+  publishedAt                  DateTime?                    @map("published_at") @db.DateTime(3)
+  unpublishedAt                DateTime?                    @map("unpublished_at") @db.DateTime(3)
+  publicationUpdatedAt         DateTime?                    @map("publication_updated_at") @db.DateTime(3)
+  publicationUpdatedBy         BigInt?                      @map("publication_updated_by") @db.UnsignedBigInt
+  publishedReleaseId           BigInt?                      @unique @map("published_release_id") @db.UnsignedBigInt
+  layoutKey                    String                       @default("docs") @map("layout_key") @db.VarChar(32)
+  layoutUpdatedAt              DateTime?                    @map("layout_updated_at")
+  layoutUpdatedBy              BigInt?                      @map("layout_updated_by") @db.UnsignedBigInt
+  contributionPolicySource     String?                      @map("contribution_policy_source") @db.Text
+  editHelpSource               String?                      @map("edit_help_source") @db.Text
+  topNoticeSource              String?                      @map("top_notice_source") @db.Text
+  bottomNoticeSource           String?                      @map("bottom_notice_source") @db.Text
+  requireContributionPolicyAck Boolean                      @default(false) @map("require_contribution_policy_ack")
+  contributionPolicyVersion    Int                          @default(0) @map("contribution_policy_version") @db.UnsignedInt
+  contentSettingsVersion       Int                          @default(0) @map("content_settings_version") @db.UnsignedInt
+  contentSettingsUpdatedAt     DateTime?                    @map("content_settings_updated_at")
+  contentSettingsUpdatedBy     BigInt?                      @map("content_settings_updated_by") @db.UnsignedBigInt
+  navigationOrder              Json?                        @map("navigation_order")
+  navigationVersion            Int                          @default(0) @map("navigation_version") @db.UnsignedInt
+  navigationUpdatedAt          DateTime?                    @map("navigation_updated_at")
+  navigationUpdatedBy          BigInt?                      @map("navigation_updated_by") @db.UnsignedBigInt
+  createdBy                    BigInt?                      @map("created_by") @db.UnsignedBigInt
+  createdAt                    DateTime                     @map("created_at")
+  updatedAt                    DateTime                     @map("updated_at")
+  space                        WikiSpace                    @relation("ServerWikiSpace", fields: [spaceId], references: [id], onDelete: Restrict)
   billingSubject               PaddleBillingSubject?
-  releases                     ServerWikiRelease[]         @relation("ServerWikiReleaseHistory")
+  releases                     ServerWikiRelease[]          @relation("ServerWikiReleaseHistory")
+  releaseCandidates            ServerWikiReleaseCandidate[]
   releaseApprovals             ServerWikiReleaseApproval[]
-  publishedRelease             ServerWikiRelease?          @relation("PublishedServerWikiRelease", fields: [publishedReleaseId], references: [id], onDelete: SetNull)
+  publishedRelease             ServerWikiRelease?           @relation("PublishedServerWikiRelease", fields: [publishedReleaseId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([publicationStatus])
@@ -1995,15 +1996,46 @@ model ServerWikiRelease {
   createdBy            BigInt?  @map("created_by") @db.UnsignedBigInt
   createdAt            DateTime @default(now()) @map("created_at") @db.DateTime(3)
   publishedAt          DateTime @map("published_at") @db.DateTime(3)
+  candidateId          BigInt?  @unique @map("candidate_id") @db.UnsignedBigInt
 
-  serverWiki   ServerWiki              @relation("ServerWikiReleaseHistory", fields: [serverWikiId], references: [id], onDelete: Cascade)
-  publishedFor ServerWiki?             @relation("PublishedServerWikiRelease")
+  serverWiki   ServerWiki                  @relation("ServerWikiReleaseHistory", fields: [serverWikiId], references: [id], onDelete: Cascade)
+  publishedFor ServerWiki?                 @relation("PublishedServerWikiRelease")
   items        ServerWikiReleaseItem[]
   links        ServerWikiReleaseLink[]
+  candidate    ServerWikiReleaseCandidate? @relation("CandidatePublishedRelease", fields: [candidateId], references: [id], onDelete: Restrict)
 
   @@unique([serverWikiId, version], map: "uq_server_wiki_release_version")
   @@index([serverWikiId, publishedAt], map: "idx_server_wiki_release_published")
   @@map("server_wiki_releases")
+}
+
+model ServerWikiReleaseCandidate {
+  id                       BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  serverWikiId             BigInt   @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId                  BigInt   @map("space_id") @db.UnsignedBigInt
+  baselineReleaseId        BigInt?  @map("baseline_release_id") @db.UnsignedBigInt
+  sourcePublicationVersion Int      @map("source_publication_version") @db.UnsignedInt
+  status                   String   @default("pending_review") @db.VarChar(32)
+  token                    String   @db.Char(64)
+  siteSlug                 String   @map("site_slug") @db.VarChar(80)
+  contentSlug              String   @map("content_slug") @db.VarChar(255)
+  requiredApprovals        Int      @default(0) @map("required_approvals") @db.UnsignedInt
+  submissionReason         String   @map("submission_reason") @db.VarChar(500)
+  manifestSnapshot         Json     @map("manifest_snapshot")
+  releaseSnapshot          Json     @map("release_snapshot")
+  createdBy                BigInt?  @map("created_by") @db.UnsignedBigInt
+  submittedAt              DateTime @map("submitted_at") @db.DateTime(3)
+  createdAt                DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  serverWiki       ServerWiki                  @relation(fields: [serverWikiId], references: [id], onDelete: Cascade)
+  approvals        ServerWikiReleaseApproval[]
+  publishedRelease ServerWikiRelease?          @relation("CandidatePublishedRelease")
+
+  @@unique([serverWikiId, token], map: "uq_server_wiki_release_candidate_token")
+  @@index([spaceId, createdAt], map: "idx_server_wiki_release_candidate_space")
+  @@index([serverWikiId, status, submittedAt], map: "idx_server_wiki_release_candidate_status")
+  @@index([serverWikiId, baselineReleaseId, createdAt], map: "idx_server_wiki_release_candidate_baseline")
+  @@map("server_wiki_release_candidates")
 }
 
 model ServerWikiReleaseItem {
@@ -2063,18 +2095,21 @@ model ServerWikiReleaseLink {
 }
 
 model ServerWikiReleaseApproval {
-  id                BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
-  serverWikiId      BigInt     @map("server_wiki_id") @db.UnsignedBigInt
-  spaceId           BigInt     @map("space_id") @db.UnsignedBigInt
-  candidateToken    String     @map("candidate_token") @db.Char(64)
-  reviewerProfileId BigInt     @map("reviewer_profile_id") @db.UnsignedBigInt
-  approvedAt        DateTime   @map("approved_at") @db.DateTime(3)
-  revokedAt         DateTime?  @map("revoked_at") @db.DateTime(3)
-  createdAt         DateTime   @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt         DateTime   @updatedAt @map("updated_at") @db.DateTime(3)
-  serverWiki        ServerWiki @relation(fields: [serverWikiId], references: [id], onDelete: Cascade)
+  id                BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
+  serverWikiId      BigInt                      @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId           BigInt                      @map("space_id") @db.UnsignedBigInt
+  candidateToken    String                      @map("candidate_token") @db.Char(64)
+  candidateId       BigInt?                     @map("candidate_id") @db.UnsignedBigInt
+  reviewerProfileId BigInt                      @map("reviewer_profile_id") @db.UnsignedBigInt
+  approvedAt        DateTime                    @map("approved_at") @db.DateTime(3)
+  revokedAt         DateTime?                   @map("revoked_at") @db.DateTime(3)
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime                    @updatedAt @map("updated_at") @db.DateTime(3)
+  serverWiki        ServerWiki                  @relation(fields: [serverWikiId], references: [id], onDelete: Cascade)
+  candidate         ServerWikiReleaseCandidate? @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 
   @@unique([serverWikiId, candidateToken, reviewerProfileId], map: "uq_server_wiki_release_approval")
+  @@unique([candidateId, reviewerProfileId], map: "uq_server_wiki_release_approval_candidate_id")
   @@index([serverWikiId, candidateToken, revokedAt], map: "idx_server_wiki_release_approval_candidate")
   @@index([spaceId, reviewerProfileId, approvedAt], map: "idx_server_wiki_release_approval_reviewer")
   @@map("server_wiki_release_approvals")

@@ -9,6 +9,7 @@ import {
   ServerWikiPublicationService,
   type ServerWikiPublicationActor,
   type ReviewServerWikiReleaseCandidateInput,
+  type SubmitServerWikiReleaseCandidateInput,
   type UpdateServerWikiPublicationInput,
 } from './server-wiki-publication.service';
 
@@ -16,6 +17,7 @@ const updatePublicationSchema = z.object({
   status: z.enum(['published', 'unpublished']),
   expectedVersion: z.number().int().min(0).max(4_294_967_295),
   expectedCandidateToken: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  candidateId: z.string().regex(/^[1-9][0-9]{0,19}$/u).optional(),
   reason: z.string().trim().min(5).max(500),
 }).strict().superRefine((value, context) => {
   if (value.status === 'published' && !value.expectedCandidateToken) {
@@ -25,10 +27,24 @@ const updatePublicationSchema = z.object({
       message: 'expectedCandidateToken is required when publishing.',
     });
   }
+  if (value.status === 'published' && !value.candidateId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['candidateId'],
+      message: 'candidateId is required when publishing.',
+    });
+  }
 });
 
 const reviewCandidateSchema = z.object({
+  candidateId: z.string().regex(/^[1-9][0-9]{0,19}$/u),
   candidateToken: z.string().regex(/^[0-9a-f]{64}$/u),
+}).strict();
+
+const submitCandidateSchema = z.object({
+  expectedVersion: z.number().int().min(0).max(4_294_967_295),
+  expectedCandidateToken: z.string().regex(/^[0-9a-f]{64}$/u),
+  reason: z.string().trim().min(5).max(500),
 }).strict();
 
 @Controller('v1/servers/:serverId/wiki-publication')
@@ -55,6 +71,18 @@ export class ServerWikiPublicationController {
   ) {
     const input = updatePublicationSchema.parse(body) as UpdateServerWikiPublicationInput;
     return this.publication.update(serverId, input, actorFromSession(session));
+  }
+
+  @Post('candidate')
+  @RequireStepUp('server_admin')
+  @Throttle({ default: { limit: 8, ttl: 60 } })
+  submitCandidate(
+    @Param('serverId', new ParseUUIDPipe()) serverId: string,
+    @Body() body: unknown,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    const input = submitCandidateSchema.parse(body) as SubmitServerWikiReleaseCandidateInput;
+    return this.publication.submitCandidate(serverId, input, actorFromSession(session));
   }
 
   @Post('approval')
