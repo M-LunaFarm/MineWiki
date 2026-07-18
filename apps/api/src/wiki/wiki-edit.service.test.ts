@@ -213,6 +213,7 @@ test('subtree move redirects clone page ACLs atomically and keep raw old paths r
   const aclRules = [...sourceAclRules];
   const updates: Array<{ readonly id: bigint; readonly data: Record<string, unknown> }> = [];
   const recent: Array<Record<string, unknown>> = [];
+  const lifecycle: Array<Record<string, unknown>> = [];
   const indexed: Array<{ readonly pageId: bigint; readonly revisionId: bigint }> = [];
   const permissionChecks: Array<{ readonly type: string; readonly namespace?: string; readonly spaceId?: bigint }> = [];
   let auditMetadata: Record<string, unknown> | null = null;
@@ -302,6 +303,9 @@ test('subtree move redirects clone page ACLs atomically and keep raw old paths r
     },
     wikiRecentChange: {
       async create(input: { data: Record<string, unknown> }) { recent.push(input.data); return input.data; }
+    },
+    wikiPageLifecycleEvent: {
+      async createMany(input: { data: Array<Record<string, unknown>> }) { lifecycle.push(...input.data); return { count: input.data.length }; }
     }
   };
   const prisma = {
@@ -310,7 +314,7 @@ test('subtree move redirects clone page ACLs atomically and keep raw old paths r
       const pageSnapshot = new Map([...pages].map(([id, page]) => [id, { ...page }]));
       const revisionSnapshot = new Map([...revisions].map(([id, revision]) => [id, { ...revision }]));
       const lengths = {
-        aclRules: aclRules.length, updates: updates.length, recent: recent.length,
+        aclRules: aclRules.length, updates: updates.length, recent: recent.length, lifecycle: lifecycle.length,
         indexed: indexed.length, permissionChecks: permissionChecks.length
       };
       const ids = { nextPageId, nextRevisionId, nextAclRuleId };
@@ -325,6 +329,7 @@ test('subtree move redirects clone page ACLs atomically and keep raw old paths r
         aclRules.length = lengths.aclRules;
         updates.length = lengths.updates;
         recent.length = lengths.recent;
+        lifecycle.length = lengths.lifecycle;
         indexed.length = lengths.indexed;
         permissionChecks.length = lengths.permissionChecks;
         ({ nextPageId, nextRevisionId, nextAclRuleId } = ids);
@@ -365,6 +370,7 @@ test('subtree move redirects clone page ACLs atomically and keep raw old paths r
   assert.equal([...pages.values()].some((item) => item.pageType === 'redirect'), false);
   assert.equal(aclRules.length, sourceAclRules.length);
   assert.equal(recent.length, 0);
+  assert.equal(lifecycle.length, 0);
   assert.equal(auditMetadata, null);
 
   failAclClone = false;
@@ -390,6 +396,11 @@ test('subtree move redirects clone page ACLs atomically and keep raw old paths r
   assert.equal(permissionChecks.filter((check) => check.type === 'move').length, 2);
   assert.equal(permissionChecks.filter((check) => check.type === 'create').length, 2);
   assert.equal(recent.length, 2);
+  assert.equal(lifecycle.length, 2);
+  assert.deepEqual(lifecycle.map((event) => [event.pageId, event.eventType, event.sourceTitle, event.destinationTitle]), [
+    [7n, 'move', 'Old', 'New'],
+    [8n, 'move', 'Old/Child', 'New/Child']
+  ]);
   assert.equal(recent.every((change) => String(change.summary).includes('[main@10 -> guide@20]')), true);
   const redirects = [...pages.values()].filter((page) => page.pageType === 'redirect');
   const rootRedirect = redirects.find((page) => page.localPath === 'old');
@@ -1143,6 +1154,7 @@ if (!hasDatabase) {
     const pages = await prisma.wikiPage.findMany({ where: pageFilter, select: { id: true } });
     for (const page of pages) {
       await prisma.pageSectionLock.deleteMany({ where: { pageId: page.id } });
+      await prisma.wikiPageLifecycleEvent.deleteMany({ where: { pageId: page.id } });
       await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: page.id } });
       await prisma.wikiPageRevision.deleteMany({ where: { pageId: page.id } });
       await prisma.wikiPage.delete({ where: { id: page.id } }).catch(() => {});
@@ -1180,6 +1192,40 @@ if (!hasDatabase) {
       });
       assert.equal(recentChange?.changeType, 'create');
       assert.equal(recentChange?.namespaceCode, fixture.namespace.code);
+    } finally {
+      await cleanupFixture({
+        accountId: fixture.account.id,
+        namespaceId: fixture.namespace.id,
+        namespaceCode: fixture.namespace.code,
+        spaceId: fixture.space.id,
+        pageId
+      });
+    }
+  });
+
+  test('delete and restore append lifecycle events without creating content revisions', async () => {
+    const fixture = await createFixture();
+    let pageId: string | undefined;
+    try {
+      const created = await edits.createPage(session(fixture.account.id), {
+        namespace: fixture.namespace.code,
+        title: `lifecycle_${fixture.unique}`,
+        spaceId: fixture.space.id.toString(),
+        contentRaw: 'lifecycle content'
+      });
+      pageId = created.pageId;
+      await edits.deletePage(session(fixture.account.id), created.pageId, { reason: 'obsolete' });
+      await edits.restorePage(session(fixture.account.id), created.pageId, { reason: 'needed again' });
+
+      const [events, revisionCount, publicHistory] = await Promise.all([
+        prisma.wikiPageLifecycleEvent.findMany({ where: { pageId: BigInt(created.pageId) }, orderBy: { id: 'asc' } }),
+        prisma.wikiPageRevision.count({ where: { pageId: BigInt(created.pageId) } }),
+        reads.getPageLifecycleEvents(created.pageId)
+      ]);
+      assert.deepEqual(events.map((event) => event.eventType), ['delete', 'restore']);
+      assert.deepEqual(events.map((event) => event.reason), ['obsolete', 'needed again']);
+      assert.equal(revisionCount, 1);
+      assert.deepEqual(publicHistory.items.map((event) => event.eventType), ['restore', 'delete']);
     } finally {
       await cleanupFixture({
         accountId: fixture.account.id,
@@ -1756,6 +1802,7 @@ if (!hasDatabase) {
       await prisma.wikiPageLink.deleteMany({ where: { sourcePageId: { in: pageIds } } });
       await prisma.wikiSearchDocument.deleteMany({ where: { pageId: { in: pageIds } } });
       await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageLifecycleEvent.deleteMany({ where: { pageId: { in: pageIds } } });
       await prisma.wikiPageRevision.deleteMany({ where: { pageId: { in: pageIds } } });
       await prisma.wikiPage.deleteMany({ where: { id: { in: pageIds } } });
       await prisma.wikiSpace.delete({ where: { id: destinationSpace.id } }).catch(() => {});
@@ -1828,6 +1875,7 @@ if (!hasDatabase) {
       await prisma.wikiPageLink.deleteMany({ where: { sourcePageId: { in: pageIds } } });
       await prisma.wikiSearchDocument.deleteMany({ where: { pageId: { in: pageIds } } });
       await prisma.wikiPageRenderCache.deleteMany({ where: { pageId: { in: pageIds } } });
+      await prisma.wikiPageLifecycleEvent.deleteMany({ where: { pageId: { in: pageIds } } });
       await prisma.wikiPageRevision.deleteMany({ where: { pageId: { in: pageIds } } });
       await prisma.wikiPage.deleteMany({ where: { id: { in: pageIds } } });
       await prisma.wikiSpace.delete({ where: { id: destinationSpace.id } }).catch(() => {});

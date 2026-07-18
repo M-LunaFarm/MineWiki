@@ -1526,6 +1526,29 @@ model WikiPageRevision {
   @@map("page_revisions")
 }
 
+model WikiPageLifecycleEvent {
+  id                       BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId                   BigInt   @map("page_id") @db.UnsignedBigInt
+  eventType                String   @map("event_type") @db.VarChar(16)
+  actorProfileId           BigInt?  @map("actor_profile_id") @db.UnsignedBigInt
+  reason                   String?  @db.VarChar(255)
+  sourceNamespaceId        Int?     @map("source_namespace_id") @db.UnsignedInt
+  sourceNamespaceCode      String?  @map("source_namespace_code") @db.VarChar(32)
+  sourceSpaceId            BigInt?  @map("source_space_id") @db.UnsignedBigInt
+  sourceTitle              String?  @map("source_title") @db.VarChar(255)
+  sourcePath               String?  @map("source_path") @db.VarChar(500)
+  destinationNamespaceId   Int?     @map("destination_namespace_id") @db.UnsignedInt
+  destinationNamespaceCode String?  @map("destination_namespace_code") @db.VarChar(32)
+  destinationSpaceId       BigInt?  @map("destination_space_id") @db.UnsignedBigInt
+  destinationTitle         String?  @map("destination_title") @db.VarChar(255)
+  destinationPath          String?  @map("destination_path") @db.VarChar(500)
+  createdAt                DateTime @map("created_at") @db.DateTime(3)
+
+  @@index([pageId, id], map: "idx_page_lifecycle_page_id")
+  @@index([createdAt, id], map: "idx_page_lifecycle_created")
+  @@map("page_lifecycle_events")
+}
+
 model WikiPageRenderCache {
   id              BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
   pageId          BigInt           @map("page_id") @db.UnsignedBigInt

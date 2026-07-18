@@ -689,6 +689,39 @@ test('revision history uses a stable revision number cursor beyond the first pag
   assert.equal(result.nextCursor, '3');
 });
 
+test('page lifecycle history uses an independent id cursor and redacts cross-space identities', async () => {
+  const now = new Date('2026-07-18T09:00:00Z');
+  const page = { id: 1n, namespaceId: 2, spaceId: 20n, localPath: 'new', slug: 'new', title: 'New', displayTitle: 'New', currentRevisionId: 4n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
+  let lifecycleWhere: unknown;
+  const events = [
+    { id: 9n, pageId: 1n, eventType: 'restore', actorProfileId: 3n, reason: 'restore reason', sourceNamespaceId: null, sourceNamespaceCode: null, sourceSpaceId: null, sourceTitle: null, sourcePath: null, destinationNamespaceId: 2, destinationNamespaceCode: 'guide', destinationSpaceId: 20n, destinationTitle: 'New', destinationPath: 'new', createdAt: now },
+    { id: 8n, pageId: 1n, eventType: 'move', actorProfileId: 3n, reason: 'private source title', sourceNamespaceId: 1, sourceNamespaceCode: 'main', sourceSpaceId: 10n, sourceTitle: 'Secret', sourcePath: 'secret', destinationNamespaceId: 2, destinationNamespaceCode: 'guide', destinationSpaceId: 20n, destinationTitle: 'New', destinationPath: 'new', createdAt: now },
+    { id: 7n, pageId: 1n, eventType: 'delete', actorProfileId: null, reason: null, sourceNamespaceId: 2, sourceNamespaceCode: 'guide', sourceSpaceId: 20n, sourceTitle: 'New', sourcePath: 'new', destinationNamespaceId: null, destinationNamespaceCode: null, destinationSpaceId: null, destinationTitle: null, destinationPath: null, createdAt: now }
+  ];
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageLifecycleEvent: { async findMany(args: { where: unknown }) { lifecycleWhere = args.where; return events; } },
+    wikiProfile: { async findUnique() { return null; }, async findMany() { return [{ id: 3n, displayName: 'Maintainer', username: 'maintainer' }]; } }
+  } as unknown as PrismaService;
+  const actions: string[] = [];
+  const permissions = {
+    async assertCanReadPage() {},
+    async assertCanUsePageAction(input: { action: string }) { actions.push(input.action); }
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getPageLifecycleEvents('1', null, '10', 2);
+
+  assert.deepEqual(lifecycleWhere, { pageId: 1n, id: { lt: 10n } });
+  assert.deepEqual(actions, ['history']);
+  assert.equal(result.nextCursor, '8');
+  assert.equal(result.items[0]?.destination?.title, 'New');
+  assert.equal(result.items[0]?.actorUsername, 'maintainer');
+  assert.equal(result.items[1]?.source, null);
+  assert.equal(result.items[1]?.destination?.title, 'New');
+  assert.equal(result.items[1]?.reason, null);
+  assert.equal(result.items[1]?.identityRedacted, true);
+});
+
 test('historical revision rendering keeps raw source private and applies read plus history ACLs', async () => {
   const now = new Date('2026-07-16T00:00:00Z');
   const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'history', slug: 'history', title: 'History', displayTitle: 'History', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };

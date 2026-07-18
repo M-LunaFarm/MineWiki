@@ -242,6 +242,31 @@ export interface WikiRevisionListResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiLifecycleIdentity {
+  readonly namespace: string;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly path: string;
+}
+
+export interface WikiPageLifecycleEventSummary {
+  readonly id: string;
+  readonly eventType: 'move' | 'delete' | 'restore';
+  readonly actorProfileId: string | null;
+  readonly actorName: string | null;
+  readonly actorUsername: string | null;
+  readonly reason: string | null;
+  readonly source: WikiLifecycleIdentity | null;
+  readonly destination: WikiLifecycleIdentity | null;
+  readonly identityRedacted: boolean;
+  readonly createdAt: string;
+}
+
+export interface WikiPageLifecycleEventListResponse {
+  readonly items: WikiPageLifecycleEventSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiDeletedPageSummary {
   readonly id: string;
   readonly namespace: string;
@@ -400,6 +425,21 @@ export async function resolveWikiAccessContext(
     accountId: viewer.userId,
     actor: profile ? wikiPermissions.actorFromSession(viewer, profile) : null,
     requestIp: viewer.requestIp
+  };
+}
+
+function lifecycleIdentity(input: {
+  readonly namespace: string | null;
+  readonly spaceId: bigint | null;
+  readonly title: string | null;
+  readonly path: string | null;
+}): WikiLifecycleIdentity | null {
+  if (!input.namespace || input.spaceId === null || !input.title || !input.path) return null;
+  return {
+    namespace: input.namespace,
+    spaceId: input.spaceId.toString(),
+    title: input.title,
+    path: input.path
   };
 }
 
@@ -692,6 +732,68 @@ export class WikiReadService {
       };
     });
     return { items, nextCursor: hasMore ? pageRows.at(-1)?.revisionNo.toString() ?? null : null };
+  }
+
+  async getPageLifecycleEvents(
+    pageId: string,
+    viewer?: WikiAccessViewer,
+    cursor?: string,
+    requestedLimit: string | number = 50
+  ): Promise<WikiPageLifecycleEventListResponse> {
+    const parsedPageId = this.parseBigIntId(pageId, 'pageId');
+    const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
+    if (!page) throw new NotFoundException('Wiki page not found.');
+    const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    await this.wikiPermissions.assertCanReadPage({ ...access, page });
+    await this.wikiPermissions.assertCanUsePageAction({ ...access, action: 'history', page });
+
+    const limit = Math.min(Math.max(Number(requestedLimit) || 50, 1), 100);
+    const cursorId = cursor ? this.parseBigIntId(cursor, 'cursor') : null;
+    const events = await this.prisma.wikiPageLifecycleEvent.findMany({
+      where: {
+        pageId: parsedPageId,
+        ...(cursorId ? { id: { lt: cursorId } } : {})
+      },
+      orderBy: [{ id: 'desc' }],
+      take: limit + 1
+    });
+    const hasMore = events.length > limit;
+    const rows = events.slice(0, limit);
+    const actorIds = [...new Set(rows.flatMap((event) => event.actorProfileId ? [event.actorProfileId] : []))];
+    const profileById = await this.canonicalProfileViews(actorIds);
+    const items = rows.map((event) => {
+      const sourceVisible = event.sourceNamespaceId === null || event.sourceSpaceId === null
+        ? true
+        : event.sourceNamespaceId === page.namespaceId && event.sourceSpaceId === page.spaceId;
+      const destinationVisible = event.destinationNamespaceId === null || event.destinationSpaceId === null
+        ? true
+        : event.destinationNamespaceId === page.namespaceId && event.destinationSpaceId === page.spaceId;
+      const identityRedacted = !sourceVisible || !destinationVisible;
+      const actor = event.actorProfileId ? profileById.get(event.actorProfileId) : null;
+      return {
+        id: event.id.toString(),
+        eventType: event.eventType as 'move' | 'delete' | 'restore',
+        actorProfileId: event.actorProfileId?.toString() ?? null,
+        actorName: actor?.displayName ?? null,
+        actorUsername: actor?.username ?? null,
+        reason: identityRedacted && event.eventType === 'move' ? null : event.reason,
+        source: sourceVisible ? lifecycleIdentity({
+          namespace: event.sourceNamespaceCode,
+          spaceId: event.sourceSpaceId,
+          title: event.sourceTitle,
+          path: event.sourcePath
+        }) : null,
+        destination: destinationVisible ? lifecycleIdentity({
+          namespace: event.destinationNamespaceCode,
+          spaceId: event.destinationSpaceId,
+          title: event.destinationTitle,
+          path: event.destinationPath
+        }) : null,
+        identityRedacted,
+        createdAt: event.createdAt.toISOString()
+      };
+    });
+    return { items, nextCursor: hasMore ? rows.at(-1)?.id.toString() ?? null : null };
   }
 
   async getRecent(input: {

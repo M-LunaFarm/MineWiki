@@ -249,6 +249,31 @@ export interface WikiRevisionListResponse {
   readonly nextCursor: string | null;
 }
 
+export interface WikiLifecycleIdentity {
+  readonly namespace: string;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly path: string;
+}
+
+export interface WikiPageLifecycleEventSummary {
+  readonly id: string;
+  readonly eventType: 'move' | 'delete' | 'restore';
+  readonly actorProfileId: string | null;
+  readonly actorName: string | null;
+  readonly actorUsername: string | null;
+  readonly reason: string | null;
+  readonly source: WikiLifecycleIdentity | null;
+  readonly destination: WikiLifecycleIdentity | null;
+  readonly identityRedacted: boolean;
+  readonly createdAt: string;
+}
+
+export interface WikiPageLifecycleEventListResponse {
+  readonly items: WikiPageLifecycleEventSummary[];
+  readonly nextCursor: string | null;
+}
+
 export interface WikiRevisionDiffResponse {
   readonly left: WikiRevisionResponse;
   readonly right: WikiRevisionResponse;
@@ -1663,6 +1688,12 @@ export async function fetchWikiRevisions(pageId: string, cursor?: string): Promi
   const params = new URLSearchParams({ limit: '50' });
   if (cursor) params.set('cursor', cursor);
   return readWikiBrowser(`/v1/wiki/pages/${encodeURIComponent(pageId)}/revisions?${params.toString()}`);
+}
+
+export async function fetchWikiPageLifecycleEvents(pageId: string, cursor?: string): Promise<WikiPageLifecycleEventListResponse> {
+  const params = new URLSearchParams({ limit: '50' });
+  if (cursor) params.set('cursor', cursor);
+  return readWikiBrowser(`/v1/wiki/pages/${encodeURIComponent(pageId)}/lifecycle?${params.toString()}`);
 }
 
 export async function fetchWikiRevisionDiff(leftId: string, rightId: string): Promise<WikiRevisionDiffResponse> {

@@ -3,25 +3,31 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { ArrowRight, Loader2 } from 'lucide-react';
-import { fetchWikiRevisions, type WikiRevisionListResponse } from '../../lib/wiki-api';
+import { fetchWikiPageLifecycleEvents, fetchWikiRevisions, type WikiPageLifecycleEventListResponse, type WikiRevisionListResponse } from '../../lib/wiki-api';
 import { buildWikiDiffPath, buildWikiRevisionPath } from '../../lib/wiki-routes.mjs';
 import { WikiRevertButton } from './wiki-revert-button';
 import { WikiReportButton } from './wiki-report-button';
 import { WikiEditSummary } from './wiki-edit-summary';
 
 type Revision = WikiRevisionListResponse['items'][number];
+type LifecycleEvent = WikiPageLifecycleEventListResponse['items'][number];
 type SelectionKind = 'older' | 'newer';
 
-export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, initial }: {
+export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, initial, initialLifecycle }: {
   readonly pageId: string;
   readonly currentRevisionId: string;
   readonly routePath: string;
   readonly initial: WikiRevisionListResponse;
+  readonly initialLifecycle: WikiPageLifecycleEventListResponse;
 }) {
   const [revisions, setRevisions] = useState(initial.items);
   const [cursor, setCursor] = useState(initial.nextCursor);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lifecycleEvents, setLifecycleEvents] = useState(initialLifecycle.items);
+  const [lifecycleCursor, setLifecycleCursor] = useState(initialLifecycle.nextCursor);
+  const [lifecycleLoading, setLifecycleLoading] = useState(false);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const [olderId, setOlderId] = useState(initial.items[1]?.id ?? null);
   const [newerId, setNewerId] = useState(initial.items[0]?.id ?? null);
   const older = revisions.find((revision) => revision.id === olderId) ?? null;
@@ -53,8 +59,36 @@ export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, in
     }
   }
 
+  async function loadMoreLifecycle() {
+    if (!lifecycleCursor) return;
+    setLifecycleLoading(true);
+    setLifecycleError(null);
+    try {
+      const response = await fetchWikiPageLifecycleEvents(pageId, lifecycleCursor);
+      setLifecycleEvents((current) => [...current, ...response.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      setLifecycleCursor(response.nextCursor);
+    } catch (caught) {
+      setLifecycleError(caught instanceof Error ? caught.message : '이전 수명주기 기록을 불러오지 못했습니다.');
+    } finally {
+      setLifecycleLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
+      {lifecycleEvents.length > 0 ? (
+        <section className="space-y-3" aria-labelledby="wiki-lifecycle-heading">
+          <div>
+            <h2 id="wiki-lifecycle-heading" className="text-lg font-semibold text-white">문서 수명주기</h2>
+            <p className="mt-1 text-sm text-slate-400">이동·삭제·복구 기록입니다. 내용 판 비교와 되돌리기는 아래 판 목록에서만 할 수 있습니다.</p>
+          </div>
+          {lifecycleError ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{lifecycleError}</p> : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {lifecycleEvents.map((event) => <LifecycleCard key={event.id} event={event} />)}
+          </div>
+          {lifecycleCursor ? <button type="button" disabled={lifecycleLoading} onClick={() => void loadMoreLifecycle()} className="btn-secondary min-h-11 w-full sm:w-auto">{lifecycleLoading ? <Loader2 className="size-4 animate-spin" /> : null} 이전 수명주기 더 보기</button> : null}
+        </section>
+      ) : null}
       <section className="surface-flat flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between" aria-label="판 비교 선택">
         <div>
           <h2 className="font-semibold text-white">두 판 비교</h2>
@@ -96,6 +130,20 @@ export function WikiHistoryListClient({ pageId, currentRevisionId, routePath, in
       {cursor ? <button type="button" disabled={loading} onClick={() => void loadMore()} className="btn-secondary min-h-11 w-full sm:w-auto">{loading ? <Loader2 className="size-4 animate-spin" /> : null} 이전 기록 더 보기</button> : null}
     </div>
   );
+}
+
+function LifecycleCard({ event }: { event: LifecycleEvent }) {
+  const label = event.eventType === 'move' ? '문서 이동' : event.eventType === 'delete' ? '문서 삭제' : '문서 복구';
+  return <article className="border border-white/10 bg-[#111821] p-4"><div className="flex items-center justify-between gap-3"><strong className="text-white">{label}</strong><time className="text-xs text-slate-500">{formatDate(event.createdAt)}</time></div>{event.eventType === 'move' ? <p className="mt-3 break-words text-sm text-slate-300"><LifecycleIdentity identity={event.source} fallback="비공개 경로" /> <ArrowRight className="mx-1 inline size-4" aria-hidden="true" /> <LifecycleIdentity identity={event.destination} fallback="비공개 경로" /></p> : <p className="mt-3 break-words text-sm text-slate-300"><LifecycleIdentity identity={event.source ?? event.destination} fallback="문서 경로 비공개" /></p>}{event.identityRedacted ? <p className="mt-2 text-xs text-amber-200">접근 권한이 없는 이전 경로 정보는 숨겼습니다.</p> : null}{event.reason ? <p className="mt-2 break-words text-sm text-slate-400">사유: {event.reason}</p> : null}<p className="mt-3 text-xs text-slate-500">처리자 <LifecycleActor event={event} /></p></article>;
+}
+
+function LifecycleIdentity({ identity, fallback }: { identity: LifecycleEvent['source']; fallback: string }) {
+  return identity ? <>{identity.namespace}:{identity.title}</> : <>{fallback}</>;
+}
+
+function LifecycleActor({ event }: { event: LifecycleEvent }) {
+  if (!event.actorProfileId) return <>unknown</>;
+  return <Link href={event.actorUsername ? `/user/${encodeURIComponent(event.actorUsername)}` : `/wiki/contributions/${event.actorProfileId}`} className="hover:text-emerald-200">{event.actorName ?? event.actorProfileId}</Link>;
 }
 
 function HistoryCard({ revision, previous, pageId, currentRevisionId, routePath, olderId, newerId, onSelect }: { revision: Revision; previous?: Revision; pageId: string; currentRevisionId: string; routePath: string; olderId: string | null; newerId: string | null; onSelect: (kind: SelectionKind, revision: Revision) => void }) {

@@ -1571,6 +1571,25 @@ export class WikiEditService {
           isMinor: false, createdAt: now
         });
       }
+      await tx.wikiPageLifecycleEvent.createMany({
+        data: moves.map((move) => ({
+          pageId: move.source.id,
+          eventType: 'move',
+          actorProfileId: actor.id,
+          reason: this.cleanOptional(request.reason),
+          sourceNamespaceId: move.source.namespaceId,
+          sourceNamespaceCode: namespace.code,
+          sourceSpaceId: move.source.spaceId,
+          sourceTitle: move.source.title,
+          sourcePath: move.source.localPath,
+          destinationNamespaceId: move.target.namespaceId,
+          destinationNamespaceCode: move.target.namespaceCode,
+          destinationSpaceId: move.target.spaceId,
+          destinationTitle: move.target.title,
+          destinationPath: move.target.slug,
+          createdAt: now
+        }))
+      });
       const latest = await this.findLatestRevision(tx, moved.id);
       if (!latest) {
         throw new NotFoundException('Public wiki revision not found.');
@@ -1741,6 +1760,7 @@ export class WikiEditService {
     const actor = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockPageForRevision(tx, parsedPageId);
       const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
       if (!page) {
         throw new NotFoundException('Wiki page not found.');
@@ -1806,6 +1826,30 @@ export class WikiEditService {
         summary: this.cleanOptional(request.reason) ?? (status === 'deleted' ? '문서 삭제' : '문서 복구'),
         isMinor: false,
         createdAt: now
+      });
+      await tx.wikiPageLifecycleEvent.create({
+        data: {
+          pageId: updated.id,
+          eventType: status === 'deleted' ? 'delete' : 'restore',
+          actorProfileId: actor.id,
+          reason: this.cleanOptional(request.reason),
+          ...(status === 'deleted'
+            ? {
+                sourceNamespaceId: page.namespaceId,
+                sourceNamespaceCode: namespace.code,
+                sourceSpaceId: page.spaceId,
+                sourceTitle: page.title,
+                sourcePath: page.localPath
+              }
+            : {
+                destinationNamespaceId: page.namespaceId,
+                destinationNamespaceCode: namespace.code,
+                destinationSpaceId: page.spaceId,
+                destinationTitle: page.title,
+                destinationPath: page.localPath
+              }),
+          createdAt: now
+        }
       });
       return { pageId: updated.id.toString(), status };
     });

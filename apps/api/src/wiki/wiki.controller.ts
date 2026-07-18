@@ -31,6 +31,7 @@ import {
   type WikiContributionResponse,
   type WikiDeletedPageSummary,
   type WikiPageResponse,
+  type WikiPageLifecycleEventListResponse,
   type WikiRecentChangeListResponse,
   type WikiRevisionListResponse,
   type WikiRenderedRevisionResponse,
@@ -121,6 +122,17 @@ export class WikiController {
   @UseGuards(OptionalSessionGuard)
   getPageRevisions(@Param('id') pageId: string, @Req() request: FastifyRequest, @Query('cursor') cursor?: string, @Query('limit') limit?: string): Promise<WikiRevisionListResponse> {
     return this.wikiRead.getRevisions(pageId, request.sessionPayload ?? null, cursor, limit);
+  }
+
+  @Get('pages/:id/lifecycle')
+  @UseGuards(OptionalSessionGuard)
+  getPageLifecycleEvents(
+    @Param('id') pageId: string,
+    @Req() request: FastifyRequest,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string
+  ): Promise<WikiPageLifecycleEventListResponse> {
+    return this.wikiRead.getPageLifecycleEvents(pageId, request.sessionPayload ?? null, cursor, limit);
   }
 
   @Get('pages/:id/raw')
