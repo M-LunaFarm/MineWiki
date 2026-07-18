@@ -191,6 +191,9 @@ export function SiteHeader({ variant = 'dark' }: { readonly variant?: 'dark' | '
                 <Link href="/wiki/edit-requests?status=open&scope=reviewable" className="rounded-lg border border-white/[0.06] px-3 py-2 text-center text-xs font-medium text-slate-300">
                   편집 요청 검토
                 </Link>
+                <Link href="/wiki/release-reviews" className="col-span-2 rounded-lg border border-white/[0.06] px-3 py-2 text-center text-xs font-medium text-slate-300">
+                  서버 위키 릴리스 검토
+                </Link>
               </div>
             ) : null}
             <nav className="grid gap-0.5">

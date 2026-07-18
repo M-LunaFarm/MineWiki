@@ -945,6 +945,11 @@ export interface WikiEditRequestReviewableSummary {
   readonly capped: boolean;
 }
 
+export interface ServerWikiReleaseReviewSummary {
+  readonly count: number;
+  readonly capped: boolean;
+}
+
 export interface WikiEditRequestDiffResponse {
   readonly requestId: string;
   readonly baseRevisionId: string | null;
@@ -1644,6 +1649,10 @@ export async function fetchWikiEditRequestQueue(input: {
 
 export async function fetchWikiEditRequestReviewableSummary(): Promise<WikiEditRequestReviewableSummary> {
   return readWikiBrowser<WikiEditRequestReviewableSummary>('/v1/wiki/edit-requests/reviewable-summary');
+}
+
+export async function fetchServerWikiReleaseReviewSummary(): Promise<ServerWikiReleaseReviewSummary> {
+  return readWikiBrowser<ServerWikiReleaseReviewSummary>('/v1/wiki/release-reviews/summary');
 }
 
 export async function fetchWikiEditRequest(requestId: string): Promise<WikiEditRequestSummary> {

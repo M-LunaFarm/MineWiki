@@ -94,6 +94,7 @@ export type MfaStepUpPurpose =
   | 'wiki_admin'
   | 'role_admin'
   | 'server_admin'
+  | 'wiki_release_review'
   | 'review_moderation'
   | 'vote_admin'
   | 'guild_admin'

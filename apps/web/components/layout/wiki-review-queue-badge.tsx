@@ -4,7 +4,7 @@ import { ClipboardCheck } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { fetchWikiEditRequestReviewableSummary } from '../../lib/wiki-api';
+import { fetchServerWikiReleaseReviewSummary, fetchWikiEditRequestReviewableSummary } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 
 export function WikiReviewQueueBadge({ paper = false }: { readonly paper?: boolean }) {
@@ -12,20 +12,23 @@ export function WikiReviewQueueBadge({ paper = false }: { readonly paper?: boole
   const pathname = usePathname();
   const [count, setCount] = useState(0);
   const [capped, setCapped] = useState(false);
+  const [releaseCount, setReleaseCount] = useState(0);
 
   useEffect(() => {
     let active = true;
     if (!account) {
       setCount(0);
       setCapped(false);
+      setReleaseCount(0);
       return () => { active = false; };
     }
     const load = () => {
-      void fetchWikiEditRequestReviewableSummary()
-        .then((result) => {
+      void Promise.all([fetchWikiEditRequestReviewableSummary(), fetchServerWikiReleaseReviewSummary()])
+        .then(([editRequests, releaseReviews]) => {
           if (!active) return;
-          setCount(result.count);
-          setCapped(result.capped);
+          setCount(editRequests.count + releaseReviews.count);
+          setReleaseCount(releaseReviews.count);
+          setCapped(editRequests.capped || releaseReviews.capped);
         })
         .catch(() => {});
     };
@@ -43,8 +46,8 @@ export function WikiReviewQueueBadge({ paper = false }: { readonly paper?: boole
   const displayCount = capped || count > 99 ? '99+' : count.toString();
   return (
     <Link
-      href="/wiki/edit-requests?status=open&scope=reviewable"
-      aria-label={`검토할 편집 요청 ${capped ? `${count}개 이상` : `${count}개`}`}
+      href={releaseCount > 0 ? '/wiki/release-reviews' : '/wiki/edit-requests?status=open&scope=reviewable'}
+      aria-label={`검토할 작업 ${capped ? `${count}개 이상` : `${count}개`}`}
       className={`relative inline-flex size-10 items-center justify-center rounded-xl border transition ${paper ? 'border-[#aaa79e] bg-white/30 text-[#4d544d] hover:text-[#1f5f46]' : 'border-white/[0.08] bg-white/[0.03] text-slate-400 hover:border-white/20 hover:text-white'}`}
     >
       <ClipboardCheck className="size-[18px]" />

@@ -15,6 +15,7 @@ const PURPOSE_LABELS: Record<MfaStepUpPurpose, string> = {
   wiki_admin: '위키 관리',
   role_admin: '역할 관리',
   server_admin: '서버 관리',
+  wiki_release_review: '서버 위키 릴리스 검토',
   review_moderation: '리뷰 조정',
   vote_admin: '투표 관리',
   guild_admin: '그룹 관리',

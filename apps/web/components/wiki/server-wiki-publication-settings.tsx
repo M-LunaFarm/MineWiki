@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { csrfHeaders } from '../../lib/csrf';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
+import { MfaStepUpDialog } from '../auth/mfa-step-up-dialog';
 
 type PublicationStatus = 'draft' | 'published' | 'unpublished';
 type ReadinessBlocker =
@@ -127,6 +128,7 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ readonly tone: 'error' | 'success'; readonly text: string } | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<boolean | null>(null);
 
   async function load() {
     setLoading(true);
@@ -282,7 +284,7 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
         candidate={publication.submission ?? publication.candidate}
         review={publication.review}
         saving={saving}
-        onApproval={(approve) => void changeApproval(approve)}
+        onApproval={setPendingApproval}
       />
       {publication.submission ? <p className={`mt-3 rounded-lg border px-4 py-3 text-xs ${hasCurrentSubmission ? 'border-emerald-300/20 bg-emerald-400/5 text-emerald-100' : 'border-amber-300/25 bg-amber-400/10 text-amber-100'}`}>{hasCurrentSubmission ? `검토 요청 #${publication.submission.id} · ${new Date(publication.submission.submittedAt).toLocaleString('ko-KR')}` : '검토 요청을 제출한 뒤 작업본이 변경되었습니다. 기존 후보는 그대로 보존되며, 새 변경까지 포함하려면 다시 제출하세요.'}</p> : null}
       {message ? <p className={`mt-4 text-sm ${message.tone === 'error' ? 'text-red-200' : 'text-emerald-200'}`} role="status">{message.text}</p> : null}
@@ -300,6 +302,7 @@ export function ServerWikiPublicationSettings({ serverId }: { readonly serverId:
           {publication.status === 'published' ? <button type="button" onClick={() => void changeStatus('unpublished')} disabled={!canUnpublish || saving} className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-amber-300/35 px-5 text-sm font-bold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto">비공개 전환</button> : null}
         </div>
       </div> : null}
+      <MfaStepUpDialog open={pendingApproval !== null} purpose="wiki_release_review" onClose={() => setPendingApproval(null)} onSuccess={async () => { const approve = pendingApproval; setPendingApproval(null); if (approve !== null) await changeApproval(approve); }} />
     </section>
   );
 }
