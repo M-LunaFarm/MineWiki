@@ -17,15 +17,18 @@ import { MfaController } from './mfa.controller';
 import { MfaService } from './mfa.service';
 import { AccountModerationController } from './account-moderation.controller';
 import { AccountModerationService } from './account-moderation.service';
+import { AccountDataExportController } from './account-data-export.controller';
+import { AccountDataExportService } from './account-data-export.service';
 import { WebAuthnController } from './webauthn.controller';
 import {
   DEFAULT_WEBAUTHN_SERVER,
   WEBAUTHN_SERVER,
   WebAuthnService,
 } from './webauthn.service';
+import { WikiModule } from '../wiki/wiki.module';
 
 @Module({
-  imports: [SessionModule, FileModule],
+  imports: [SessionModule, FileModule, WikiModule],
   providers: [
     AuthService,
     AccountConflictService,
@@ -38,9 +41,20 @@ import {
     MfaService,
     WebAuthnService,
     { provide: WEBAUTHN_SERVER, useValue: DEFAULT_WEBAUTHN_SERVER },
-    AccountModerationService
+    AccountModerationService,
+    AccountDataExportService
   ],
-  controllers: [AuthController, MfaController, WebAuthnController, AccountConflictController, AccountDeletionController, AccountDeletionAdminController, AccountDeletionInternalController, AccountModerationController],
+  controllers: [
+    AuthController,
+    MfaController,
+    WebAuthnController,
+    AccountConflictController,
+    AccountDeletionController,
+    AccountDeletionAdminController,
+    AccountDeletionInternalController,
+    AccountModerationController,
+    AccountDataExportController
+  ],
   exports: [AuthService, AccountSeparationService, OAuthFlowService, EmailService]
 })
 export class AuthModule {}

@@ -84,7 +84,8 @@ export type MfaStepUpPurpose =
   | 'audit_read'
   | 'account_delete_admin'
   | 'account_moderation'
-  | 'mfa_manage';
+  | 'mfa_manage'
+  | 'account_export';
 
 export interface MfaStatus {
   readonly mfaEnabled: boolean;
@@ -238,6 +239,31 @@ export function regenerateMfaRecoveryCodes(): Promise<{ readonly recoveryCodes: 
 
 export function disableTotp(): Promise<{ readonly enabled: false }> {
   return mfaRequest('/v1/auth/mfa/totp', { method: 'DELETE' });
+}
+
+export async function downloadAccountData(password?: string): Promise<{ readonly blob: Blob; readonly filename: string }> {
+  const response = await fetch(`${API_BASE}/v1/auth/account-data-export`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+    body: JSON.stringify(password ? { password } : {}),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new ApiClientError(
+      typeof payload?.message === 'string' ? payload.message : '계정 데이터를 내보내지 못했습니다.',
+      typeof payload?.code === 'string' ? payload.code : 'account_export_failed',
+      response.status,
+      payload,
+    );
+  }
+  clearCsrfToken();
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const match = /filename="([^"\r\n]+)"/u.exec(disposition);
+  return {
+    blob: await response.blob(),
+    filename: match?.[1] ?? `minewiki-account-data-${new Date().toISOString().slice(0, 10)}.json`,
+  };
 }
 
 export async function registerEmail(payload: {

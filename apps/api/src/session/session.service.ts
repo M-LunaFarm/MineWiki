@@ -62,6 +62,7 @@ export const STEP_UP_PURPOSES = [
   'account_delete_admin',
   'account_moderation',
   'mfa_manage',
+  'account_export',
 ] as const;
 export type StepUpPurpose = (typeof STEP_UP_PURPOSES)[number];
 export type StepUpMethod = 'totp' | 'recovery_code' | 'webauthn';

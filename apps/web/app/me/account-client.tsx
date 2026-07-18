@@ -23,6 +23,7 @@ import { SessionList } from '../../components/account/session-list';
 import { MfaSecurityPanel } from '../../components/account/mfa-security-panel';
 import { WikiProfileMergePanel } from '../../components/account/wiki-profile-merge-panel';
 import { WikiApiTokenPanel } from '../../components/account/wiki-api-token-panel';
+import { AccountDataExportPanel } from '../../components/account/account-data-export-panel';
 import { AuthShellLayout } from '../../components/auth/auth-shell-layout';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
 import { useAuth } from '../../components/providers/auth-context';
@@ -1144,6 +1145,7 @@ export function AccountClientPage() {
           </div>
 
           <MinecraftOwnershipPanel />
+          <AccountDataExportPanel hasPassword={hasPasswordLogin} />
           <AccountTerminationPanel hasPassword={hasPasswordLogin} />
         </div>
       </main>

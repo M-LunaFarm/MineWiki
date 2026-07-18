@@ -7,6 +7,7 @@ import { PrismaService } from '../common/prisma.service';
 import {
   withActiveCanonicalAccountGroup,
   withCanonicalAccountGroups,
+  readCanonicalAccountGroup,
 } from './account-lifecycle-fence';
 import { AccountSeparationService } from './account-separation.service';
 import { AuthService } from './auth.service';
@@ -63,6 +64,28 @@ test('canonical group locking keeps distinct seeds separate while expanding link
     { seedAccountId: 'actor', canonicalAccountId: 'actor', accountIds: ['actor'] },
     { seedAccountId: 'alias', canonicalAccountId: 'target', accountIds: ['alias', 'target'] },
   ]);
+});
+
+test('read-only canonical resolution closes over canonical aliases and both link directions', async () => {
+  const accounts = [
+    { id: 'canonical', canonicalAccountId: 'canonical' },
+    { id: 'alias', canonicalAccountId: 'canonical' },
+    { id: 'linked', canonicalAccountId: null },
+  ];
+  const store = {
+    account: {
+      async findUnique(input: { where: { id: string } }) {
+        return accounts.find((account) => account.id === input.where.id) ?? null;
+      },
+      async findMany() { return accounts; },
+    },
+    accountLink: {
+      async findMany() { return [{ primaryAccountId: 'linked', linkedAccountId: 'alias' }]; },
+    },
+  };
+  assert.deepEqual(await readCanonicalAccountGroup(store as never, 'alias'), {
+    seedAccountId: 'alias', canonicalAccountId: 'canonical', accountIds: ['alias', 'canonical', 'linked'],
+  });
 });
 
 if (!hasDatabase) {

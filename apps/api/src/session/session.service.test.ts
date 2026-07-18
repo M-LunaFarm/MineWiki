@@ -14,6 +14,7 @@ const hasDatabase = Boolean(process.env.DATABASE_URL);
 
 test('account moderation is a recognized purpose-bound step-up operation', () => {
   assert.ok(STEP_UP_PURPOSES.includes('account_moderation'));
+  assert.ok(STEP_UP_PURPOSES.includes('account_export'));
 });
 
 if (!hasDatabase) {

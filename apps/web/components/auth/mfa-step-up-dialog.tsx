@@ -23,6 +23,7 @@ const PURPOSE_LABELS: Record<MfaStepUpPurpose, string> = {
   account_delete_admin: '계정 종료 관리',
   account_moderation: '계정 보안 조치',
   mfa_manage: '다중 인증 설정',
+  account_export: '계정 데이터 내보내기',
 };
 
 export function MfaStepUpDialog({

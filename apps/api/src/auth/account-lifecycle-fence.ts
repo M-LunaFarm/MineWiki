@@ -12,6 +12,16 @@ export interface CanonicalAccountGroup {
   readonly accountIds: readonly string[];
 }
 
+type CanonicalAccountReadStore = Pick<PrismaService, 'account' | 'accountLink'>;
+
+/** Resolve the complete linked/canonical account component without opening a write transaction. */
+export function readCanonicalAccountGroup(
+  prisma: CanonicalAccountReadStore,
+  seedAccountId: string,
+): Promise<CanonicalAccountGroup> {
+  return resolveCanonicalAccountGroup(prisma, seedAccountId);
+}
+
 export async function withCanonicalAccountGroups<T>(
   prisma: PrismaService,
   seedAccountIds: readonly string[],
@@ -99,7 +109,7 @@ async function resolveCanonicalGroup(
 }
 
 async function resolveCanonicalAccountGroup(
-  tx: Prisma.TransactionClient,
+  tx: CanonicalAccountReadStore,
   seedAccountId: string,
 ): Promise<CanonicalAccountGroup> {
   const seed = await tx.account.findUnique({
