@@ -43,6 +43,15 @@ export async function fetchWikiPageByPath(
   return readWikiResponse<WikiPageResponse>(response, `Failed to load wiki page (${path}).`);
 }
 
+export async function fetchPublicWikiPageByPath(path: string): Promise<WikiPageResponse | null> {
+  const params = new URLSearchParams({ path });
+  const response = await fetch(`${API_BASE}/v1/wiki/page/by-path?${params.toString()}`, {
+    cache: 'no-store',
+  });
+  if (response.status === 404) return null;
+  return readWikiResponse<WikiPageResponse>(response, `Failed to load public wiki page (${path}).`);
+}
+
 export async function fetchServerWikiPresentation(slug: string): Promise<ServerWikiPresentation | null> {
   const response = await wikiFetch(
     `/v1/wiki/server-wikis/${encodeURIComponent(slug)}/presentation`,

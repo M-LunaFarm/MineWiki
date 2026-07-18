@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { WikiRoutePage } from '../../../components/wiki/wiki-route-page';
 import { WikiEditRoutePage } from '../../../components/wiki/wiki-edit-route-page';
 import { WikiHistoryRoutePage } from '../../../components/wiki/wiki-history-route-page';
@@ -5,6 +6,9 @@ import { ServerWikiToolRoutePage } from '../../../components/wiki/server-wiki-to
 import { ServerWikiSearchPage } from '../../../components/wiki/server-wiki-search-page';
 import { ServerWikiRecentPage } from '../../../components/wiki/server-wiki-recent-page';
 import { parseServerWikiToolRoute } from '../../../lib/wiki-routes.mjs';
+import { buildWikiRoutePath } from '../../../lib/wiki-routes.mjs';
+import { fetchPublicWikiPageByPath } from '../../../lib/wiki-server-api';
+import { createPageMetadata, DEFAULT_SITE_DESCRIPTION } from '../../../lib/metadata';
 
 interface PageProps {
   readonly params: Promise<{ path?: string[] }>;
@@ -12,6 +16,36 @@ interface PageProps {
 }
 
 export const dynamic = 'force-dynamic';
+
+export async function generateMetadata({ params }: Pick<PageProps, 'params'>): Promise<Metadata> {
+  const path = (await params).path ?? [];
+  const routePath = buildWikiRoutePath('serverWiki', path);
+  if (path.length === 0 || path[1] === '_search' || path[1] === '_changes' || parseServerWikiToolRoute(path)) {
+    return createPageMetadata({
+      title: '서버 위키 도구',
+      description: DEFAULT_SITE_DESCRIPTION,
+      path: routePath,
+      noIndex: true,
+    });
+  }
+  try {
+    const page = await fetchPublicWikiPageByPath(routePath);
+    if (!page?.serverWiki || page.serverWiki.publicationStatus !== 'published') {
+      return createPageMetadata({ title: '서버 위키', description: DEFAULT_SITE_DESCRIPTION, path: routePath, noIndex: true });
+    }
+    const siteTitle = `${page.serverWiki.name} 위키`;
+    const description = metadataDescription(page.html, page.serverWiki.directoryOverview?.shortDescription);
+    return createPageMetadata({
+      title: `${page.displayTitle} | ${siteTitle}`,
+      description,
+      path: routePath,
+      imageTitle: page.displayTitle,
+      imageDescription: description,
+    });
+  } catch {
+    return createPageMetadata({ title: '서버 위키', description: DEFAULT_SITE_DESCRIPTION, path: routePath, noIndex: true });
+  }
+}
 
 export default async function ServerWikiSitePage({ params, searchParams }: PageProps) {
   const resolvedParams = await params;
@@ -33,4 +67,21 @@ export default async function ServerWikiSitePage({ params, searchParams }: PageP
     return <WikiHistoryRoutePage prefix="serverWiki" segments={toolRoute.documentSegments} />;
   }
   return <WikiRoutePage prefix="serverWiki" segments={resolvedParams.path} />;
+}
+
+function metadataDescription(html: string, fallback?: string | null): string {
+  const plain = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, ' ')
+    .replace(/<[^>]+>/gu, ' ')
+    .replace(/&(?:nbsp|#160);/giu, ' ')
+    .replace(/&amp;/giu, '&')
+    .replace(/&lt;/giu, '<')
+    .replace(/&gt;/giu, '>')
+    .replace(/&quot;/giu, '"')
+    .replace(/&#(?:39|x27);/giu, "'")
+    .replace(/[\u0000-\u001F\u007F]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  return (plain || fallback?.trim() || DEFAULT_SITE_DESCRIPTION).slice(0, 200);
 }
