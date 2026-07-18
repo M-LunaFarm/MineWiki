@@ -46,6 +46,10 @@ test('layout plans bind checkout and portal actions to availability, CSRF, and e
   assert.match(source, /portalAvailable/u);
   assert.match(source, /entitlementExpiresAt/u);
   assert.match(source, /Paddle 테스트 모드 · 실제 청구 없음/u);
+  assert.match(source, /policyVersion: billing\?\.policy\.version/u);
+  assert.match(source, /billingPolicyAccepted/u);
+  assert.match(source, /유료 서비스 정책 \{billing\.policy\.version\}/u);
+  assert.match(source, /billing\?\.ready/u);
   assert.doesNotMatch(source, /category=billing/u);
 });
 

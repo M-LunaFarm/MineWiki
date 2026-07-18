@@ -26,8 +26,21 @@ interface LayoutSettings {
 
 interface BillingAvailability {
   readonly onlineCheckout: boolean;
+  readonly ready: boolean;
+  readonly reasonCode: 'billing_disabled' | 'policy_version_mismatch' | null;
   readonly portalAvailable: boolean;
   readonly environment: 'sandbox' | 'production';
+  readonly policy: {
+    readonly version: string;
+    readonly effectiveDate: string;
+    readonly path: string;
+  };
+  readonly products: ReadonlyArray<{
+    readonly productCode: string;
+    readonly layoutKey: PremiumLayoutKey;
+    readonly displayName: string;
+    readonly serviceScope: 'recurring_server_wiki_layout';
+  }>;
 }
 
 type PremiumLayoutKey = Exclude<LayoutSettings['selected'], 'docs'>;
@@ -50,6 +63,7 @@ export function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: 
   const [saving, setSaving] = useState<string | null>(null);
   const [billing, setBilling] = useState<BillingAvailability | null>(null);
   const [billingAction, setBillingAction] = useState<string | null>(null);
+  const [billingPolicyAccepted, setBillingPolicyAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const baseUrl = normalizeApiBaseUrl();
 
@@ -102,7 +116,7 @@ export function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: 
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
-        body: action === 'checkout' ? JSON.stringify({ layoutKey }) : '{}',
+        body: action === 'checkout' ? JSON.stringify({ layoutKey, policyVersion: billing?.policy.version }) : '{}',
       });
       const body = await response.json().catch(() => ({})) as {
         checkoutUrl?: unknown;
@@ -160,6 +174,16 @@ export function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: 
           </button>
         </section>
       ) : null}
+      {billing?.ready ? (
+        <section className="surface-flat p-5" aria-labelledby="billing-policy-consent-title">
+          <h2 id="billing-policy-consent-title" className="font-semibold text-white">구독 정책 확인</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-400">Handbook·Brand는 Paddle에서 결제되는 서버 위키 레이아웃 구독입니다. 최종 금액·통화·청구 주기는 결제 화면에서 확인합니다.</p>
+          <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-violet-300/20 bg-violet-400/[0.06] p-3 text-sm leading-6 text-slate-200">
+            <input type="checkbox" checked={billingPolicyAccepted} onChange={(event) => setBillingPolicyAccepted(event.target.checked)} className="mt-1 size-4 accent-violet-300" />
+            <span><Link href={billing.policy.path} target="_blank" className="font-semibold text-violet-200 underline underline-offset-2">유료 서비스 정책 {billing.policy.version}</Link>을 확인했으며 구독 결제를 진행합니다.</span>
+          </label>
+        </section>
+      ) : null}
       <div className="grid gap-6 xl:grid-cols-3">
         {settings.layouts.map((layout) => {
           const selected = settings.selected === layout.key;
@@ -179,6 +203,7 @@ export function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: 
                   saving={saving}
                   billing={billing}
                   billingAction={billingAction}
+                  billingPolicyAccepted={billingPolicyAccepted}
                   serverId={serverId}
                   onSelect={selectLayout}
                   onCheckout={(layoutKey) => void openBilling('checkout', layoutKey)}
@@ -193,12 +218,13 @@ export function ServerWikiLayoutPlansContent({ serverId }: { readonly serverId: 
   );
 }
 
-function LayoutPlanAction({ layout, selected, saving, billing, billingAction, serverId, onSelect, onCheckout }: {
+function LayoutPlanAction({ layout, selected, saving, billing, billingAction, billingPolicyAccepted, serverId, onSelect, onCheckout }: {
   readonly layout: LayoutSettings['layouts'][number];
   readonly selected: boolean;
   readonly saving: string | null;
   readonly billing: BillingAvailability | null;
   readonly billingAction: string | null;
+  readonly billingPolicyAccepted: boolean;
   readonly serverId: string;
   readonly onSelect: (layoutKey: LayoutSettings['selected']) => Promise<void>;
   readonly onCheckout: (layoutKey: PremiumLayoutKey) => void;
@@ -206,9 +232,9 @@ function LayoutPlanAction({ layout, selected, saving, billing, billingAction, se
   const layoutKey = layout.key;
   if (selected) return <div className="mt-5 flex h-11 items-center justify-center gap-2 rounded-lg border border-emerald-300/30 bg-emerald-400/10 text-sm font-semibold text-emerald-300"><Check className="size-4" />현재 사용 중</div>;
   if (layout.entitled) return <button type="button" onClick={() => void onSelect(layoutKey)} disabled={Boolean(saving) || billingAction !== null} className="btn-primary mt-5 h-11 w-full gap-2 disabled:opacity-50">{saving === layoutKey ? <Loader2 className="size-4 animate-spin" /> : <Crown className="size-4" />}이 레이아웃 사용</button>;
-  if (isPremiumLayoutKey(layoutKey) && billing?.onlineCheckout) {
+  if (isPremiumLayoutKey(layoutKey) && billing?.ready && billing.products.some((product) => product.layoutKey === layoutKey)) {
     const pending = billingAction === `checkout:${layoutKey}`;
-    return <button type="button" onClick={() => onCheckout(layoutKey)} disabled={billingAction !== null || Boolean(saving)} className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-violet-300/30 bg-violet-400/10 text-sm font-semibold text-violet-200 transition hover:bg-violet-400/15 disabled:opacity-50">{pending ? <Loader2 className="size-4 animate-spin" /> : <CreditCard className="size-4" />}{billing.environment === 'sandbox' ? '테스트 결제 시작' : '요금제 결제'}</button>;
+    return <button type="button" onClick={() => onCheckout(layoutKey)} disabled={!billingPolicyAccepted || billingAction !== null || Boolean(saving)} className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-violet-300/30 bg-violet-400/10 text-sm font-semibold text-violet-200 transition hover:bg-violet-400/15 disabled:opacity-50">{pending ? <Loader2 className="size-4 animate-spin" /> : <CreditCard className="size-4" />}{billing.environment === 'sandbox' ? '테스트 결제 시작' : '요금제 결제'}</button>;
   }
   if (layoutKey === 'docs') return null;
   return <Link href={billingSupportHref(serverId, layoutKey)} className="mt-5 flex h-11 items-center justify-center gap-2 rounded-lg border border-violet-300/30 bg-violet-400/10 text-sm font-semibold text-violet-200 transition hover:bg-violet-400/15"><LockKeyhole className="size-4" />요금제 문의</Link>;
