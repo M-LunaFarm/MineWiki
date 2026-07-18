@@ -75,7 +75,7 @@ function QueueCard({ item, viewerProfileId }: { readonly item: WikiEditRequestQu
             <span>·</span>
             <span>{statusLabel(item.status)}</span>
             {item.canReview ? <span className="chip chip-accent">검토 가능</span> : null}
-            {viewerProfileId === item.createdBy ? <span className="chip chip-muted">내 요청</span> : null}
+            {item.createdBy !== null && viewerProfileId === item.createdBy ? <span className="chip chip-muted">내 요청</span> : null}
           </div>
           <h2 className="mt-2 break-words text-lg font-semibold text-white"><Link href={item.detailPath} className="hover:text-emerald-200">{item.pageDisplayTitle}</Link></h2>
           <p className="mt-2 break-words text-sm text-slate-300"><WikiEditSummary summary={item.editSummary} hidden={item.editSummaryHidden} /></p>

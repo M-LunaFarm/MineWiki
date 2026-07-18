@@ -100,9 +100,16 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
   const [saving, startSaveTransition] = useTransition();
   const fileSourceRequired = Boolean(fileLicense && fileLicense !== 'self-created');
   const uploadSpaceId = page ? null : createContext?.spaceId ?? null;
-  const canUploadImage = Boolean((page || uploadSpaceId) && fileLicense && (!fileSourceRequired || fileSourceUrl.trim()));
+  const canUploadImage = Boolean(account && (page || uploadSpaceId) && fileLicense && (!fileSourceRequired || fileSourceUrl.trim()));
   const hasUnresolvedConflict = containsWikiConflictMarkers(contentRaw);
-  const needsCaptcha = !page && isCaptchaConfigured();
+  const anonymousReviewEnabled = Boolean(
+    !account
+    && page
+    && sectionAnchor === null
+    && process.env.NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED === 'true'
+    && isCaptchaConfigured()
+  );
+  const needsCaptcha = Boolean((!page || anonymousReviewEnabled) && isCaptchaConfigured());
   const policyRequired = Boolean(presentation?.policy.required && presentation.policy.html);
   const policyReady = !presentationLoadFailed && (!policyRequired || policyAccepted);
   const policyAcceptance: WikiPolicyAcceptance | undefined = policyRequired && policyAccepted && presentation
@@ -430,7 +437,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
       setFeedback('이 공간에는 새 문서 검토 요청을 제출할 수 없습니다.');
       return;
     }
-    if (!account || !contentRaw.trim() || !editSummary.trim() || (page && !baseRevisionId)) {
+    if ((!account && !anonymousReviewEnabled) || !contentRaw.trim() || !editSummary.trim() || (page && !baseRevisionId)) {
       setFeedback('본문과 편집 요약을 입력해야 편집 요청을 보낼 수 있습니다.');
       return;
     }
@@ -448,7 +455,15 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
     startSaveTransition(async () => {
       try {
         if (page && baseRevisionId) {
-          await createWikiEditRequest({ pageId: page.id, baseRevisionId, contentRaw, editSummary, isMinor, policyAcceptance });
+          await createWikiEditRequest({
+            pageId: page.id,
+            baseRevisionId,
+            contentRaw,
+            editSummary,
+            isMinor,
+            captchaToken: anonymousReviewEnabled ? captchaToken ?? undefined : undefined,
+            policyAcceptance,
+          });
         } else {
           await createWikiPageRequest({ namespace, title, spaceId: createContext?.spaceId, contentRaw, editSummary, isMinor, captchaToken: captchaToken ?? undefined, policyAcceptance });
         }
@@ -574,7 +589,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
     );
   }
 
-  if (!account) {
+  if (!account && !anonymousReviewEnabled) {
     return (
       <div className="mx-auto flex min-h-[50vh] max-w-3xl flex-col justify-center px-4 py-12">
         <div className="surface-flat p-6">
@@ -726,11 +741,11 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               <button
                 type="button"
                 onClick={renderPreview}
-                disabled={previewing}
+                disabled={previewing || !account}
                 className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:opacity-50"
               >
                 {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
-                {previewHtml ? '새로고침' : '미리보기'}
+                {!account ? '로그인 후 미리보기' : previewHtml ? '새로고침' : '미리보기'}
               </button>
             </div>
             <div
@@ -758,7 +773,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               />
               사소한 편집
             </label>
-            {page || createContext?.canCreate ? (
+            {account && (page || createContext?.canCreate) ? (
               <button
                 type="button"
                 onClick={submit}
@@ -776,7 +791,9 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
           </p>
           {!sectionAnchor && (page || createContext?.canRequest) ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-4">
-              <p className="max-w-2xl text-xs leading-5 text-slate-400">{page ? '직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.' : '직접 생성할 수 없는 문서도 관리자가 검토하는 새 문서 요청으로 제출할 수 있습니다.'}</p>
+              <p className="max-w-2xl text-xs leading-5 text-slate-400">{anonymousReviewEnabled
+                ? '로그인 없이 검토 요청만 제출됩니다. IP 주소는 악용 방지와 감사 목적으로만 제한 보관되며 공개 화면에는 표시되지 않습니다. 승인 전까지 문서는 변경되지 않습니다.'
+                : page ? '직접 편집 권한이 없거나 관리자의 검토가 필요한 변경은 편집 요청으로 제출할 수 있습니다.' : '직접 생성할 수 없는 문서도 관리자가 검토하는 새 문서 요청으로 제출할 수 있습니다.'}</p>
               <button type="button" onClick={submitForReview} disabled={saving || loadingRevision || !contentRaw.trim() || !editSummary.trim() || (needsCaptcha && !captchaToken) || !policyReady} className="btn-secondary h-10 disabled:opacity-50">{page ? '검토 요청' : '새 문서 검토 요청'}</button>
             </div>
           ) : null}
@@ -832,7 +849,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               }}
               aria-expanded={filePickerOpen}
               aria-controls="wiki-file-picker"
-              disabled={saving || loadingRevision}
+              disabled={!account || saving || loadingRevision}
             >
               <FileImage className="h-3.5 w-3.5" />
               파일
@@ -965,11 +982,11 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               <button
                 type="button"
                 onClick={renderPreview}
-                disabled={previewing}
+                disabled={previewing || !account}
                 className="inline-flex h-8 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40"
               >
                 {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
-                보기
+                {account ? '보기' : '로그인 필요'}
               </button>
             </div>
             <div

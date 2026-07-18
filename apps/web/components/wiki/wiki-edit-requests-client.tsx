@@ -175,7 +175,7 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
     {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
     {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}
     <div className="space-y-4">{data.items.map((item) => {
-      const isAuthor = data.viewerProfileId === item.createdBy;
+      const isAuthor = item.createdBy !== null && data.viewerProfileId === item.createdBy;
       const isMutable = ['pending', 'stale', 'closed'].includes(item.status);
       const isStale = item.requestKind === 'edit' && isMutable && (item.status === 'stale' || !data.currentRevisionId || item.baseRevisionId !== data.currentRevisionId);
       const canEdit = isAuthor && ['pending', 'closed'].includes(item.status) && !isStale;

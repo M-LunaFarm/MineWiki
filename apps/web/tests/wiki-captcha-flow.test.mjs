@@ -12,14 +12,15 @@ const compose = readFileSync(new URL('../../../compose.yml', import.meta.url), '
 test('new wiki pages and discussions share the configured captcha challenge', () => {
   assert.match(challenge, /NEXT_PUBLIC_TURNSTILE_SITE_KEY/u);
   assert.match(challenge, /NEXT_PUBLIC_HCAPTCHA_SITE_KEY/u);
-  assert.match(editor, /const needsCaptcha = !page && isCaptchaConfigured\(\)/u);
+  assert.match(editor, /const needsCaptcha = Boolean\(\(!page \|\| anonymousReviewEnabled\) && isCaptchaConfigured\(\)\)/u);
   assert.match(editor, /<CaptchaChallenge resetKey=\{captchaKey\}/u);
   assert.match(discussion, /<CaptchaChallenge resetKey=\{captchaKey\}/u);
   assert.match(api, /captchaToken: input\.captchaToken/u);
 });
 
-test('existing wiki edits and discussion comments do not require a new captcha', () => {
-  assert.match(editor, /const needsCaptcha = !page/u);
+test('authenticated existing wiki edits and discussion comments do not require a new captcha', () => {
+  assert.match(editor, /captchaToken: anonymousReviewEnabled \? captchaToken/u);
+  assert.match(editor, /const anonymousReviewEnabled = Boolean\([\s\S]*!account[\s\S]*&& page/u);
   const start = api.indexOf('export async function addWikiThreadComment');
   const end = api.indexOf('export async function voteWikiDiscussionPoll', start);
   const commentFunction = start >= 0 && end > start ? api.slice(start, end) : '';
@@ -30,6 +31,8 @@ test('existing wiki edits and discussion comments do not require a new captcha',
 test('container builds receive the public captcha keys used by the client bundle', () => {
   assert.match(dockerfile, /ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY/u);
   assert.match(dockerfile, /ARG NEXT_PUBLIC_HCAPTCHA_SITE_KEY/u);
+  assert.match(dockerfile, /ARG NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED/u);
   assert.match(compose, /NEXT_PUBLIC_TURNSTILE_SITE_KEY: \$\{NEXT_PUBLIC_TURNSTILE_SITE_KEY:-\}/u);
   assert.match(compose, /NEXT_PUBLIC_HCAPTCHA_SITE_KEY: \$\{NEXT_PUBLIC_HCAPTCHA_SITE_KEY:-\}/u);
+  assert.match(compose, /NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED: \$\{NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED:-false\}/u);
 });

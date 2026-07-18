@@ -877,7 +877,7 @@ export interface WikiEditRequestSummary {
   readonly editSummaryHidden: boolean;
   readonly isMinor: boolean;
   readonly status: string;
-  readonly createdBy: string;
+  readonly createdBy: string | null;
   readonly createdByName: string;
   readonly reviewedBy: string | null;
   readonly reviewedByName: string | null;
@@ -1611,7 +1611,7 @@ export async function fetchWikiEditRequestContext(requestId: string): Promise<Wi
   return readWikiBrowser<WikiEditRequestListResponse>(`/v1/wiki/edit-requests/${encodeURIComponent(requestId)}/context`);
 }
 
-export async function createWikiEditRequest(input: { pageId: string; baseRevisionId: string; contentRaw: string; editSummary: string; isMinor: boolean; policyAcceptance?: WikiPolicyAcceptance }): Promise<WikiEditRequestSummary> {
+export async function createWikiEditRequest(input: { pageId: string; baseRevisionId: string; contentRaw: string; editSummary: string; isMinor: boolean; captchaToken?: string; policyAcceptance?: WikiPolicyAcceptance }): Promise<WikiEditRequestSummary> {
   return mutateWikiBrowser<WikiEditRequestSummary>(`/v1/wiki/pages/${encodeURIComponent(input.pageId)}/edit-requests`, 'POST', input);
 }
 
