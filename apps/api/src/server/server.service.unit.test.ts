@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { hashContent } from '@minewiki/wiki-core';
 import { buildOrder, downsamplePingSamples, ServerService } from './server.service';
+import { buildServerWikiMainPage, buildServerWikiStarterPages } from './server-wiki-scaffold';
 
 test('server stats downsampling preserves the seven-day range endpoints', () => {
   const samples = Array.from({ length: 901 }, (_, index) => index);
@@ -166,6 +168,73 @@ test('server detail hides a stale cross-brand wiki link', async () => {
   assert.equal(detail.wikiPageId, null);
   assert.equal(detail.wikiSlug, null);
   assert.equal(detail.wikiUrl, null);
+});
+
+test('server wiki readiness points owners to the first incomplete factual document', async () => {
+  const server = {
+    id: randomUUID(),
+    wikiSpaceId: 10n,
+    wikiPageId: 1n,
+    wikiSlug: 'server-one',
+    name: 'Server One',
+    joinHost: 'play.server-one.test',
+    joinPort: 25565,
+    edition: 'java',
+    supportedVersions: ['1.21'],
+    tags: ['survival'],
+    shortDescription: 'A factual server summary',
+    longDescription: 'This owner-provided introduction is intentionally long enough to satisfy the server wiki readiness check with factual information.',
+    websiteUrl: 'https://server-one.test',
+    discordUrl: null,
+  };
+  const serverWiki = {
+    id: 20n,
+    voteServerId: server.id,
+    spaceId: 10n,
+    slug: 'server-one',
+    siteSlug: 'server-one-docs',
+    status: 'active',
+    serverName: server.name,
+    host: server.joinHost,
+  };
+  const documents = [
+    { path: serverWiki.slug, contentRaw: buildServerWikiMainPage(server) },
+    ...buildServerWikiStarterPages(server).map((page) => ({
+      path: `${serverWiki.slug}/${page.path}`,
+      contentRaw: page.contentRaw,
+    })),
+  ];
+  const pages = documents.map((document, index) => ({
+    localPath: document.path,
+    currentRevisionId: BigInt(index + 1),
+    searchDocument: { revisionId: BigInt(index + 1) },
+  }));
+  const prisma = {
+    server: { async findUnique() { return server; } },
+    serverWiki: { async findUnique() { return serverWiki; } },
+    wikiPage: { async findMany() { return pages; } },
+    wikiPageRevision: {
+      async findMany() {
+        return documents.map((document, index) => ({
+          id: BigInt(index + 1),
+          contentHash: hashContent(document.contentRaw),
+        }));
+      },
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  const readiness = await service.getServerWikiReadiness(server.id);
+
+  assert.equal(readiness.status, 'needs_attention');
+  assert.equal(readiness.checks.officialRules, false);
+  assert.equal(readiness.checks.requiredDocuments, true);
+  assert.equal(readiness.checks.searchIndex, true);
+  assert.deepEqual(readiness.nextAction, {
+    code: 'write_rules',
+    label: '공식 규칙 작성하기',
+    href: '/serverWiki/server-one-docs/_tools/edit/%EA%B7%9C%EC%B9%99',
+  });
 });
 
 test('server wiki public slug is tenant-owned, validated, and audited independently of content paths', async () => {

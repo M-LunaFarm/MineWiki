@@ -682,6 +682,97 @@ export class ServerService {
     return toServerWikiLinkResponse(server, serverWiki);
   }
 
+  async getServerWikiReadiness(serverId: string): Promise<ServerWikiReadinessResponse> {
+    const server = await this.ensureExists(serverId);
+    const serverWiki = await this.findServerWikiForServer(server.id, server.wikiSpaceId);
+    if (!serverWiki) {
+      return emptyServerWikiReadiness(server.id, 'unlinked');
+    }
+    if (!hasCanonicalServerWikiLink(server, serverWiki)) {
+      return emptyServerWikiReadiness(server.id, 'repair_required');
+    }
+
+    const starters = buildServerWikiStarterPages(server);
+    const expectedByPath = new Map<string, string>([
+      [serverWiki.slug, hashContent(buildServerWikiMainPage(server))],
+      ...starters.map((starter) => [
+        `${serverWiki.slug}/${starter.path}`,
+        hashContent(starter.contentRaw),
+      ] as const),
+    ]);
+    const pages = await this.prisma.wikiPage.findMany({
+      where: { spaceId: serverWiki.spaceId, localPath: { in: [...expectedByPath.keys()] } },
+      select: {
+        localPath: true,
+        currentRevisionId: true,
+        searchDocument: { select: { revisionId: true } },
+      },
+    });
+    const revisions = await this.prisma.wikiPageRevision.findMany({
+      where: { id: { in: pages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []) } },
+      select: { id: true, contentHash: true },
+    });
+    const revisionHashById = new Map(revisions.map((revision) => [revision.id, revision.contentHash]));
+    const pageByPath = new Map(pages.map((page) => [page.localPath, page]));
+    const root = pageByPath.get(serverWiki.slug);
+    const rules = pageByPath.get(`${serverWiki.slug}/규칙`);
+    const requiredDocuments = Object.fromEntries(
+      [...expectedByPath.keys()].map((path) => [path, pageByPath.has(path)]),
+    );
+    const requiredDocumentCount = Object.values(requiredDocuments).filter(Boolean).length;
+    const rulesCustomized = Boolean(
+      rules?.currentRevisionId
+      && revisionHashById.get(rules.currentRevisionId) !== expectedByPath.get(`${serverWiki.slug}/규칙`),
+    );
+    const introductionCustomized = Boolean(
+      root?.currentRevisionId
+      && revisionHashById.get(root.currentRevisionId) !== expectedByPath.get(serverWiki.slug),
+    );
+    const introductionComplete = introductionCustomized || server.longDescription.trim().length >= 80;
+    const officialChannels = Boolean(server.websiteUrl || server.discordUrl);
+    const searchIndexHealthy = pages.length === expectedByPath.size && pages.every(
+      (page) => page.currentRevisionId !== null
+        && page.searchDocument?.revisionId === page.currentRevisionId,
+    );
+    const checks = {
+      canonicalLink: true,
+      requiredDocuments: requiredDocumentCount === expectedByPath.size,
+      introduction: introductionComplete,
+      officialRules: rulesCustomized,
+      officialChannels,
+      searchIndex: searchIndexHealthy,
+    };
+    const completedChecks = Object.values(checks).filter(Boolean).length;
+    const siteSlug = serverWiki.siteSlug ?? serverWiki.slug;
+    const wikiUrl = `/serverWiki/${encodeURIComponent(siteSlug)}`;
+    const nextAction = !checks.requiredDocuments
+      ? { code: 'restore_documents' as const, label: '필수 문서 복구 요청하기', href: '/support/new' }
+      : !checks.officialRules
+        ? {
+            code: 'write_rules' as const,
+            label: '공식 규칙 작성하기',
+            href: `${wikiUrl}/_tools/edit/${encodeURIComponent('규칙')}`,
+          }
+        : !checks.introduction
+          ? { code: 'write_introduction' as const, label: '서버 소개 보강하기', href: `${wikiUrl}/_tools/edit` }
+          : !checks.officialChannels
+            ? { code: 'add_official_channels' as const, label: '공식 채널 등록하기', href: '#server-profile-settings' }
+            : !checks.searchIndex
+              ? { code: 'repair_search_index' as const, label: '검색 인덱스 복구 요청하기', href: '/support/new' }
+              : null;
+
+    return {
+      serverId: server.id,
+      status: completedChecks === Object.keys(checks).length ? 'ready' : 'needs_attention',
+      wikiUrl,
+      completedChecks,
+      totalChecks: Object.keys(checks).length,
+      checks,
+      requiredDocuments,
+      nextAction,
+    };
+  }
+
   async createServerWiki(
     serverId: string,
     accountId: string,
@@ -1981,6 +2072,28 @@ export interface ServerWikiLinkResponse {
   readonly status: 'linked' | 'unlinked';
 }
 
+export interface ServerWikiReadinessResponse {
+  readonly serverId: string;
+  readonly status: 'unlinked' | 'repair_required' | 'needs_attention' | 'ready';
+  readonly wikiUrl: string | null;
+  readonly completedChecks: number;
+  readonly totalChecks: number;
+  readonly checks: {
+    readonly canonicalLink: boolean;
+    readonly requiredDocuments: boolean;
+    readonly introduction: boolean;
+    readonly officialRules: boolean;
+    readonly officialChannels: boolean;
+    readonly searchIndex: boolean;
+  };
+  readonly requiredDocuments: Readonly<Record<string, boolean>>;
+  readonly nextAction: {
+    readonly code: 'create_wiki' | 'repair_link' | 'restore_documents' | 'write_rules' | 'write_introduction' | 'add_official_channels' | 'repair_search_index';
+    readonly label: string;
+    readonly href: string;
+  } | null;
+}
+
 interface ServerWikiContentSettingsRecord {
   readonly id: bigint;
   readonly slug: string;
@@ -2223,6 +2336,31 @@ function hasCanonicalServerWikiLink(
     && serverWiki.spaceId === server.wikiSpaceId
     && !serverWikiIdentityConflicts(serverWiki, server),
   );
+}
+
+function emptyServerWikiReadiness(
+  serverId: string,
+  status: 'unlinked' | 'repair_required',
+): ServerWikiReadinessResponse {
+  return {
+    serverId,
+    status,
+    wikiUrl: null,
+    completedChecks: 0,
+    totalChecks: 6,
+    checks: {
+      canonicalLink: false,
+      requiredDocuments: false,
+      introduction: false,
+      officialRules: false,
+      officialChannels: false,
+      searchIndex: false,
+    },
+    requiredDocuments: {},
+    nextAction: status === 'unlinked'
+      ? { code: 'create_wiki', label: '서버 위키 만들기', href: '#server-wiki-management' }
+      : { code: 'repair_link', label: '연결 복구 요청하기', href: '/support/new' },
+  };
 }
 
 function buildServerDirectoryPath(server: { id: string; shortCode?: string | null }): string {

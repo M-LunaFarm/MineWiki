@@ -64,10 +64,28 @@ type DispatchSummary = {
   readonly failed: DispatchAttemptSummary[];
 };
 
+const READINESS_LABELS: Readonly<Record<string, string>> = {
+  canonicalLink: '안전한 서버 연결',
+  requiredDocuments: '필수 문서 4개',
+  introduction: '서버 소개',
+  officialRules: '공식 규칙',
+  officialChannels: '공식 홈페이지 또는 Discord',
+  searchIndex: '문서 검색 색인',
+};
+
 type ServerWikiLinkResponse = {
   readonly wikiSlug: string | null;
   readonly wikiUrl: string | null;
   readonly status: 'linked' | 'unlinked';
+};
+
+type ServerWikiReadiness = {
+  readonly status: 'unlinked' | 'repair_required' | 'needs_attention' | 'ready';
+  readonly wikiUrl: string | null;
+  readonly completedChecks: number;
+  readonly totalChecks: number;
+  readonly checks: Record<string, boolean>;
+  readonly nextAction: { readonly code: string; readonly label: string; readonly href: string } | null;
 };
 
 function createDefaultTargets(): EditableTarget[] {
@@ -147,6 +165,7 @@ export function ServerOwnerControls({
   const [isOwner, setIsOwner] = useState(false);
   const [requiresOwnership, setRequiresOwnership] = useState(initialPolicy);
   const [wikiUrl, setWikiUrl] = useState<string | null>(initialWikiUrl ?? null);
+  const [wikiReadiness, setWikiReadiness] = useState<ServerWikiReadiness | null>(null);
   const [creatingWiki, setCreatingWiki] = useState(false);
   const [wikiFeedback, setWikiFeedback] = useState<FeedbackState | null>(null);
   const [saving, setSaving] = useState(false);
@@ -220,9 +239,29 @@ export function ServerOwnerControls({
     }
   }, [baseUrl, serverId]);
 
+  const fetchWikiReadiness = useCallback(async () => {
+    const response = await fetch(`${baseUrl}/v1/servers/${serverId}/wiki-readiness`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error(`서버 위키 준비 상태를 불러오지 못했습니다. (${response.status})`);
+    }
+    const payload = (await response.json()) as ServerWikiReadiness;
+    setWikiReadiness(payload);
+    if (payload.wikiUrl) setWikiUrl(payload.wikiUrl);
+  }, [baseUrl, serverId]);
+
   const hydrateProtectedControls = useCallback(async () => {
-    await Promise.all([fetchVotifierTargets(), fetchDispatchAttempts()]);
-  }, [fetchDispatchAttempts, fetchVotifierTargets]);
+    const results = await Promise.allSettled([
+      fetchVotifierTargets(),
+      fetchDispatchAttempts(),
+      fetchWikiReadiness(),
+    ]);
+    if (results[2]?.status === 'rejected') {
+      console.warn('서버 위키 준비 상태 로드 실패', results[2].reason);
+      setWikiReadiness(null);
+    }
+  }, [fetchDispatchAttempts, fetchVotifierTargets, fetchWikiReadiness]);
 
   useEffect(() => {
     setRequiresOwnership(initialPolicy);
@@ -240,6 +279,7 @@ export function ServerOwnerControls({
       setVotifierFeedback(null);
       setDispatchSummary({ recent: [], failed: [] });
       setDispatchFeedback(null);
+      setWikiReadiness(null);
       return;
     }
     const check = async () => {
@@ -259,6 +299,7 @@ export function ServerOwnerControls({
           setVotifierFeedback(null);
           setDispatchSummary({ recent: [], failed: [] });
           setDispatchFeedback(null);
+          setWikiReadiness(null);
         }
       } catch (error) {
         console.warn('소유자 확인 실패', error);
@@ -267,6 +308,7 @@ export function ServerOwnerControls({
         setVotifierFeedback(null);
         setDispatchSummary({ recent: [], failed: [] });
         setDispatchFeedback(null);
+        setWikiReadiness(null);
       }
     };
     void check();
@@ -293,6 +335,9 @@ export function ServerOwnerControls({
         throw new Error('서버 위키 링크가 생성되지 않았습니다.');
       }
       setWikiUrl(nextUrl);
+      void fetchWikiReadiness().catch((error) => {
+        console.warn('서버 위키 준비 상태 새로고침 실패', error);
+      });
       setWikiFeedback({
         type: 'success',
         message: '서버 위키가 생성되었습니다.',
@@ -310,7 +355,7 @@ export function ServerOwnerControls({
     } finally {
       setCreatingWiki(false);
     }
-  }, [baseUrl, creatingWiki, isOwner, router, serverId]);
+  }, [baseUrl, creatingWiki, fetchWikiReadiness, isOwner, router, serverId]);
 
   const handleToggle = async () => {
     if (!isOwner || saving) {
@@ -533,13 +578,15 @@ export function ServerOwnerControls({
         </Link>
       </div>
 
-      <ServerProfileSettings
-        serverId={serverId}
-        baseUrl={baseUrl}
-        initial={initialProfile}
-      />
+      <div id="server-profile-settings">
+        <ServerProfileSettings
+          serverId={serverId}
+          baseUrl={baseUrl}
+          initial={initialProfile}
+        />
+      </div>
 
-      <div className="mt-5 rounded-lg border border-[#2a2a2d] bg-[#1c1c1f] p-4 text-sm text-slate-200">
+      <div id="server-wiki-management" className="mt-5 rounded-lg border border-[#2a2a2d] bg-[#1c1c1f] p-4 text-sm text-slate-200">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -587,6 +634,39 @@ export function ServerOwnerControls({
           >
             {wikiFeedback.message}
           </p>
+        ) : null}
+        {wikiReadiness && wikiReadiness.status !== 'unlinked' ? (
+          <div className={`mt-4 rounded-lg border p-4 ${
+            wikiReadiness.status === 'ready'
+              ? 'border-emerald-400/25 bg-emerald-400/5'
+              : wikiReadiness.status === 'repair_required'
+                ? 'border-red-400/25 bg-red-400/5'
+                : 'border-amber-300/25 bg-amber-300/5'
+          }`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-2 font-semibold text-white">
+                {wikiReadiness.status === 'ready' ? <CheckCircle2 className="size-4 text-emerald-300" /> : <AlertCircle className="size-4 text-amber-300" />}
+                {wikiReadiness.status === 'ready' ? '문서 공간 준비 완료' : wikiReadiness.status === 'repair_required' ? '연결 복구 필요' : '문서 완성도 보강 필요'}
+              </p>
+              <span className="text-xs text-slate-400">{wikiReadiness.completedChecks}/{wikiReadiness.totalChecks} 확인 완료</span>
+            </div>
+            {wikiReadiness.status === 'needs_attention' ? (
+              <div className="mt-3 grid gap-2 text-xs text-slate-300 sm:grid-cols-2">
+                {Object.entries(wikiReadiness.checks).map(([key, complete]) => (
+                  <span key={key} className="flex items-center gap-2">
+                    <span className={`size-1.5 rounded-full ${complete ? 'bg-emerald-300' : 'bg-amber-300'}`} />
+                    {READINESS_LABELS[key] ?? key}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {wikiReadiness.nextAction ? (
+              <Link href={wikiReadiness.nextAction.href} className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#13ec80] px-4 py-2 text-xs font-bold text-[#06140d] transition hover:bg-[#1ee6a4]">
+                {wikiReadiness.nextAction.label}
+                <ExternalLink className="size-3.5" />
+              </Link>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

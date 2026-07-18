@@ -192,6 +192,16 @@ export class ServerController {
   }
 
   @UseGuards(SessionGuard)
+  @Get(':id/wiki-readiness')
+  async wikiReadiness(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentSession() session: SessionPayload,
+  ) {
+    await this.assertCanManageServer(id, session);
+    return this.serverService.getServerWikiReadiness(id);
+  }
+
+  @UseGuards(SessionGuard)
   @Get(':id/wiki-layouts')
   async wikiLayouts(
     @Param('id', new ParseUUIDPipe()) id: string,
