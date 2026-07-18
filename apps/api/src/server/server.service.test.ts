@@ -194,6 +194,25 @@ if (!hasDatabase) {
       });
       assert.equal(serverWiki?.slug, link.wikiSlug);
 
+      const createdPages = await prisma.wikiPage.findMany({
+        where: { spaceId: BigInt(link.wikiSpaceId ?? '0') },
+        include: { searchDocument: true },
+      });
+      const createdRevisions = await prisma.wikiPageRevision.findMany({
+        where: { id: { in: createdPages.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []) } },
+      });
+      const revisionById = new Map(createdRevisions.map((revision) => [revision.id, revision]));
+      assert.equal(createdPages.length, 4);
+      assert.equal(
+        createdPages.every(
+          (page) =>
+            page.currentRevisionId !== null &&
+            page.currentContentSize === revisionById.get(page.currentRevisionId)?.contentSize &&
+            page.searchDocument?.revisionId === page.currentRevisionId,
+        ),
+        true,
+      );
+
       await prisma.serverWiki.update({
         where: { voteServerId: server.id },
         data: {

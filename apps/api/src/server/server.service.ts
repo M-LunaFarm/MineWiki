@@ -8,7 +8,7 @@
 } from '@nestjs/common';
 import { Logger } from '@minewiki/logger';
 import { UnsafeEndpointError, validateOutboundTarget } from '@minewiki/security';
-import { hashContent, parseMarkup } from '@minewiki/wiki-core';
+import { buildWikiSearchVector, hashContent, parseMarkup } from '@minewiki/wiki-core';
 import type {
   ServerDetail,
   ServerStats,
@@ -789,31 +789,19 @@ export class ServerService {
           visibility: 'public',
         },
       });
-      await tx.wikiPage.update({
-        where: { id: page.id },
-        data: {
-          currentRevisionId: revision.id,
-          updatedAt: now,
-        },
+      await finalizeCreatedServerWikiPage(tx, {
+        page,
+        revision,
+        contentRaw,
+        namespaceCode: namespace.code,
+        actorId: actor.id,
+        now,
       });
       await tx.wikiSpace.update({
         where: { id: space.id },
         data: {
           rootPageId: page.id,
           updatedAt: now,
-        },
-      });
-      await tx.wikiRecentChange.create({
-        data: {
-          pageId: page.id,
-          revisionId: revision.id,
-          actorId: actor.id,
-          changeType: 'create',
-          title: page.title,
-          namespaceCode: namespace.code,
-          summary: revision.editSummary,
-          isMinor: revision.isMinor,
-          createdAt: now,
         },
       });
       for (const starter of buildServerStarterPages(server)) {
@@ -853,22 +841,13 @@ export class ServerService {
             visibility: 'public',
           },
         });
-        await tx.wikiPage.update({
-          where: { id: starterPage.id },
-          data: { currentRevisionId: starterRevision.id, updatedAt: now },
-        });
-        await tx.wikiRecentChange.create({
-          data: {
-            pageId: starterPage.id,
-            revisionId: starterRevision.id,
-            actorId: actor.id,
-            changeType: 'create',
-            title: starterPage.title,
-            namespaceCode: namespace.code,
-            summary: starterRevision.editSummary,
-            isMinor: false,
-            createdAt: now,
-          },
+        await finalizeCreatedServerWikiPage(tx, {
+          page: starterPage,
+          revision: starterRevision,
+          contentRaw: starter.contentRaw,
+          namespaceCode: namespace.code,
+          actorId: actor.id,
+          now,
         });
       }
       const updatedServer = await tx.server.update({
@@ -2360,6 +2339,57 @@ function toSummary(server: {
 function normalizeShortDescription(value?: string | null): string {
   const trimmed = value?.trim();
   return trimmed ? trimmed : 'No description';
+}
+
+async function finalizeCreatedServerWikiPage(
+  tx: Prisma.TransactionClient,
+  input: {
+    readonly page: { readonly id: bigint; readonly title: string; readonly displayTitle: string };
+    readonly revision: {
+      readonly id: bigint;
+      readonly contentSize: number;
+      readonly editSummary: string;
+      readonly isMinor: boolean;
+    };
+    readonly contentRaw: string;
+    readonly namespaceCode: string;
+    readonly actorId: bigint;
+    readonly now: Date;
+  },
+): Promise<void> {
+  await tx.wikiPage.update({
+    where: { id: input.page.id },
+    data: {
+      currentRevisionId: input.revision.id,
+      currentContentSize: input.revision.contentSize,
+      updatedAt: input.now,
+    },
+  });
+  await tx.wikiSearchDocument.create({
+    data: {
+      pageId: input.page.id,
+      revisionId: input.revision.id,
+      searchVector: buildWikiSearchVector([
+        input.page.title,
+        input.page.displayTitle,
+        input.contentRaw,
+      ]),
+      updatedAt: input.now,
+    },
+  });
+  await tx.wikiRecentChange.create({
+    data: {
+      pageId: input.page.id,
+      revisionId: input.revision.id,
+      actorId: input.actorId,
+      changeType: 'create',
+      title: input.page.title,
+      namespaceCode: input.namespaceCode,
+      summary: input.revision.editSummary,
+      isMinor: input.revision.isMinor,
+      createdAt: input.now,
+    },
+  });
 }
 
 function toDetail(

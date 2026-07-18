@@ -149,6 +149,35 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'Server wiki reciprocal linkage and canonical identity are consistent',
+    `
+      SELECT s.id
+      FROM Server s
+      LEFT JOIN server_wikis sw ON sw.space_id = s.wikiSpaceId
+      LEFT JOIN wiki_spaces ws ON ws.id = sw.space_id
+      LEFT JOIN pages root ON root.id = ws.root_page_id
+      WHERE s.wikiSpaceId IS NOT NULL
+        AND (
+          sw.id IS NULL
+          OR ws.id IS NULL
+          OR NOT (sw.vote_server_id <=> s.id)
+          OR NOT (sw.slug <=> s.wikiSlug)
+          OR ws.space_type <> 'server_wiki'
+          OR ws.status <> 'active'
+          OR ws.root_namespace_code <> 'server'
+          OR NOT (ws.root_page_id <=> s.wikiPageId)
+          OR NOT (root.space_id <=> ws.id)
+          OR NOT (BINARY TRIM(sw.server_name) <=> BINARY TRIM(s.name))
+          OR NOT (
+            LOWER(TRIM(TRAILING '.' FROM sw.host))
+            <=> LOWER(TRIM(TRAILING '.' FROM s.joinHost))
+          )
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'ServerWiki layout keys and premium entitlements are valid',
     `
       SELECT sw.id

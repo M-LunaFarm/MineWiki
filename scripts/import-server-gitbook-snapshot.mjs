@@ -5,32 +5,30 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  assertServerGitBookLinkage,
+  parseServerGitBookImportArgs,
+  validateServerGitBookSnapshot,
+} from './server-gitbook-import-contract.mjs';
 
 const require = createRequire(import.meta.url);
 const { PrismaClient } = require('@prisma/client');
 const { buildWikiSearchVector, parseMarkup } = require('../packages/wiki-core/dist/index.js');
 
-const snapshotPath = process.argv[2];
-if (!snapshotPath) {
-  throw new Error('Usage: node scripts/import-server-gitbook-snapshot.mjs <snapshot.json>');
-}
-
-const snapshot = JSON.parse(await readFile(snapshotPath, 'utf8'));
-if (!snapshot.serverId || !snapshot.sourceRevision || !Array.isArray(snapshot.pages)) {
-  throw new Error('Snapshot requires serverId, sourceRevision, and pages.');
+const args = parseServerGitBookImportArgs(process.argv.slice(2));
+const snapshot = JSON.parse(await readFile(args.snapshotPath, 'utf8'));
+const { computedDigest } = validateServerGitBookSnapshot(snapshot, { requireDigest: args.apply });
+if (args.printDigest) {
+  process.stdout.write(`${computedDigest}\n`);
+  process.exit(0);
 }
 
 const prisma = new PrismaClient();
 try {
-  const server = await prisma.server.findUnique({ where: { id: snapshot.serverId } });
-  if (!server?.wikiSpaceId || !server.wikiSlug) {
-    throw new Error(`Server ${snapshot.serverId} has no linked server wiki.`);
-  }
-  const serverWiki = await prisma.serverWiki.findUnique({ where: { spaceId: server.wikiSpaceId } });
-  const namespace = await prisma.wikiNamespace.findUnique({ where: { code: 'server' } });
-  if (!serverWiki || !namespace) throw new Error('Linked server wiki records are incomplete.');
+  const context = await loadLinkedContext(prisma, snapshot);
+  assertServerGitBookLinkage({ snapshot, ...context });
 
-  const slug = serverWiki.slug;
+  const slug = context.serverWiki.slug;
   const now = new Date();
   const prepared = snapshot.pages.map((page) => ({
     ...page,
@@ -38,14 +36,41 @@ try {
     content: normalizeGitBookSource(page.content, page.sourcePath, snapshot.pages, slug),
   }));
   const importedPaths = new Set(prepared.map((page) => page.localPath));
+  const existingPages = await prisma.wikiPage.findMany({
+    where: { spaceId: context.serverWiki.spaceId },
+    select: { id: true, localPath: true },
+  });
+  const existingPaths = new Set(existingPages.map((page) => page.localPath));
+  const plan = {
+    mode: args.apply ? 'apply' : 'plan',
+    serverId: context.server.id,
+    wikiSpaceId: String(context.serverWiki.spaceId),
+    wikiSlug: context.serverWiki.slug,
+    sourceUrl: snapshot.sourceUrl,
+    sourceRevision: snapshot.sourceRevision,
+    snapshotDigest: computedDigest,
+    create: prepared.filter((page) => !existingPaths.has(page.localPath)).map((page) => page.localPath),
+    update: prepared.filter((page) => existingPaths.has(page.localPath)).map((page) => page.localPath),
+    prune: args.prune
+      ? existingPages.filter((page) => !importedPaths.has(page.localPath)).map((page) => page.localPath)
+      : [],
+  };
+  process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+  if (!args.apply) {
+    process.stdout.write('Plan only. Add snapshotDigest to the snapshot and pass --apply to write.\n');
+  }
 
-  await prisma.$transaction(async (tx) => {
+  if (args.apply) {
+    await prisma.$transaction(async (tx) => {
+    await lockLinkedContext(tx, context);
+    const lockedContext = await loadLinkedContext(tx, snapshot);
+    assertServerGitBookLinkage({ snapshot, ...lockedContext });
+    const { server, serverWiki, namespace } = lockedContext;
     await tx.serverWiki.update({
       where: { id: serverWiki.id },
       data: {
-        serverName: snapshot.siteName ?? serverWiki.serverName,
-        host: snapshot.host ?? serverWiki.host,
-        supportedVersions: snapshot.supportedVersions ?? serverWiki.supportedVersions,
+        serverName: server.name,
+        host: server.joinHost,
         layoutKey: 'docs',
         layoutUpdatedAt: now,
         updatedAt: now,
@@ -54,17 +79,22 @@ try {
     await tx.wikiSpace.update({
       where: { id: serverWiki.spaceId },
       data: {
-        name: `${snapshot.siteName ?? serverWiki.serverName} 문서`,
-        title: `${snapshot.siteName ?? serverWiki.serverName} 문서`,
+        name: `${server.name} 문서`,
+        title: `${server.name} 문서`,
         description: snapshot.description ?? null,
         updatedAt: now,
       },
     });
 
-    const existingPages = await tx.wikiPage.findMany({ where: { spaceId: serverWiki.spaceId } });
-    for (const existing of existingPages) {
-      if (!importedPaths.has(existing.localPath)) {
-        await tx.wikiPage.update({ where: { id: existing.id }, data: { status: 'deleted', updatedAt: now } });
+    if (args.prune) {
+      const pagesToCheck = await tx.wikiPage.findMany({ where: { spaceId: serverWiki.spaceId } });
+      for (const existing of pagesToCheck) {
+        if (!importedPaths.has(existing.localPath)) {
+          await tx.wikiPage.update({
+            where: { id: existing.id },
+            data: { status: 'deleted', updatedAt: now },
+          });
+        }
       }
     }
 
@@ -166,11 +196,63 @@ try {
         await tx.server.update({ where: { id: server.id }, data: { wikiPageId: page.id } });
       }
     }
-  }, { timeout: 120_000 });
+    await tx.auditEvent.create({
+      data: {
+        category: 'wiki',
+        action: 'server_gitbook_import',
+        severity: 'info',
+        actorProfileId: serverWiki.createdBy,
+        subjectType: 'server_wiki',
+        subjectId: String(serverWiki.id),
+        metadata: {
+          serverId: server.id,
+          wikiSpaceId: String(serverWiki.spaceId),
+          wikiSlug: serverWiki.slug,
+          sourceUrl: snapshot.sourceUrl,
+          sourceRevision: snapshot.sourceRevision,
+          snapshotDigest: computedDigest,
+          pages: prepared.length,
+          pruned: plan.prune.length,
+        },
+        createdAt: now,
+      },
+    });
+    }, { timeout: 120_000 });
 
-  process.stdout.write(`Imported ${prepared.length} GitBook pages into /server/${slug}.\n`);
+    process.stdout.write(`Imported ${prepared.length} GitBook pages into /server/${slug}.\n`);
+  }
 } finally {
   await prisma.$disconnect();
+}
+
+async function loadLinkedContext(client, snapshotInput) {
+  const server = await client.server.findUnique({ where: { id: snapshotInput.serverId } });
+  if (!server?.wikiSpaceId || !server.wikiSlug || !server.wikiPageId) {
+    throw new Error(`Server ${snapshotInput.serverId} has no complete linked server wiki.`);
+  }
+  const [serverWiki, space, rootPage, namespace] = await Promise.all([
+    client.serverWiki.findUnique({ where: { spaceId: server.wikiSpaceId } }),
+    client.wikiSpace.findUnique({ where: { id: server.wikiSpaceId } }),
+    client.wikiPage.findUnique({ where: { id: server.wikiPageId } }),
+    client.wikiNamespace.findUnique({ where: { code: 'server' } }),
+  ]);
+  if (!serverWiki || !space || !rootPage || !namespace) {
+    throw new Error('Linked server wiki records are incomplete.');
+  }
+  return { server, serverWiki, space, rootPage, namespace };
+}
+
+async function lockLinkedContext(tx, context) {
+  await tx.$queryRawUnsafe('SELECT id FROM Server WHERE id = ? FOR UPDATE', context.server.id);
+  await tx.$queryRawUnsafe(
+    'SELECT id FROM server_wikis WHERE id = ? FOR UPDATE',
+    context.serverWiki.id,
+  );
+  await tx.$queryRawUnsafe(
+    'SELECT id FROM wiki_spaces WHERE id = ? FOR UPDATE',
+    context.serverWiki.spaceId,
+  );
+  await tx.$queryRawUnsafe('SELECT id FROM pages WHERE id = ? FOR UPDATE', context.rootPage.id);
 }
 
 function sourcePathToLocalPath(slug, sourcePath) {
