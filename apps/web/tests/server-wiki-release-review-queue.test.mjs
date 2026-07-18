@@ -12,6 +12,9 @@ test('reviewers can discover and approve immutable server wiki candidates withou
   ]);
 
   assert.match(client, /\/v1\/wiki\/release-reviews/u);
+  assert.match(client, /\/pages\?/u);
+  assert.match(client, /문서 더 불러오기/u);
+  assert.match(client, /filterKinds/u);
   assert.match(client, /candidateId: detail\.candidateId/u);
   assert.match(client, /candidateToken: detail\.candidateToken/u);
   assert.match(client, /본문 변경 비교/u);
