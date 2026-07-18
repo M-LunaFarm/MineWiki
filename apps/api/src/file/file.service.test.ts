@@ -10,6 +10,7 @@ interface TestFile {
   id: string;
   ownerAccountId: string | null;
   filename: string;
+  wikiFilename: string | null;
   originalName: string | null;
   mimeType: string;
   sizeBytes: number;
@@ -46,6 +47,7 @@ interface VisibilityCondition {
 
 interface SearchCondition {
   filename?: { contains: string };
+  wikiFilename?: { contains: string };
   originalName?: { contains: string };
 }
 
@@ -113,6 +115,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
           id: `file-${files.size + 1}`,
           status: 'active',
           visibility: 'public',
+          wikiFilename: null,
           license: null,
           sourceUrl: null,
           sourceText: null,
@@ -148,6 +151,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
           if (searchOr?.length) {
             const matches = searchOr.some((condition) => {
               if (condition.filename?.contains) return file.filename.includes(condition.filename.contains);
+              if (condition.wikiFilename?.contains) return file.wikiFilename?.includes(condition.wikiFilename.contains);
               if (condition.originalName?.contains) return file.originalName?.includes(condition.originalName.contains);
               return false;
             });
@@ -240,7 +244,8 @@ test('file service stores canonical image metadata', async () => {
   }, session('account-1'));
 
   assert.equal(uploaded.id, 'file-1');
-  assert.equal(uploaded.filename, 'stored.webp');
+  assert.equal(uploaded.filename, 'wiki.png');
+  assert.equal(uploaded.storageFilename, 'stored.webp');
   assert.equal(uploaded.originalName, 'wiki.png');
   assert.equal(uploaded.ownerAccountId, 'account-1');
   assert.equal(uploaded.usageContext, 'wiki_editor');
@@ -248,8 +253,8 @@ test('file service stores canonical image metadata', async () => {
   assert.equal(uploaded.license, 'self-created');
   assert.equal(uploaded.sourceText, '업로더 직접 제작');
   assert.deepEqual(actionCalls, ['upload_file']);
-  assert.deepEqual(fileDocuments, [{ filename: 'stored.webp', linkedPageId: '7' }]);
-  assert.equal(uploaded.wikiDocumentPath, '/file/stored.webp');
+  assert.deepEqual(fileDocuments, [{ filename: 'wiki.png', linkedPageId: '7' }]);
+  assert.equal(uploaded.wikiDocumentPath, '/file/wiki.png');
   assert.equal(uploaded.url, 'upload://stored.webp');
 });
 
@@ -267,8 +272,8 @@ test('standalone wiki uploads can bind to an editable wiki space', async () => {
   assert.equal(uploaded.linkedResourceType, 'wiki_space');
   assert.equal(uploaded.linkedResourceId, '3');
   assert.deepEqual(actionCalls, ['upload_file']);
-  assert.deepEqual(fileDocuments, [{ filename: 'stored.webp', linkedSpaceId: '3' }]);
-  assert.equal(uploaded.wikiDocumentPath, '/file/stored.webp');
+  assert.deepEqual(fileDocuments, [{ filename: 'standalone.png', linkedSpaceId: '3' }]);
+  assert.equal(uploaded.wikiDocumentPath, '/file/standalone.png');
 });
 
 test('file service list hides private and unlisted files from non-owners', async () => {
@@ -482,8 +487,8 @@ test('wiki uploads enforce upload_file ACL separately from edit access', async (
   assert.equal(files.size, 0);
 });
 
-test('failed file document creation disables the uploaded record', async () => {
-  const { service, files } = createService({ failFileDocument: true });
+test('failed file document creation disables the uploaded record and removes its object', async () => {
+  const { service, files, getDeleteAttempts } = createService({ failFileDocument: true });
   await assert.rejects(
     () => service.createImage('account-1', {
       data: 'data:image/png;base64,aW1hZ2U=',
@@ -496,4 +501,22 @@ test('failed file document creation disables the uploaded record', async () => {
     /File document failed/
   );
   assert.equal([...files.values()][0]?.status, 'deleted');
+  assert.equal(getDeleteAttempts(), 1);
+});
+
+test('wiki upload keeps the logical filename separate from immutable storage', async () => {
+  const { service, files } = createService();
+  const uploaded = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: '서버 아이콘.png',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7'
+  }, session('account-1'));
+
+  assert.equal(uploaded.filename, '서버 아이콘.png');
+  assert.equal(uploaded.storageFilename, 'stored.webp');
+  assert.equal(files.get(uploaded.id)?.wikiFilename, '서버 아이콘.png');
+  assert.equal(uploaded.status, 'active');
 });

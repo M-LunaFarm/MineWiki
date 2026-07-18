@@ -230,8 +230,12 @@ export class WikiEditService {
     request: AuthorizedWikiFileDocumentRequest
   ): Promise<WikiMutationResponse> {
     const filename = this.requiredString(request.filename, 'filename');
-    if (!/^[a-f0-9-]{16,64}\.(?:png|jpe?g|webp)$/i.test(filename)) {
-      throw new BadRequestException('Stored wiki filename is invalid.');
+    const hasForbiddenCharacter = Array.from(filename).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127 || '<>:"|?*\\/[]'.includes(character);
+    });
+    if (filename.length > 255 || hasForbiddenCharacter) {
+      throw new BadRequestException('Wiki filename is invalid.');
     }
     const linkedPageId = request.linkedPageId
       ? this.parseBigIntId(request.linkedPageId, 'linkedPageId')

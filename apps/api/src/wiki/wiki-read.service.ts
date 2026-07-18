@@ -2391,7 +2391,7 @@ export class WikiReadService {
     }
     const files = await this.prisma.uploadedFile.findMany({
       where: {
-        filename: { in: fileNames },
+        wikiFilename: { in: fileNames },
         usageContext: 'wiki_editor',
         status: 'active'
       }
@@ -2424,7 +2424,7 @@ export class WikiReadService {
     }
     return Object.fromEntries(
       visibleFiles.map((file) => [
-        file.filename,
+        file.wikiFilename ?? file.filename,
         {
           url: file.publicPath,
           mimeType: file.mimeType,

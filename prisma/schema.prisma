@@ -1007,6 +1007,7 @@ model UploadedFile {
   id                 String   @id @default(uuid()) @db.Char(36)
   ownerAccountId     String?  @map("owner_account_id") @db.Char(36)
   filename           String   @db.VarChar(255)
+  wikiFilename       String?  @unique(map: "uk_uploaded_files_wiki_filename") @map("wiki_filename") @db.VarChar(255)
   originalName       String?  @map("original_name") @db.VarChar(255)
   mimeType           String   @map("mime_type") @db.VarChar(128)
   sizeBytes          Int      @map("size_bytes") @db.UnsignedInt

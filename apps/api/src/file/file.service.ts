@@ -41,6 +41,7 @@ export interface FileMetadataResponse {
   readonly id: string;
   readonly ownerAccountId: string | null;
   readonly filename: string;
+  readonly storageFilename: string;
   readonly originalName: string | null;
   readonly mimeType: string;
   readonly size: number;
@@ -158,43 +159,69 @@ export class FileService {
     session: SessionPayload | null
   ): Promise<FileImageUploadResponse> {
     const { usageContext, visibility, license, sourceUrl, sourceText, linkedResource } = policy;
-    const created = await this.prisma.uploadedFile.create({
-      data: {
-        ownerAccountId: accountId,
-        filename: stored.filename,
-        originalName: request.filename?.trim() || null,
-        mimeType: stored.mimeType,
-        sizeBytes: stored.size,
-        width: stored.width,
-        height: stored.height,
-        sha256: stored.hash,
-        storagePath: stored.storagePath,
-        publicPath: stored.publicPath,
-        usageContext,
-        visibility,
-        license,
-        sourceUrl,
-        sourceText,
-        linkedResourceType: linkedResource?.type ?? null,
-        linkedResourceId: linkedResource?.id ?? null
+    let wikiFilename: string | null = null;
+    try {
+      wikiFilename = usageContext === 'wiki_editor'
+        ? normalizeWikiFilename(request.filename, stored.filename)
+        : null;
+    } catch (error) {
+      await this.uploads.deleteObject(stored.storagePath).catch(() => undefined);
+      throw error;
+    }
+    let created;
+    try {
+      created = await this.prisma.uploadedFile.create({
+        data: {
+          ownerAccountId: accountId,
+          filename: stored.filename,
+          wikiFilename,
+          originalName: request.filename?.trim() || null,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.size,
+          width: stored.width,
+          height: stored.height,
+          sha256: stored.hash,
+          storagePath: stored.storagePath,
+          publicPath: stored.publicPath,
+          usageContext,
+          visibility,
+          license,
+          sourceUrl,
+          sourceText,
+          linkedResourceType: linkedResource?.type ?? null,
+          linkedResourceId: linkedResource?.id ?? null,
+          status: usageContext === 'wiki_editor' ? 'pending' : 'active'
+        }
+      });
+    } catch (error) {
+      await this.uploads.deleteObject(stored.storagePath).catch(() => undefined);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002' && wikiFilename) {
+        throw new ConflictException('A wiki file with this name already exists.');
       }
-    });
+      throw error;
+    }
     if (usageContext === 'wiki_editor') {
       if (!session || !this.wikiEdits) {
         await this.prisma.uploadedFile.update({ where: { id: created.id }, data: { status: 'deleted' } });
+        await this.uploads.deleteObject(stored.storagePath).catch(() => undefined);
         throw new BadRequestException('Wiki file document service is unavailable.');
       }
       try {
         await this.wikiEdits.createFileDocumentAfterAuthorizedUpload(session, {
-          filename: created.filename,
+          filename: created.wikiFilename!,
           ...(linkedResource!.type === 'wiki_page'
             ? { linkedPageId: linkedResource!.id }
             : { linkedSpaceId: linkedResource!.id })
         });
       } catch (error) {
         await this.prisma.uploadedFile.update({ where: { id: created.id }, data: { status: 'deleted' } });
+        await this.uploads.deleteObject(stored.storagePath).catch(() => undefined);
         throw error;
       }
+      created = await this.prisma.uploadedFile.update({
+        where: { id: created.id },
+        data: { status: 'active' }
+      });
     }
     await this.events?.audit('file.upload', {
       category: 'file',
@@ -202,7 +229,7 @@ export class FileService {
       subjectType: 'file',
       subjectId: created.id,
       metadata: {
-        filename: created.filename,
+        filename: created.wikiFilename ?? created.filename,
         mimeType: created.mimeType,
         sizeBytes: created.sizeBytes,
         usageContext: created.usageContext,
@@ -247,6 +274,7 @@ export class FileService {
               AND: [{
                 OR: [
                   { filename: { contains: search } },
+                  { wikiFilename: { contains: search } },
                   { originalName: { contains: search } }
                 ]
               }]
@@ -323,10 +351,16 @@ export class FileService {
           JOIN pages p
             ON p.id = l.source_page_id
            AND p.current_revision_id = l.source_revision_id
+          JOIN namespaces n
+            ON n.id = p.namespace_id
           WHERE l.target_namespace_code = 'file'
-            AND l.target_slug = ${current.filename}
+            AND l.target_slug = ${current.wikiFilename ?? current.filename}
             AND l.link_type = 'file'
             AND p.status <> 'deleted'
+            AND NOT (
+              n.code = 'file'
+              AND p.title = ${current.wikiFilename ?? current.filename}
+            )
           LIMIT 1
         `;
         if (references.length > 0) {
@@ -394,6 +428,7 @@ function toFileMetadata(file: {
   id: string;
   ownerAccountId: string | null;
   filename: string;
+  wikiFilename: string | null;
   originalName: string | null;
   mimeType: string;
   sizeBytes: number;
@@ -415,7 +450,8 @@ function toFileMetadata(file: {
   return {
     id: file.id,
     ownerAccountId: file.ownerAccountId,
-    filename: file.filename,
+    filename: file.wikiFilename ?? file.filename,
+    storageFilename: file.filename,
     originalName: file.originalName,
     mimeType: file.mimeType,
     size: file.sizeBytes,
@@ -429,7 +465,7 @@ function toFileMetadata(file: {
     sourceUrl: file.sourceUrl,
     sourceText: file.sourceText,
     wikiDocumentPath: file.usageContext === 'wiki_editor'
-      ? `/file/${encodeURIComponent(file.filename)}`
+      ? `/file/${encodeURIComponent(file.wikiFilename ?? file.filename)}`
       : null,
     linkedResourceType: file.linkedResourceType,
     linkedResourceId: file.linkedResourceId,
@@ -437,6 +473,23 @@ function toFileMetadata(file: {
     createdAt: file.createdAt.toISOString(),
     updatedAt: file.updatedAt.toISOString()
   };
+}
+
+function normalizeWikiFilename(requestedName: string | undefined, fallback: string): string {
+  const normalized = requestedName?.normalize('NFC').trim() || fallback;
+  const hasForbiddenCharacter = Array.from(normalized).some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 || '<>:"|?*\\/[]'.includes(character);
+  });
+  if (
+    normalized.length > 255
+    || hasForbiddenCharacter
+    || normalized === '.'
+    || normalized === '..'
+  ) {
+    throw new BadRequestException('Wiki filename is invalid.');
+  }
+  return normalized;
 }
 
 const WIKI_FILE_LICENSES = new Set([

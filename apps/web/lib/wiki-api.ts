@@ -1131,6 +1131,7 @@ export interface UploadedFileMetadata {
   readonly id: string;
   readonly ownerAccountId: string | null;
   readonly filename: string;
+  readonly storageFilename: string;
   readonly originalName: string | null;
   readonly mimeType: string;
   readonly size: number;
