@@ -14,6 +14,7 @@ type WikiPermissionStore = Pick<
   | 'wikiSpace'
   | 'subwikiRole'
   | 'serverWiki'
+  | 'serverWikiReleaseItem'
   | 'server'
   | 'modWiki'
   | 'aclRule'

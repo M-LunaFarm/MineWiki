@@ -478,6 +478,25 @@ interface ReleasedServerWikiPage {
   };
 }
 
+function pageFromServerWikiReleaseItem(item: ServerWikiReleaseItem): ReleasedServerWikiPage['page'] {
+  return {
+    namespaceId: item.namespaceId,
+    id: item.pageId,
+    spaceId: item.spaceId,
+    localPath: item.localPath,
+    slug: item.slug,
+    title: item.title,
+    displayTitle: item.displayTitle,
+    currentRevisionId: item.revisionId,
+    pageType: item.pageType,
+    protectionLevel: item.protectionLevel,
+    status: item.pageStatus,
+    createdBy: item.createdBy,
+    ownerProfileId: item.ownerProfileId,
+    updatedAt: item.pageUpdatedAt,
+  };
+}
+
 export async function resolveWikiAccessContext(
   prisma: Pick<PrismaService, 'wikiProfile'>,
   wikiPermissions: WikiPermissionService,
@@ -731,22 +750,7 @@ export class WikiReadService {
     return {
       releaseId: item.releaseId,
       revisionId: item.revisionId,
-      page: {
-        namespaceId: item.namespaceId,
-        id: item.pageId,
-        spaceId: item.spaceId,
-        localPath: item.localPath,
-        slug: item.slug,
-        title: item.title,
-        displayTitle: item.displayTitle,
-        currentRevisionId: item.revisionId,
-        pageType: item.pageType,
-        protectionLevel: item.protectionLevel,
-        status: item.pageStatus,
-        createdBy: item.createdBy,
-        ownerProfileId: item.ownerProfileId,
-        updatedAt: item.pageUpdatedAt,
-      },
+      page: pageFromServerWikiReleaseItem(item),
     };
   }
 
@@ -2402,11 +2406,24 @@ export class WikiReadService {
     const page = await this.prisma.wikiPage.findUnique({ where: { id } });
     if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    const released = await this.releasedRevisionForViewer(page, access);
     await this.wikiPermissions.assertCanReadPage({ ...access, page });
     await this.wikiPermissions.assertCanUsePageAction({ ...access, action: 'history', page });
-    const total = await this.prisma.wikiPageRevision.count({ where: { pageId: page.id, visibility: 'public' } });
+    const releaseAnchor = released
+      ? await this.prisma.wikiPageRevision.findFirst({
+          where: { id: released.revisionId, pageId: page.id, visibility: 'public' },
+          select: { revisionNo: true },
+        })
+      : null;
+    if (released && !releaseAnchor) throw new NotFoundException('Public wiki revision not found.');
+    const revisionWhere = {
+      pageId: page.id,
+      visibility: 'public' as const,
+      ...(releaseAnchor ? { revisionNo: { lte: releaseAnchor.revisionNo } } : {}),
+    };
+    const total = await this.prisma.wikiPageRevision.count({ where: revisionWhere });
     const revisions = await this.prisma.wikiPageRevision.findMany({
-      where: { pageId: page.id, visibility: 'public' },
+      where: revisionWhere,
       orderBy: [{ revisionNo: 'asc' }],
       ...(total > 500 ? { skip: total - 500 } : {}),
       take: 500,
@@ -2829,7 +2846,8 @@ export class WikiReadService {
     sourceNamespace: string,
     sourceLocalPath: string,
     targets: readonly string[],
-    access: WikiAccessContext
+    access: WikiAccessContext,
+    releaseId?: bigint,
   ): Promise<Set<string>> {
     const resolvedByLinkKey = new Map<string, { namespace: string; slug: string }>();
     for (const target of targets) {
@@ -2845,9 +2863,51 @@ export class WikiReadService {
     });
     const namespaceIdByCode = new Map(namespaceRows.map((item) => [item.code, item.id]));
     const readableTargets = new Set<string>();
+    const sourceServerSlug = sourceNamespace === 'server' ? slugifyTitle(sourceLocalPath).split('/')[0] : null;
+    const releasePinnedTargets = releaseId && sourceServerSlug
+      ? [...resolvedByLinkKey.values()].filter((target) =>
+          target.namespace === 'server' && target.slug.split('/')[0] === sourceServerSlug)
+      : [];
+    if (releaseId && releasePinnedTargets.length > 0) {
+      const releaseItems = await this.prisma.serverWikiReleaseItem.findMany({
+        where: {
+          releaseId,
+          namespaceId: {
+            in: [...new Set(releasePinnedTargets.flatMap((target) => {
+              const namespaceId = namespaceIdByCode.get(target.namespace);
+              return namespaceId === undefined ? [] : [namespaceId];
+            }))],
+          },
+          slug: { in: [...new Set(releasePinnedTargets.map((target) => target.slug))] },
+        },
+      });
+      const revisions = releaseItems.length > 0
+        ? await this.prisma.wikiPageRevision.findMany({
+            where: { id: { in: releaseItems.map((item) => item.revisionId) }, visibility: 'public' },
+          })
+        : [];
+      const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
+      const namespaceCodeById = new Map(namespaceRows.map((namespace) => [namespace.id, namespace.code]));
+      for (const item of releaseItems) {
+        const revision = revisionById.get(item.revisionId);
+        const namespaceCode = namespaceCodeById.get(item.namespaceId);
+        if (!revision || !namespaceCode) continue;
+        try {
+          await this.wikiPermissions.assertCanReadPage({
+            ...access,
+            page: pageFromServerWikiReleaseItem(item),
+            revision,
+          });
+          readableTargets.add(`${namespaceCode}:${item.slug}`);
+        } catch {
+          // A released target still follows its snapshotted ACL and publication policy.
+        }
+      }
+    }
+    const releasePinnedKeys = new Set(releasePinnedTargets.map((target) => `${target.namespace}:${target.slug}`));
     for (const namespace of namespaceRows) {
       const slugs = [...new Set([...resolvedByLinkKey.values()]
-        .filter((item) => item.namespace === namespace.code)
+        .filter((item) => item.namespace === namespace.code && !releasePinnedKeys.has(`${item.namespace}:${item.slug}`))
         .map((item) => item.slug))];
       if (slugs.length === 0) continue;
       const pages = await this.prisma.wikiPage.findMany({
@@ -2997,7 +3057,7 @@ export class WikiReadService {
         });
     const files = cache ? {} : await this.findRenderableFiles(expanded.ast, access);
     const missingLinks = hasLinkDependencies
-      ? await this.findMissingLinks(namespace, page.localPath, links, access)
+      ? await this.findMissingLinks(namespace, page.localPath, links, access, options.releaseId)
       : new Set<string>();
     const html = cache?.html ?? renderDocument(expanded.ast, {
       files,

@@ -1347,6 +1347,7 @@ test('blame keeps attribution for lines preserved across later revisions', async
   const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'doc', slug: 'doc', title: '문서', displayTitle: '문서', currentRevisionId: 12n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
   const prisma = {
     wikiPage: { async findUnique() { return page; } },
+    serverWiki: { async findFirst() { return null; } },
     wikiPageRevision: {
       async count() { return 2; },
       async findMany() { return [
@@ -1362,6 +1363,50 @@ test('blame keeps attribution for lines preserved across later revisions', async
   assert.deepEqual(result.lines.map((line) => [line.content, line.revisionNo, line.createdByName]), [
     ['new', 2, 'second'], ['alpha', 1, 'first'], ['beta', 1, 'first']
   ]);
+});
+
+test('public server wiki blame stops at the released revision and conceals later draft content', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  const page = {
+    id: 1n, namespaceId: 7, spaceId: 40n, localPath: 'luna/guide', slug: 'luna/guide',
+    title: 'luna/guide', displayTitle: 'Guide', currentRevisionId: 13n, pageType: 'article',
+    protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now,
+  };
+  const whereInputs: unknown[] = [];
+  const revisions = [
+    { id: 11n, revisionNo: 1, contentRaw: '공개 첫 줄', createdBy: 1n, createdAt: now },
+    { id: 12n, revisionNo: 2, contentRaw: '공개 첫 줄\n공개 둘째 줄', createdBy: 2n, createdAt: new Date('2026-07-19T01:00:00Z') },
+    { id: 13n, revisionNo: 3, contentRaw: '재발행 전 비밀 초안', createdBy: 2n, createdAt: new Date('2026-07-19T02:00:00Z') },
+  ];
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    serverWiki: {
+      async findFirst() {
+        return { id: 50n, spaceId: 40n, publicationStatus: 'published', status: 'active', publishedReleaseId: 70n };
+      },
+    },
+    serverWikiReleaseItem: { async findFirst() { return { revisionId: 12n }; } },
+    wikiPageRevision: {
+      async findFirst() { return { revisionNo: 2 }; },
+      async count(args: { where: unknown }) { whereInputs.push(args.where); return 2; },
+      async findMany(args: { where: { revisionNo?: { lte: number } } }) {
+        whereInputs.push(args.where);
+        return revisions.filter((revision) => revision.revisionNo <= (args.where.revisionNo?.lte ?? Number.MAX_SAFE_INTEGER));
+      },
+    },
+    wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'first' }, { id: 2n, displayName: 'second' }]; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return false; },
+    async assertCanReadPage() {},
+    async assertCanUsePageAction() {},
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getBlame('1');
+
+  assert.equal(whereInputs.every((where) => (where as { revisionNo?: { lte?: number } }).revisionNo?.lte === 2), true);
+  assert.equal(result.revisionId, '12');
+  assert.doesNotMatch(JSON.stringify(result), /비밀 초안/u);
 });
 
 test('backlinks expose only links from the current readable source revision', async () => {
@@ -2112,6 +2157,61 @@ test('wiki read marks only readable missing links and bypasses shared render cac
   assert.equal(createdCache, false);
   assert.match(page.html, /class="wiki-link" href="\/wiki\/%EC%9E%88%EB%8A%94_%EB%AC%B8%EC%84%9C"/);
   assert.match(page.html, /class="wiki-link missing" href="\/wiki\/%EC%97%86%EB%8A%94_%EB%AC%B8%EC%84%9C" title="문서 없음"/);
+});
+
+test('released server wiki link existence is pinned to the release instead of the draft worktree', async () => {
+  const now = new Date('2026-07-19T00:00:00.000Z');
+  const releaseItem = {
+    id: 1n,
+    releaseId: 70n,
+    serverWikiId: 50n,
+    spaceId: 40n,
+    namespaceId: 7,
+    pageId: 30n,
+    revisionId: 20n,
+    localPath: 'luna/공개',
+    slug: 'luna/공개',
+    title: 'luna/공개',
+    displayTitle: '공개',
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 10n,
+    ownerProfileId: null,
+    pageUpdatedAt: now,
+    createdAt: now,
+  };
+  const prisma = {
+    wikiNamespace: {
+      async findMany() { return [{ id: 7, code: 'server' }]; },
+    },
+    serverWikiReleaseItem: {
+      async findMany() { return [releaseItem]; },
+    },
+    wikiPageRevision: {
+      async findMany() { return [{ id: 20n, pageId: 30n, visibility: 'public' }]; },
+    },
+    wikiPage: {
+      async findMany() { throw new Error('same-tenant draft pages must not decide released link existence'); },
+    },
+  } as unknown as PrismaService;
+  const permissions = {
+    async assertCanReadPage() {},
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions) as unknown as {
+    findMissingLinks(
+      sourceNamespace: string,
+      sourceLocalPath: string,
+      targets: readonly string[],
+      access: unknown,
+      releaseId?: bigint,
+    ): Promise<Set<string>>;
+  };
+
+  const missing = await service.findMissingLinks('server', 'luna/대문', ['공개', '초안'], { accountId: null }, 70n);
+
+  assert.equal(missing.has('main:공개'), false);
+  assert.equal(missing.has('main:초안'), true);
 });
 
 test('wiki read applies missing-link ACL state to links introduced by includes', async () => {
