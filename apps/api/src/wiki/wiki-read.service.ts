@@ -28,7 +28,7 @@ import { resolveEffectiveServerWikiLayout } from '../server/server-wiki-layout-p
 import { publicWikiRecentChangeSummary, publicWikiRevisionEditSummary } from './wiki-revision-summary';
 import { wikiLinkResolutionContext } from './wiki-link-context';
 import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
-import { resolveServerWikiNavigationTree } from './server-wiki-navigation-order';
+import { buildServerWikiReleaseNavigation } from './server-wiki-navigation-order';
 
 export interface WikiPageResponse {
   readonly id: string;
@@ -3738,37 +3738,29 @@ export function buildServerWikiNavigation(
   routePrefix: '/server' | '/serverWiki' = '/server',
   storedOrder: unknown = null
 ) {
-  const navigationTree = resolveServerWikiNavigationTree(serverSlug, pages, storedOrder);
-  const parentIds = new Set(navigationTree.flatMap((entry) => entry.parentId ? [entry.parentId] : []));
-  return navigationTree.map((node) => {
+  return buildServerWikiReleaseNavigation(serverSlug, pages, storedOrder).map((node) => {
     if (node.kind === 'group') {
       return {
         kind: 'group' as const,
-        id: node.id,
+        id: node.nodeKey,
         title: node.title,
         path: null,
         current: false,
         depth: node.depth,
-        hasChildren: parentIds.has(node.id),
+        hasChildren: node.hasChildren,
       };
     }
     const item = node.page;
     return {
       kind: 'page' as const,
       id: item.id.toString(),
-      title: serverWikiNavigationTitle(serverSlug, item.displayTitle),
+      title: node.title,
       path: buildCanonicalServerWikiPath(routeSlug, item.title, serverSlug, routePrefix),
       current: item.id === currentPageId,
       depth: node.depth,
-      hasChildren: parentIds.has(node.id)
+      hasChildren: node.hasChildren
     };
   });
-}
-
-function serverWikiNavigationTitle(serverSlug: string, displayTitle: string): string {
-  const title = displayTitle.trim();
-  const duplicatedPrefix = `${serverSlug.trim()}/`;
-  return title.startsWith(duplicatedPrefix) ? title.slice(duplicatedPrefix.length) : title;
 }
 
 function serverWikiRelativePath(serverSlug: string, localPath: string): string {

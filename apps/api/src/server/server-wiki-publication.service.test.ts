@@ -121,6 +121,7 @@ function createFixture(options: FixtureOptions = {}) {
   }));
   const audits: Array<Record<string, unknown>> = [];
   const releaseItems: Array<Record<string, unknown>> = [];
+  const releaseNavigation: Array<Record<string, unknown>> = [];
   const releaseLinks: Array<Record<string, unknown>> = [];
   const approvals: Array<{
     id: bigint;
@@ -314,6 +315,12 @@ function createFixture(options: FixtureOptions = {}) {
         return { count: args.data.length };
       },
     },
+    serverWikiReleaseNavigationNode: {
+      async createMany(args: { data: Array<Record<string, unknown>> }) {
+        releaseNavigation.push(...args.data);
+        return { count: args.data.length };
+      },
+    },
     serverWikiReleaseLink: {
       async findMany() { return releaseLinks; },
       async createMany(args: { data: Array<Record<string, unknown>> }) {
@@ -391,6 +398,7 @@ function createFixture(options: FixtureOptions = {}) {
     wiki,
     audits,
     releaseItems,
+    releaseNavigation,
     releaseLinks,
     isolationLevels,
     lockQueries,
@@ -481,6 +489,10 @@ test('owner publishes a ready draft atomically with version, timestamps, and an 
   assert.equal(fixture.releaseItems.length, 4);
   assert.ok(fixture.releaseItems.every((item) => item.releaseId === BigInt(result.release!.id)));
   assert.ok(fixture.releaseItems.every((item) => typeof item.searchVector === 'string' && item.searchVector.length > 0));
+  assert.equal(fixture.releaseNavigation.length, 4);
+  assert.deepEqual(fixture.releaseNavigation.map((node) => node.position), [0, 1, 2, 3]);
+  assert.ok(fixture.releaseNavigation.every((node) => node.releaseId === BigInt(result.release!.id)));
+  assert.ok(fixture.releaseNavigation.every((node) => !('searchVector' in node)));
   assert.ok(buildWikiSearchVector(['owner-provided']).split(' ')
     .every((term) => String(fixture.releaseItems[0]?.searchVector).split(' ').includes(term)));
   assert.equal(fixture.releaseLinks.length, 3);

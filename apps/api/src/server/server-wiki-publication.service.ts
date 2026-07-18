@@ -30,6 +30,7 @@ import {
   serverWikiReleaseReviewState,
   type ServerWikiReleaseReviewState,
 } from './server-wiki-release-review';
+import { buildServerWikiReleaseNavigation } from '../wiki/server-wiki-navigation-order';
 
 export const SERVER_WIKI_PUBLICATION_STATUSES = ['draft', 'published', 'unpublished'] as const;
 export type ServerWikiPublicationStatus = (typeof SERVER_WIKI_PUBLICATION_STATUSES)[number];
@@ -689,6 +690,26 @@ export class ServerWikiPublicationService {
           page.localPath,
           snapshot.revisionContentByPageId.get(page.id) ?? '',
         ]),
+        createdAt: now,
+      })),
+    });
+    const releaseNavigation = buildServerWikiReleaseNavigation(
+      context.contentSlug,
+      releasedPages,
+      snapshot.presentation.navigationOrder,
+    );
+    await tx.serverWikiReleaseNavigationNode.createMany({
+      data: releaseNavigation.map((node) => ({
+        releaseId: release.id,
+        serverWikiId: context.serverWikiId,
+        nodeKey: node.nodeKey,
+        kind: node.kind,
+        pageId: node.kind === 'page' ? node.page.id : null,
+        parentKey: node.parentKey,
+        title: node.title,
+        position: node.position,
+        depth: node.depth,
+        hasChildren: node.hasChildren,
         createdAt: now,
       })),
     });

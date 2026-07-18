@@ -2002,11 +2002,36 @@ model ServerWikiRelease {
   publishedFor ServerWiki?                 @relation("PublishedServerWikiRelease")
   items        ServerWikiReleaseItem[]
   links        ServerWikiReleaseLink[]
+  navigation   ServerWikiReleaseNavigationNode[]
   candidate    ServerWikiReleaseCandidate? @relation("CandidatePublishedRelease", fields: [candidateId], references: [id], onDelete: Restrict)
 
   @@unique([serverWikiId, version], map: "uq_server_wiki_release_version")
   @@index([serverWikiId, publishedAt], map: "idx_server_wiki_release_published")
   @@map("server_wiki_releases")
+}
+
+model ServerWikiReleaseNavigationNode {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  releaseId    BigInt   @map("release_id") @db.UnsignedBigInt
+  serverWikiId BigInt   @map("server_wiki_id") @db.UnsignedBigInt
+  nodeKey      String   @map("node_key") @db.VarChar(100)
+  kind         String   @db.VarChar(16)
+  pageId       BigInt?  @map("page_id") @db.UnsignedBigInt
+  parentKey    String?  @map("parent_key") @db.VarChar(100)
+  title        String   @db.VarChar(255)
+  position     Int      @db.UnsignedInt
+  depth        Int      @db.UnsignedInt
+  hasChildren  Boolean  @default(false) @map("has_children")
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  release ServerWikiRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, nodeKey], map: "uq_server_wiki_release_navigation_node")
+  @@unique([releaseId, position], map: "uq_server_wiki_release_navigation_position")
+  @@unique([releaseId, pageId], map: "uq_server_wiki_release_navigation_page")
+  @@index([serverWikiId, releaseId], map: "idx_server_wiki_release_navigation_wiki")
+  @@index([releaseId, kind, position], map: "idx_server_wiki_release_navigation_kind")
+  @@map("server_wiki_release_navigation_nodes")
 }
 
 model ServerWikiReleaseCandidate {

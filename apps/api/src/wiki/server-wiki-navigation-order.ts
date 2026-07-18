@@ -24,6 +24,63 @@ export type ResolvedServerWikiNavigationNode<T extends ServerWikiNavigationPage 
   | { readonly id: string; readonly kind: 'group'; readonly title: string; readonly parentId: string | null; readonly depth: number }
   | { readonly id: string; readonly kind: 'page'; readonly page: T; readonly parentId: string | null; readonly depth: number };
 
+export type ServerWikiReleaseNavigationNode<T extends ServerWikiNavigationPage = ServerWikiNavigationPage> =
+  | {
+      readonly nodeKey: string;
+      readonly kind: 'group';
+      readonly page: null;
+      readonly parentKey: string | null;
+      readonly title: string;
+      readonly position: number;
+      readonly depth: number;
+      readonly hasChildren: boolean;
+    }
+  | {
+      readonly nodeKey: string;
+      readonly kind: 'page';
+      readonly page: T;
+      readonly parentKey: string | null;
+      readonly title: string;
+      readonly position: number;
+      readonly depth: number;
+      readonly hasChildren: boolean;
+    };
+
+/**
+ * Materializes the presentation-only document tree used by immutable releases.
+ * Release readers can query this compact structure without loading page bodies or
+ * the full-text search vector from every release item.
+ */
+export function buildServerWikiReleaseNavigation<T extends ServerWikiNavigationPage>(
+  serverSlug: string,
+  pages: readonly T[],
+  stored: unknown,
+): Array<ServerWikiReleaseNavigationNode<T>> {
+  const resolved = resolveServerWikiNavigationTree(serverSlug, pages, stored);
+  const parentKeys = new Set(resolved.flatMap((node) => node.parentId ? [node.parentId] : []));
+  return resolved.map((node, position) => node.kind === 'group'
+    ? {
+        nodeKey: node.id,
+        kind: 'group' as const,
+        page: null,
+        parentKey: node.parentId,
+        title: node.title,
+        position,
+        depth: node.depth,
+        hasChildren: parentKeys.has(node.id),
+      }
+    : {
+        nodeKey: node.id,
+        kind: 'page' as const,
+        page: node.page,
+        parentKey: node.parentId,
+        title: serverWikiNavigationTitle(serverSlug, node.page.displayTitle),
+        position,
+        depth: node.depth,
+        hasChildren: parentKeys.has(node.id),
+      });
+}
+
 export function resolveServerWikiNavigationTree<T extends ServerWikiNavigationPage>(
   serverSlug: string,
   pages: readonly T[],
@@ -223,6 +280,12 @@ export function serverWikiPageRelativePath(
   return slugifyTitle(page.title) === slugifyTitle(serverSlug)
     ? ''
     : serverWikiRelativePath(serverSlug, page.localPath);
+}
+
+export function serverWikiNavigationTitle(serverSlug: string, displayTitle: string): string {
+  const title = displayTitle.trim();
+  const duplicatedPrefix = `${serverSlug.trim()}/`;
+  return title.startsWith(duplicatedPrefix) ? title.slice(duplicatedPrefix.length) : title;
 }
 
 function reconcileStoredNodes(
