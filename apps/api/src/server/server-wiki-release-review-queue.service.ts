@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { readCanonicalAccountGroup } from '../auth/account-lifecycle-fence';
 import { PrismaService } from '../common/prisma.service';
 import type { ServerWikiReleaseCandidate } from './server-wiki-release-candidate';
+import type { ServerWikiReleaseCandidatePageKind } from './server-wiki-release-candidate';
+import { ServerWikiReleaseManifestCursorCodec } from './server-wiki-release-manifest-cursor';
 import { serverWikiReleaseReviewState } from './server-wiki-release-review';
 
 export interface ServerWikiReleaseReviewQueueItem {
@@ -23,7 +25,10 @@ export interface ServerWikiReleaseReviewQueueItem {
 
 @Injectable()
 export class ServerWikiReleaseReviewQueueService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly manifestCursors: ServerWikiReleaseManifestCursorCodec = new ServerWikiReleaseManifestCursorCodec(),
+  ) {}
 
   async list(accountId: string, cursorInput?: string, limitInput?: string) {
     const viewer = await this.resolveReviewer(accountId);
@@ -85,9 +90,53 @@ export class ServerWikiReleaseReviewQueueService {
     }, row.id, row.requiredApprovals, false);
     return {
       ...toQueueItem(row),
-      manifest,
+      manifest: manifestSummary(manifest),
       review,
       wikiUrl: `/serverWiki/${encodeURIComponent(row.serverWiki.siteSlug ?? '')}`,
+    };
+  }
+
+  async pages(
+    accountId: string,
+    candidateIdInput: string,
+    kindsInput?: string,
+    cursorInput?: string,
+    limitInput?: string,
+  ) {
+    const candidateId = parseCandidateId(candidateIdInput);
+    const kinds = parseKinds(kindsInput);
+    const viewer = await this.resolveReviewer(accountId);
+    if (!viewer) throw reviewNotFound();
+    const row = await this.prisma.serverWikiReleaseCandidate.findFirst({
+      where: {
+        id: candidateId,
+        status: 'pending_review',
+        spaceId: { in: [...viewer.spaceIds] },
+        serverWiki: { status: 'active', voteServerId: { not: null } },
+      },
+      select: queueCandidateSelection,
+    });
+    if (!row) throw reviewNotFound();
+    const manifest = parseManifest(row.manifestSnapshot, row.token);
+    const binding = {
+      candidateId: row.id.toString(),
+      candidateToken: row.token,
+      serverWikiId: row.serverWikiId.toString(),
+      spaceId: row.spaceId.toString(),
+      kinds,
+    } as const;
+    const afterPageId = cursorInput ? BigInt(this.manifestCursors.decode(cursorInput, binding)) : null;
+    const limit = parseLimit(limitInput);
+    const filtered = manifest.pages
+      .filter((page) => kinds.includes(page.kind) && (afterPageId === null || BigInt(page.pageId) > afterPageId))
+      .sort((left, right) => BigInt(left.pageId) < BigInt(right.pageId) ? -1 : BigInt(left.pageId) > BigInt(right.pageId) ? 1 : 0);
+    const items = filtered.slice(0, limit);
+    return {
+      items,
+      nextCursor: filtered.length > limit && items.length > 0
+        ? this.manifestCursors.encode(binding, items.at(-1)!.pageId)
+        : null,
+      kinds,
     };
   }
 
@@ -178,6 +227,34 @@ function parseLimit(value?: string): number {
   const limit = Number(value);
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new BadRequestException('limit must be an integer between 1 and 50.');
   return limit;
+}
+
+const candidateKinds = ['added', 'updated', 'moved', 'removed', 'unchanged'] as const;
+const defaultCandidateKinds: readonly ServerWikiReleaseCandidatePageKind[] = ['added', 'updated', 'moved', 'removed'];
+
+function parseKinds(value?: string): readonly ServerWikiReleaseCandidatePageKind[] {
+  if (value === undefined || value === '') return defaultCandidateKinds;
+  const requested = value.split(',');
+  if (requested.some((kind) => !candidateKinds.includes(kind as ServerWikiReleaseCandidatePageKind))) {
+    throw new BadRequestException('kinds must contain only added, updated, moved, removed, or unchanged.');
+  }
+  const unique = candidateKinds.filter((kind) => requested.includes(kind));
+  if (unique.length !== requested.length || unique.length === 0) {
+    throw new BadRequestException('kinds must contain distinct release candidate page kinds.');
+  }
+  return unique;
+}
+
+function manifestSummary(manifest: ServerWikiReleaseCandidate) {
+  return {
+    token: manifest.token,
+    baselineReleaseId: manifest.baselineReleaseId,
+    generatedAt: manifest.generatedAt,
+    counts: manifest.counts,
+    presentation: manifest.presentation,
+    hasChanges: manifest.hasChanges,
+    totalPageCount: manifest.pages.length,
+  };
 }
 
 function reviewNotFound(): NotFoundException {

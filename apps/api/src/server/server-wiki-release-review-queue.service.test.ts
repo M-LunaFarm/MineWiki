@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ServerWikiReleaseReviewQueueService } from './server-wiki-release-review-queue.service';
+import { ServerWikiReleaseManifestCursorCodec } from './server-wiki-release-manifest-cursor';
 
 const accountId = '11111111-1111-4111-8111-111111111111';
 
-function candidate(id: bigint, spaceId: bigint) {
+function candidate(id: bigint, spaceId: bigint, pageCount = 0) {
   const token = id.toString(16).padStart(64, '0');
+  const kinds = ['added', 'updated', 'moved', 'removed'] as const;
+  const pages = Array.from({ length: pageCount }, (_, index) => ({
+    pageId: String(index + 1),
+    kind: kinds[index % kinds.length]!,
+    contentChanged: index % kinds.length === 1,
+    identityChanged: index % kinds.length === 2,
+    metadataChanged: false,
+    before: null,
+    after: null,
+    updatedAt: '2026-07-18T00:00:00.000Z',
+  }));
   return {
     id,
     serverWikiId: spaceId + 100n,
@@ -21,8 +33,8 @@ function candidate(id: bigint, spaceId: bigint) {
       token,
       baselineReleaseId: null,
       generatedAt: '2026-07-18T00:00:00.000Z',
-      counts: { added: 1, updated: 0, moved: 0, removed: 0, unchanged: 0 },
-      pages: [],
+      counts: { added: Math.ceil(pageCount / 4), updated: Math.ceil(Math.max(0, pageCount - 1) / 4), moved: Math.ceil(Math.max(0, pageCount - 2) / 4), removed: Math.ceil(Math.max(0, pageCount - 3) / 4), unchanged: 0 },
+      pages,
       presentation: { navigationChanged: false, contentSettingsChanged: false, layoutChanged: false, linkGraphChanged: false },
       hasChanges: true,
     },
@@ -35,7 +47,8 @@ function candidate(id: bigint, spaceId: bigint) {
 }
 
 function fixture() {
-  const rows = [candidate(3n, 77n), candidate(2n, 77n), candidate(1n, 88n)];
+  const rows = [candidate(3n, 77n, 150), candidate(2n, 77n, 3), candidate(1n, 88n, 2)];
+  let reviewerEnabled = true;
   const prisma = {
     account: {
       async findUnique() { return { id: accountId, canonicalAccountId: accountId }; },
@@ -51,7 +64,7 @@ function fixture() {
     subwikiRole: {
       async findMany(args: { where: { userId?: bigint; spaceId?: bigint } }) {
         if (args.where.spaceId !== undefined) return [{ userId: 7n }];
-        return [{ spaceId: 77n }];
+        return reviewerEnabled ? [{ spaceId: 77n }] : [];
       },
     },
     serverWikiReleaseCandidate: {
@@ -66,7 +79,13 @@ function fixture() {
     },
     serverWikiReleaseApproval: { async findMany() { return []; } },
   };
-  return { service: new ServerWikiReleaseReviewQueueService(prisma as never) };
+  const cursors = new ServerWikiReleaseManifestCursorCodec({
+    get(name: string) { return name === 'APP_ENCRYPTION_KEY' ? 'release-review-queue-test-secret' : undefined; },
+  } as never);
+  return {
+    service: new ServerWikiReleaseReviewQueueService(prisma as never, cursors),
+    revokeReviewer() { reviewerEnabled = false; },
+  };
 }
 
 test('reviewer discovers only pending candidates from assigned spaces without a server UUID', async () => {
@@ -81,11 +100,39 @@ test('reviewer discovers only pending candidates from assigned spaces without a 
   assert.equal((await service.summary(accountId)).count, 2);
 });
 
-test('review detail returns the persisted manifest and hides another tenant candidate as not found', async () => {
+test('review detail returns only a bounded persisted manifest summary and hides another tenant candidate', async () => {
   const { service } = fixture();
   const detail = await service.get(accountId, '3');
   assert.equal(detail.serverName, 'Server 3');
   assert.equal(detail.manifest.token, detail.candidateToken);
+  assert.equal(detail.manifest.totalPageCount, 150);
+  assert.equal('pages' in detail.manifest, false);
   assert.equal(detail.review.canApprove, true);
   await assert.rejects(() => service.get(accountId, '1'), NotFoundException);
+});
+
+test('release manifest pages traverse 150 persisted entries without duplicates or omissions', async () => {
+  const { service } = fixture();
+  const received: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await service.pages(accountId, '3', undefined, cursor, '50');
+    received.push(...page.items.map((item) => item.pageId));
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  assert.equal(received.length, 150);
+  assert.equal(new Set(received).size, 150);
+  assert.deepEqual(received, Array.from({ length: 150 }, (_, index) => String(index + 1)));
+});
+
+test('manifest cursor cannot cross candidates or filters and role revocation stops pagination', async () => {
+  const { service, revokeReviewer } = fixture();
+  const first = await service.pages(accountId, '3', 'added,updated', undefined, '10');
+  assert.ok(first.nextCursor);
+  await assert.rejects(() => service.pages(accountId, '2', 'added,updated', first.nextCursor!, '10'), BadRequestException);
+  await assert.rejects(() => service.pages(accountId, '3', 'moved', first.nextCursor!, '10'), BadRequestException);
+  const tampered = `${first.nextCursor!.slice(0, -1)}x`;
+  await assert.rejects(() => service.pages(accountId, '3', 'added,updated', tampered, '10'), BadRequestException);
+  revokeReviewer();
+  await assert.rejects(() => service.pages(accountId, '3', 'added,updated', first.nextCursor!, '10'), NotFoundException);
 });

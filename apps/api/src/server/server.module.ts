@@ -23,10 +23,11 @@ import { ServerWikiTemplateController } from './server-wiki-template.controller'
 import { ServerWikiTemplateService } from './server-wiki-template.service';
 import { ServerWikiReleaseReviewQueueController } from './server-wiki-release-review-queue.controller';
 import { ServerWikiReleaseReviewQueueService } from './server-wiki-release-review-queue.service';
+import { ServerWikiReleaseManifestCursorCodec } from './server-wiki-release-manifest-cursor';
 
 @Module({
   imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
-  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService],
+  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseManifestCursorCodec, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService],
   controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController],
   exports: [ServerService]
 })

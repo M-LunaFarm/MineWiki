@@ -26,6 +26,18 @@ export class ServerWikiReleaseReviewQueueController {
     return this.reviews.summary(session.userId);
   }
 
+  @Get(':candidateId/pages')
+  @Throttle({ default: { limit: 60, ttl: 60 } })
+  pages(
+    @CurrentSession() session: SessionPayload,
+    @Param('candidateId') candidateId: string,
+    @Query('kinds') kinds?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.reviews.pages(session.userId, candidateId, kinds, cursor, limit);
+  }
+
   @Get(':candidateId')
   @Throttle({ default: { limit: 30, ttl: 60 } })
   get(
