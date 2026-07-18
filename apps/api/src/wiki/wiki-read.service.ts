@@ -270,7 +270,7 @@ export interface WikiPageLifecycleEventListResponse {
 
 export interface WikiPageAclHistoryEventSummary {
   readonly id: string;
-  readonly actionType: 'create' | 'delete' | 'reorder';
+  readonly actionType: string;
   readonly actorProfileId: string | null;
   readonly actorName: string | null;
   readonly actorUsername: string | null;
@@ -850,7 +850,7 @@ export class WikiReadService {
       const actor = event.changedBy ? profileById.get(event.changedBy) : null;
       return {
         id: event.id.toString(),
-        actionType: event.actionType as 'create' | 'delete' | 'reorder',
+        actionType: event.actionType,
         actorProfileId: event.changedBy?.toString() ?? null,
         actorName: actor?.displayName ?? null,
         actorUsername: actor?.username ?? null,

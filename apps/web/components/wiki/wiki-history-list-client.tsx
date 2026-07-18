@@ -181,8 +181,16 @@ function LifecycleActor({ event }: { event: LifecycleEvent }) {
 }
 
 function AclHistoryCard({ event }: { event: AclHistoryEvent }) {
-  const label = event.actionType === 'create' ? 'ACL 규칙 생성' : event.actionType === 'delete' ? 'ACL 규칙 삭제' : 'ACL 규칙 순서 변경';
+  const label = aclActionLabel(event.actionType);
   return <article className="border border-white/10 bg-[#111821] p-4"><div className="flex items-center justify-between gap-3"><strong className="text-white">{label}</strong><time className="text-xs text-slate-500">{formatDate(event.createdAt)}</time></div>{event.detailsVisible ? <AclRuleDetails event={event} /> : <p className="mt-3 text-sm text-slate-400">상세 규칙은 ACL 관리 권한이 있는 사용자에게만 표시됩니다.</p>}{event.reason ? <p className="mt-2 break-words text-sm text-slate-400">사유: {event.reason}</p> : null}<p className="mt-3 text-xs text-slate-500">처리자 <AclActor event={event} /></p></article>;
+}
+
+function aclActionLabel(actionType: string) {
+  if (actionType === 'create') return 'ACL 규칙 생성';
+  if (actionType === 'delete') return 'ACL 규칙 삭제';
+  if (actionType === 'reorder') return 'ACL 규칙 순서 변경';
+  if (actionType === 'reset') return 'ACL 규칙 초기화';
+  return 'ACL 규칙 변경';
 }
 
 function AclRuleDetails({ event }: { event: AclHistoryEvent }) {

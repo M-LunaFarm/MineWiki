@@ -276,7 +276,7 @@ export interface WikiPageLifecycleEventListResponse {
 
 export interface WikiPageAclHistoryEventSummary {
   readonly id: string;
-  readonly actionType: 'create' | 'delete' | 'reorder';
+  readonly actionType: string;
   readonly actorProfileId: string | null;
   readonly actorName: string | null;
   readonly actorUsername: string | null;

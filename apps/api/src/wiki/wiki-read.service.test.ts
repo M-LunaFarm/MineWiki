@@ -730,7 +730,7 @@ test('page ACL history keeps a stable cursor and exposes rule snapshots only to 
   const page = { id: 1n, namespaceId: 2, spaceId: 20n, title: 'Policy', status: 'normal', createdBy: 1n };
   let historyWhere: unknown;
   const events = [
-    { id: 12n, targetType: 'page', targetId: 1n, actionType: 'create', oldRuleJson: null, newRuleJson: { action: 'edit', subjectType: 'user', subjectValue: '99' }, reason: 'private reason', changedBy: 3n, createdAt: now },
+    { id: 12n, targetType: 'page', targetId: 1n, actionType: 'reset', oldRuleJson: null, newRuleJson: { action: 'edit', subjectType: 'user', subjectValue: '99' }, reason: 'private reason', changedBy: 3n, createdAt: now },
     { id: 11n, targetType: 'page', targetId: 1n, actionType: 'delete', oldRuleJson: { action: 'read', subjectType: 'ip', subjectValue: '192.0.2.1' }, newRuleJson: null, reason: 'remove address rule', changedBy: 3n, createdAt: now },
     { id: 10n, targetType: 'page', targetId: 1n, actionType: 'reorder', oldRuleJson: [], newRuleJson: [], reason: null, changedBy: null, createdAt: now }
   ];
@@ -754,6 +754,7 @@ test('page ACL history keeps a stable cursor and exposes rule snapshots only to 
   const publicResult = await service.getPageAclHistoryEvents('1', null, '13', 2);
   assert.deepEqual(historyWhere, { targetType: 'page', targetId: 1n, id: { lt: 13n } });
   assert.equal(publicResult.nextCursor, '11');
+  assert.equal(publicResult.items[0]?.actionType, 'reset');
   assert.equal(publicResult.detailsVisible, false);
   assert.equal(publicResult.items[0]?.reason, null);
   assert.equal(publicResult.items[0]?.newRules, null);

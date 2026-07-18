@@ -21,7 +21,7 @@ test('lifecycle cards do not expose revision diff or revert controls', () => {
 
 test('ACL history cards keep sensitive rule details behind the API visibility flag', () => {
   const aclCard = history.slice(history.indexOf('function AclHistoryCard'), history.indexOf('function HistoryCard'));
-  assert.match(aclCard, /ACL 규칙 생성|ACL 규칙 삭제|ACL 규칙 순서 변경/u);
+  assert.match(aclCard, /ACL 규칙 생성|ACL 규칙 삭제|ACL 규칙 순서 변경|ACL 규칙 초기화|ACL 규칙 변경/u);
   assert.match(aclCard, /event\.detailsVisible/u);
   assert.match(aclCard, /ACL 관리 권한이 있는 사용자에게만 표시/u);
   assert.doesNotMatch(aclCard, /JSON\.stringify/u);
