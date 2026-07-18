@@ -31,6 +31,7 @@ test('preview is limited to an empty canonical vote epoch with known unranked se
 test('server directory renders unranked cards without fabricated ranks and exposes named filters', async () => {
   const source = await readFile(new URL('../components/servers/server-list-explorer.tsx', import.meta.url), 'utf8');
   assert.match(source, /initialUnrankedPreview/u);
+  assert.match(source, /paper-unranked-notice/u);
   assert.match(source, /unrankedPreview\.map\(\(server\) => <ServerCard key=\{server\.id\} server=\{server\} rank=\{null\}/u);
   assert.match(source, /<Link href=\{unrankedBrowseHref\}[^>]*>등록된 서버 전체 보기<\/Link>/u);
   assert.doesNotMatch(source, /onClick=\{\(\) => setSort\('latest'\)\}/u);

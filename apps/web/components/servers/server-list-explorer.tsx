@@ -479,7 +479,7 @@ export function ServerListExplorer({
               </section>
             ) : servers.length === 0 && hasOnlyUnrankedServers ? (
               <div className="mb-12">
-                <section className="flex flex-col gap-4 border-b border-amber-700/30 bg-amber-500/[0.05] px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+                <section className="paper-unranked-notice flex flex-col gap-4 border-b border-amber-700/30 bg-amber-500/[0.05] px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-start gap-3">
                     <span className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-lg bg-amber-500/10"><Activity className="h-5 w-5 text-amber-700" /></span>
                     <div><h2 className="font-bold text-[#252925]">투표 순위 집계 전입니다</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-[#676c64]">유효한 투표가 생긴 서버부터 정기 집계에 순위가 표시됩니다. 아래 서버는 순위 번호 없이 최신 등록순으로 안내합니다.</p></div>

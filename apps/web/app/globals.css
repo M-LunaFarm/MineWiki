@@ -803,6 +803,33 @@ html[data-theme='dark'] .paper-directory .paper-server-row [class~='text-red-2']
   color: #fecaca;
 }
 
+.paper-directory .paper-unranked-notice,
+.paper-directory .paper-unranked-notice h2 {
+  color: #252925;
+}
+
+.paper-directory .paper-unranked-notice p {
+  color: #676c64;
+}
+
+html[data-theme='dark'] .paper-directory .paper-unranked-notice {
+  border-color: rgba(217, 168, 58, 0.38);
+  background-color: rgba(120, 82, 10, 0.16);
+}
+
+html[data-theme='dark'] .paper-directory .paper-unranked-notice,
+html[data-theme='dark'] .paper-directory .paper-unranked-notice h2 {
+  color: #f3f6f2;
+}
+
+html[data-theme='dark'] .paper-directory .paper-unranked-notice p {
+  color: #b8c2ba;
+}
+
+html[data-theme='dark'] .paper-directory .paper-unranked-notice svg {
+  color: #f5c451;
+}
+
 html[data-theme='dark'] .paper-directory .paper-server-row [class~='text-amber-2'],
 html[data-theme='dark'] .paper-directory .paper-server-row [class~='text-amber-1'] {
   color: #fde68a;
