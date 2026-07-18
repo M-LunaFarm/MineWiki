@@ -2,8 +2,15 @@
 
 import Link from 'next/link';
 import { ClipboardCopy, ImagePlus, Loader2, OctagonX } from 'lucide-react';
-import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { uploadWikiImage } from '../../lib/wiki-api';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import {
+  fetchWikiFileVersions,
+  listWikiFiles,
+  restoreWikiFileVersion,
+  uploadWikiImage,
+  type UploadedFileMetadata,
+  type WikiFileVersion,
+} from '../../lib/wiki-api';
 import {
   mergeWikiUploadSelection,
   runWikiUploadQueue,
@@ -29,9 +36,34 @@ export function WikiUploadClient({ spaceId }: WikiUploadClientProps) {
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [progress, setProgress] = useState('');
+  const [replaceFileId, setReplaceFileId] = useState('');
+  const [replaceableFiles, setReplaceableFiles] = useState<UploadedFileMetadata[]>([]);
+  const [versions, setVersions] = useState<WikiFileVersion[]>([]);
   const sourceRequired = Boolean(license && license !== 'self-created');
   const queuedCount = queue.filter((item) => item.status === 'queued').length;
   const successCount = queue.filter((item) => item.status === 'success').length;
+
+  useEffect(() => {
+    if (!account) return;
+    void listWikiFiles({ limit: 100 }).then((files) => {
+      setReplaceableFiles(files.filter((file) =>
+        file.ownerAccountId === account.id
+        && file.status === 'active'
+        && file.linkedResourceType === 'wiki_space'
+        && file.linkedResourceId === spaceId));
+    }).catch(() => setReplaceableFiles([]));
+  }, [account, spaceId]);
+
+  useEffect(() => {
+    if (!replaceFileId) {
+      setVersions([]);
+      return;
+    }
+    void fetchWikiFileVersions(replaceFileId).then(setVersions).catch((error) => {
+      setVersions([]);
+      setMessage(error instanceof Error ? error.message : '버전 이력을 불러오지 못했습니다.');
+    });
+  }, [replaceFileId]);
 
   function replaceQueue(next: WikiUploadQueueItem[]) {
     queueRef.current = next;
@@ -67,6 +99,10 @@ export function WikiUploadClient({ spaceId }: WikiUploadClientProps) {
   }
 
   async function uploadItems(items: readonly WikiUploadQueueItem[]) {
+    if (replaceFileId && items.length !== 1) {
+      setMessage('기존 파일 교체는 한 번에 한 파일만 선택할 수 있습니다.');
+      return;
+    }
     setUploading(true);
     setMessage(null);
     continueRef.current = true;
@@ -79,6 +115,7 @@ export function WikiUploadClient({ spaceId }: WikiUploadClientProps) {
         license,
         sourceUrl: sourceUrl.trim() || undefined,
         sourceText: sourceText.trim() || undefined,
+        replaceFileId: replaceFileId || undefined,
       }),
       (id: string, patch: Partial<WikiUploadQueueItem>) => patchQueueItem(id, patch),
       () => continueRef.current,
@@ -86,9 +123,37 @@ export function WikiUploadClient({ spaceId }: WikiUploadClientProps) {
     setUploading(false);
     const failed = queueRef.current.filter((item) => item.status === 'failed').length;
     const succeeded = queueRef.current.filter((item) => item.status === 'success').length;
+    const replaced = replaceFileId
+      ? queueRef.current.find((item) => item.status === 'success')?.result
+      : null;
+    if (replaced?.id) {
+      setReplaceFileId(replaced.id);
+      setVersions(await fetchWikiFileVersions(replaced.id));
+    }
     setProgress(run.stopped
       ? `업로드를 중단했습니다. ${succeeded}개 완료, 나머지는 대기 중입니다.`
       : `${succeeded}개 업로드 완료${failed > 0 ? `, ${failed}개 실패` : ''}`);
+  }
+
+  async function restoreVersion(version: WikiFileVersion) {
+    const current = versions.find((item) => item.isCurrent);
+    if (!current || !replaceFileId || version.isCurrent) return;
+    if (!window.confirm(`파일 버전 ${version.versionNo}의 실제 이미지로 복원할까요? 복원 작업도 새 버전으로 기록됩니다.`)) return;
+    setUploading(true);
+    setMessage(null);
+    try {
+      await restoreWikiFileVersion({
+        fileId: replaceFileId,
+        versionId: version.id,
+        expectedCurrentVersionNo: current.versionNo,
+      });
+      setVersions(await fetchWikiFileVersions(replaceFileId));
+      setProgress(`파일 버전 ${version.versionNo}을 새 현재 버전으로 복원했습니다.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '파일 버전을 복원하지 못했습니다.');
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function retryItem(id: string) {
@@ -125,8 +190,29 @@ export function WikiUploadClient({ spaceId }: WikiUploadClientProps) {
   return (
     <form onSubmit={submit} className="surface-flat space-y-5 p-5">
       <label className="grid gap-2 text-sm font-semibold text-slate-200">
-        이미지 파일 <span className="text-xs font-normal text-slate-500">PNG, JPEG, WebP · 최대 10개 · 합계 20MiB</span>
-        <input ref={fileInput} type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={selectFiles} disabled={uploading || queue.length >= 10} className="min-h-11 rounded-lg border border-white/10 bg-[#0d1219] px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-300 file:px-3 file:py-1.5 file:font-semibold file:text-slate-950 disabled:opacity-50" />
+        업로드 방식
+        <select value={replaceFileId} onChange={(event) => { setReplaceFileId(event.target.value); replaceQueue([]); }} disabled={uploading} className="min-h-11 rounded-lg border border-white/10 bg-[#0d1219] px-3 text-sm text-slate-200">
+          <option value="">새 파일 등록</option>
+          {replaceableFiles.map((file) => <option key={file.id} value={file.id}>기존 파일 교체 · {file.wikiFilename}</option>)}
+        </select>
+        <span className="text-xs font-normal text-slate-500">교체 시 논리 파일명은 유지되고 이전 바이트와 리비전은 버전 이력에 보존됩니다.</span>
+      </label>
+      {versions.length > 0 ? (
+        <section className="rounded-lg border border-white/10 bg-black/15 p-4" aria-label="파일 버전 이력">
+          <h2 className="text-sm font-semibold text-white">버전 이력</h2>
+          <ul className="mt-3 space-y-2">
+            {versions.map((version) => (
+              <li key={version.id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-white/10 px-3 py-2 text-xs text-slate-300">
+                <span>v{version.versionNo} · {(version.size / 1024).toFixed(1)} KiB · {new Date(version.createdAt).toLocaleString('ko-KR')}</span>
+                {version.isCurrent ? <strong className="text-emerald-300">현재</strong> : <button type="button" disabled={uploading} onClick={() => void restoreVersion(version)} className="btn-secondary min-h-9 px-3">이 버전 복원</button>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <label className="grid gap-2 text-sm font-semibold text-slate-200">
+        이미지 파일 <span className="text-xs font-normal text-slate-500">PNG, JPEG, WebP · {replaceFileId ? '교체 파일 1개' : '최대 10개'} · 합계 20MiB</span>
+        <input ref={fileInput} type="file" multiple={!replaceFileId} accept="image/png,image/jpeg,image/webp" onChange={selectFiles} disabled={uploading || queue.length >= (replaceFileId ? 1 : 10)} className="min-h-11 rounded-lg border border-white/10 bg-[#0d1219] px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-300 file:px-3 file:py-1.5 file:font-semibold file:text-slate-950 disabled:opacity-50" />
       </label>
       <WikiUploadQueueView items={queue} busy={uploading} onRemove={removeItem} onRetry={(id) => void retryItem(id)} />
       <UploadAttribution license={license} sourceUrl={sourceUrl} sourceText={sourceText} sourceRequired={sourceRequired} disabled={uploading} onLicense={setLicense} onSourceUrl={setSourceUrl} onSourceText={setSourceText} />

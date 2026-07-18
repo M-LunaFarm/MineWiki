@@ -80,6 +80,23 @@ export class FileController {
     return this.files.listWikiFileVersions(id, request.sessionPayload ?? null);
   }
 
+  @Post(':id/versions/:versionId/restore')
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  @UseGuards(SessionGuard)
+  restoreWikiFileVersion(
+    @Param('id') id: string,
+    @Param('versionId') versionId: string,
+    @Body() body: { expectedCurrentVersionNo?: number },
+    @CurrentSession() session: SessionPayload,
+  ) {
+    return this.files.restoreWikiFileVersion(
+      id,
+      versionId,
+      Number(body.expectedCurrentVersionNo),
+      session,
+    );
+  }
+
   @Get(':id/raw')
   @UseGuards(OptionalSessionGuard)
   async getRawFile(

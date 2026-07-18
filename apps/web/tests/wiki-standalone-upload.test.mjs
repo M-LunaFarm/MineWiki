@@ -35,3 +35,14 @@ test('standalone upload exposes a bounded serial multi-image queue', () => {
   assert.match(client, /성공 \{successCount\}개 문법 복사/u);
   assert.doesNotMatch(client, /files\?\.\[0\]/u);
 });
+
+test('standalone upload versions replacements and restores history with optimistic concurrency', () => {
+  assert.match(client, /기존 파일 교체/u);
+  assert.match(client, /replaceFileId: replaceFileId \|\| undefined/u);
+  assert.match(client, /fetchWikiFileVersions/u);
+  assert.match(client, /restoreWikiFileVersion/u);
+  assert.match(client, /expectedCurrentVersionNo: current\.versionNo/u);
+  assert.match(client, /복원 작업도 새 버전으로 기록/u);
+  assert.match(api, /\/versions\/\$\{encodeURIComponent\(input\.versionId\)\}\/restore/u);
+  assert.match(api, /headers: \{ 'Content-Type': 'application\/json', \.\.\.\(await csrfHeaders\(\)\) \}/u);
+});

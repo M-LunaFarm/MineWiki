@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { CheckCircle2, CircleAlert, Clock3, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 
 export interface WikiUploadResult {
+  readonly id: string;
   readonly filename: string;
   readonly wikiDocumentPath: string | null;
 }

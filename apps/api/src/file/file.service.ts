@@ -366,6 +366,28 @@ export class FileService {
     }));
   }
 
+  async restoreWikiFileVersion(
+    id: string,
+    versionId: string,
+    expectedCurrentVersionNo: number,
+    session: SessionPayload,
+  ) {
+    const file = await this.prisma.uploadedFile.findUnique({ where: { id } });
+    await this.permissions.assertCanRead(file, session);
+    if (!/^\d+$/u.test(versionId) || !Number.isSafeInteger(expectedCurrentVersionNo) || expectedCurrentVersionNo < 1) {
+      throw new BadRequestException('A valid version and current version number are required.');
+    }
+    if (!this.wikiEdits) throw new ServiceUnavailableException('Wiki file document service is unavailable.');
+    const [anchor, target] = await Promise.all([
+      this.prisma.wikiFileVersion.findFirst({ where: { uploadedFileId: file.id } }),
+      this.prisma.wikiFileVersion.findUnique({ where: { id: BigInt(versionId) } }),
+    ]);
+    if (!anchor || !target || anchor.filePageId !== target.filePageId) {
+      throw new BadRequestException('The selected version does not belong to this file.');
+    }
+    return this.wikiEdits.restoreFileVersion(session, target.id, expectedCurrentVersionNo);
+  }
+
   async listFiles(input: {
     readonly session?: SessionPayload | null;
     readonly search?: string;

@@ -80,6 +80,10 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     linkedSpaceId?: string;
   }> = [];
   const deletedFileDocuments: string[] = [];
+  const restoredFileVersions: Array<{
+    versionId: bigint;
+    expectedCurrentVersionNo: number;
+  }> = [];
   const fileVersions: Array<Record<string, unknown>> = [];
   let deleteAttempts = 0;
   const wikiPages = new Map<bigint, { id: bigint; status: string }>([
@@ -186,6 +190,16 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
       async create({ data }: { data: Record<string, unknown> }) {
         fileVersions.push(data);
         return { id: BigInt(fileVersions.length), ...data };
+      },
+      async findFirst({ where }: { where: { uploadedFileId: string } }) {
+        const index = fileVersions.findIndex((version) => version.uploadedFileId === where.uploadedFileId);
+        return index < 0 ? null : { id: BigInt(index + 1), ...fileVersions[index] };
+      },
+      async findUnique({ where }: { where: { id: bigint } }) {
+        const index = Number(where.id) - 1;
+        return index < 0 || index >= fileVersions.length
+          ? null
+          : { id: where.id, ...fileVersions[index] };
       }
     },
     wikiPage: {
@@ -253,7 +267,24 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
       assert.ok(pending);
       files.set(previous.id, { ...previous, status: 'versioned', currentWikiFilename: null });
       files.set(pending.id, { ...pending, status: 'active', currentWikiFilename: request.filename });
+      fileVersions.push({
+        filePageId: 99n,
+        pageRevisionId: 102n,
+        uploadedFileId: pending.id,
+        versionNo: 2,
+        isCurrent: true,
+        createdByAccountId: pending.ownerAccountId,
+        createdAt: pending.createdAt,
+      });
       return { pageId: '99', revisionId: '102', revisionNo: 2 };
+    },
+    async restoreFileVersion(
+      _session: unknown,
+      versionId: bigint,
+      expectedCurrentVersionNo: number,
+    ) {
+      restoredFileVersions.push({ versionId, expectedCurrentVersionNo });
+      return { pageId: '99', revisionId: '103', revisionNo: 3 };
     }
   };
   return {
@@ -263,6 +294,7 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
     actionCalls,
     fileDocuments,
     fileVersions,
+    restoredFileVersions,
     deletedFileDocuments,
     getDeleteAttempts: () => deleteAttempts
   };
@@ -331,6 +363,41 @@ test('wiki file replacement preserves the logical name and versions the previous
   assert.equal(files.get(first.id)?.wikiFilename, first.wikiFilename);
   assert.equal(files.get(first.id)?.currentWikiFilename, null);
   assert.equal(files.get(replacement.id)?.currentWikiFilename, first.wikiFilename);
+});
+
+test('wiki file restore accepts only a version from the anchor file document', async () => {
+  const { service, restoredFileVersions } = createService();
+  const first = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'wiki.png',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7',
+  }, session('account-1'));
+  const replacement = await service.createImage('account-1', {
+    data: 'data:image/png;base64,bmV3LWltYWdl',
+    filename: 'replacement.png',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7',
+    replaceFileId: first.id,
+  }, session('account-1'));
+
+  const result = await service.restoreWikiFileVersion(
+    replacement.id,
+    '1',
+    2,
+    session('account-1'),
+  );
+
+  assert.equal(result.revisionNo, 3);
+  assert.deepEqual(restoredFileVersions, [{ versionId: 1n, expectedCurrentVersionNo: 2 }]);
+  await assert.rejects(
+    service.restoreWikiFileVersion(replacement.id, '999', 2, session('account-1')),
+    /selected version does not belong/u,
+  );
 });
 
 test('standalone wiki uploads can bind to an editable wiki space', async () => {

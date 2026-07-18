@@ -1196,6 +1196,8 @@ export interface UploadedFileMetadata {
   readonly sourceUrl: string | null;
   readonly sourceText: string | null;
   readonly wikiDocumentPath: string | null;
+  readonly linkedResourceType: string | null;
+  readonly linkedResourceId: string | null;
   readonly status: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -2131,6 +2133,7 @@ export async function uploadWikiImage(input: {
   license: string;
   sourceUrl?: string;
   sourceText?: string;
+  replaceFileId?: string;
 }): Promise<{ url: string; publicPath: string; id: string; filename: string; wikiDocumentPath: string | null }> {
   if (Boolean(input.pageId) === Boolean(input.spaceId)) {
     throw new Error('Exactly one wiki page or space is required for an upload.');
@@ -2149,6 +2152,7 @@ export async function uploadWikiImage(input: {
       sourceText: input.sourceText,
       linkedResourceType: input.pageId ? 'wiki_page' : 'wiki_space',
       linkedResourceId: input.pageId ?? input.spaceId,
+      replaceFileId: input.replaceFileId,
     }),
   });
   const body = await response.json().catch(() => ({}));
@@ -2166,6 +2170,50 @@ export async function uploadWikiImage(input: {
     publicPath: String(body.publicPath ?? body.url),
     wikiDocumentPath: typeof body.wikiDocumentPath === 'string' ? body.wikiDocumentPath : null,
   };
+}
+
+export interface WikiFileVersion {
+  readonly id: string;
+  readonly fileId: string;
+  readonly pageId: string;
+  readonly pageRevisionId: string;
+  readonly versionNo: number;
+  readonly isCurrent: boolean;
+  readonly mimeType: string;
+  readonly size: number;
+  readonly width: number | null;
+  readonly height: number | null;
+  readonly hash: string;
+  readonly createdAt: string;
+}
+
+export async function fetchWikiFileVersions(fileId: string): Promise<WikiFileVersion[]> {
+  const response = await fetch(`${apiBaseUrl()}/v1/files/${encodeURIComponent(fileId)}/versions`, {
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  const body = await response.json().catch(() => []);
+  if (!response.ok) throw new Error(body?.message ?? 'Failed to load wiki file versions.');
+  return body as WikiFileVersion[];
+}
+
+export async function restoreWikiFileVersion(input: {
+  readonly fileId: string;
+  readonly versionId: string;
+  readonly expectedCurrentVersionNo: number;
+}) {
+  const response = await fetch(
+    `${apiBaseUrl()}/v1/files/${encodeURIComponent(input.fileId)}/versions/${encodeURIComponent(input.versionId)}/restore`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
+      body: JSON.stringify({ expectedCurrentVersionNo: input.expectedCurrentVersionNo }),
+    },
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.message ?? 'Failed to restore wiki file version.');
+  return body;
 }
 
 export async function listWikiFiles(
