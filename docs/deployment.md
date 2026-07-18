@@ -152,25 +152,30 @@ Check these paths from a browser:
 
 ## Backup And Restore
 
-Before deploys, back up MySQL and uploads:
+Create one atomic snapshot containing MySQL and the configured `UPLOAD_STORAGE_ROOT`:
 
 ```bash
-mkdir -p backups
-mysqldump --single-transaction --routines --triggers minewiki > backups/minewiki-$(date +%Y%m%d-%H%M%S).sql
-tar -czf backups/uploads-$(date +%Y%m%d-%H%M%S).tar.gz apps/cdn/storage
+pnpm backup
 ```
 
-Restore a database backup:
+Each snapshot contains `database.sql`, `uploads.tar.gz`, and a SHA-256 manifest. The backup is only published after both artifacts are complete and automatically verified. Configure `MINEWIKI_BACKUP_REMOTE` as an rclone destination (for example an encrypted R2/S3 remote); the production timer refuses to succeed without it.
+
+Verify an existing snapshot again before restore:
 
 ```bash
-mysql minewiki < backups/minewiki-YYYYMMDD-HHMMSS.sql
+pnpm backup:verify -- /var/backups/minewiki/YYYYMMDDTHHMMSSZ
 ```
 
-Restore uploads:
+Restore into isolated targets first, run `pnpm data:validate`, and only then schedule the production cutover:
 
 ```bash
-tar -xzf backups/uploads-YYYYMMDD-HHMMSS.tar.gz -C /
+mysql minewiki_restore < /var/backups/minewiki/SNAPSHOT/database.sql
+mkdir -p /srv/minewiki-restore/uploads
+tar -xzf /var/backups/minewiki/SNAPSHOT/uploads.tar.gz -C /srv/minewiki-restore/uploads
+DATABASE_URL=mysql://.../minewiki_restore UPLOAD_STORAGE_ROOT=/srv/minewiki-restore/uploads pnpm data:validate
 ```
+
+Install `infra/systemd/minewiki-backup.{service,timer}` for nightly snapshots. Alert on a failed unit and perform a full isolated restore drill at least monthly; checksum verification alone does not prove MySQL restore compatibility.
 
 ## Rollback
 

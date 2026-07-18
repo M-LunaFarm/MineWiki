@@ -1,0 +1,15 @@
+[Unit]
+Description=Create and verify a MineWiki database and upload snapshot
+After=network-online.target mysql.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/var/www/MineWiki
+Environment=MINEWIKI_ENV_FILE=/var/www/MineWiki/.env
+ExecStart=/usr/bin/flock -n /run/minewiki-backup.lock /usr/bin/node scripts/backup-minewiki.mjs --require-remote
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+NoNewPrivileges=true
