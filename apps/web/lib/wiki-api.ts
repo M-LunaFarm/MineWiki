@@ -2048,7 +2048,11 @@ export async function uploadWikiImage(input: {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(body?.message ?? 'Failed to upload wiki image.');
+    const retryAfter = response.headers.get('Retry-After');
+    const retryHint = response.status === 429 && retryAfter
+      ? ` 요청 한도를 초과했습니다. 서버 재시도 안내: ${retryAfter}.`
+      : '';
+    throw new Error(`${body?.message ?? 'Failed to upload wiki image.'}${retryHint}`);
   }
   return {
     id: String(body.id),

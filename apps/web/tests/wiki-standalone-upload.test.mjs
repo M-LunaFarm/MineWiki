@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const [page, client, api, tools] = await Promise.all([
+const [page, client, queueView, api, tools] = await Promise.all([
   readFile(new URL('../app/wiki/upload/page.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../components/wiki/wiki-upload-client.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../components/wiki/wiki-upload-queue-view.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../lib/wiki-api.ts', import.meta.url), 'utf8'),
   readFile(new URL('../components/wiki/wiki-page-tools.tsx', import.meta.url), 'utf8'),
 ]);
@@ -19,8 +20,18 @@ test('standalone upload resolves a wiki space and is discoverable from document 
 test('standalone upload sends space-scoped ACL context and required attribution', () => {
   assert.match(client, /spaceId,/u);
   assert.match(client, /license,/u);
-  assert.match(client, /sourceRequired && !sourceUrl\.trim\(\)/u);
-  assert.match(client, /wikiDocumentPath/u);
+  assert.match(client, /wikiUploadMetadataError/u);
+  assert.match(queueView, /wikiDocumentPath/u);
   assert.match(api, /linkedResourceType: input\.pageId \? 'wiki_page' : 'wiki_space'/u);
   assert.match(api, /Boolean\(input\.pageId\) === Boolean\(input\.spaceId\)/u);
+});
+
+test('standalone upload exposes a bounded serial multi-image queue', () => {
+  assert.match(page, /이미지 1~10개/u);
+  assert.match(client, /type="file" multiple/u);
+  assert.match(client, /mergeWikiUploadSelection/u);
+  assert.match(client, /runWikiUploadQueue/u);
+  assert.match(client, /현재 파일 후 중단/u);
+  assert.match(client, /성공 \{successCount\}개 문법 복사/u);
+  assert.doesNotMatch(client, /files\?\.\[0\]/u);
 });

@@ -20,12 +20,12 @@ export default async function WikiUploadPage({ searchParams }: WikiUploadPagePro
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">Wiki File</p>
         <h1 className="mt-3 text-3xl font-bold text-white">파일 업로드</h1>
         <p className="mt-3 text-sm leading-6 text-slate-400">
-          기존 문서를 먼저 만들지 않아도 이미지를 위키에 등록할 수 있습니다.
-          업로드가 끝나면 출처와 라이선스를 보존하는 파일 문서와 삽입 문법을 함께 제공합니다.
+          기존 문서를 먼저 만들지 않아도 이미지 1~10개를 위키에 등록할 수 있습니다.
+          파일을 하나씩 안전하게 처리하고, 출처와 라이선스를 보존하는 파일 문서와 삽입 문법을 함께 제공합니다.
         </p>
       </header>
       <aside className="grid gap-3 sm:grid-cols-3" aria-label="업로드 처리 단계">
-        <UploadStep number="1" title="이미지 선택" text="PNG, JPEG, WebP 파일" />
+        <UploadStep number="1" title="이미지 선택" text="PNG, JPEG, WebP 최대 10개" />
         <UploadStep number="2" title="권리 정보" text="라이선스와 원본 출처" />
         <UploadStep number="3" title="문서 생성" text="파일 문서와 삽입 문법" />
       </aside>
