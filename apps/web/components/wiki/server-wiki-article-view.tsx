@@ -182,6 +182,8 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               spaceId={page.spaceId}
               title={page.title}
               displayTitle={page.displayTitle}
+              pageType={page.pageType}
+              currentRevisionId={page.revision.id}
               routePath={routePath}
             />
           </div>

@@ -12,8 +12,10 @@ import type { WikiProfileService } from './wiki-profile.service';
 import type { WikiReadService } from './wiki-read.service';
 import type { SessionPayload } from '../session/session.service';
 import type { WikiCaptchaService } from './wiki-captcha.service';
+import type { WikiPageSwapService } from './wiki-page-swap.service';
 
 const captchaStub = { async assertVerified() {} } as WikiCaptchaService;
+const pageSwapStub = {} as WikiPageSwapService;
 
 test('public wiki stats controller forwards an optional namespace without authentication', async () => {
   let receivedNamespace: string | undefined;
@@ -26,7 +28,8 @@ test('public wiki stats controller forwards an optional namespace without authen
       }
     } as unknown as WikiReadService,
     {} as WikiEditService,
-    captchaStub
+    captchaStub,
+    pageSwapStub,
   );
 
   const response = await controller.getPublicStats('main');
@@ -43,7 +46,8 @@ test('new wiki pages require captcha before the clean mutation reaches the edit 
     {} as WikiProfileService,
     {} as WikiReadService,
     { async createPage(receivedSession: SessionPayload, body: unknown) { mutationInput = { receivedSession, body }; return { pageId: '1' }; } } as unknown as WikiEditService,
-    { async assertVerified(token: string | undefined, ip: string | undefined) { captchaInput = { token, ip }; } } as WikiCaptchaService
+    { async assertVerified(token: string | undefined, ip: string | undefined) { captchaInput = { token, ip }; } } as WikiCaptchaService,
+    pageSwapStub,
   );
   const request = { clientIp: '192.0.2.21' } as FastifyRequest;
 
@@ -66,6 +70,7 @@ test('wiki preview forwards the authenticated session and stable page context', 
       },
     } as unknown as WikiEditService,
     captchaStub,
+    pageSwapStub,
   );
 
   const response = await controller.previewPage({
@@ -95,7 +100,8 @@ test('wiki move controller forwards additive destination namespace and space fie
         return { pageId, namespace: 'guide', spaceId: '22' };
       }
     } as unknown as WikiEditService,
-    captchaStub
+    captchaStub,
+    pageSwapStub,
   );
   const body = {
     namespace: 'guide',
@@ -110,13 +116,52 @@ test('wiki move controller forwards additive destination namespace and space fie
   assert.deepEqual(mutationInput, { receivedSession: session, pageId: '7', body });
 });
 
+test('wiki page swap controller forwards candidate and mutation contracts', async () => {
+  const session = { userId: 'account-1' } as SessionPayload;
+  const received: unknown[] = [];
+  const swap = {
+    async listCandidates(receivedSession: SessionPayload, pageId: string, query: string | undefined) {
+      received.push({ method: 'candidates', receivedSession, pageId, query });
+      return { items: [] };
+    },
+    async swap(receivedSession: SessionPayload, pageId: string, body: unknown) {
+      received.push({ method: 'swap', receivedSession, pageId, body });
+      return { source: { pageId }, target: { pageId: '8' } };
+    },
+  } as unknown as WikiPageSwapService;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    {} as WikiReadService,
+    {} as WikiEditService,
+    captchaStub,
+    swap,
+  );
+  const body = {
+    targetPageId: '8',
+    expectedSourceRevisionId: '70',
+    expectedTargetRevisionId: '80',
+    reason: '문서 제목 정리',
+    sourceTitleConfirmation: '원본',
+    targetTitleConfirmation: '대상',
+  };
+
+  await controller.getPageSwapCandidates('7', '대상', session);
+  await controller.swapPage('7', body, session);
+
+  assert.deepEqual(received, [
+    { method: 'candidates', receivedSession: session, pageId: '7', query: '대상' },
+    { method: 'swap', receivedSession: session, pageId: '7', body },
+  ]);
+});
+
 test('public block history controller is callable without an authenticated session', async () => {
   let input: unknown;
   const controller = new WikiController(
     {} as WikiProfileService,
     { async getPublicBlockHistory(value: unknown) { input = value; return { items: [], nextCursor: null }; } } as unknown as WikiReadService,
     {} as WikiEditService,
-    captchaStub
+    captchaStub,
+    pageSwapStub,
   );
 
   const response = await controller.blockHistory('20', '50', 'block', 'target');
@@ -156,7 +201,7 @@ test('optional browser wiki reads forward the complete session payload', async (
     async getRevision(_revisionId: string, viewer: unknown) { received.push({ method: 'revision', viewer }); return {}; },
     async getRevisionDiff(_leftId: string, _rightId: string, viewer: unknown) { received.push({ method: 'diff', viewer }); return {}; }
   } as unknown as WikiEditService;
-  const controller = new WikiController({} as WikiProfileService, reads, edits, captchaStub);
+  const controller = new WikiController({} as WikiProfileService, reads, edits, captchaStub, pageSwapStub);
 
   await Promise.all([
     controller.getPage('main', '대문', request),
@@ -186,7 +231,7 @@ test('optional browser wiki reads forward the complete session payload', async (
 test('browser backlink reads forward type and namespace filters', async () => {
   let received: unknown;
   const reads = { async getBacklinks(input: unknown) { received = input; return { items: [], prevCursor: null, nextCursor: null }; } } as unknown as WikiReadService;
-  const controller = new WikiController({} as WikiProfileService, reads, {} as WikiEditService, captchaStub);
+  const controller = new WikiController({} as WikiProfileService, reads, {} as WikiEditService, captchaStub, pageSwapStub);
   const request = { sessionPayload: null } as FastifyRequest;
 
   await controller.getBacklinks('10', request, 'cursor', '50', 'file,redirect', 'server');
@@ -229,7 +274,8 @@ test('anonymous wiki controller read applies CIDR ACL from the central request c
     {} as WikiProfileService,
     wikiRead,
     {} as WikiEditService,
-    captchaStub
+    captchaStub,
+    pageSwapStub,
   );
   const guard = new OptionalSessionGuard({
     async getSessionByToken() { return null; }

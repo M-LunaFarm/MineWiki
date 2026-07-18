@@ -16,6 +16,28 @@ export interface WikiEditConflictDetails {
   readonly conflictCount: number;
 }
 
+export interface WikiSwapCandidate {
+  readonly pageId: string;
+  readonly title: string;
+  readonly displayTitle: string;
+  readonly currentRevisionId: string;
+}
+
+export interface WikiSwapResponsePage {
+  readonly pageId: string;
+  readonly namespace: string;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly slug: string;
+  readonly revisionId: string;
+  readonly revisionNo: number;
+}
+
+export interface WikiSwapResponse {
+  readonly source: WikiSwapResponsePage;
+  readonly target: WikiSwapResponsePage;
+}
+
 export class WikiApiError extends Error {
   constructor(
     message: string,
@@ -1986,6 +2008,36 @@ export async function moveWikiPage(input: { pageId: string; namespace?: string; 
     displayTitle: input.displayTitle,
     reason: input.reason,
     leaveRedirect: input.leaveRedirect,
+  });
+}
+
+export async function fetchWikiSwapCandidates(pageId: string, query: string): Promise<{ readonly items: WikiSwapCandidate[] }> {
+  const params = new URLSearchParams({ q: query });
+  const response = await fetch(`${apiBaseUrl()}/v1/wiki/pages/${encodeURIComponent(pageId)}/swap-candidates?${params.toString()}`, {
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw wikiApiError(response, body, 'Failed to find exchange candidates.');
+  return body as { readonly items: WikiSwapCandidate[] };
+}
+
+export async function swapWikiPages(input: {
+  readonly pageId: string;
+  readonly targetPageId: string;
+  readonly expectedSourceRevisionId: string;
+  readonly expectedTargetRevisionId: string;
+  readonly reason: string;
+  readonly sourceTitleConfirmation: string;
+  readonly targetTitleConfirmation: string;
+}): Promise<WikiSwapResponse> {
+  return mutateWikiPage(input.pageId, 'swap', {
+    targetPageId: input.targetPageId,
+    expectedSourceRevisionId: input.expectedSourceRevisionId,
+    expectedTargetRevisionId: input.expectedTargetRevisionId,
+    reason: input.reason,
+    sourceTitleConfirmation: input.sourceTitleConfirmation,
+    targetTitleConfirmation: input.targetTitleConfirmation,
   });
 }
 

@@ -41,6 +41,12 @@ import {
 } from './wiki-read.service';
 import { WikiProfileService, type WikiMeResponse, type WikiPublicProfileResponse } from './wiki-profile.service';
 import { WikiCaptchaService } from './wiki-captcha.service';
+import {
+  WikiPageSwapService,
+  type WikiPageSwapCandidateResponse,
+  type WikiPageSwapRequest,
+  type WikiPageSwapResponse,
+} from './wiki-page-swap.service';
 
 @Controller('v1/wiki')
 export class WikiController {
@@ -48,7 +54,8 @@ export class WikiController {
     private readonly wikiProfiles: WikiProfileService,
     private readonly wikiRead: WikiReadService,
     private readonly wikiEdit: WikiEditService,
-    private readonly wikiCaptcha: WikiCaptchaService
+    private readonly wikiCaptcha: WikiCaptchaService,
+    private readonly wikiPageSwap: WikiPageSwapService,
   ) {}
 
   @Get('stats')
@@ -341,6 +348,28 @@ export class WikiController {
     @CurrentSession() session: SessionPayload
   ): Promise<WikiMoveResponse> {
     return this.wikiEdit.movePage(session, pageId, body);
+  }
+
+  @Get('pages/:id/swap-candidates')
+  @Throttle({ default: { limit: 20, ttl: 60 } })
+  @UseGuards(SessionGuard)
+  getPageSwapCandidates(
+    @Param('id') pageId: string,
+    @Query('q') query: string | undefined,
+    @CurrentSession() session: SessionPayload,
+  ): Promise<WikiPageSwapCandidateResponse> {
+    return this.wikiPageSwap.listCandidates(session, pageId, query);
+  }
+
+  @Post('pages/:id/swap')
+  @Throttle({ default: { limit: 6, ttl: 60 } })
+  @UseGuards(SessionGuard)
+  swapPage(
+    @Param('id') pageId: string,
+    @Body() body: WikiPageSwapRequest,
+    @CurrentSession() session: SessionPayload,
+  ): Promise<WikiPageSwapResponse> {
+    return this.wikiPageSwap.swap(session, pageId, body);
   }
 
   @Post('pages/:id/delete')

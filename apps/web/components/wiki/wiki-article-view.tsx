@@ -169,6 +169,8 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
             spaceId={page.spaceId}
             title={page.title}
             displayTitle={page.displayTitle}
+            pageType={page.pageType}
+            currentRevisionId={page.revision.id}
             routePath={routePath}
           />
           {page.categories.length > 0 ? (

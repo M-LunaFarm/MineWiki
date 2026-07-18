@@ -8,6 +8,7 @@ import { useAuth } from '../providers/auth-context';
 import { WikiWatchButton } from './wiki-watch-button';
 import { buildServerWikiToolPath, buildWikiPagePath } from '../../lib/wiki-routes.mjs';
 import { WikiReportButton } from './wiki-report-button';
+import { WikiPageSwapForm } from './wiki-page-swap-form';
 
 interface WikiPageToolsProps {
   readonly pageId: string;
@@ -15,10 +16,12 @@ interface WikiPageToolsProps {
   readonly spaceId: string;
   readonly title: string;
   readonly displayTitle: string;
+  readonly pageType: string;
+  readonly currentRevisionId: string;
   readonly routePath: string;
 }
 
-export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle, routePath }: WikiPageToolsProps) {
+export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle, pageType, currentRevisionId, routePath }: WikiPageToolsProps) {
   const { account, loading: authLoading } = useAuth();
   const [nextTitle, setNextTitle] = useState(title);
   const [nextNamespace, setNextNamespace] = useState(namespace);
@@ -163,6 +166,7 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
             이동
           </button>
         </form>
+        {pageType === 'article' && !['user', 'file', 'server'].includes(namespace) ? <WikiPageSwapForm pageId={pageId} title={title} currentRevisionId={currentRevisionId} /> : null}
         <form onSubmit={remove} className="mt-5 space-y-3 border-t border-red-300/15 pt-4">
           <label className="block text-xs font-semibold text-slate-400">
             삭제 사유
