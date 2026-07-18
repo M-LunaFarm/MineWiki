@@ -196,7 +196,7 @@ export class ServerService {
           _sum: { votes24h: true },
         }),
         this.prisma.serverStats.aggregate({
-          where: { server: where },
+          where: { server: where, votesTotal: { gt: 0 } },
           _max: { rankCalculatedAt: true },
         }),
       ]);
@@ -2345,7 +2345,8 @@ function toSummary(server: {
     latencyMs: server.latencyMs ?? null,
     rank:
       server.stats &&
-      server.stats.rankCalculatedAt
+      server.stats.rankCalculatedAt &&
+      server.stats.votesTotal > 0
       ? {
           current: server.stats.rankCurrent,
           delta24h: server.stats.rankDelta24h,

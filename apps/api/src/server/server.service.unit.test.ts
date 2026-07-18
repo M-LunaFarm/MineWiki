@@ -423,7 +423,7 @@ test('server list preserves rank when only historical valid votes remain', async
   assert.equal(server.rank?.current, 1);
 });
 
-test('server list exposes an aggregated rank even when the server has zero votes', async () => {
+test('server list conceals stale aggregated rank when the server has zero valid votes', async () => {
   const serverId = randomUUID();
   const calculatedAt = new Date('2026-07-17T00:45:00.000Z');
   const prisma = {
@@ -467,8 +467,7 @@ test('server list exposes an aggregated rank even when the server has zero votes
 
   const [server] = await service.list();
 
-  assert.equal(server.rank?.current, 9);
-  assert.equal(server.rank?.updatedAt, calculatedAt.toISOString());
+  assert.equal(server.rank, null);
 });
 
 test('server wiki Docs layout is always included without a paid entitlement', async () => {

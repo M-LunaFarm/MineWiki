@@ -1,8 +1,9 @@
 ﻿import { Logger } from '@minewiki/logger';
 import type { RankAggregationJob } from '@minewiki/schemas';
 import { PUBLIC_SERVER_LISTING_STATUS } from '@minewiki/schemas';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { DateTime } from 'luxon';
+import { isRankEligible, resolveRankBest } from './rank-integrity';
 
 const KST_ZONE = 'Asia/Seoul';
 const SPARKLINE_DAYS = 7;
@@ -49,7 +50,12 @@ export function createRankAggregator(prisma: PrismaHandle) {
       }),
       prisma.server.findMany({
         where: { listingStatus: PUBLIC_SERVER_LISTING_STATUS },
-        select: { id: true, name: true, reviewsCount: true }
+        select: {
+          id: true,
+          name: true,
+          reviewsCount: true,
+          stats: { select: { rankBest: true, rankCalculatedAt: true } }
+        }
       }),
       prisma.serverRankSnapshot.groupBy({
         by: ['serverId'],
@@ -77,6 +83,7 @@ export function createRankAggregator(prisma: PrismaHandle) {
         votesMonth: votesMonthMap.get(server.id) ?? 0,
         votesTotal: votesTotalMap.get(server.id) ?? 0
       }))
+      .filter((server) => isRankEligible(server.votesTotal))
       .sort((a, b) => {
         if (b.votes24h !== a.votes24h) {
           return b.votes24h - a.votes24h;
@@ -97,25 +104,43 @@ export function createRankAggregator(prisma: PrismaHandle) {
     const previousRankMap = await loadPreviousRanks(prisma, now);
 
     const sparklineMap = await buildSparkline(prisma, now, servers.map((server) => server.id));
+    const rankedMap = new Map(ranked.map((entry) => [entry.id, entry] as const));
+    const unrankedServerIds: string[] = [];
 
-    const updates = ranked.flatMap((entry) => {
-      const previousRank = previousRankMap.get(entry.id);
-      const rankDelta24h = previousRank ? previousRank - entry.rankCurrent : 0;
-      const rankBest = Math.min(rankBestMap.get(entry.id) ?? entry.rankCurrent, entry.rankCurrent);
-      const sparkline = sparklineMap.get(entry.id) ?? Array(SPARKLINE_DAYS).fill(0);
+    const updates: Prisma.PrismaPromise<unknown>[] = servers.flatMap((server) => {
+      const entry = rankedMap.get(server.id);
+      const votes24h = votes24hMap.get(server.id) ?? 0;
+      const votes7d = votes7dMap.get(server.id) ?? 0;
+      const votesMonth = votesMonthMap.get(server.id) ?? 0;
+      const votesTotal = votesTotalMap.get(server.id) ?? 0;
+      const sparkline = sparklineMap.get(server.id) ?? Array(SPARKLINE_DAYS).fill(0);
+      const previousRank = entry ? previousRankMap.get(server.id) : undefined;
+      const rankCurrent = entry?.rankCurrent ?? 0;
+      const rankDelta24h = entry && previousRank ? previousRank - entry.rankCurrent : 0;
+      const rankBest = entry
+        ? resolveRankBest({
+            currentRank: entry.rankCurrent,
+            snapshotBest: rankBestMap.get(server.id),
+            persisted: server.stats
+          })
+        : 0;
+      const rankCalculatedAt = entry ? now.toJSDate() : null;
+      if (!entry) {
+        unrankedServerIds.push(server.id);
+      }
 
       return [
         prisma.serverStats.upsert({
-          where: { serverId: entry.id },
+          where: { serverId: server.id },
           create: {
-            serverId: entry.id,
-            rankCurrent: entry.rankCurrent,
+            serverId: server.id,
+            rankCurrent,
             rankDelta24h,
             rankBest,
-            votesLast24h: entry.votes24h,
-            votesLast7d: entry.votes7d,
-            votesMonthToDate: entry.votesMonth,
-            votesTotal: entry.votesTotal,
+            votesLast24h: votes24h,
+            votesLast7d: votes7d,
+            votesMonthToDate: votesMonth,
+            votesTotal,
             playersOnline: 0,
             playersMax: 0,
             playersLastUpdatedAt: null,
@@ -123,29 +148,37 @@ export function createRankAggregator(prisma: PrismaHandle) {
             sparkline,
             latencyMs: 0,
             lastPingAt: null,
-            rankCalculatedAt: now.toJSDate()
+            rankCalculatedAt
           },
           update: {
-            rankCurrent: entry.rankCurrent,
+            rankCurrent,
             rankDelta24h,
             rankBest,
-            votesLast24h: entry.votes24h,
-            votesLast7d: entry.votes7d,
-            votesMonthToDate: entry.votesMonth,
-            votesTotal: entry.votesTotal,
+            votesLast24h: votes24h,
+            votesLast7d: votes7d,
+            votesMonthToDate: votesMonth,
+            votesTotal,
             sparkline,
-            rankCalculatedAt: now.toJSDate()
+            rankCalculatedAt
           }
         }),
         prisma.server.update({
-          where: { id: entry.id },
+          where: { id: server.id },
           data: {
-            votes24h: entry.votes24h,
-            votesMonthly: entry.votesMonth
+            votes24h,
+            votesMonthly: votesMonth
           }
         })
       ];
     });
+
+    if (unrankedServerIds.length > 0) {
+      updates.push(
+        prisma.serverRankSnapshot.deleteMany({
+          where: { serverId: { in: unrankedServerIds } }
+        })
+      );
+    }
 
     if (updates.length > 0) {
       await prisma.$transaction(updates);
@@ -154,10 +187,13 @@ export function createRankAggregator(prisma: PrismaHandle) {
     await createDailySnapshot(prisma, now, ranked);
 
     const risers = ranked.filter((entry) => (previousRankMap.get(entry.id) ?? entry.rankCurrent) > entry.rankCurrent).length;
-    logger.info({ serversProcessed: ranked.length, risers }, 'Rank aggregation completed');
+    logger.info(
+      { serversProcessed: servers.length, rankedServers: ranked.length, risers },
+      'Rank aggregation completed'
+    );
 
     return {
-      serversProcessed: ranked.length,
+      serversProcessed: servers.length,
       risers
     };
   }
