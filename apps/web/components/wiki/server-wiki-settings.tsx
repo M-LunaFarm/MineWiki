@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, ExternalLink, FileText, LayoutList, LayoutTemplate, Link2, Loader2, Save, Users } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Files, FileText, LayoutList, LayoutTemplate, Link2, Loader2, Save, Users } from 'lucide-react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
@@ -11,6 +11,7 @@ import { ServerWikiCollaboratorsContent } from './server-wiki-collaborators';
 import { ServerWikiLayoutPlansContent } from './server-wiki-layout-plans';
 import { ServerWikiNavigationSettings } from './server-wiki-navigation-settings';
 import { ServerWikiPublicationSettings } from './server-wiki-publication-settings';
+import { ServerWikiTemplateSettings } from './server-wiki-template-settings';
 
 interface ContentSettings {
   readonly serverWikiId: string;
@@ -37,7 +38,7 @@ interface SettingsAccess {
 
 type SourceField = 'contributionPolicySource' | 'editHelpSource' | 'topNoticeSource' | 'bottomNoticeSource';
 type FormState = Pick<ContentSettings, SourceField | 'requireContributionPolicyAck'>;
-type SettingsTab = 'content' | 'structure' | 'layout' | 'collaborators';
+type SettingsTab = 'content' | 'structure' | 'templates' | 'layout' | 'collaborators';
 
 const FIELD_LIMITS: Record<SourceField, number> = {
   contributionPolicySource: 8 * 1024,
@@ -72,7 +73,7 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
   const tabIdPrefix = useId();
   const tabButtons = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
   const settingsTabs = useMemo<readonly SettingsTab[]>(() => {
-    const allowed: SettingsTab[] = ['content', 'structure'];
+    const allowed: SettingsTab[] = ['content', 'structure', 'templates'];
     if (access?.canManageLayout) allowed.push('layout');
     if (access?.canManageCollaborators) allowed.push('collaborators');
     return allowed;
@@ -149,6 +150,17 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
         >
           문서 구조
         </Tab>
+        <Tab
+          id={tabId('templates')}
+          controls={panelId('templates')}
+          active={tab === 'templates'}
+          onClick={() => setTab('templates')}
+          onKeyDown={(event) => handleTabKeyDown(event, 'templates')}
+          buttonRef={(node) => { tabButtons.current.templates = node; }}
+          icon={<Files className="size-4" aria-hidden="true" />}
+        >
+          문서 양식
+        </Tab>
         {access?.canManageLayout ? <Tab
           id={tabId('layout')}
           controls={panelId('layout')}
@@ -177,6 +189,9 @@ function ServerWikiSettingsContent({ serverId }: { readonly serverId: string }) 
       </TabPanel>
       <TabPanel id={panelId('structure')} labelledBy={tabId('structure')} active={tab === 'structure'}>
         {tab === 'structure' ? <ServerWikiNavigationSettings serverId={serverId} /> : null}
+      </TabPanel>
+      <TabPanel id={panelId('templates')} labelledBy={tabId('templates')} active={tab === 'templates'}>
+        {tab === 'templates' ? <ServerWikiTemplateSettings serverId={serverId} /> : null}
       </TabPanel>
       {access?.canManageLayout ? <TabPanel id={panelId('layout')} labelledBy={tabId('layout')} active={tab === 'layout'}>
         {tab === 'layout' ? <ServerWikiLayoutPlansContent serverId={serverId} /> : null}

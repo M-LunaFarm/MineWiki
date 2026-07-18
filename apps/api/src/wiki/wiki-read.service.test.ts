@@ -138,6 +138,7 @@ test('new document templates are scoped to an explicitly readable wiki space', a
   let readableSpace: bigint | null = null;
   const prisma = {
     wikiProfile: { async findUnique() { return { id: 9n }; } },
+    wikiSpace: { async findUnique() { return { spaceType: 'server_wiki' }; } },
     documentTemplate: {
       async findMany(input: unknown) {
         templateQuery = input;
@@ -162,8 +163,9 @@ test('new document templates are scoped to an explicitly readable wiki space', a
   assert.deepEqual((templateQuery as { where: { OR: unknown[] } }).where.OR, [
     { templateScope: 'global', spaceId: null },
     { templateScope: 'space', spaceId: 22n },
-    { templateScope: 'user', createdBy: 9n },
+    { templateScope: 'user', createdBy: 9n, spaceId: 22n },
   ]);
+  assert.deepEqual((templateQuery as { where: { targetArea: { in: string[] } } }).where.targetArea.in, ['any', 'official']);
 });
 
 test('public block history redacts private reasons and account identity while keeping a stable cursor', async () => {

@@ -2176,7 +2176,9 @@ model DocumentTemplate {
   defaultCategory String?  @map("default_category") @db.VarChar(255)
   contentRaw      String   @map("content_raw") @db.MediumText
   createdBy       BigInt?  @map("created_by") @db.UnsignedBigInt
+  updatedBy       BigInt?  @map("updated_by") @db.UnsignedBigInt
   status          String   @default("active") @db.VarChar(32)
+  version         Int      @default(1) @db.UnsignedInt
   createdAt       DateTime @map("created_at")
   updatedAt       DateTime @map("updated_at")
 
