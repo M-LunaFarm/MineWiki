@@ -6,6 +6,7 @@ test('checkout persists an immutable intent before calling Paddle and attaches i
   const operations: string[] = [];
   let intent: Record<string, unknown> | null = null;
   const prisma = {
+    server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: {
       async upsert() { operations.push('subject'); return { id: 'subject-id' }; },
@@ -64,6 +65,7 @@ test('concurrent checkout requests create one Paddle transaction and keep the op
   const providerStarted = new Promise<void>((resolve) => { markProviderStarted = resolve; });
   const providerRelease = new Promise<void>((resolve) => { releaseProvider = resolve; });
   const prisma = {
+    server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
     async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
@@ -113,6 +115,7 @@ test('concurrent checkout requests create one Paddle transaction and keep the op
 test('checkout retry reuses the persisted Paddle transaction URL', async () => {
   let providerCalls = 0;
   const prisma = {
+    server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
     async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
@@ -143,10 +146,41 @@ test('checkout retry reuses the persisted Paddle transaction URL', async () => {
   assert.equal(providerCalls, 0);
 });
 
+test('checkout rechecks active ownership inside the intent transaction', async () => {
+  let persisted = false;
+  const prisma = {
+    server: {
+      async findUnique() {
+        return { ownerAccountId: 'account-id', ownershipChallengeSuspendedAt: new Date() };
+      },
+    },
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    paddleBillingSubject: {
+      async upsert() { persisted = true; throw new Error('must not persist'); },
+    },
+  };
+  const service = new PaddleCheckoutService(
+    prisma as never,
+    config('live') as never,
+    {
+      getProviderPriceId() { return 'pri_handbook'; },
+      getProduct() { return { productCode: 'server_wiki_handbook', layoutKey: 'handbook' }; },
+    } as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    () => service.create('server-id', 'handbook', 'account-id', '2026-07-19-v2.0'),
+    /active server owner/i,
+  );
+  assert.equal(persisted, false);
+});
+
 test('an uncertain provider failure keeps the lease and a retry cannot create a second transaction', async () => {
   let intent: Record<string, unknown> | null = null;
   let providerCalls = 0;
   const prisma = {
+    server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
     async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
@@ -218,4 +252,8 @@ function config(mode: string) {
     PADDLE_CHECKOUT_URL: 'https://minewiki.kr/billing/checkout',
   };
   return { get(key: string, fallback?: string) { return values[key] ?? fallback ?? ''; } };
+}
+
+function activeOwner() {
+  return { ownerAccountId: 'account-id', ownershipChallengeSuspendedAt: null };
 }

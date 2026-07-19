@@ -55,7 +55,7 @@ export class PaddleBillingController {
     @CurrentSession() session: SessionPayload,
   ) {
     await this.assertOwner(serverId, session);
-    return this.portal.create(serverId);
+    return this.portal.create(serverId, session.userId);
   }
 
   @Get('availability')

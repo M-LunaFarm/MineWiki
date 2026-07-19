@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ServiceUnavailableException } from '@nes
 import { ConfigService } from '@minewiki/config';
 import { PrismaService } from '../common/prisma.service';
 import { PaddleClient } from './paddle-client';
+import { assertActiveBillingOwner } from './billing-server-authority';
 
 @Injectable()
 export class PaddlePortalService {
@@ -23,10 +24,11 @@ export class PaddlePortalService {
     return Boolean(subscription);
   }
 
-  async create(serverId: string) {
+  async create(serverId: string, accountId: string) {
     if (this.config.get('PADDLE_MODE', 'off') !== 'live') {
       throw new ServiceUnavailableException('Paddle customer portal is not enabled.');
     }
+    await assertActiveBillingOwner(this.prisma, serverId, accountId);
     const subject = await this.prisma.paddleBillingSubject.findFirst({
       where: { serverWiki: { voteServerId: serverId } },
       select: { id: true },

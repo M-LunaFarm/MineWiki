@@ -37,6 +37,7 @@ test('portal creation selects the newest shadow with a provider customer', async
     },
   };
   const service = new PaddlePortalService({
+    server: { async findUnique() { return activeOwner(); } },
     paddleBillingSubject: { async findFirst() { return { id: 'subject-id' }; } },
     paddleSubscriptionShadow: {
       async findFirst(input: { where: unknown }) {
@@ -46,7 +47,7 @@ test('portal creation selects the newest shadow with a provider customer', async
     },
   } as never, config('live') as never, paddle as never);
 
-  assert.deepEqual(await service.create('11111111-1111-4111-8111-111111111111'), {
+  assert.deepEqual(await service.create('11111111-1111-4111-8111-111111111111', 'account-id'), {
     portalUrl: 'https://customer-portal.paddle.com/cpl_test?token=secret',
   });
   assert.deepEqual(subscriptionWhere, {
@@ -55,6 +56,30 @@ test('portal creation selects the newest shadow with a provider customer', async
   });
 });
 
+test('portal creation rejects a suspended owner before reading billing state', async () => {
+  let billingRead = false;
+  const service = new PaddlePortalService({
+    server: {
+      async findUnique() {
+        return { ownerAccountId: 'account-id', ownershipChallengeSuspendedAt: new Date() };
+      },
+    },
+    paddleBillingSubject: {
+      async findFirst() { billingRead = true; throw new Error('must not read'); },
+    },
+  } as never, config('live') as never, {} as never);
+
+  await assert.rejects(
+    () => service.create('11111111-1111-4111-8111-111111111111', 'account-id'),
+    /active server owner/i,
+  );
+  assert.equal(billingRead, false);
+});
+
 function config(mode: string) {
   return { get(key: string, fallback?: string) { return key === 'PADDLE_MODE' ? mode : fallback ?? ''; } };
+}
+
+function activeOwner() {
+  return { ownerAccountId: 'account-id', ownershipChallengeSuspendedAt: null };
 }

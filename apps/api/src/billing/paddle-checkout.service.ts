@@ -5,6 +5,7 @@ import { PrismaService } from '../common/prisma.service';
 import { BillingCatalog, type PaddleBillableLayoutKey } from './billing-catalog';
 import { PaddleClient } from './paddle-client';
 import { BILLING_POLICY_VERSION } from '@minewiki/schemas/billing-contract';
+import { assertActiveBillingOwner } from './billing-server-authority';
 
 const INTENT_LIFETIME_MS = 30 * 60 * 1000;
 
@@ -36,27 +37,27 @@ export class PaddleCheckoutService {
     }
     const priceId = this.catalog.getProviderPriceId(layoutKey);
     const product = this.catalog.getProduct(layoutKey);
-    const serverWiki = await this.prisma.serverWiki.findUnique({
-      where: { voteServerId: serverId },
-      select: { id: true },
-    });
-    if (!serverWiki) throw new NotFoundException('Server wiki not found.');
-
-    const subject = await this.prisma.paddleBillingSubject.upsert({
-      where: { serverWikiId: serverWiki.id },
-      create: {
-        id: randomUUID(),
-        serverWikiId: serverWiki.id,
-        createdByAccountId: accountId,
-      },
-      update: {},
-      select: { id: true },
-    });
     const intentId = randomUUID();
     const termsAcceptedAt = new Date();
     const environment = this.config.get('PADDLE_ENV', 'sandbox');
-    const openLeaseKey = `${environment}:${subject.id}`;
     const intent = await this.prisma.$transaction(async (tx) => {
+      await assertActiveBillingOwner(tx, serverId, accountId);
+      const serverWiki = await tx.serverWiki.findUnique({
+        where: { voteServerId: serverId },
+        select: { id: true },
+      });
+      if (!serverWiki) throw new NotFoundException('Server wiki not found.');
+      const subject = await tx.paddleBillingSubject.upsert({
+        where: { serverWikiId: serverWiki.id },
+        create: {
+          id: randomUUID(),
+          serverWikiId: serverWiki.id,
+          createdByAccountId: accountId,
+        },
+        update: {},
+        select: { id: true },
+      });
+      const openLeaseKey = `${environment}:${subject.id}`;
       const active = await tx.paddleSubscriptionShadow.findFirst({
         where: {
           billingSubjectId: subject.id,
@@ -85,6 +86,7 @@ export class PaddleCheckoutService {
           id: true,
           layoutKey: true,
           status: true,
+          openLeaseKey: true,
           providerTransactionId: true,
           providerCheckoutUrl: true,
         },
@@ -115,8 +117,11 @@ export class PaddleCheckoutService {
       checkoutIntentId: intentId,
       checkoutUrl: this.config.get('PADDLE_CHECKOUT_URL'),
     });
+    if (!intent.openLeaseKey) {
+      throw new ConflictException('The Paddle checkout lease is no longer active.');
+    }
     const attached = await this.prisma.paddleCheckoutIntent.updateMany({
-      where: { id: intentId, status: 'creating', openLeaseKey },
+      where: { id: intentId, status: 'creating', openLeaseKey: intent.openLeaseKey },
       data: {
         status: 'pending',
         providerTransactionId: transaction.transactionId,
