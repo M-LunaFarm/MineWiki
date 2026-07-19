@@ -78,10 +78,9 @@ export function createClaimVerifier(
     }
     const snapshot: ClaimSnapshot = { ...methodRecord, method: job.method };
 
-    const expiryBasis = methodRecord.verifiedAt ?? methodRecord.issuedAt;
     if (
-      (methodRecord.status === 'pending' || methodRecord.status === 'verified') &&
-      now().getTime() - expiryBasis.getTime() > METHOD_EXPIRY_MS
+      methodRecord.status === 'pending'
+      && now().getTime() - methodRecord.issuedAt.getTime() > METHOD_EXPIRY_MS
     ) {
       const result = {
         status: 'expired' as const,

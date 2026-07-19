@@ -420,12 +420,13 @@ export class ClaimService {
       where: {
         serverId,
         method: { in: [...SUPPORTED_CLAIM_METHODS] },
-        status: { in: ['pending', 'verified'] },
+        status: 'pending',
       },
     });
 
     const expired = methods.filter(
-      (method) => now - (method.verifiedAt ?? method.issuedAt).getTime() > METHOD_EXPIRY_MS,
+      (method) => method.status === 'pending'
+        && now - method.issuedAt.getTime() > METHOD_EXPIRY_MS,
     );
 
     if (expired.length === 0) {
@@ -570,8 +571,8 @@ export class ClaimService {
     if (!isSupportedClaimMethod(method.method)) {
       throw new BadRequestException('지원하지 않는 검증 방식입니다.');
     }
-    const expiresAt = method.status === 'pending' || method.status === 'verified'
-      ? new Date((method.verifiedAt ?? method.issuedAt).getTime() + METHOD_EXPIRY_MS)
+    const expiresAt = method.status === 'pending'
+      ? new Date(method.issuedAt.getTime() + METHOD_EXPIRY_MS)
       : undefined;
     return {
       method: method.method as ClaimMethod,

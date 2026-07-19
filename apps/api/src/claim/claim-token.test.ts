@@ -477,3 +477,45 @@ test('pending claim tokens expire 24 hours after issuance and cannot be verified
   assert.equal(updates[0]?.status, 'expired');
   assert.equal(updates[0]?.note, 'token_expired');
 });
+
+test('verified ownership proofs do not expire and remain available for scheduled rechecks', async () => {
+  const verifiedMethod = {
+    id: 'claim-method-verified',
+    serverId: 'server-1',
+    accountId: 'account-1',
+    method: 'dns',
+    token: hashClaimToken('persistent-proof'),
+    tokenCiphertext: null,
+    issuedAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+    status: 'verified',
+    verifiedAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    lastCheckedAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    note: 'dns_token_confirmed',
+    version: 1,
+  };
+  let expiryWrites = 0;
+  const prisma = {
+    serverClaimMethod: {
+      findMany: async () => [verifiedMethod],
+      updateMany: async () => {
+        expiryWrites += 1;
+        return { count: 1 };
+      },
+    },
+    server: { update: async () => ({}) },
+  };
+  const server = ownershipServer({
+    ownerAccountId: 'account-1',
+    verificationGrade: 'VerifiedBasic',
+  });
+  const service = new ClaimService(
+    { ensureExists: async () => server } as never,
+    prisma as never,
+  );
+
+  const status = await service.getStatus('server-1');
+
+  assert.equal(status.methods[0]?.status, 'verified');
+  assert.equal(status.methods[0]?.expiresAt, undefined);
+  assert.equal(expiryWrites, 0);
+});

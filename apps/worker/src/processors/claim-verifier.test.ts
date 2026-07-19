@@ -128,6 +128,59 @@ test('stale pending proof expires without performing an external check', async (
   assert.equal(serverUpdates, 1);
 });
 
+test('verified ownership proof remains renewable and is rechecked after 24 hours', async () => {
+  const fixedNow = new Date('2026-07-19T12:00:00.000Z');
+  let checkCalls = 0;
+  const serverWrites: Array<Record<string, unknown>> = [];
+  const record = {
+    id: 'claim-method-verified',
+    serverId: 'server-1',
+    accountId: 'account-1',
+    method: 'dns',
+    version: 1,
+    token: 'proof-a',
+    tokenCiphertext: null,
+    issuedAt: new Date(fixedNow.getTime() - 48 * 60 * 60 * 1000),
+    status: 'verified',
+    verifiedAt: new Date(fixedNow.getTime() - 25 * 60 * 60 * 1000),
+  };
+  const prisma = transactionMock({
+    serverClaimMethod: {
+      findUnique: async () => record,
+      updateMany: async () => ({ count: 1 }),
+      findMany: async () => [{ method: 'dns', status: 'verified' }],
+    },
+    server: {
+      findUnique: async () => ownershipServer({ ownerAccountId: 'account-1', listingStatus: 'active' }),
+      update: async (query: Record<string, unknown>) => {
+        serverWrites.push(query);
+        return {};
+      },
+      updateMany: async () => ({ count: 1 }),
+    },
+  });
+
+  const result = await createClaimVerifier(prisma as never, {
+    now: () => fixedNow,
+    runVerificationCheck: async () => {
+      checkCalls += 1;
+      return {
+        status: 'verified',
+        checkedAt: fixedNow.toISOString(),
+        note: 'dns_token_confirmed',
+      };
+    },
+  }).verify({
+    serverId: 'server-1',
+    method: 'dns',
+    initiatedAt: fixedNow.toISOString(),
+  });
+
+  assert.equal(result.status, 'verified');
+  assert.equal(checkCalls, 1);
+  assert.equal((serverWrites[0]?.data as Record<string, unknown>)?.verificationGrade, 'A');
+});
+
 test('proof rotation during verification discards the stale result', async () => {
   const fixedNow = new Date('2026-07-12T12:00:00.000Z');
   let serverUpdates = 0;
