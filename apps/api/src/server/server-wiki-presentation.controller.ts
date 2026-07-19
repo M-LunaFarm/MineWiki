@@ -49,7 +49,7 @@ export class ServerWikiPresentationController {
       select: {
         id: true, voteServerId: true, spaceId: true, slug: true, siteSlug: true, status: true,
         publicationStatus: true, publishedReleaseId: true,
-        publishedRelease: { select: { serverWikiId: true, presentationSnapshot: true, items: { orderBy: [{ localPath: 'asc' }, { id: 'asc' }], select: { serverWikiId: true, spaceId: true, title: true, pageUpdatedAt: true } } } },
+        publishedRelease: { select: { serverWikiId: true, presentationSnapshot: true, items: { orderBy: [{ localPath: 'asc' }, { id: 'asc' }], select: { serverWikiId: true, spaceId: true, title: true, pageType: true, pageUpdatedAt: true } } } },
         space: { select: { status: true, spaceType: true, rootPageId: true } },
       },
     });
@@ -61,7 +61,7 @@ export class ServerWikiPresentationController {
     if (!server || server.listingStatus !== 'active' || server.wikiSpaceId !== wiki.spaceId
       || server.wikiPageId !== wiki.space.rootPageId || server.wikiSlug !== wiki.slug) throw new NotFoundException('Server wiki not found.');
     return { releaseId: wiki.publishedReleaseId.toString(), items: (wiki.publishedRelease?.items ?? []).flatMap((item) =>
-      item.serverWikiId === wiki.id && item.spaceId === wiki.spaceId
+      item.serverWikiId === wiki.id && item.spaceId === wiki.spaceId && item.pageType !== 'redirect'
         ? [{ path: buildCanonicalServerWikiPath(wiki.siteSlug!, item.title, wiki.slug, '/serverWiki'), lastModified: item.pageUpdatedAt.toISOString() }]
         : []) };
   }

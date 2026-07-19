@@ -859,6 +859,61 @@ test('public server wiki reads resolve immutable release items while collaborato
   assert.equal(await service.resolveReleasedServerWikiPage('server', 7, 'luna/guide', {}), undefined);
 });
 
+test('public server wiki redirects resolve both old and target paths inside one immutable release', async () => {
+  const now = new Date('2026-07-19T00:00:00.000Z');
+  const items = new Map([
+    ['luna/old', {
+      id: 1n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, namespaceId: 7,
+      pageId: 30n, revisionId: 20n, localPath: 'luna/old', slug: 'luna/old',
+      title: 'luna/old', displayTitle: 'Old', pageType: 'redirect', protectionLevel: 'open',
+      pageStatus: 'normal', createdBy: 10n, ownerProfileId: null, pageUpdatedAt: now, createdAt: now,
+    }],
+    ['luna/new', {
+      id: 2n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, namespaceId: 7,
+      pageId: 31n, revisionId: 21n, localPath: 'luna/new', slug: 'luna/new',
+      title: 'luna/new', displayTitle: 'New', pageType: 'article', protectionLevel: 'open',
+      pageStatus: 'normal', createdBy: 10n, ownerProfileId: null, pageUpdatedAt: now, createdAt: now,
+    }],
+  ]);
+  const queriedReleaseIds: bigint[] = [];
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 7, code: 'server' }; } },
+    serverWiki: {
+      async findUnique() {
+        return { id: 50n, spaceId: 40n, status: 'active', publicationStatus: 'published', publishedReleaseId: 70n };
+      },
+      async findFirst() { return null; },
+    },
+    serverWikiReleaseItem: {
+      async findFirst(args: { where: { releaseId: bigint; slug: string } }) {
+        queriedReleaseIds.push(args.where.releaseId);
+        return items.get(args.where.slug) ?? null;
+      },
+    },
+    wikiPageRevision: {
+      async findFirst(args: { where: { id: bigint } }) {
+        return args.where.id === 20n
+          ? { id: 20n, pageId: 30n, revisionNo: 1, contentHash: 'a'.repeat(64), contentRaw: '#넘겨주기 [[server:luna/new]]', visibility: 'public', createdAt: now, createdBy: 10n }
+          : { id: 21n, pageId: 31n, revisionNo: 1, contentHash: 'b'.repeat(64), contentRaw: 'immutable target', visibility: 'public', createdAt: now, createdBy: 10n };
+      },
+    },
+    wikiPageRenderCache: { async findUnique() { return null; }, async create() { return { id: 1n }; } },
+    uploadedFile: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return false; },
+    async assertCanReadPage() { return undefined; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+  (service as unknown as { findServerWikiContext: () => Promise<null> }).findServerWikiContext = async () => null;
+
+  const page = await service.getPage('server', 'luna/old');
+
+  assert.equal(page.id, '31');
+  assert.equal(page.redirectedFrom?.title, 'luna/old');
+  assert.deepEqual(queriedReleaseIds, [70n, 70n]);
+});
+
 test('released server wiki search matches only the snapshotted revision', async () => {
   const releaseItem = {
     id: 1n,

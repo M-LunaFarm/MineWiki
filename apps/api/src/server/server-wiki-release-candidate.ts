@@ -126,7 +126,6 @@ export async function buildServerWikiReleaseCandidate(
   const pages: ReleaseCandidateCurrentPage[] = pageRows.flatMap((page) => page.currentRevisionId !== null
     && revisionByKey.has(`${page.id}:${page.currentRevisionId}`)
     && isPublicWikiPageStatus(page.status)
-    && page.pageType !== 'redirect'
     ? [{ ...page, currentRevisionId: page.currentRevisionId }]
     : []);
   if (pages.some((page) => page.spaceId !== input.spaceId)) {

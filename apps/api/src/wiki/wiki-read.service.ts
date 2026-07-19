@@ -3980,6 +3980,7 @@ export class WikiReadService {
         serverWikiId: input.wiki.id,
         spaceId: input.wiki.spaceId,
         namespaceId: input.namespaceId,
+        pageType: { not: 'redirect' },
         ...(input.cursor
           ? {
               OR: [
@@ -4078,6 +4079,7 @@ export class WikiReadService {
       }),
       this.prisma.serverWikiReleaseItem.findMany({
         where: {
+          pageType: { not: 'redirect' },
           release: {
             publishedFor: { is: { status: 'active', publicationStatus: 'published' } },
           },
@@ -5152,6 +5154,7 @@ async function findReleasedServerWikiSearchMatchIds(
       WHERE sw.status = 'active'
         AND sw.publication_status = 'published'
         AND i.namespace_id = ?
+        AND i.page_type <> 'redirect'
         AND MATCH(i.search_vector) AGAINST (? IN BOOLEAN MODE)
         ${cursorSql}
       ORDER BY i.page_updated_at DESC, i.page_id DESC

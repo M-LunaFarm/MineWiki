@@ -812,7 +812,7 @@ export class ServerWikiPublicationService {
     });
     const releaseNavigation = buildServerWikiReleaseNavigation(
       context.contentSlug,
-      releasedPages,
+      releasedPages.filter((page) => page.pageType !== 'redirect'),
       snapshot.presentation.navigationOrder,
     );
     await tx.serverWikiReleaseNavigationNode.createMany({

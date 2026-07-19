@@ -545,6 +545,49 @@ test('owner publishes a ready draft atomically with version, timestamps, and an 
   assert.match(JSON.stringify(publishAudit?.metadata), /owner approved launch/u);
 });
 
+test('publish snapshots redirects for permalinks but omits them from release navigation', async () => {
+  const fixture = createFixture();
+  fixture.documentRows.push({
+    id: 500n,
+    namespaceId: 7,
+    spaceId: 77n,
+    localPath: 'test-server/old-guide',
+    slug: 'test-server/old-guide',
+    title: 'test-server/old-guide',
+    displayTitle: 'Old guide',
+    status: 'normal',
+    pageType: 'redirect',
+    protectionLevel: 'open',
+    createdBy: 1n,
+    ownerProfileId: null,
+    currentRevisionId: 600n,
+    updatedAt: fixture.now,
+    searchDocument: { revisionId: 600n },
+  });
+  const redirectSource = '#넘겨주기 [[server:test-server/guide]]';
+  fixture.revisionRows.push({
+    id: 600n,
+    pageId: 500n,
+    visibility: 'public',
+    contentRaw: redirectSource,
+    contentHash: hashContent(redirectSource),
+  });
+
+  const candidate = (await fixture.service.get(serverId, fixture.actor)).candidate;
+  assert.equal(candidate.totalPageCount, 5);
+  const submission = await fixture.submitCandidate('preserve moved document permalink');
+  await fixture.service.update(serverId, {
+    status: 'published',
+    expectedVersion: 0,
+    candidateId: submission.id,
+    expectedCandidateToken: submission.token,
+    reason: 'publish redirect permalink',
+  }, fixture.actor);
+
+  assert.equal(fixture.releaseItems.some((item) => item.pageId === 500n && item.pageType === 'redirect'), true);
+  assert.equal(fixture.releaseNavigation.some((node) => node.pageId === 500n), false);
+});
+
 test('an unchanged published snapshot cannot be submitted as a meaningless second release', async () => {
   const fixture = createFixture();
   const submission = await fixture.submitCandidate();
