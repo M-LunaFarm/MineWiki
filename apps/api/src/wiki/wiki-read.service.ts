@@ -1013,24 +1013,7 @@ export class WikiReadService {
     const publicKeys = new Set(publicRevisions.map((revision) => `${revision.pageId}:${revision.id}`));
     const publicPages = draftPages.filter((page) => page.currentRevisionId
       && publicKeys.has(`${page.id}:${page.currentRevisionId}`));
-    const releaseItemByPageId = releaseId
-      ? new Map((pageRows as NavigationReleaseItem[]).map((item) => [item.pageId, item]))
-      : new Map<bigint, NavigationReleaseItem>();
-    const readablePages = publicationBoundary && releaseId
-      ? (await Promise.all(publicPages.map(async (candidate) => {
-          const item = releaseItemByPageId.get(candidate.id);
-          if (!item) return null;
-          const decision = await this.wikiPermissions.canReadPage({
-            ...access,
-            page: candidate,
-            publicationProof: {
-              boundary: publicationBoundary,
-              item: item as ServerWikiReleaseItem,
-            },
-          });
-          return decision.allowed ? candidate : null;
-        }))).filter((candidate) => candidate !== null)
-      : await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
+    const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
     return {
       key: `draft:${wiki.navigationVersion}:${wiki.contentSettingsVersion}`,
       cacheable: false,
@@ -1524,6 +1507,108 @@ export class WikiReadService {
     };
   }
 
+  private async publishedActivityProjection(
+    rows: ReadonlyArray<{
+      readonly spaceId: bigint | null;
+      readonly pageId: bigint | null;
+      readonly revisionId: bigint | null;
+    }>,
+    access: WikiAccessContext,
+  ): Promise<PublishedActivityProjection> {
+    const spaceIds = [...new Set(rows.flatMap((row) => row.spaceId ? [row.spaceId] : []))];
+    if (spaceIds.length === 0) return emptyPublishedActivityProjection();
+    const serverWikis = await this.prisma.serverWiki.findMany({
+      where: { spaceId: { in: spaceIds }, status: 'active' },
+      select: {
+        id: true,
+        spaceId: true,
+        slug: true,
+        siteSlug: true,
+        publicationStatus: true,
+        publishedReleaseId: true,
+        publishedRelease: { select: { version: true } },
+      },
+    });
+    const constrainedSpaceIds = new Set<bigint>();
+    const publicWikis: typeof serverWikis = [];
+    for (const wiki of serverWikis) {
+      if (await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: wiki.spaceId })) continue;
+      constrainedSpaceIds.add(wiki.spaceId);
+      if (wiki.publicationStatus === 'published'
+        && wiki.publishedReleaseId !== null
+        && wiki.publishedRelease !== null) {
+        publicWikis.push(wiki);
+      }
+    }
+    const pageIds = [...new Set(rows.flatMap((row) => row.pageId ? [row.pageId] : []))];
+    const revisionIds = [...new Set(rows.flatMap((row) => row.revisionId ? [row.revisionId] : []))];
+    if (publicWikis.length === 0 || pageIds.length === 0 || revisionIds.length === 0) {
+      return { constrainedSpaceIds, proofByRevisionKey: new Map() };
+    }
+    const [items, currentItems] = await Promise.all([
+      this.prisma.serverWikiReleaseItem.findMany({
+        where: {
+          pageId: { in: pageIds },
+          revisionId: { in: revisionIds },
+          OR: publicWikis.map((wiki) => ({
+            serverWikiId: wiki.id,
+            spaceId: wiki.spaceId,
+            release: {
+              serverWikiId: wiki.id,
+              version: { lte: wiki.publishedRelease!.version },
+            },
+          })),
+        },
+        include: {
+          release: {
+            select: {
+              version: true,
+              candidate: { select: { createdAt: true } },
+            },
+          },
+        },
+        orderBy: [{ release: { version: 'desc' } }],
+      }),
+      this.prisma.serverWikiReleaseItem.findMany({
+        where: {
+          pageId: { in: pageIds },
+          OR: publicWikis.map((wiki) => ({
+            releaseId: wiki.publishedReleaseId!,
+            serverWikiId: wiki.id,
+            spaceId: wiki.spaceId,
+          })),
+        },
+      }),
+    ]);
+    const wikiById = new Map(publicWikis.map((wiki) => [wiki.id, wiki]));
+    const currentItemByPageKey = new Map<string, ServerWikiReleaseItem>();
+    for (const item of currentItems) {
+      currentItemByPageKey.set(activityPageKey(item.spaceId, item.pageId), item);
+    }
+    const proofByRevisionKey = new Map<string, PublishedActivityProof>();
+    for (const item of items) {
+      const key = activityRevisionKey(item.spaceId, item.pageId, item.revisionId);
+      if (proofByRevisionKey.has(key) || !item.release.candidate) continue;
+      const wiki = wikiById.get(item.serverWikiId);
+      const currentItem = currentItemByPageKey.get(activityPageKey(item.spaceId, item.pageId));
+      if (!wiki || !currentItem || !wiki.publishedRelease || wiki.publishedReleaseId === null) continue;
+      proofByRevisionKey.set(key, {
+        item,
+        capturedAt: item.release.candidate.createdAt,
+        boundary: {
+          serverWikiId: wiki.id,
+          spaceId: wiki.spaceId,
+          currentReleaseId: wiki.publishedReleaseId,
+          currentReleaseVersion: wiki.publishedRelease.version,
+          currentItem,
+        },
+        contentSlug: wiki.slug,
+        siteSlug: wiki.siteSlug ?? wiki.slug,
+      });
+    }
+    return { constrainedSpaceIds, proofByRevisionKey };
+  }
+
   async getPageLifecycleEvents(
     pageId: string,
     viewer?: WikiAccessViewer,
@@ -1685,85 +1770,99 @@ export class WikiReadService {
         })
       : [];
     const revisionActorById = new Map(revisionActors.map((revision) => [revision.id, revision]));
-    const changeSpaceIds = [...new Set(changes.flatMap((change) => change.spaceId ? [change.spaceId] : []))];
-    const serverWikis = changeSpaceIds.length > 0
-      ? await this.prisma.serverWiki.findMany({
-          where: { spaceId: { in: changeSpaceIds }, status: 'active' },
-          select: {
-            spaceId: true,
-            publicationStatus: true,
-            publishedReleaseId: true,
-            publishedRelease: { select: { publishedAt: true } },
-          },
-        })
-      : [];
-    const publicReleaseCutoffBySpace = new Map<bigint, Date | null>();
-    for (const wiki of serverWikis) {
-      const canPreview = await this.wikiPermissions.canPreviewServerWikiSpace({
-        ...access,
-        spaceId: wiki.spaceId,
-      });
-      if (!canPreview) {
-        publicReleaseCutoffBySpace.set(
-          wiki.spaceId,
-          wiki.publicationStatus === 'published' && wiki.publishedReleaseId !== null
-            ? wiki.publishedRelease?.publishedAt ?? null
-            : null,
-        );
-      }
-    }
+    const activityProjection = await this.publishedActivityProjection([
+      ...changes,
+      ...changes.flatMap((change) => change.previousPublicRevisionId && change.pageId && change.spaceId
+        ? [{ spaceId: change.spaceId, pageId: change.pageId, revisionId: change.previousPublicRevisionId }]
+        : []),
+    ], access);
     const knownNamespaces = new Map<number, string>();
     for (const change of changes) {
       const page = change.pageId ? pageById.get(change.pageId) : null;
       if (page) knownNamespaces.set(page.namespaceId, change.namespaceCode);
     }
     const routePaths = await this.routePaths.preload(pages, knownNamespaces);
-    const readableByPageId = new Map<bigint, boolean>();
-    const historyByPageId = new Map<bigint, boolean>();
+    const readableBySnapshot = new Map<string, boolean>();
+    const historyBySnapshot = new Map<string, boolean>();
     const visible: WikiRecentChangeSummary[] = [];
     let lastScannedId: bigint | null = null;
     for (const change of changes) {
       lastScannedId = change.id;
-      const releaseCutoff = change.spaceId ? publicReleaseCutoffBySpace.get(change.spaceId) : undefined;
-      if (releaseCutoff === null || (releaseCutoff && change.createdAt > releaseCutoff)) continue;
+      const releaseConstrained = Boolean(change.spaceId
+        && activityProjection.constrainedSpaceIds.has(change.spaceId));
+      const publication = change.spaceId && change.pageId && change.revisionId
+        ? activityProjection.proofByRevisionKey.get(activityRevisionKey(
+            change.spaceId,
+            change.pageId,
+            change.revisionId,
+          ))
+        : undefined;
+      if (releaseConstrained && (!publication || change.createdAt > publication.capturedAt)) continue;
       const publicDeletion = change.changeType === 'delete' && change.eventAudience === 'public';
       if (change.pageId) {
-        let readable = readableByPageId.get(change.pageId);
+        const permissionPage = publication
+          ? pageFromServerWikiReleaseItem(publication.item)
+          : pageById.get(change.pageId) ?? null;
+        const permissionKey = publication
+          ? `release:${publication.item.releaseId}:${publication.item.pageId}`
+          : `current:${change.pageId}`;
+        let readable = readableBySnapshot.get(permissionKey);
         if (readable === undefined) {
           try {
             const revision = change.revisionId ? revisionActorById.get(change.revisionId) : null;
             await this.wikiPermissions.assertCanReadPage({
               ...access,
-              page: pageById.get(change.pageId) ?? null,
+              page: permissionPage,
               revision: revision ? { id: revision.id, visibility: revision.visibility } : undefined,
+              publicationProof: publication
+                ? { boundary: publication.boundary, item: publication.item }
+                : undefined,
             });
             readable = true;
           } catch {
             readable = false;
           }
-          readableByPageId.set(change.pageId, readable);
+          readableBySnapshot.set(permissionKey, readable);
         }
         if (!readable && !publicDeletion) continue;
       }
       if (change.changeType === 'delete' && !publicDeletion) continue;
       let canViewDiff = false;
       if (change.pageId && change.revisionId && change.previousPublicRevisionId && change.changeType !== 'delete') {
-        let historyAllowed = historyByPageId.get(change.pageId);
+        const permissionPage = publication
+          ? pageFromServerWikiReleaseItem(publication.item)
+          : pageById.get(change.pageId) ?? null;
+        const permissionKey = publication
+          ? `release:${publication.item.releaseId}:${publication.item.pageId}`
+          : `current:${change.pageId}`;
+        const previousPublication = change.spaceId
+          ? activityProjection.proofByRevisionKey.get(activityRevisionKey(
+              change.spaceId,
+              change.pageId,
+              change.previousPublicRevisionId,
+            ))
+          : undefined;
+        let historyAllowed = historyBySnapshot.get(permissionKey);
         if (historyAllowed === undefined) {
           try {
             await this.wikiPermissions.assertCanUsePageAction({
               ...access,
               action: 'history',
-              page: pageById.get(change.pageId) ?? null
+              page: permissionPage,
+              publicationProof: publication
+                ? { boundary: publication.boundary, item: publication.item }
+                : undefined,
             });
             historyAllowed = true;
           } catch {
             historyAllowed = false;
           }
-          historyByPageId.set(change.pageId, historyAllowed);
+          historyBySnapshot.set(permissionKey, historyAllowed);
         }
         const revisionActor = revisionActorById.get(change.revisionId);
-        canViewDiff = historyAllowed && revisionActor?.visibility === 'public';
+        canViewDiff = historyAllowed
+          && revisionActor?.visibility === 'public'
+          && (!releaseConstrained || previousPublication !== undefined);
       }
       const publicSummary = change.changeType === 'delete'
         ? { summary: '문서 삭제', summaryHidden: false }
@@ -1783,10 +1882,17 @@ export class WikiReadService {
         actorName: profile?.displayName ?? (revisionActor?.actorType === 'ip' ? '익명 기여자' : '알 수 없는 기여자'),
         actorUsername: profile?.username ?? null,
         changeType: change.changeType,
-        title: change.title,
-        namespaceCode: change.namespaceCode,
+        title: publication?.item.title ?? change.title,
+        namespaceCode: publication ? 'server' : change.namespaceCode,
         spaceId: change.spaceId?.toString() ?? null,
-        routePath: change.pageId && pageById.has(change.pageId)
+        routePath: publication
+          ? buildCanonicalServerWikiPath(
+              publication.siteSlug,
+              publication.item.title,
+              publication.contentSlug,
+              '/serverWiki',
+            )
+          : change.pageId && pageById.has(change.pageId)
           ? routePaths.routePath(pageById.get(change.pageId)!, change.namespaceCode)
           : wikiUrl(change.namespaceCode as Parameters<typeof wikiUrl>[0], change.localPath ?? change.title),
         ...publicSummary,
@@ -2319,6 +2425,7 @@ export class WikiReadService {
       this.wikiPermissions,
       input.session ?? input.accountId ?? null,
     );
+    const activityProjection = await this.publishedActivityProjection(changes, access);
     const projection = await this.projectDerivedPagesWithContext(pages, namespaceById, access);
     const pageById = new Map(projection.pages.map((page) => [page.id, page]));
     const routePaths = await this.routePaths.preload(projection.pages, namespaceById);
@@ -2327,16 +2434,42 @@ export class WikiReadService {
     for (const change of changes) {
       lastScannedId = change.id;
       if (!change.pageId) continue;
-      const page = pageById.get(change.pageId);
+      const releaseConstrained = Boolean(change.spaceId
+        && activityProjection.constrainedSpaceIds.has(change.spaceId));
+      const publication = change.spaceId && change.revisionId
+        ? activityProjection.proofByRevisionKey.get(activityRevisionKey(
+            change.spaceId,
+            change.pageId,
+            change.revisionId,
+          ))
+        : undefined;
+      if (releaseConstrained && (!publication || change.createdAt > publication.capturedAt)) continue;
+      const page = publication
+        ? pageFromServerWikiReleaseItem(publication.item)
+        : pageById.get(change.pageId);
       if (!page) continue;
-      const source = projection.sourceByPageId.get(page.id);
-      if (source?.kind === 'release' && (!source.publishedAt || change.createdAt > source.publishedAt)) continue;
       try {
-        await this.wikiPermissions.assertCanReadPage({ ...access, page });
+        await this.wikiPermissions.assertCanReadPage({
+          ...access,
+          page,
+          publicationProof: publication
+            ? { boundary: publication.boundary, item: publication.item }
+            : undefined,
+        });
       } catch {
         continue;
       }
-      const namespace = namespaceById.get(page.namespaceId) ?? change.namespaceCode;
+      const namespace = publication
+        ? 'server'
+        : namespaceById.get(page.namespaceId) ?? change.namespaceCode;
+      const routePath = publication
+        ? buildCanonicalServerWikiPath(
+            publication.siteSlug,
+            publication.item.title,
+            publication.contentSlug,
+            '/serverWiki',
+          )
+        : routePaths.routePath(page, namespace);
       const publicSummary = publicWikiRecentChangeSummary({
         summary: change.summary,
         revisionId: change.revisionId,
@@ -2350,10 +2483,10 @@ export class WikiReadService {
         changeType: change.changeType,
         title: page.displayTitle,
         namespace,
-        routePath: routePaths.routePath(page, namespace),
-        href: change.revisionId && (source?.kind !== 'release' || change.revisionId === page.currentRevisionId)
+        routePath,
+        href: change.revisionId
           ? `/wiki/revision/${change.revisionId.toString()}`
-          : routePaths.routePath(page, namespace),
+          : routePath,
         ...publicSummary,
         isMinor: change.isMinor,
         status: null,
@@ -5034,6 +5167,31 @@ type DerivedPageProjectionSource =
       readonly spaceId: bigint;
       readonly publishedAt: Date | null;
     };
+
+interface PublishedActivityProof {
+  readonly item: ServerWikiReleaseItem;
+  readonly capturedAt: Date;
+  readonly boundary: WikiPublishedPageBoundary;
+  readonly contentSlug: string;
+  readonly siteSlug: string;
+}
+
+interface PublishedActivityProjection {
+  readonly constrainedSpaceIds: ReadonlySet<bigint>;
+  readonly proofByRevisionKey: ReadonlyMap<string, PublishedActivityProof>;
+}
+
+function emptyPublishedActivityProjection(): PublishedActivityProjection {
+  return { constrainedSpaceIds: new Set(), proofByRevisionKey: new Map() };
+}
+
+function activityPageKey(spaceId: bigint, pageId: bigint): string {
+  return `${spaceId}:${pageId}`;
+}
+
+function activityRevisionKey(spaceId: bigint, pageId: bigint, revisionId: bigint): string {
+  return `${spaceId}:${pageId}:${revisionId}`;
+}
 
 type BacklinkCursor = {
   readonly direction: 'prev' | 'next';
