@@ -22,6 +22,7 @@ import { ServerWikiHeader } from './server-wiki-header';
 import { WikiPageTools } from './wiki-page-tools';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
+import { WikiReaderInteractionHydrator } from './wiki-reader-interaction-hydrator';
 import { serverWikiDocumentTitle } from '../../lib/server-wiki-navigation.mjs';
 import { ServerWikiDirectoryOverview } from './server-wiki-directory-overview';
 import {
@@ -177,6 +178,7 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
 
           <div id={contentId} className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: rewriteServerWikiHtmlLinks(page.html, routeContext) }} />
           <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
+          <WikiReaderInteractionHydrator targetId={contentId} revisionId={page.revision.id} />
 
           {startHereDocuments.length > 0 ? (
             <section className="mt-10 border-t border-[#e8e8e8] pt-8" aria-labelledby="server-wiki-start-here-title">

@@ -5,6 +5,7 @@ import type { WikiPageResponse } from '../../lib/wiki-api';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath, buildWikiHistoryPath, buildWikiRevisionPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
+import { WikiReaderInteractionHydrator } from './wiki-reader-interaction-hydrator';
 
 interface WikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -97,6 +98,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
           dangerouslySetInnerHTML={{ __html: page.html }}
         />
         <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
+        <WikiReaderInteractionHydrator targetId={contentId} revisionId={page.revision.id} />
         <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
           {page.namespace === 'server' && page.serverDirectoryPath ? (
             <Link

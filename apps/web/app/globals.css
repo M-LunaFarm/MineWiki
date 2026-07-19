@@ -1498,6 +1498,69 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   .wiki-rendered .wiki-heading-content > :first-child {
     @apply mt-3;
   }
+  .wiki-footnote-popover {
+    position: fixed;
+    z-index: 80;
+    max-height: min(18rem, calc(100dvh - 1.5rem));
+    overflow: auto;
+    border: 1px solid rgb(148 163 184 / 0.35);
+    border-radius: 0.75rem;
+    background: #111821;
+    padding: 0.875rem 1rem;
+    color: #e2e8f0;
+    box-shadow: 0 18px 45px rgb(0 0 0 / 0.28);
+    font-size: 0.875rem;
+    line-height: 1.55;
+  }
+  .wiki-footnote-popover[hidden] {
+    display: none;
+  }
+  .wiki-footnote-dialog {
+    width: min(32rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow: auto;
+    border: 1px solid rgb(148 163 184 / 0.35);
+    border-radius: 1rem;
+    background: #111821;
+    padding: 0;
+    color: #e2e8f0;
+    box-shadow: 0 24px 70px rgb(0 0 0 / 0.45);
+  }
+  .wiki-footnote-dialog::backdrop {
+    background: rgb(2 6 23 / 0.72);
+  }
+  .wiki-footnote-dialog > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid rgb(148 163 184 / 0.2);
+    padding: 0.875rem 1rem;
+  }
+  .wiki-footnote-dialog > header h2 {
+    font-size: 1rem;
+    font-weight: 700;
+  }
+  .wiki-footnote-dialog > header button {
+    min-height: 2.75rem;
+    border: 1px solid rgb(148 163 184 / 0.3);
+    border-radius: 0.625rem;
+    padding: 0 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+  .wiki-footnote-dialog-content {
+    padding: 1rem;
+    font-size: 0.925rem;
+    line-height: 1.65;
+  }
+  html[data-theme='light'] .wiki-footnote-popover,
+  html[data-theme='light'] .wiki-footnote-dialog,
+  .wiki-footnote-light {
+    border-color: #d8dee9;
+    background: #fff;
+    color: #333;
+  }
   .wiki-rendered .front-wiki-component {
     @apply border-t border-white/[0.07] py-6 first:border-t-0 first:pt-0 last:pb-0;
   }
