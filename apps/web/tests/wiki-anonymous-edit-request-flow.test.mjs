@@ -13,6 +13,9 @@ test('anonymous wiki editing is captcha-bound and grants controls only through t
   assert.match(editor, /captchaToken: anonymousReviewEnabled \? captchaToken/u);
   assert.match(editor, /IP 주소는 악용 방지와 감사 목적으로만 제한 보관/u);
   assert.match(editor, /account && \(page \|\| createContext\?\.canCreate\)/u);
+  assert.doesNotMatch(editor, /disabled=\{previewing \|\| !account\}/u);
+  assert.doesNotMatch(editor, /로그인 후 미리보기|로그인 필요/u);
+  assert.match(editor, /disabled=\{previewing\}/u);
   assert.match(api, /createWikiEditRequest\(input: \{[^}]*captchaToken\?: string/u);
   assert.match(editor, /내 요청 보기/u);
   assert.match(api, /claimWikiEditRequest/u);

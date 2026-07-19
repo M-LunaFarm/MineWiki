@@ -743,11 +743,11 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               <button
                 type="button"
                 onClick={renderPreview}
-                disabled={previewing || !account}
+                disabled={previewing}
                 className="inline-flex min-h-11 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40 disabled:opacity-50"
               >
                 {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
-                {!account ? '로그인 후 미리보기' : previewHtml ? '새로고침' : '미리보기'}
+                {previewHtml ? '새로고침' : '미리보기'}
               </button>
             </div>
             <div
@@ -984,11 +984,11 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               <button
                 type="button"
                 onClick={renderPreview}
-                disabled={previewing || !account}
+                disabled={previewing}
                 className="inline-flex h-8 items-center gap-2 rounded-md border border-white/10 px-3 text-xs font-semibold text-slate-200 hover:border-emerald-300/40"
               >
                 {previewing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5" />}
-                {account ? '보기' : '로그인 필요'}
+                {previewHtml ? '새로고침' : '미리보기'}
               </button>
             </div>
             <div

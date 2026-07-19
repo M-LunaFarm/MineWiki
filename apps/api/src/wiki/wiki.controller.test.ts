@@ -129,6 +129,7 @@ test('wiki create context forwards the authenticated target before a new documen
 
 test('wiki preview forwards the authenticated session and stable page context', async () => {
   const session = { userId: 'account-1', requestIp: '192.0.2.20' } as SessionPayload;
+  const request = { sessionPayload: session } as FastifyRequest;
   let previewInput: unknown;
   const controller = new WikiController(
     {} as WikiProfileService,
@@ -149,7 +150,7 @@ test('wiki preview forwards the authenticated session and stable page context', 
     pageId: '7',
     namespace: 'main',
     localPath: '대문',
-  }, session);
+  }, request);
 
   assert.deepEqual(previewInput, {
     contentRaw: '[include(틀:안내)]',
@@ -157,6 +158,37 @@ test('wiki preview forwards the authenticated session and stable page context', 
     viewer: session,
   });
   assert.equal(response.html, '<p>preview</p>');
+});
+
+test('wiki preview preserves anonymous access instead of requiring an account', async () => {
+  let previewInput: unknown;
+  const controller = new WikiController(
+    {} as WikiProfileService,
+    {} as WikiReadService,
+    {
+      async preview(contentRaw: string, context: unknown, viewer: unknown) {
+        previewInput = { contentRaw, context, viewer };
+        return { html: '<p>anonymous preview</p>', links: [], categories: [], errors: [], blockingErrors: [] };
+      },
+    } as unknown as WikiEditService,
+    captchaStub,
+    pageSwapStub,
+    usernameStub,
+  );
+
+  const response = await controller.previewPage({
+    contentRaw: '검토 요청 미리보기',
+    pageId: '7',
+    namespace: 'main',
+    localPath: '대문',
+  }, {} as FastifyRequest);
+
+  assert.deepEqual(previewInput, {
+    contentRaw: '검토 요청 미리보기',
+    context: { pageId: '7', namespace: 'main', localPath: '대문' },
+    viewer: null,
+  });
+  assert.equal(response.html, '<p>anonymous preview</p>');
 });
 
 test('wiki move controller forwards additive destination namespace and space fields', async () => {
