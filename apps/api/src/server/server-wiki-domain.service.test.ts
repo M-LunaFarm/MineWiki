@@ -65,6 +65,33 @@ test('public domain routing exposes only a canonical active published release', 
   await assert.rejects(service.resolveActiveHost('docs.example.com'), NotFoundException);
 });
 
+test('provisioner domain discovery is bounded and cursor paginated', async () => {
+  const calls: unknown[] = [];
+  const service = new ServerWikiDomainService({
+    serverWikiDomain: {
+      async findMany(input: unknown) {
+        calls.push(input);
+        return [
+          { id: 18n, hostname: 'one.example.com', status: 'verified', version: 2 },
+          { id: 19n, hostname: 'two.example.com', status: 'active', version: 4 },
+        ];
+      },
+    },
+  } as never, domainFixture().dns);
+
+  assert.deepEqual(await service.listProvisioningDomains('17', 1), {
+    items: [{ hostname: 'one.example.com', status: 'verified', version: 2 }],
+    nextCursor: '18',
+  });
+  assert.deepEqual(calls, [{
+    where: { id: { gt: 17n } },
+    orderBy: { id: 'asc' },
+    take: 2,
+    select: { id: true, hostname: true, status: true, version: true },
+  }]);
+  await assert.rejects(service.listProvisioningDomains('bad', 10), BadRequestException);
+});
+
 function domainFixture() {
   const server = {
     id: SERVER_ID,

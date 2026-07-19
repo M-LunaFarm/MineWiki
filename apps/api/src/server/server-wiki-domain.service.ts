@@ -287,30 +287,62 @@ export class ServerWikiDomainService {
     const current = await this.prisma.serverWikiDomain.findUnique({ where: { hostname } });
     if (!current || !['verified', 'provisioning', 'active'].includes(current.status)) throw domainNotFound();
     if (current.version !== expectedVersion) throw staleDomainVersion();
-    const updated = await this.prisma.serverWikiDomain.updateMany({
-      where: { id: current.id, version: expectedVersion, status: { in: ['verified', 'provisioning', 'active'] } },
-      data: {
-        status: 'active',
-        version: { increment: 1 },
-        activatedAt: current.activatedAt ?? now,
-        tlsReadyAt: now,
-        lastCheckedAt: now,
-        nextCheckAt: new Date(now.getTime() + RECHECK_INTERVAL_MS),
-        consecutiveFailures: 0,
-        disabledAt: null,
-        updatedAt: now,
-      },
+    const saved = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.serverWikiDomain.updateMany({
+        where: { id: current.id, version: expectedVersion, status: { in: ['verified', 'provisioning', 'active'] } },
+        data: {
+          status: 'active',
+          version: { increment: 1 },
+          activatedAt: current.activatedAt ?? now,
+          tlsReadyAt: now,
+          lastCheckedAt: now,
+          nextCheckAt: new Date(now.getTime() + RECHECK_INTERVAL_MS),
+          consecutiveFailures: 0,
+          disabledAt: null,
+          updatedAt: now,
+        },
+      });
+      if (updated.count !== 1) throw staleDomainVersion();
+      const active = await tx.serverWikiDomain.findUniqueOrThrow({ where: { id: current.id } });
+      await writeAuditEvent(tx, 'server.wiki_domain.activate', {
+        category: 'server', subjectType: 'server_wiki', subjectId: current.serverWikiId,
+        metadata: { hostname, version: active.version, provisioner: 'nginx-certbot' }, createdAt: now,
+      });
+      return active;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15_000 });
+    return response(saved, this.routingTarget, null);
+  }
+
+  async listProvisioningDomains(cursorInput?: string, limitInput = 100): Promise<{
+    readonly items: ReadonlyArray<{ readonly hostname: string; readonly status: string; readonly version: number }>;
+    readonly nextCursor: string | null;
+  }> {
+    const limit = Number.isFinite(limitInput) ? Math.max(1, Math.min(500, Math.trunc(limitInput))) : 100;
+    let cursor: bigint | undefined;
+    if (cursorInput?.trim()) {
+      try { cursor = BigInt(cursorInput); } catch { throw new BadRequestException('도메인 cursor가 올바르지 않습니다.'); }
+      if (cursor <= 0n) throw new BadRequestException('도메인 cursor가 올바르지 않습니다.');
+    }
+    const rows = await this.prisma.serverWikiDomain.findMany({
+      where: cursor ? { id: { gt: cursor } } : undefined,
+      orderBy: { id: 'asc' },
+      take: limit + 1,
+      select: { id: true, hostname: true, status: true, version: true },
     });
-    if (updated.count !== 1) throw staleDomainVersion();
-    return response(await this.prisma.serverWikiDomain.findUniqueOrThrow({ where: { id: current.id } }), this.routingTarget, null);
+    const page = rows.slice(0, limit);
+    return {
+      items: page.map(({ hostname, status, version }) => ({ hostname, status, version })),
+      nextCursor: rows.length > limit ? page.at(-1)?.id.toString() ?? null : null,
+    };
   }
 
   async revalidateDue(limit = 50): Promise<{ readonly checked: number; readonly disabled: number }> {
     const now = new Date();
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.trunc(limit))) : 50;
     const due = await this.prisma.serverWikiDomain.findMany({
       where: { status: { in: ['verified', 'provisioning', 'active'] }, nextCheckAt: { lte: now } },
       orderBy: { nextCheckAt: 'asc' },
-      take: Math.max(1, Math.min(100, Math.trunc(limit))),
+      take: safeLimit,
     });
     let disabled = 0;
     for (const domain of due) {

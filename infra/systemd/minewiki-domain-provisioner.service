@@ -1,0 +1,13 @@
+[Unit]
+Description=Provision MineWiki server wiki custom-domain TLS and Nginx routes
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/var/www/MineWiki
+Environment=MINEWIKI_ENV_FILE=/var/www/MineWiki/.env
+ExecStart=/usr/bin/flock -n /run/minewiki-domain-provisioner.lock /usr/bin/node scripts/server-wiki-domain-provisioner.mjs
+PrivateTmp=true
+NoNewPrivileges=true

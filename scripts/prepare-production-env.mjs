@@ -51,6 +51,7 @@ const values = {
   WEBAUTHN_RP_ID: 'minewiki.kr',
   INTERNAL_API_BASE_URL: 'http://127.0.0.1:4321',
   SERVER_WIKI_DOMAIN_TARGET: 'domains.minewiki.kr',
+  SERVER_WIKI_CERTBOT_EMAIL: 'support@minewiki.kr',
   API_HOST: '127.0.0.1',
   API_PORT: '4321',
   DATABASE_URL: legacy.DATABASE_URL,

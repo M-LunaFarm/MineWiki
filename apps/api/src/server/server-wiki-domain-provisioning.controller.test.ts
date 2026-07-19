@@ -22,3 +22,20 @@ test('domain provisioning controller requires a derived constant-time bearer tok
   assert.deepEqual(activated, ['docs.example.com', 2]);
   assert.deepEqual(result, { domain: { status: 'active' } });
 });
+
+test('domain provisioning controller protects paginated domain discovery', async () => {
+  const key = 'test-app-encryption-key-with-enough-entropy';
+  let listed: unknown = null;
+  const controller = new ServerWikiDomainProvisioningController(
+    { listProvisioningDomains(...args: unknown[]) { listed = args; return { items: [], nextCursor: null }; } } as never,
+    { get() { return key; } } as never,
+  );
+  assert.throws(() => controller.list(undefined, undefined, undefined), UnauthorizedException);
+  const result = controller.list(
+    `Bearer ${deriveServerWikiDomainProvisionerToken(key)}`,
+    '17',
+    '250',
+  );
+  assert.deepEqual(listed, ['17', 250]);
+  assert.deepEqual(result, { items: [], nextCursor: null });
+});

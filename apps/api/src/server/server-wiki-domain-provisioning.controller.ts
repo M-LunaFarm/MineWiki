@@ -1,4 +1,4 @@
-import { Controller, Headers, Param, ParseIntPipe, Post, Query, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Headers, Param, ParseIntPipe, Post, Query, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { ServerWikiDomainService } from './server-wiki-domain.service';
@@ -27,6 +27,16 @@ export class ServerWikiDomainProvisioningController {
   ) {
     this.assertProvisioner(authorization);
     return this.domains.revalidateDue(limit?.trim() ? Number(limit) : undefined);
+  }
+
+  @Get('domains')
+  list(
+    @Headers('authorization') authorization: string | undefined,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
+    this.assertProvisioner(authorization);
+    return this.domains.listProvisioningDomains(cursor, limit?.trim() ? Number(limit) : undefined);
   }
 
   private assertProvisioner(authorization: string | undefined): void {

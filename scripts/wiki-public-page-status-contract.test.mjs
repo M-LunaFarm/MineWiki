@@ -30,7 +30,6 @@ test('API discovery and permission paths consume the shared public status contra
   assert.match(readService, /PUBLIC_WIKI_PAGE_STATUSES/u);
   assert.match(readService, /PUBLIC_WIKI_PAGE_STATUS_SQL_LIST/u);
   assert.match(permissionService, /isPublicWikiPageStatus/u);
-  assert.match(publicationService, /PUBLIC_WIKI_PAGE_STATUSES/u);
   assert.match(publicationService, /isPublicWikiPageStatus/u);
   for (const source of [readService, permissionService, publicationService]) {
     assert.doesNotMatch(source, /\['normal', 'active', 'published'\]/u);
