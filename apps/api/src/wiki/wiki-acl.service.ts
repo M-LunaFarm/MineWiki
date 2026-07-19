@@ -448,9 +448,6 @@ export class WikiAclService {
       : role === 'server_manager'
         ? ['owner', 'manager']
         : ['owner', 'manager', 'editor'];
-    if (await this.hasSubwikiRole(store, actor.profileId, spaceId, allowedRoles)) {
-      return true;
-    }
     const serverWiki = await store.serverWiki.findFirst({
       where: {
         spaceId,
@@ -458,16 +455,17 @@ export class WikiAclService {
       },
       select: { voteServerId: true, createdBy: true }
     });
-    if (serverWiki?.createdBy === actor.profileId) {
-      return true;
-    }
     if (!serverWiki?.voteServerId) {
       return false;
     }
     const server = await store.server.findUnique({
       where: { id: serverWiki.voteServerId },
-      select: { ownerAccountId: true }
+      select: { ownerAccountId: true, ownershipChallengeSuspendedAt: true }
     });
+    if (server?.ownershipChallengeSuspendedAt) return false;
+    if (await this.hasSubwikiRole(store, actor.profileId, spaceId, allowedRoles)) {
+      return true;
+    }
     return server?.ownerAccountId === actor.accountId;
   }
 

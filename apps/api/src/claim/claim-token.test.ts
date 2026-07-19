@@ -2,6 +2,24 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ClaimService, hashClaimToken, matchesClaimToken } from './claim.service';
 import { decryptAppSecret } from '../common/secret-codec';
+import {
+  SERVER_OWNERSHIP_CHALLENGE_GRACE_MS,
+  serverOwnershipVerificationTransition,
+} from '@minewiki/schemas';
+
+function ownershipServer(overrides: Record<string, unknown> = {}) {
+  return {
+    ownerAccountId: null,
+    registrantAccountId: null,
+    listingStatus: 'pending',
+    ownershipVerificationFailures: 0,
+    ownershipChallengeStartedAt: null,
+    ownershipChallengeExpiresAt: null,
+    ownershipChallengeSuspendedAt: null,
+    ownershipLastFailureAt: null,
+    ...overrides,
+  };
+}
 
 test('claim tokens are stored as deterministic one-way hashes', () => {
   const token = 'claim-token-that-must-not-be-stored';
@@ -16,6 +34,48 @@ test('claim tokens are stored as deterministic one-way hashes', () => {
 test('legacy plaintext claim tokens remain verifiable during rotation', () => {
   assert.equal(matchesClaimToken('legacy-token', 'legacy-token'), true);
   assert.equal(matchesClaimToken('legacy-token', 'wrong-token'), false);
+});
+
+test('ownership challenge counts only spaced confirmed proof absence and requires a post-grace failure', () => {
+  const owner = 'account-owner';
+  const start = new Date('2026-07-01T00:00:00.000Z');
+  let state = ownershipServer({ ownerAccountId: owner });
+
+  const inconclusive = serverOwnershipVerificationTransition(state, 'inconclusive', start);
+  assert.equal(inconclusive.ownershipVerificationFailures, 0);
+
+  for (const hours of [0, 6, 12]) {
+    const checkedAt = new Date(start.getTime() + hours * 60 * 60 * 1000);
+    const transition = serverOwnershipVerificationTransition(state, 'confirmed_absent', checkedAt);
+    state = { ...state, ...transition };
+  }
+  assert.equal(state.ownershipVerificationFailures, 3);
+  assert.equal((state.ownershipChallengeStartedAt as Date).toISOString(), new Date(start.getTime() + 12 * 60 * 60 * 1000).toISOString());
+  assert.equal((state.ownershipChallengeExpiresAt as Date).toISOString(), new Date(
+    start.getTime() + 12 * 60 * 60 * 1000 + SERVER_OWNERSHIP_CHALLENGE_GRACE_MS,
+  ).toISOString());
+
+  const beforeGrace = serverOwnershipVerificationTransition(
+    state,
+    'confirmed_absent',
+    new Date((state.ownershipChallengeExpiresAt as Date).getTime() - 1),
+  );
+  assert.equal(beforeGrace.challengeMatured, false);
+  const afterGrace = serverOwnershipVerificationTransition(
+    state,
+    'confirmed_absent',
+    new Date((state.ownershipChallengeExpiresAt as Date).getTime() + 1),
+  );
+  assert.equal(afterGrace.challengeMatured, true);
+
+  const restored = serverOwnershipVerificationTransition(
+    { ...state, ownershipChallengeSuspendedAt: new Date() },
+    'verified',
+    new Date(),
+  );
+  assert.equal(restored.ownershipVerificationFailures, 0);
+  assert.equal(restored.ownershipChallengeExpiresAt, null);
+  assert.equal(restored.ownershipLastFailureAt, null);
 });
 
 test('token issuance stores a hash plus encrypted proof and reveals the token once', async () => {
@@ -42,6 +102,7 @@ test('token issuance stores a hash plus encrypted proof and reveals the token on
       findMany: async () => [],
     },
     server: {
+      findUnique: async () => ownershipServer(),
       updateMany: async ({ data }: { data: Record<string, unknown> }) => {
         leaseUpdate = data;
         return { count: 1 };
@@ -130,6 +191,101 @@ test('token issuance rechecks the registration lease inside the write transactio
   assert.equal(tokenWrites, 0);
 });
 
+test('a suspended ownership challenge admits one fresh takeover claimant', async () => {
+  const suspendedAt = new Date('2026-07-19T00:00:00.000Z');
+  const server = ownershipServer({
+    ownerAccountId: 'account-old',
+    ownershipChallengeSuspendedAt: suspendedAt,
+  });
+  const leaseWrites: Array<Record<string, unknown>> = [];
+  let tokenAccountId: unknown = null;
+  const prisma = {
+    server: {
+      findUnique: async () => server,
+      updateMany: async (input: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        leaseWrites.push(input);
+        return { count: 1 };
+      },
+      update: async () => ({}),
+    },
+    serverClaimMethod: {
+      upsert: async ({ create }: { create: Record<string, unknown> }) => {
+        tokenAccountId = create.accountId;
+        return { ...create, id: 'method-1', verifiedAt: null, note: 'token_issued' };
+      },
+      findMany: async () => [],
+    },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+  };
+  const service = new ClaimService({ ensureExists: async () => server } as never, prisma as never);
+
+  const issued = await service.issueTokens('server-1', 'account-new', ['dns']);
+
+  assert.ok(issued[0]?.token);
+  assert.equal(tokenAccountId, 'account-new');
+  assert.deepEqual(leaseWrites[0]?.where, {
+    id: 'server-1',
+    ownerAccountId: 'account-old',
+    ownershipChallengeSuspendedAt: { not: null },
+  });
+  assert.equal(
+    (leaseWrites[0]?.data as Record<string, unknown> | undefined)?.registrantAccountId,
+    'account-new',
+  );
+});
+
+test('verified takeover replaces the suspended owner while keeping authority locked for wiki reconciliation', async () => {
+  const suspendedAt = new Date('2026-07-19T00:00:00.000Z');
+  const current = ownershipServer({
+    ownerAccountId: 'account-old',
+    registrantAccountId: 'account-new',
+    listingStatus: 'suspended',
+    ownershipVerificationFailures: 4,
+    ownershipChallengeStartedAt: new Date('2026-07-10T00:00:00.000Z'),
+    ownershipChallengeExpiresAt: new Date('2026-07-17T00:00:00.000Z'),
+    ownershipChallengeSuspendedAt: suspendedAt,
+    ownershipLastFailureAt: suspendedAt,
+  });
+  const ownershipWrites: Array<Record<string, unknown>> = [];
+  const serverUpdates: Array<Record<string, unknown>> = [];
+  const snapshot = {
+    id: 'claim-method-new', serverId: 'server-1', accountId: 'account-new', method: 'dns',
+    token: hashClaimToken('proof'), issuedAt: new Date(), version: 1,
+  };
+  const prisma = {
+    serverClaimMethod: {
+      updateMany: async () => ({ count: 1 }),
+      findMany: async () => [{ method: 'dns', status: 'verified' }],
+    },
+    server: {
+      findUnique: async () => current,
+      updateMany: async (input: Record<string, unknown>) => {
+        ownershipWrites.push(input);
+        return { count: 1 };
+      },
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        serverUpdates.push(data);
+        return {};
+      },
+    },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+  };
+  const service = new ClaimService({ ensureExists: async () => current } as never, prisma as never);
+
+  assert.equal(await service.applyVerificationResult(snapshot, {
+    status: 'verified', checkedAt: new Date().toISOString(), note: 'dns_token_confirmed',
+  }), true);
+  assert.equal((ownershipWrites[0]?.data as Record<string, unknown>)?.ownerAccountId, 'account-new');
+  assert.deepEqual((ownershipWrites[0]?.where as { OR: unknown[] }).OR.at(-1), {
+    ownerAccountId: 'account-old',
+    registrantAccountId: 'account-new',
+    ownershipChallengeSuspendedAt: { not: null },
+  });
+  assert.equal(serverUpdates[0]?.ownershipVerificationFailures, 0);
+  assert.equal(serverUpdates[0]?.ownershipChallengeSuspendedAt, suspendedAt);
+  assert.equal(serverUpdates[0]?.listingStatus, 'suspended');
+});
+
 test('successful ownership verification promotes registrant to owner atomically', async () => {
   const updates: Array<Record<string, unknown>> = [];
   const verifiedMethod = {
@@ -151,6 +307,7 @@ test('successful ownership verification promotes registrant to owner atomically'
       findMany: async () => [verifiedMethod],
     },
     server: {
+      findUnique: async () => ownershipServer(),
       updateMany: async ({ data }: { data: Record<string, unknown> }) => {
         updates.push(data);
         return { count: 1 };
@@ -202,6 +359,7 @@ test('legacy verified plugin rows cannot preserve a public verification grade', 
       ],
     },
     server: {
+      findUnique: async () => ownershipServer(),
       update: async ({ data }: { data: Record<string, unknown> }) => {
         gradeUpdates.push(data);
         return {};
@@ -223,7 +381,16 @@ test('legacy verified plugin rows cannot preserve a public verification grade', 
     checkedAt: new Date().toISOString(),
   });
 
-  assert.deepEqual(gradeUpdates, [{ verificationGrade: 'Unverified', verifiedAt: null }]);
+  assert.deepEqual(gradeUpdates, [{
+    verificationGrade: 'Unverified',
+    verifiedAt: null,
+    ownershipVerificationFailures: 0,
+    ownershipChallengeStartedAt: null,
+    ownershipChallengeExpiresAt: null,
+    ownershipLastFailureAt: null,
+    ownershipChallengeSuspendedAt: null,
+    listingStatus: undefined,
+  }]);
   assert.equal(listingUpdates, 0);
 });
 
@@ -244,6 +411,7 @@ test('stale claim verification result cannot promote an owner after proof rotati
       findMany: async () => [],
     },
     server: {
+      findUnique: async () => ownershipServer(),
       updateMany: async () => {
         ownershipUpdates += 1;
         return { count: 1 };
@@ -291,6 +459,7 @@ test('pending claim tokens expire 24 hours after issuance and cannot be verified
       },
     },
     server: {
+      findUnique: async () => ownershipServer(),
       update: async () => ({}),
     },
     $transaction: async (operations: Array<Promise<unknown>>) => Promise.all(operations),

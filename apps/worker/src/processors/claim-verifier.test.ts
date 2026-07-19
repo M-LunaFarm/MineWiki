@@ -11,6 +11,20 @@ function transactionMock<T extends object>(prisma: T): T & {
   });
 }
 
+function ownershipServer(overrides: Record<string, unknown> = {}) {
+  return {
+    ownerAccountId: null,
+    registrantAccountId: null,
+    listingStatus: 'pending',
+    ownershipVerificationFailures: 0,
+    ownershipChallengeStartedAt: null,
+    ownershipChallengeExpiresAt: null,
+    ownershipChallengeSuspendedAt: null,
+    ownershipLastFailureAt: null,
+    ...overrides,
+  };
+}
+
 test('worker decrypts the automatic verification proof without using its hash', () => {
   const previousKey = process.env.APP_ENCRYPTION_KEY;
   process.env.APP_ENCRYPTION_KEY = 'claim-worker-test-key';
@@ -87,6 +101,7 @@ test('stale pending proof expires without performing an external check', async (
       findMany: async () => [{ method: 'dns', status: 'expired' }],
     },
     server: {
+      findUnique: async () => ownershipServer(),
       update: async () => {
         serverUpdates += 1;
         return {};
@@ -135,6 +150,7 @@ test('proof rotation during verification discards the stale result', async () =>
       findMany: async () => [],
     },
     server: {
+      findUnique: async () => ownershipServer(),
       update: async () => {
         serverUpdates += 1;
         return {};
@@ -184,6 +200,7 @@ test('successful verification atomically assigns ownership before activating a p
       findMany: async () => [{ method: 'dns', status: 'verified' }],
     },
     server: {
+      findUnique: async () => ownershipServer({ registrantAccountId: 'account-1' }),
       update: async () => ({}),
       updateMany: async (query: unknown) => {
         listingUpdates.push(query);
@@ -233,6 +250,72 @@ test('successful verification atomically assigns ownership before activating a p
   ]);
 });
 
+test('worker keeps a verified takeover suspended until wiki ownership reconciliation succeeds', async () => {
+  const fixedNow = new Date('2026-07-19T12:00:00.000Z');
+  const suspendedAt = new Date('2026-07-19T00:00:00.000Z');
+  const ownershipWrites: Array<Record<string, unknown>> = [];
+  const serverWrites: Array<Record<string, unknown>> = [];
+  const provisionedServers: string[] = [];
+  const record = {
+    id: 'claim-method-takeover',
+    serverId: 'server-1',
+    accountId: 'account-new',
+    method: 'dns',
+    version: 1,
+    token: 'proof-a',
+    tokenCiphertext: null,
+    issuedAt: new Date(fixedNow.getTime() - 60_000),
+    status: 'pending',
+    verifiedAt: null,
+  };
+  const prisma = transactionMock({
+    serverClaimMethod: {
+      findUnique: async () => record,
+      updateMany: async () => ({ count: 1 }),
+      findMany: async () => [{ method: 'dns', status: 'verified' }],
+    },
+    server: {
+      findUnique: async () => ownershipServer({
+        ownerAccountId: 'account-old',
+        registrantAccountId: 'account-new',
+        listingStatus: 'suspended',
+        ownershipChallengeSuspendedAt: suspendedAt,
+      }),
+      update: async (query: Record<string, unknown>) => {
+        serverWrites.push(query);
+        return {};
+      },
+      updateMany: async (query: Record<string, unknown>) => {
+        ownershipWrites.push(query);
+        return { count: 1 };
+      },
+    },
+  });
+
+  const result = await createClaimVerifier(prisma as never, {
+    now: () => fixedNow,
+    runVerificationCheck: async () => ({
+      status: 'verified',
+      checkedAt: fixedNow.toISOString(),
+      note: 'dns_token_confirmed',
+    }),
+    provisionServerWiki: async (serverId) => {
+      provisionedServers.push(serverId);
+    },
+  }).verify({
+    serverId: 'server-1',
+    method: 'dns',
+    initiatedAt: fixedNow.toISOString(),
+  });
+
+  assert.equal(result.status, 'verified');
+  assert.equal((ownershipWrites[0]?.data as Record<string, unknown>)?.ownerAccountId, 'account-new');
+  assert.equal((ownershipWrites[0]?.data as Record<string, unknown>)?.registrantAccountId, 'account-new');
+  assert.equal((serverWrites[0]?.data as Record<string, unknown>)?.ownershipChallengeSuspendedAt, suspendedAt);
+  assert.equal((serverWrites[0]?.data as Record<string, unknown>)?.listingStatus, 'suspended');
+  assert.deepEqual(provisionedServers, ['server-1']);
+});
+
 test('successful verification refuses to activate a listing owned by another account', async () => {
   const fixedNow = new Date('2026-07-12T12:00:00.000Z');
   let listingActivated = false;
@@ -254,6 +337,7 @@ test('successful verification refuses to activate a listing owned by another acc
       findMany: async () => [{ method: 'dns', status: 'verified' }],
     },
     server: {
+      findUnique: async () => ownershipServer({ ownerAccountId: 'account-other' }),
       update: async () => ({}),
       updateMany: async (query: { data: { listingStatus?: string } }) => {
         if (query.data.listingStatus === 'active') listingActivated = true;
@@ -306,6 +390,7 @@ test('legacy verified plugin rows cannot activate a listing after a supported ch
       ],
     },
     server: {
+      findUnique: async () => ownershipServer({ ownerAccountId: 'account-1', listingStatus: 'active' }),
       update: async (query: unknown) => {
         gradeUpdates.push(query);
         return {};
@@ -331,9 +416,9 @@ test('legacy verified plugin rows cannot activate a listing after a supported ch
   });
 
   assert.equal(result.status, 'failed');
-  assert.deepEqual(gradeUpdates, [{
-    where: { id: 'server-1' },
-    data: { verificationGrade: 'Unverified', verifiedAt: null },
-  }]);
+  const gradeUpdate = gradeUpdates[0] as { data?: Record<string, unknown> };
+  assert.equal(gradeUpdate.data?.verificationGrade, 'Unverified');
+  assert.equal(gradeUpdate.data?.ownershipVerificationFailures, 1);
+  assert.ok(gradeUpdate.data?.ownershipLastFailureAt instanceof Date);
   assert.deepEqual(listingUpdates, []);
 });

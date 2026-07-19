@@ -858,23 +858,24 @@ export class ServerService {
     options: ServerWikiLinkOptions = {},
   ): Promise<ServerWikiLinkResponse> {
     const server = await this.ensureExists(serverId);
+    const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
     const existing = await this.findServerWikiForServer(server.id, server.wikiSpaceId);
     if (existing) {
       if (serverWikiIdentityConflicts(existing, server)) {
         throw new ConflictException('Server wiki identity is inconsistent and requires repair.');
       }
-      if (server.wikiSpaceId && server.wikiPageId && server.wikiSlug) {
-        return toServerWikiLinkResponse(server, existing);
+      const reconciledServer = await this.reconcileClaimedServerWikiOwner(server, existing, actor.id);
+      if (reconciledServer.wikiSpaceId && reconciledServer.wikiPageId && reconciledServer.wikiSlug) {
+        return toServerWikiLinkResponse(reconciledServer, existing);
       }
       return this.linkServerWiki(
-        server.id,
+        reconciledServer.id,
         { serverWikiId: existing.id.toString() },
         accountId,
         options,
       );
     }
 
-    const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
     const now = new Date();
     let slug = await this.generateUniqueServerWikiSlug(
       server.wikiSlug ?? server.shortCode ?? server.joinHost ?? server.name,
@@ -1043,6 +1044,14 @@ export class ServerService {
           wikiSpaceId: space.id,
           wikiPageId: page.id,
           wikiSlug: slug,
+          ownershipVerificationFailures: 0,
+          ownershipChallengeStartedAt: null,
+          ownershipChallengeExpiresAt: null,
+          ownershipChallengeSuspendedAt: null,
+          ownershipLastFailureAt: null,
+          listingStatus: 'active',
+          registrantAccountId: null,
+          registrationLeaseExpiresAt: null,
         },
       });
           return { server: updatedServer, serverWiki };
@@ -1078,6 +1087,73 @@ export class ServerService {
       }
     });
     return response;
+  }
+
+  private async reconcileClaimedServerWikiOwner(
+    server: Server,
+    serverWiki: ServerWiki,
+    ownerProfileId: bigint,
+  ): Promise<Server> {
+    if (!server.ownershipChallengeSuspendedAt) return server;
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM \`Server\` WHERE id = ${server.id} FOR UPDATE
+      `;
+      const current = await tx.server.findUnique({ where: { id: server.id } });
+      if (!current?.ownerAccountId || !current.ownershipChallengeSuspendedAt) {
+        if (!current) throw new NotFoundException(`Server ${server.id} not found`);
+        return current;
+      }
+      await tx.$queryRaw<Array<{ id: bigint }>>`
+        SELECT id FROM wiki_spaces WHERE id = ${serverWiki.spaceId} FOR UPDATE
+      `;
+      const linkedWiki = await tx.serverWiki.findUnique({ where: { id: serverWiki.id } });
+      if (!linkedWiki || linkedWiki.voteServerId !== current.id || linkedWiki.spaceId !== serverWiki.spaceId) {
+        throw new ConflictException('Server wiki ownership reconciliation found an inconsistent link.');
+      }
+      await tx.subwikiRole.updateMany({
+        where: { spaceId: linkedWiki.spaceId, status: 'active', userId: { not: ownerProfileId } },
+        data: { status: 'revoked', revokedAt: now, revokedBy: ownerProfileId },
+      });
+      await tx.subwikiRole.upsert({
+        where: {
+          spaceId_userId_role: { spaceId: linkedWiki.spaceId, userId: ownerProfileId, role: 'owner' },
+        },
+        create: {
+          spaceId: linkedWiki.spaceId,
+          userId: ownerProfileId,
+          role: 'owner',
+          status: 'active',
+          grantedBy: ownerProfileId,
+          grantedAt: now,
+        },
+        update: {
+          status: 'active',
+          grantedBy: ownerProfileId,
+          grantedAt: now,
+          revokedAt: null,
+          revokedBy: null,
+        },
+      });
+      await tx.wikiSpace.update({
+        where: { id: linkedWiki.spaceId },
+        data: { ownerUserId: ownerProfileId, updatedAt: now },
+      });
+      return tx.server.update({
+        where: { id: current.id },
+        data: {
+          registrantAccountId: null,
+          registrationLeaseExpiresAt: null,
+          ownershipVerificationFailures: 0,
+          ownershipChallengeStartedAt: null,
+          ownershipChallengeExpiresAt: null,
+          ownershipChallengeSuspendedAt: null,
+          ownershipLastFailureAt: null,
+          listingStatus: 'active',
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async ensureClaimedServerWiki(serverId: string): Promise<ServerWikiLinkResponse> {
@@ -1220,6 +1296,9 @@ export class ServerService {
           true,
         );
         if (!options.allowTargetAuthorityBypass) {
+          if (server.ownershipChallengeSuspendedAt) {
+            throw new ForbiddenException('서버 소유권 재검증이 완료될 때까지 위키 연결이 잠겨 있습니다.');
+          }
           if (!serverOwnerCanonicalId || actorCanonicalId !== serverOwnerCanonicalId) {
             throw new ForbiddenException('Only the canonical server owner can link a server wiki.');
           }
@@ -1463,6 +1542,7 @@ export class ServerService {
             id: true,
             ownerAccountId: true,
             registrantAccountId: true,
+            ownershipChallengeSuspendedAt: true,
             wikiSpaceId: true,
             wikiPageId: true,
             wikiSlug: true,
@@ -1471,6 +1551,7 @@ export class ServerService {
         if (!server) throw new NotFoundException(`Server ${id} not found`);
         const actorStillAuthorized = Boolean(
           actorAccountId
+          && !server.ownershipChallengeSuspendedAt
           && (
             server.ownerAccountId === actorAccountId
             || (!server.ownerAccountId && server.registrantAccountId === actorAccountId)

@@ -1436,12 +1436,14 @@ export class WikiPermissionService {
         name: true,
         joinHost: true,
         ownerAccountId: true,
+        ownershipChallengeSuspendedAt: true,
         wikiSpaceId: true,
         wikiPageId: true,
         wikiSlug: true,
       }
     });
-    if (!server || server.wikiSpaceId !== space.id || server.wikiPageId !== space.rootPageId ||
+    if (!server || server.ownershipChallengeSuspendedAt
+        || server.wikiSpaceId !== space.id || server.wikiPageId !== space.rootPageId ||
         server.wikiSlug !== wiki.slug || !server.ownerAccountId || serverWikiIdentityConflicts(wiki, server)) {
       return { state: 'inconsistent', isOwner: false };
     }

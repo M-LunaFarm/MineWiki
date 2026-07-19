@@ -360,7 +360,27 @@ export default function DashboardPage() {
                     <div className="mt-2 border-t border-dashed border-[#30363d] pt-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2 text-xs text-[#b8c0c8]">
-                          {server.isPendingClaim ? (
+                          {server.ownershipStatus === 'takeover_pending' ? (
+                            <>
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                              <span>새 소유권 검증과 위키 권한 이전을 완료해 주세요.</span>
+                            </>
+                          ) : server.ownershipStatus === 'ownership_suspended' ? (
+                            <>
+                              <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+                              <span>소유권 증명이 만료되어 운영 설정이 잠겼습니다.</span>
+                            </>
+                          ) : server.ownershipStatus === 'verification_grace' ? (
+                            <>
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                              <span>
+                                소유권 증명을 복구해 주세요
+                                {server.ownershipChallengeExpiresAt
+                                  ? ` · ${new Date(server.ownershipChallengeExpiresAt).toLocaleDateString('ko-KR')}까지`
+                                  : null}
+                              </span>
+                            </>
+                          ) : server.isPendingClaim ? (
                             <>
                               <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
                               <span>소유권 검증 전까지 운영 설정이 잠겨 있습니다.</span>
@@ -399,7 +419,11 @@ export default function DashboardPage() {
                                 : 'bg-[#30363d] text-[#d8dee5] hover:bg-[#3f4850] hover:text-white'
                             }`}
                           >
-                            {server.isPendingClaim ? '소유권 검증 시작' : '검증 관리'}
+                            {server.ownershipStatus === 'takeover_pending'
+                              ? '인수 검증 계속'
+                              : server.isPendingClaim
+                                ? '소유권 검증 시작'
+                                : '검증 관리'}
                           </Link>
                           <Link
                             href={buildServerPath(server)}

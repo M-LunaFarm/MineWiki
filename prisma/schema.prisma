@@ -613,6 +613,11 @@ model Server {
   voteCooldownHours          Int                 @default(24)
   verificationGrade          VerificationGrade   @default(Unverified)
   verifiedAt                 DateTime?
+  ownershipVerificationFailures Int               @default(0) @map("ownership_verification_failures")
+  ownershipChallengeStartedAt DateTime?            @map("ownership_challenge_started_at") @db.DateTime(3)
+  ownershipChallengeExpiresAt DateTime?            @map("ownership_challenge_expires_at") @db.DateTime(3)
+  ownershipChallengeSuspendedAt DateTime?          @map("ownership_challenge_suspended_at") @db.DateTime(3)
+  ownershipLastFailureAt      DateTime?            @map("ownership_last_failure_at") @db.DateTime(3)
   votes24h                   Int                 @default(0)
   votesMonthly               Int?
   reviewsCount               Int                 @default(0)
@@ -648,6 +653,7 @@ model Server {
   @@index([wikiSpaceId])
   @@index([wikiSlug])
   @@index([verificationGrade])
+  @@index([ownershipChallengeExpiresAt])
   @@index([listingStatus])
   @@index([votes24h])
   @@index([votesMonthly])

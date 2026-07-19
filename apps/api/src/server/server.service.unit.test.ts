@@ -1479,6 +1479,63 @@ test('server wiki slug allocation reserves globally unique site slugs', async ()
   assert.equal(longAllocated.endsWith('-12345678'), true);
 });
 
+test('takeover reconciliation transfers wiki ownership and revokes prior tenant roles before unlock', async () => {
+  const serverId = randomUUID();
+  const suspendedAt = new Date('2026-07-19T00:00:00.000Z');
+  const server = {
+    id: serverId,
+    ownerAccountId: 'account-new',
+    ownershipChallengeSuspendedAt: suspendedAt,
+    wikiSpaceId: 77n,
+    wikiPageId: 88n,
+    wikiSlug: 'tenant',
+  };
+  const serverWiki = { id: 99n, voteServerId: serverId, spaceId: 77n, slug: 'tenant' };
+  const roleWrites: Array<Record<string, unknown>> = [];
+  const spaceWrites: Array<Record<string, unknown>> = [];
+  const serverWrites: Array<Record<string, unknown>> = [];
+  const tx = {
+    $queryRaw: async () => [],
+    server: {
+      findUnique: async () => server,
+      update: async ({ data }: { data: Record<string, unknown> }) => {
+        serverWrites.push(data);
+        return { ...server, ...data };
+      },
+    },
+    serverWiki: { findUnique: async () => serverWiki },
+    subwikiRole: {
+      updateMany: async (input: Record<string, unknown>) => { roleWrites.push(input); return { count: 2 }; },
+      upsert: async (input: Record<string, unknown>) => { roleWrites.push(input); return {}; },
+    },
+    wikiSpace: {
+      update: async (input: Record<string, unknown>) => { spaceWrites.push(input); return {}; },
+    },
+  };
+  const prisma = { $transaction: async (callback: (store: typeof tx) => Promise<unknown>) => callback(tx) };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+  const reconciler = service as unknown as {
+    reconcileClaimedServerWikiOwner(
+      inputServer: unknown,
+      inputWiki: unknown,
+      profileId: bigint,
+    ): Promise<unknown>;
+  };
+
+  await reconciler.reconcileClaimedServerWikiOwner(server, serverWiki, 500n);
+
+  assert.deepEqual((roleWrites[0]?.where as Record<string, unknown>), {
+    spaceId: 77n,
+    status: 'active',
+    userId: { not: 500n },
+  });
+  assert.equal((spaceWrites[0]?.data as Record<string, unknown>).ownerUserId, 500n);
+  assert.ok((spaceWrites[0]?.data as Record<string, unknown>).updatedAt instanceof Date);
+  assert.equal(serverWrites[0]?.ownershipChallengeSuspendedAt, null);
+  assert.equal(serverWrites[0]?.listingStatus, 'active');
+  assert.equal(serverWrites[0]?.registrantAccountId, null);
+});
+
 test('server wiki provisioning retries a unique collision with a fresh slug', async () => {
   const serverId = randomUUID();
   const accountId = randomUUID();

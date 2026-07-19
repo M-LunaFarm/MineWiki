@@ -37,6 +37,7 @@ function createService(options: {
     wikiPageId?: bigint | null;
     wikiSlug?: string | null;
     listingStatus?: string;
+    ownershipChallengeSuspendedAt?: Date | null;
   } | null;
   readonly accounts?: readonly {
     id: string;
@@ -873,6 +874,31 @@ test('linked server wiki management fails closed when the canonical linkage inva
   assert.equal(await identityCollision.canManagePage({ actor: actor(), page: historicalPage }), false);
   assert.equal(await identityCollision.canManageSpace({ actor: actor(), spaceId: 10n }), false);
   assert.equal((await identityCollision.canEditPage({ actor: actor(), page: historicalPage })).allowed, false);
+});
+
+test('ownership challenge blocks linked owner, provenance, and delegated manager authority', async () => {
+  const service = createService({
+    space: {
+      id: 10n,
+      status: 'active',
+      spaceType: 'server_wiki',
+      rootPageId: 1n,
+      ownerUserId: 300n,
+      createdBy: 300n,
+    },
+    roles: ['manager'],
+    serverWiki: { voteServerId: 'server-1', createdBy: 300n },
+    server: {
+      ownerAccountId: 'account-1',
+      ownershipChallengeSuspendedAt: new Date('2026-07-19T00:00:00.000Z'),
+    },
+  });
+  const protectedPage = page({ createdBy: 300n, protectionLevel: 'owner_only' });
+
+  assert.equal(await service.canManagePage({ actor: actor({ accountId: 'account-1', profileId: 300n }), page: protectedPage }), false);
+  assert.equal(await service.canManageSpace({ actor: actor({ accountId: 'account-1', profileId: 300n }), spaceId: 10n }), false);
+  assert.equal(await service.canManagePage({ actor: actor({ accountId: 'manager', profileId: 500n }), page: protectedPage }), false);
+  assert.equal((await service.canEditPage({ actor: actor({ accountId: 'account-1', profileId: 300n }), page: protectedPage })).allowed, false);
 });
 
 test('legacy unlinked server wiki keeps its narrow provenance fallback', async () => {

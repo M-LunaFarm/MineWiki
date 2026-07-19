@@ -1,6 +1,11 @@
 import { Logger } from '@minewiki/logger';
 import { validateOutboundTarget } from '@minewiki/security';
-import type { ClaimVerificationJob } from '@minewiki/schemas';
+import {
+  classifyServerOwnershipProofResult,
+  isServerOwnershipManagementSuspended,
+  serverOwnershipVerificationTransition,
+  type ClaimVerificationJob,
+} from '@minewiki/schemas';
 import { isSupportedClaimMethod, type ClaimMethod } from '@minewiki/schemas/claim-methods';
 import type { PrismaClient } from '@prisma/client';
 import { resolveTxt } from 'node:dns/promises';
@@ -145,6 +150,21 @@ async function applyVerificationResult(
 ): Promise<boolean> {
   const checkedAt = new Date(result.checkedAt);
   return prisma.$transaction(async (transaction) => {
+    let ownershipTakeover = false;
+    const current = await transaction.server.findUnique({
+      where: { id: snapshot.serverId },
+      select: {
+        ownerAccountId: true,
+        registrantAccountId: true,
+        listingStatus: true,
+        ownershipVerificationFailures: true,
+        ownershipChallengeStartedAt: true,
+        ownershipChallengeExpiresAt: true,
+        ownershipChallengeSuspendedAt: true,
+        ownershipLastFailureAt: true,
+      },
+    });
+    if (!current) return false;
     const updated = await transaction.serverClaimMethod.updateMany({
       where: {
         id: snapshot.id,
@@ -168,17 +188,26 @@ async function applyVerificationResult(
       if (!snapshot.accountId) {
         throw new Error('Verified claim is missing its account owner.');
       }
+      const takeover = current.ownerAccountId !== null
+        && current.registrantAccountId === snapshot.accountId
+        && isServerOwnershipManagementSuspended(current);
+      ownershipTakeover = takeover;
       const ownership = await transaction.server.updateMany({
         where: {
           id: snapshot.serverId,
           OR: [
             { ownerAccountId: null },
             { ownerAccountId: snapshot.accountId },
+            ...(takeover ? [{
+              ownerAccountId: current.ownerAccountId,
+              registrantAccountId: snapshot.accountId,
+              ownershipChallengeSuspendedAt: { not: null },
+            }] : []),
           ],
         },
         data: {
           ownerAccountId: snapshot.accountId,
-          registrantAccountId: null,
+          registrantAccountId: takeover ? snapshot.accountId : null,
           registrationLeaseExpiresAt: null,
         },
       });
@@ -192,11 +221,36 @@ async function applyVerificationResult(
       select: { method: true, status: true },
     });
     const grade = computeGrade(methods);
+    const ownership = serverOwnershipVerificationTransition(
+      current,
+      grade !== 'Unverified'
+        ? 'verified'
+        : classifyServerOwnershipProofResult(result),
+      checkedAt,
+    );
     await transaction.server.update({
       where: { id: snapshot.serverId },
       data: {
         verificationGrade: grade,
         verifiedAt: grade === 'Unverified' ? null : checkedAt,
+        ownershipVerificationFailures: ownership.ownershipVerificationFailures,
+        ownershipChallengeStartedAt: ownership.ownershipChallengeStartedAt,
+        ownershipChallengeExpiresAt: ownership.ownershipChallengeExpiresAt,
+        ownershipLastFailureAt: ownership.ownershipLastFailureAt,
+        ownershipChallengeSuspendedAt: ownershipTakeover
+          ? current.ownershipChallengeSuspendedAt
+          : grade !== 'Unverified'
+          ? null
+          : ownership.challengeMatured
+            ? current.ownershipChallengeSuspendedAt ?? checkedAt
+            : current.ownershipChallengeSuspendedAt,
+        listingStatus: ownershipTakeover
+          ? 'suspended'
+          : grade !== 'Unverified' && current.ownershipChallengeSuspendedAt
+          ? 'active'
+          : ownership.challengeMatured
+            ? 'suspended'
+            : undefined,
       },
     });
     if (grade !== 'Unverified' && snapshot.accountId) {

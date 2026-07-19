@@ -328,12 +328,17 @@ export class ServerWikiCollaboratorService {
       select: {
         id: true,
         ownerAccountId: true,
+        ownershipChallengeSuspendedAt: true,
         wikiSpaceId: true,
         wikiPageId: true,
         wikiSlug: true,
       },
     });
     if (!server) throw new NotFoundException('Server not found.');
+    if (server.ownershipChallengeSuspendedAt
+      && actor.permissions?.includes('server.admin') !== true) {
+      throw new ForbiddenException('서버 소유권 재검증이 완료될 때까지 협업자 권한이 잠겨 있습니다.');
+    }
     const actorAccountId = await this.lockCanonicalActorAccount(tx, actor.accountId);
     if (expectedActorAccountId && actorAccountId !== expectedActorAccountId) {
       throw canonicalActorConflict();

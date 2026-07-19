@@ -21,6 +21,11 @@ import { validateOutboundTarget } from '@minewiki/security';
 import { status, statusBedrock } from 'minecraft-server-util';
 import { encryptAppSecret } from '../common/secret-codec';
 import { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '@minewiki/schemas/claim-methods';
+import {
+  classifyServerOwnershipProofResult,
+  isServerOwnershipManagementSuspended,
+  serverOwnershipVerificationTransition,
+} from '@minewiki/schemas';
 
 export interface ClaimVerificationResult {
   readonly status: ClaimMethodState;
@@ -56,7 +61,8 @@ export class ClaimService {
     methods?: ClaimMethod[],
   ): Promise<ClaimMethodStatus[]> {
     const server = await this.serverService.ensureExists(serverId);
-    if (server.ownerAccountId && server.ownerAccountId !== accountId) {
+    const takeoverAllowed = isServerOwnershipManagementSuspended(server);
+    if (server.ownerAccountId && server.ownerAccountId !== accountId && !takeoverAllowed) {
       throw new ForbiddenException('해당 서버를 검증할 권한이 없습니다.');
     }
     if (
@@ -79,26 +85,48 @@ export class ClaimService {
 
     const now = new Date();
     const updates = await this.prisma.$transaction(async (transaction) => {
-      const lease = await transaction.server.updateMany({
-        where: {
-          id: serverId,
-          ownerAccountId: null,
-          OR: [
-            { registrantAccountId: accountId },
-            { registrantAccountId: null },
-          ],
-        },
-        data: {
-          registrantAccountId: accountId,
-          registrationLeaseExpiresAt: new Date(now.getTime() + REGISTRATION_LEASE_MS),
-        },
-      });
+      const lease = server.ownerAccountId === accountId
+        ? await transaction.server.updateMany({
+            where: { id: serverId, ownerAccountId: accountId },
+            data: { registrantAccountId: null, registrationLeaseExpiresAt: null },
+          })
+        : server.ownerAccountId
+          ? await transaction.server.updateMany({
+              where: {
+                id: serverId,
+                ownerAccountId: server.ownerAccountId,
+                ownershipChallengeSuspendedAt: { not: null },
+              },
+              data: {
+                registrantAccountId: accountId,
+                registrationLeaseExpiresAt: new Date(now.getTime() + REGISTRATION_LEASE_MS),
+              },
+            })
+          : await transaction.server.updateMany({
+              where: {
+                id: serverId,
+                ownerAccountId: null,
+                OR: [
+                  { registrantAccountId: accountId },
+                  { registrantAccountId: null },
+                ],
+              },
+              data: {
+                registrantAccountId: accountId,
+                registrationLeaseExpiresAt: new Date(now.getTime() + REGISTRATION_LEASE_MS),
+              },
+            });
       if (lease.count !== 1) {
         const current = await transaction.server.findUnique({
           where: { id: serverId },
-          select: { ownerAccountId: true, registrantAccountId: true },
+          select: {
+            ownerAccountId: true,
+            registrantAccountId: true,
+            ownershipChallengeSuspendedAt: true,
+          },
         });
-        if (!current || current.ownerAccountId !== accountId) {
+        if (!current || (current.ownerAccountId !== accountId
+          && !isServerOwnershipManagementSuspended(current))) {
           throw new ForbiddenException(
             current?.ownerAccountId
               ? '해당 서버를 검증할 권한이 없습니다.'
@@ -171,7 +199,7 @@ export class ClaimService {
       throw new BadRequestException('검증 토큰이 만료되었습니다. 토큰을 다시 발급받아 주세요.');
     }
 
-    this.assertCanUseClaimMethod(server.ownerAccountId, methodState.accountId, accountId);
+    this.assertCanUseClaimMethod(server, methodState.accountId, accountId);
 
     const normalizedProof = proof?.trim();
     if (!normalizedProof || !matchesClaimToken(methodState.token, normalizedProof)) {
@@ -198,6 +226,21 @@ export class ClaimService {
     await this.serverService.ensureExists(snapshot.serverId);
     const checkedAt = new Date(result.checkedAt);
     return this.prisma.$transaction(async (transaction) => {
+      let ownershipTakeover = false;
+      const current = await transaction.server.findUnique({
+        where: { id: snapshot.serverId },
+        select: {
+          ownerAccountId: true,
+          registrantAccountId: true,
+          listingStatus: true,
+          ownershipVerificationFailures: true,
+          ownershipChallengeStartedAt: true,
+          ownershipChallengeExpiresAt: true,
+          ownershipChallengeSuspendedAt: true,
+          ownershipLastFailureAt: true,
+        },
+      });
+      if (!current) return false;
       const updated = await transaction.serverClaimMethod.updateMany({
         where: {
           id: snapshot.id,
@@ -218,17 +261,26 @@ export class ClaimService {
       }
 
       if (result.status === 'verified' && snapshot.accountId) {
+        const takeover = current.ownerAccountId !== null
+          && current.registrantAccountId === snapshot.accountId
+          && isServerOwnershipManagementSuspended(current);
+        ownershipTakeover = takeover;
         const ownership = await transaction.server.updateMany({
           where: {
             id: snapshot.serverId,
             OR: [
               { ownerAccountId: null },
               { ownerAccountId: snapshot.accountId },
+              ...(takeover ? [{
+                ownerAccountId: current.ownerAccountId,
+                registrantAccountId: snapshot.accountId,
+                ownershipChallengeSuspendedAt: { not: null },
+              }] : []),
             ],
           },
           data: {
             ownerAccountId: snapshot.accountId,
-            registrantAccountId: null,
+            registrantAccountId: takeover ? snapshot.accountId : null,
             registrationLeaseExpiresAt: null,
           },
         });
@@ -241,11 +293,36 @@ export class ClaimService {
         where: { serverId: snapshot.serverId },
       });
       const grade = this.computeStoredGrade(methods);
+      const ownership = serverOwnershipVerificationTransition(
+        current,
+        grade !== 'Unverified'
+          ? 'verified'
+          : classifyServerOwnershipProofResult(result),
+        checkedAt,
+      );
       await transaction.server.update({
         where: { id: snapshot.serverId },
         data: {
           verificationGrade: grade,
           verifiedAt: grade === 'Unverified' ? null : checkedAt,
+          ownershipVerificationFailures: ownership.ownershipVerificationFailures,
+          ownershipChallengeStartedAt: ownership.ownershipChallengeStartedAt,
+          ownershipChallengeExpiresAt: ownership.ownershipChallengeExpiresAt,
+          ownershipLastFailureAt: ownership.ownershipLastFailureAt,
+          ownershipChallengeSuspendedAt: ownershipTakeover
+            ? current.ownershipChallengeSuspendedAt
+            : grade !== 'Unverified'
+            ? null
+            : ownership.challengeMatured
+              ? current.ownershipChallengeSuspendedAt ?? checkedAt
+              : current.ownershipChallengeSuspendedAt,
+          listingStatus: ownershipTakeover
+            ? 'suspended'
+            : grade !== 'Unverified' && current.ownershipChallengeSuspendedAt
+            ? 'active'
+            : ownership.challengeMatured
+              ? 'suspended'
+              : undefined,
         },
       });
       if (grade !== 'Unverified') {
@@ -288,32 +365,45 @@ export class ClaimService {
 
   async isOwner(serverId: string, accountId: string): Promise<boolean> {
     const server = await this.serverService.ensureExists(serverId);
+    return Boolean(
+      server.ownerAccountId
+      && server.ownerAccountId === accountId
+      && !isServerOwnershipManagementSuspended(server),
+    );
+  }
+
+  async isRecordedOwner(serverId: string, accountId: string): Promise<boolean> {
+    const server = await this.serverService.ensureExists(serverId);
     return Boolean(server.ownerAccountId && server.ownerAccountId === accountId);
   }
 
   async isPendingRegistrant(serverId: string, accountId: string): Promise<boolean> {
     const server = await this.serverService.ensureExists(serverId);
     return Boolean(
-      !server.ownerAccountId &&
-        server.registrantAccountId &&
-        server.registrantAccountId === accountId,
+      server.registrantAccountId
+        && server.registrantAccountId === accountId
+        && (!server.ownerAccountId || isServerOwnershipManagementSuspended(server)),
     );
   }
 
   async canAccessClaim(serverId: string, accountId: string): Promise<boolean> {
     return (
-      (await this.isOwner(serverId, accountId)) ||
+      (await this.isRecordedOwner(serverId, accountId)) ||
       (await this.isPendingRegistrant(serverId, accountId))
     );
   }
 
   private assertCanUseClaimMethod(
-    ownerAccountId: string | null,
+    server: {
+      readonly ownerAccountId: string | null;
+      readonly ownershipChallengeSuspendedAt?: Date | null;
+    },
     issuerAccountId: string | null,
     accountId: string,
   ): void {
-    if (ownerAccountId) {
-      if (ownerAccountId !== accountId) {
+    if (server.ownerAccountId) {
+      if (server.ownerAccountId !== accountId
+        && !(issuerAccountId === accountId && isServerOwnershipManagementSuspended(server))) {
         throw new ForbiddenException('해당 서버를 검증할 권한이 없습니다.');
       }
       return;
@@ -363,20 +453,46 @@ export class ClaimService {
     );
 
     if (results.some((result) => result.count === 1)) {
-      await this.syncGrade(serverId);
+      await this.syncGrade(serverId, true);
     }
   }
 
-  private async syncGrade(serverId: string): Promise<void> {
-    const methods = await this.prisma.serverClaimMethod.findMany({
-      where: { serverId, method: { in: [...SUPPORTED_CLAIM_METHODS] } },
-    });
+  private async syncGrade(serverId: string, recordFailure = false): Promise<void> {
+    const [methods, server] = await Promise.all([
+      this.prisma.serverClaimMethod.findMany({
+        where: { serverId, method: { in: [...SUPPORTED_CLAIM_METHODS] } },
+      }),
+      this.prisma.server.findUnique({ where: { id: serverId } }),
+    ]);
+    if (!server) return;
     const grade = this.computeStoredGrade(methods);
+    const checkedAt = new Date();
+    const ownership = grade !== 'Unverified'
+      ? serverOwnershipVerificationTransition(server, 'verified', checkedAt)
+      : recordFailure
+        ? serverOwnershipVerificationTransition(server, 'inconclusive', checkedAt)
+        : null;
     await this.prisma.server.update({
       where: { id: serverId },
       data: {
         verificationGrade: grade,
-        verifiedAt: grade === 'Unverified' ? null : new Date(),
+        verifiedAt: grade === 'Unverified' ? null : checkedAt,
+        ...(ownership ? {
+          ownershipVerificationFailures: ownership.ownershipVerificationFailures,
+          ownershipChallengeStartedAt: ownership.ownershipChallengeStartedAt,
+          ownershipChallengeExpiresAt: ownership.ownershipChallengeExpiresAt,
+          ownershipLastFailureAt: ownership.ownershipLastFailureAt,
+          ownershipChallengeSuspendedAt: grade !== 'Unverified'
+            ? null
+            : ownership.challengeMatured
+              ? server.ownershipChallengeSuspendedAt ?? checkedAt
+              : server.ownershipChallengeSuspendedAt,
+          listingStatus: grade !== 'Unverified' && server.ownershipChallengeSuspendedAt
+            ? 'active'
+            : ownership.challengeMatured
+              ? 'suspended'
+              : undefined,
+        } : {}),
       },
     });
   }

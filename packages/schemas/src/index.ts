@@ -1,4 +1,6 @@
 import { z } from 'zod';
+
+export * from './server-ownership';
 import { SUPPORTED_CLAIM_METHODS } from '../claim-methods';
 
 export * from './worker-health';
@@ -613,6 +615,14 @@ export const dashboardServerSummarySchema = z.object({
   verificationGrade: serverVerificationGradeSchema,
   voteRequiresOwnership: z.boolean(),
   isPendingClaim: z.boolean().optional(),
+  ownershipStatus: z.enum([
+    'active',
+    'pending_claim',
+    'verification_grace',
+    'ownership_suspended',
+    'takeover_pending',
+  ]).optional(),
+  ownershipChallengeExpiresAt: z.string().datetime().nullable().optional(),
   lastSyncedAt: z.string().datetime().nullable().optional(),
 });
 

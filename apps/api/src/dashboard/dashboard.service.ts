@@ -26,7 +26,11 @@ export class DashboardService {
       verificationGrade:
         (server.verificationGrade === 'Unverified' ? 'Unverified' : 'Verified') as DashboardOverview['servers'][number]['verificationGrade'],
       voteRequiresOwnership: server.voteRequiresOwnership,
-      isPendingClaim: !server.ownerAccountId && server.registrantAccountId === accountId,
+      isPendingClaim: server.registrantAccountId === accountId && (
+        !server.ownerAccountId || Boolean(server.ownershipChallengeSuspendedAt)
+      ),
+      ownershipStatus: dashboardOwnershipStatus(server, accountId),
+      ownershipChallengeExpiresAt: server.ownershipChallengeExpiresAt?.toISOString() ?? null,
       lastSyncedAt: server.stats?.lastUpdatedAt
         ? server.stats.lastUpdatedAt.toISOString()
         : server.updatedAt.toISOString()
@@ -77,6 +81,27 @@ export class DashboardService {
       verification
     };
   }
+}
+
+function dashboardOwnershipStatus(
+  server: {
+    readonly ownerAccountId: string | null;
+    readonly registrantAccountId: string | null;
+    readonly ownershipChallengeStartedAt: Date | null;
+    readonly ownershipChallengeSuspendedAt: Date | null;
+  },
+  accountId: string,
+): DashboardOverview['servers'][number]['ownershipStatus'] {
+  if (server.ownershipChallengeSuspendedAt) {
+    return server.registrantAccountId === accountId && server.ownerAccountId !== accountId
+      ? 'takeover_pending'
+      : 'ownership_suspended';
+  }
+  if (!server.ownerAccountId && server.registrantAccountId === accountId) return 'pending_claim';
+  if (server.ownerAccountId === accountId && server.ownershipChallengeStartedAt) {
+    return 'verification_grace';
+  }
+  return 'active';
 }
 
 function normalizeReviewTags(

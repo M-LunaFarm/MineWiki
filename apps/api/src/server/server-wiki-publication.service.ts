@@ -586,6 +586,7 @@ export class ServerWikiPublicationService {
       select: {
         id: true,
         ownerAccountId: true,
+        ownershipChallengeSuspendedAt: true,
         wikiSpaceId: true,
         wikiPageId: true,
         wikiSlug: true,
@@ -602,6 +603,10 @@ export class ServerWikiPublicationService {
       },
     });
     if (!server) throw new NotFoundException('Server not found.');
+    if (server.ownershipChallengeSuspendedAt
+      && actor.permissions?.includes('server.admin') !== true) {
+      throw new ForbiddenException('서버 소유권 재검증이 완료될 때까지 위키 발행이 잠겨 있습니다.');
+    }
     if (!server.wikiSpaceId || !server.wikiPageId || !server.wikiSlug) throw invalidLink();
 
     if (lock) {

@@ -42,6 +42,7 @@ interface FixtureOptions {
   readonly failAudit?: boolean;
   readonly mismatchedWiki?: boolean;
   readonly mismatchedRootPage?: boolean;
+  readonly ownershipSuspended?: boolean;
 }
 
 function wikiProfile(input: Partial<WikiProfile> & Pick<WikiProfile, 'id' | 'username' | 'displayName'>): WikiProfile {
@@ -105,6 +106,7 @@ function createFixture(options: FixtureOptions = {}) {
   const server = {
     id: serverId,
     ownerAccountId,
+    ownershipChallengeSuspendedAt: options.ownershipSuspended ? now : null,
     wikiSpaceId: 77n,
     wikiPageId: 99n,
     wikiSlug: 'test-server',
@@ -292,6 +294,22 @@ test('owner list returns the frontend roster contract and locks the authoritativ
   assert.ok(fixture.lockQueries.some((query) => query.includes('FROM server_wikis')));
   assert.ok(fixture.lockQueries.some((query) => query.includes('FROM wiki_spaces')));
   assert.ok(fixture.lockQueries.some((query) => query.includes('FROM subwiki_roles')));
+});
+
+test('ownership challenge locks owner and delegated collaborator authority while preserving server admin', async () => {
+  const fixture = createFixture({
+    ownershipSuspended: true,
+    roles: [role({ id: 10n, userId: 2n, role: 'manager', status: 'active' })],
+  });
+  await assert.rejects(() => fixture.service.list(serverId, ownerActor), /소유권 재검증/u);
+  await assert.rejects(() => fixture.service.authorizeContentSettings(serverId, {
+    accountId: targetAccountId,
+    permissions: [],
+  }), /소유권 재검증/u);
+  await assert.doesNotReject(() => fixture.service.list(serverId, {
+    accountId: targetAccountId,
+    permissions: ['server.admin'],
+  }));
 });
 
 test('elevation and subwiki manager state never replace explicit server owner or global server.admin authority', async () => {

@@ -28,6 +28,7 @@ interface FixtureOptions {
   readonly missingOfficialChannel?: boolean;
   readonly staleSearchIndex?: boolean;
   readonly reviewerConfigured?: boolean;
+  readonly ownershipSuspended?: boolean;
   readonly notifications?: {
     notifyServerWikiReleaseSubmitted(tx: unknown, input: unknown): Promise<void>;
     notifyServerWikiReleaseReviewChanged(tx: unknown, input: unknown): Promise<void>;
@@ -71,6 +72,7 @@ function createFixture(options: FixtureOptions = {}) {
   const server = {
     id: serverId,
     ownerAccountId,
+    ownershipChallengeSuspendedAt: options.ownershipSuspended ? now : null,
     wikiSpaceId: 77n,
     wikiPageId: 100n,
     wikiSlug: options.invalidLink ? 'other-server' : 'test-server',
@@ -443,6 +445,21 @@ test('release candidate manifest is deterministic and classifies the initial pub
   assert.equal(first.candidate.hasChanges, true);
   assert.equal(first.candidate.totalPageCount, 4);
   assert.equal('pages' in first.candidate, false);
+});
+
+test('ownership challenge locks owner and collaborator publication authority but preserves admin recovery', async () => {
+  const owner = createFixture({ ownershipSuspended: true });
+  await assert.rejects(() => owner.service.get(serverId, owner.actor), /소유권 재검증/u);
+
+  const manager = createFixture({
+    ownershipSuspended: true,
+    actorAccountId: managerAccountId,
+    actorRole: 'manager',
+  });
+  await assert.rejects(() => manager.service.get(serverId, manager.actor), /소유권 재검증/u);
+
+  const admin = createFixture({ ownershipSuspended: true, actorPermissions: ['server.admin'] });
+  await assert.doesNotReject(() => admin.service.get(serverId, admin.actor));
 });
 
 test('candidate token binds the public site slug and release metadata-only changes remain publishable', async () => {
