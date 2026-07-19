@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import { fetchWikiBacklinks, fetchWikiCategory, fetchWikiPageByPath, fetchWikiPublicProfile, fetchWikiPublicStats, fetchWikiRecent, fetchWikiRevisions, fetchWikiSpecial } from '../../lib/wiki-server-api';
 import { buildWikiRoutePath, decodeWikiRouteSegment } from '../../lib/wiki-routes.mjs';
 import { WikiArticleView } from './wiki-article-view';
@@ -35,6 +35,10 @@ export async function WikiRoutePage({ prefix, segments = [], followRedirects = t
     notFound();
   }
   if ((prefix === 'server' || prefix === 'serverWiki') && page.serverWiki) {
+    if (prefix === 'serverWiki' && segments[0] && decodeWikiRouteSegment(segments[0]) !== page.serverWiki.slug) {
+      const canonicalSegments = [page.serverWiki.slug, ...segments.slice(1)];
+      permanentRedirect(buildWikiRoutePath('serverWiki', canonicalSegments));
+    }
     return <ServerWikiArticleView page={page} routePath={routePath} routeContext={serverWikiRouteContext} />;
   }
   if (page.title === '대문' && isStandardFrontPagePrefix(prefix)) {

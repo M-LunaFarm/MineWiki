@@ -399,15 +399,29 @@ test('server wiki readiness points owners to the first incomplete factual docume
 
 test('server wiki public slug is tenant-owned, validated, and audited independently of content paths', async () => {
   let storedSiteSlug: string | null = 'old-docs';
+  const aliases = new Map<string, { id: bigint; serverWikiId: bigint }>();
   const audits: Array<Record<string, unknown>> = [];
   const prisma = {
     serverWiki: {
-      async findUnique() { return { id: 9n, siteSlug: storedSiteSlug }; },
+      async findUnique() { return { id: 9n, slug: 'content-root', siteSlug: storedSiteSlug }; },
+      async findFirst() { return null; },
       async update({ data }: { data: { siteSlug: string } }) {
         storedSiteSlug = data.siteSlug;
         return { id: 9n, siteSlug: storedSiteSlug };
       },
     },
+    serverWikiSiteSlugAlias: {
+      async findUnique({ where }: { where: { slug: string } }) {
+        return aliases.get(where.slug) ?? null;
+      },
+      async upsert({ where, create }: { where: { slug: string }; create: { serverWikiId: bigint } }) {
+        aliases.set(where.slug, { id: BigInt(aliases.size + 1), serverWikiId: create.serverWikiId });
+      },
+      async delete({ where }: { where: { id: bigint } }) {
+        for (const [slug, alias] of aliases) if (alias.id === where.id) aliases.delete(slug);
+      },
+    },
+    async $transaction<T>(callback: (tx: never) => Promise<T>) { return callback(prisma as never); },
   };
   const events = { async audit(_name: string, input: Record<string, unknown>) { audits.push(input); } };
   const service = new ServerService({} as never, prisma as never, {} as never, undefined, events as never);
@@ -416,7 +430,11 @@ test('server wiki public slug is tenant-owned, validated, and audited independen
 
   assert.deepEqual(result, { siteSlug: 'luna-farm', wikiUrl: '/serverWiki/luna-farm' });
   assert.equal(storedSiteSlug, 'luna-farm');
-  assert.equal(audits.length, 1);
+  assert.ok(aliases.has('old-docs'));
+  await service.updateWikiSiteSlug(randomUUID(), 'second-address', randomUUID());
+  assert.ok(aliases.has('luna-farm'));
+  assert.ok(aliases.has('old-docs'));
+  assert.equal(audits.length, 2);
   await assert.rejects(() => service.updateWikiSiteSlug(randomUUID(), 'api'), /예약된 사이트 주소/u);
   await assert.rejects(() => service.updateWikiSiteSlug(randomUUID(), 'bad_slug'), /3~63자/u);
 });

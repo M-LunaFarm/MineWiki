@@ -505,9 +505,11 @@ test('server wiki navigation removes the duplicated space slug', () => {
 });
 
 test('server wiki site routes resolve the public site slug to the internal content root', async () => {
+  let routeWhere: unknown;
   const prisma = {
     serverWiki: {
-      async findUnique() {
+      async findFirst({ where }: { where: unknown }) {
+        routeWhere = where;
         return { slug: 'internal-luna-root', status: 'active' };
       },
     },
@@ -523,6 +525,14 @@ test('server wiki site routes resolve the public site slug to the internal conte
 
   assert.equal(resolved[0], 'server');
   assert.equal(resolved[1], 'internal-luna-root/가이드');
+  assert.deepEqual(routeWhere, {
+    status: 'active',
+    OR: [
+      { siteSlug: 'lunafarm' },
+      { slug: 'lunafarm' },
+      { siteSlugAliases: { some: { slug: 'lunafarm' } } },
+    ],
+  });
 });
 
 test('server wiki navigation derives a stable document tree depth', () => {

@@ -383,7 +383,10 @@ export class WikiWatchService {
     const slug = value.trim();
     if (!slug || slug.length > 255) throw new NotFoundException('Server wiki not found.');
     const serverWiki = await this.prisma.serverWiki.findFirst({
-      where: { status: 'active', OR: [{ siteSlug: slug }, { slug }] },
+      where: {
+        status: 'active',
+        OR: [{ siteSlug: slug }, { slug }, { siteSlugAliases: { some: { slug } } }],
+      },
       select: { id: true, spaceId: true },
     });
     if (!serverWiki) throw new NotFoundException('Server wiki not found.');

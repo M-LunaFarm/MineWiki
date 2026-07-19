@@ -2127,18 +2127,65 @@ export class ServerService {
     }
     const current = await this.prisma.serverWiki.findUnique({
       where: { voteServerId: serverId },
-      select: { id: true, siteSlug: true },
+      select: { id: true, slug: true, siteSlug: true },
     });
     if (!current) throw new NotFoundException('Server wiki not found.');
     if (current.siteSlug === siteSlug) {
       return { siteSlug, wikiUrl: `/serverWiki/${encodeURIComponent(siteSlug)}` };
     }
+    let previousSiteSlug = current.siteSlug;
     try {
-      await this.prisma.serverWiki.update({
-        where: { id: current.id },
-        data: { siteSlug },
-      });
+      const change = await this.prisma.$transaction(async (tx) => {
+        const locked = await tx.serverWiki.findUnique({
+          where: { id: current.id },
+          select: { id: true, slug: true, siteSlug: true },
+        });
+        if (!locked) throw new NotFoundException('Server wiki not found.');
+        if (locked.siteSlug === siteSlug) return { changed: false, previousSiteSlug: locked.siteSlug };
+
+        const [activeCollision, aliasCollision] = await Promise.all([
+          tx.serverWiki.findFirst({
+            where: {
+              id: { not: locked.id },
+              OR: [{ siteSlug }, { slug: siteSlug }],
+            },
+            select: { id: true },
+          }),
+          tx.serverWikiSiteSlugAlias.findUnique({
+            where: { slug: siteSlug },
+            select: { id: true, serverWikiId: true },
+          }),
+        ]);
+        if (activeCollision || (aliasCollision && aliasCollision.serverWikiId !== locked.id)) {
+          throw new ConflictException('이미 사용 중이거나 이전 주소로 예약된 서버 위키 사이트 주소입니다.');
+        }
+
+        if (aliasCollision) {
+          await tx.serverWikiSiteSlugAlias.delete({ where: { id: aliasCollision.id } });
+        }
+        if (locked.siteSlug && locked.siteSlug !== locked.slug) {
+          await tx.serverWikiSiteSlugAlias.upsert({
+            where: { slug: locked.siteSlug },
+            create: {
+              serverWikiId: locked.id,
+              slug: locked.siteSlug,
+              createdBy: actorAccountId ?? null,
+            },
+            update: {},
+          });
+        }
+        await tx.serverWiki.update({
+          where: { id: locked.id },
+          data: { siteSlug },
+        });
+        return { changed: true, previousSiteSlug: locked.siteSlug };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      if (!change.changed) {
+        return { siteSlug, wikiUrl: `/serverWiki/${encodeURIComponent(siteSlug)}` };
+      }
+      previousSiteSlug = change.previousSiteSlug;
     } catch (error) {
+      if (error instanceof ConflictException || error instanceof NotFoundException) throw error;
       if (isUniqueConstraintError(error)) {
         throw new ConflictException('이미 사용 중인 서버 위키 사이트 주소입니다.');
       }
@@ -2151,7 +2198,7 @@ export class ServerService {
       subjectId: current.id,
       metadata: {
         serverId,
-        previousSiteSlug: current.siteSlug,
+        previousSiteSlug,
         siteSlug,
       },
     });

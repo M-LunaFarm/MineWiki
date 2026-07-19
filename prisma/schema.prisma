@@ -2022,12 +2022,25 @@ model ServerWiki {
   releaseApprovals             ServerWikiReleaseApproval[]
   publishedRelease             ServerWikiRelease?           @relation("PublishedServerWikiRelease", fields: [publishedReleaseId], references: [id], onDelete: SetNull)
   domain                       ServerWikiDomain?
+  siteSlugAliases              ServerWikiSiteSlugAlias[]
 
   @@unique([id, spaceId], map: "uq_server_wiki_tenant")
   @@index([status])
   @@index([publicationStatus])
   @@index([verifiedStatus])
   @@map("server_wikis")
+}
+
+model ServerWikiSiteSlugAlias {
+  id           BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+  serverWikiId BigInt     @map("server_wiki_id") @db.UnsignedBigInt
+  slug         String     @unique @db.VarChar(63)
+  createdBy    String?    @map("created_by") @db.Char(36)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  serverWiki   ServerWiki @relation(fields: [serverWikiId], references: [id], onDelete: Cascade)
+
+  @@index([serverWikiId, createdAt], map: "idx_server_wiki_site_slug_aliases_wiki")
+  @@map("server_wiki_site_slug_aliases")
 }
 
 model ServerWikiDomain {

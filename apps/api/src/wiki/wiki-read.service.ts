@@ -893,8 +893,15 @@ export class WikiReadService {
   ): Promise<WikiPageResponse> {
     const siteRoute = parseServerWikiSitePath(path);
     if (siteRoute) {
-      const serverWiki = await this.prisma.serverWiki.findUnique({
-        where: { siteSlug: siteRoute.siteSlug },
+      const serverWiki = await this.prisma.serverWiki.findFirst({
+        where: {
+          status: 'active',
+          OR: [
+            { siteSlug: siteRoute.siteSlug },
+            { slug: siteRoute.siteSlug },
+            { siteSlugAliases: { some: { slug: siteRoute.siteSlug } } },
+          ],
+        },
         select: { slug: true, status: true }
       });
       if (!serverWiki || serverWiki.status !== 'active') {
@@ -3132,7 +3139,10 @@ export class WikiReadService {
     const slug = value.trim();
     if (!slug || slug.length > 255) throw new NotFoundException('Server wiki not found.');
     const serverWiki = await this.prisma.serverWiki.findFirst({
-      where: { status: 'active', OR: [{ siteSlug: slug }, { slug }] },
+      where: {
+        status: 'active',
+        OR: [{ siteSlug: slug }, { slug }, { siteSlugAliases: { some: { slug } } }],
+      },
       select: {
         id: true,
         spaceId: true,
@@ -3734,7 +3744,13 @@ export class WikiReadService {
     if (input.serverSlug?.trim()) {
       const requestedSlug = input.serverSlug.trim();
       const serverWiki = await this.prisma.serverWiki.findFirst({
-        where: { OR: [{ siteSlug: requestedSlug }, { slug: requestedSlug }] },
+        where: {
+          OR: [
+            { siteSlug: requestedSlug },
+            { slug: requestedSlug },
+            { siteSlugAliases: { some: { slug: requestedSlug } } },
+          ],
+        },
         select: {
           id: true,
           spaceId: true,
