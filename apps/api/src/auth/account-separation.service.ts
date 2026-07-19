@@ -10,6 +10,7 @@ import { authProviderSchema } from '@minewiki/schemas';
 import { PrismaService } from '../common/prisma.service';
 import { withActiveCanonicalAccountGroup } from './account-lifecycle-fence';
 import { rehomeReviewsForCanonicalMerge } from '../review/review-account-merge';
+import { isProtectedRoleCode } from '../roles/role-policy';
 
 export type AuthProvider = z.infer<typeof authProviderSchema>;
 
@@ -228,6 +229,7 @@ export class AccountSeparationService {
         );
         await this.finalizeCanonicalAccountMerge(tx, canonicalAccountId, group.accountIds);
         await this.rehomeWebAuthnForCanonicalMerge(tx, fresh.primaryAccountId, group.accountIds);
+        await this.assertProtectedRolesRetainMfa(tx, canonicalAccountId);
         await this.synchronizeWikiProfileBlocksForAccountLink(tx, group.accountIds);
         await this.revokeWikiApiTokensForAccountLink(tx, group.accountIds);
         await tx.accountLinkRequest.update({
@@ -294,6 +296,7 @@ export class AccountSeparationService {
     );
     await this.finalizeCanonicalAccountMerge(tx, canonicalAccountId, accountIds);
     await this.rehomeWebAuthnForCanonicalMerge(tx, primaryAccountId, accountIds);
+    await this.assertProtectedRolesRetainMfa(tx, canonicalAccountId);
     await this.synchronizeWikiProfileBlocksForAccountLink(tx, accountIds);
     await this.revokeWikiApiTokensForAccountLink(tx, accountIds);
     return canonicalAccountId;
@@ -412,6 +415,7 @@ export class AccountSeparationService {
       data: { accountId: canonicalAccountId },
     });
     await rehomeReviewsForCanonicalMerge(tx, canonicalAccountId, accountIds);
+    await rehomeAccountRolesForCanonicalMerge(tx, canonicalAccountId, accountIds);
 
     const identities = await tx.minecraftIdentity.findMany({
       where: { accountId: { in: [...accountIds] } },
@@ -452,6 +456,7 @@ export class AccountSeparationService {
       throw new ConflictException('패스키를 이전할 대표 계정이 계정 그룹과 일치하지 않습니다.');
     }
 
+    await rehomeMfaTotpForCanonicalMerge(tx, canonicalAccountId, accountIds);
     await tx.webAuthnChallenge.deleteMany({ where: { accountId: { in: [...accountIds] } } });
     const credentials = await tx.webAuthnCredential.findMany({
       where: { accountId: { in: [...accountIds] } },
@@ -486,6 +491,29 @@ export class AccountSeparationService {
       where: { accountId: { in: [...accountIds], not: canonicalAccountId } },
       data: { accountId: canonicalAccountId },
     });
+  }
+
+  private async assertProtectedRolesRetainMfa(
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    canonicalAccountId: string,
+  ): Promise<void> {
+    const roles = await tx.accountRole.findMany({
+      where: { accountId: canonicalAccountId },
+      select: { role: { select: { code: true } } },
+    });
+    if (!roles.some(({ role }) => isProtectedRoleCode(role.code))) return;
+    const [totp, passkeyCount] = await Promise.all([
+      tx.mfaTotpCredential.findUnique({
+        where: { accountId: canonicalAccountId },
+        select: { enabledAt: true },
+      }),
+      tx.webAuthnCredential.count({ where: { accountId: canonicalAccountId } }),
+    ]);
+    if (!totp?.enabledAt && passkeyCount === 0) {
+      throw new ConflictException(
+        '보호된 관리자 역할이 있는 계정은 다중 인증을 유지해야 통합할 수 있습니다.',
+      );
+    }
   }
 
   private async revokeWikiApiTokensForAccountLink(
@@ -563,6 +591,67 @@ export class AccountSeparationService {
       passwordHash: account.passwordHash,
       lifecycleStatus: account.lifecycleStatus
     };
+  }
+}
+
+export async function rehomeAccountRolesForCanonicalMerge(
+  tx: Pick<import('@prisma/client').Prisma.TransactionClient, 'accountRole'>,
+  canonicalAccountId: string,
+  accountIds: readonly string[],
+): Promise<void> {
+  const roles = await tx.accountRole.findMany({
+    where: { accountId: { in: [...accountIds] } },
+    select: { id: true, accountId: true, roleId: true, createdAt: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+  const rowsByRole = new Map<string, typeof roles>();
+  for (const row of roles) {
+    const rows = rowsByRole.get(row.roleId) ?? [];
+    rows.push(row);
+    rowsByRole.set(row.roleId, rows);
+  }
+
+  for (const rows of rowsByRole.values()) {
+    const canonical = rows.find((row) => row.accountId === canonicalAccountId);
+    const keeper = canonical ?? rows[0];
+    if (!keeper) continue;
+    const duplicateIds = rows.filter((row) => row.id !== keeper.id).map((row) => row.id);
+    if (duplicateIds.length > 0) {
+      await tx.accountRole.deleteMany({ where: { id: { in: duplicateIds } } });
+    }
+    if (!canonical) {
+      await tx.accountRole.update({
+        where: { id: keeper.id },
+        data: { accountId: canonicalAccountId },
+      });
+    }
+  }
+}
+
+export async function rehomeMfaTotpForCanonicalMerge(
+  tx: Pick<import('@prisma/client').Prisma.TransactionClient, 'mfaTotpCredential'>,
+  canonicalAccountId: string,
+  accountIds: readonly string[],
+): Promise<void> {
+  const credentials = await tx.mfaTotpCredential.findMany({
+    where: { accountId: { in: [...accountIds] } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+  credentials.sort((left, right) =>
+    Number(Boolean(right.enabledAt)) - Number(Boolean(left.enabledAt))
+    || Number(right.accountId === canonicalAccountId) - Number(left.accountId === canonicalAccountId),
+  );
+  const keeper = credentials[0];
+  if (!keeper) return;
+  const duplicateIds = credentials.slice(1).map((credential) => credential.id);
+  if (duplicateIds.length > 0) {
+    await tx.mfaTotpCredential.deleteMany({ where: { id: { in: duplicateIds } } });
+  }
+  if (keeper.accountId !== canonicalAccountId) {
+    await tx.mfaTotpCredential.update({
+      where: { id: keeper.id },
+      data: { accountId: canonicalAccountId },
+    });
   }
 }
 
