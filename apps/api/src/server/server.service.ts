@@ -1029,6 +1029,14 @@ export class ServerService {
     return response;
   }
 
+  async ensureClaimedServerWiki(serverId: string): Promise<ServerWikiLinkResponse> {
+    const server = await this.ensureExists(serverId);
+    if (!server.ownerAccountId) {
+      throw new ConflictException('소유권 검증이 완료된 서버만 위키를 만들 수 있습니다.');
+    }
+    return this.createServerWiki(serverId, server.ownerAccountId);
+  }
+
   async linkServerWiki(
     serverId: string,
     input: ServerWikiLinkRequest,

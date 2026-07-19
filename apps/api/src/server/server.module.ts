@@ -28,11 +28,12 @@ import { ServerWikiDomainController, ServerWikiDomainRouteController } from './s
 import { ServerWikiDomainService } from './server-wiki-domain.service';
 import { ServerWikiDomainProvisioningController } from './server-wiki-domain-provisioning.controller';
 import { CaptchaModule } from '../captcha/captcha.module';
+import { ServerWikiProvisioningInternalController } from './server-wiki-provisioning-internal.controller';
 
 @Module({
   imports: [CaptchaModule, FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
   providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseManifestCursorCodec, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService, ServerWikiDomainService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController, ServerWikiDomainProvisioningController],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiProvisioningInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController, ServerWikiDomainProvisioningController],
   exports: [ServerService]
 })
 export class ServerModule {}

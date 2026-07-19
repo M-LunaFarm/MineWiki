@@ -157,6 +157,9 @@ export class ClaimService {
         '검증 토큰이 변경되었습니다. 새 토큰으로 다시 시도해 주세요.',
       );
     }
+    if (result.status === 'verified') {
+      await this.serverService.ensureClaimedServerWiki(serverId);
+    }
     return this.getStatus(serverId);
   }
 

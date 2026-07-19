@@ -47,8 +47,13 @@ import { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '@minewiki/schem
 import { terminateOnRunLoopFailure } from './runtime-failure';
 import { triggerAccountDeletionSweep } from './account-deletion-scheduler';
 import { processAccountDeletionDiscordRevocations } from './account-deletion-discord-revocations';
+import { provisionClaimedServerWiki } from './server-wiki-provisioner';
 import { triggerBillingEntitlementSweep } from './billing-entitlement-scheduler';
-import { deriveAccountDeletionServiceToken, deriveBillingLifecycleServiceToken } from '@minewiki/auth';
+import {
+  deriveAccountDeletionServiceToken,
+  deriveBillingLifecycleServiceToken,
+  deriveServerWikiProvisioningServiceToken,
+} from '@minewiki/auth';
 import { publishWorkerHeartbeat } from './worker-heartbeat';
 import { RETRYABLE_SCHEDULED_JOB_OPTIONS } from './queue-options';
 
@@ -143,7 +148,17 @@ const dispatcher = createVoteDispatcher({
   },
 });
 const pinger = createServerPinger(prisma);
-const claimVerifier = createClaimVerifier(prisma);
+const internalApiBaseUrl = config.getOptional('INTERNAL_API_BASE_URL') ?? 'http://api:3000';
+const serverWikiProvisioningToken = deriveServerWikiProvisioningServiceToken(
+  config.get('APP_ENCRYPTION_KEY'),
+);
+const claimVerifier = createClaimVerifier(prisma, {
+  provisionServerWiki: (serverId) => provisionClaimedServerWiki({
+    apiBaseUrl: internalApiBaseUrl,
+    internalToken: serverWikiProvisioningToken,
+    serverId,
+  }),
+});
 const rankAggregator = createRankAggregator(prisma);
 const discordToken = config.getOptional('DISCORD_BOT_TOKEN') ?? '';
 const discordDeliverer = createDiscordDigestDeliverer({
@@ -645,7 +660,6 @@ async function bootstrapWorker(): Promise<void> {
     const result = await rebuildWikiSpecialSnapshots(prisma);
     Logger.info(result, 'Rebuilt wiki special document snapshots');
   });
-  const internalApiBaseUrl = config.getOptional('INTERNAL_API_BASE_URL') ?? 'http://api:3000';
   const accountDeletionServiceToken = deriveAccountDeletionServiceToken(config.get('APP_ENCRYPTION_KEY'));
   const billingLifecycleServiceToken = deriveBillingLifecycleServiceToken(config.get('APP_ENCRYPTION_KEY'));
   scheduleInterval('account-deletion', ACCOUNT_DELETION_INTERVAL_MS, async () => {

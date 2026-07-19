@@ -30,3 +30,9 @@ export function deriveBillingLifecycleServiceToken(appEncryptionKey: string): st
     .update('minewiki:billing-lifecycle-worker:v1')
     .digest('base64url');
 }
+
+export function deriveServerWikiProvisioningServiceToken(appEncryptionKey: string): string {
+  return createHmac('sha256', appEncryptionKey)
+    .update('minewiki:server-wiki-provisioning-worker:v1')
+    .digest('base64url');
+}

@@ -164,6 +164,7 @@ test('proof rotation during verification discards the stale result', async () =>
 test('successful verification atomically assigns ownership before activating a pending listing', async () => {
   const fixedNow = new Date('2026-07-12T12:00:00.000Z');
   const listingUpdates: unknown[] = [];
+  const provisionedServers: string[] = [];
   const record = {
     id: 'claim-method-1',
     serverId: 'server-1',
@@ -198,6 +199,9 @@ test('successful verification atomically assigns ownership before activating a p
       checkedAt: fixedNow.toISOString(),
       note: 'dns_token_confirmed',
     }),
+    provisionServerWiki: async (serverId) => {
+      provisionedServers.push(serverId);
+    },
   }).verify({
     serverId: 'server-1',
     method: 'dns',
@@ -205,6 +209,7 @@ test('successful verification atomically assigns ownership before activating a p
   });
 
   assert.equal(result.status, 'verified');
+  assert.deepEqual(provisionedServers, ['server-1']);
   assert.deepEqual(listingUpdates, [
     {
       where: {

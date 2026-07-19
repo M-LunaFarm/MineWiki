@@ -36,11 +36,13 @@ export function createClaimVerifier(
   dependencies: {
     readonly now?: () => Date;
     readonly runVerificationCheck?: typeof runVerificationCheck;
+    readonly provisionServerWiki?: (serverId: string) => Promise<void>;
   } = {},
 ) {
   const logger = Logger.child({ component: 'ClaimVerifier' });
   const now = dependencies.now ?? (() => new Date());
   const check = dependencies.runVerificationCheck ?? runVerificationCheck;
+  const provisionServerWiki = dependencies.provisionServerWiki ?? (async () => {});
 
   async function verify(job: ClaimVerificationJob): Promise<ClaimVerificationResult> {
     const checkedAt = now().toISOString();
@@ -112,6 +114,9 @@ export function createClaimVerifier(
 
     const result = await check(job.method, proof ?? '', job.serverId, prisma);
     const applied = await applyVerificationResult(prisma, snapshot, result);
+    if (applied && result.status === 'verified') {
+      await provisionServerWiki(job.serverId);
+    }
     return applied
       ? result
       : { status: 'pending', checkedAt, note: 'claim_generation_changed' };
