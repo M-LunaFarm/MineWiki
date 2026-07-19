@@ -176,6 +176,32 @@ test('watched revision notifications exclude the editor and deduplicate per reci
   assert.deepEqual(deliveries.map((item) => item.dedupeKey), ['revision:3:profile:8', 'revision:3:profile:9']);
 });
 
+test('server wiki collaborator invite notification uses a versioned outbox delivery', async () => {
+  let event: { eventKey: string; payloadJson: { deliveries: Array<{ profileId: string; href: string; dedupeKey: string }> } } | null = null;
+  const tx = { wikiNotificationEvent: { async createMany(args: { data: typeof event[] }) { event = args.data[0] ?? null; return { count: 1 }; } } };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+  await service.notifyServerWikiCollaboratorInvited(tx as never, {
+    invitationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', targetProfileId: 8n,
+    actorProfileId: 7n, serverName: 'Luna', roleLabel: '편집자', invitedAt: now, deliveryVersion: 2,
+  });
+  assert.equal(event?.eventKey, 'server-wiki-collaborator-invitation:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:delivery:2');
+  assert.equal(event?.payloadJson.deliveries[0]?.profileId, '8');
+  assert.equal(event?.payloadJson.deliveries[0]?.href, '/me#server-wiki-invitations');
+  assert.match(event?.payloadJson.deliveries[0]?.dedupeKey ?? '', /delivery:2:profile:8/u);
+});
+
+test('invitation state notification deduplicates recipients and excludes the actor', async () => {
+  let deliveries: Array<{ profileId: string; href: string }> = [];
+  const tx = { wikiNotificationEvent: { async createMany(args: { data: Array<{ payloadJson: { deliveries: Array<{ profileId: string; href: string }> } }> }) { deliveries = (args.data[0]?.payloadJson.deliveries ?? []).map(({ profileId, href }) => ({ profileId, href })); return { count: 1 }; } } };
+  const service = new WikiNotificationService({} as PrismaService, {} as WikiProfileService, {} as WikiPermissionService);
+  await service.notifyServerWikiCollaboratorInvitationChanged(tx as never, {
+    invitationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', recipientProfileIds: [7n, 8n, 8n],
+    actorProfileId: 7n, serverId: '11111111-1111-4111-8111-111111111111', serverName: 'Luna',
+    state: 'accepted', changedAt: now, version: 2,
+  });
+  assert.deepEqual(deliveries, [{ profileId: '8', href: '/servers/11111111-1111-4111-8111-111111111111/wiki-layouts?tab=collaborators' }]);
+});
+
 test('discussion reply notifications deep-link to the exact comment', async () => {
   let href = '';
   const tx = {

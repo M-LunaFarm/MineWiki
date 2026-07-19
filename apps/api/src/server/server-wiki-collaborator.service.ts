@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma, type WikiProfile } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -11,6 +12,8 @@ import { lockServerWikiReviewerPolicy } from './server-wiki-release-review';
 import { toAuditJson } from '../events/business-event.service';
 import { writeAuditRecord } from '../events/audit-event-writer';
 import { WikiProfileService } from '../wiki/wiki-profile.service';
+import { WikiNotificationService } from '../wiki/wiki-notification.service';
+import { EmailService } from '../auth/email.service';
 
 export const SERVER_WIKI_COLLABORATOR_ROLES = [
   'manager',
@@ -52,6 +55,32 @@ export interface ServerWikiCollaboratorRoster {
   readonly spaceId: string;
   readonly assignableRoles: readonly ServerWikiCollaboratorRole[];
   readonly items: readonly ServerWikiCollaboratorItem[];
+  readonly pendingInvitations: readonly ServerWikiCollaboratorInvitationItem[];
+}
+
+export interface ServerWikiCollaboratorInvitationItem {
+  readonly id: string;
+  readonly profileId: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly role: ServerWikiCollaboratorRole;
+  readonly reason: string;
+  readonly invitedAt: string;
+  readonly expiresAt: string;
+  readonly resendCount: number;
+  readonly version: number;
+}
+
+export interface MyServerWikiCollaboratorInvitationItem {
+  readonly id: string;
+  readonly serverId: string;
+  readonly serverName: string;
+  readonly role: ServerWikiCollaboratorRole;
+  readonly reason: string;
+  readonly inviterName: string;
+  readonly invitedAt: string;
+  readonly expiresAt: string;
+  readonly version: number;
 }
 
 export interface CreateServerWikiCollaboratorInput {
@@ -71,6 +100,16 @@ export interface RemoveServerWikiCollaboratorInput {
   readonly reason: string;
 }
 
+export interface ManageServerWikiCollaboratorInvitationInput {
+  readonly expectedVersion: number;
+  readonly reason: string;
+}
+
+export interface RespondServerWikiCollaboratorInvitationInput {
+  readonly action: 'accept' | 'decline';
+  readonly expectedVersion: number;
+}
+
 interface LockedServerWiki {
   readonly serverId: string;
   readonly ownerAccountId: string | null;
@@ -87,6 +126,7 @@ interface PreparedActor {
 interface AssignableProfile {
   readonly profile: WikiProfile;
   readonly canonicalAccountId: string;
+  readonly verifiedEmail: string | null;
 }
 
 interface LockedRoleRow {
@@ -103,12 +143,16 @@ const MAX_UNSIGNED_BIGINT = 18_446_744_073_709_551_615n;
 const REASON_MIN_LENGTH = 5;
 const REASON_MAX_LENGTH = 500;
 const MAX_PROFILE_ALIAS_DEPTH = 8;
+const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+const MAX_RESEND_COUNT = 10;
 
 @Injectable()
 export class ServerWikiCollaboratorService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly wikiProfiles: WikiProfileService,
+    @Optional() private readonly notifications?: WikiNotificationService,
+    @Optional() private readonly email?: EmailService,
   ) {}
 
   async list(
@@ -177,9 +221,8 @@ export class ServerWikiCollaboratorService {
     const reason = parseReason(input.reason);
     const preparedActor = await this.prepareActorProfile(serverId, actor);
 
-    return this.serializable(async (tx) => {
+    const result = await this.serializable(async (tx) => {
       const context = await this.lockServerWiki(tx, serverId, actor, preparedActor.accountId);
-      if (role === 'reviewer') await lockServerWikiReviewerPolicy(tx, context.spaceId);
       const target = await this.resolveAssignableProfileByUsername(tx, username);
       this.assertNotServerOwner(context, target);
       const rows = await this.lockTargetRoleRows(tx, context.spaceId, target.profile.id);
@@ -189,10 +232,44 @@ export class ServerWikiCollaboratorService {
       }
 
       const now = new Date();
-      await this.activateRole(tx, context.spaceId, target.profile.id, role, preparedActor.profile.id, now);
-      await this.assertTargetRoleState(tx, context.spaceId, target.profile.id, role);
+      await this.expirePendingInvitations(tx, now, context.serverWikiId, target.canonicalAccountId);
+      await this.lockTargetInvitationRows(tx, context.serverWikiId, target.canonicalAccountId);
+      const existing = await tx.serverWikiCollaboratorInvitation.findFirst({
+        where: {
+          serverWikiId: context.serverWikiId,
+          targetAccountId: target.canonicalAccountId,
+          status: 'pending',
+          activeKey: invitationActiveKey(context.serverWikiId, target.canonicalAccountId),
+        },
+        select: { id: true },
+      });
+      if (existing) throw rosterConflict('이미 응답을 기다리는 협업 초대가 있습니다.');
+      const serverWiki = await tx.serverWiki.findUnique({
+        where: { id: context.serverWikiId },
+        select: { serverName: true },
+      });
+      if (!serverWiki) throw serverWikiMismatch();
+      const invitation = await tx.serverWikiCollaboratorInvitation.create({
+        data: {
+          serverWikiId: context.serverWikiId,
+          spaceId: context.spaceId,
+          targetProfileId: target.profile.id,
+          targetAccountId: target.canonicalAccountId,
+          role,
+          reason,
+          status: 'pending',
+          activeKey: invitationActiveKey(context.serverWikiId, target.canonicalAccountId),
+          invitedByProfileId: preparedActor.profile.id,
+          invitedByAccountId: context.actorAccountId,
+          issuerAuthority: actor.permissions?.includes('server.admin') === true ? 'server_admin' : 'owner',
+          issuedUnderOwnerId: context.ownerAccountId,
+          invitedAt: now,
+          expiresAt: new Date(now.getTime() + INVITATION_TTL_MS),
+          version: 1,
+        },
+      });
       await this.appendAudit(tx, {
-        action: 'server.wiki_collaborator.add',
+        action: 'server.wiki_collaborator.invite',
         actorAccountId: context.actorAccountId,
         actorProfileId: preparedActor.profile.id,
         context,
@@ -201,9 +278,283 @@ export class ServerWikiCollaboratorService {
         newRole: role,
         reason,
         now,
+        invitation: {
+          id: invitation.id, previousStatus: null, status: 'pending',
+          previousVersion: null, version: invitation.version, expiresAt: invitation.expiresAt,
+        },
+      });
+      await this.notifications?.notifyServerWikiCollaboratorInvited(tx, {
+        invitationId: invitation.id,
+        targetProfileId: target.profile.id,
+        actorProfileId: preparedActor.profile.id,
+        serverName: serverWiki.serverName,
+        roleLabel: roleLabel(role),
+        invitedAt: now,
+        deliveryVersion: invitation.version,
+      });
+      return {
+        roster: await this.roster(tx, context),
+        delivery: {
+          email: target.verifiedEmail,
+          serverName: serverWiki.serverName,
+          roleLabel: roleLabel(role),
+          inviterName: preparedActor.profile.displayName,
+          expiresAt: invitation.expiresAt,
+        },
+      };
+    });
+    if (result.delivery.email && this.email?.isEnabled()) {
+      await this.email.sendServerWikiCollaboratorInvitationEmail({
+        ...result.delivery,
+        email: result.delivery.email,
+      }).catch((error) => this.email?.logDeliveryFailure(error));
+    }
+    return result.roster;
+  }
+
+  async cancelInvitation(
+    serverIdInput: string,
+    invitationIdInput: string,
+    input: ManageServerWikiCollaboratorInvitationInput,
+    actor: ServerWikiCollaboratorActor,
+  ): Promise<ServerWikiCollaboratorRoster> {
+    const serverId = parseServerId(serverIdInput);
+    const invitationId = parseInvitationId(invitationIdInput);
+    const expectedVersion = parseExpectedVersion(input.expectedVersion);
+    const reason = parseReason(input.reason);
+    const preparedActor = await this.prepareActorProfile(serverId, actor);
+    return this.serializable(async (tx) => {
+      const context = await this.lockServerWiki(tx, serverId, actor, preparedActor.accountId);
+      await this.lockInvitation(tx, invitationId);
+      const invitation = await tx.serverWikiCollaboratorInvitation.findUnique({ where: { id: invitationId } });
+      this.assertManageableInvitation(invitation, context, expectedVersion);
+      const now = new Date();
+      const updated = await tx.serverWikiCollaboratorInvitation.updateMany({
+        where: {
+          id: invitationId, serverWikiId: context.serverWikiId, status: 'pending',
+          version: expectedVersion, expiresAt: { gt: now },
+        },
+        data: {
+          status: 'cancelled', activeKey: null, respondedAt: now,
+          cancelledByProfileId: preparedActor.profile.id, cancelReason: reason,
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count !== 1) throw staleInvitationConflict();
+      const targetProfile = await this.resolveProfileForRemoval(tx, invitation!.targetProfileId);
+      const serverWiki = await tx.serverWiki.findUnique({ where: { id: context.serverWikiId }, select: { serverName: true } });
+      if (!serverWiki) throw serverWikiMismatch();
+      await this.appendAudit(tx, {
+        action: 'server.wiki_collaborator.invitation.cancel',
+        actorAccountId: context.actorAccountId,
+        actorProfileId: preparedActor.profile.id,
+        context,
+        targetProfile,
+        previousRole: invitation!.role as ServerWikiCollaboratorRole,
+        newRole: null,
+        reason,
+        now,
+        invitation: {
+          id: invitationId, previousStatus: 'pending', status: 'cancelled',
+          previousVersion: expectedVersion, version: expectedVersion + 1, expiresAt: invitation!.expiresAt,
+        },
+      });
+      await this.notifications?.notifyServerWikiCollaboratorInvitationChanged(tx, {
+        invitationId, recipientProfileIds: [targetProfile.id], actorProfileId: preparedActor.profile.id,
+        serverId: context.serverId, serverName: serverWiki.serverName, state: 'cancelled',
+        changedAt: now, version: expectedVersion + 1,
       });
       return this.roster(tx, context);
     });
+  }
+
+  async resendInvitation(
+    serverIdInput: string,
+    invitationIdInput: string,
+    input: ManageServerWikiCollaboratorInvitationInput,
+    actor: ServerWikiCollaboratorActor,
+  ): Promise<ServerWikiCollaboratorRoster> {
+    const serverId = parseServerId(serverIdInput);
+    const invitationId = parseInvitationId(invitationIdInput);
+    const expectedVersion = parseExpectedVersion(input.expectedVersion);
+    const reason = parseReason(input.reason);
+    const preparedActor = await this.prepareActorProfile(serverId, actor);
+    const result = await this.serializable(async (tx) => {
+      const context = await this.lockServerWiki(tx, serverId, actor, preparedActor.accountId);
+      await this.lockInvitation(tx, invitationId);
+      const invitation = await tx.serverWikiCollaboratorInvitation.findUnique({ where: { id: invitationId } });
+      this.assertManageableInvitation(invitation, context, expectedVersion);
+      if (invitation!.resendCount >= MAX_RESEND_COUNT) {
+        throw new BadRequestException('이 초대는 재전송 한도에 도달했습니다. 취소 후 새 초대를 보내 주세요.');
+      }
+      const target = await this.resolveAssignableProfileById(tx, invitation!.targetProfileId);
+      if (target.canonicalAccountId !== invitation!.targetAccountId) throw staleInvitationConflict();
+      const rows = await this.lockTargetRoleRows(tx, context.spaceId, target.profile.id);
+      if (this.assertUnambiguousMutationRoles(rows).length > 0) {
+        throw rosterConflict('이미 서버 위키 협업자로 등록된 사용자입니다. 초대를 취소해 주세요.');
+      }
+      const serverWiki = await tx.serverWiki.findUnique({ where: { id: context.serverWikiId }, select: { serverName: true } });
+      if (!serverWiki) throw serverWikiMismatch();
+      const now = new Date();
+      const nextVersion = expectedVersion + 1;
+      const expiresAt = new Date(now.getTime() + INVITATION_TTL_MS);
+      const updated = await tx.serverWikiCollaboratorInvitation.updateMany({
+        where: {
+          id: invitationId, serverWikiId: context.serverWikiId, status: 'pending',
+          version: expectedVersion, expiresAt: { gt: now },
+        },
+        data: {
+          resentAt: now, resendCount: { increment: 1 }, expiresAt, version: { increment: 1 },
+          invitedByProfileId: preparedActor.profile.id,
+          invitedByAccountId: context.actorAccountId,
+          issuerAuthority: actor.permissions?.includes('server.admin') === true ? 'server_admin' : 'owner',
+          issuedUnderOwnerId: context.ownerAccountId,
+        },
+      });
+      if (updated.count !== 1) throw staleInvitationConflict();
+      await this.notifications?.notifyServerWikiCollaboratorInvited(tx, {
+        invitationId, targetProfileId: target.profile.id, actorProfileId: preparedActor.profile.id,
+        serverName: serverWiki.serverName, roleLabel: roleLabel(invitation!.role as ServerWikiCollaboratorRole),
+        invitedAt: now, deliveryVersion: nextVersion,
+      });
+      await this.appendAudit(tx, {
+        action: 'server.wiki_collaborator.invitation.resend', actorAccountId: context.actorAccountId,
+        actorProfileId: preparedActor.profile.id, context, targetProfile: target.profile,
+        previousRole: invitation!.role as ServerWikiCollaboratorRole,
+        newRole: invitation!.role as ServerWikiCollaboratorRole, reason, now,
+        invitation: {
+          id: invitationId, previousStatus: 'pending', status: 'pending',
+          previousVersion: expectedVersion, version: nextVersion, expiresAt,
+        },
+      });
+      return {
+        roster: await this.roster(tx, context),
+        delivery: {
+          email: target.verifiedEmail, serverName: serverWiki.serverName,
+          roleLabel: roleLabel(invitation!.role as ServerWikiCollaboratorRole),
+          inviterName: preparedActor.profile.displayName, expiresAt,
+        },
+      };
+    });
+    if (result.delivery.email && this.email?.isEnabled()) {
+      await this.email.sendServerWikiCollaboratorInvitationEmail({ ...result.delivery, email: result.delivery.email })
+        .catch((error) => this.email?.logDeliveryFailure(error));
+    }
+    return result.roster;
+  }
+
+  async listMyInvitations(actor: ServerWikiCollaboratorActor): Promise<readonly MyServerWikiCollaboratorInvitationItem[]> {
+    const accountId = await this.resolveCanonicalActorAccount(actor.accountId);
+    const profile = await this.wikiProfiles.ensureWikiProfile(accountId);
+    const now = new Date();
+    await this.expireMyInvitations(accountId, now);
+    const rows = await this.prisma.serverWikiCollaboratorInvitation.findMany({
+      where: { targetAccountId: accountId, targetProfileId: profile.id, status: 'pending', expiresAt: { gt: now } },
+      select: {
+        id: true, role: true, reason: true, invitedAt: true, expiresAt: true, version: true,
+        invitedByProfileId: true,
+        serverWiki: { select: { voteServerId: true, serverName: true, status: true } },
+      },
+      orderBy: [{ invitedAt: 'desc' }, { id: 'desc' }],
+      take: 100,
+    });
+    const inviterIds = [...new Set(rows.map((row) => row.invitedByProfileId))];
+    const inviters = inviterIds.length > 0
+      ? await this.prisma.wikiProfile.findMany({ where: { id: { in: inviterIds } }, select: { id: true, displayName: true } })
+      : [];
+    const inviterById = new Map(inviters.map((item) => [item.id, item.displayName]));
+    return rows.flatMap((row) => {
+      if (!row.serverWiki.voteServerId || row.serverWiki.status !== 'active' || !isRole(row.role)) return [];
+      return [{
+        id: row.id, serverId: row.serverWiki.voteServerId, serverName: row.serverWiki.serverName,
+        role: row.role, reason: row.reason,
+        inviterName: inviterById.get(row.invitedByProfileId) ?? '서버 운영자',
+        invitedAt: row.invitedAt.toISOString(), expiresAt: row.expiresAt.toISOString(), version: row.version,
+      }];
+    });
+  }
+
+  async respondToInvitation(
+    invitationIdInput: string,
+    input: RespondServerWikiCollaboratorInvitationInput,
+    actor: ServerWikiCollaboratorActor,
+  ): Promise<{ readonly status: 'accepted' | 'declined'; readonly serverId: string }> {
+    const invitationId = parseInvitationId(invitationIdInput);
+    const expectedVersion = parseExpectedVersion(input.expectedVersion);
+    const action = input.action;
+    if (action !== 'accept' && action !== 'decline') throw new BadRequestException('Invalid invitation action.');
+    const accountId = await this.resolveCanonicalActorAccount(actor.accountId);
+    const actorProfile = await this.wikiProfiles.ensureWikiProfile(accountId);
+    const result = await this.serializable(async (tx) => {
+      await this.lockInvitation(tx, invitationId);
+      const invitation = await tx.serverWikiCollaboratorInvitation.findUnique({ where: { id: invitationId } });
+      if (!invitation || invitation.targetAccountId !== accountId || invitation.targetProfileId !== actorProfile.id) {
+        throw new NotFoundException('협업 초대를 찾을 수 없습니다.');
+      }
+      if (invitation.status !== 'pending' || invitation.version !== expectedVersion) throw staleInvitationConflict();
+      const now = new Date();
+      if (invitation.expiresAt <= now) {
+        const expired = await tx.serverWikiCollaboratorInvitation.updateMany({
+          where: { id: invitation.id, status: 'pending', version: expectedVersion },
+          data: { status: 'expired', activeKey: null, respondedAt: now, version: { increment: 1 } },
+        });
+        if (expired.count !== 1) throw staleInvitationConflict();
+        return { expired: true as const, serverId: '' };
+      }
+      const wiki = await tx.serverWiki.findUnique({
+        where: { id: invitation.serverWikiId },
+        select: { voteServerId: true, serverName: true },
+      });
+      if (!wiki?.voteServerId) throw staleInvitationConflict();
+      const context = await this.lockServerWiki(tx, wiki.voteServerId, actor, accountId, false);
+      if (context.serverWikiId !== invitation.serverWikiId || context.spaceId !== invitation.spaceId) throw staleInvitationConflict();
+      if (invitation.issuerAuthority === 'owner' && context.ownerAccountId !== invitation.issuedUnderOwnerId) {
+        throw staleInvitationConflict();
+      }
+      const target = await this.resolveAssignableProfileById(tx, invitation.targetProfileId);
+      if (target.canonicalAccountId !== accountId) throw staleInvitationConflict();
+      const invitationRole = parseRole(invitation.role, 'invitation role');
+      const rows = await this.lockTargetRoleRows(tx, context.spaceId, target.profile.id);
+      if (this.assertUnambiguousMutationRoles(rows).length > 0) throw staleInvitationConflict();
+      if (action === 'accept' && invitationRole === 'reviewer') await lockServerWikiReviewerPolicy(tx, context.spaceId);
+      const terminalStatus: 'accepted' | 'declined' = action === 'accept' ? 'accepted' : 'declined';
+      const updated = await tx.serverWikiCollaboratorInvitation.updateMany({
+        where: { id: invitation.id, status: 'pending', version: expectedVersion, expiresAt: { gt: now } },
+        data: { status: terminalStatus, activeKey: null, respondedAt: now, version: { increment: 1 } },
+      });
+      if (updated.count !== 1) throw staleInvitationConflict();
+      if (action === 'accept') {
+        await this.activateRole(tx, context.spaceId, target.profile.id, invitationRole, invitation.invitedByProfileId, now);
+        await this.assertTargetRoleState(tx, context.spaceId, target.profile.id, invitationRole);
+      }
+      await this.appendAudit(tx, {
+        action: `server.wiki_collaborator.invitation.${action}`,
+        actorAccountId: accountId, actorProfileId: actorProfile.id, context, targetProfile: target.profile,
+        previousRole: null, newRole: action === 'accept' ? invitationRole : null,
+        reason: action === 'accept' ? '초대 대상자가 협업 역할을 수락했습니다.' : '초대 대상자가 협업 역할을 거절했습니다.',
+        now,
+        invitation: {
+          id: invitation.id, previousStatus: 'pending', status: terminalStatus,
+          previousVersion: expectedVersion, version: expectedVersion + 1, expiresAt: invitation.expiresAt,
+        },
+      });
+      const ownerProfile = context.ownerAccountId
+        ? await tx.wikiProfile.findUnique({ where: { accountId: context.ownerAccountId }, select: { id: true } })
+        : null;
+      await this.notifications?.notifyServerWikiCollaboratorInvitationChanged(tx, {
+        invitationId: invitation.id,
+        recipientProfileIds: [invitation.invitedByProfileId, ...(ownerProfile ? [ownerProfile.id] : [])],
+        actorProfileId: actorProfile.id,
+        serverId: context.serverId,
+        serverName: wiki.serverName,
+        state: terminalStatus,
+        changedAt: now,
+        version: expectedVersion + 1,
+      });
+      return { expired: false as const, status: terminalStatus, serverId: context.serverId };
+    });
+    if (result.expired) throw staleInvitationConflict('초대가 만료되었습니다.');
+    return { status: result.status, serverId: result.serverId };
   }
 
   async update(
@@ -495,12 +846,16 @@ export class ServerWikiCollaboratorService {
     `;
     const account = await tx.account.findUnique({
       where: { id: profile.accountId },
-      select: { id: true, canonicalAccountId: true, lifecycleStatus: true },
+      select: { id: true, canonicalAccountId: true, lifecycleStatus: true, email: true, emailVerified: true },
     });
     if (!account || account.lifecycleStatus !== 'active') throw profileNotAssignable();
     const canonicalAccountId = account.canonicalAccountId ?? account.id;
     if (canonicalAccountId !== account.id) throw profileNotAssignable();
-    return { profile, canonicalAccountId };
+    return {
+      profile,
+      canonicalAccountId,
+      verifiedEmail: account.emailVerified ? account.email : null,
+    };
   }
 
   private async resolveProfileForRemoval(
@@ -560,6 +915,66 @@ export class ServerWikiCollaboratorService {
       },
       orderBy: { id: 'asc' },
     });
+  }
+
+  private lockInvitation(tx: Prisma.TransactionClient, invitationId: string): Promise<unknown> {
+    return tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM server_wiki_collaborator_invitations WHERE id = ${invitationId} FOR UPDATE
+    `;
+  }
+
+  private lockTargetInvitationRows(
+    tx: Prisma.TransactionClient,
+    serverWikiId: bigint,
+    targetAccountId: string,
+  ): Promise<unknown> {
+    return tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM server_wiki_collaborator_invitations
+      WHERE server_wiki_id = ${serverWikiId} AND target_account_id = ${targetAccountId}
+      ORDER BY id FOR UPDATE
+    `;
+  }
+
+  private async expirePendingInvitations(
+    tx: Prisma.TransactionClient,
+    now: Date,
+    serverWikiId?: bigint,
+    targetAccountId?: string,
+  ): Promise<void> {
+    await tx.serverWikiCollaboratorInvitation.updateMany({
+      where: {
+        status: 'pending', expiresAt: { lte: now },
+        ...(serverWikiId ? { serverWikiId } : {}),
+        ...(targetAccountId ? { targetAccountId } : {}),
+      },
+      data: { status: 'expired', activeKey: null, respondedAt: now, version: { increment: 1 } },
+    });
+  }
+
+  private async expireMyInvitations(accountId: string, now: Date): Promise<void> {
+    await this.prisma.serverWikiCollaboratorInvitation.updateMany({
+      where: { targetAccountId: accountId, status: 'pending', expiresAt: { lte: now } },
+      data: { status: 'expired', activeKey: null, respondedAt: now, version: { increment: 1 } },
+    });
+  }
+
+  private assertManageableInvitation(
+    invitation: {
+      readonly serverWikiId: bigint;
+      readonly spaceId: bigint;
+      readonly status: string;
+      readonly version: number;
+      readonly expiresAt: Date;
+    } | null,
+    context: LockedServerWiki,
+    expectedVersion: number,
+  ): void {
+    if (!invitation || invitation.serverWikiId !== context.serverWikiId || invitation.spaceId !== context.spaceId) {
+      throw new NotFoundException('협업 초대를 찾을 수 없습니다.');
+    }
+    if (invitation.status !== 'pending' || invitation.version !== expectedVersion || invitation.expiresAt <= new Date()) {
+      throw staleInvitationConflict();
+    }
   }
 
   private assertUnambiguousMutationRoles(
@@ -687,6 +1102,14 @@ export class ServerWikiCollaboratorService {
       readonly newRole: ServerWikiCollaboratorRole | null;
       readonly reason: string;
       readonly now: Date;
+      readonly invitation?: {
+        readonly id: string;
+        readonly previousStatus: string | null;
+        readonly status: string;
+        readonly previousVersion: number | null;
+        readonly version: number;
+        readonly expiresAt: Date;
+      };
     },
   ): Promise<void> {
     await writeAuditRecord(tx, {
@@ -707,6 +1130,14 @@ export class ServerWikiCollaboratorService {
           previousRole: input.previousRole,
           newRole: input.newRole,
           reason: input.reason,
+          ...(input.invitation ? {
+            invitationId: input.invitation.id,
+            previousStatus: input.invitation.previousStatus,
+            status: input.invitation.status,
+            previousVersion: input.invitation.previousVersion,
+            version: input.invitation.version,
+            expiresAt: input.invitation.expiresAt,
+          } : {}),
         }),
         createdAt: input.now,
       },
@@ -717,6 +1148,8 @@ export class ServerWikiCollaboratorService {
     tx: Prisma.TransactionClient,
     context: LockedServerWiki,
   ): Promise<ServerWikiCollaboratorRoster> {
+    const now = new Date();
+    await this.expirePendingInvitations(tx, now, context.serverWikiId);
     const rows = await tx.subwikiRole.findMany({
       where: {
         spaceId: context.spaceId,
@@ -732,7 +1165,18 @@ export class ServerWikiCollaboratorService {
       },
       orderBy: [{ grantedAt: 'asc' }, { id: 'asc' }],
     });
-    const profileIds = [...new Set(rows.flatMap((row) => [row.userId, ...(row.grantedBy ? [row.grantedBy] : [])]))];
+    const invitations = await tx.serverWikiCollaboratorInvitation.findMany({
+      where: { serverWikiId: context.serverWikiId, spaceId: context.spaceId, status: 'pending', expiresAt: { gt: now } },
+      select: {
+        id: true, targetProfileId: true, role: true, reason: true, invitedAt: true,
+        expiresAt: true, resendCount: true, version: true,
+      },
+      orderBy: [{ invitedAt: 'asc' }, { id: 'asc' }],
+    });
+    const profileIds = [...new Set([
+      ...rows.flatMap((row) => [row.userId, ...(row.grantedBy ? [row.grantedBy] : [])]),
+      ...invitations.map((invitation) => invitation.targetProfileId),
+    ])];
     const profiles = profileIds.length > 0
       ? await tx.wikiProfile.findMany({
           where: { id: { in: profileIds } },
@@ -763,11 +1207,28 @@ export class ServerWikiCollaboratorService {
           : null,
       };
     });
+    const pendingInvitations = invitations.map((invitation): ServerWikiCollaboratorInvitationItem => {
+      const profile = profilesById.get(invitation.targetProfileId);
+      if (!profile || !isRole(invitation.role)) throw rosterConflict('대기 중인 초대 정보가 유효하지 않습니다.');
+      return {
+        id: invitation.id,
+        profileId: profile.id.toString(),
+        username: profile.username,
+        displayName: profile.displayName,
+        role: invitation.role,
+        reason: invitation.reason,
+        invitedAt: invitation.invitedAt.toISOString(),
+        expiresAt: invitation.expiresAt.toISOString(),
+        resendCount: invitation.resendCount,
+        version: invitation.version,
+      };
+    });
     return {
       serverId: context.serverId,
       spaceId: context.spaceId.toString(),
       assignableRoles: [...SERVER_WIKI_COLLABORATOR_ROLES],
       items,
+      pendingInvitations,
     };
   }
 
@@ -795,6 +1256,28 @@ function parseServerId(value: string): string {
     throw new BadRequestException('serverId must be a UUID.');
   }
   return value.toLowerCase();
+}
+
+function parseInvitationId(value: string): string {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+    throw new BadRequestException('invitationId must be a UUID.');
+  }
+  return value.toLowerCase();
+}
+
+function parseExpectedVersion(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 1_000_000) {
+    throw new BadRequestException('expectedVersion must be a positive integer.');
+  }
+  return value;
+}
+
+function invitationActiveKey(serverWikiId: bigint, accountId: string): string {
+  return `${serverWikiId.toString()}:${accountId}`;
+}
+
+function roleLabel(role: ServerWikiCollaboratorRole): string {
+  return role === 'manager' ? '관리자' : role === 'reviewer' ? '검토자' : '편집자';
 }
 
 function parseProfileId(value: string): bigint {
@@ -901,6 +1384,10 @@ function serverWikiMismatch(): ConflictException {
 
 function staleRoleConflict(): ConflictException {
   return rosterConflict('협업자 역할이 이미 변경되었습니다. 목록을 새로고침해 주세요.');
+}
+
+function staleInvitationConflict(message = '협업 초대가 이미 처리되었거나 변경되었습니다. 목록을 새로고침해 주세요.'): ConflictException {
+  return rosterConflict(message);
 }
 
 function rosterConflict(message: string): ConflictException {

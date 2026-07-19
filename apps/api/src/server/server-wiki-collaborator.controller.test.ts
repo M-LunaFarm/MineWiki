@@ -5,7 +5,7 @@ import { ZodError } from 'zod';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import { STEP_UP_PURPOSE_METADATA, StepUpGuard } from '../session/step-up.guard';
-import { ServerWikiCollaboratorController } from './server-wiki-collaborator.controller';
+import { MyServerWikiCollaboratorInvitationController, ServerWikiCollaboratorController } from './server-wiki-collaborator.controller';
 
 const serverId = '11111111-1111-4111-8111-111111111111';
 const session: SessionPayload = {
@@ -34,6 +34,8 @@ test('collaborator endpoints have bounded operation-specific throttles', () => {
     create: 8,
     update: 12,
     remove: 8,
+    resendInvitation: 5,
+    cancelInvitation: 8,
   } as const;
   for (const [method, limit] of Object.entries(expected)) {
     const handler = ServerWikiCollaboratorController.prototype[
@@ -42,6 +44,26 @@ test('collaborator endpoints have bounded operation-specific throttles', () => {
     assert.equal(Reflect.getMetadata('THROTTLER:LIMITdefault', handler), limit);
     assert.equal(Reflect.getMetadata('THROTTLER:TTLdefault', handler), 60);
   }
+});
+
+test('recipient invitation controller requires a session without owner step-up and fixes the response action server-side', async () => {
+  const guards = Reflect.getMetadata(GUARDS_METADATA, MyServerWikiCollaboratorInvitationController) ?? [];
+  assert.ok(guards.includes(SessionGuard));
+  assert.equal(Reflect.getMetadata(STEP_UP_PURPOSE_METADATA, MyServerWikiCollaboratorInvitationController), undefined);
+  const calls: unknown[] = [];
+  const controller = new MyServerWikiCollaboratorInvitationController({
+    async listMyInvitations(actor: unknown) { calls.push(['list', actor]); return []; },
+    async respondToInvitation(id: string, input: unknown, actor: unknown) { calls.push(['respond', id, input, actor]); return { status: 'accepted', serverId }; },
+  } as never);
+  await controller.list(session);
+  await controller.accept('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', { expectedVersion: 2 }, session);
+  await controller.decline('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { expectedVersion: 3 }, session);
+  const actor = { accountId: session.userId, permissions: ['server.admin'] };
+  assert.deepEqual(calls, [
+    ['list', actor],
+    ['respond', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', { action: 'accept', expectedVersion: 2 }, actor],
+    ['respond', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', { action: 'decline', expectedVersion: 3 }, actor],
+  ]);
 });
 
 test('controller forwards only canonical account identity and global permissions from the session', async () => {

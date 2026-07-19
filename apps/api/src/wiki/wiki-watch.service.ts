@@ -238,7 +238,6 @@ export class WikiWatchService {
           }
         })
       : [];
-    const serverWikiBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki]));
     const previewSpaces = new Set<bigint>();
     for (const wiki of serverWikis) {
       if (await this.permissions.canPreviewServerWikiSpace({ accountId: session.userId, actor, spaceId: wiki.spaceId })) {

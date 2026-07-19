@@ -37,6 +37,30 @@ interface TestRole {
   revokedBy: bigint | null;
 }
 
+interface TestInvitation {
+  id: string;
+  serverWikiId: bigint;
+  spaceId: bigint;
+  targetProfileId: bigint;
+  targetAccountId: string;
+  role: string;
+  reason: string;
+  status: string;
+  activeKey: string | null;
+  invitedByProfileId: bigint;
+  invitedByAccountId: string;
+  issuerAuthority: string;
+  issuedUnderOwnerId: string | null;
+  invitedAt: Date;
+  expiresAt: Date;
+  respondedAt: Date | null;
+  cancelledByProfileId: bigint | null;
+  cancelReason: string | null;
+  resentAt: Date | null;
+  resendCount: number;
+  version: number;
+}
+
 interface FixtureOptions {
   readonly roles?: TestRole[];
   readonly failAudit?: boolean;
@@ -99,6 +123,7 @@ function createFixture(options: FixtureOptions = {}) {
     { id: '99999999-9999-4999-8999-999999999999', canonicalAccountId: '99999999-9999-4999-8999-999999999999', lifecycleStatus: 'active' },
   ];
   const roles = structuredClone(options.roles ?? []);
+  const invitations: TestInvitation[] = [];
   const audits: Array<Record<string, unknown>> = [];
   const lockQueries: string[] = [];
   const isolationLevels: string[] = [];
@@ -117,6 +142,8 @@ function createFixture(options: FixtureOptions = {}) {
     spaceId: options.mismatchedWiki ? 78n : 77n,
     slug: 'test-server',
     status: 'active',
+    serverName: '테스트 서버',
+    publicationStatus: 'draft',
   };
   const space = {
     id: 77n,
@@ -139,6 +166,9 @@ function createFixture(options: FixtureOptions = {}) {
     serverWiki: {
       async findMany() {
         return [serverWiki];
+      },
+      async findUnique(args: { where: { id: bigint } }) {
+        return args.where.id === serverWiki.id ? serverWiki : null;
       },
     },
     wikiSpace: {
@@ -213,6 +243,55 @@ function createFixture(options: FixtureOptions = {}) {
         return created;
       },
     },
+    serverWikiCollaboratorInvitation: {
+      async updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }) {
+        const matching = invitations.filter((item) => {
+          const where = args.where;
+          if (where.id !== undefined && item.id !== where.id) return false;
+          if (where.serverWikiId !== undefined && item.serverWikiId !== where.serverWikiId) return false;
+          if (where.targetAccountId !== undefined && item.targetAccountId !== where.targetAccountId) return false;
+          if (where.status !== undefined && item.status !== where.status) return false;
+          if (where.version !== undefined && item.version !== where.version) return false;
+          if (typeof where.expiresAt === 'object' && where.expiresAt) {
+            const expiry = where.expiresAt as { lte?: Date; gt?: Date };
+            if (expiry.lte && item.expiresAt > expiry.lte) return false;
+            if (expiry.gt && item.expiresAt <= expiry.gt) return false;
+          }
+          return true;
+        });
+        for (const item of matching) {
+          for (const [key, value] of Object.entries(args.data)) {
+            if (typeof value === 'object' && value && 'increment' in value) {
+              (item as unknown as Record<string, unknown>)[key] = Number((item as unknown as Record<string, unknown>)[key]) + Number((value as { increment: number }).increment);
+            } else {
+              (item as unknown as Record<string, unknown>)[key] = value;
+            }
+          }
+        }
+        return { count: matching.length };
+      },
+      async findFirst(args: { where: { serverWikiId: bigint; targetAccountId: string; status: string } }) {
+        return invitations.find((item) => item.serverWikiId === args.where.serverWikiId && item.targetAccountId === args.where.targetAccountId && item.status === args.where.status) ?? null;
+      },
+      async findUnique(args: { where: { id: string } }) {
+        return invitations.find((item) => item.id === args.where.id) ?? null;
+      },
+      async findMany(args: { where: { serverWikiId?: bigint; targetAccountId?: string; status?: string } }) {
+        return invitations.filter((item) => (
+          (args.where.serverWikiId === undefined || item.serverWikiId === args.where.serverWikiId)
+          && (args.where.targetAccountId === undefined || item.targetAccountId === args.where.targetAccountId)
+          && (args.where.status === undefined || item.status === args.where.status)
+        ));
+      },
+      async create(args: { data: Omit<TestInvitation, 'id' | 'respondedAt' | 'cancelledByProfileId' | 'cancelReason' | 'resentAt' | 'resendCount'> }) {
+        const created: TestInvitation = {
+          id: randomUUID(), respondedAt: null, cancelledByProfileId: null, cancelReason: null,
+          resentAt: null, resendCount: 0, ...args.data,
+        };
+        invitations.push(created);
+        return created;
+      },
+    },
     auditEvent: {
       async create(args: { data: Record<string, unknown> }) {
         if (options.failAudit) throw new Error('audit write failed');
@@ -225,18 +304,22 @@ function createFixture(options: FixtureOptions = {}) {
   const prisma = {
     server: tx.server,
     account: tx.account,
+    wikiProfile: tx.wikiProfile,
+    serverWikiCollaboratorInvitation: tx.serverWikiCollaboratorInvitation,
     async $transaction<T>(
       callback: (store: typeof tx) => Promise<T>,
       config: { isolationLevel: string },
     ): Promise<T> {
       isolationLevels.push(config.isolationLevel);
       const roleSnapshot = structuredClone(roles);
+      const invitationSnapshot = structuredClone(invitations);
       const auditLength = audits.length;
       const nextIdSnapshot = nextRoleId;
       try {
         return await callback(tx);
       } catch (error) {
         roles.splice(0, roles.length, ...roleSnapshot);
+        invitations.splice(0, invitations.length, ...invitationSnapshot);
         audits.splice(auditLength);
         nextRoleId = nextIdSnapshot;
         throw error;
@@ -256,6 +339,7 @@ function createFixture(options: FixtureOptions = {}) {
       profileService as unknown as WikiProfileService,
     ),
     roles,
+    invitations,
     audits,
     lockQueries,
     isolationLevels,
@@ -289,6 +373,7 @@ test('owner list returns the frontend roster contract and locks the authoritativ
     grantedByName: '서버 소유자',
     grantedBy: { profileId: '1', username: 'server_owner', displayName: '서버 소유자' },
   }]);
+  assert.deepEqual(result.pendingInvitations, []);
   assert.deepEqual(fixture.isolationLevels, [Prisma.TransactionIsolationLevel.Serializable]);
   assert.ok(fixture.lockQueries.some((query) => query.includes('FROM `Server`')));
   assert.ok(fixture.lockQueries.some((query) => query.includes('FROM server_wikis')));
@@ -414,13 +499,14 @@ test('a linked alias session is compared through its canonical owner account', a
     reason: '연결 계정 소유자 협업 추가',
   }, { accountId: aliasAccountId, permissions: [] });
 
-  assert.equal(result.items[0]?.role, 'editor');
+  assert.equal(result.items.length, 0);
+  assert.equal(result.pendingInvitations[0]?.role, 'editor');
   assert.equal(fixture.audits[0]?.actorAccountId, ownerAccountId);
   assert.equal(fixture.audits[0]?.actorProfileId, 1n);
   assert.ok(fixture.lockQueries.some((query) => query.includes('FROM `Account`')));
 });
 
-test('create resolves an exact merged username to its canonical profile and reactivates history', async () => {
+test('create resolves an exact merged username to a pending invitation and accept activates the role', async () => {
   const fixture = createFixture({
     roles: [
       role({ id: 10n, userId: 2n, role: 'reviewer', status: 'revoked', grantedBy: null }),
@@ -434,11 +520,11 @@ test('create resolves an exact merged username to its canonical profile and reac
   }, ownerActor);
 
   const reviewer = fixture.roles.find((item) => item.id === 10n);
-  assert.equal(reviewer?.status, 'active');
-  assert.equal(reviewer?.grantedBy, 1n);
+  assert.equal(reviewer?.status, 'revoked');
   assert.equal(fixture.roles.find((item) => item.id === 11n)?.status, 'revoked');
-  assert.equal(result.items[0]?.profileId, '2');
-  assert.equal(result.items[0]?.username, 'Exact_User');
+  assert.equal(result.items.length, 0);
+  assert.equal(result.pendingInvitations[0]?.profileId, '2');
+  assert.equal(result.pendingInvitations[0]?.username, 'Exact_User');
   assert.equal(fixture.audits.length, 1);
   assert.equal(fixture.audits[0]?.actorAccountId, ownerAccountId);
   assert.equal(fixture.audits[0]?.actorProfileId, 1n);
@@ -452,9 +538,76 @@ test('create resolves an exact merged username to its canonical profile and reac
     previousRole: null,
     newRole: 'reviewer',
     reason: '문서 검토 협업 요청',
+    invitationId: fixture.invitations[0]?.id,
+    previousStatus: null,
+    status: 'pending',
+    previousVersion: null,
+    version: 1,
+    expiresAt: fixture.invitations[0]?.expiresAt.toISOString(),
   });
   assert.ok(fixture.lockQueries.some((query) => query.includes('wiki_profile_aliases')));
   assert.ok(fixture.lockQueries.some((query) => query.includes('space_id = ? AND user_id = ?')));
+
+  const invitation = fixture.invitations[0];
+  assert.ok(invitation);
+  const accepted = await fixture.service.respondToInvitation(invitation.id, {
+    action: 'accept', expectedVersion: invitation.version,
+  }, { accountId: targetAccountId, permissions: [] });
+  assert.equal(accepted.status, 'accepted');
+  assert.equal(reviewer?.status, 'active');
+  assert.equal(reviewer?.grantedBy, 1n);
+  assert.equal(invitation.status, 'accepted');
+});
+
+test('only the canonical invitee can decline and decline never grants a role', async () => {
+  const fixture = createFixture();
+  await fixture.service.create(serverId, {
+    username: 'Exact_User', role: 'editor', reason: '문서 편집 협업 초대',
+  }, ownerActor);
+  const invitation = fixture.invitations[0];
+  assert.ok(invitation);
+  await assert.rejects(
+    fixture.service.respondToInvitation(invitation.id, {
+      action: 'decline', expectedVersion: invitation.version,
+    }, ownerActor),
+    /초대를 찾을 수 없습니다/u,
+  );
+  const currentInvitation = fixture.invitations[0];
+  assert.ok(currentInvitation);
+  const declined = await fixture.service.respondToInvitation(currentInvitation.id, {
+    action: 'decline', expectedVersion: currentInvitation.version,
+  }, { accountId: targetAccountId, permissions: [] });
+  assert.equal(declined.status, 'declined');
+  assert.equal(fixture.invitations[0]?.status, 'declined');
+  assert.equal(fixture.roles.length, 0);
+});
+
+test('owner can resend with version CAS and cancel a still-pending invitation', async () => {
+  const fixture = createFixture();
+  await fixture.service.create(serverId, {
+    username: 'Exact_User', role: 'reviewer', reason: '검토 역할 협업 초대',
+  }, ownerActor);
+  const invitation = fixture.invitations[0];
+  assert.ok(invitation);
+  await fixture.service.resendInvitation(serverId, invitation.id, {
+    expectedVersion: invitation.version, reason: '초대 만료 전 재안내',
+  }, ownerActor);
+  assert.equal(invitation.version, 2);
+  assert.equal(invitation.resendCount, 1);
+  await assert.rejects(
+    fixture.service.cancelInvitation(serverId, invitation.id, {
+      expectedVersion: 1, reason: '오래된 버전 취소 차단',
+    }, ownerActor),
+    ConflictException,
+  );
+  const currentInvitation = fixture.invitations[0];
+  assert.ok(currentInvitation);
+  await fixture.service.cancelInvitation(serverId, currentInvitation.id, {
+    expectedVersion: 2, reason: '협업 계획 변경으로 취소',
+  }, ownerActor);
+  assert.equal(fixture.invitations[0]?.status, 'cancelled');
+  assert.equal(fixture.invitations[0]?.activeKey, null);
+  assert.equal(fixture.roles.length, 0);
 });
 
 test('assignments reject owner duplication and blocked, closed, detached, or non-canonical profiles', async () => {

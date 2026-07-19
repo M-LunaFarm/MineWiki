@@ -2023,12 +2023,45 @@ model ServerWiki {
   publishedRelease             ServerWikiRelease?           @relation("PublishedServerWikiRelease", fields: [publishedReleaseId], references: [id], onDelete: SetNull)
   domain                       ServerWikiDomain?
   siteSlugAliases              ServerWikiSiteSlugAlias[]
+  collaboratorInvitations      ServerWikiCollaboratorInvitation[]
 
   @@unique([id, spaceId], map: "uq_server_wiki_tenant")
   @@index([status])
   @@index([publicationStatus])
   @@index([verifiedStatus])
   @@map("server_wikis")
+}
+
+model ServerWikiCollaboratorInvitation {
+  id                    String     @id @default(uuid()) @db.Char(36)
+  serverWikiId          BigInt     @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId               BigInt     @map("space_id") @db.UnsignedBigInt
+  targetProfileId       BigInt     @map("target_profile_id") @db.UnsignedBigInt
+  targetAccountId       String     @map("target_account_id") @db.Char(36)
+  role                  String     @db.VarChar(32)
+  reason                String     @db.VarChar(500)
+  status                String     @default("pending") @db.VarChar(16)
+  activeKey             String?    @unique @map("active_key") @db.VarChar(96)
+  invitedByProfileId    BigInt     @map("invited_by_profile_id") @db.UnsignedBigInt
+  invitedByAccountId    String     @map("invited_by_account_id") @db.Char(36)
+  issuerAuthority       String     @map("issuer_authority") @db.VarChar(16)
+  issuedUnderOwnerId    String?    @map("issued_under_owner_id") @db.Char(36)
+  invitedAt             DateTime   @default(now()) @map("invited_at") @db.DateTime(3)
+  expiresAt             DateTime   @map("expires_at") @db.DateTime(3)
+  respondedAt           DateTime?  @map("responded_at") @db.DateTime(3)
+  cancelledByProfileId  BigInt?    @map("cancelled_by_profile_id") @db.UnsignedBigInt
+  cancelReason          String?    @map("cancel_reason") @db.VarChar(500)
+  resentAt              DateTime?  @map("resent_at") @db.DateTime(3)
+  resendCount           Int        @default(0) @map("resend_count") @db.UnsignedInt
+  version               Int        @default(1) @db.UnsignedInt
+  createdAt             DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime   @updatedAt @map("updated_at") @db.DateTime(3)
+  serverWiki            ServerWiki @relation(fields: [serverWikiId, spaceId], references: [id, spaceId], onDelete: Cascade)
+
+  @@index([targetAccountId, status, expiresAt], map: "idx_server_wiki_invites_target")
+  @@index([serverWikiId, status, invitedAt], map: "idx_server_wiki_invites_wiki")
+  @@index([expiresAt, status], map: "idx_server_wiki_invites_expiry")
+  @@map("server_wiki_collaborator_invitations")
 }
 
 model ServerWikiSiteSlugAlias {

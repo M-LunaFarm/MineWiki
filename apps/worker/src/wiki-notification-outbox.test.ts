@@ -164,3 +164,45 @@ test('change request delivery reaches only the current candidate submitter', asy
     type: 'server_wiki_release_changes_requested',
   }]);
 });
+
+test('late collaborator invite delivery is discarded after the invitation is cancelled', async () => {
+  let delivered = false;
+  let completed = false;
+  const invitationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const event = {
+    id: 5n, status: 'processing', attempts: 1,
+    payloadJson: { deliveries: [{
+      profileId: '8', type: 'server_wiki_collaborator_invited', pageId: null,
+      actorProfileId: '7', sourceType: 'server_wiki_collaborator_invitation', sourceId: invitationId,
+      title: 'Luna', message: '편집자 역할 초대', href: '/me#server-wiki-invitations',
+      dedupeKey: `invite:${invitationId}:profile:8`, createdAt: new Date().toISOString(),
+    }] },
+  };
+  const eventStore = {
+    async updateMany(args: { where: { id?: bigint; status?: string }; data: { status?: string } }) {
+      if (args.where.id === 5n && args.where.status === 'pending') return { count: 1 };
+      if (args.where.id === 5n && args.where.status === 'processing' && args.data.status === 'processed') { completed = true; return { count: 1 }; }
+      return { count: 0 };
+    },
+    async findMany() { return [{ id: 5n }]; },
+    async findUnique() { return event; },
+  };
+  const tx = {
+    serverWikiCollaboratorInvitation: {
+      async findMany() { return [{ id: invitationId, status: 'cancelled', targetProfileId: 8n }]; },
+    },
+    wikiNotification: {
+      async createMany() { delivered = true; return { count: 1 }; },
+      async findMany() { return []; },
+    },
+    wikiNotificationEvent: eventStore,
+  };
+  const prisma = {
+    wikiNotificationEvent: eventStore,
+    async $transaction(callback: (store: typeof tx) => Promise<void>) { await callback(tx); },
+  } as unknown as PrismaClient;
+
+  assert.equal(await processWikiNotificationOutbox(prisma, 'worker-5'), 1);
+  assert.equal(delivered, false);
+  assert.equal(completed, true);
+});

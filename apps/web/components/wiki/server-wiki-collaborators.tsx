@@ -31,13 +31,27 @@ interface WikiCollaboratorsPayload {
   readonly spaceId: string;
   readonly assignableRoles: readonly CollaboratorRole[];
   readonly items: readonly WikiCollaborator[];
+  readonly pendingInvitations: readonly WikiCollaboratorInvitation[];
+}
+
+interface WikiCollaboratorInvitation {
+  readonly id: string;
+  readonly profileId: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly role: CollaboratorRole;
+  readonly reason: string;
+  readonly invitedAt: string;
+  readonly expiresAt: string;
+  readonly resendCount: number;
+  readonly version: number;
 }
 
 interface MutationInput {
   readonly key: string;
   readonly method: 'POST' | 'PATCH' | 'DELETE';
   readonly path?: string;
-  readonly body: Record<string, string>;
+  readonly body: Record<string, string | number>;
   readonly successMessage: string;
 }
 
@@ -81,6 +95,8 @@ export function ServerWikiCollaboratorsContent({ serverId }: { readonly serverId
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
   const [revokeProfileId, setRevokeProfileId] = useState<string | null>(null);
   const [revokeReason, setRevokeReason] = useState('');
+  const [cancelInvitationId, setCancelInvitationId] = useState<string | null>(null);
+  const [invitationReason, setInvitationReason] = useState('');
 
   const busy = mutationKey !== null;
   const revokeTarget = useMemo(
@@ -198,7 +214,7 @@ export function ServerWikiCollaboratorsContent({ serverId }: { readonly serverId
       key: 'add',
       method: 'POST',
       body: { username, role: addRole, reason },
-      successMessage: `${username}님을 ${ROLE_DETAILS[addRole].label} 역할로 추가했습니다.`,
+      successMessage: `${username}님에게 ${ROLE_DETAILS[addRole].label} 역할 초대를 보냈습니다. 수락 전에는 권한이 부여되지 않습니다.`,
     });
     if (succeeded) {
       setAddUsername('');
@@ -246,6 +262,41 @@ export function ServerWikiCollaboratorsContent({ serverId }: { readonly serverId
       setRevokeProfileId(null);
       setRevokeReason('');
     }
+  }
+
+  async function cancelInvitation(item: WikiCollaboratorInvitation) {
+    const reason = normalizedReason(invitationReason);
+    if (!reason) {
+      setError(`초대 취소 사유를 ${REASON_MIN_LENGTH}~${REASON_MAX_LENGTH}자로 입력해 주세요.`);
+      return;
+    }
+    const succeeded = await performMutation({
+      key: `cancel-invitation:${item.id}`,
+      method: 'DELETE',
+      path: `/invitations/${encodeURIComponent(item.id)}`,
+      body: { expectedVersion: item.version, reason },
+      successMessage: `${item.displayName}님에게 보낸 협업 초대를 취소했습니다.`,
+    });
+    if (succeeded) {
+      setCancelInvitationId(null);
+      setInvitationReason('');
+    }
+  }
+
+  async function resendInvitation(item: WikiCollaboratorInvitation) {
+    const reason = normalizedReason(invitationReason);
+    if (!reason) {
+      setError(`재전송 사유를 ${REASON_MIN_LENGTH}~${REASON_MAX_LENGTH}자로 입력해 주세요.`);
+      return;
+    }
+    const succeeded = await performMutation({
+      key: `resend-invitation:${item.id}`,
+      method: 'POST',
+      path: `/invitations/${encodeURIComponent(item.id)}/resend`,
+      body: { expectedVersion: item.version, reason },
+      successMessage: `${item.displayName}님에게 협업 초대를 다시 보냈습니다.`,
+    });
+    if (succeeded) setInvitationReason('');
   }
 
   if (loading) {
@@ -319,7 +370,7 @@ export function ServerWikiCollaboratorsContent({ serverId }: { readonly serverId
             <UserPlus className="size-5" aria-hidden="true" />
           </span>
           <div>
-            <h3 className="font-bold text-white">협업자 추가</h3>
+          <h3 className="font-bold text-white">협업자 초대</h3>
             <p className="mt-1 text-xs leading-5 text-slate-400">정확한 사용자명을 직접 입력하세요. 자동 완성이나 계정 검색은 제공하지 않습니다.</p>
           </div>
         </div>
@@ -362,10 +413,50 @@ export function ServerWikiCollaboratorsContent({ serverId }: { readonly serverId
             className="btn-primary min-h-11 w-full gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-36"
           >
             {mutationKey === 'add' ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <UserPlus className="size-4" aria-hidden="true" />}
-            협업자 추가
+            초대 보내기
           </button>
         </div>
       </form>
+
+      <section aria-labelledby="pending-invitations-heading">
+        <h3 id="pending-invitations-heading" className="text-lg font-bold text-white">응답 대기 중인 초대</h3>
+        <p className="mt-1 text-xs text-slate-500">수락 전에는 문서 접근 권한이 생기지 않으며 초대는 7일 뒤 만료됩니다.</p>
+        {payload.pendingInvitations.length === 0 ? (
+          <p className="mt-4 rounded-xl border border-dashed border-white/10 p-5 text-sm text-slate-500">대기 중인 초대가 없습니다.</p>
+        ) : (
+          <div className="mt-4 grid gap-3">
+            {payload.pendingInvitations.map((item) => {
+              const expanded = cancelInvitationId === item.id;
+              const resending = mutationKey === `resend-invitation:${item.id}`;
+              const cancelling = mutationKey === `cancel-invitation:${item.id}`;
+              return (
+                <article key={item.id} className="rounded-2xl border border-amber-300/15 bg-amber-400/[0.04] p-4 sm:p-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="font-bold text-white">{item.displayName} <span className="font-normal text-slate-400">@{item.username}</span></h4>
+                        <span className="rounded-full bg-amber-300/10 px-2.5 py-1 text-[11px] font-bold text-amber-200">대기 중 · {ROLE_DETAILS[item.role].label}</span>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-400">발송 <time dateTime={item.invitedAt}>{formatGrantedAt(item.invitedAt)}</time> · 만료 <time dateTime={item.expiresAt}>{formatGrantedAt(item.expiresAt)}</time></p>
+                      <p className="mt-2 text-xs leading-5 text-slate-500">{item.reason}</p>
+                    </div>
+                    <button type="button" aria-expanded={expanded} aria-controls={`invite-actions-${item.id}`} onClick={() => { setCancelInvitationId(expanded ? null : item.id); setInvitationReason(''); }} disabled={busy || refreshing} className="btn-secondary min-h-11 px-3 disabled:opacity-50">초대 관리</button>
+                  </div>
+                  {expanded ? (
+                    <section id={`invite-actions-${item.id}`} className="mt-4 border-t border-white/10 pt-4">
+                      <ReasonField label="관리 사유" value={invitationReason} onChange={setInvitationReason} disabled={busy || refreshing} compact autoFocus placeholder="재전송 또는 취소 사유를 5자 이상 입력하세요." />
+                      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                        <button type="button" onClick={() => void resendInvitation(item)} disabled={busy || refreshing || !isValidReason(invitationReason)} className="btn-secondary min-h-11 gap-2 disabled:opacity-50">{resending ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="size-4" aria-hidden="true" />} 다시 보내기</button>
+                        <button type="button" onClick={() => void cancelInvitation(item)} disabled={busy || refreshing || !isValidReason(invitationReason)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-red-500 px-4 text-sm font-bold text-white disabled:opacity-50">{cancelling ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Trash2 className="size-4" aria-hidden="true" />} 초대 취소</button>
+                      </div>
+                    </section>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <section aria-labelledby="collaborator-roster-heading">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -601,10 +692,26 @@ function parsePayload(value: unknown): WikiCollaboratorsPayload {
     || value.assignableRoles.length === 0
     || !value.assignableRoles.every(isCollaboratorRole)
     || !Array.isArray(value.items)
-    || !value.items.every(isCollaborator)) {
+    || !value.items.every(isCollaborator)
+    || !Array.isArray(value.pendingInvitations)
+    || !value.pendingInvitations.every(isInvitation)) {
     throw new Error('협업자 목록 응답 형식이 올바르지 않습니다.');
   }
   return value as unknown as WikiCollaboratorsPayload;
+}
+
+function isInvitation(value: unknown): value is WikiCollaboratorInvitation {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.profileId === 'string'
+    && typeof value.username === 'string'
+    && typeof value.displayName === 'string'
+    && isCollaboratorRole(value.role)
+    && typeof value.reason === 'string'
+    && typeof value.invitedAt === 'string'
+    && typeof value.expiresAt === 'string'
+    && typeof value.resendCount === 'number'
+    && typeof value.version === 'number';
 }
 
 function isCollaborator(value: unknown): value is WikiCollaborator {

@@ -26,6 +26,10 @@ test('collaborator requests follow the roster and mutation source contract', () 
   assert.match(collaboratorsSource, /\.\.\.\(await csrfHeaders\(\)\)/u);
   assert.match(collaboratorsSource, /const refreshed = await loadCollaborators/u);
   assert.match(collaboratorsSource, /response\.status === 409/u);
+  assert.match(collaboratorsSource, /pendingInvitations/u);
+  assert.match(collaboratorsSource, /\/invitations\/\$\{encodeURIComponent\(item\.id\)\}\/resend/u);
+  assert.match(collaboratorsSource, /body: \{ expectedVersion: item\.version, reason \}/u);
+  assert.match(collaboratorsSource, /수락 전에는 권한이 부여되지 않습니다/u);
 });
 
 test('collaborator controls require exact usernames, audited reasons, and explicit revocation', () => {
@@ -39,5 +43,7 @@ test('collaborator controls require exact usernames, audited reasons, and explic
   assert.match(collaboratorsSource, /editor:[\s\S]*label: '편집자'/u);
   assert.match(collaboratorsSource, /reviewer:[\s\S]*label: '검토자'/u);
   assert.match(collaboratorsSource, /권한 회수 확인/u);
+  assert.match(collaboratorsSource, /초대 보내기/u);
+  assert.match(collaboratorsSource, /aria-controls=\{`invite-actions-/u);
   assert.ok((collaboratorsSource.match(/min-h-11/g) ?? []).length >= 10, 'interactive controls should keep a 44px minimum height');
 });

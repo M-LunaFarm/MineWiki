@@ -43,7 +43,8 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
     try {
       const parsedDeliveries = parseDeliveries(event.payloadJson);
       await prisma.$transaction(async (tx) => {
-        const deliveries = await filterAuthorizedReleaseReviewDeliveries(tx, parsedDeliveries);
+        const releaseAuthorized = await filterAuthorizedReleaseReviewDeliveries(tx, parsedDeliveries);
+        const deliveries = await filterCurrentCollaboratorInvitationDeliveries(tx, releaseAuthorized);
         if (deliveries.length > 0) await tx.wikiNotification.createMany({
           data: deliveries.map((delivery) => ({
             profileId: BigInt(delivery.profileId), type: delivery.type,
@@ -126,6 +127,41 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
     }
   }
   return processed;
+}
+
+async function filterCurrentCollaboratorInvitationDeliveries(
+  tx: Prisma.TransactionClient,
+  deliveries: readonly DeliveryPayload[],
+): Promise<DeliveryPayload[]> {
+  const invitationDeliveries = deliveries.filter((delivery) => delivery.sourceType === 'server_wiki_collaborator_invitation');
+  if (invitationDeliveries.length === 0) return [...deliveries];
+  const ids = [...new Set(invitationDeliveries
+    .filter((delivery) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(delivery.sourceId))
+    .map((delivery) => delivery.sourceId.toLowerCase()))];
+  const invitations = ids.length > 0 ? await tx.serverWikiCollaboratorInvitation.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, status: true, targetProfileId: true },
+  }) : [];
+  const invitationById = new Map(invitations.map((invitation) => [invitation.id, invitation]));
+  return deliveries.filter((delivery) => {
+    if (delivery.sourceType !== 'server_wiki_collaborator_invitation') return true;
+    const invitation = invitationById.get(delivery.sourceId.toLowerCase());
+    if (!invitation) return false;
+    const recipientId = BigInt(delivery.profileId);
+    if (delivery.type === 'server_wiki_collaborator_invited') {
+      return invitation.status === 'pending' && invitation.targetProfileId === recipientId;
+    }
+    if (delivery.type === 'server_wiki_collaborator_invitation_cancelled') {
+      return invitation.status === 'cancelled' && invitation.targetProfileId === recipientId;
+    }
+    if (delivery.type === 'server_wiki_collaborator_invitation_accepted') {
+      return invitation.status === 'accepted' && delivery.actorProfileId !== delivery.profileId;
+    }
+    if (delivery.type === 'server_wiki_collaborator_invitation_declined') {
+      return invitation.status === 'declined' && delivery.actorProfileId !== delivery.profileId;
+    }
+    return false;
+  });
 }
 
 async function filterAuthorizedReleaseReviewDeliveries(

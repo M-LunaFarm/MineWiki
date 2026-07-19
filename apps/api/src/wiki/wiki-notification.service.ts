@@ -482,6 +482,75 @@ export class WikiNotificationService {
     );
   }
 
+  async notifyServerWikiCollaboratorInvited(tx: Prisma.TransactionClient, input: {
+    readonly invitationId: string;
+    readonly targetProfileId: bigint;
+    readonly actorProfileId: bigint;
+    readonly serverName: string;
+    readonly roleLabel: string;
+    readonly invitedAt: Date;
+    readonly deliveryVersion: number;
+  }): Promise<void> {
+    await this.persistDeliveries(
+      tx,
+      `server-wiki-collaborator-invitation:${input.invitationId}:delivery:${input.deliveryVersion}`,
+      'server_wiki_collaborator_invited',
+      [{
+        profileId: input.targetProfileId,
+        type: 'server_wiki_collaborator_invited',
+        pageId: null,
+        actorProfileId: input.actorProfileId,
+        sourceType: 'server_wiki_collaborator_invitation',
+        sourceId: input.invitationId,
+        title: input.serverName,
+        message: `${input.roleLabel} 역할로 협업 초대를 받았습니다.`,
+        href: '/me#server-wiki-invitations',
+        dedupeKey: `server-wiki-collaborator-invitation:${input.invitationId}:delivery:${input.deliveryVersion}:profile:${input.targetProfileId.toString()}`,
+        readAt: null,
+        createdAt: input.invitedAt,
+      }],
+    );
+  }
+
+  async notifyServerWikiCollaboratorInvitationChanged(tx: Prisma.TransactionClient, input: {
+    readonly invitationId: string;
+    readonly recipientProfileIds: readonly bigint[];
+    readonly actorProfileId: bigint;
+    readonly serverId: string;
+    readonly serverName: string;
+    readonly state: 'accepted' | 'declined' | 'cancelled';
+    readonly changedAt: Date;
+    readonly version: number;
+  }): Promise<void> {
+    const recipients = [...new Set(input.recipientProfileIds)].filter((profileId) => profileId !== input.actorProfileId);
+    const message = input.state === 'accepted'
+      ? '서버 위키 협업 초대가 수락되었습니다.'
+      : input.state === 'declined'
+        ? '서버 위키 협업 초대가 거절되었습니다.'
+        : '서버 위키 협업 초대가 취소되었습니다.';
+    await this.persistDeliveries(
+      tx,
+      `server-wiki-collaborator-invitation:${input.invitationId}:${input.state}:${input.version}`,
+      `server_wiki_collaborator_invitation_${input.state}`,
+      recipients.map((profileId) => ({
+        profileId,
+        type: `server_wiki_collaborator_invitation_${input.state}`,
+        pageId: null,
+        actorProfileId: input.actorProfileId,
+        sourceType: 'server_wiki_collaborator_invitation',
+        sourceId: input.invitationId,
+        title: input.serverName,
+        message,
+        href: input.state === 'cancelled'
+          ? '/me#server-wiki-invitations'
+          : `/servers/${encodeURIComponent(input.serverId)}/wiki-layouts?tab=collaborators`,
+        dedupeKey: `server-wiki-collaborator-invitation:${input.invitationId}:${input.state}:${input.version}:profile:${profileId.toString()}`,
+        readAt: null,
+        createdAt: input.changedAt,
+      })),
+    );
+  }
+
   async notifyServerWikiReleaseReviewChanged(tx: Prisma.TransactionClient, input: {
     readonly candidateId: bigint;
     readonly serverId: string;

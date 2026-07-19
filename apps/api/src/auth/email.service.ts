@@ -157,6 +157,30 @@ export class EmailService {
     });
   }
 
+  async sendServerWikiCollaboratorInvitationEmail(payload: {
+    email: string;
+    serverName: string;
+    roleLabel: string;
+    inviterName: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    if (!this.transporter || !this.from) throw new Error('SMTP is not configured.');
+    const baseUrl = this.siteUrl?.replace(/\/$/u, '');
+    const invitationUrl = baseUrl ? `${baseUrl}/me#server-wiki-invitations` : undefined;
+    await this.transporter.sendMail({
+      from: this.from,
+      to: payload.email,
+      subject: `${payload.serverName} 서버 위키 협업 초대`,
+      text: [
+        `${payload.inviterName}님이 ${payload.serverName} 서버 위키의 ${payload.roleLabel} 역할로 초대했습니다.`,
+        invitationUrl ? `초대 확인: ${invitationUrl}` : 'MineWiki 내 계정 화면에서 초대를 확인해 주세요.',
+        `만료 시각: ${payload.expiresAt.toISOString()}`,
+        '',
+        '권한은 초대를 수락하기 전까지 부여되지 않습니다.'
+      ].join('\n')
+    });
+  }
+
   logDeliveryFailure(error: unknown): void {
     this.logger.warn({ err: error }, 'Email delivery failed');
   }

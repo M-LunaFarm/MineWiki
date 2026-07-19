@@ -11,7 +11,7 @@ import { EventsModule } from '../events/events.module';
 import { PluginCredentialService } from './plugin-credential.service';
 import { VerifyModule } from '../verify/verify.module';
 import { ServerWikiPresentationController } from './server-wiki-presentation.controller';
-import { ServerWikiCollaboratorController } from './server-wiki-collaborator.controller';
+import { MyServerWikiCollaboratorInvitationController, ServerWikiCollaboratorController } from './server-wiki-collaborator.controller';
 import { ServerWikiCollaboratorService } from './server-wiki-collaborator.service';
 import { ServerWikiLayoutEntitlementAdminController } from './server-wiki-layout-entitlement-admin.controller';
 import { ServerWikiLayoutEntitlementAdminService } from './server-wiki-layout-entitlement-admin.service';
@@ -29,11 +29,12 @@ import { ServerWikiDomainService } from './server-wiki-domain.service';
 import { ServerWikiDomainProvisioningController } from './server-wiki-domain-provisioning.controller';
 import { CaptchaModule } from '../captcha/captcha.module';
 import { ServerWikiProvisioningInternalController } from './server-wiki-provisioning-internal.controller';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [CaptchaModule, FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
+  imports: [AuthModule, CaptchaModule, FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
   providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseManifestCursorCodec, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService, ServerWikiDomainService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiProvisioningInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController, ServerWikiDomainProvisioningController],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, MyServerWikiCollaboratorInvitationController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiProvisioningInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController, ServerWikiDomainProvisioningController],
   exports: [ServerService]
 })
 export class ServerModule {}
