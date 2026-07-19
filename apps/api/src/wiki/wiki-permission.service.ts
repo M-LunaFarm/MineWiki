@@ -749,6 +749,7 @@ export class WikiPermissionService {
     readonly actor?: WikiPermissionActor | null;
     readonly thread: WikiPermissionThread | null;
     readonly page: WikiPermissionPage | null;
+    readonly requestIp?: string | null;
     readonly store?: WikiPermissionStore;
   }): Promise<void> {
     const decision = await this.canReadThread(input);
@@ -760,6 +761,7 @@ export class WikiPermissionService {
     readonly actor?: WikiPermissionActor | null;
     readonly thread: WikiPermissionThread | null;
     readonly page: WikiPermissionPage | null;
+    readonly requestIp?: string | null;
     readonly store?: WikiPermissionStore;
   }): Promise<WikiPermissionDecision> {
     if (!input.thread || !input.page || input.thread.pageId !== input.page.id || input.thread.status === 'deleted') {
@@ -769,7 +771,8 @@ export class WikiPermissionService {
       accountId: input.accountId,
       actor: input.actor,
       items: [{ thread: input.thread, page: input.page }],
-      store: input.store
+      store: input.store,
+      requestIp: input.requestIp,
     });
     return rows.length === 1 ? allow('thread_read') : deny('thread_not_readable');
   }
@@ -778,12 +781,13 @@ export class WikiPermissionService {
     readonly accountId?: string | null;
     readonly actor?: WikiPermissionActor | null;
     readonly items: readonly T[];
+    readonly requestIp?: string | null;
     readonly store?: WikiPermissionStore;
   }): Promise<T[]> {
     if (input.items.length === 0) return [];
     const store = input.store ?? this.prisma;
     const pages = [...new Map(input.items.map((item) => [item.page.id, item.page])).values()];
-    const readablePages = await this.filterReadablePages({ accountId: input.accountId, actor: input.actor, pages, store });
+    const readablePages = await this.filterReadablePages({ accountId: input.accountId, actor: input.actor, pages, store, requestIp: input.requestIp });
     const readablePageIds = new Set(readablePages.map((page) => page.id));
     const candidates = input.items.filter((item) =>
       item.thread.status !== 'deleted' && item.thread.pageId === item.page.id && readablePageIds.has(item.page.id)
@@ -795,7 +799,7 @@ export class WikiPermissionService {
     const recoverySpaceIds = actor
       ? await this.threadAclRecoverySpaceIds(store, actor, candidates.map((item) => item.page.spaceId))
       : new Set<bigint>();
-    const decisions = await this.evaluateThreadAclBatch('read', actor ?? null, candidates, store);
+    const decisions = await this.evaluateThreadAclBatch('read', actor ?? null, candidates, store, input.requestIp);
     return candidates.filter((item) => {
       if (recoverySpaceIds.has(item.page.spaceId)) return true;
       const decision = decisions.get(item.thread.id);

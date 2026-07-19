@@ -284,6 +284,11 @@ function validateProductionEnvironment(env: EnvSchema): void {
         failures,
       );
     }
+    if (env.WIKI_ANONYMOUS_DISCUSSIONS_ENABLED === 'true'
+      && isBlank(env.TURNSTILE_SECRET_KEY)
+      && isBlank(env.HCAPTCHA_SECRET_KEY)) {
+      failures.push('TURNSTILE_SECRET_KEY or HCAPTCHA_SECRET_KEY is required for anonymous wiki discussions');
+    }
     if (env.WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED === 'true') {
       if (env.NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED !== 'true') {
         failures.push('NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED must be true when anonymous wiki edit requests are enabled');

@@ -782,8 +782,10 @@ export interface WikiThreadSummary {
   readonly pageId: string;
   readonly title: string;
   readonly status: string;
-  readonly createdBy: string;
+  readonly createdBy: string | null;
   readonly createdByName: string;
+  readonly anonymous: boolean;
+  readonly viewerOwns: boolean;
   readonly commentCount: number;
   /** Optional while API and web instances roll independently. */
   readonly preview?: WikiThreadPreview;
@@ -796,7 +798,7 @@ export interface WikiThreadCommentPreview {
   readonly status: string;
   readonly contentPreview: string | null;
   readonly truncated: boolean;
-  readonly createdBy: string;
+  readonly createdBy: string | null;
   readonly createdByName: string;
   readonly createdAt: string;
 }
@@ -873,6 +875,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     }>;
     readonly createdAt: string | null;
     readonly canDelete: boolean;
+    readonly viewerOwns: boolean;
     readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
     readonly poll: WikiDiscussionPollDetail | null;
@@ -1588,10 +1591,11 @@ export async function createWikiThread(input: { pageId: string; title: string; c
   });
 }
 
-export async function addWikiThreadComment(input: { threadId: string; content: string; poll?: WikiDiscussionPollInput }): Promise<WikiThreadDetail> {
+export async function addWikiThreadComment(input: { threadId: string; content: string; poll?: WikiDiscussionPollInput; captchaToken?: string }): Promise<WikiThreadDetail> {
   return mutateWikiBrowser<WikiThreadDetail>(`/v1/wiki/discussions/${encodeURIComponent(input.threadId)}/comments`, 'POST', {
     content: input.content,
     poll: input.poll,
+    captchaToken: input.captchaToken,
   });
 }
 

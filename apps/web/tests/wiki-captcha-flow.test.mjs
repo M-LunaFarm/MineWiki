@@ -25,7 +25,16 @@ test('authenticated existing wiki edits and discussion comments do not require a
   const end = api.indexOf('export async function voteWikiDiscussionPoll', start);
   const commentFunction = start >= 0 && end > start ? api.slice(start, end) : '';
   assert.notEqual(commentFunction, '');
-  assert.doesNotMatch(commentFunction, /captchaToken/u);
+  assert.match(commentFunction, /captchaToken\?: string/u);
+  assert.match(discussion, /captchaToken: !account \? replyCaptchaToken/u);
+  assert.match(discussion, /!account && needsCaptcha \? <CaptchaChallenge resetKey=\{replyCaptchaKey\}/u);
+});
+
+test('guest discussion forms follow API capabilities and keep member-only poll features hidden', () => {
+  assert.match(discussion, /\{canCreateThread \? \(/u);
+  assert.match(discussion, /\{account \? <PollComposer enabled=\{createPollEnabled\}/u);
+  assert.match(discussion, /poll: account && replyPollEnabled/u);
+  assert.match(discussion, /익명 토론은 이 브라우저의 보안 쿠키로 소유권을 확인합니다/u);
 });
 
 test('container builds receive the public captcha keys used by the client bundle', () => {

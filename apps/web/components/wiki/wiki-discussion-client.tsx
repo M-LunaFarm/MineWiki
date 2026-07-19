@@ -44,6 +44,8 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const [error, setError] = useState<string | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaKey, setCaptchaKey] = useState(0);
+  const [replyCaptchaToken, setReplyCaptchaToken] = useState<string | null>(null);
+  const [replyCaptchaKey, setReplyCaptchaKey] = useState(0);
   const [moveQuery, setMoveQuery] = useState('');
   const [moveResults, setMoveResults] = useState<WikiSearchResult[]>([]);
   const [movePageId, setMovePageId] = useState('');
@@ -261,7 +263,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
         pageId,
         title,
         content,
-        poll: createPollEnabled ? toPollInput(createPollDraft) : undefined,
+        poll: account && createPollEnabled ? toPollInput(createPollDraft) : undefined,
         captchaToken: captchaToken ?? undefined,
       });
       setSelected(thread);
@@ -284,20 +286,31 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   async function reply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
+    if (!account && needsCaptcha && !replyCaptchaToken) {
+      setError('댓글을 등록하기 전에 로봇 방지 확인을 완료해 주세요.');
+      return;
+    }
     setWorking(true);
     setError(null);
     try {
       const thread = await addWikiThreadComment({
         threadId: selected.id,
         content: comment,
-        poll: replyPollEnabled ? toPollInput(replyPollDraft) : undefined,
+        poll: account && replyPollEnabled ? toPollInput(replyPollDraft) : undefined,
+        captchaToken: !account ? replyCaptchaToken ?? undefined : undefined,
       });
       setSelected(thread);
       setComment('');
       setReplyPollEnabled(false);
       setReplyPollDraft(emptyPollDraft());
+      setReplyCaptchaToken(null);
+      setReplyCaptchaKey((current) => current + 1);
       setThreads((current) => current.map((item) => (item.id === thread.id ? thread : item)));
     } catch (caught) {
+      if (!account) {
+        setReplyCaptchaToken(null);
+        setReplyCaptchaKey((current) => current + 1);
+      }
       setError(message(caught));
     } finally {
       setWorking(false);
@@ -600,13 +613,15 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
       <p className="sr-only" aria-live="polite">{pollAnnouncement}</p>
       <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <aside className={`space-y-4 ${selected ? 'hidden lg:block' : ''}`}>
-          {account && canCreateThread ? (
+          {canCreateThread ? (
             <details className="border border-white/10 bg-[#111821] p-4">
               <summary className="cursor-pointer font-semibold text-white">새 토론</summary>
               <form onSubmit={create} className="mt-4 space-y-3">
                 <input value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={255} placeholder="토론 제목" aria-label="토론 제목" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
                 <textarea value={content} onChange={(event) => setContent(event.target.value)} required maxLength={10000} rows={5} placeholder="첫 의견" aria-label="첫 의견" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
-                <PollComposer enabled={createPollEnabled} onEnabledChange={setCreatePollEnabled} draft={createPollDraft} onDraftChange={setCreatePollDraft} compact />
+                {account ? <PollComposer enabled={createPollEnabled} onEnabledChange={setCreatePollEnabled} draft={createPollDraft} onDraftChange={setCreatePollDraft} compact /> : (
+                  <p className="text-xs leading-5 text-slate-500">익명 토론은 이 브라우저의 보안 쿠키로 소유권을 확인합니다. 쿠키를 지우면 작성자 확인이 불가능하며 설문과 알림은 로그인 후 사용할 수 있습니다.</p>
+                )}
                 {needsCaptcha ? <CaptchaChallenge resetKey={captchaKey} onTokenChange={setCaptchaToken} /> : null}
                 <button disabled={working || (needsCaptcha && !captchaToken)} className="btn-primary inline-flex items-center gap-2 disabled:opacity-50">
                   <MessageSquarePlus className="size-4" /> 토론 만들기
@@ -622,7 +637,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
               <Link href={`/login?returnTo=${encodeURIComponent(locationPath(pageId, returnTo))}`} className="text-emerald-300">
                 로그인
               </Link>
-              하면 토론에 참여할 수 있습니다.
+              하면 회원 전용 토론에 참여할 수 있습니다. 이 문서가 익명 토론을 허용하면 로그인 없이도 작성 폼이 표시됩니다.
             </p>
           )}
           <nav aria-label="토론 상태 필터" className="overflow-x-auto border border-white/10 bg-[#111821] p-2">
@@ -994,9 +1009,12 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
               ) : null}
               {selected.canReply ? (
                 <form onSubmit={reply} className="space-y-3">
-                  <textarea ref={replyTextarea} value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder="댓글 작성 · @사용자명으로 멘션" aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
-                  <PollComposer enabled={replyPollEnabled} onEnabledChange={setReplyPollEnabled} draft={replyPollDraft} onDraftChange={setReplyPollDraft} />
-                  <button disabled={working} className="btn-primary w-full sm:w-auto">
+                  <textarea ref={replyTextarea} value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder={account ? '댓글 작성 · @사용자명으로 멘션' : '익명 댓글 작성'} aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
+                  {account ? <PollComposer enabled={replyPollEnabled} onEnabledChange={setReplyPollEnabled} draft={replyPollDraft} onDraftChange={setReplyPollDraft} /> : (
+                    <p className="text-xs leading-5 text-slate-500">익명 댓글에는 설문·멘션 알림·구독 기능이 적용되지 않습니다.</p>
+                  )}
+                  {!account && needsCaptcha ? <CaptchaChallenge resetKey={replyCaptchaKey} onTokenChange={setReplyCaptchaToken} /> : null}
+                  <button disabled={working || (!account && needsCaptcha && !replyCaptchaToken)} className="btn-primary w-full disabled:opacity-50 sm:w-auto">
                     댓글 등록
                   </button>
                 </form>

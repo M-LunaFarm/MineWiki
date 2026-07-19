@@ -53,6 +53,19 @@ test('anonymous wiki edit requests require a dedicated private hash key and matc
   assert.doesNotThrow(() => new ConfigService(enabled));
 });
 
+test('anonymous wiki discussions require private attribution and captcha verification', () => {
+  const enabled = validProductionEnv();
+  delete enabled.TURNSTILE_SECRET_KEY;
+  delete enabled.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  enabled.WIKI_ANONYMOUS_DISCUSSIONS_ENABLED = 'true';
+  assert.throws(() => new ConfigService(enabled), /WIKI_ANONYMOUS_IP_HASH_SECRET is required/);
+  enabled.WIKI_ANONYMOUS_IP_HASH_SECRET = 'dedicated-anonymous-ip-secret';
+  assert.throws(() => new ConfigService(enabled), /TURNSTILE_SECRET_KEY or HCAPTCHA_SECRET_KEY is required/);
+  enabled.TURNSTILE_SECRET_KEY = 'turnstile-secret';
+  enabled.NEXT_PUBLIC_TURNSTILE_SITE_KEY = 'turnstile-site-key';
+  assert.doesNotThrow(() => new ConfigService(enabled));
+});
+
 test('Paddle shadow mode requires a webhook secret only when enabled', () => {
   const disabled = validProductionEnv();
   disabled.PADDLE_MODE = 'off';
