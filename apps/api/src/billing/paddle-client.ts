@@ -6,6 +6,12 @@ const REQUEST_TIMEOUT_MS = 10_000;
 interface PaddleEnvelope {
   readonly data?: unknown;
   readonly error?: { readonly detail?: string };
+  readonly meta?: {
+    readonly pagination?: {
+      readonly has_more?: boolean;
+      readonly next?: string | null;
+    };
+  };
 }
 
 export interface CreatePaddleTransactionInput {
@@ -22,6 +28,8 @@ export interface PaddleTransactionResult {
 export interface PaddlePortalResult {
   readonly overviewUrl: string;
 }
+
+const TRANSACTION_RECONCILIATION_PAGE_LIMIT = 20;
 
 @Injectable()
 export class PaddleClient {
@@ -52,7 +60,48 @@ export class PaddleClient {
     return { overviewUrl: requiredHttpsUrl(general.overview, 'portal') };
   }
 
-  private async request(path: string, body: Record<string, unknown>): Promise<PaddleEnvelope> {
+  async findTransactionByCheckoutIntent(
+    checkoutIntentId: string,
+    createdAfter: Date,
+  ): Promise<PaddleTransactionResult | null> {
+    const params = new URLSearchParams({
+      'created_at[GTE]': new Date(createdAfter.getTime() - 2 * 60_000).toISOString(),
+      origin: 'api',
+      order_by: 'created_at[ASC]',
+      per_page: '30',
+    });
+    for (let page = 0; page < TRANSACTION_RECONCILIATION_PAGE_LIMIT; page += 1) {
+      const envelope = await this.request(`/transactions?${params.toString()}`, undefined, 'GET');
+      const matches = arrayValue(envelope.data)
+        .filter((item) => objectValue(item).custom_data
+          && objectValue(objectValue(item).custom_data).minewiki_checkout_intent_id === checkoutIntentId);
+      if (matches.length > 1) {
+        throw new BadGatewayException('Paddle returned duplicate transactions for one checkout intent.');
+      }
+      if (matches.length === 1) {
+        const transaction = objectValue(matches[0]);
+        const checkout = objectValue(transaction.checkout);
+        return {
+          transactionId: requiredProviderId(transaction.id, 'txn_', 'transaction'),
+          checkoutUrl: requiredHttpsUrl(checkout.url, 'checkout'),
+        };
+      }
+      const pagination = envelope.meta?.pagination;
+      if (pagination?.has_more !== true) return null;
+      const after = pagination.next ? new URL(pagination.next).searchParams.get('after') : null;
+      if (!after || !/^txn_[a-z\d]{26}$/u.test(after)) {
+        throw new BadGatewayException('Paddle transaction pagination is invalid.');
+      }
+      params.set('after', after);
+    }
+    throw new BadGatewayException('Paddle transaction reconciliation exceeded its safe scan limit.');
+  }
+
+  private async request(
+    path: string,
+    body?: Record<string, unknown>,
+    method: 'GET' | 'POST' = 'POST',
+  ): Promise<PaddleEnvelope> {
     if (this.config.get('PADDLE_MODE', 'off') !== 'live') {
       throw new ServiceUnavailableException('Paddle billing is not enabled.');
     }
@@ -63,13 +112,14 @@ export class PaddleClient {
     let response: Response;
     try {
       response = await fetch(`${baseUrl}${path}`, {
-        method: 'POST',
+        method,
         headers: {
           Authorization: `Bearer ${apiKey}`,
+          'Paddle-Version': '1',
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify(body),
+        body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {
@@ -86,6 +136,13 @@ export class PaddleClient {
     }
     return envelope;
   }
+}
+
+function arrayValue(value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new BadGatewayException('Paddle response is missing required data.');
+  }
+  return value;
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

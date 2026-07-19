@@ -217,6 +217,59 @@ test('an uncertain provider failure keeps the lease and a retry cannot create a 
   assert.equal(intent?.openLeaseKey, 'sandbox:subject-id');
 });
 
+test('an expired uncertain checkout reconciles before safely opening a replacement', async () => {
+  const expired = {
+    id: 'expired-intent', billingSubjectId: 'subject-id', environment: 'sandbox', layoutKey: 'handbook',
+    status: 'creating', openLeaseKey: 'sandbox:subject-id', providerTransactionId: null,
+    providerCheckoutUrl: null, expiresAt: new Date(Date.now() - 60_000),
+    createdAt: new Date(Date.now() - 31 * 60_000),
+  };
+  let openIntent: Record<string, unknown> | null = expired;
+  let providerCalls = 0;
+  let reconciliationCalls = 0;
+  const prisma = {
+    server: { async findUnique() { return activeOwner(); } },
+    serverWiki: { async findUnique() { return { id: 9n }; } },
+    paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    paddleSubscriptionShadow: { async findFirst() { return null; } },
+    paddleCheckoutIntent: {
+      async upsert({ create }: { create: Record<string, unknown> }) {
+        if (!openIntent) openIntent = create;
+        return { ...openIntent };
+      },
+      async updateMany({ where, data }: { where: { id: string }; data: Record<string, unknown> }) {
+        if (!openIntent || openIntent.id !== where.id) return { count: 0 };
+        openIntent = { ...openIntent, ...data };
+        if (data.openLeaseKey === null) openIntent = null;
+        return { count: 1 };
+      },
+    },
+  };
+  const service = new PaddleCheckoutService(
+    prisma as never,
+    config('live') as never,
+    {
+      getProviderPriceId() { return 'pri_handbook'; },
+      getProduct() { return { productCode: 'server_wiki_handbook', layoutKey: 'handbook' }; },
+    } as never,
+    {
+      async findTransactionByCheckoutIntent() { reconciliationCalls += 1; return null; },
+      async createTransaction() {
+        providerCalls += 1;
+        return { transactionId: 'txn_replacement', checkoutUrl: 'https://checkout.paddle.com/replacement' };
+      },
+    } as never,
+  );
+
+  assert.deepEqual(
+    await service.create('server-id', 'handbook', 'account-id', '2026-07-19-v2.0'),
+    { transactionId: 'txn_replacement', checkoutUrl: 'https://checkout.paddle.com/replacement' },
+  );
+  assert.equal(reconciliationCalls, 1);
+  assert.equal(providerCalls, 1);
+});
+
 test('checkout is unavailable without live mode and never touches persistence', async () => {
   const service = new PaddleCheckoutService(
     { serverWiki: { async findUnique() { throw new Error('must not run'); } } } as never,

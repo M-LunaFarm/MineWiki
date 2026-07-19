@@ -89,6 +89,8 @@ export class PaddleCheckoutService {
           openLeaseKey: true,
           providerTransactionId: true,
           providerCheckoutUrl: true,
+          expiresAt: true,
+          createdAt: true,
         },
       });
     });
@@ -105,6 +107,35 @@ export class PaddleCheckoutService {
           transactionId: intent.providerTransactionId,
         };
       }
+      if (
+        intent.status === 'creating'
+        && intent.openLeaseKey
+        && intent.expiresAt.getTime() <= Date.now()
+      ) {
+        const recovered = await this.paddle.findTransactionByCheckoutIntent(
+          intent.id,
+          intent.createdAt,
+        );
+        if (recovered) {
+          await this.attachTransaction(intent.id, intent.openLeaseKey, recovered);
+          return {
+            checkoutUrl: recovered.checkoutUrl,
+            transactionId: recovered.transactionId,
+          };
+        }
+        const released = await this.prisma.paddleCheckoutIntent.updateMany({
+          where: {
+            id: intent.id,
+            status: 'creating',
+            openLeaseKey: intent.openLeaseKey,
+            expiresAt: { lte: new Date() },
+          },
+          data: { status: 'expired', openLeaseKey: null },
+        });
+        if (released.count === 1) {
+          return this.create(serverId, layoutKey, accountId, policyVersion);
+        }
+      }
       throw new ConflictException({
         statusCode: 409,
         code: 'PADDLE_CHECKOUT_IN_PROGRESS',
@@ -120,8 +151,20 @@ export class PaddleCheckoutService {
     if (!intent.openLeaseKey) {
       throw new ConflictException('The Paddle checkout lease is no longer active.');
     }
+    await this.attachTransaction(intentId, intent.openLeaseKey, transaction);
+    return {
+      checkoutUrl: transaction.checkoutUrl,
+      transactionId: transaction.transactionId,
+    };
+  }
+
+  private async attachTransaction(
+    intentId: string,
+    openLeaseKey: string,
+    transaction: { readonly transactionId: string; readonly checkoutUrl: string },
+  ): Promise<void> {
     const attached = await this.prisma.paddleCheckoutIntent.updateMany({
-      where: { id: intentId, status: 'creating', openLeaseKey: intent.openLeaseKey },
+      where: { id: intentId, status: 'creating', openLeaseKey },
       data: {
         status: 'pending',
         providerTransactionId: transaction.transactionId,
@@ -131,9 +174,5 @@ export class PaddleCheckoutService {
     if (attached.count !== 1) {
       throw new ConflictException('The Paddle checkout lease changed while the transaction was being created.');
     }
-    return {
-      checkoutUrl: transaction.checkoutUrl,
-      transactionId: transaction.transactionId,
-    };
   }
 }
