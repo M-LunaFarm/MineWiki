@@ -1345,6 +1345,98 @@ test('page lifecycle history uses an independent id cursor and redacts cross-spa
   assert.equal(result.items[1]?.identityRedacted, true);
 });
 
+test('public server wiki lifecycle and ACL history stop at the immutable release capture', async () => {
+  const capturedAt = new Date('2026-07-18T09:00:00.000Z');
+  const before = new Date('2026-07-18T08:59:00.000Z');
+  const after = new Date('2026-07-18T09:01:00.000Z');
+  const livePage = {
+    id: 1n, namespaceId: 9, spaceId: 20n, title: 'Draft Secret', protectionLevel: 'locked',
+    status: 'deleted', createdBy: 1n,
+  };
+  const releaseItem = {
+    id: 100n, releaseId: 200n, serverWikiId: 300n, spaceId: 20n, pageId: 1n,
+    namespaceId: 2, localPath: 'guide', slug: 'guide', title: 'Published Guide',
+    displayTitle: 'Published Guide', revisionId: 4n, pageType: 'article',
+    protectionLevel: 'open', pageStatus: 'normal', createdBy: 1n, ownerProfileId: null,
+    pageUpdatedAt: before,
+  };
+  const boundary = {
+    serverWikiId: 300n, spaceId: 20n, currentReleaseId: 200n,
+    currentReleaseVersion: 1, currentItem: releaseItem,
+  };
+  const lifecycleEvents = [
+    {
+      id: 11n, pageId: 1n, eventType: 'move', actorProfileId: 3n, reason: 'published move',
+      sourceNamespaceId: 2, sourceNamespaceCode: 'guide', sourceSpaceId: 20n,
+      sourceTitle: 'Old', sourcePath: 'old', destinationNamespaceId: 2,
+      destinationNamespaceCode: 'guide', destinationSpaceId: 20n,
+      destinationTitle: 'Published Guide', destinationPath: 'guide', createdAt: before,
+    },
+    {
+      id: 12n, pageId: 1n, eventType: 'move', actorProfileId: 3n, reason: 'draft secret',
+      sourceNamespaceId: 2, sourceNamespaceCode: 'guide', sourceSpaceId: 20n,
+      sourceTitle: 'Published Guide', sourcePath: 'guide', destinationNamespaceId: 9,
+      destinationNamespaceCode: 'dev', destinationSpaceId: 20n,
+      destinationTitle: 'Draft Secret', destinationPath: 'draft-secret', createdAt: after,
+    },
+  ];
+  const aclEvents = [
+    { id: 21n, targetType: 'page', targetId: 1n, actionType: 'create', oldRuleJson: null, newRuleJson: {}, reason: 'published ACL', changedBy: 3n, createdAt: before },
+    { id: 22n, targetType: 'page', targetId: 1n, actionType: 'reset', oldRuleJson: {}, newRuleJson: {}, reason: 'draft ACL', changedBy: 3n, createdAt: after },
+  ];
+  const lifecycleWhere: unknown[] = [];
+  const aclWhere: unknown[] = [];
+  const prisma = {
+    wikiPage: { async findUnique() { return livePage; } },
+    serverWikiRelease: {
+      async findFirst(input: { where: unknown }) {
+        assert.deepEqual(input.where, { id: 200n, serverWikiId: 300n });
+        return { publishedAt: new Date('2026-07-18T10:00:00.000Z'), candidate: { createdAt: capturedAt } };
+      },
+    },
+    wikiPageLifecycleEvent: {
+      async findMany(input: { where: { createdAt?: { lte: Date } } }) {
+        lifecycleWhere.push(input.where);
+        return lifecycleEvents.filter((event) => !input.where.createdAt || event.createdAt <= input.where.createdAt.lte);
+      },
+    },
+    aclChangeLog: {
+      async findMany(input: { where: { createdAt?: { lte: Date } } }) {
+        aclWhere.push(input.where);
+        return aclEvents.filter((event) => !input.where.createdAt || event.createdAt <= input.where.createdAt.lte);
+      },
+    },
+    wikiProfile: {
+      async findMany() { return [{ id: 3n, displayName: 'Maintainer', username: 'maintainer' }]; },
+    },
+  } as unknown as PrismaService;
+  const permissionPages: Array<{ title: string; status: string; proof: unknown }> = [];
+  const permissions = {
+    async resolvePublishedPageBoundary() { return boundary; },
+    async assertCanReadPage(input: { page: { title: string; status: string }; publicationProof?: unknown }) {
+      permissionPages.push({ title: input.page.title, status: input.page.status, proof: input.publicationProof });
+    },
+    async assertCanUsePageAction(input: { page: { title: string; status: string }; publicationProof?: unknown }) {
+      permissionPages.push({ title: input.page.title, status: input.page.status, proof: input.publicationProof });
+    },
+    async canManagePageAcl() { return { allowed: false, reason: 'page_manager_required' }; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const [lifecycle, acl] = await Promise.all([
+    service.getPageLifecycleEvents('1'),
+    service.getPageAclHistoryEvents('1'),
+  ]);
+
+  assert.deepEqual(lifecycle.items.map((item) => item.reason), ['published move']);
+  assert.deepEqual(acl.items.map((item) => item.actionType), ['create']);
+  assert.deepEqual(lifecycleWhere, [{ pageId: 1n, createdAt: { lte: capturedAt } }]);
+  assert.deepEqual(aclWhere, [{ targetType: 'page', targetId: 1n, createdAt: { lte: capturedAt } }]);
+  assert.equal(permissionPages.every((entry) => entry.title === 'Published Guide'), true);
+  assert.equal(permissionPages.every((entry) => entry.status === 'normal'), true);
+  assert.equal(permissionPages.every((entry) => Boolean(entry.proof)), true);
+});
+
 test('deleted-page recovery hides page existence from an unrelated authenticated actor', async () => {
   const now = new Date('2026-07-19T00:00:00Z');
   let revisionsQueried = false;

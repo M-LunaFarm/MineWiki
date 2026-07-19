@@ -1335,6 +1335,39 @@ export class WikiReadService {
     return scope ? publishedBoundaryFromScope(scope) : null;
   }
 
+  private async pageHistoryPublicationContext(
+    page: {
+      readonly id: bigint;
+      readonly namespaceId: number;
+      readonly spaceId: bigint;
+      readonly title: string;
+      readonly protectionLevel: string;
+      readonly status: string;
+    },
+    access: WikiAccessContext,
+  ) {
+    const boundary = await this.publishedRevisionBoundaryForViewer(page, access);
+    if (!boundary) {
+      return { page, proof: undefined, capturedAt: null };
+    }
+    const release = await this.prisma.serverWikiRelease.findFirst({
+      where: {
+        id: boundary.currentReleaseId,
+        serverWikiId: boundary.serverWikiId,
+      },
+      select: {
+        publishedAt: true,
+        candidate: { select: { createdAt: true } },
+      },
+    });
+    if (!release) throw new NotFoundException('Wiki page not found.');
+    return {
+      page: pageFromServerWikiReleaseItem(boundary.currentItem),
+      proof: { boundary, item: boundary.currentItem },
+      capturedAt: release.candidate?.createdAt ?? release.publishedAt,
+    };
+  }
+
   private async publishedRevisionProof(
     boundary: WikiPublishedPageBoundary,
     pageId: bigint,
@@ -1619,14 +1652,25 @@ export class WikiReadService {
     const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
     if (!page) throw new NotFoundException('Wiki page not found.');
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
-    await this.wikiPermissions.assertCanReadPage({ ...access, page });
-    await this.wikiPermissions.assertCanUsePageAction({ ...access, action: 'history', page });
+    const publication = await this.pageHistoryPublicationContext(page, access);
+    await this.wikiPermissions.assertCanReadPage({
+      ...access,
+      page: publication.page,
+      publicationProof: publication.proof,
+    });
+    await this.wikiPermissions.assertCanUsePageAction({
+      ...access,
+      action: 'history',
+      page: publication.page,
+      publicationProof: publication.proof,
+    });
 
     const limit = Math.min(Math.max(Number(requestedLimit) || 50, 1), 100);
     const cursorId = cursor ? this.parseBigIntId(cursor, 'cursor') : null;
     const events = await this.prisma.wikiPageLifecycleEvent.findMany({
       where: {
         pageId: parsedPageId,
+        ...(publication.capturedAt ? { createdAt: { lte: publication.capturedAt } } : {}),
         ...(cursorId ? { id: { lt: cursorId } } : {})
       },
       orderBy: [{ id: 'desc' }],
@@ -1639,10 +1683,12 @@ export class WikiReadService {
     const items = rows.map((event) => {
       const sourceVisible = event.sourceNamespaceId === null || event.sourceSpaceId === null
         ? true
-        : event.sourceNamespaceId === page.namespaceId && event.sourceSpaceId === page.spaceId;
+        : event.sourceNamespaceId === publication.page.namespaceId
+          && event.sourceSpaceId === publication.page.spaceId;
       const destinationVisible = event.destinationNamespaceId === null || event.destinationSpaceId === null
         ? true
-        : event.destinationNamespaceId === page.namespaceId && event.destinationSpaceId === page.spaceId;
+        : event.destinationNamespaceId === publication.page.namespaceId
+          && event.destinationSpaceId === publication.page.spaceId;
       const identityRedacted = !sourceVisible || !destinationVisible;
       const actor = event.actorProfileId ? profileById.get(event.actorProfileId) : null;
       return {
@@ -1682,9 +1728,22 @@ export class WikiReadService {
     const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
     if (!page) throw new NotFoundException('Wiki page not found.');
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
-    await this.wikiPermissions.assertCanReadPage({ ...access, page });
-    await this.wikiPermissions.assertCanUsePageAction({ ...access, action: 'history', page });
-    const management = await this.wikiPermissions.canManagePageAcl({ actor: access.actor ?? null, page });
+    const publication = await this.pageHistoryPublicationContext(page, access);
+    await this.wikiPermissions.assertCanReadPage({
+      ...access,
+      page: publication.page,
+      publicationProof: publication.proof,
+    });
+    await this.wikiPermissions.assertCanUsePageAction({
+      ...access,
+      action: 'history',
+      page: publication.page,
+      publicationProof: publication.proof,
+    });
+    const management = await this.wikiPermissions.canManagePageAcl({
+      actor: access.actor ?? null,
+      page: publication.page,
+    });
     const detailsVisible = management.allowed;
 
     const limit = Math.min(Math.max(Number(requestedLimit) || 50, 1), 100);
@@ -1693,6 +1752,7 @@ export class WikiReadService {
       where: {
         targetType: 'page',
         targetId: parsedPageId,
+        ...(publication.capturedAt ? { createdAt: { lte: publication.capturedAt } } : {}),
         ...(cursorId ? { id: { lt: cursorId } } : {})
       },
       orderBy: [{ id: 'desc' }],
