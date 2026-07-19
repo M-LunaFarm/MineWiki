@@ -54,6 +54,60 @@ test('poll creation rejects normalized duplicate choices before poll persistence
   assert.equal(pollCreated, false);
 });
 
+test('thetree vote macro creates one structured poll in the comment transaction', async () => {
+  let pollData: Record<string, unknown> | null = null;
+  let optionData: readonly Record<string, unknown>[] = [];
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async create() { return thread; } },
+    wikiDiscussionComment: { async create() { return comment; } },
+    wikiDiscussionPoll: {
+      async create({ data }: { data: Record<string, unknown> }) { pollData = data; return poll; },
+    },
+    wikiDiscussionPollOption: {
+      async createMany({ data }: { data: readonly Record<string, unknown>[] }) { optionData = data; return { count: data.length }; },
+    },
+    wikiDiscussionSubscription: { async create() { return {}; } },
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) { return callback(store); },
+  };
+  const discussion = new WikiDiscussionService(store as unknown as PrismaService, profiles(), permissions());
+  discussion.getThread = async () => ({ id: thread.id.toString(), comments: [] }) as never;
+
+  await discussion.createThread(session, page.id.toString(), {
+    title: '버전 투표',
+    content: '다음 버전은? [vote(선호 버전,1.20,1.21)]',
+  });
+
+  assert.equal(pollData?.question, '선호 버전');
+  assert.equal(pollData?.resultsVisibility, 'always');
+  assert.deepEqual(optionData.map((option) => option.label), ['1.20', '1.21']);
+});
+
+test('vote macro rejects ambiguous, malformed, and duplicate poll declarations', async () => {
+  let commentWrites = 0;
+  const store = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: { async create() { return thread; } },
+    wikiDiscussionComment: { async create() { commentWrites += 1; return comment; } },
+    wikiDiscussionPoll: { async create() { return poll; } },
+    wikiDiscussionPollOption: { async createMany() { return { count: 2 }; } },
+    wikiDiscussionSubscription: { async create() { return {}; } },
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) { return callback(store); },
+  };
+  const discussion = new WikiDiscussionService(store as unknown as PrismaService, profiles(), permissions());
+
+  await assert.rejects(() => discussion.createThread(session, page.id.toString(), {
+    title: '중복', content: '[vote(Q,A,B)] [vote(Q2,C,D)]',
+  }), /only one vote macro/i);
+  await assert.rejects(() => discussion.createThread(session, page.id.toString(), {
+    title: '명시 중복', content: '[vote(Q,A,B)]', poll: { question: '별도', options: ['A', 'B'] },
+  }), /either a vote macro/i);
+  await assert.rejects(() => discussion.createThread(session, page.id.toString(), {
+    title: '선택지 부족', content: '[vote(Q,A)]',
+  }), /between 2 and 10 choices/i);
+  assert.equal(commentWrites, 1);
+});
+
 test('after-vote poll results hide every aggregate from readers and reveal only after voting', async () => {
   function store(viewerHasVoted: boolean) {
     return {

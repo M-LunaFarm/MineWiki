@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, parseMarkup, renderDiscussionMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
+import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, extractDiscussionVoteMacros, parseMarkup, renderDiscussionMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
 import { parseLinkTarget, resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
@@ -1300,6 +1300,25 @@ test('renders explicit safe placeholders for unsupported macros', () => {
   assert.match(html, />지원하지 않는 매크로: \[vote\]<\/span>/);
   assert.match(html, /class="wiki-link"/);
   assert.match(html, /href="https:\/\/example\.com"/);
+});
+
+test('extracts thetree vote macros for structured discussion polls without converting literals', () => {
+  assert.deepEqual(extractDiscussionVoteMacros('의견 [vote(선호 버전,1.20,1.21)]'), [{
+    question: '선호 버전',
+    options: ['1.20', '1.21'],
+  }]);
+  assert.deepEqual(extractDiscussionVoteMacros('[vote(쉼표,Java\\, Edition,Bedrock)]'), [{
+    question: '쉼표',
+    options: ['Java, Edition', 'Bedrock'],
+  }]);
+  assert.deepEqual(extractDiscussionVoteMacros('{{{[vote(코드,A,B)]}}}'), []);
+  assert.deepEqual(extractDiscussionVoteMacros('<code>[vote(코드,A,B)]</code>'), []);
+});
+
+test('discussion vote macros are visible on legacy comments and hidden after poll conversion', () => {
+  const raw = '선택 [vote(선호 버전,1.20,1.21)]';
+  assert.match(renderDiscussionMarkup(raw), /지원되지 않는 투표 매크로/u);
+  assert.doesNotMatch(renderDiscussionMarkup(raw, { convertedVoteMacro: true }), /투표 매크로/u);
 });
 
 test('renders cache-safe pagecount markers with an optional namespace', () => {

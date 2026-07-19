@@ -2010,7 +2010,7 @@ function parseSafeInlineMacro(name: string, rawArgs: string | undefined, errors:
   }
   const warning = `지원되지 않는 매크로입니다: ${name}`;
   if (!errors.includes(warning)) errors.push(warning);
-  return { type: 'unsupported_macro', name };
+  return { type: 'unsupported_macro', name, ...(rawArgs === undefined ? {} : { rawArgs }) };
 }
 
 function normalizeMacroDate(value: string): string | null {
@@ -2103,11 +2103,40 @@ export interface DiscussionMarkupMention {
 export interface DiscussionMarkupOptions extends RenderOptions {
   /** Mentions already validated against active wiki profiles by the caller. */
   mentions?: readonly DiscussionMarkupMention[];
+  /** A persisted structured poll already represents the legacy vote macro. */
+  convertedVoteMacro?: boolean;
+}
+
+export interface DiscussionVoteMacro {
+  readonly question: string;
+  readonly options: readonly string[];
+}
+
+/** Extract vote macros through the real parser so code and link literals are never converted. */
+export function extractDiscussionVoteMacros(raw: string): readonly DiscussionVoteMacro[] {
+  const parsed = parseMarkup(raw);
+  const macros: DiscussionVoteMacro[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    const node = value as Record<string, unknown>;
+    if (node.type === 'unsupported_macro' && typeof node.name === 'string' && node.name.toLowerCase() === 'vote') {
+      const args = typeof node.rawArgs === 'string' ? splitMacroArguments(node.rawArgs) : [];
+      macros.push({ question: args[0] ?? '', options: args.slice(1) });
+      return;
+    }
+    for (const child of Object.values(node)) visit(child);
+  };
+  visit(parsed.ast);
+  return macros;
 }
 
 /** Render the deliberately small NamuMark subset supported inside discussions. */
 export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOptions = {}): string {
-  const { mentions = [], ...renderOptions } = options;
+  const { mentions = [], convertedVoteMacro = false, ...renderOptions } = options;
   const parsed = parseMarkup(raw, { linkResolution: renderOptions.linkResolution });
   const mentionByUsername = new Map(mentions
     .filter((mention) => /^[A-Za-z0-9_]{3,16}$/u.test(mention.username) && /^\/user\/[A-Za-z0-9_%._~-]+$/u.test(mention.href))
@@ -2146,6 +2175,9 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
     if (node.type === 'text') return injectMentions(node.text);
     if (node.type === 'line_break' || node.type === 'code' || node.type === 'internal_link' || node.type === 'external_link') return [node];
     if (node.type === 'ruby') return [{ type: 'text', text: node.text }];
+    if (node.type === 'unsupported_macro' && node.name.toLowerCase() === 'vote') {
+      return convertedVoteMacro ? [] : [{ type: 'text', text: '[지원되지 않는 투표 매크로]' }];
+    }
     if (node.type === 'bold' || node.type === 'italic' || node.type === 'strike'
       || node.type === 'underline' || node.type === 'sup' || node.type === 'sub') {
       return [{ ...node, children: restrictInline(node.children) }];

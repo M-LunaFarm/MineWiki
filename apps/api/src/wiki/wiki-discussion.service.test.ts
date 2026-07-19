@@ -921,7 +921,7 @@ test('discussion comment writes recheck the published page snapshot inside the t
 
 test('discussion previews expose the first and latest comments without hidden or deleted content', async () => {
   const previewRows = [
-    { id: 1n, threadId: 30n, contentPreview: 'first comment', contentLength: 13n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), firstRank: 1n, recentRank: 2n, commentCount: 2n },
+    { id: 1n, threadId: 30n, contentPreview: '[vote(선호 버전,1.20,1.21)]', contentLength: 27n, pollQuestion: '선호 버전', status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), firstRank: 1n, recentRank: 2n, commentCount: 2n },
     { id: 3n, threadId: 30n, contentPreview: 'hidden secret', contentLength: 13n, status: 'hidden', createdBy: 21n, createdAt: new Date('2026-01-03T00:00:00Z'), firstRank: 3n, recentRank: 3n, commentCount: 5n },
     { id: 4n, threadId: 30n, contentPreview: 'deleted secret', contentLength: 14n, status: 'deleted', createdBy: 21n, createdAt: new Date('2026-01-04T00:00:00Z'), firstRank: 4n, recentRank: 2n, commentCount: 5n },
     { id: 5n, threadId: 30n, contentPreview: 'latest comment', contentLength: 14n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-05T00:00:00Z'), firstRank: 2n, recentRank: 1n, commentCount: 2n },
@@ -943,7 +943,7 @@ test('discussion previews expose the first and latest comments without hidden or
   assert.equal(result.items[0]?.commentCount, 2);
   assert.deepEqual(result.items[0]?.preview, {
     firstComment: {
-      id: '1', status: 'normal', contentPreview: 'first comment', truncated: false,
+      id: '1', status: 'normal', contentPreview: '설문: 선호 버전', truncated: false,
       createdBy: '20', createdByName: '테스터', createdAt: '2026-01-01T00:00:00.000Z',
     },
     recentComments: [
@@ -952,6 +952,7 @@ test('discussion previews expose the first and latest comments without hidden or
     omittedCommentCount: 0,
   });
   assert.doesNotMatch(JSON.stringify(result.items[0]?.preview), /hidden secret|deleted secret|숨김 사용자/);
+  assert.doesNotMatch(JSON.stringify(result.items[0]?.preview), /\[vote/u);
 });
 
 test('active discussion filter includes open and paused but excludes closed threads', async () => {

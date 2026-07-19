@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { createHmac } from 'node:crypto';
 import { ConfigService } from '@minewiki/config';
 import { normalizeIpOrCidr } from '@minewiki/security';
-import { renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
+import { extractDiscussionVoteMacros, renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
 import { PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
 import { Prisma, type ServerWikiReleaseItem, type WikiDiscussionThread, type WikiPage } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -180,6 +180,7 @@ interface ThreadPreviewRow {
   readonly threadId: bigint;
   readonly contentPreview: string;
   readonly contentLength: bigint | number;
+  readonly pollQuestion: string | null;
   readonly status: string;
   readonly createdBy: bigint | null;
   readonly anonymousOwnerId: bigint | null;
@@ -853,6 +854,9 @@ export class WikiDiscussionService {
               const target = mentionProfileByUsername.get(mention.username.toLocaleLowerCase('en-US'));
               return target ? [{ username: target.username, profileId: target.id.toString(), start: mention.start, end: mention.end }] : [];
             });
+        const commentPoll = comment.status === 'deleted' || (comment.status === 'hidden' && !canManage)
+          ? null
+          : pollByCommentId.get(comment.id) ?? null;
         return {
         id: comment.id.toString(),
         entryType: comment.entryType === 'system' ? 'system' as const : 'comment' as const,
@@ -866,6 +870,7 @@ export class WikiDiscussionService {
                 username: mention.username,
                 href: `/user/${encodeURIComponent(mention.username)}`,
               })),
+              convertedVoteMacro: commentPoll !== null,
             }),
         status: concealed ? 'hidden' : comment.status,
         createdBy: concealed ? null : comment.createdBy?.toString() ?? null,
@@ -877,9 +882,7 @@ export class WikiDiscussionService {
         viewerOwns: Boolean(!concealed && anonymousOwnerId !== null && comment.createdBy === null && comment.anonymousOwnerId === anonymousOwnerId),
         canChangeVisibility: Boolean(comment.entryType !== 'system' && canManage && comment.status !== 'deleted'),
         pinned: comment.id === thread.pinnedCommentId,
-        poll: comment.status === 'deleted' || (comment.status === 'hidden' && !canManage)
-          ? null
-          : pollByCommentId.get(comment.id) ?? null,
+        poll: commentPoll,
         moderationHistory: (moderationByCommentId.get(comment.id) ?? []).map((event) => ({
           id: event.id.toString(),
           action: event.action === 'restore' ? 'restore' as const : 'hide' as const,
@@ -906,6 +909,7 @@ export class WikiDiscussionService {
     });
     const title = this.requiredText(input.title, 'title', 255);
     const content = this.requiredText(input.content, 'content', 10_000);
+    const pollInput = this.resolveDiscussionPoll(content, input.poll);
     const now = new Date();
     const thread = await this.prisma.$transaction(async (tx) => {
       const created = await tx.wikiDiscussionThread.create({
@@ -914,7 +918,7 @@ export class WikiDiscussionService {
       const comment = await tx.wikiDiscussionComment.create({
         data: { threadId: created.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
       });
-      if (input.poll) await this.createPoll(tx, comment.id, profile.id, input.poll, now);
+      if (pollInput) await this.createPoll(tx, comment.id, profile.id, pollInput, now);
       await tx.wikiDiscussionSubscription.create({
         data: { threadId: created.id, profileId: profile.id, muted: false, createdAt: now, updatedAt: now }
       });
@@ -924,7 +928,7 @@ export class WikiDiscussionService {
         commentId: comment.id,
         actorProfileId: profile.id,
         title,
-        usernames: uniqueDiscussionMentionUsernames(content)
+        usernames: uniqueDiscussionMentionUsernames(this.discussionTextWithoutVoteMacros(content))
       });
       return created;
     });
@@ -949,6 +953,7 @@ export class WikiDiscussionService {
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
     await this.wikiPermissions.assertCanWriteThreadComment({ actor, page, threadId: thread.id });
     const content = this.requiredText(input.content, 'content', 10_000);
+    const pollInput = this.resolveDiscussionPoll(content, input.poll);
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
       await this.lockDiscussionRows(tx, thread.id);
@@ -963,7 +968,7 @@ export class WikiDiscussionService {
       const comment = await tx.wikiDiscussionComment.create({
         data: { threadId: thread.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
       });
-      if (input.poll) await this.createPoll(tx, comment.id, profile.id, input.poll, now);
+      if (pollInput) await this.createPoll(tx, comment.id, profile.id, pollInput, now);
       await tx.wikiDiscussionSubscription.upsert({
         where: { threadId_profileId: { threadId: thread.id, profileId: profile.id } },
         create: { threadId: thread.id, profileId: profile.id, muted: false, createdAt: now, updatedAt: now },
@@ -976,7 +981,7 @@ export class WikiDiscussionService {
         commentId: comment.id,
         actorProfileId: profile.id,
         title: thread.title,
-        usernames: uniqueDiscussionMentionUsernames(content)
+        usernames: uniqueDiscussionMentionUsernames(this.discussionTextWithoutVoteMacros(content))
       }) ?? [];
       await this.notifications?.notifyDiscussionReply(tx, {
         pageId: page.id,
@@ -1005,10 +1010,12 @@ export class WikiDiscussionService {
     existingOwnerToken?: string | null,
   ): Promise<{ readonly thread: WikiThreadDetail; readonly ownerToken: string; readonly ownerTokenIssued: boolean }> {
     this.assertAnonymousDiscussionsEnabled();
-    if (input.poll) throw new ForbiddenException('Anonymous contributors cannot create polls.');
     const parsedPageId = this.parseId(pageId, 'pageId');
     const title = this.requiredText(input.title, 'title', 255);
     const content = this.requiredText(input.content, 'content', 10_000);
+    if (input.poll || extractDiscussionVoteMacros(content).length > 0) {
+      throw new ForbiddenException('Anonymous contributors cannot create polls.');
+    }
     const ipHash = this.anonymousIpHash(requestIp);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1068,9 +1075,11 @@ export class WikiDiscussionService {
     existingOwnerToken?: string | null,
   ): Promise<{ readonly thread: WikiThreadDetail; readonly ownerToken: string; readonly ownerTokenIssued: boolean }> {
     this.assertAnonymousDiscussionsEnabled();
-    if (input.poll) throw new ForbiddenException('Anonymous contributors cannot create polls.');
     const id = this.parseId(threadId, 'threadId');
     const content = this.requiredText(input.content, 'content', 10_000);
+    if (input.poll || extractDiscussionVoteMacros(content).length > 0) {
+      throw new ForbiddenException('Anonymous contributors cannot create polls.');
+    }
     const ipHash = this.anonymousIpHash(requestIp);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1667,6 +1676,25 @@ export class WikiDiscussionService {
     });
   }
 
+  private resolveDiscussionPoll(
+    content: string,
+    explicitPoll?: WikiDiscussionPollInput,
+  ): WikiDiscussionPollInput | undefined {
+    const macros = extractDiscussionVoteMacros(content);
+    if (macros.length > 1) {
+      throw new BadRequestException('A discussion comment can contain only one vote macro.');
+    }
+    if (macros.length === 0) return explicitPoll;
+    if (explicitPoll) {
+      throw new BadRequestException('Use either a vote macro or the structured poll fields, not both.');
+    }
+    return {
+      question: macros[0]?.question,
+      options: macros[0]?.options,
+      resultsVisibility: 'always',
+    };
+  }
+
   private async hydratePolls(input: {
     readonly comments: ReadonlyArray<{ readonly id: bigint; readonly status: string }>;
     readonly viewerProfileId: bigint | null;
@@ -1928,27 +1956,30 @@ export class WikiDiscussionService {
     const rows = await this.prisma.$queryRaw<ThreadPreviewRow[]>(Prisma.sql`
       WITH ranked AS (
         SELECT
-          id,
-          thread_id,
-          LEFT(content, 600) AS content_preview,
-          CHAR_LENGTH(content) AS content_length,
-          status,
-          created_by,
-          anonymous_owner_id,
-          created_at,
-          ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY id ASC) AS first_rank,
-          ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY id DESC) AS recent_rank,
-          COUNT(*) OVER (PARTITION BY thread_id) AS comment_count
-        FROM wiki_discussion_comments
-        WHERE entry_type = 'comment'
-          AND status = 'normal'
-          AND thread_id IN (${Prisma.join(threadIds)})
+          comments.id,
+          comments.thread_id,
+          LEFT(comments.content, 600) AS content_preview,
+          CHAR_LENGTH(comments.content) AS content_length,
+          polls.question AS poll_question,
+          comments.status,
+          comments.created_by,
+          comments.anonymous_owner_id,
+          comments.created_at,
+          ROW_NUMBER() OVER (PARTITION BY comments.thread_id ORDER BY comments.id ASC) AS first_rank,
+          ROW_NUMBER() OVER (PARTITION BY comments.thread_id ORDER BY comments.id DESC) AS recent_rank,
+          COUNT(*) OVER (PARTITION BY comments.thread_id) AS comment_count
+        FROM wiki_discussion_comments AS comments
+        LEFT JOIN wiki_discussion_polls AS polls ON polls.comment_id = comments.id
+        WHERE comments.entry_type = 'comment'
+          AND comments.status = 'normal'
+          AND comments.thread_id IN (${Prisma.join(threadIds)})
       )
       SELECT
         id,
         thread_id AS threadId,
         content_preview AS contentPreview,
         content_length AS contentLength,
+        poll_question AS pollQuestion,
         status,
         created_by AS createdBy,
         anonymous_owner_id AS anonymousOwnerId,
@@ -1992,7 +2023,10 @@ export class WikiDiscussionService {
     row: ThreadPreviewRow,
     profileById: ReadonlyMap<bigint, string>
   ): WikiThreadCommentPreview {
-    const normalized = row.contentPreview.replace(/\s+/gu, ' ').trim();
+    const displayContent = row.pollQuestion
+      ? this.discussionTextWithoutVoteMacros(row.contentPreview)
+      : row.contentPreview;
+    const normalized = displayContent.replace(/\s+/gu, ' ').trim() || (row.pollQuestion ? `설문: ${row.pollQuestion}` : '');
     const characters = [...normalized];
     return {
       id: row.id.toString(),
@@ -2007,6 +2041,10 @@ export class WikiDiscussionService {
 
   private anonymousDiscussionsEnabled(): boolean {
     return this.config?.getOptional('WIKI_ANONYMOUS_DISCUSSIONS_ENABLED') === 'true';
+  }
+
+  private discussionTextWithoutVoteMacros(content: string): string {
+    return content.replace(/\[vote(?:\([^\]\n]*\))?\]/giu, ' ');
   }
 
   private anonymousIpHash(requestIp: string): string {

@@ -153,7 +153,7 @@ export type InlineNode =
   | { type: 'internal_link'; target: string; label: string; fragment?: string | null }
   | { type: 'external_link'; href: string; label: string }
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null; display?: WikiFileDisplayOptions }
-  | { type: 'unsupported_macro'; name: string }
+  | { type: 'unsupported_macro'; name: string; rawArgs?: string }
   | { type: 'code'; code: string }
   | { type: 'ref'; name: string | null; text: string | null };
 
