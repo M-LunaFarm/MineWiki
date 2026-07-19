@@ -418,17 +418,21 @@ export const serverRankingResponseSchema = z.object({
 });
 
 export const serverRegistrationSchema = z.object({
-  name: z.string().min(3).max(32),
-  joinHost: z.string().min(3).max(255),
+  name: z.string().trim().min(3).max(32),
+  joinHost: z.string().trim().min(3).max(255),
   joinPort: z.number().int().min(1).max(65535),
   edition: z.enum(['java', 'bedrock']),
-  supportedVersions: z.array(z.string().min(1)).min(1).max(8),
-  tags: z.array(z.string().min(1)).max(12),
-  shortDescription: z.string().min(1).max(160),
-  longDescription: z.string().min(1),
-  websiteUrl: z.string().url().optional().nullable(),
-  discordUrl: z.string().url().optional().nullable(),
-});
+  supportedVersions: z.array(z.string().trim().min(1).max(32)).min(1).max(8).transform((versions) => [
+    ...new Set(versions),
+  ]),
+  tags: z.array(z.string().trim().min(1).max(32)).max(12).transform((tags) => [
+    ...new Set(tags),
+  ]),
+  shortDescription: z.string().trim().min(1).max(160),
+  longDescription: z.string().trim().min(1).max(20_000),
+  websiteUrl: z.string().trim().max(2_048).url().optional().nullable(),
+  discordUrl: z.string().trim().max(2_048).url().optional().nullable(),
+}).strict();
 
 export const serverPingSampleSchema = z.object({
   timestamp: z.string().datetime(),

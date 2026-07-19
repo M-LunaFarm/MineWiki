@@ -41,15 +41,15 @@ test('public registration records a pending registrant without granting ownershi
 
   await controller.register(
     {
-      name: 'Pending Server',
-      joinHost: 'play.example.com',
+      name: '  Pending Server  ',
+      joinHost: '  play.example.com  ',
       joinPort: 25565,
       edition: 'java',
-      supportedVersions: ['1.21.1'],
-      tags: ['survival'],
-      shortDescription: 'Ownership verification pending',
-      longDescription: 'A server waiting for DNS or MOTD ownership verification.',
-      websiteUrl: null,
+      supportedVersions: [' 1.21.1 ', '1.21.1'],
+      tags: [' survival ', 'survival'],
+      shortDescription: '  Ownership verification pending  ',
+      longDescription: '  A server waiting for DNS or MOTD ownership verification.  ',
+      websiteUrl: '  https://example.com/server  ',
       discordUrl: null,
       captchaToken: 'verified-captcha-token',
     },
@@ -65,6 +65,19 @@ test('public registration records a pending registrant without granting ownershi
     registration?.registrantAccountId,
     '11111111-1111-4111-8111-111111111111',
   );
+  assert.deepEqual(registration, {
+    name: 'Pending Server',
+    joinHost: 'play.example.com',
+    joinPort: 25565,
+    edition: 'java',
+    supportedVersions: ['1.21.1'],
+    tags: ['survival'],
+    shortDescription: 'Ownership verification pending',
+    longDescription: 'A server waiting for DNS or MOTD ownership verification.',
+    websiteUrl: 'https://example.com/server',
+    discordUrl: null,
+    registrantAccountId: '11111111-1111-4111-8111-111111111111',
+  });
   assert.equal('ownerAccountId' in (registration ?? {}), false);
 });
 
@@ -92,6 +105,34 @@ test('public registration fails closed before persistence when CAPTCHA is reject
       longDescription: 'A server waiting for ownership verification.',
     }, { userId: 'account-1' } as never, { clientIp: '203.0.113.10' } as never),
     /CAPTCHA/u,
+  );
+  assert.equal(registrations, 0);
+});
+
+test('public registration rejects oversized tenant content before persistence', async () => {
+  let registrations = 0;
+  const controller = new ServerController(
+    { register: async () => { registrations += 1; return {}; } } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    { verifyCaptcha: async () => ({ success: true }) } as never,
+  );
+
+  await assert.rejects(
+    controller.register({
+      name: 'Pending Server',
+      joinHost: 'play.example.com',
+      joinPort: 25565,
+      edition: 'java',
+      supportedVersions: ['v'.repeat(33)],
+      tags: ['survival'],
+      shortDescription: 'Ownership verification pending',
+      longDescription: 'x'.repeat(20_001),
+      websiteUrl: `https://example.com/${'x'.repeat(2_048)}`,
+    }, { userId: 'account-1' } as never, { clientIp: '203.0.113.10' } as never),
   );
   assert.equal(registrations, 0);
 });
