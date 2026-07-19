@@ -19,6 +19,10 @@ if (!process.env.DATABASE_URL?.trim()) {
   process.exit(1);
 }
 
+if (process.env.MINEWIKI_MIGRATION_DATABASE_URL?.trim()) {
+  process.env.DATABASE_URL = process.env.MINEWIKI_MIGRATION_DATABASE_URL.trim();
+}
+
 const prisma = new PrismaClient();
 
 try {

@@ -6,10 +6,16 @@ import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from '
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { parseMysqlDatabaseUrl, resolveSafeDirectory } from './minewiki-backup-contract.mjs';
+import {
+  parseMysqlDatabaseUrl,
+  resolveSafeDirectory,
+  selectSnapshotsToDelete,
+} from './minewiki-backup-contract.mjs';
 
 const options = parseArgs(process.argv.slice(2));
-const database = parseMysqlDatabaseUrl(process.env.DATABASE_URL);
+const database = parseMysqlDatabaseUrl(
+  process.env.MINEWIKI_BACKUP_DATABASE_URL || process.env.DATABASE_URL,
+);
 const uploadRoot = resolveSafeDirectory(process.env.UPLOAD_STORAGE_ROOT, { label: 'UPLOAD_STORAGE_ROOT' });
 const backupRoot = resolveSafeDirectory(process.env.MINEWIKI_BACKUP_ROOT || '/var/backups/minewiki', {
   label: 'MINEWIKI_BACKUP_ROOT', forbidden: [uploadRoot],
@@ -49,6 +55,7 @@ try {
   await run(process.execPath, [path.resolve('scripts/verify-minewiki-backup.mjs'), destination]);
   verified = true;
   if (remote) await run('rclone', ['copy', destination, `${remote.replace(/\/$/u, '')}/${snapshotId}`]);
+  await applyRetention(backupRoot, remote);
   process.stdout.write(`${snapshotId}\n`);
 } catch (error) {
   await rm(temporary, { recursive: true, force: true });
@@ -86,3 +93,39 @@ async function countFiles(root) {
 }
 
 async function exists(target) { try { await stat(target); return true; } catch { return false; } }
+
+async function applyRetention(root, remoteName) {
+  const snapshots = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\d{8}T\d{6}Z$/u.test(entry.name)) continue;
+    try {
+      const manifest = JSON.parse(await readFile(path.join(root, entry.name, 'manifest.json'), 'utf8'));
+      snapshots.push({
+        id: entry.name,
+        createdAt: manifest.createdAt,
+        verifiedAt: manifest.verification?.verifiedAt ?? null,
+      });
+    } catch {
+      // Corrupt or incomplete evidence is preserved for operator inspection.
+    }
+  }
+  const selected = selectSnapshotsToDelete(snapshots, {
+    daily: retentionValue('MINEWIKI_BACKUP_RETENTION_DAILY', 7),
+    weekly: retentionValue('MINEWIKI_BACKUP_RETENTION_WEEKLY', 4),
+    monthly: retentionValue('MINEWIKI_BACKUP_RETENTION_MONTHLY', 6),
+  });
+  for (const id of selected) {
+    if (remoteName) await run('rclone', ['purge', `${remoteName.replace(/\/$/u, '')}/${id}`]);
+    await rm(path.join(root, id), { recursive: true, force: true });
+  }
+}
+
+function retentionValue(name, fallback) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 365) {
+    throw new Error(`${name} must be an integer between 1 and 365.`);
+  }
+  return value;
+}

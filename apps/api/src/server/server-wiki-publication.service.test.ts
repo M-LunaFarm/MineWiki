@@ -844,23 +844,19 @@ test('same-token resubmission cannot lower sticky reviewer policy after role rem
   );
 });
 
-test('reviewer history floors a legacy pending candidate stored with zero approvals', async () => {
+test('revoked reviewer history does not require approval for a newly submitted candidate', async () => {
   const fixture = createFixture({ reviewerConfigured: true });
-  const submission = await fixture.submitCandidate();
-  fixture.candidates[0]!.requiredApprovals = 0;
   fixture.setReviewerEnabled(false);
+  const submission = await fixture.submitCandidate();
+  assert.equal(submission.requiredApprovals, 0);
   const state = await fixture.service.get(serverId, fixture.actor);
-  assert.equal(state.review.required, true);
-  assert.equal(state.review.approved, false);
+  assert.equal(state.review.required, false);
   assert.equal(state.review.reviewerAvailable, false);
-  await assert.rejects(
-    () => fixture.service.update(serverId, {
-      status: 'published', expectedVersion: 0, candidateId: submission.id,
-      expectedCandidateToken: submission.token, reason: 'attempt legacy zero policy bypass',
-    }, fixture.actor),
-    (error: unknown) => error instanceof ConflictException
-      && JSON.stringify(error.getResponse()).includes('SERVER_WIKI_RELEASE_REVIEW_REQUIRED'),
-  );
+  const published = await fixture.service.update(serverId, {
+    status: 'published', expectedVersion: 0, candidateId: submission.id,
+    expectedCandidateToken: submission.token, reason: 'publish after reviewer access was revoked',
+  }, fixture.actor);
+  assert.equal(published.status, 'published');
 });
 
 test('publish fails closed when readiness is incomplete but unpublish preserves content readiness', async () => {

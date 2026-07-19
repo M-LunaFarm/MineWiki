@@ -79,12 +79,8 @@ export async function serverWikiReleaseReviewState(
 }
 
 async function configuredReviewerApprovalCount(store: ReviewStore, spaceId: bigint): Promise<number> {
-  const configured = await store.subwikiRole.findMany({
-    where: { spaceId, role: 'reviewer' },
-    select: { id: true },
-    take: 1,
-  });
-  return configured.length > 0 ? 1 : 0;
+  const activeReviewers = await activeReviewerIds(store, spaceId);
+  return activeReviewers.size > 0 ? 1 : 0;
 }
 
 async function activeReviewerIds(store: ReviewStore, spaceId: bigint): Promise<Set<bigint>> {
