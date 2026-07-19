@@ -36,7 +36,7 @@ import {
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 import { evaluateConditionalExpression } from './conditional.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.33.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.34.0';
 const MAX_HIGHLIGHT_CODE_LENGTH = 100_000;
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
@@ -151,6 +151,7 @@ const allowedTags = [
   'rp',
   'rt',
   'img',
+  'video',
   'figure',
   'figcaption',
   'blockquote',
@@ -2691,6 +2692,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       aside: ['class'],
       figure: ['class'],
       img: ['src', 'alt', 'loading', 'class', 'style'],
+      video: ['src', 'controls', 'preload', 'playsinline', 'class', 'style', 'aria-label'],
       figcaption: ['class'],
       section: ['class'],
       nav: ['class', 'aria-label'],
@@ -2751,6 +2753,12 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         height: [/^100%$/],
         'border-radius': [/^\d+(?:px|%)$/],
         'image-rendering': [/^(?:auto|smooth|high-quality|pixelated|crisp-edges)$/],
+        'object-fit': [/^(?:fill|contain|cover|none|scale-down)$/]
+      },
+      video: {
+        width: [/^100%$/],
+        height: [/^100%$/],
+        'border-radius': [/^\d+(?:px|%)$/],
         'object-fit': [/^(?:fill|contain|cover|none|scale-down)$/]
       },
       div: {
@@ -3458,6 +3466,20 @@ function renderFile(
     'object-fit': display.objectFit
   });
   const alt = display.alt ?? caption ?? file.originalName;
+  if (file.mimeType === 'video/mp4' || file.mimeType === 'video/webm') {
+    const videoStyles = styleAttribute({
+      width: display.width ? '100%' : undefined,
+      height: display.height ? '100%' : undefined,
+      'border-radius': display.borderRadius,
+      'object-fit': display.objectFit,
+    });
+    const video = `<video class="wiki-file-video" src="${escapeAttr(file.url)}" controls preload="metadata" playsinline aria-label="${escapeAttr(alt)}"${videoStyles}></video>`;
+    const videoHtml = `<span class="wiki-file-frame"${frameStyles}>${video}</span>`;
+    if (inline) {
+      return `<span class="${outerClass}">${videoHtml}${caption ? `<span>${escapeHtml(caption)}</span>` : ''}${metaHtml}</span>`;
+    }
+    return `<figure class="${outerClass}">${videoHtml}${caption ? `<figcaption>${escapeHtml(caption)}${metaHtml}</figcaption>` : metaHtml}</figure>`;
+  }
   const image = `<img class="wiki-file-image" src="${escapeAttr(file.url)}" alt="${escapeAttr(alt)}" loading="lazy"${imageStyles}>`;
   const imageHtml = Number.isFinite(file.sizeBytes) && file.sizeBytes! >= 2 * 1024 * 1024
     ? `<span class="wiki-file-frame wiki-file-deferred"${frameStyles}><button type="button" class="wiki-file-load" data-wiki-file-src="${escapeAttr(file.url)}" data-wiki-file-alt="${escapeAttr(alt)}"${imageStyles}>이미지 불러오기 <small>${escapeHtml(formatFileSize(file.sizeBytes!))}</small></button><noscript><a href="${escapeAttr(file.url)}">이미지 열기 (${escapeHtml(formatFileSize(file.sizeBytes!))})</a></noscript></span>`

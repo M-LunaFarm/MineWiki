@@ -17,7 +17,7 @@ test('non-self-created uploads require attribution before any queue request star
   assert.match(wikiUploadMetadataError({ queuedCount: 2, license: 'cc-by-4.0', sourceUrl: '' }), /출처 URL/u);
   assert.equal(wikiUploadMetadataError({ queuedCount: 2, license: 'cc-by-4.0', sourceUrl: 'https://example.com/source' }), null);
   assert.equal(wikiUploadMetadataError({ queuedCount: 1, license: 'self-created', sourceUrl: '' }), null);
-  assert.match(wikiUploadMetadataError({ queuedCount: 0, license: 'self-created', sourceUrl: '' }), /이미지와 라이선스/u);
+  assert.match(wikiUploadMetadataError({ queuedCount: 0, license: 'self-created', sourceUrl: '' }), /파일과 라이선스/u);
 });
 
 test('selection deduplicates files and enforces count, type, and aggregate size before upload', () => {
@@ -26,6 +26,9 @@ test('selection deduplicates files and enforces count, type, and aggregate size 
   const merged = mergeWikiUploadSelection([], selected);
   assert.equal(merged.items.length, 1);
   assert.equal(merged.rejected.length, 2);
+
+  const video = mergeWikiUploadSelection([], [file('demo.mp4', { type: 'video/mp4', size: 4 * 1024 * 1024 })]);
+  assert.equal(video.items.length, 1);
 
   const eleven = mergeWikiUploadSelection([], Array.from({ length: 11 }, (_, index) => file(`${index}.png`, { lastModified: index })));
   assert.equal(eleven.items.length, MAX_WIKI_UPLOAD_FILES);

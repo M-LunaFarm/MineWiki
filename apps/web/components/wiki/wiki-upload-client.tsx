@@ -7,7 +7,7 @@ import {
   fetchWikiFileVersions,
   listWikiFiles,
   restoreWikiFileVersion,
-  uploadWikiImage,
+  uploadWikiMedia,
   type UploadedFileMetadata,
   type WikiFileVersion,
 } from '../../lib/wiki-api';
@@ -108,7 +108,7 @@ export function WikiUploadClient({ spaceId }: WikiUploadClientProps) {
     continueRef.current = true;
     const run = await runWikiUploadQueue(
       items,
-      async (item: WikiUploadQueueItem) => uploadWikiImage({
+      async (item: WikiUploadQueueItem) => uploadWikiMedia({
         data: await readFileAsDataUrl(item.file),
         filename: item.file.name,
         spaceId,
@@ -138,7 +138,7 @@ export function WikiUploadClient({ spaceId }: WikiUploadClientProps) {
   async function restoreVersion(version: WikiFileVersion) {
     const current = versions.find((item) => item.isCurrent);
     if (!current || !replaceFileId || version.isCurrent) return;
-    if (!window.confirm(`파일 버전 ${version.versionNo}의 실제 이미지로 복원할까요? 복원 작업도 새 버전으로 기록됩니다.`)) return;
+    if (!window.confirm(`파일 버전 ${version.versionNo}의 실제 파일로 복원할까요? 복원 작업도 새 버전으로 기록됩니다.`)) return;
     setUploading(true);
     setMessage(null);
     try {
@@ -211,8 +211,8 @@ export function WikiUploadClient({ spaceId }: WikiUploadClientProps) {
         </section>
       ) : null}
       <label className="grid gap-2 text-sm font-semibold text-slate-200">
-        이미지 파일 <span className="text-xs font-normal text-slate-500">PNG, JPEG, WebP · {replaceFileId ? '교체 파일 1개' : '최대 10개'} · 합계 20MiB</span>
-        <input ref={fileInput} type="file" multiple={!replaceFileId} accept="image/png,image/jpeg,image/webp" onChange={selectFiles} disabled={uploading || queue.length >= (replaceFileId ? 1 : 10)} className="min-h-11 rounded-lg border border-white/10 bg-[#0d1219] px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-300 file:px-3 file:py-1.5 file:font-semibold file:text-slate-950 disabled:opacity-50" />
+        이미지 또는 동영상 <span className="text-xs font-normal text-slate-500">PNG, JPEG, WebP, MP4, WebM · 동영상 1080p/5분 이하 · {replaceFileId ? '교체 파일 1개' : '최대 10개'} · 합계 20MiB</span>
+        <input ref={fileInput} type="file" multiple={!replaceFileId} accept="image/png,image/jpeg,image/webp,video/mp4,video/webm" onChange={selectFiles} disabled={uploading || queue.length >= (replaceFileId ? 1 : 10)} className="min-h-11 rounded-lg border border-white/10 bg-[#0d1219] px-3 py-2 text-sm text-slate-300 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-300 file:px-3 file:py-1.5 file:font-semibold file:text-slate-950 disabled:opacity-50" />
       </label>
       <WikiUploadQueueView items={queue} busy={uploading} onRemove={removeItem} onRetry={(id) => void retryItem(id)} />
       <UploadAttribution license={license} sourceUrl={sourceUrl} sourceText={sourceText} sourceRequired={sourceRequired} disabled={uploading} onLicense={setLicense} onSourceUrl={setSourceUrl} onSourceText={setSourceText} />

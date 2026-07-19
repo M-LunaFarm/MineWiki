@@ -25,6 +25,19 @@ test('large wiki files require an explicit size-labelled load while small files 
   assert.match(html, /<img class="wiki-file-image" src="\/files\/small\.webp"[^>]+loading="lazy"/u);
 });
 
+test('renders validated self-hosted MP4 and WebM files as non-autoplaying video', () => {
+  const ast = parseMarkup('[[파일:demo.mp4|서버 기능 데모]]\n본문 [[파일:clip.webm|짧은 재현 영상]]').ast;
+  const html = renderDocument(ast, { files: {
+    'demo.mp4': { url: '/v1/files/public/demo.mp4/raw', mimeType: 'video/mp4', originalName: 'demo.mp4' },
+    'clip.webm': { url: 'https://cdn.example.com/clip.webm', mimeType: 'video/webm', originalName: 'clip.webm' },
+  } });
+
+  assert.equal((html.match(/<video /gu) ?? []).length, 2);
+  assert.match(html, /controls preload="metadata" playsinline/u);
+  assert.match(html, /aria-label="서버 기능 데모"/u);
+  assert.doesNotMatch(html, /autoplay|<img/iu);
+});
+
 test('resolves canonical wiki route mappings', () => {
   assert.deepEqual(resolveWikiPath('/wiki/대문'), {
     namespace: 'main',

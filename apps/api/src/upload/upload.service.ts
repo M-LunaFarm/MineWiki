@@ -8,7 +8,10 @@ import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } fro
 import {
   validateImageUpload,
   ImageValidationError,
-  type SanitizedImage
+  validateVideoUpload,
+  VideoValidationError,
+  type SanitizedImage,
+  type ValidatedVideo,
 } from '@minewiki/security';
 
 const MAX_BYTES = 2 * 1024 * 1024; // 2MB cap
@@ -36,6 +39,8 @@ export interface StoredImage {
   readonly storagePath: string;
   readonly publicPath: string;
 }
+
+export type StoredWikiMedia = StoredImage;
 
 @Injectable()
 export class UploadService {
@@ -101,13 +106,33 @@ export class UploadService {
       throw error;
     }
 
+    return this.persistUpload(sanitized, input.visibility);
+  }
+
+  async storeWikiMedia(input: ImageUploadInput): Promise<StoredWikiMedia> {
+    const extension = (input.filename ?? '').toLowerCase().match(/\.[^.]+$/u)?.[0] ?? '';
+    if (extension !== '.mp4' && extension !== '.webm') return this.storeImage(input);
+    let validated: ValidatedVideo;
+    try {
+      validated = await validateVideoUpload(input.buffer, input.filename ?? 'upload');
+    } catch (error) {
+      if (error instanceof VideoValidationError) throw new BadRequestException(error.message);
+      throw error;
+    }
+    return this.persistUpload(validated, input.visibility);
+  }
+
+  private async persistUpload(
+    sanitized: SanitizedImage | ValidatedVideo,
+    visibility: ImageVisibility,
+  ): Promise<StoredImage> {
     if (this.storageMode === 'disabled') {
       throw new BadRequestException('Upload storage is not configured.');
     }
 
     const filename = `${randomUUID()}${sanitized.extension}`;
     const hash = createHash('sha256').update(sanitized.buffer).digest('hex');
-    const publiclyReadable = input.visibility === 'public' || input.visibility === 'unlisted';
+    const publiclyReadable = visibility === 'public' || visibility === 'unlisted';
 
     if (this.storageMode === 's3') {
       const key = `${publiclyReadable ? PUBLIC_UPLOAD_PREFIX : PRIVATE_UPLOAD_PREFIX}/${filename}`;
@@ -180,8 +205,8 @@ export class UploadService {
         throw new Error('Stored object does not belong to the configured bucket.');
       }
       const key = storagePath.slice(prefix.length);
-      const currentKey = /^uploads\/(?:public|private)\/[A-Za-z0-9-]+\.(?:png|jpe?g|webp)$/iu.test(key);
-      const legacyKey = /^uploads\/[A-Za-z0-9-]+\.(?:png|jpe?g|webp)$/iu.test(key);
+      const currentKey = /^uploads\/(?:public|private)\/[A-Za-z0-9-]+\.(?:png|jpe?g|webp|mp4|webm)$/iu.test(key);
+      const legacyKey = /^uploads\/[A-Za-z0-9-]+\.(?:png|jpe?g|webp|mp4|webm)$/iu.test(key);
       if (!currentKey && !legacyKey) throw new Error('Stored object key is invalid.');
       await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
       return;

@@ -1,7 +1,7 @@
 export const MAX_WIKI_UPLOAD_FILES = 10;
 export const MAX_WIKI_UPLOAD_TOTAL_BYTES = 20 * 1024 * 1024;
 
-const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const ALLOWED_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm']);
 
 export function wikiUploadFileKey(file) {
   return [
@@ -24,8 +24,8 @@ export function mergeWikiUploadSelection(existing, selected) {
       rejected.push(`${file.name}: 이미 대기열에 있습니다.`);
       continue;
     }
-    if (!ALLOWED_IMAGE_TYPES.has(String(file.type ?? '').toLowerCase())) {
-      rejected.push(`${file.name}: PNG, JPEG, WebP 파일만 선택할 수 있습니다.`);
+    if (!ALLOWED_MEDIA_TYPES.has(String(file.type ?? '').toLowerCase())) {
+      rejected.push(`${file.name}: PNG, JPEG, WebP, MP4, WebM 파일만 선택할 수 있습니다.`);
       continue;
     }
     if (items.length >= MAX_WIKI_UPLOAD_FILES) {
@@ -46,7 +46,7 @@ export function mergeWikiUploadSelection(existing, selected) {
 
 export function wikiUploadMetadataError({ queuedCount, license, sourceUrl }) {
   if (queuedCount < 1 || !String(license ?? '').trim()) {
-    return '대기 중인 이미지와 라이선스를 모두 선택해 주세요.';
+    return '대기 중인 파일과 라이선스를 모두 선택해 주세요.';
   }
   if (license !== 'self-created' && !String(sourceUrl ?? '').trim()) {
     return '직접 제작하지 않은 파일은 원본 출처 URL이 필요합니다.';

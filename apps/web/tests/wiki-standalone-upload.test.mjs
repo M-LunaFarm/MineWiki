@@ -27,9 +27,11 @@ test('standalone upload sends space-scoped ACL context and required attribution'
   assert.match(api, /Boolean\(input\.pageId\) === Boolean\(input\.spaceId\)/u);
 });
 
-test('standalone upload exposes a bounded serial multi-image queue', () => {
-  assert.match(page, /이미지 1~10개/u);
+test('standalone upload exposes a bounded serial image and video queue', () => {
+  assert.match(page, /이미지·동영상 1~10개/u);
   assert.match(client, /type="file" multiple/u);
+  assert.match(client, /video\/mp4,video\/webm/u);
+  assert.match(api, /\/v1\/files\/wiki-media/u);
   assert.match(client, /mergeWikiUploadSelection/u);
   assert.match(client, /runWikiUploadQueue/u);
   assert.match(client, /현재 파일 후 중단/u);

@@ -2322,7 +2322,7 @@ async function mutateWikiPage<T>(pageId: string, action: string, body: Record<st
   return responseBody as T;
 }
 
-export async function uploadWikiImage(input: {
+export async function uploadWikiMedia(input: {
   data: string;
   filename: string;
   pageId?: string;
@@ -2335,7 +2335,7 @@ export async function uploadWikiImage(input: {
   if (Boolean(input.pageId) === Boolean(input.spaceId)) {
     throw new Error('Exactly one wiki page or space is required for an upload.');
   }
-  const response = await fetch(`${apiBaseUrl()}/v1/files/images`, {
+  const response = await fetch(`${apiBaseUrl()}/v1/files/wiki-media`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
@@ -2358,7 +2358,7 @@ export async function uploadWikiImage(input: {
     const retryHint = response.status === 429 && retryAfter
       ? ` 요청 한도를 초과했습니다. 서버 재시도 안내: ${retryAfter}.`
       : '';
-    throw new Error(`${body?.message ?? 'Failed to upload wiki image.'}${retryHint}`);
+    throw new Error(`${body?.message ?? 'Failed to upload wiki media.'}${retryHint}`);
   }
   return {
     id: String(body.id),

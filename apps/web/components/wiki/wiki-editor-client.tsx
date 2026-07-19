@@ -24,7 +24,7 @@ import {
   previewWikiMarkup,
   saveWikiPage,
   saveWikiSection,
-  uploadWikiImage,
+  uploadWikiMedia,
   type UploadedFileMetadata,
   type WikiEditConflictDetails,
   type WikiDocumentTemplateSummary,
@@ -550,15 +550,15 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
       setFeedback('직접 제작하지 않은 파일은 원본 출처 URL이 필요합니다.');
       return;
     }
-    if (!file.type.startsWith('image/')) {
-      setFeedback('이미지 파일만 업로드할 수 있습니다.');
+    if (!['image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm'].includes(file.type)) {
+      setFeedback('PNG, JPEG, WebP, MP4, WebM 파일만 업로드할 수 있습니다.');
       return;
     }
     setUploadingImage(true);
     setFeedback(null);
     try {
       const data = await readFileAsDataUrl(file);
-      const uploaded = await uploadWikiImage({
+      const uploaded = await uploadWikiMedia({
         data,
         filename: file.name,
         pageId: page?.id,
@@ -574,10 +574,10 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
       setContentRaw((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}${markup}\n`);
       setBlockingErrors([]);
       setFeedback(uploaded.wikiDocumentPath
-        ? `이미지를 삽입했습니다. 파일 문서: ${uploaded.wikiDocumentPath}`
-        : '이미지를 삽입했습니다.');
+        ? `미디어를 삽입했습니다. 파일 문서: ${uploaded.wikiDocumentPath}`
+        : '미디어를 삽입했습니다.');
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : '이미지 업로드 중 오류가 발생했습니다.');
+      setFeedback(error instanceof Error ? error.message : '미디어 업로드 중 오류가 발생했습니다.');
     } finally {
       setUploadingImage(false);
     }
@@ -838,12 +838,12 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               disabled={!canUploadImage || uploadingImage || saving || loadingRevision}
             >
               {uploadingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
-              이미지
+              이미지·동영상
             </button>
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,video/mp4,video/webm"
               className="hidden"
               onChange={(event) => void handleImageSelect(event)}
             />

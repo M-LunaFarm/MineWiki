@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { RouteConfig } from '@nestjs/platform-fastify';
 import { CurrentSession } from '../session/session.decorator';
 import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
@@ -47,6 +48,17 @@ export class FileController {
     }
   ): Promise<FileImageUploadResponse> {
     return this.files.createImage(session.userId, body, session);
+  }
+
+  @Post('wiki-media')
+  @RouteConfig({ bodyLimit: 29 * 1024 * 1024 })
+  @Throttle({ default: { limit: 10, ttl: 300 } })
+  @UseGuards(SessionGuard)
+  uploadWikiMedia(
+    @CurrentSession() session: SessionPayload,
+    @Body() body: Parameters<FileService['createWikiMedia']>[1],
+  ): Promise<FileImageUploadResponse> {
+    return this.files.createWikiMedia(session.userId, body, session);
   }
 
   @Get()
@@ -105,7 +117,7 @@ export class FileController {
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<StreamableFile | undefined> {
     const raw = await this.files.getRawFile(id, request.sessionPayload ?? null);
-    return this.sendRawFile(raw, reply);
+    return this.sendRawFile(raw, reply, request.headers.range);
   }
 
   @Get('public/:filename/raw')
@@ -116,21 +128,40 @@ export class FileController {
     @Res({ passthrough: true }) reply: FastifyReply
   ): Promise<StreamableFile | undefined> {
     const raw = await this.files.getRawFileByFilename(filename, request.sessionPayload ?? null);
-    return this.sendRawFile(raw, reply);
+    return this.sendRawFile(raw, reply, request.headers.range);
   }
 
   private sendRawFile(
     raw: Awaited<ReturnType<FileService['getRawFile']>>,
-    reply: FastifyReply
+    reply: FastifyReply,
+    rangeHeader?: string,
   ): StreamableFile | undefined {
     reply.header('Cache-Control', raw.cacheControl);
+    reply.header('X-Content-Type-Options', 'nosniff');
     if (raw.redirectUrl) {
       reply.redirect(raw.redirectUrl, 302);
       return undefined;
     }
     reply.header('Content-Type', raw.mimeType);
     reply.header('Content-Disposition', `inline; filename="${raw.filename.replace(/"/g, '')}"`);
-    return new StreamableFile(raw.buffer!);
+    const buffer = raw.buffer!;
+    if (raw.mimeType.startsWith('video/')) {
+      reply.header('Accept-Ranges', 'bytes');
+      const range = parseByteRange(rangeHeader, buffer.length);
+      if (rangeHeader && !range) {
+        reply.status(416).header('Content-Range', `bytes */${buffer.length}`);
+        return new StreamableFile(Buffer.alloc(0));
+      }
+      if (range) {
+        const body = buffer.subarray(range.start, range.end + 1);
+        reply.status(206);
+        reply.header('Content-Range', `bytes ${range.start}-${range.end}/${buffer.length}`);
+        reply.header('Content-Length', String(body.length));
+        return new StreamableFile(body);
+      }
+    }
+    reply.header('Content-Length', String(buffer.length));
+    return new StreamableFile(buffer);
   }
 
   @Delete(':id')
@@ -142,4 +173,28 @@ export class FileController {
   ): Promise<{ deleted: true }> {
     return this.files.deleteFile(id, session);
   }
+}
+
+function parseByteRange(value: string | undefined, size: number): { start: number; end: number } | null {
+  if (!value) return null;
+  const match = /^bytes=(\d*)-(\d*)$/u.exec(value.trim());
+  if (!match || size < 1) return null;
+  const startText = match[1] ?? '';
+  const endText = match[2] ?? '';
+  if (!startText && !endText) return null;
+  let start: number;
+  let end: number;
+  if (!startText) {
+    const suffix = Number(endText);
+    if (!Number.isSafeInteger(suffix) || suffix < 1) return null;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(startText);
+    end = endText ? Number(endText) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
+    end = Math.min(end, size - 1);
+  }
+  if (start < 0 || start >= size || end < start) return null;
+  return { start, end };
 }

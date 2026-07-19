@@ -1119,13 +1119,15 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   .wiki-rendered .wiki-file:not(.wiki-file-inline) {
     @apply my-5 block max-w-full;
   }
-  .wiki-rendered .wiki-file img {
+  .wiki-rendered .wiki-file img,
+  .wiki-rendered .wiki-file video {
     @apply h-auto max-w-full rounded-lg;
   }
   .wiki-rendered .wiki-file-frame {
     @apply inline-flex max-w-full overflow-hidden align-middle;
   }
-  .wiki-rendered .wiki-file-frame .wiki-file-image {
+  .wiki-rendered .wiki-file-frame .wiki-file-image,
+  .wiki-rendered .wiki-file-frame .wiki-file-video {
     @apply block max-h-full max-w-full;
   }
   .wiki-rendered .wiki-file-deferred {
@@ -1140,7 +1142,8 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   .wiki-rendered .wiki-file-inline {
     @apply mx-1 inline-flex max-w-full items-center gap-1.5 align-middle;
   }
-  .wiki-rendered .wiki-file-inline img {
+  .wiki-rendered .wiki-file-inline img,
+  .wiki-rendered .wiki-file-inline video {
     @apply max-h-16 w-auto max-w-40;
   }
   .wiki-rendered .wiki-file small,

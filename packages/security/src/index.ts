@@ -234,6 +234,8 @@ export async function validateOutboundTarget(
 
 export { validateImageUpload, ImageValidationError } from './upload';
 export type { SanitizedImage } from './upload';
+export { validateVideoUpload, VideoValidationError } from './video-upload';
+export type { ValidatedVideo, VideoProbe, VideoProbeResult, VideoValidationOptions } from './video-upload';
 export {
   cidrContains,
   CidrValidationError,

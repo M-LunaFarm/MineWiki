@@ -119,6 +119,24 @@ export class FileService {
     return this.createImageRecord(accountId, request, stored, policy, session ?? null);
   }
 
+  async createWikiMedia(
+    accountId: string,
+    request: FileImageUploadRequest,
+    session: SessionPayload,
+  ): Promise<FileImageUploadResponse> {
+    if (!request.data) throw new BadRequestException('File data is required.');
+    const policy = await this.prepareUploadPolicy(request, session);
+    if (policy.usageContext !== 'wiki_editor') {
+      throw new BadRequestException('This endpoint only accepts wiki media.');
+    }
+    const stored = await this.uploads.storeWikiMedia({
+      buffer: decodeBase64(request.data),
+      filename: request.filename?.trim() || undefined,
+      visibility: policy.visibility,
+    });
+    return this.createImageRecord(accountId, request, stored, policy, session);
+  }
+
   async createImageFromBuffer(
     accountId: string | null,
     request: FileImageBufferUploadRequest

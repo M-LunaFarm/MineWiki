@@ -102,6 +102,18 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
         publicPath: 'upload://stored.webp'
       };
     },
+    async storeWikiMedia() {
+      return {
+        filename: 'stored.mp4',
+        mimeType: 'video/mp4',
+        size: 4 * 1024 * 1024,
+        width: 1280,
+        height: 720,
+        hash: 'b'.repeat(64),
+        storagePath: '/tmp/stored.mp4',
+        publicPath: 'upload://stored.mp4'
+      };
+    },
     async readPrivateObject() {
       return Buffer.from('private s3 image');
     },
@@ -334,6 +346,25 @@ test('file service stores canonical image metadata', async () => {
   assert.deepEqual(fileDocuments, [{ filename: 'wiki.webp', linkedPageId: '7' }]);
   assert.equal(uploaded.wikiDocumentPath, '/file/wiki.webp');
   assert.equal(uploaded.url, 'upload://stored.webp');
+});
+
+test('wiki media endpoint stores validated video through the same ACL and file-document lifecycle', async () => {
+  const { service, actionCalls, fileDocuments } = createService();
+  const uploaded = await service.createWikiMedia('account-1', {
+    data: 'data:video/mp4;base64,dmlkZW8=',
+    filename: 'server-demo.mp4',
+    usageContext: 'wiki_editor',
+    license: 'self-created',
+    linkedResourceType: 'wiki_page',
+    linkedResourceId: '7'
+  }, session('account-1'));
+
+  assert.equal(uploaded.mimeType, 'video/mp4');
+  assert.equal(uploaded.wikiFilename, 'server-demo.mp4');
+  assert.equal(uploaded.width, 1280);
+  assert.equal(uploaded.height, 720);
+  assert.deepEqual(actionCalls, ['upload_file']);
+  assert.deepEqual(fileDocuments, [{ filename: 'server-demo.mp4', linkedPageId: '7' }]);
 });
 
 test('wiki file replacement preserves the logical name and versions the previous asset', async () => {
