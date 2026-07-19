@@ -21,6 +21,7 @@ import {
   type WikiEditRequestSummary
 } from '../../lib/wiki-api';
 import { WikiEditSummary } from './wiki-edit-summary';
+import { WikiConflictResolver } from './wiki-conflict-resolver';
 
 const EMPTY: WikiEditRequestListResponse = { items: [], canReview: false, viewerProfileId: null, nextCursor: null, currentRevisionId: null };
 
@@ -205,6 +206,10 @@ export function WikiEditRequestsClient({ pageId, requestId, returnTo }: { readon
         {isStale ? <div className="mt-4 flex gap-3 border border-amber-300/25 bg-amber-400/10 p-3 text-sm text-amber-100" role="status"><AlertTriangle className="mt-0.5 size-4 flex-none" /><p>이 요청은 현재 문서보다 오래된 판을 기준으로 합니다. 승인하거나 수정하기 전에 작성자가 최신 판으로 재배치해야 합니다.</p></div> : null}
         {editing?.id === item.id ? <form onSubmit={(event) => void saveEdit(event)} className="mt-4 grid gap-3 border border-emerald-300/20 bg-black/20 p-4">
           {resolvingConflict ? <div role="alert" className="flex gap-3 border border-amber-300/30 bg-amber-400/10 p-3 text-sm text-amber-100"><AlertTriangle className="mt-0.5 size-4 flex-none" /><div className="space-y-1"><p className="font-semibold">겹치는 변경 {rebaseConflict.conflictCount}개를 직접 정리해 주세요.</p><p className="text-xs leading-5 text-amber-100/80"><code>&lt;&lt;&lt;&lt;&lt;&lt;&lt; 내 편집</code>, <code>=======</code>, <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt; 최신 판</code> 표시를 모두 제거하면 재배치 저장이 활성화됩니다.</p></div></div> : null}
+          {resolvingConflict && unresolvedMarkers ? <WikiConflictResolver
+            contentRaw={editing.proposedContent}
+            onChange={(resolved) => setEditing({ ...editing, proposedContent: resolved })}
+          /> : null}
           <label className="grid gap-2 text-sm text-slate-300">요약<input name="editSummary" value={editing.editSummary ?? ''} onChange={(event) => setEditing({ ...editing, editSummary: event.target.value })} maxLength={255} required className="input min-h-11" /></label>
           <label className="grid gap-2 text-sm text-slate-300">제안 원문<textarea name="contentRaw" value={editing.proposedContent} onChange={(event) => setEditing({ ...editing, proposedContent: event.target.value })} required rows={12} className="input min-h-64 resize-y overflow-x-auto font-mono text-xs [overflow-wrap:anywhere]" /></label>
           <label className="flex min-h-11 items-center gap-2 text-sm text-slate-300"><input name="isMinor" type="checkbox" checked={editing.isMinor} onChange={(event) => setEditing({ ...editing, isMinor: event.target.checked })} /> 사소한 편집</label>

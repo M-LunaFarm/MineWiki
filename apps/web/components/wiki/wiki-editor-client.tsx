@@ -11,6 +11,7 @@ import { type ChangeEvent, type KeyboardEvent, type MouseEvent, useCallback, use
 import { useAuth } from '../providers/auth-context';
 import { CaptchaChallenge, isCaptchaConfigured } from '../security/captcha-challenge';
 import { WikiEditorLoadError } from './wiki-editor-load-error';
+import { WikiConflictResolver } from './wiki-conflict-resolver';
 import { WikiEditorToolbar, type WikiEditorFormatAction } from './wiki-editor-toolbar';
 import {
   fetchWikiRevision,
@@ -714,6 +715,13 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
               </div>
             </div>
           ) : null}
+          {editConflict && hasUnresolvedConflict ? <WikiConflictResolver
+            contentRaw={contentRaw}
+            onChange={(resolved) => {
+              setContentRaw(resolved);
+              setBlockingErrors([]);
+            }}
+          /> : null}
           <WikiEditorToolbar
             disabled={loadingRevision || saving}
             onApply={applyEditorFormat}

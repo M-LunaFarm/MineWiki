@@ -14,7 +14,8 @@ test('standalone upload resolves a wiki space and is discoverable from document 
   assert.match(page, /fetchWikiPageByPath\('\/wiki'\)/u);
   assert.match(page, /<WikiUploadClient spaceId=\{spaceId\}/u);
   assert.match(page, /space-y-7 px-4 py-10 sm:px-6 lg:px-0/u);
-  assert.match(tools, /href=\{`\/wiki\/upload\?spaceId=\$\{encodeURIComponent\(spaceId\)\}`\}/u);
+  assert.match(tools, /const uploadHref = `\/wiki\/upload\?spaceId=\$\{encodeURIComponent\(spaceId\)\}&returnTo=\$\{encodeURIComponent\(routePath\)\}`/u);
+  assert.match(tools, /href=\{uploadHref\}/u);
 });
 
 test('standalone upload sends space-scoped ACL context and required attribution', () => {
