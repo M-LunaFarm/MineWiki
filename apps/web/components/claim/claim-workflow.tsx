@@ -734,7 +734,7 @@ export function ClaimWorkflow() {
         setNotice(`${formatMethodLabel(selectedMethod)} 검증이 완료되었습니다.`);
       } else if (selected?.status === 'failed') {
         const noteMessage = selected.note ? (NOTE_COPY[selected.note] ?? selected.note) : null;
-        setNotice(noteMessage ?? `${formatMethodLabel(selectedMethod)} 검증이 실패했습니다.`);
+        setError(noteMessage ?? `${formatMethodLabel(selectedMethod)} 검증이 실패했습니다.`);
       } else {
         setNotice(`${formatMethodLabel(selectedMethod)} 검증 요청을 처리했습니다.`);
       }
@@ -892,7 +892,7 @@ export function ClaimWorkflow() {
       </div>
 
       {notice ? (
-        <div className="mb-4 rounded-lg border border-[#13ec80]/30 bg-[#13ec80]/10 p-3 text-sm text-[#d8ffef]">
+        <div role="status" aria-live="polite" className="mb-4 rounded-lg border border-[#13ec80]/30 bg-[#13ec80]/10 p-3 text-sm text-[#d8ffef]">
           {notice}
         </div>
       ) : null}
@@ -914,7 +914,7 @@ export function ClaimWorkflow() {
         </div>
       ) : null}
       {error ? (
-        <div className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+        <div role="alert" aria-live="assertive" className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
           {error}
         </div>
       ) : null}

@@ -166,6 +166,11 @@ export default function ServerRegisterPage() {
   const captchaRequired = isCaptchaConfigured();
   const availableVersions = useMemo(() => VERSION_OPTIONS[form.edition], [form.edition]);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
+  const errorSummaryRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (errors.length > 0) errorSummaryRef.current?.focus();
+  }, [errors]);
 
   const handleChange =
     (field: keyof FormState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -468,12 +473,8 @@ export default function ServerRegisterPage() {
       setNotice('서버가 등록되었습니다. 검증 마법사에서 소유권 확인을 완료하세요.');
       router.prefetch(claimUrl);
       if (bannerDataUrl) {
-        const bannerUploaded = await uploadBanner(detail.id, bannerDataUrl);
-        if (bannerUploaded) {
-          setNotice(
-            '서버가 등록되었습니다. 배너 이미지까지 업로드되었습니다. 검증 마법사에서 소유권 확인을 완료하세요.',
-          );
-        }
+        // The optional image must never hold the ownership-verification path open.
+        void uploadBanner(detail.id, bannerDataUrl);
       }
       router.push(claimUrl);
     } catch (submitError) {
@@ -1076,7 +1077,13 @@ export default function ServerRegisterPage() {
                   </div>
 
                   {errors.length > 0 ? (
-                    <div className="mb-4 flex gap-3 rounded-lg border border-red-500/20 bg-red-500/10 p-3">
+                    <div
+                      ref={errorSummaryRef}
+                      role="alert"
+                      aria-live="assertive"
+                      tabIndex={-1}
+                      className="mb-4 flex gap-3 rounded-lg border border-red-500/20 bg-red-500/10 p-3 focus:outline-none focus:ring-2 focus:ring-red-300/70"
+                    >
                       <CircleAlert
                         className="mt-0.5 h-4 w-4 shrink-0 text-red-300"
                         aria-hidden="true"
@@ -1113,7 +1120,8 @@ export default function ServerRegisterPage() {
                     <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#13ec80]" aria-hidden="true" />
                     <p className="text-xs leading-relaxed text-[#A0A0A0]">
                       등록 버튼을 누르면 서버 상태 확인을 위한{' '}
-                      <span className="font-bold text-white">MOTD 검증</span> 단계로 이동합니다.
+                      <span className="font-bold text-white">DNS TXT 또는 MOTD 소유권 검증</span>{' '}
+                      단계로 이동합니다.
                     </p>
                   </div>
 
@@ -1168,9 +1176,9 @@ export default function ServerRegisterPage() {
                   1
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-white">MOTD 검증 설정</p>
+                  <p className="text-sm font-bold text-white">소유권 검증 방식 선택</p>
                   <p className="mt-1 text-xs text-[#A0A0A0]">
-                    발급된 코드를 MOTD에 잠시 넣고 검증을 완료하세요.
+                    DNS TXT 또는 MOTD 중 운영 환경에 맞는 방식을 선택해 검증하세요.
                   </p>
                 </div>
               </div>

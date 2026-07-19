@@ -8,6 +8,7 @@ import { PrivilegedActionGate } from '../auth/privileged-action-gate';
 
 interface Transfer {
   readonly id: string; readonly serverId: string; readonly serverName: string;
+  readonly serverAddress: string;
   readonly targetUsername: string; readonly targetDisplayName: string; readonly reason: string;
   readonly requestedAt: string; readonly expiresAt: string; readonly version: number;
 }
@@ -25,8 +26,8 @@ export function ServerOwnershipTransferPanel({ serverId, serverName }: { readonl
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
+  const load = useCallback(async (preserveError = false) => {
+    setLoading(true); if (!preserveError) setError(null);
     try {
       const response = await fetch(`${endpoint}/current`, { credentials: 'include', cache: 'no-store' });
       const body: unknown = await response.json().catch(() => null);
@@ -65,7 +66,7 @@ export function ServerOwnershipTransferPanel({ serverId, serverName }: { readonl
       const body: unknown = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(apiMessage(body, '소유권 이전 요청을 취소하지 못했습니다.'));
       setCurrent(null); setCancelReason(''); setNotice('소유권 이전 요청을 취소했습니다.');
-    } catch (value) { setError(message(value, '소유권 이전 요청을 취소하지 못했습니다.')); await load(); }
+    } catch (value) { setError(message(value, '소유권 이전 요청을 취소하지 못했습니다.')); await load(true); }
     finally { setWorking(false); }
   }
 
@@ -107,7 +108,7 @@ function apiMessage(value: unknown, fallback: string) { return isRecord(value) &
 function message(value: unknown, fallback: string) { return value instanceof Error ? value.message : fallback; }
 function parseTransfer(value: unknown): Transfer {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.serverId !== 'string' || typeof value.serverName !== 'string'
-    || typeof value.targetUsername !== 'string' || typeof value.targetDisplayName !== 'string' || typeof value.reason !== 'string'
+    || typeof value.serverAddress !== 'string' || typeof value.targetUsername !== 'string' || typeof value.targetDisplayName !== 'string' || typeof value.reason !== 'string'
     || typeof value.requestedAt !== 'string' || typeof value.expiresAt !== 'string' || typeof value.version !== 'number') {
     throw new Error('소유권 이전 응답 형식이 올바르지 않습니다.');
   }

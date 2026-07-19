@@ -24,6 +24,7 @@ export interface OwnershipTransferItem {
   readonly id: string;
   readonly serverId: string;
   readonly serverName: string;
+  readonly serverAddress: string;
   readonly sourceOwnerName: string;
   readonly targetUsername: string;
   readonly targetDisplayName: string;
@@ -52,7 +53,7 @@ export class ServerOwnershipTransferService {
     if (server.ownerAccountId !== accountId) throw new ForbiddenException('현재 서버 소유자만 이전 요청을 관리할 수 있습니다.');
     const row = await this.prisma.serverOwnershipTransfer.findFirst({
       where: { serverId, status: 'pending', expiresAt: { gt: new Date() } },
-      include: { server: { select: { name: true } } },
+      include: { server: { select: { name: true, joinHost: true, joinPort: true, edition: true } } },
     });
     return row ? this.item(this.prisma, row) : null;
   }
@@ -87,7 +88,7 @@ export class ServerOwnershipTransferService {
           reason, status: 'pending', activeServerKey: serverId, requestedAt: now,
           expiresAt: new Date(now.getTime() + TRANSFER_TTL_MS), version: 1,
         },
-        include: { server: { select: { name: true } } },
+        include: { server: { select: { name: true, joinHost: true, joinPort: true, edition: true } } },
       });
       await this.audit(tx, 'server.ownership_transfer.request', transfer, actorAccountId, sourceProfile.id, reason, now);
       await this.notifications.notifyServerOwnershipTransferRequested(tx, {
@@ -127,7 +128,7 @@ export class ServerOwnershipTransferService {
       if (await this.lockCanonicalAccount(tx, accountId) !== accountId) throw invalidTarget();
       if (server.ownerAccountId !== accountId) throw new ForbiddenException('현재 서버 소유자만 요청을 취소할 수 있습니다.');
       await this.lockTransfer(tx, transferId);
-      const row = await tx.serverOwnershipTransfer.findUnique({ where: { id: transferId }, include: { server: { select: { name: true } } } });
+      const row = await tx.serverOwnershipTransfer.findUnique({ where: { id: transferId }, include: { server: { select: { name: true, joinHost: true, joinPort: true, edition: true } } } });
       this.assertPending(row, serverId, expectedVersion);
       const now = new Date();
       const changed = await tx.serverOwnershipTransfer.updateMany({
@@ -150,7 +151,7 @@ export class ServerOwnershipTransferService {
     await this.expirePending(new Date(), { targetAccountId: accountId });
     const rows = await this.prisma.serverOwnershipTransfer.findMany({
       where: { targetAccountId: accountId, status: 'pending', expiresAt: { gt: new Date() } },
-      include: { server: { select: { name: true } } },
+      include: { server: { select: { name: true, joinHost: true, joinPort: true, edition: true } } },
       orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }], take: 100,
     });
     return Promise.all(rows.map((row) => this.item(this.prisma, row)));
@@ -171,7 +172,7 @@ export class ServerOwnershipTransferService {
     return this.serializable(async (tx) => {
       const server = await this.lockServer(tx, lookup.serverId);
       await this.lockTransferRows(tx, server.id);
-      const row = await tx.serverOwnershipTransfer.findUnique({ where: { id: transferId }, include: { server: { select: { name: true } } } });
+      const row = await tx.serverOwnershipTransfer.findUnique({ where: { id: transferId }, include: { server: { select: { name: true, joinHost: true, joinPort: true, edition: true } } } });
       this.assertPending(row, server.id, expectedVersion);
       for (const id of [row!.sourceOwnerAccountId, row!.targetAccountId].sort()) {
         if (await this.lockCanonicalAccount(tx, id) !== id) throw staleTransfer('요청 계정 상태가 변경되었습니다.');
@@ -358,6 +359,7 @@ export class ServerOwnershipTransferService {
     if (!source || !target) throw staleTransfer('이전 요청의 계정 정보를 확인할 수 없습니다.');
     return {
       id: row.id, serverId: row.serverId, serverName: row.server.name,
+      serverAddress: formatServerAddress(row.server.joinHost, row.server.joinPort, row.server.edition),
       sourceOwnerName: source.displayName, targetUsername: target.username,
       targetDisplayName: target.displayName, reason: row.reason,
       requestedAt: row.requestedAt.toISOString(), expiresAt: row.expiresAt.toISOString(), version: row.version,
@@ -404,7 +406,14 @@ type LockedServer = {
   readonly ownershipChallengeStartedAt: Date | null; readonly ownershipChallengeExpiresAt: Date | null;
   readonly ownershipChallengeSuspendedAt: Date | null; readonly wikiSpaceId: bigint | null;
 };
-type TransferWithServer = Prisma.ServerOwnershipTransferGetPayload<{ include: { server: { select: { name: true } } } }>;
+type TransferWithServer = Prisma.ServerOwnershipTransferGetPayload<{
+  include: { server: { select: { name: true; joinHost: true; joinPort: true; edition: true } } };
+}>;
+
+function formatServerAddress(host: string, port: number, edition: string): string {
+  const defaultPort = edition === 'bedrock' ? 19132 : 25565;
+  return port === defaultPort ? host : `${host}:${port}`;
+}
 
 function exactUsername(value: string): string {
   if (typeof value !== 'string' || value.length < 1 || value.length > 64 || value.normalize('NFKC') !== value) {
