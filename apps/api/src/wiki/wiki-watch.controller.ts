@@ -14,8 +14,9 @@ export class WikiWatchController {
   list(
     @CurrentSession() session: SessionPayload,
     @Query('cursor') cursor?: string,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number
-  ) { return this.watches.list(session, cursor, limit ?? 50); }
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('serverSlug') serverSlug?: string,
+  ) { return this.watches.list(session, cursor, limit ?? 50, serverSlug); }
 
   @Get('pages/:pageId/watch')
   status(@Param('pageId') pageId: string, @CurrentSession() session: SessionPayload) { return this.watches.status(session, pageId); }

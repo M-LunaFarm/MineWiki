@@ -19,6 +19,13 @@ interface WatchlistCursorPosition {
 
 interface WatchlistCursor extends WatchlistCursorPosition {
   readonly snapshotAt: Date;
+  readonly serverWikiId: bigint | null;
+  readonly spaceId: bigint | null;
+}
+
+interface WatchlistServerWikiScope {
+  readonly id: bigint;
+  readonly spaceId: bigint;
 }
 
 interface WatchlistCandidateRow {
@@ -107,10 +114,11 @@ export class WikiWatchService {
     return { watched: result.count > 0, unread: false };
   }
 
-  async list(session: SessionPayload, cursor?: string, requestedLimit = 50): Promise<WikiWatchlistResponse> {
+  async list(session: SessionPayload, cursor?: string, requestedLimit = 50, serverSlug?: string): Promise<WikiWatchlistResponse> {
     const profile = await this.profiles.ensureWikiProfile(session.userId);
     const limit = Math.min(Math.max(requestedLimit, 1), 100);
-    const decoded = cursor ? this.decodeCursor(cursor, profile.id) : null;
+    const serverWikiScope = serverSlug ? await this.resolveActiveServerWikiScope(serverSlug) : null;
+    const decoded = cursor ? this.decodeCursor(cursor, profile.id, serverWikiScope) : null;
     const snapshotAt = decoded?.snapshotAt ?? new Date();
     const actor = this.permissions.actorFromSession(session, profile);
     const visible: Array<{ row: WatchlistCandidateRow; item: WikiWatchlistItem }> = [];
@@ -124,7 +132,7 @@ export class WikiWatchService {
         WATCHLIST_CANDIDATE_BATCH_SIZE,
         MAX_WATCHLIST_CANDIDATE_SCAN - scannedCandidateCount
       );
-      const candidateRows = await this.loadCandidates(profile.id, snapshotAt, scanPosition, take + 1);
+      const candidateRows = await this.loadCandidates(profile.id, snapshotAt, scanPosition, take + 1, serverWikiScope?.spaceId ?? null);
       const candidates = candidateRows.slice(0, take);
       hasUnscannedCandidates = candidateRows.length > take;
       if (candidates.length === 0) break;
@@ -152,7 +160,7 @@ export class WikiWatchService {
     return {
       items: pageRows.map((row) => row.item),
       nextCursor: hasMore && cursorRow
-        ? this.encodeCursor(snapshotAt, cursorRow.pageUpdatedAt, cursorRow.watchId, profile.id)
+        ? this.encodeCursor(snapshotAt, cursorRow.pageUpdatedAt, cursorRow.watchId, profile.id, serverWikiScope)
         : null
     };
   }
@@ -161,7 +169,8 @@ export class WikiWatchService {
     profileId: bigint,
     snapshotAt: Date,
     position: WatchlistCursorPosition | null,
-    take: number
+    take: number,
+    spaceId: bigint | null,
   ): Promise<WatchlistCandidateRow[]> {
     const after = position
       ? Prisma.sql`AND (
@@ -196,6 +205,7 @@ export class WikiWatchService {
       )
       WHERE w.profile_id = ${profileId}
         AND w.created_at <= ${snapshotAt}
+        ${spaceId === null ? Prisma.empty : Prisma.sql`AND p.space_id = ${spaceId}`}
         ${after}
       ORDER BY snapshot_revision.created_at DESC, w.id DESC
       LIMIT ${take}
@@ -207,10 +217,71 @@ export class WikiWatchService {
     actor: ReturnType<WikiPermissionService['actorFromSession']>,
     candidates: readonly WatchlistCandidateRow[]
   ): Promise<Array<{ row: WatchlistCandidateRow; item: WikiWatchlistItem }>> {
+    const namespaces = await this.prisma.wikiNamespace.findMany({
+      where: { id: { in: [...new Set(candidates.map((row) => row.namespaceId))] } },
+      select: { id: true, code: true }
+    });
+    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
+    const serverSpaces = [...new Set(candidates
+      .filter((row) => namespaceById.get(row.namespaceId) === 'server')
+      .map((row) => row.spaceId))];
+    const serverWikis = serverSpaces.length > 0
+      ? await this.prisma.serverWiki.findMany({
+          where: { spaceId: { in: serverSpaces }, status: 'active' },
+          select: {
+            id: true,
+            spaceId: true,
+            slug: true,
+            siteSlug: true,
+            publicationStatus: true,
+            publishedReleaseId: true,
+          }
+        })
+      : [];
+    const serverWikiBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki]));
+    const previewSpaces = new Set<bigint>();
+    for (const wiki of serverWikis) {
+      if (await this.permissions.canPreviewServerWikiSpace({ accountId: session.userId, actor, spaceId: wiki.spaceId })) {
+        previewSpaces.add(wiki.spaceId);
+      }
+    }
+    const releasedScopes = serverWikis.filter((wiki) => !previewSpaces.has(wiki.spaceId)
+      && wiki.publicationStatus === 'published' && wiki.publishedReleaseId !== null);
+    const releaseItems = releasedScopes.length > 0
+      ? await this.prisma.serverWikiReleaseItem.findMany({
+          where: {
+            OR: releasedScopes.map((wiki) => ({
+              releaseId: wiki.publishedReleaseId!,
+              serverWikiId: wiki.id,
+              spaceId: wiki.spaceId,
+            })),
+            pageId: { in: candidates.map((row) => row.pageId) },
+          },
+        })
+      : [];
+    const releaseItemByPage = new Map(releaseItems.map((item) => [`${item.spaceId}:${item.pageId}`, item]));
+    const projectedCandidates = candidates.flatMap((row): WatchlistCandidateRow[] => {
+      if (namespaceById.get(row.namespaceId) !== 'server' || previewSpaces.has(row.spaceId)) return [row];
+      const item = releaseItemByPage.get(`${row.spaceId}:${row.pageId}`);
+      if (!item) return [];
+      return [{
+        ...row,
+        namespaceId: item.namespaceId,
+        spaceId: item.spaceId,
+        localPath: item.localPath,
+        title: item.title,
+        displayTitle: item.displayTitle,
+        currentRevisionId: item.revisionId,
+        protectionLevel: item.protectionLevel,
+        status: item.pageStatus,
+        createdBy: item.createdBy,
+        pageUpdatedAt: item.pageUpdatedAt,
+      }];
+    });
     const readablePages = await this.permissions.filterReadablePages({
       accountId: session.userId,
       actor,
-      pages: candidates.map((row) => ({
+      pages: projectedCandidates.map((row) => ({
         id: row.pageId,
         namespaceId: row.namespaceId,
         spaceId: row.spaceId,
@@ -221,23 +292,9 @@ export class WikiWatchService {
       }))
     });
     const readableIds = new Set(readablePages.map((page) => page.id));
-    const readableCandidates = candidates.filter((row) => readableIds.has(row.pageId));
+    const readableCandidates = projectedCandidates.filter((row) => readableIds.has(row.pageId));
     if (readableCandidates.length === 0) return [];
-    const namespaces = await this.prisma.wikiNamespace.findMany({
-      where: { id: { in: [...new Set(readableCandidates.map((row) => row.namespaceId))] } },
-      select: { id: true, code: true }
-    });
-    const namespaceById = new Map(namespaces.map((namespace) => [namespace.id, namespace.code]));
-    const serverSpaces = [...new Set(readableCandidates
-      .filter((row) => namespaceById.get(row.namespaceId) === 'server')
-      .map((row) => row.spaceId))];
-    const serverWikis = serverSpaces.length > 0
-      ? await this.prisma.serverWiki.findMany({
-          where: { spaceId: { in: serverSpaces }, status: 'active' },
-          select: { spaceId: true, slug: true }
-        })
-      : [];
-    const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.slug]));
+    const serverSlugBySpace = new Map(serverWikis.map((wiki) => [wiki.spaceId, wiki.siteSlug ?? wiki.slug]));
     const visible: Array<{ row: WatchlistCandidateRow; item: WikiWatchlistItem }> = [];
     for (const row of readableCandidates) {
       if (row.status === 'deleted') continue;
@@ -259,31 +316,43 @@ export class WikiWatchService {
     return visible;
   }
 
-  private encodeCursor(snapshotAt: Date, pageUpdatedAt: Date, watchId: bigint, profileId: bigint): string {
+  private encodeCursor(
+    snapshotAt: Date,
+    pageUpdatedAt: Date,
+    watchId: bigint,
+    profileId: bigint,
+    serverWikiScope: WatchlistServerWikiScope | null,
+  ): string {
     const payload = Buffer.from(JSON.stringify({
-      version: 1,
+      version: 2,
       snapshotAt: snapshotAt.toISOString(),
       pageUpdatedAt: pageUpdatedAt.toISOString(),
-      watchId: watchId.toString()
+      watchId: watchId.toString(),
+      serverWikiId: serverWikiScope?.id.toString() ?? null,
+      spaceId: serverWikiScope?.spaceId.toString() ?? null,
     })).toString('base64url');
-    return `${payload}.${this.signCursor(payload, profileId)}`;
+    return `${payload}.${this.signCursor(payload, profileId, serverWikiScope)}`;
   }
 
-  private decodeCursor(value: string, profileId: bigint): WatchlistCursor {
+  private decodeCursor(value: string, profileId: bigint, serverWikiScope: WatchlistServerWikiScope | null): WatchlistCursor {
     try {
       const parts = value.split('.');
       if (parts.length !== 2) throw new Error('shape');
       const [payload, signature] = parts as [string, string];
-      const expected = Buffer.from(this.signCursor(payload, profileId));
+      const expected = Buffer.from(this.signCursor(payload, profileId, serverWikiScope));
       const actual = Buffer.from(signature);
       if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new Error('signature');
       const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>;
       if (
-        parsed.version !== 1 ||
+        parsed.version !== 2 ||
         typeof parsed.snapshotAt !== 'string' ||
         typeof parsed.pageUpdatedAt !== 'string' ||
         typeof parsed.watchId !== 'string' ||
-        !/^\d+$/u.test(parsed.watchId)
+        !/^\d+$/u.test(parsed.watchId) ||
+        (parsed.serverWikiId !== null && (typeof parsed.serverWikiId !== 'string' || !/^[1-9][0-9]{0,19}$/u.test(parsed.serverWikiId))) ||
+        (parsed.spaceId !== null && (typeof parsed.spaceId !== 'string' || !/^[1-9][0-9]{0,19}$/u.test(parsed.spaceId))) ||
+        parsed.serverWikiId !== (serverWikiScope?.id.toString() ?? null) ||
+        parsed.spaceId !== (serverWikiScope?.spaceId.toString() ?? null)
       ) throw new Error('payload');
       const snapshotAt = new Date(parsed.snapshotAt);
       const pageUpdatedAt = new Date(parsed.pageUpdatedAt);
@@ -292,16 +361,33 @@ export class WikiWatchService {
         Number.isNaN(pageUpdatedAt.getTime()) ||
         pageUpdatedAt > snapshotAt
       ) throw new Error('date');
-      return { snapshotAt, pageUpdatedAt, watchId: BigInt(parsed.watchId) };
+      return {
+        snapshotAt,
+        pageUpdatedAt,
+        watchId: BigInt(parsed.watchId),
+        serverWikiId: serverWikiScope?.id ?? null,
+        spaceId: serverWikiScope?.spaceId ?? null,
+      };
     } catch {
       throw new NotFoundException('Wiki watchlist cursor not found.');
     }
   }
 
-  private signCursor(payload: string, profileId: bigint): string {
+  private signCursor(payload: string, profileId: bigint, serverWikiScope: WatchlistServerWikiScope | null): string {
     return createHmac('sha256', this.config.get('APP_ENCRYPTION_KEY'))
-      .update(`minewiki:wiki-watchlist:v1:${profileId.toString()}:${payload}`)
+      .update(`minewiki:wiki-watchlist:v2:${profileId.toString()}:${serverWikiScope?.id.toString() ?? 'global'}:${serverWikiScope?.spaceId.toString() ?? 'global'}:${payload}`)
       .digest('base64url');
+  }
+
+  private async resolveActiveServerWikiScope(value: string): Promise<WatchlistServerWikiScope> {
+    const slug = value.trim();
+    if (!slug || slug.length > 255) throw new NotFoundException('Server wiki not found.');
+    const serverWiki = await this.prisma.serverWiki.findFirst({
+      where: { status: 'active', OR: [{ siteSlug: slug }, { slug }] },
+      select: { id: true, spaceId: true },
+    });
+    if (!serverWiki) throw new NotFoundException('Server wiki not found.');
+    return serverWiki;
   }
 
   private async context(session: SessionPayload, pageId: string) {

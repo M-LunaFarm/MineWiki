@@ -3,7 +3,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 export type WikiRecentDiscussionSort = 'newest' | 'oldest';
 export type WikiRecentDiscussionCursorScope =
   | { readonly kind: 'page'; readonly pageId: string; readonly status: string; readonly sort: 'newest' }
-  | { readonly kind: 'global'; readonly status: string; readonly sort: WikiRecentDiscussionSort };
+  | { readonly kind: 'global'; readonly status: string; readonly sort: WikiRecentDiscussionSort }
+  | { readonly kind: 'space'; readonly serverWikiId: string; readonly spaceId: string; readonly status: string; readonly sort: WikiRecentDiscussionSort };
 
 export interface WikiRecentDiscussionCursor {
   readonly snapshotAt: Date;

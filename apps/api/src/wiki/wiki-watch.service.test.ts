@@ -111,16 +111,20 @@ function createListService(
   const prisma = {
     async $queryRaw(query: Prisma.Sql) {
       rawCalls += 1;
-      sql.push(query.strings.join('?'));
+      const sqlText = query.strings.join('?');
+      sql.push(sqlText);
       const values = query.values as unknown[];
       const snapshotAt = values[0] as Date;
       const profileId = values[1] as bigint;
       const take = Number(values.at(-1));
-      const position = values.length > 4
-        ? { pageUpdatedAt: values[3] as Date, watchId: values[5] as bigint }
+      const scopedSpaceId = sqlText.includes('p.space_id =') ? values[3] as bigint : null;
+      const positionOffset = scopedSpaceId === null ? 3 : 4;
+      const position = values.length > positionOffset + 1
+        ? { pageUpdatedAt: values[positionOffset] as Date, watchId: values[positionOffset + 2] as bigint }
         : null;
       return sourceRows
         .filter((row) => row.profileId === profileId && row.watchCreatedAt <= snapshotAt)
+        .filter((row) => scopedSpaceId === null || row.spaceId === scopedSpaceId)
         .flatMap((row) => {
           const snapshotRevisionAt = row.revisionHistory
             .filter((createdAt) => createdAt <= snapshotAt)
@@ -174,10 +178,18 @@ function createListService(
         assert.equal(where.status, 'active');
         return where.spaceId.in.flatMap((spaceId) => {
           const slug = options.activeServerSpaces?.get(spaceId);
-          return slug ? [{ spaceId, slug }] : [];
+          return slug ? [{ id: spaceId + 100n, spaceId, slug, siteSlug: null, publicationStatus: 'published', publishedReleaseId: spaceId + 200n }] : [];
         });
-      }
-    }
+      },
+      async findFirst({ where }: { where: { OR: Array<{ siteSlug?: string; slug?: string }> } }) {
+        const requested = where.OR[0]?.siteSlug ?? where.OR[1]?.slug;
+        for (const [spaceId, slug] of options.activeServerSpaces ?? []) {
+          if (slug === requested) return { id: spaceId + 100n, spaceId };
+        }
+        return null;
+      },
+    },
+    serverWikiReleaseItem: { async findMany() { return []; } },
   } as unknown as PrismaService;
   const profiles = {
     async ensureWikiProfile(accountId: string) {
@@ -192,7 +204,8 @@ function createListService(
     async filterReadablePages({ pages }: { pages: Array<{ id: bigint }> }) {
       aclCalls += 1;
       return pages.filter((candidatePage) => options.readable?.(candidatePage.id) ?? true);
-    }
+    },
+    async canPreviewServerWikiSpace() { return true; },
   } as unknown as WikiPermissionService;
   return {
     service: new WikiWatchService(prisma, profiles, permissions, testConfig()),
@@ -340,4 +353,18 @@ test('watchlist hides server pages whose linked server wiki is not active', asyn
   const result = await service.list(session);
 
   assert.deepEqual(result.items, []);
+});
+
+test('server wiki watchlists enforce the resolved space in SQL and reject cross-tenant cursors', async () => {
+  const firstSpace = candidate(2n, 20n, new Date('2026-07-17T00:00:00Z'), { namespaceId: 2, spaceId: 9n });
+  const firstSpaceOlder = candidate(3n, 22n, new Date('2026-07-15T00:00:00Z'), { namespaceId: 2, spaceId: 9n });
+  const otherSpace = candidate(1n, 21n, new Date('2026-07-16T00:00:00Z'), { namespaceId: 2, spaceId: 10n });
+  const activeServerSpaces = new Map([[9n, 'alpha'], [10n, 'beta']]);
+  const { service, stats } = createListService([firstSpace, firstSpaceOlder, otherSpace], { activeServerSpaces });
+
+  const result = await service.list(session, undefined, 1, 'alpha');
+  assert.deepEqual(result.items.map((item) => item.pageId), ['20']);
+  assert.equal(stats.sql.some((value) => value.includes('p.space_id =')), true);
+  assert.ok(result.nextCursor);
+  await assert.rejects(() => service.list(session, result.nextCursor!, 1, 'beta'), /cursor not found/u);
 });

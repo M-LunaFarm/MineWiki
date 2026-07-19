@@ -2003,6 +2003,60 @@ test('indexed special documents paginate without duplicate rows and bind the cur
   );
 });
 
+test('public server wiki special documents use the immutable release and reject cross-tenant cursors', async () => {
+  const now = new Date('2026-07-18T00:00:00.000Z');
+  const releaseItems = [2n, 1n].map((pageId) => ({
+    id: pageId + 100n,
+    releaseId: 70n,
+    serverWikiId: 50n,
+    spaceId: 40n,
+    namespaceId: 9,
+    pageId,
+    revisionId: pageId + 200n,
+    localPath: `guide-${pageId}`,
+    slug: `guide-${pageId}`,
+    title: `가이드 ${pageId}`,
+    displayTitle: `가이드 ${pageId}`,
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 7n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date(now.getTime() - Number(pageId) * 1_000),
+    searchVector: '',
+    createdAt: now,
+    revision: { contentSize: Number(pageId) * 100 },
+  }));
+  const prisma = {
+    serverWiki: {
+      async findFirst(args: { where: { OR: Array<{ siteSlug?: string; slug?: string }> } }) {
+        const requested = args.where.OR[0]?.siteSlug ?? args.where.OR[1]?.slug;
+        return requested === 'other'
+          ? { id: 51n, spaceId: 41n, slug: 'other', siteSlug: null, publicationStatus: 'published', publishedReleaseId: 71n }
+          : { id: 50n, spaceId: 40n, slug: 'alpha', siteSlug: 'alpha-site', publicationStatus: 'published', publishedReleaseId: 70n };
+      },
+    },
+    wikiNamespace: { async findUnique() { return { id: 9, code: 'server' }; } },
+    serverWikiReleaseItem: { async findMany() { return releaseItems; } },
+    serverWikiReleaseLink: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return false; },
+    async filterReadablePages({ pages }: { pages: unknown[] }) { return pages; },
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions, undefined, undefined, undefined, specialCursorCodec);
+
+  const first = await service.getSpecialDocuments({ type: 'long', serverSlug: 'alpha-site', limit: 1 });
+  assert.deepEqual(first.items.map((item) => [item.pageId, item.value, item.routePath]), [
+    ['2', 200, '/serverWiki/alpha-site/%EA%B0%80%EC%9D%B4%EB%93%9C_2'],
+  ]);
+  assert.ok(first.nextCursor);
+  await assert.rejects(
+    () => service.getSpecialDocuments({ type: 'long', serverSlug: 'other', limit: 1, cursor: first.nextCursor! }),
+    /유효하지 않거나/u,
+  );
+});
+
 test('graph special snapshots remain reachable beyond the legacy five-hundred item cutoff', async () => {
   const now = new Date('2026-07-18T00:00:00.000Z');
   const items = Array.from({ length: 501 }, (_, index) => ({

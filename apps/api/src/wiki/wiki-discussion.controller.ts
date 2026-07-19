@@ -22,6 +22,7 @@ export class WikiDiscussionController {
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
     @Query('status') status?: string,
     @Query('sort') sort?: string,
+    @Query('serverSlug') serverSlug?: string,
   ): Promise<WikiRecentThreadListResponse> {
     if (status !== undefined && !['all', 'active', 'open', 'paused', 'closed'].includes(status)) {
       throw new BadRequestException('Invalid recent discussion status filter.');
@@ -34,6 +35,7 @@ export class WikiDiscussionController {
       limit: limit ?? 30,
       status: (status ?? 'all') as WikiDiscussionStatusFilter,
       sort: (sort ?? 'newest') as WikiRecentDiscussionSort,
+      ...(serverSlug ? { serverSlug } : {}),
     });
   }
 

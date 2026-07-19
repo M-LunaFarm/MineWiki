@@ -90,6 +90,7 @@ export interface WikiRecentThreadListOptions {
   readonly limit?: number;
   readonly status?: WikiDiscussionStatusFilter;
   readonly sort?: WikiRecentDiscussionSort;
+  readonly serverSlug?: string;
 }
 
 export interface WikiThreadDetail extends WikiThreadSummary {
@@ -438,7 +439,17 @@ export class WikiDiscussionService {
     const limit = Math.min(Math.max(options.limit ?? 30, 1), 50);
     const statusFilter = options.status ?? 'all';
     const sort = options.sort ?? 'newest';
-    const cursorScope: WikiRecentDiscussionCursorScope = { kind: 'global', status: statusFilter, sort };
+    const serverWikiScope = options.serverSlug ? await this.resolveActiveServerWikiScope(options.serverSlug) : null;
+    const spaceId = serverWikiScope?.spaceId ?? null;
+    const cursorScope: WikiRecentDiscussionCursorScope = serverWikiScope === null
+      ? { kind: 'global', status: statusFilter, sort }
+      : {
+          kind: 'space',
+          serverWikiId: serverWikiScope.id.toString(),
+          spaceId: serverWikiScope.spaceId.toString(),
+          status: statusFilter,
+          sort,
+        };
     const decoded = options.cursor ? this.decodeRecentCursor(options.cursor, cursorScope) : null;
     const snapshotAt = decoded?.snapshotAt ?? new Date();
     const status = statusFilter === 'all'
@@ -456,7 +467,6 @@ export class WikiDiscussionService {
         ]
       } : {})
     });
-    const order = sort === 'newest' ? 'desc' as const : 'asc' as const;
     const actor = await this.viewerActor(viewer);
     const visibleRows: Array<{
       thread: WikiDiscussionThread;
@@ -470,8 +480,14 @@ export class WikiDiscussionService {
     let candidatesExhausted = false;
     while (visibleRows.length <= limit && scannedCandidateCount < MAX_GLOBAL_RECENT_CANDIDATE_SCAN) {
       const take = Math.min(GLOBAL_RECENT_CANDIDATE_BATCH_SIZE, MAX_GLOBAL_RECENT_CANDIDATE_SCAN - scannedCandidateCount);
-      const candidates = await this.prisma.wikiDiscussionThread.findMany({
-        where: candidateWhere(scanPosition), orderBy: [{ updatedAt: order }, { id: order }], take,
+      const candidates = await this.loadRecentCandidates({
+        spaceId,
+        statusFilter,
+        sort,
+        snapshotAt,
+        position: scanPosition,
+        take,
+        globalWhere: candidateWhere(scanPosition),
       });
       if (candidates.length === 0) { candidatesExhausted = true; break; }
       scannedCandidateCount += candidates.length;
@@ -496,9 +512,14 @@ export class WikiDiscussionService {
       if (candidates.length < take) { candidatesExhausted = true; break; }
     }
     const hasUnscannedCandidates = visibleRows.length <= limit && !candidatesExhausted && lastScanned
-      ? (await this.prisma.wikiDiscussionThread.findMany({
-          where: candidateWhere({ updatedAt: lastScanned.updatedAt, id: lastScanned.id }),
-          orderBy: [{ updatedAt: order }, { id: order }], take: 1,
+      ? (await this.loadRecentCandidates({
+          spaceId,
+          statusFilter,
+          sort,
+          snapshotAt,
+          position: { updatedAt: lastScanned.updatedAt, id: lastScanned.id },
+          take: 1,
+          globalWhere: candidateWhere({ updatedAt: lastScanned.updatedAt, id: lastScanned.id }),
         })).length > 0
       : false;
     const pageRows = visibleRows.slice(0, limit);
@@ -534,6 +555,64 @@ export class WikiDiscussionService {
         ? this.encodeRecentCursor(snapshotAt, cursorRow.updatedAt, cursorRow.id, cursorScope)
         : null,
     };
+  }
+
+  private async resolveActiveServerWikiScope(value: string): Promise<{ readonly id: bigint; readonly spaceId: bigint }> {
+    const slug = value.trim();
+    if (!slug || slug.length > 255) throw new NotFoundException('Server wiki not found.');
+    const serverWiki = await this.prisma.serverWiki.findFirst({
+      where: { status: 'active', OR: [{ siteSlug: slug }, { slug }] },
+      select: { id: true, spaceId: true },
+    });
+    if (!serverWiki) throw new NotFoundException('Server wiki not found.');
+    return serverWiki;
+  }
+
+  private async loadRecentCandidates(input: {
+    readonly spaceId: bigint | null;
+    readonly statusFilter: WikiDiscussionStatusFilter;
+    readonly sort: WikiRecentDiscussionSort;
+    readonly snapshotAt: Date;
+    readonly position: { readonly updatedAt: Date; readonly id: bigint } | null;
+    readonly take: number;
+    readonly globalWhere: Prisma.WikiDiscussionThreadWhereInput;
+  }): Promise<WikiDiscussionThread[]> {
+    const order = input.sort === 'newest' ? Prisma.sql`DESC` : Prisma.sql`ASC`;
+    if (input.spaceId === null) {
+      return this.prisma.wikiDiscussionThread.findMany({
+        where: input.globalWhere,
+        orderBy: [{ updatedAt: input.sort === 'newest' ? 'desc' : 'asc' }, { id: input.sort === 'newest' ? 'desc' : 'asc' }],
+        take: input.take,
+      });
+    }
+    const status = input.statusFilter === 'all'
+      ? Prisma.sql`t.status <> 'deleted'`
+      : input.statusFilter === 'active'
+        ? Prisma.sql`t.status IN ('open', 'paused')`
+        : Prisma.sql`t.status = ${input.statusFilter}`;
+    const position = input.position
+      ? input.sort === 'newest'
+        ? Prisma.sql`AND (t.updated_at < ${input.position.updatedAt} OR (t.updated_at = ${input.position.updatedAt} AND t.id < ${input.position.id}))`
+        : Prisma.sql`AND (t.updated_at > ${input.position.updatedAt} OR (t.updated_at = ${input.position.updatedAt} AND t.id > ${input.position.id}))`
+      : Prisma.empty;
+    const ids = await this.prisma.$queryRaw<Array<{ id: bigint }>>(Prisma.sql`
+      SELECT t.id
+      FROM wiki_discussion_threads t
+      INNER JOIN pages p ON p.id = t.page_id
+      WHERE p.space_id = ${input.spaceId}
+        AND ${status}
+        AND t.updated_at <= ${input.snapshotAt}
+        ${position}
+      ORDER BY t.updated_at ${order}, t.id ${order}
+      LIMIT ${input.take}
+    `);
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.wikiDiscussionThread.findMany({ where: { id: { in: ids.map((row) => row.id) } } });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return ids.flatMap((row) => {
+      const thread = byId.get(row.id);
+      return thread ? [thread] : [];
+    });
   }
 
   private async projectRecentDiscussionPages(

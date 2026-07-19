@@ -3047,6 +3047,7 @@ export class WikiReadService {
   async getSpecialDocuments(input: {
     readonly type?: string;
     readonly namespace?: string;
+    readonly serverSlug?: string;
     readonly limit?: string | number;
     readonly cursor?: string;
     readonly accountId?: string | null;
@@ -3072,15 +3073,74 @@ export class WikiReadService {
       ? input.type as WikiSpecialDocumentType
       : 'orphaned';
     const limit = Math.min(Math.max(Number(input.limit ?? 50) || 50, 1), 100);
-    const namespace = input.namespace?.trim()
-      ? await this.prisma.wikiNamespace.findUnique({ where: { code: input.namespace.trim() } })
+    const serverWikiScope = input.serverSlug
+      ? await this.resolveActiveSpecialServerWikiScope(input.serverSlug)
       : null;
-    if (input.namespace?.trim() && !namespace) return { type, items: [], nextCursor: null };
-    if (type === 'orphaned_categories' && namespace && namespace.code !== 'category') return { type, items: [], nextCursor: null };
-    if (type === 'random' || type === 'old' || type === 'long' || type === 'short' || type === 'uncategorized') {
-      return this.getIndexedSpecialDocuments(type, limit, namespace?.id, namespace?.code ?? '', access, input.cursor);
+    if (serverWikiScope && input.namespace?.trim() && input.namespace.trim() !== 'server') {
+      return { type, items: [], nextCursor: null };
     }
-    return this.getSnapshotSpecialDocuments(type, limit, namespace?.code ?? '', access, input.cursor);
+    const namespaceCode = serverWikiScope ? 'server' : input.namespace?.trim();
+    const namespace = namespaceCode
+      ? await this.prisma.wikiNamespace.findUnique({ where: { code: namespaceCode } })
+      : null;
+    if (namespaceCode && !namespace) return { type, items: [], nextCursor: null };
+    if (type === 'orphaned_categories' && namespace && namespace.code !== 'category') return { type, items: [], nextCursor: null };
+    const canPreviewServerWiki = serverWikiScope
+      ? await this.wikiPermissions.canPreviewServerWikiSpace({ ...access, spaceId: serverWikiScope.spaceId })
+      : false;
+    if (serverWikiScope && !canPreviewServerWiki
+      && (serverWikiScope.publicationStatus !== 'published' || serverWikiScope.publishedReleaseId === null)) {
+      return { type, items: [], nextCursor: null };
+    }
+    if (type === 'random' || type === 'old' || type === 'long' || type === 'short' || type === 'uncategorized') {
+      if (serverWikiScope && !canPreviewServerWiki && serverWikiScope.publishedReleaseId !== null) {
+        return this.getReleasedServerWikiIndexedSpecialDocuments(
+          type,
+          limit,
+          namespace?.id,
+          namespace?.code ?? '',
+          access,
+          input.cursor,
+          { ...serverWikiScope, publishedReleaseId: serverWikiScope.publishedReleaseId },
+        );
+      }
+      return this.getIndexedSpecialDocuments(
+        type,
+        limit,
+        namespace?.id,
+        namespace?.code ?? '',
+        access,
+        input.cursor,
+        serverWikiScope,
+        serverWikiScope ? 'preview' : null,
+      );
+    }
+    return this.getSnapshotSpecialDocuments(type, limit, namespace?.code ?? '', access, input.cursor, serverWikiScope);
+  }
+
+  private async resolveActiveSpecialServerWikiScope(value: string): Promise<{
+    readonly id: bigint;
+    readonly spaceId: bigint;
+    readonly slug: string;
+    readonly siteSlug: string | null;
+    readonly publicationStatus: string;
+    readonly publishedReleaseId: bigint | null;
+  }> {
+    const slug = value.trim();
+    if (!slug || slug.length > 255) throw new NotFoundException('Server wiki not found.');
+    const serverWiki = await this.prisma.serverWiki.findFirst({
+      where: { status: 'active', OR: [{ siteSlug: slug }, { slug }] },
+      select: {
+        id: true,
+        spaceId: true,
+        slug: true,
+        siteSlug: true,
+        publicationStatus: true,
+        publishedReleaseId: true,
+      },
+    });
+    if (!serverWiki) throw new NotFoundException('Server wiki not found.');
+    return serverWiki;
   }
 
   async getPublicBlockHistory(input: {
@@ -3155,6 +3215,7 @@ export class WikiReadService {
     namespaceCode: string,
     access: WikiAccessContext,
     cursorValue?: string,
+    serverWikiScope: { readonly id: bigint; readonly spaceId: bigint } | null = null,
   ): Promise<WikiSpecialDocumentResponse> {
     const snapshot = await this.prisma.wikiSpecialSnapshot.findUnique({
       where: { type_namespaceCode: { type, namespaceCode } }
@@ -3177,6 +3238,8 @@ export class WikiReadService {
     const binding: WikiSpecialCursorBinding = {
       type,
       namespace: namespaceCode,
+      serverWikiId: serverWikiScope?.id.toString() ?? null,
+      spaceId: serverWikiScope?.spaceId.toString() ?? null,
       generation: snapshot.generation,
       viewerScope: specialCursorViewerScope(access),
     };
@@ -3190,23 +3253,27 @@ export class WikiReadService {
     }
     const aggregateType = type === 'wanted' || type === 'categories';
     const identifiedViewer = access.accountId !== null;
-    const eligibleSnapshotItems = aggregateType && identifiedViewer
+    const recomputeAggregate = aggregateType && (identifiedViewer || serverWikiScope !== null);
+    const eligibleSnapshotItems = recomputeAggregate
       ? snapshotItems.filter((item) => item.sourceContributionsComplete)
       : snapshotItems;
     const pageIds = eligibleSnapshotItems.flatMap((item) => item.pageId ? [BigInt(item.pageId)] : []);
-    const sourcePageIds = aggregateType && identifiedViewer
+    const sourcePageIds = recomputeAggregate
       ? eligibleSnapshotItems.flatMap((item) => item.sourceContributions.map((source) => BigInt(source.pageId)))
       : [];
     const candidatePageIds = [...new Set([...pageIds, ...sourcePageIds])];
-    const pages = candidatePageIds.length > 0
+    const candidatePages = candidatePageIds.length > 0
       ? await this.prisma.wikiPage.findMany({ where: { id: { in: candidatePageIds } } })
       : [];
+    const pages = serverWikiScope
+      ? candidatePages.filter((page) => page.spaceId === serverWikiScope.spaceId)
+      : candidatePages;
     const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages });
     const readablePageIds = new Set(readablePages.map((page) => page.id.toString()));
     const items: WikiSpecialDocumentItem[] = [];
     for (const item of eligibleSnapshotItems) {
       if (item.pageId && !readablePageIds.has(item.pageId)) continue;
-      if (aggregateType && identifiedViewer) {
+      if (recomputeAggregate) {
         const value = item.sourceContributions.reduce(
           (total, source) => total + (readablePageIds.has(source.pageId) ? source.count : 0),
           0
@@ -3217,7 +3284,7 @@ export class WikiReadService {
         items.push(publicSpecialSnapshotItem(item));
       }
     }
-    if (aggregateType && identifiedViewer) {
+    if (recomputeAggregate) {
       items.sort((left, right) =>
         (right.value ?? 0) - (left.value ?? 0) || left.id.localeCompare(right.id, 'ko')
       );
@@ -3245,10 +3312,13 @@ export class WikiReadService {
     namespaceCode: string,
     access: WikiAccessContext,
     cursorValue?: string,
+    serverWikiScope: { readonly id: bigint; readonly spaceId: bigint } | null = null,
+    generation: string | null = null,
   ): Promise<WikiSpecialDocumentResponse> {
     const scanBudget = Math.min(Math.max(limit * 5, 50), 500);
     const baseWhere: Prisma.WikiPageWhereInput = {
       namespaceId,
+      ...(serverWikiScope ? { spaceId: serverWikiScope.spaceId } : {}),
       status: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
       pageType: { not: 'redirect' },
       currentRevisionId: { not: null },
@@ -3257,7 +3327,9 @@ export class WikiReadService {
     const binding: WikiSpecialCursorBinding = {
       type,
       namespace: namespaceCode,
-      generation: null,
+      serverWikiId: serverWikiScope?.id.toString() ?? null,
+      spaceId: serverWikiScope?.spaceId.toString() ?? null,
+      generation,
       viewerScope: specialCursorViewerScope(access),
     };
     let decoded: IndexedSpecialCursor | null = null;
@@ -3360,6 +3432,137 @@ export class WikiReadService {
       )),
       nextCursor: hasMore && cursorPage
         ? this.specialCursors.encode(binding, indexedSpecialPosition(type, snapshotAt, cursorPage))
+        : null,
+    };
+  }
+
+  private async getReleasedServerWikiIndexedSpecialDocuments(
+    type: 'random' | 'old' | 'long' | 'short' | 'uncategorized',
+    limit: number,
+    namespaceId: number | undefined,
+    namespaceCode: string,
+    access: WikiAccessContext,
+    cursorValue: string | undefined,
+    serverWikiScope: {
+      readonly id: bigint;
+      readonly spaceId: bigint;
+      readonly slug: string;
+      readonly siteSlug: string | null;
+      readonly publishedReleaseId: bigint;
+    },
+  ): Promise<WikiSpecialDocumentResponse> {
+    const generation = `release:${serverWikiScope.publishedReleaseId.toString()}`;
+    const binding: WikiSpecialCursorBinding = {
+      type,
+      namespace: namespaceCode,
+      serverWikiId: serverWikiScope.id.toString(),
+      spaceId: serverWikiScope.spaceId.toString(),
+      generation,
+      viewerScope: specialCursorViewerScope(access),
+    };
+    let decoded: IndexedSpecialCursor | null = null;
+    if (cursorValue) {
+      const cursor = this.specialCursors.decode(cursorValue, binding);
+      if (cursor.kind !== 'indexed') {
+        throw new BadRequestException('특수 문서 목록의 커서 종류가 올바르지 않습니다.');
+      }
+      decoded = cursor;
+    }
+    if (type === 'random' && cursorValue) {
+      throw new BadRequestException('임의 문서 목록에는 커서를 사용할 수 없습니다.');
+    }
+    const categorySourcePageIds = type === 'uncategorized'
+      ? [...new Set((await this.prisma.serverWikiReleaseLink.findMany({
+          where: {
+            releaseId: serverWikiScope.publishedReleaseId,
+            serverWikiId: serverWikiScope.id,
+            spaceId: serverWikiScope.spaceId,
+            linkType: 'category',
+            targetNamespaceCode: 'category',
+          },
+          select: { sourcePageId: true },
+        })).map((link) => link.sourcePageId))]
+      : [];
+    const baseWhere: Prisma.ServerWikiReleaseItemWhereInput = {
+      releaseId: serverWikiScope.publishedReleaseId,
+      serverWikiId: serverWikiScope.id,
+      spaceId: serverWikiScope.spaceId,
+      namespaceId,
+      pageStatus: { in: [...PUBLIC_WIKI_PAGE_STATUSES] },
+      pageType: { not: 'redirect' },
+      ...(categorySourcePageIds.length > 0 ? { pageId: { notIn: categorySourcePageIds } } : {}),
+    };
+    const siteSlug = serverWikiScope.siteSlug ?? serverWikiScope.slug;
+    if (type === 'random') {
+      const count = await this.prisma.serverWikiReleaseItem.count({ where: baseWhere });
+      if (count === 0) return { type, items: [], nextCursor: null };
+      const skip = Math.floor(Math.random() * count);
+      const candidate = await this.prisma.serverWikiReleaseItem.findMany({
+        where: baseWhere,
+        include: { revision: { select: { contentSize: true } } },
+        orderBy: [{ pageId: 'asc' }],
+        skip,
+        take: 1,
+      });
+      const readable = await this.wikiPermissions.filterReadablePages({
+        ...access,
+        pages: candidate.map(pageFromServerWikiReleaseItem),
+      });
+      const readableIds = new Set(readable.map((page) => page.id));
+      return {
+        type,
+        items: candidate.filter((item) => readableIds.has(item.pageId)).map((item) => ({
+          id: item.pageId.toString(),
+          pageId: item.pageId.toString(),
+          namespace: namespaceCode || 'server',
+          title: item.title,
+          displayTitle: item.displayTitle,
+          routePath: buildCanonicalServerWikiPath(siteSlug, item.title, serverWikiScope.slug, '/serverWiki'),
+          value: null,
+          updatedAt: item.pageUpdatedAt.toISOString(),
+        })),
+        nextCursor: null,
+      };
+    }
+
+    const snapshotAt = decoded ? new Date(decoded.snapshotAt) : new Date();
+    const afterCursor: Prisma.ServerWikiReleaseItemWhereInput | null = decoded
+      ? releasedIndexedSpecialAfterCursor(type, decoded)
+      : null;
+    const candidates = await this.prisma.serverWikiReleaseItem.findMany({
+      where: {
+        ...baseWhere,
+        AND: [
+          { pageUpdatedAt: { lte: snapshotAt } },
+          ...(afterCursor ? [afterCursor] : []),
+        ],
+      },
+      include: { revision: { select: { contentSize: true } } },
+      orderBy: releasedIndexedSpecialOrder(type),
+      take: limit + 1,
+    });
+    const readable = await this.wikiPermissions.filterReadablePages({
+      ...access,
+      pages: candidates.map(pageFromServerWikiReleaseItem),
+    });
+    const readableIds = new Set(readable.map((page) => page.id));
+    const visible = candidates.filter((item) => readableIds.has(item.pageId));
+    const selected = visible.slice(0, limit);
+    const last = selected.at(-1);
+    return {
+      type,
+      items: selected.map((item) => ({
+        id: item.pageId.toString(),
+        pageId: item.pageId.toString(),
+        namespace: namespaceCode || 'server',
+        title: item.title,
+        displayTitle: item.displayTitle,
+        routePath: buildCanonicalServerWikiPath(siteSlug, item.title, serverWikiScope.slug, '/serverWiki'),
+        value: type === 'long' || type === 'short' ? item.revision.contentSize : null,
+        updatedAt: item.pageUpdatedAt.toISOString(),
+      })),
+      nextCursor: visible.length > limit && last
+        ? this.specialCursors.encode(binding, releasedIndexedSpecialPosition(type, snapshotAt, last))
         : null,
     };
   }
@@ -4949,6 +5152,9 @@ function randomBigIntBetween(minimum: bigint, maximum: bigint): bigint {
 
 type IndexedSpecialType = 'old' | 'long' | 'short' | 'uncategorized';
 type IndexedSpecialCursor = Extract<WikiSpecialCursorPosition, { readonly kind: 'indexed' }>;
+type ReleasedIndexedSpecialItem = Prisma.ServerWikiReleaseItemGetPayload<{
+  include: { revision: { select: { contentSize: true } } };
+}>;
 
 function specialCursorViewerScope(access: WikiAccessContext): string {
   if (access.actor?.profileId) return `profile:${access.actor.profileId.toString()}`;
@@ -5011,6 +5217,57 @@ function indexedSpecialAfterCursor(
   return type === 'old'
     ? { OR: [{ updatedAt: { gt: updatedAt } }, { updatedAt, id: { gt: pageId } }] }
     : { OR: [{ updatedAt: { lt: updatedAt } }, { updatedAt, id: { lt: pageId } }] };
+}
+
+function releasedIndexedSpecialOrder(
+  type: IndexedSpecialType,
+): Prisma.ServerWikiReleaseItemOrderByWithRelationInput[] {
+  if (type === 'old') return [{ pageUpdatedAt: 'asc' }, { pageId: 'asc' }];
+  if (type === 'long') return [{ revision: { contentSize: 'desc' } }, { pageId: 'desc' }];
+  if (type === 'short') return [{ revision: { contentSize: 'asc' } }, { pageId: 'asc' }];
+  return [{ pageUpdatedAt: 'desc' }, { pageId: 'desc' }];
+}
+
+function releasedIndexedSpecialPosition(
+  type: IndexedSpecialType,
+  snapshotAt: Date,
+  item: ReleasedIndexedSpecialItem,
+): IndexedSpecialCursor {
+  return {
+    kind: 'indexed',
+    snapshotAt: snapshotAt.toISOString(),
+    sortValue: type === 'long' || type === 'short'
+      ? String(item.revision.contentSize)
+      : item.pageUpdatedAt.toISOString(),
+    pageId: item.pageId.toString(),
+  };
+}
+
+function releasedIndexedSpecialAfterCursor(
+  type: IndexedSpecialType,
+  cursor: IndexedSpecialCursor,
+): Prisma.ServerWikiReleaseItemWhereInput {
+  const pageId = BigInt(cursor.pageId);
+  if (type === 'long' || type === 'short') {
+    const size = Number(cursor.sortValue);
+    return type === 'long'
+      ? {
+          OR: [
+            { revision: { contentSize: { lt: size } } },
+            { revision: { contentSize: size }, pageId: { lt: pageId } },
+          ],
+        }
+      : {
+          OR: [
+            { revision: { contentSize: { gt: size } } },
+            { revision: { contentSize: size }, pageId: { gt: pageId } },
+          ],
+        };
+  }
+  const updatedAt = new Date(cursor.sortValue);
+  return type === 'old'
+    ? { OR: [{ pageUpdatedAt: { gt: updatedAt } }, { pageUpdatedAt: updatedAt, pageId: { gt: pageId } }] }
+    : { OR: [{ pageUpdatedAt: { lt: updatedAt } }, { pageUpdatedAt: updatedAt, pageId: { lt: pageId } }] };
 }
 
 function encodeDeletedPageCursor(page: { readonly updatedAt: Date; readonly id: bigint }): string {

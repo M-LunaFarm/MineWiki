@@ -625,6 +625,24 @@ test('recent discussion cursors fail closed when tampered', async () => {
   await assert.rejects(discussions.listRecent(null, { cursor: 'not-a-valid-cursor' }), BadRequestException);
 });
 
+test('server recent discussions resolve the tenant and filter candidates by its immutable space', async () => {
+  let rawQuery: Prisma.Sql | null = null;
+  const store = {
+    serverWiki: {
+      async findFirst() { return { id: 50n, spaceId: 40n }; },
+    },
+    async $queryRaw(query: Prisma.Sql) { rawQuery = query; return []; },
+  } as unknown as PrismaService;
+  const discussions = new WikiDiscussionService(store, {} as WikiProfileService, {} as WikiPermissionService);
+
+  assert.deepEqual(await discussions.listRecent(null, { serverSlug: 'alpha', status: 'active' }), {
+    items: [], nextCursor: null,
+  });
+  assert.ok(rawQuery);
+  assert.equal(rawQuery!.strings.join('?').includes('p.space_id ='), true);
+  assert.equal(rawQuery!.values.includes(40n), true);
+});
+
 test('global recent discussions filter status, support both keyset orders, and bind cursors to filters', async () => {
   const rows = [
     { ...thread, id: 31n, status: 'closed', updatedAt: new Date('2026-07-18T03:00:00Z') },

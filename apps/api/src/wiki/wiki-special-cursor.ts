@@ -6,6 +6,8 @@ import { z } from 'zod';
 export interface WikiSpecialCursorBinding {
   readonly type: string;
   readonly namespace: string;
+  readonly serverWikiId: string | null;
+  readonly spaceId: string | null;
   readonly generation: string | null;
   readonly viewerScope: string;
 }
@@ -22,19 +24,21 @@ export type WikiSpecialCursorPosition =
 const bindingFields = {
   type: z.string().min(1).max(32),
   namespace: z.string().max(32),
+  serverWikiId: z.string().regex(/^[1-9][0-9]{0,19}$/u).nullable(),
+  spaceId: z.string().regex(/^[1-9][0-9]{0,19}$/u).nullable(),
   generation: z.string().max(64).nullable(),
   viewerScope: z.string().min(1).max(128),
 };
 
 const cursorSchema = z.discriminatedUnion('kind', [
   z.object({
-    version: z.literal(1),
+    version: z.literal(2),
     ...bindingFields,
     kind: z.literal('snapshot'),
     offset: z.number().int().min(1).max(50_000),
   }).strict(),
   z.object({
-    version: z.literal(1),
+    version: z.literal(2),
     ...bindingFields,
     kind: z.literal('indexed'),
     snapshotAt: z.string().datetime(),
@@ -50,7 +54,7 @@ export class WikiSpecialCursorCodec {
   constructor(@Optional() private readonly config?: ConfigService) {}
 
   encode(binding: WikiSpecialCursorBinding, position: WikiSpecialCursorPosition): string {
-    const parsed = cursorSchema.parse({ version: 1, ...binding, ...position });
+    const parsed = cursorSchema.parse({ version: 2, ...binding, ...position });
     this.assertPosition(parsed);
     const payload = Buffer.from(JSON.stringify(parsed), 'utf8').toString('base64url');
     return `${payload}.${this.sign(payload)}`;
@@ -68,6 +72,8 @@ export class WikiSpecialCursorCodec {
       if (
         parsed.type !== binding.type
         || parsed.namespace !== binding.namespace
+        || parsed.serverWikiId !== binding.serverWikiId
+        || parsed.spaceId !== binding.spaceId
         || parsed.generation !== binding.generation
         || parsed.viewerScope !== binding.viewerScope
       ) throw new Error('binding');
@@ -107,7 +113,7 @@ export class WikiSpecialCursorCodec {
     const key = this.config?.get('APP_ENCRYPTION_KEY') ?? process.env.APP_ENCRYPTION_KEY;
     if (!key) throw new ServiceUnavailableException('Special document cursor signing is not configured.');
     return createHmac('sha256', key)
-      .update(`minewiki:wiki-special:v1:${payload}`)
+      .update(`minewiki:wiki-special:v2:${payload}`)
       .digest('base64url');
   }
 }

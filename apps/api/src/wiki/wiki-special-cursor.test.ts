@@ -9,6 +9,8 @@ const codec = new WikiSpecialCursorCodec({
 const binding = {
   type: 'old',
   namespace: 'main',
+  serverWikiId: null,
+  spaceId: null,
   generation: null,
   viewerScope: 'profile:7',
 } as const;

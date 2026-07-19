@@ -31,3 +31,14 @@ test('recent discussion cursor rejects signature and timestamp tampering', () =>
   });
   assert.throws(() => decodeWikiRecentDiscussionCursor(secret, scope, future, cursor.snapshotAt), /INVALID/u);
 });
+
+test('recent discussion cursor binds immutable server wiki and space identities', () => {
+  const tenantScope: WikiRecentDiscussionCursorScope = {
+    kind: 'space', serverWikiId: '50', spaceId: '40', status: 'all', sort: 'newest',
+  };
+  const encoded = encodeWikiRecentDiscussionCursor(secret, tenantScope, cursor);
+  assert.deepEqual(decodeWikiRecentDiscussionCursor(secret, tenantScope, encoded, cursor.snapshotAt), cursor);
+  assert.throws(() => decodeWikiRecentDiscussionCursor(secret, {
+    ...tenantScope, serverWikiId: '51', spaceId: '41',
+  }, encoded, cursor.snapshotAt), /INVALID/u);
+});
