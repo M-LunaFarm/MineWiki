@@ -376,7 +376,9 @@ export class ServerController {
   ): Promise<ServerDetail> {
     await this.assertCanManageServer(id, session);
     const payload = serverProfilePayloadSchema.parse(body) as ServerProfileUpdateInput;
-    return this.serverService.updateProfile(id, payload, session.userId);
+    return this.serverService.updateProfile(id, payload, session.userId, {
+      allowAdminBypass: session.permissions?.includes('server.admin') === true,
+    });
   }
 
   @RequireStepUp('server_admin')
@@ -575,7 +577,9 @@ export class ServerController {
     if (!(await this.canManageServer(id, session))) {
       throw new BadRequestException('해당 서버의 투표 정책을 변경할 권한이 없습니다.');
     }
-    return this.serverService.updateVotePolicy(id, Boolean(requiresOwnership));
+    return this.serverService.updateVotePolicy(id, Boolean(requiresOwnership), session.userId, {
+      allowAdminBypass: session.permissions?.includes('server.admin') === true,
+    });
   }
 
   @RequireStepUp('server_admin')
@@ -605,7 +609,9 @@ export class ServerController {
       throw new BadRequestException('해당 서버의 Votifier 설정을 변경할 권한이 없습니다.');
     }
     const payload = votifierPayloadSchema.parse(body);
-    await this.serverService.updateVotifierTargets(id, payload.targets);
+    await this.serverService.updateVotifierTargets(id, payload.targets, session.userId, {
+      allowAdminBypass: session.permissions?.includes('server.admin') === true,
+    });
     return { success: true };
   }
 

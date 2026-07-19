@@ -82,7 +82,7 @@ if (!hasDatabase) {
       const stored = await service.updateBanner(server.id, randomUUID(), {
         data: `data:image/jpeg;base64,${buffer.toString('base64')}`,
         filename: 'banner.jpg'
-      });
+      }, { allowAdminBypass: true });
       uploadedFileId = stored.id;
 
       await prisma.server.update({

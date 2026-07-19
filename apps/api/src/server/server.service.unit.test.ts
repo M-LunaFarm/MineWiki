@@ -153,6 +153,13 @@ test('server profile updates sync linked wiki identity and write a bounded audit
       return callback(prisma);
     },
     server: {
+      async findUnique() {
+        return {
+          ownerAccountId: actorAccountId,
+          registrantAccountId: actorAccountId,
+          ownershipChallengeSuspendedAt: null,
+        };
+      },
       async update({ data }: { data: Record<string, unknown> }) {
         return { ...current, ...data };
       },
@@ -197,6 +204,44 @@ test('server profile updates sync linked wiki identity and write a bounded audit
     hasWebsite: true,
     hasDiscord: false,
   });
+});
+
+test('server profile update rechecks ownership suspension inside the write transaction', async () => {
+  const serverId = randomUUID();
+  const actorAccountId = randomUUID();
+  let writes = 0;
+  const prisma = {
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) {
+      return callback(prisma);
+    },
+    server: {
+      async findUnique() {
+        return {
+          ownerAccountId: actorAccountId,
+          registrantAccountId: actorAccountId,
+          ownershipChallengeSuspendedAt: new Date(),
+        };
+      },
+      async update() {
+        writes += 1;
+        throw new Error('unexpected write');
+      },
+    },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  await assert.rejects(
+    () => service.updateProfile(serverId, {
+      name: 'Blocked Server',
+      tags: [],
+      shortDescription: 'Blocked summary',
+      longDescription: 'Blocked body',
+      websiteUrl: null,
+      discordUrl: null,
+    }, actorAccountId),
+    /관리 권한이 변경/u,
+  );
+  assert.equal(writes, 0);
 });
 
 test('server detail exposes only a canonical published wiki release', async () => {
@@ -995,6 +1040,7 @@ test('Votifier settings never return the stored v2 token', async () => {
 
 test('Votifier update preserves an encrypted token when no replacement is provided', async () => {
   const serverId = randomUUID();
+  const actorAccountId = randomUUID();
   const created: Array<Record<string, unknown>> = [];
   const service = new ServerService(
     {} as never,
@@ -1013,7 +1059,29 @@ test('Votifier update preserves an encrypted token when no replacement is provid
           return { count: data.length };
         },
       },
-      $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
+      server: {
+        findUnique: async () => ({
+          ownerAccountId: actorAccountId,
+          registrantAccountId: actorAccountId,
+          ownershipChallengeSuspendedAt: null,
+        }),
+      },
+      $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        server: {
+          findUnique: async () => ({
+            ownerAccountId: actorAccountId,
+            registrantAccountId: actorAccountId,
+            ownershipChallengeSuspendedAt: null,
+          }),
+        },
+        votifierTarget: {
+          deleteMany: async () => ({ count: 1 }),
+          createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
+            created.push(...data);
+            return { count: data.length };
+          },
+        },
+      }),
     } as never,
     {} as never,
   );
@@ -1025,7 +1093,7 @@ test('Votifier update preserves an encrypted token when no replacement is provid
       port: 8192,
       tokenConfigured: true,
     },
-  ]);
+  ], actorAccountId);
 
   assert.equal(created[0]?.token, 'enc:v1:stored-token');
 });
@@ -1219,8 +1287,17 @@ test('server banner upload uses canonical file service metadata path', async () 
   };
   const updates: unknown[] = [];
   const prisma = {
+    async $transaction(callback: (tx: unknown) => Promise<unknown>) {
+      return callback(prisma);
+    },
     server: {
-      findUnique: async () => ({ id: serverId, bannerUrl: 'upload://old-banner.webp' }),
+      findUnique: async ({ select }: { select?: { ownerAccountId?: boolean } }) => select?.ownerAccountId
+        ? {
+            ownerAccountId: accountId,
+            registrantAccountId: accountId,
+            ownershipChallengeSuspendedAt: null,
+          }
+        : { id: serverId, bannerUrl: 'upload://old-banner.webp' },
       update: async (args: unknown) => {
         updates.push(args);
         return { id: serverId, bannerUrl: 'upload://banner.webp' };

@@ -16,7 +16,11 @@ import type {
   ServerUpdate,
   VotifierTarget,
 } from '@minewiki/schemas';
-import { isPublicHttpUrl, PUBLIC_SERVER_LISTING_STATUS } from '@minewiki/schemas';
+import {
+  isPublicHttpUrl,
+  isServerOwnershipManagementSuspended,
+  PUBLIC_SERVER_LISTING_STATUS,
+} from '@minewiki/schemas';
 import { Prisma, type Server, type ServerWiki } from '@prisma/client';
 import { status, statusBedrock } from 'minecraft-server-util';
 import { resolveSrv } from 'node:dns/promises';
@@ -87,6 +91,11 @@ export interface ServerProfileUpdateInput {
   readonly longDescription: string;
   readonly websiteUrl: string | null;
   readonly discordUrl: string | null;
+}
+
+interface ServerMutationAuthority {
+  readonly allowAdminBypass?: boolean;
+  readonly allowPendingRegistrant?: boolean;
 }
 
 @Injectable()
@@ -1381,7 +1390,12 @@ export class ServerService {
     return response;
   }
 
-  async updateBanner(id: string, accountId: string, upload: FileImageUploadRequest): Promise<FileImageUploadResponse> {
+  async updateBanner(
+    id: string,
+    accountId: string,
+    upload: FileImageUploadRequest,
+    authority: ServerMutationAuthority = {},
+  ): Promise<FileImageUploadResponse> {
     const startedAt = Date.now();
     try {
       const server = await this.ensureExists(id);
@@ -1389,9 +1403,15 @@ export class ServerService {
         ...upload,
         usageContext: 'server_banner',
       });
-      await this.prisma.server.update({
-        where: { id },
-        data: { bannerUrl: stored.publicPath },
+      await this.prisma.$transaction(async (tx) => {
+        await this.assertServerMutationAuthority(tx, id, accountId, {
+          ...authority,
+          allowPendingRegistrant: true,
+        });
+        await tx.server.update({
+          where: { id },
+          data: { bannerUrl: stored.publicPath },
+        });
       });
       if (server.bannerUrl && server.bannerUrl !== stored.publicPath) {
         await this.retireServerBanner(server.bannerUrl, id);
@@ -1414,8 +1434,10 @@ export class ServerService {
     id: string,
     input: ServerProfileUpdateInput,
     actorAccountId: string,
+    authority: ServerMutationAuthority = {},
   ): Promise<ServerDetail> {
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertServerMutationAuthority(tx, id, actorAccountId, authority);
       const server = await tx.server.update({
         where: { id },
         data: {
@@ -1469,10 +1491,18 @@ export class ServerService {
     }
   }
 
-  async updateVotePolicy(id: string, requiresOwnership: boolean): Promise<ServerDetail> {
-    const updated = await this.prisma.server.update({
-      where: { id },
-      data: { voteRequiresOwnership: requiresOwnership },
+  async updateVotePolicy(
+    id: string,
+    requiresOwnership: boolean,
+    actorAccountId: string,
+    authority: ServerMutationAuthority = {},
+  ): Promise<ServerDetail> {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.assertServerMutationAuthority(tx, id, actorAccountId, authority);
+      return tx.server.update({
+        where: { id },
+        data: { voteRequiresOwnership: requiresOwnership },
+      });
     });
     return toDetail(updated, SUPPORTED_CLAIM_METHODS);
   }
@@ -1491,7 +1521,12 @@ export class ServerService {
     }));
   }
 
-  async updateVotifierTargets(serverId: string, targets: VotifierTarget[]): Promise<void> {
+  async updateVotifierTargets(
+    serverId: string,
+    targets: VotifierTarget[],
+    actorAccountId: string,
+    authority: ServerMutationAuthority = {},
+  ): Promise<void> {
     const existingTargets = await this.prisma.votifierTarget.findMany({
       where: { serverId },
       orderBy: { createdAt: 'asc' },
@@ -1521,12 +1556,38 @@ export class ServerService {
         publicKey: target.publicKey ?? null,
       };
     });
-    await this.prisma.$transaction([
-      this.prisma.votifierTarget.deleteMany({ where: { serverId } }),
-      this.prisma.votifierTarget.createMany({
-        data,
-      }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      await this.assertServerMutationAuthority(tx, serverId, actorAccountId, authority);
+      await tx.votifierTarget.deleteMany({ where: { serverId } });
+      await tx.votifierTarget.createMany({ data });
+    });
+  }
+
+  private async assertServerMutationAuthority(
+    tx: Prisma.TransactionClient,
+    serverId: string,
+    actorAccountId: string,
+    authority: ServerMutationAuthority,
+  ): Promise<void> {
+    const server = await tx.server.findUnique({
+      where: { id: serverId },
+      select: {
+        ownerAccountId: true,
+        registrantAccountId: true,
+        ownershipChallengeSuspendedAt: true,
+      },
+    });
+    if (!server) throw new NotFoundException('서버를 찾을 수 없습니다.');
+    if (authority.allowAdminBypass) return;
+
+    const suspended = isServerOwnershipManagementSuspended(server);
+    const isOwner = server.ownerAccountId === actorAccountId && !suspended;
+    const isPendingRegistrant = authority.allowPendingRegistrant === true
+      && server.registrantAccountId === actorAccountId
+      && (!server.ownerAccountId || suspended);
+    if (!isOwner && !isPendingRegistrant) {
+      throw new ForbiddenException('서버 관리 권한이 변경되었습니다. 다시 확인해 주세요.');
+    }
   }
 
   async remove(id: string, actorAccountId?: string): Promise<void> {
