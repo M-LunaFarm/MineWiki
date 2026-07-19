@@ -1,5 +1,20 @@
 import sanitizeHtml from 'sanitize-html';
 import katex from 'katex';
+import hljs from 'highlight.js/lib/core';
+import bash from 'highlight.js/lib/languages/bash';
+import css from 'highlight.js/lib/languages/css';
+import groovy from 'highlight.js/lib/languages/groovy';
+import ini from 'highlight.js/lib/languages/ini';
+import java from 'highlight.js/lib/languages/java';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import kotlin from 'highlight.js/lib/languages/kotlin';
+import markdown from 'highlight.js/lib/languages/markdown';
+import python from 'highlight.js/lib/languages/python';
+import sql from 'highlight.js/lib/languages/sql';
+import typescript from 'highlight.js/lib/languages/typescript';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
 import type {
   AstNode,
   InlineNode,
@@ -20,7 +35,8 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.30.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.31.0';
+const MAX_HIGHLIGHT_CODE_LENGTH = 100_000;
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
@@ -37,6 +53,40 @@ const MAX_FOOTNOTE_NAME_LENGTH = 64;
 const MAX_FILE_OPTION_VALUE_LENGTH = 256;
 const MAX_FILE_OPTIONS = 16;
 const INCLUDE_PARAM_KEY = /^[A-Za-z0-9가-힣_]+$/u;
+
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('groovy', groovy);
+hljs.registerLanguage('ini', ini);
+hljs.registerLanguage('java', java);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('kotlin', kotlin);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('yaml', yaml);
+
+const codeLanguageAliases: Readonly<Record<string, string>> = {
+  cjs: 'javascript',
+  conf: 'ini',
+  gradle: 'groovy',
+  htm: 'xml',
+  html: 'xml',
+  js: 'javascript',
+  jsonc: 'json',
+  kt: 'kotlin',
+  md: 'markdown',
+  properties: 'ini',
+  py: 'python',
+  sh: 'bash',
+  shell: 'bash',
+  ts: 'typescript',
+  xhtml: 'xml',
+  yml: 'yaml',
+};
 
 const componentNameMap: Record<string, string> = {
   '문서 상태': 'document_status',
@@ -2531,7 +2581,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         continue;
       }
       if (node.type === 'codeblock') {
-        output.push(`<pre class="codeblock" data-lang="${escapeAttr(node.lang ?? '')}"><code>${escapeHtml(node.code)}</code></pre>`);
+        output.push(renderCodeBlock(node.code, node.lang));
         continue;
       }
       if (node.name === 'references') {
@@ -3242,13 +3292,13 @@ function renderComponent(name: string, props: Record<string, string>, options: R
   if (name === 'version_support') return renderSimpleRows(props, props['열'] || '버전,지원,상태,비고', '버전 지원표');
   if (name === 'code_example') {
     const lang = props['언어'] ?? '';
-    return `<figure class="code-example"><figcaption>${escapeHtml(props['제목'] ?? '코드 예제')}${lang ? ` · ${escapeHtml(lang)}` : ''}</figcaption><pre class="codeblock" data-lang="${escapeAttr(lang)}"><code>${escapeHtml(props['코드'] ?? '')}</code></pre></figure>`;
+    return `<figure class="code-example"><figcaption>${escapeHtml(props['제목'] ?? '코드 예제')}${lang ? ` · ${escapeHtml(lang)}` : ''}</figcaption>${renderCodeBlock(props['코드'] ?? '', lang)}</figure>`;
   }
   if (name === 'warning_box') return `<aside class="warning"><strong>${escapeHtml(props['제목'] ?? '주의')}</strong><span>${escapeHtml(props['내용'] ?? '')}</span></aside>`;
   if (name === 'official_doc_link') return `<aside class="doc-status official-doc-link"><strong>공식 문서</strong><span>${renderExternalLink(props['URL'] ?? '', props['제목'] ?? props['URL'] ?? '공식 문서')}</span>${props['확인일'] ? `<small>${escapeHtml(formatComponentValue('확인일', props['확인일']))}</small>` : ''}</aside>`;
   if (name === 'dependency_info') return renderSimpleRows(props, props['열'] || '이름,범위,버전,비고', '의존성 정보');
-  if (name === 'gradle_setup') return `<figure class="code-example"><figcaption>Gradle 설정</figcaption><pre class="codeblock" data-lang="gradle"><code>${escapeHtml(props['내용'] ?? '')}</code></pre></figure>`;
-  if (name === 'maven_setup') return `<figure class="code-example"><figcaption>Maven 설정</figcaption><pre class="codeblock" data-lang="xml"><code>${escapeHtml(props['내용'] ?? '')}</code></pre></figure>`;
+  if (name === 'gradle_setup') return `<figure class="code-example"><figcaption>Gradle 설정</figcaption>${renderCodeBlock(props['내용'] ?? '', 'gradle')}</figure>`;
+  if (name === 'maven_setup') return `<figure class="code-example"><figcaption>Maven 설정</figcaption>${renderCodeBlock(props['내용'] ?? '', 'xml')}</figure>`;
   if (name === 'nbt_structure') return renderSimpleRows(props, props['열'] || '태그,타입,설명', 'NBT 구조');
   if (name === 'protocol_fields') return renderSimpleRows(props, props['열'] || '필드,타입,설명', '프로토콜 필드 표');
   if (name === 'references') return '';
@@ -3712,4 +3762,19 @@ export function escapeHtml(value: string) {
 
 export function escapeAttr(value: string) {
   return escapeHtml(value).replace(/`/g, '&#96;');
+}
+
+function renderCodeBlock(code: string, requestedLanguage: string | null): string {
+  const rawLanguage = requestedLanguage?.trim().toLocaleLowerCase('en-US') ?? '';
+  const language = codeLanguageAliases[rawLanguage] ?? rawLanguage;
+  const dataLanguage = escapeAttr(rawLanguage);
+  if (!language || code.length > MAX_HIGHLIGHT_CODE_LENGTH || !hljs.getLanguage(language)) {
+    return `<pre class="codeblock" data-lang="${dataLanguage}"><code>${escapeHtml(code)}</code></pre>`;
+  }
+  try {
+    const highlighted = hljs.highlight(code, { language, ignoreIllegals: true }).value;
+    return `<pre class="codeblock" data-lang="${dataLanguage}"><code class="hljs language-${escapeAttr(language)}">${highlighted}</code></pre>`;
+  } catch {
+    return `<pre class="codeblock" data-lang="${dataLanguage}"><code>${escapeHtml(code)}</code></pre>`;
+  }
 }

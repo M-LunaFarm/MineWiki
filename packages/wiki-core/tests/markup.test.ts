@@ -486,8 +486,29 @@ test('renders the safe discussion NamuMark subset with contextual links and tabl
   assert.match(html, /<ul class="wiki-list">/u);
   assert.match(html, /<blockquote class="wiki-quote">/u);
   assert.match(html, /<table class="component-table wiki-table"/u);
-  assert.match(html, /<pre class="codeblock" data-lang="js"><code>&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/code><\/pre>/u);
+  assert.match(html, /<pre class="codeblock" data-lang="js"><code class="hljs language-javascript">/u);
+  assert.match(html, /&lt;script&gt;/u);
   assert.equal(html.includes('<script>'), false);
+});
+
+test('highlights supported syntax blocks and keeps unknown languages escaped', () => {
+  const highlighted = renderDocument(parseMarkup([
+    '{{{#!syntax typescript',
+    'const answer: number = 42;',
+    '}}}',
+  ].join('\n')).ast);
+  assert.match(highlighted, /<code class="hljs language-typescript">/u);
+  assert.match(highlighted, /<span class="hljs-keyword">const<\/span>/u);
+  assert.match(highlighted, /<span class="hljs-number">42<\/span>/u);
+
+  const fallback = renderDocument(parseMarkup([
+    '{{{#!syntax unsupported-lang',
+    '<script>alert(1)</script>',
+    '}}}',
+  ].join('\n')).ast);
+  assert.match(fallback, /<code>&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/code>/u);
+  assert.equal(fallback.includes('<script>'), false);
+  assert.equal(fallback.includes('class="hljs'), false);
 });
 
 test('keeps document-level and dynamic markup inert in discussion comments', () => {
