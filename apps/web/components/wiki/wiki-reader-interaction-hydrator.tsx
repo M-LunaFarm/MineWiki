@@ -13,8 +13,9 @@ export function WikiReaderInteractionHydrator({ targetId, revisionId }: WikiRead
   useEffect(() => {
     const root = document.getElementById(targetId);
     if (!root) return;
+    const cleanupHeadings = hydrateHeadingSections(root, revisionId);
     const references = Array.from(root.querySelectorAll<HTMLAnchorElement>('.wiki-footnote-ref > a[href^="#fn-"]'));
-    if (references.length === 0) return;
+    if (references.length === 0) return cleanupHeadings;
 
     const popover = document.createElement('aside');
     popover.className = 'wiki-footnote-popover';
@@ -110,6 +111,7 @@ export function WikiReaderInteractionHydrator({ targetId, revisionId }: WikiRead
     dialog.element.addEventListener('close', restoreFocus);
 
     return () => {
+      cleanupHeadings();
       for (const cleanup of cleanups) cleanup();
       clearHideTimer();
       popover.remove();
@@ -119,6 +121,78 @@ export function WikiReaderInteractionHydrator({ targetId, revisionId }: WikiRead
   }, [revisionId, targetId]);
 
   return null;
+}
+
+function hydrateHeadingSections(root: HTMLElement, revisionId: string) {
+  const headings = Array.from(root.children).filter(
+    (element): element is HTMLHeadingElement => /^H[2-6]$/u.test(element.tagName) && Boolean(element.id),
+  );
+  if (headings.length === 0) return () => undefined;
+  const storageKey = `minewiki:wiki:collapsed-headings:${revisionId}`;
+  const collapsed = readCollapsedHeadings(storageKey);
+  const sections = headings.map((heading) => {
+    const nodes: HTMLElement[] = [];
+    let sibling = heading.nextElementSibling;
+    while (sibling) {
+      const siblingLevel = /^H[1-6]$/u.test(sibling.tagName) ? Number(sibling.tagName.slice(1)) : null;
+      if (siblingLevel !== null) break;
+      nodes.push(sibling as HTMLElement);
+      sibling = sibling.nextElementSibling;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'wiki-heading-toggle';
+    heading.append(button);
+    const setCollapsed = (isCollapsed: boolean, persist = true) => {
+      for (const node of nodes) node.hidden = isCollapsed;
+      button.textContent = isCollapsed ? '+' : '−';
+      button.setAttribute('aria-expanded', String(!isCollapsed));
+      button.setAttribute('aria-label', `${heading.textContent?.replace(/[+−]$/u, '').trim() || '문단'} ${isCollapsed ? '펼치기' : '접기'}`);
+      if (isCollapsed) collapsed.add(heading.id);
+      else collapsed.delete(heading.id);
+      if (persist) writeCollapsedHeadings(storageKey, collapsed);
+    };
+    const onClick = () => setCollapsed(!collapsed.has(heading.id));
+    button.addEventListener('click', onClick);
+    setCollapsed(collapsed.has(heading.id), false);
+    return { heading, nodes, button, setCollapsed, onClick };
+  });
+  const revealHashTarget = () => {
+    const targetId = decodeURIComponent(window.location.hash.slice(1));
+    if (!targetId) return;
+    const target = document.getElementById(targetId);
+    if (!target || !root.contains(target)) return;
+    for (const section of sections) {
+      if (section.nodes.some((node) => node === target || node.contains(target))) section.setCollapsed(false);
+    }
+  };
+  window.addEventListener('hashchange', revealHashTarget);
+  revealHashTarget();
+  return () => {
+    window.removeEventListener('hashchange', revealHashTarget);
+    for (const section of sections) {
+      section.button.removeEventListener('click', section.onClick);
+      section.button.remove();
+      for (const node of section.nodes) node.hidden = false;
+    }
+  };
+}
+
+function readCollapsedHeadings(storageKey: string): Set<string> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]');
+    return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCollapsedHeadings(storageKey: string, collapsed: ReadonlySet<string>) {
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify([...collapsed]));
+  } catch {
+    // Reading remains fully functional when storage is unavailable.
+  }
 }
 
 function resolveFootnote(root: HTMLElement, reference: HTMLAnchorElement): HTMLLIElement | null {

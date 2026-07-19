@@ -1202,6 +1202,9 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   .wiki-rendered .wiki-anchor {
     scroll-margin-top: 6rem;
   }
+  .wiki-rendered .wiki-heading-toggle {
+    @apply ml-2 inline-grid size-7 translate-y-[-0.08em] place-items-center rounded-md border border-white/10 bg-white/[0.04] align-middle text-sm font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300;
+  }
   .wiki-rendered .wiki-footnote-ref {
     @apply ml-0.5 text-xs font-semibold;
     scroll-margin-top: 6rem;
@@ -1265,6 +1268,15 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   }
   .server-wiki-layout .wiki-rendered a:hover {
     color: color-mix(in srgb, var(--server-wiki-accent, #346ddb) 78%, #111);
+  }
+  .server-wiki-layout .wiki-rendered .wiki-heading-toggle {
+    border-color: #dedede;
+    background: #f7f7f7;
+    color: #666;
+  }
+  .server-wiki-layout .wiki-rendered .wiki-heading-toggle:hover {
+    border-color: color-mix(in srgb, var(--server-wiki-accent, #346ddb) 45%, #dedede);
+    color: var(--server-wiki-accent, #346ddb);
   }
   .server-wiki-layout .wiki-rendered blockquote {
     border-color: #9ab5ef;
