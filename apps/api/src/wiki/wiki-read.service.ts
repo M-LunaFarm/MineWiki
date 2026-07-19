@@ -3307,7 +3307,7 @@ export class WikiReadService {
   async getBlame(pageId: string, viewer?: WikiAccessViewer): Promise<WikiBlameResponse> {
     const id = this.parseBigIntId(pageId, 'pageId');
     const page = await this.prisma.wikiPage.findUnique({ where: { id } });
-    if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
+    if (!page) throw new NotFoundException('Wiki page not found.');
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
     const boundaryResolver = this.wikiPermissions.resolvePublishedPageBoundary?.bind(this.wikiPermissions);
     const legacyPublication = boundaryResolver
@@ -3318,6 +3318,9 @@ export class WikiReadService {
       : legacyPublication
         ? publishedBoundaryFromScope(legacyPublication)
         : null;
+    if (!publicationBoundary && page.status === 'deleted') {
+      throw new NotFoundException('Wiki page not found.');
+    }
     const permissionPage = publicationBoundary
       ? pageFromServerWikiReleaseItem(publicationBoundary.currentItem)
       : page;

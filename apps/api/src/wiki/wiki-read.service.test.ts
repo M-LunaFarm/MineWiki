@@ -2080,7 +2080,7 @@ test('public server wiki blame stops at the released revision and conceals later
   const page = {
     id: 1n, namespaceId: 7, spaceId: 40n, localPath: 'luna/guide', slug: 'luna/guide',
     title: 'luna/guide', displayTitle: 'Guide', currentRevisionId: 13n, pageType: 'article',
-    protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now,
+    protectionLevel: 'open', status: 'deleted', createdBy: 1n, createdAt: now, updatedAt: now,
   };
   const whereInputs: unknown[] = [];
   const permissionInputs: Array<{ page: { title: string }; publicationProof?: { item: { revisionId: bigint } } }> = [];
@@ -2141,6 +2141,19 @@ test('public server wiki blame stops at the released revision and conceals later
   )), true);
   assert.equal(result.revisionId, '12');
   assert.doesNotMatch(JSON.stringify(result), /비밀 초안/u);
+});
+
+test('blame keeps deleted non-server pages hidden', async () => {
+  const prisma = {
+    wikiPage: { async findUnique() { return { id: 1n, spaceId: 1n, status: 'deleted' }; } },
+    serverWiki: { async findFirst() { return null; } },
+  } as unknown as PrismaService;
+  const permissions = {} as unknown as WikiPermissionService;
+
+  await assert.rejects(
+    () => new WikiReadService(prisma, permissions).getBlame('1'),
+    /not found/i,
+  );
 });
 
 test('backlinks expose only links from the current readable source revision', async () => {
