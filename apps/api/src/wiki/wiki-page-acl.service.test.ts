@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import type { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import type { WikiAdminService } from './wiki-admin.service';
+import type { WikiAclService } from './wiki-acl.service';
 import { WikiPageAclService } from './wiki-page-acl.service';
 import type { WikiPermissionService } from './wiki-permission.service';
 import type { WikiProfileService } from './wiki-profile.service';
@@ -46,7 +47,8 @@ test('page ACL creation always fixes the target to the authorized page', async (
     prisma as unknown as PrismaService,
     profiles as unknown as WikiProfileService,
     permissions as unknown as WikiPermissionService,
-    admin as unknown as WikiAdminService
+    admin as unknown as WikiAdminService,
+    {} as WikiAclService
   );
 
   await service.createRule('7', session, {
@@ -80,7 +82,8 @@ test('page ACL accepts separate thread creation and comment actions', async () =
     prisma as unknown as PrismaService,
     profiles as unknown as WikiProfileService,
     permissions as unknown as WikiPermissionService,
-    admin as unknown as WikiAdminService
+    admin as unknown as WikiAdminService,
+    {} as WikiAclService
   );
 
   for (const action of ['create_thread', 'write_thread_comment']) {
@@ -112,7 +115,8 @@ test('page ACL deletion cannot address a rule owned by another page', async () =
     prisma as unknown as PrismaService,
     profiles as unknown as WikiProfileService,
     permissions as unknown as WikiPermissionService,
-    admin as unknown as WikiAdminService
+    admin as unknown as WikiAdminService,
+    {} as WikiAclService
   );
 
   await assert.rejects(service.deleteRule('7', '9', session), /not found/i);
@@ -138,7 +142,8 @@ test('page ACL creation rejects past expirations before persistence', async () =
     prisma as unknown as PrismaService,
     profiles as unknown as WikiProfileService,
     permissions as unknown as WikiPermissionService,
-    admin as unknown as WikiAdminService
+    admin as unknown as WikiAdminService,
+    {} as WikiAclService
   );
 
   await assert.rejects(
@@ -170,7 +175,8 @@ test('page ACL rejects a group scoped to another wiki space', async () => {
     prisma as unknown as PrismaService,
     profiles as unknown as WikiProfileService,
     permissions as unknown as WikiPermissionService,
-    admin as unknown as WikiAdminService
+    admin as unknown as WikiAdminService,
+    {} as WikiAclService
   );
 
   await assert.rejects(
@@ -199,14 +205,83 @@ test('page readers do not receive manager-only ACL rules, subjects, reasons, or 
     prisma as unknown as PrismaService,
     {} as WikiProfileService,
     permissions as unknown as WikiPermissionService,
-    {} as WikiAdminService
+    {} as WikiAdminService,
+    {} as WikiAclService
   );
 
   const result = await service.getPageAcl('7', null);
   assert.equal(catalogQueried, false);
   assert.equal(rulesQueried, false);
   assert.deepEqual(result.rules, []);
+  assert.deepEqual(result.layers, []);
+  assert.deepEqual(result.viewerTrace, []);
+  assert.equal(result.evaluatedAt, null);
   assert.doesNotMatch(JSON.stringify(result), /private-user-42|internal incident/);
   assert.equal(result.manageReason, 'insufficient_permission');
   assert.deepEqual(result.catalog, { groups: [], aclGroups: [], roles: [] });
+});
+
+test('page ACL managers receive the exact active inheritance stack and viewer trace', async () => {
+  const now = new Date();
+  const rule = (id: bigint, targetType: string, targetId: bigint | null, action = 'edit', expiresAt: Date | null = null) => ({
+    id, targetType, targetId, action, effect: 'allow', subjectType: 'perm', subjectValue: 'member',
+    sortOrder: Number(id), reason: `${targetType} reason`, expiresAt, createdBy: 3n, createdAt: now, updatedAt: now
+  });
+  const queriedWhere: unknown[] = [];
+  const prisma = {
+    wikiPage: { async findUnique() { return page(); } },
+    aclRule: {
+      async findMany(input: { where: unknown }) {
+        queriedWhere.push(input.where);
+        return [
+          rule(1n, 'page', 7n),
+          rule(2n, 'space', 2n),
+          rule(3n, 'namespace', 1n),
+          rule(4n, 'site', null),
+          rule(5n, 'space', 99n),
+          rule(6n, 'page', 7n, 'edit', new Date(now.getTime() - 1_000))
+        ];
+      }
+    },
+    wikiGroup: { async findMany() { return []; } },
+    aclGroup: { async findMany() { return []; } }
+  };
+  const actor = { accountId: 'account-1', profileId: 3n, status: 'active' };
+  const permissions = {
+    async assertCanReadPage() {},
+    async resolveActor() { return actor; },
+    async canManagePageAcl() { return { allowed: true, reason: 'page_owner' }; }
+  };
+  const acl = {
+    async evaluateActionsWithTrace(input: { actions: readonly string[]; requestIp?: string | null }) {
+      assert.equal(input.requestIp, '192.0.2.10');
+      return new Map(input.actions.map((action) => [action, action === 'edit'
+        ? { matched: true, allowed: true, reason: 'space allow', matchedScope: 'space', matchedRuleId: 2n }
+        : { matched: false, allowed: false, reason: 'acl_no_match', matchedScope: null, matchedRuleId: null }]));
+    }
+  };
+  const service = new WikiPageAclService(
+    prisma as unknown as PrismaService,
+    {} as WikiProfileService,
+    permissions as unknown as WikiPermissionService,
+    {} as WikiAdminService,
+    acl as unknown as WikiAclService
+  );
+
+  const result = await service.getPageAcl('7', { ...session, requestIp: '198.51.100.1' }, '192.0.2.10');
+
+  assert.equal(queriedWhere.length, 1);
+  assert.deepEqual(result.layers.map((layer) => [layer.scope, layer.targetId, layer.editableHere, layer.rules.map((entry) => entry.id)]), [
+    ['page', '7', true, ['1']],
+    ['space', '2', false, ['2']],
+    ['namespace', '1', false, ['3']],
+    ['site', null, false, ['4']]
+  ]);
+  assert.deepEqual(result.rules.map((entry) => entry.id), ['1']);
+  assert.deepEqual(result.viewerTrace.find((entry) => entry.action === 'edit'), {
+    action: 'edit', matched: true, allowed: true, matchedScope: 'space', matchedRuleId: '2', reason: 'space allow'
+  });
+  assert.ok(result.evaluatedAt);
+  assert.doesNotMatch(JSON.stringify(result), /space reason.*99/u);
+  assert.doesNotMatch(JSON.stringify(result), /"id":"6"/u);
 });

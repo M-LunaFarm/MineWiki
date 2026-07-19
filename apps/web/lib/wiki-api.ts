@@ -1253,6 +1253,22 @@ export interface WikiPageAclResponse {
   };
   readonly actions: readonly string[];
   readonly rules: readonly WikiAclRuleSummary[];
+  readonly layers: ReadonlyArray<{
+    readonly scope: 'page' | 'space' | 'namespace' | 'site';
+    readonly targetId: string | null;
+    readonly label: string;
+    readonly editableHere: boolean;
+    readonly rules: readonly WikiAclRuleSummary[];
+  }>;
+  readonly viewerTrace: ReadonlyArray<{
+    readonly action: string;
+    readonly matched: boolean;
+    readonly allowed: boolean;
+    readonly matchedScope: 'page' | 'space' | 'namespace' | 'site' | null;
+    readonly matchedRuleId: string | null;
+    readonly reason: string;
+  }>;
+  readonly evaluatedAt: string | null;
   readonly canManage: boolean;
   readonly manageReason: string;
   readonly catalog: {

@@ -57,6 +57,13 @@ export interface WikiAclDecision {
   readonly reason: string;
 }
 
+export type WikiAclScope = 'page' | 'space' | 'namespace' | 'site';
+
+export interface WikiAclTraceDecision extends WikiAclDecision {
+  readonly matchedScope: WikiAclScope | null;
+  readonly matchedRuleId: bigint | null;
+}
+
 const ROLE_GROUPS = {
   admin: new Set(['admin', 'developer']),
   moderator: new Set(['moderator', 'admin', 'developer']),
@@ -214,8 +221,32 @@ export class WikiAclService {
     readonly store?: WikiAclStore;
     readonly requestIp?: string | null;
   }): Promise<WikiAclDecision> {
+    const traced = await this.evaluateWithTrace(input);
+    return { matched: traced.matched, allowed: traced.allowed, reason: traced.reason };
+  }
+
+  async evaluateWithTrace(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly action: WikiAclAction;
+    readonly resource: WikiAclResource;
+    readonly store?: WikiAclStore;
+    readonly requestIp?: string | null;
+  }): Promise<WikiAclTraceDecision> {
+    const decisions = await this.evaluateActionsWithTrace({ ...input, actions: [input.action] });
+    return decisions.get(input.action) ?? noAclTrace();
+  }
+
+  async evaluateActionsWithTrace(input: {
+    readonly actor: WikiPermissionActor | null;
+    readonly actions: readonly WikiAclAction[];
+    readonly resource: WikiAclResource;
+    readonly store?: WikiAclStore;
+    readonly requestIp?: string | null;
+  }): Promise<ReadonlyMap<WikiAclAction, WikiAclTraceDecision>> {
     const store = input.store ?? this.prisma;
     const now = new Date();
+    const actions = [...new Set(input.actions)];
+    if (actions.length === 0) return new Map();
     let namespaceId = input.resource.namespaceId ?? null;
     if (!namespaceId && input.resource.namespaceCode) {
       const namespace = await store.wikiNamespace.findUnique({
@@ -224,7 +255,7 @@ export class WikiAclService {
       });
       namespaceId = namespace?.id ?? null;
     }
-    const targetFilters: Array<{ targetType: string; targetId?: bigint | null }> = [
+    const targetFilters: Array<{ targetType: WikiAclScope; targetId?: bigint | null }> = [
       { targetType: 'site', targetId: null }
     ];
     if (namespaceId) {
@@ -239,7 +270,7 @@ export class WikiAclService {
 
     const rules = await store.aclRule.findMany({
       where: {
-        action: input.action,
+        action: { in: actions },
         OR: targetFilters.map((target) => ({
           targetType: target.targetType,
           targetId: target.targetId ?? null
@@ -253,7 +284,7 @@ export class WikiAclService {
     });
     const activeRules = rules
       .filter((rule) =>
-        rule.action === input.action &&
+        actions.includes(rule.action as WikiAclAction) &&
         targetFilters.some((target) => rule.targetType === target.targetType && (rule.targetId ?? null) === (target.targetId ?? null)) &&
         (!rule.expiresAt || rule.expiresAt.getTime() > now.getTime())
       );
@@ -261,38 +292,36 @@ export class WikiAclService {
     const scopes = [...targetFilters].sort(
       (left, right) => targetSpecificity(right.targetType) - targetSpecificity(left.targetType)
     );
-    for (const scope of scopes) {
-      const scopedRules = activeRules
-        .filter(
-          (rule) =>
-            rule.targetType === scope.targetType &&
-            (rule.targetId ?? null) === (scope.targetId ?? null)
-        )
-        .sort((left, right) => left.sortOrder - right.sortOrder);
-      for (const rule of scopedRules) {
-        if (!isSupportedAclSubjectType(rule.subjectType)) {
-          return { matched: true, allowed: false, reason: 'acl_unsupported_subject' };
+    const requestIp = input.requestIp ?? input.actor?.requestIp ?? getCurrentRequestIp();
+    const result = new Map<WikiAclAction, WikiAclTraceDecision>();
+    for (const action of actions) {
+      let decision = noAclTrace();
+      scopeLoop: for (const scope of scopes) {
+        const scopedRules = activeRules
+          .filter(
+            (rule) =>
+              rule.action === action &&
+              rule.targetType === scope.targetType &&
+              (rule.targetId ?? null) === (scope.targetId ?? null)
+          )
+          .sort((left, right) => left.sortOrder - right.sortOrder || compareBigInt(left.id, right.id));
+        for (const rule of scopedRules) {
+          if (!isSupportedAclSubjectType(rule.subjectType)) {
+            decision = traceDecision(false, 'acl_unsupported_subject', scope.targetType, rule.id);
+            break scopeLoop;
+          }
+          if (!(await this.subjectMatches(store, rule, input.actor, input.resource, requestIp))) continue;
+          decision = rule.effect === 'allow'
+            ? traceDecision(true, rule.reason ?? 'acl_allow', scope.targetType, rule.id)
+            : rule.effect === 'deny'
+              ? traceDecision(false, rule.reason ?? 'acl_deny', scope.targetType, rule.id)
+              : traceDecision(false, 'acl_unsupported_effect', scope.targetType, rule.id);
+          break scopeLoop;
         }
-        if (!(await this.subjectMatches(
-          store,
-          rule,
-          input.actor,
-          input.resource,
-          input.requestIp ?? input.actor?.requestIp ?? getCurrentRequestIp()
-        ))) {
-          continue;
-        }
-        if (rule.effect === 'allow') {
-          return { matched: true, allowed: true, reason: rule.reason ?? 'acl_allow' };
-        }
-        if (rule.effect === 'deny') {
-          return { matched: true, allowed: false, reason: rule.reason ?? 'acl_deny' };
-        }
-        return { matched: true, allowed: false, reason: 'acl_unsupported_effect' };
       }
+      result.set(action, decision);
     }
-
-    return { matched: false, allowed: false, reason: 'acl_no_match' };
+    return result;
   }
 
   private async subjectMatches(
@@ -599,6 +628,29 @@ function targetSpecificity(targetType: string): number {
     throw new Error(`Unsupported ACL target type: ${targetType}`);
   }
   return specificity;
+}
+
+function noAclTrace(): WikiAclTraceDecision {
+  return {
+    matched: false,
+    allowed: false,
+    reason: 'acl_no_match',
+    matchedScope: null,
+    matchedRuleId: null
+  };
+}
+
+function traceDecision(
+  allowed: boolean,
+  reason: string,
+  matchedScope: WikiAclScope,
+  matchedRuleId: bigint
+): WikiAclTraceDecision {
+  return { matched: true, allowed, reason, matchedScope, matchedRuleId };
+}
+
+function compareBigInt(left: bigint, right: bigint): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function stripAclPrefix(value: string, subjectType: string): string {

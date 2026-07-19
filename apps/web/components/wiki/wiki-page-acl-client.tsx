@@ -31,6 +31,9 @@ const ROLE_LABELS: Record<string, string> = {
   server_owner: '서버 소유자', server_manager: '서버 매니저', server_editor: '서버 편집자',
   mod_wiki_manager: '모드 위키 관리자', mod_wiki_editor: '모드 위키 편집자'
 };
+const SCOPE_LABELS: Record<'page' | 'space' | 'namespace' | 'site', string> = {
+  page: '문서', space: '공간', namespace: '네임스페이스', site: '사이트'
+};
 
 export function WikiPageAclClient({
   pageId,
@@ -68,6 +71,17 @@ export function WikiPageAclClient({
 
   const rules = useMemo(
     () => (data?.rules ?? []).filter((rule) => rule.action === activeAction).sort((left, right) => left.sortOrder - right.sortOrder),
+    [activeAction, data]
+  );
+  const activeLayers = useMemo(
+    () => (data?.layers ?? []).map((layer) => ({
+      ...layer,
+      rules: layer.rules.filter((rule) => rule.action === activeAction).sort((left, right) => left.sortOrder - right.sortOrder)
+    })),
+    [activeAction, data]
+  );
+  const activeTrace = useMemo(
+    () => data?.viewerTrace.find((trace) => trace.action === activeAction) ?? null,
     [activeAction, data]
   );
   const subjectOptions = useMemo(() => {
@@ -173,29 +187,48 @@ export function WikiPageAclClient({
         {data.canManage ? <div className="overflow-x-auto border-b border-white/10" role="tablist" aria-label="ACL 동작">
           <div className="flex min-w-max gap-1 pb-2">
             {data.actions.map((action) => {
-              const count = data.rules.filter((rule) => rule.action === action).length;
+              const count = data.layers.reduce((total, layer) => total + layer.rules.filter((rule) => rule.action === action).length, 0);
               return <button key={action} type="button" role="tab" aria-selected={activeAction === action} onClick={() => setActiveAction(action)} className={`rounded-md px-3 py-2 text-xs font-semibold transition ${activeAction === action ? 'bg-emerald-300/15 text-emerald-200' : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'}`}>{ACTION_LABELS[action] ?? action}{count ? ` ${count}` : ''}</button>;
             })}
           </div>
         </div> : null}
 
         {data.canManage ? <section className="surface-flat overflow-hidden">
-          <div className="border-b border-white/10 p-4 sm:p-5"><h2 className="text-base font-bold text-white">{ACTION_LABELS[activeAction] ?? activeAction} 규칙</h2><p className="mt-1 text-xs leading-5 text-slate-400">가장 위에 있는 일치 규칙 하나가 적용됩니다. 문서 규칙이 없으면 공간·네임스페이스·사이트 정책을 상속합니다.</p></div>
-          <div className="divide-y divide-white/10">
-            {rules.map((rule, index) => <article key={rule.id} className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-5">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${rule.effect === 'allow' ? 'bg-emerald-300/12 text-emerald-200' : 'bg-red-400/10 text-red-200'}`}>{rule.effect === 'allow' ? '허용' : '거부'}</span><span className="break-all font-mono text-sm text-slate-200">{SUBJECT_TYPE_LABELS[rule.subjectType]}:{rule.subjectValue}</span></div>
-                <p className="mt-2 text-xs leading-5 text-slate-500">{rule.reason || '사유 없음'}{rule.expiresAt ? ` · ${new Date(rule.expiresAt).toLocaleString('ko-KR')} 만료` : ' · 만료 없음'}</p>
-              </div>
-              {data.canManage ? <div className="flex items-center gap-1">
-                <button type="button" aria-label="규칙을 위로 이동" title="위로" onClick={() => void move(rule, -1)} disabled={working || index === 0} className="rounded-md border border-white/10 p-2 text-slate-400 transition hover:text-white disabled:opacity-30"><ArrowUp className="size-4" /></button>
-                <button type="button" aria-label="규칙을 아래로 이동" title="아래로" onClick={() => void move(rule, 1)} disabled={working || index === rules.length - 1} className="rounded-md border border-white/10 p-2 text-slate-400 transition hover:text-white disabled:opacity-30"><ArrowDown className="size-4" /></button>
-                <button type="button" aria-label="규칙 삭제" title="삭제" onClick={() => void remove(rule)} disabled={working} className="rounded-md border border-red-300/20 p-2 text-red-200 transition hover:bg-red-400/10 disabled:opacity-40"><Trash2 className="size-4" /></button>
-              </div> : null}
-            </article>)}
-            {rules.length === 0 ? <p className="p-6 text-sm leading-6 text-slate-400">이 동작에 대한 문서 규칙이 없습니다. 상위 ACL과 기본 보호 정책이 적용됩니다.</p> : null}
+          <div className="border-b border-white/10 p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><h2 className="text-base font-bold text-white">{ACTION_LABELS[activeAction] ?? activeAction} 평가 계층</h2><p className="mt-1 text-xs leading-5 text-slate-400">문서부터 사이트까지 내려가며 현재 사용자와 처음 일치하는 규칙 하나가 적용됩니다. 문서 규칙이 있어도 주체가 일치하지 않으면 상위 범위를 계속 확인합니다.</p></div>
+              <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${activeTrace?.matched ? activeTrace.allowed ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-200' : 'border-red-300/30 bg-red-400/10 text-red-200' : 'border-white/10 text-slate-400'}`}>
+                {activeTrace?.matched ? `${activeTrace.allowed ? '허용' : '거부'} · ${activeTrace.matchedScope ? SCOPE_LABELS[activeTrace.matchedScope] : '기본 정책'}` : '일치 규칙 없음 · 기본 정책'}
+              </span>
+            </div>
+            {data.evaluatedAt ? <p className="mt-2 text-[11px] text-slate-600">{new Date(data.evaluatedAt).toLocaleString('ko-KR')} 기준 현재 사용자 판정</p> : null}
           </div>
-        </section> : <section className="surface-flat p-5"><h2 className="text-base font-bold text-white">적용 중인 문서 정책</h2><p className="mt-2 text-sm leading-6 text-slate-400">이 문서를 읽을 수 있는지 여부만 확인되었습니다. 사용자·그룹 식별자와 운영 사유가 포함된 상세 ACL 규칙은 권한이 있는 관리자에게만 표시됩니다.</p></section>}
+          <div className="divide-y divide-white/10">
+            {activeLayers.map((layer) => <section key={layer.scope} aria-label={`${layer.label} ACL 계층`} className="bg-white/[0.012]">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-4 py-3 sm:px-5">
+                <div className="flex items-center gap-2"><span className="text-xs font-bold text-slate-200">{layer.label}</span><span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-slate-500">{layer.editableHere ? '이 화면에서 편집' : '상속 · 읽기 전용'}</span></div>
+                {activeTrace?.matchedScope === layer.scope ? <span className="text-[11px] font-semibold text-emerald-300">현재 사용자에게 적용된 범위</span> : null}
+              </div>
+              <div className="divide-y divide-white/[0.06]">
+                {layer.rules.map((rule, index) => {
+                  const applied = activeTrace?.matchedScope === layer.scope && activeTrace.matchedRuleId === rule.id;
+                  return <article key={rule.id} className={`grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-5 ${applied ? 'bg-emerald-300/[0.055] ring-1 ring-inset ring-emerald-300/20' : ''}`}>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${rule.effect === 'allow' ? 'bg-emerald-300/12 text-emerald-200' : 'bg-red-400/10 text-red-200'}`}>{rule.effect === 'allow' ? '허용' : '거부'}</span><span className="break-all font-mono text-sm text-slate-200">{SUBJECT_TYPE_LABELS[rule.subjectType]}:{rule.subjectValue}</span>{applied ? <span className="rounded-full bg-emerald-300/15 px-2 py-1 text-[10px] font-bold text-emerald-200">현재 사용자에게 적용</span> : null}</div>
+                      <p className="mt-2 text-xs leading-5 text-slate-500">{rule.reason || '사유 없음'}{rule.expiresAt ? ` · ${new Date(rule.expiresAt).toLocaleString('ko-KR')} 만료` : ' · 만료 없음'}</p>
+                    </div>
+                    {layer.editableHere ? <div className="flex items-center gap-1">
+                      <button type="button" aria-label="규칙을 위로 이동" title="위로" onClick={() => void move(rule, -1)} disabled={working || index === 0} className="rounded-md border border-white/10 p-2 text-slate-400 transition hover:text-white disabled:opacity-30"><ArrowUp className="size-4" /></button>
+                      <button type="button" aria-label="규칙을 아래로 이동" title="아래로" onClick={() => void move(rule, 1)} disabled={working || index === layer.rules.length - 1} className="rounded-md border border-white/10 p-2 text-slate-400 transition hover:text-white disabled:opacity-30"><ArrowDown className="size-4" /></button>
+                      <button type="button" aria-label="규칙 삭제" title="삭제" onClick={() => void remove(rule)} disabled={working} className="rounded-md border border-red-300/20 p-2 text-red-200 transition hover:bg-red-400/10 disabled:opacity-40"><Trash2 className="size-4" /></button>
+                    </div> : null}
+                  </article>;
+                })}
+                {layer.rules.length === 0 ? <p className="px-4 py-4 text-xs leading-5 text-slate-500 sm:px-5">이 범위에는 {ACTION_LABELS[activeAction] ?? activeAction} 규칙이 없습니다. 다음 상위 범위를 확인합니다.</p> : null}
+              </div>
+            </section>)}
+          </div>
+        </section> : <section className="surface-flat p-5"><h2 className="text-base font-bold text-white">적용 중인 문서 정책</h2><p className="mt-2 text-sm leading-6 text-slate-400">이 문서를 읽을 수 있는지 여부만 확인되었습니다. 사용자·그룹 식별자와 운영 사유가 포함된 상세 ACL 규칙과 상속 판정 경로는 권한이 있는 관리자에게만 표시됩니다.</p></section>}
 
         {data.canManage ? <form onSubmit={submit} className="surface-flat grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
           <div className="lg:col-span-2"><h2 className="flex items-center gap-2 text-base font-bold text-white"><Plus className="size-4 text-emerald-300" /> {ACTION_LABELS[activeAction]} 규칙 추가</h2><p className="mt-1 text-xs text-slate-400">특정 사용자·그룹·서버 역할을 선택해 문서 범위에서만 허용하거나 거부합니다.</p></div>

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { CurrentSession } from '../session/session.decorator';
@@ -14,8 +14,10 @@ export class WikiPageAclController {
 
   @Get()
   @UseGuards(OptionalSessionGuard)
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Vary', 'Cookie, Authorization')
   getPageAcl(@Param('pageId') pageId: string, @Req() request: FastifyRequest) {
-    return this.pageAcl.getPageAcl(pageId, request.sessionPayload ?? null);
+    return this.pageAcl.getPageAcl(pageId, request.sessionPayload ?? null, request.clientIp);
   }
 
   @Post()

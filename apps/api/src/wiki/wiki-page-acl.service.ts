@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import { WikiAdminService } from './wiki-admin.service';
+import { WikiAclService, type WikiAclScope } from './wiki-acl.service';
 import { WikiPermissionService, type WikiPermissionActor, type WikiPermissionPage } from './wiki-permission.service';
 import { WikiProfileService } from './wiki-profile.service';
 import { activeAclGroupScopeWhere, aclGroupScopeMatches } from './wiki-acl-group-scope';
@@ -32,23 +33,56 @@ export interface WikiPageAclRuleSummary {
   readonly updatedAt: string;
 }
 
+export interface WikiPageAclScopeLayer {
+  readonly scope: WikiAclScope;
+  readonly targetId: string | null;
+  readonly label: string;
+  readonly editableHere: boolean;
+  readonly rules: readonly WikiPageAclRuleSummary[];
+}
+
+export interface WikiPageAclViewerTrace {
+  readonly action: string;
+  readonly matched: boolean;
+  readonly allowed: boolean;
+  readonly matchedScope: WikiAclScope | null;
+  readonly matchedRuleId: string | null;
+  readonly reason: string;
+}
+
 @Injectable()
 export class WikiPageAclService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly profiles: WikiProfileService,
     private readonly permissions: WikiPermissionService,
-    private readonly admin: WikiAdminService
+    private readonly admin: WikiAdminService,
+    private readonly acl: WikiAclService
   ) {}
 
-  async getPageAcl(pageId: string, session?: SessionPayload | null) {
+  async getPageAcl(pageId: string, session?: SessionPayload | null, clientIp?: string | null) {
     const page = await this.loadPage(pageId);
-    await this.permissions.assertCanReadPage({ accountId: session?.userId ?? null, page });
     const actor = await this.actorForSession(session);
+    const requestIp = clientIp ?? session?.requestIp ?? null;
+    await this.permissions.assertCanReadPage({
+      accountId: session?.userId ?? null,
+      actor,
+      requestIp,
+      page
+    });
     const management = await this.permissions.canManagePageAcl({ actor, page });
-    const [rules, groups, aclGroups] = await Promise.all([
+    const evaluatedAt = new Date();
+    const [rules, groups, aclGroups, traces] = await Promise.all([
       management.allowed ? this.prisma.aclRule.findMany({
-        where: { targetType: 'page', targetId: page.id },
+        where: {
+          OR: [
+            { targetType: 'page', targetId: page.id },
+            { targetType: 'space', targetId: page.spaceId },
+            { targetType: 'namespace', targetId: BigInt(page.namespaceId) },
+            { targetType: 'site', targetId: null }
+          ],
+          AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: evaluatedAt } }] }]
+        },
         orderBy: [{ action: 'asc' }, { sortOrder: 'asc' }, { id: 'asc' }]
       }) : Promise.resolve([]),
       management.allowed ? this.prisma.wikiGroup.findMany({
@@ -59,8 +93,45 @@ export class WikiPageAclService {
         where: activeAclGroupScopeWhere(page.spaceId),
         orderBy: [{ title: 'asc' }],
         select: { groupKey: true, title: true }
-      }) : Promise.resolve([])
+      }) : Promise.resolve([]),
+      management.allowed ? this.acl.evaluateActionsWithTrace({
+        actor,
+        actions: ACL_ACTIONS,
+        resource: {
+          pageId: page.id,
+          spaceId: page.spaceId,
+          namespaceId: page.namespaceId,
+          title: page.title,
+          createdBy: page.createdBy
+        },
+        requestIp
+      }) : Promise.resolve(new Map())
     ]);
+    const summarizedRules = rules
+      .filter((rule) =>
+        ruleTargetsPageHierarchy(rule, page) &&
+        (!rule.expiresAt || rule.expiresAt.getTime() > evaluatedAt.getTime())
+      )
+      .map(toRuleSummary);
+    const layers: WikiPageAclScopeLayer[] = management.allowed ? [
+      aclLayer('page', page.id, '문서 규칙', true, summarizedRules),
+      aclLayer('space', page.spaceId, `공간 #${page.spaceId.toString()}`, false, summarizedRules),
+      aclLayer('namespace', BigInt(page.namespaceId), `네임스페이스 #${page.namespaceId}`, false, summarizedRules),
+      aclLayer('site', null, '사이트 전체', false, summarizedRules)
+    ] : [];
+    const viewerTrace: WikiPageAclViewerTrace[] = management.allowed
+      ? ACL_ACTIONS.map((action) => {
+          const trace = traces.get(action);
+          return {
+            action,
+            matched: trace?.matched ?? false,
+            allowed: trace?.allowed ?? false,
+            matchedScope: trace?.matchedScope ?? null,
+            matchedRuleId: trace?.matchedRuleId?.toString() ?? null,
+            reason: trace?.reason ?? 'acl_no_match'
+          };
+        })
+      : [];
     return {
       page: {
         id: page.id.toString(),
@@ -71,7 +142,10 @@ export class WikiPageAclService {
         protectionLevel: page.protectionLevel
       },
       actions: ACL_ACTIONS,
-      rules: rules.map(toRuleSummary),
+      rules: summarizedRules.filter((rule) => rule.targetType === 'page'),
+      layers,
+      viewerTrace,
+      evaluatedAt: management.allowed ? evaluatedAt.toISOString() : null,
       canManage: management.allowed,
       manageReason: management.allowed ? management.reason : 'insufficient_permission',
       catalog: {
@@ -162,7 +236,11 @@ export class WikiPageAclService {
     } : null;
   }
 
-  private async loadPage(pageId: string): Promise<WikiPermissionPage & { displayTitle: string }> {
+  private async loadPage(pageId: string): Promise<WikiPermissionPage & {
+    displayTitle: string;
+    namespaceId: number;
+    spaceId: bigint;
+  }> {
     const page = await this.prisma.wikiPage.findUnique({
       where: { id: parseId(pageId, 'pageId') },
       select: {
@@ -237,4 +315,30 @@ function toRuleSummary(rule: {
     sortOrder: rule.sortOrder, reason: rule.reason, expiresAt: rule.expiresAt?.toISOString() ?? null,
     createdBy: rule.createdBy?.toString() ?? null, createdAt: rule.createdAt.toISOString(), updatedAt: rule.updatedAt.toISOString()
   };
+}
+
+function aclLayer(
+  scope: WikiAclScope,
+  targetId: bigint | null,
+  label: string,
+  editableHere: boolean,
+  rules: readonly WikiPageAclRuleSummary[]
+): WikiPageAclScopeLayer {
+  return {
+    scope,
+    targetId: targetId?.toString() ?? null,
+    label,
+    editableHere,
+    rules: rules.filter((rule) => rule.targetType === scope && rule.targetId === (targetId?.toString() ?? null))
+  };
+}
+
+function ruleTargetsPageHierarchy(
+  rule: { readonly targetType: string; readonly targetId: bigint | null },
+  page: { readonly id: bigint; readonly spaceId: bigint; readonly namespaceId: number }
+): boolean {
+  return (rule.targetType === 'page' && rule.targetId === page.id)
+    || (rule.targetType === 'space' && rule.targetId === page.spaceId)
+    || (rule.targetType === 'namespace' && rule.targetId === BigInt(page.namespaceId))
+    || (rule.targetType === 'site' && rule.targetId === null);
 }

@@ -399,6 +399,41 @@ test('a page rule overrides an inherited site rule', async () => {
   assert.equal(decision.reason, 'page_member_allow');
 });
 
+test('ACL trace follows a non-matching page rule into the exact inherited scope without changing the legacy decision', async () => {
+  const { service, store } = createService({
+    rules: [
+      {
+        targetType: 'page', targetId: 1n, action: 'edit', effect: 'deny',
+        subjectType: 'user', subjectValue: '999', sortOrder: 1, reason: 'other_user_only'
+      },
+      {
+        targetType: 'space', targetId: 10n, action: 'edit', effect: 'allow',
+        subjectType: 'perm', subjectValue: 'member', sortOrder: 1, reason: 'space_members'
+      }
+    ]
+  });
+  const input = {
+    actor: { accountId: 'account-1', profileId: 100n, status: 'active' },
+    action: 'edit' as const,
+    resource: { pageId: 1n, spaceId: 10n },
+    store: store as unknown as PrismaService
+  };
+
+  const [decision, trace] = await Promise.all([
+    service.evaluate(input),
+    service.evaluateWithTrace(input)
+  ]);
+
+  assert.deepEqual(decision, { matched: true, allowed: true, reason: 'space_members' });
+  assert.deepEqual(trace, {
+    matched: true,
+    allowed: true,
+    reason: 'space_members',
+    matchedScope: 'space',
+    matchedRuleId: 2n
+  });
+});
+
 test('namespace rules apply between space and site inheritance', async () => {
   const { service, store } = createService({
     namespaceId: 7,
