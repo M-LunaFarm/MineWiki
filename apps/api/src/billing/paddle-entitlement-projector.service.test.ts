@@ -133,7 +133,7 @@ test('canceling Paddle revokes only its entitlement while a manual entitlement p
   assert.equal(fixture.audits[0]?.action, 'billing.paddle.entitlement.revoked');
 });
 
-test('past-due subscriptions remain active until Paddle changes the provider status', async () => {
+test('past-due subscriptions receive a bounded grace expiry and payment recovery clears it', async () => {
   const fixture = createFixture();
   await fixture.projector.project(
     fixture.tx as never,
@@ -145,6 +145,16 @@ test('past-due subscriptions remain active until Paddle changes the provider sta
       periodEndsAt: new Date('2026-07-16T00:00:00.000Z'),
     }),
     null,
+  );
+  assert.deepEqual(fixture.entitlements[0]?.expiresAt, new Date('2026-07-24T12:00:00.000Z'));
+
+  await fixture.projector.project(
+    fixture.tx as never,
+    'sandbox',
+    'evt_recovered',
+    new Date('2026-07-18T12:00:00.000Z'),
+    snapshot({ status: 'active', checkoutIntentId: null }),
+    { billingSubjectId: 'subject-1' },
   );
   assert.equal(fixture.entitlements[0]?.expiresAt, null);
 });

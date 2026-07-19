@@ -89,6 +89,7 @@ const envSchema = z.object({
   PADDLE_MODE: z.enum(['off', 'shadow', 'live']).default('off'),
   PADDLE_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
   PADDLE_WEBHOOK_SECRET: z.string().optional(),
+  PADDLE_WEBHOOK_SECRET_PREVIOUS: z.string().optional(),
   PADDLE_WEBHOOK_TOLERANCE_SECONDS: z.coerce.number().int().min(1).max(300).default(5),
   PADDLE_API_KEY: z.string().optional(),
   PADDLE_PRICE_HANDBOOK: z.string().optional(),
@@ -311,6 +312,9 @@ function validateProductionEnvironment(env: EnvSchema): void {
     if (env.PADDLE_MODE === 'shadow' && isBlank(env.PADDLE_WEBHOOK_SECRET)) {
       failures.push('PADDLE_WEBHOOK_SECRET is required when PADDLE_MODE is shadow');
     }
+    if (env.PADDLE_MODE !== 'off') {
+      validatePaddleSecrets(env, failures);
+    }
     if (env.PADDLE_MODE === 'live') {
       validateRequiredGroup(
         env,
@@ -321,6 +325,7 @@ function validateProductionEnvironment(env: EnvSchema): void {
           'PADDLE_PRICE_BRAND',
           'PADDLE_CHECKOUT_URL',
           'PADDLE_POLICY_VERSION',
+          'NEXT_PUBLIC_PADDLE_CLIENT_TOKEN',
         ],
         'Paddle live billing',
         failures,
@@ -334,6 +339,13 @@ function validateProductionEnvironment(env: EnvSchema): void {
       if (!isBlank(env.PADDLE_POLICY_VERSION) && env.PADDLE_POLICY_VERSION !== BILLING_POLICY_VERSION) {
         failures.push(`PADDLE_POLICY_VERSION must equal ${BILLING_POLICY_VERSION}`);
       }
+      if (env.PADDLE_ENV !== 'production') {
+        failures.push('PADDLE_ENV must be production when PADDLE_MODE is live');
+      }
+      if (!env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN?.startsWith('live_')) {
+        failures.push('NEXT_PUBLIC_PADDLE_CLIENT_TOKEN must use a live_ token for Paddle production');
+      }
+      validatePaddleCheckoutUrl(env, failures);
     }
   }
 
@@ -353,6 +365,32 @@ function validateProductionEnvironment(env: EnvSchema): void {
 
   if (failures.length > 0) {
     throw new Error(`Production configuration is incomplete: ${failures.join('; ')}`);
+  }
+}
+
+function validatePaddleSecrets(env: EnvSchema, failures: string[]): void {
+  const secrets = [env.PADDLE_WEBHOOK_SECRET, env.PADDLE_WEBHOOK_SECRET_PREVIOUS].filter((value): value is string => !isBlank(value));
+  for (const secret of secrets) {
+    if (secret !== secret.trim() || secret.length < 16 || containsUnsafePlaceholder(secret)) {
+      failures.push('Paddle webhook secrets must be at least 16 characters and cannot contain whitespace or placeholders');
+      break;
+    }
+  }
+  const privateValues = [env.PADDLE_API_KEY, env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN].filter((value): value is string => !isBlank(value));
+  if (secrets.some((secret) => privateValues.includes(secret))) {
+    failures.push('Paddle API, client, and webhook credentials must be distinct');
+  }
+  if (secrets.length === 2 && secrets[0] === secrets[1]) {
+    failures.push('PADDLE_WEBHOOK_SECRET_PREVIOUS must differ from PADDLE_WEBHOOK_SECRET');
+  }
+}
+
+function validatePaddleCheckoutUrl(env: EnvSchema, failures: string[]): void {
+  if (isBlank(env.PADDLE_CHECKOUT_URL)) return;
+  const checkout = new URL(env.PADDLE_CHECKOUT_URL);
+  const site = !isBlank(env.NEXT_PUBLIC_SITE_URL) ? new URL(env.NEXT_PUBLIC_SITE_URL) : null;
+  if (checkout.protocol !== 'https:' || (site && checkout.origin !== site.origin)) {
+    failures.push('PADDLE_CHECKOUT_URL must use HTTPS on the configured MineWiki site origin');
   }
 }
 

@@ -589,49 +589,49 @@ model MinecraftIdentity {
 }
 
 model Server {
-  id                         String              @id @default(uuid())
-  shortCode                  String?             @unique @db.VarChar(12)
-  ownerAccountId             String?
-  registrantAccountId        String?
-  registrationLeaseExpiresAt DateTime?           @map("registration_lease_expires_at") @db.DateTime(3)
-  registrationEndpointKey    String?             @unique @db.Char(64)
-  wikiSpaceId                BigInt?             @unique @db.UnsignedBigInt
-  wikiPageId                 BigInt?             @unique @db.UnsignedBigInt
-  wikiSlug                   String?
-  name                       String
-  joinHost                   String
-  joinPort                   Int
-  edition                    ServerEdition
-  listingStatus              ServerListingStatus @default(pending)
-  supportedVersions          Json
-  tags                       Json
-  shortDescription           String
-  longDescription            String
-  bannerUrl                  String?
-  websiteUrl                 String?
-  discordUrl                 String?
-  voteCooldownHours          Int                 @default(24)
-  verificationGrade          VerificationGrade   @default(Unverified)
-  verifiedAt                 DateTime?
-  ownershipVerificationFailures Int               @default(0) @map("ownership_verification_failures")
-  ownershipChallengeStartedAt DateTime?            @map("ownership_challenge_started_at") @db.DateTime(3)
-  ownershipChallengeExpiresAt DateTime?            @map("ownership_challenge_expires_at") @db.DateTime(3)
-  ownershipChallengeSuspendedAt DateTime?          @map("ownership_challenge_suspended_at") @db.DateTime(3)
-  ownershipLastFailureAt      DateTime?            @map("ownership_last_failure_at") @db.DateTime(3)
-  votes24h                   Int                 @default(0)
-  votesMonthly               Int?
-  reviewsCount               Int                 @default(0)
-  voteRequiresOwnership      Boolean             @default(false)
-  playersOnline              Int?
-  playersMax                 Int?
-  playersLastUpdatedAt       DateTime?
-  playersMetricTrust         PlayerMetricTrust   @default(unknown)
-  playersMetricSource        PlayerMetricSource?
-  playersAnomalyReason       String?             @db.VarChar(64)
-  isOnline                   Boolean?
-  latencyMs                  Int?
-  createdAt                  DateTime            @default(now())
-  updatedAt                  DateTime            @updatedAt
+  id                            String              @id @default(uuid())
+  shortCode                     String?             @unique @db.VarChar(12)
+  ownerAccountId                String?
+  registrantAccountId           String?
+  registrationLeaseExpiresAt    DateTime?           @map("registration_lease_expires_at") @db.DateTime(3)
+  registrationEndpointKey       String?             @unique @db.Char(64)
+  wikiSpaceId                   BigInt?             @unique @db.UnsignedBigInt
+  wikiPageId                    BigInt?             @unique @db.UnsignedBigInt
+  wikiSlug                      String?
+  name                          String
+  joinHost                      String
+  joinPort                      Int
+  edition                       ServerEdition
+  listingStatus                 ServerListingStatus @default(pending)
+  supportedVersions             Json
+  tags                          Json
+  shortDescription              String
+  longDescription               String
+  bannerUrl                     String?
+  websiteUrl                    String?
+  discordUrl                    String?
+  voteCooldownHours             Int                 @default(24)
+  verificationGrade             VerificationGrade   @default(Unverified)
+  verifiedAt                    DateTime?
+  ownershipVerificationFailures Int                 @default(0) @map("ownership_verification_failures")
+  ownershipChallengeStartedAt   DateTime?           @map("ownership_challenge_started_at") @db.DateTime(3)
+  ownershipChallengeExpiresAt   DateTime?           @map("ownership_challenge_expires_at") @db.DateTime(3)
+  ownershipChallengeSuspendedAt DateTime?           @map("ownership_challenge_suspended_at") @db.DateTime(3)
+  ownershipLastFailureAt        DateTime?           @map("ownership_last_failure_at") @db.DateTime(3)
+  votes24h                      Int                 @default(0)
+  votesMonthly                  Int?
+  reviewsCount                  Int                 @default(0)
+  voteRequiresOwnership         Boolean             @default(false)
+  playersOnline                 Int?
+  playersMax                    Int?
+  playersLastUpdatedAt          DateTime?
+  playersMetricTrust            PlayerMetricTrust   @default(unknown)
+  playersMetricSource           PlayerMetricSource?
+  playersAnomalyReason          String?             @db.VarChar(64)
+  isOnline                      Boolean?
+  latencyMs                     Int?
+  createdAt                     DateTime            @default(now())
+  updatedAt                     DateTime            @updatedAt
 
   ownerAccount         Account?              @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
   registrantAccount    Account?              @relation("ServerRegistrant", fields: [registrantAccountId], references: [id], onDelete: SetNull)
@@ -662,24 +662,24 @@ model Server {
 }
 
 model ServerStats {
-  serverId             String    @id
-  rankCurrent          Int       @default(1)
-  rankDelta24h         Int       @default(0)
-  rankBest             Int       @default(1)
-  votesLast24h         Int       @default(0)
-  votesLast7d          Int       @default(0)
-  votesMonthToDate     Int       @default(0)
-  votesTotal           Int       @default(0)
-  playersOnline        Int       @default(0)
-  playersMax           Int       @default(0)
-  playersLastUpdatedAt DateTime?
-  uptimePercent        Float     @default(0)
-  sparkline            Json
-  latencyMs            Int       @default(0)
-  lastPingAt           DateTime?
+  serverId                   String    @id
+  rankCurrent                Int       @default(1)
+  rankDelta24h               Int       @default(0)
+  rankBest                   Int       @default(1)
+  votesLast24h               Int       @default(0)
+  votesLast7d                Int       @default(0)
+  votesMonthToDate           Int       @default(0)
+  votesTotal                 Int       @default(0)
+  playersOnline              Int       @default(0)
+  playersMax                 Int       @default(0)
+  playersLastUpdatedAt       DateTime?
+  uptimePercent              Float     @default(0)
+  sparkline                  Json
+  latencyMs                  Int       @default(0)
+  lastPingAt                 DateTime?
   liveStatsRefreshLeaseUntil DateTime? @map("live_stats_refresh_lease_until") @db.DateTime(3)
-  rankCalculatedAt     DateTime? @map("rank_calculated_at") @db.DateTime(3)
-  lastUpdatedAt        DateTime  @default(now()) @updatedAt
+  rankCalculatedAt           DateTime? @map("rank_calculated_at") @db.DateTime(3)
+  lastUpdatedAt              DateTime  @default(now()) @updatedAt
 
   server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
 
@@ -2253,20 +2253,27 @@ model ServerWikiLayoutEntitlement {
 }
 
 model PaddleWebhookEvent {
-  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  providerEventId String    @map("provider_event_id") @db.VarChar(64)
-  environment     String    @db.VarChar(16)
-  eventType       String    @map("event_type") @db.VarChar(64)
-  occurredAt      DateTime  @map("occurred_at")
-  status          String    @default("received") @db.VarChar(24)
-  payload         Json
-  attempts        Int       @default(1) @db.UnsignedInt
-  lastError       String?   @map("last_error") @db.Text
-  receivedAt      DateTime  @default(now()) @map("received_at")
-  processedAt     DateTime? @map("processed_at")
+  id                     BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  providerEventId        String    @map("provider_event_id") @db.VarChar(64)
+  providerSubscriptionId String?   @map("provider_subscription_id") @db.VarChar(64)
+  environment            String    @db.VarChar(16)
+  eventType              String    @map("event_type") @db.VarChar(64)
+  occurredAt             DateTime  @map("occurred_at")
+  occurredAtRaw          String    @map("occurred_at_raw") @db.VarChar(64)
+  status                 String    @default("received") @db.VarChar(24)
+  payload                Json
+  attempts               Int       @default(0) @db.UnsignedInt
+  availableAt            DateTime  @default(now()) @map("available_at")
+  lockedAt               DateTime? @map("locked_at")
+  lockedBy               String?   @map("locked_by") @db.VarChar(64)
+  lastError              String?   @map("last_error") @db.Text
+  receivedAt             DateTime  @default(now()) @map("received_at")
+  processedAt            DateTime? @map("processed_at")
+  deadLetteredAt         DateTime? @map("dead_lettered_at")
 
   @@unique([environment, providerEventId], map: "uq_paddle_webhook_environment_event")
-  @@index([status, receivedAt], map: "idx_paddle_webhook_status_received")
+  @@index([status, availableAt], map: "idx_paddle_webhook_status_available")
+  @@index([environment, providerSubscriptionId, occurredAt, id], map: "idx_paddle_webhook_subscription_order")
   @@index([eventType, occurredAt], map: "idx_paddle_webhook_type_occurred")
   @@map("paddle_webhook_events")
 }
@@ -2285,6 +2292,7 @@ model PaddleSubscriptionShadow {
   scheduledChange        Json?                 @map("scheduled_change")
   lastEventId            String                @map("last_event_id") @db.VarChar(64)
   lastEventOccurredAt    DateTime              @map("last_event_occurred_at")
+  lastEventOccurredAtRaw String?               @map("last_event_occurred_at_raw") @db.VarChar(64)
   lastPayload            Json                  @map("last_payload")
   projectionStatus       String                @default("unprojected") @map("projection_status") @db.VarChar(24)
   projectionError        String?               @map("projection_error") @db.Text

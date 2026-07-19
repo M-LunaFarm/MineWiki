@@ -89,7 +89,21 @@ test('Paddle live mode requires the complete private billing configuration', () 
   Object.assign(live, validPaddleLiveEnv());
   const config = new ConfigService(live);
   assert.equal(config.get('PADDLE_MODE'), 'live');
-  assert.equal(config.get('PADDLE_ENV'), 'sandbox');
+  assert.equal(config.get('PADDLE_ENV'), 'production');
+});
+
+test('Paddle live mode binds production environment, public token, checkout origin, and distinct secrets', () => {
+  const sandbox = { ...validProductionEnv(), ...validPaddleLiveEnv(), PADDLE_ENV: 'sandbox', NEXT_PUBLIC_PADDLE_CLIENT_TOKEN: 'test_clienttoken123' };
+  assert.throws(() => new ConfigService(sandbox), /PADDLE_ENV must be production/u);
+
+  const wrongToken = { ...validProductionEnv(), ...validPaddleLiveEnv(), NEXT_PUBLIC_PADDLE_CLIENT_TOKEN: 'test_clienttoken123' };
+  assert.throws(() => new ConfigService(wrongToken), /must use a live_ token/u);
+
+  const externalCheckout = { ...validProductionEnv(), ...validPaddleLiveEnv(), PADDLE_CHECKOUT_URL: 'https://evil.example/checkout' };
+  assert.throws(() => new ConfigService(externalCheckout), /configured MineWiki site origin/u);
+
+  const reusedSecret = { ...validProductionEnv(), ...validPaddleLiveEnv(), PADDLE_WEBHOOK_SECRET_PREVIOUS: 'paddle-endpoint-secret' };
+  assert.throws(() => new ConfigService(reusedSecret), /must differ/u);
 });
 
 test('Paddle live mode rejects a price id shared by two layouts', () => {
@@ -341,7 +355,8 @@ function validProductionEnv() {
 function validPaddleLiveEnv() {
   return {
     PADDLE_MODE: 'live',
-    PADDLE_ENV: 'sandbox',
+    PADDLE_ENV: 'production',
+    NEXT_PUBLIC_PADDLE_CLIENT_TOKEN: 'live_clienttoken123',
     PADDLE_WEBHOOK_SECRET: 'paddle-endpoint-secret',
     PADDLE_API_KEY: 'paddle-api-key',
     PADDLE_PRICE_HANDBOOK: 'pri_handbook',

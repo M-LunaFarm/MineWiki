@@ -9,10 +9,11 @@ import { PaddleEntitlementProjectorService } from './paddle-entitlement-projecto
 import { PaddlePortalService } from './paddle-portal.service';
 import { PaddleWebhookController } from './paddle-webhook.controller';
 import { PaddleWebhookService } from './paddle-webhook.service';
+import { PaddleWebhookInternalController } from './paddle-webhook-internal.controller';
 
 @Module({
   imports: [ClaimModule, SessionModule],
-  controllers: [PaddleWebhookController, PaddleBillingController],
+  controllers: [PaddleWebhookController, PaddleBillingController, PaddleWebhookInternalController],
   providers: [BillingCatalog, PaddleEntitlementProjectorService, PaddleWebhookService, PaddleClient, PaddleCheckoutService, PaddlePortalService],
 })
 export class BillingModule {}

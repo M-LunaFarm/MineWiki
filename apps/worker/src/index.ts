@@ -49,9 +49,11 @@ import { triggerAccountDeletionSweep } from './account-deletion-scheduler';
 import { processAccountDeletionDiscordRevocations } from './account-deletion-discord-revocations';
 import { provisionClaimedServerWiki } from './server-wiki-provisioner';
 import { triggerBillingEntitlementSweep } from './billing-entitlement-scheduler';
+import { triggerPaddleWebhookInboxSweep } from './paddle-webhook-inbox';
 import {
   deriveAccountDeletionServiceToken,
   deriveBillingLifecycleServiceToken,
+  derivePaddleWebhookInboxServiceToken,
   deriveServerWikiProvisioningServiceToken,
 } from '@minewiki/auth';
 import { publishWorkerHeartbeat } from './worker-heartbeat';
@@ -68,6 +70,7 @@ const WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000;
 const ACCOUNT_DELETION_INTERVAL_MS = 60 * 60 * 1000;
 const ACCOUNT_DELETION_DISCORD_REVOCATION_INTERVAL_MS = 60 * 1000;
 const BILLING_ENTITLEMENT_INTERVAL_MS = 5 * 60 * 1000;
+const PADDLE_WEBHOOK_INBOX_INTERVAL_MS = 5 * 1000;
 const MAX_PING_BATCH = 200;
 const MAX_CLAIM_BATCH = 200;
 
@@ -645,6 +648,7 @@ async function bootstrapWorker(): Promise<void> {
   });
   const accountDeletionServiceToken = deriveAccountDeletionServiceToken(config.get('APP_ENCRYPTION_KEY'));
   const billingLifecycleServiceToken = deriveBillingLifecycleServiceToken(config.get('APP_ENCRYPTION_KEY'));
+  const paddleWebhookInboxServiceToken = derivePaddleWebhookInboxServiceToken(config.get('APP_ENCRYPTION_KEY'));
   scheduleInterval('account-deletion', ACCOUNT_DELETION_INTERVAL_MS, async () => {
     const result = await triggerAccountDeletionSweep({ apiBaseUrl: internalApiBaseUrl, internalToken: accountDeletionServiceToken });
     if (result.processed > 0 || result.blocked > 0 || result.failed > 0) Logger.info(result, 'Account deletion sweep completed');
@@ -657,6 +661,12 @@ async function bootstrapWorker(): Promise<void> {
     const result = await triggerBillingEntitlementSweep({ apiBaseUrl: internalApiBaseUrl, internalToken: billingLifecycleServiceToken });
     if (result.expired > 0 || result.downgraded > 0 || result.skipped > 0 || result.failed > 0) {
       Logger.info(result, 'Billing entitlement sweep completed');
+    }
+  });
+  scheduleInterval('paddle-webhook-inbox', PADDLE_WEBHOOK_INBOX_INTERVAL_MS, async () => {
+    const result = await triggerPaddleWebhookInboxSweep({ apiBaseUrl: internalApiBaseUrl, internalToken: paddleWebhookInboxServiceToken });
+    if (result.processed > 0 || result.ignored > 0 || result.stale > 0 || result.quarantined > 0 || result.retried > 0 || result.deadLettered > 0) {
+      Logger.info(result, 'Paddle webhook inbox sweep completed');
     }
   });
   Logger.info({ redisUrl, workerCount: workers.length }, 'Worker bootstrapped and waiting for jobs');

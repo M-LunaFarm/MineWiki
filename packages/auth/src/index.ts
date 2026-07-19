@@ -31,6 +31,12 @@ export function deriveBillingLifecycleServiceToken(appEncryptionKey: string): st
     .digest('base64url');
 }
 
+export function derivePaddleWebhookInboxServiceToken(appEncryptionKey: string): string {
+  return createHmac('sha256', appEncryptionKey)
+    .update('minewiki:paddle-webhook-inbox-worker:v1')
+    .digest('base64url');
+}
+
 export function deriveServerWikiProvisioningServiceToken(appEncryptionKey: string): string {
   return createHmac('sha256', appEncryptionKey)
     .update('minewiki:server-wiki-provisioning-worker:v1')

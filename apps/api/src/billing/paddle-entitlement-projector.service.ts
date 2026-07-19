@@ -6,6 +6,7 @@ import { writeAuditRecord } from '../events/audit-event-writer';
 
 const ACCESS_STATUSES = new Set(['active', 'trialing', 'past_due']);
 const REVOKED_STATUSES = new Set(['paused', 'canceled']);
+const PAST_DUE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface PaddleSubscriptionSnapshot {
   readonly subscriptionId: string;
@@ -159,13 +160,16 @@ export class PaddleEntitlementProjectorService {
     const startsAt = snapshot.periodStartsAt && snapshot.periodStartsAt <= occurredAt
       ? snapshot.periodStartsAt
       : occurredAt;
+    const expiresAt = snapshot.status === 'past_due'
+      ? new Date(Math.max(snapshot.periodEndsAt?.getTime() ?? 0, occurredAt.getTime()) + PAST_DUE_GRACE_MS)
+      : null;
     const entitlement = current
       ? await tx.serverWikiLayoutEntitlement.update({
           where: { id: current.id },
-          data: { layoutKey, status: 'active', source: 'paddle', startsAt, expiresAt: null },
+          data: { layoutKey, status: 'active', source: 'paddle', startsAt, expiresAt },
         })
       : await tx.serverWikiLayoutEntitlement.create({
-          data: { serverWikiId: subject.serverWikiId, layoutKey, status: 'active', source: 'paddle', externalReference, startsAt, expiresAt: null },
+          data: { serverWikiId: subject.serverWikiId, layoutKey, status: 'active', source: 'paddle', externalReference, startsAt, expiresAt },
         });
     if (current && current.layoutKey !== layoutKey) {
       await downgradeIfUncovered(tx, subject.serverWikiId, subject.selectedLayout, occurredAt);

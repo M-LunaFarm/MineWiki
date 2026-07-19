@@ -12,6 +12,7 @@ export interface PaddleEventEnvelope {
   readonly eventId: string;
   readonly eventType: string;
   readonly occurredAt: Date;
+  readonly occurredAtRaw: string;
   readonly notificationId: string | null;
   readonly data: Record<string, unknown>;
 }
@@ -63,7 +64,8 @@ export function parsePaddleEvent(rawBody: Buffer): PaddleEventEnvelope {
   if (!isObject(parsed)) throw new BadRequestException('Webhook body is invalid.');
   const eventId = providerId(parsed.event_id, 'evt_');
   const eventType = boundedString(parsed.event_type, 64);
-  const occurredAt = parseDate(parsed.occurred_at);
+  const occurredAtRaw = boundedString(parsed.occurred_at, 64);
+  const occurredAt = parseDate(occurredAtRaw);
   if (!eventId || !eventType || !occurredAt || !isObject(parsed.data)) {
     throw new BadRequestException('Webhook event envelope is invalid.');
   }
@@ -71,6 +73,7 @@ export function parsePaddleEvent(rawBody: Buffer): PaddleEventEnvelope {
     eventId,
     eventType,
     occurredAt,
+    occurredAtRaw: occurredAtRaw!,
     notificationId: parsed.notification_id === null ? null : providerId(parsed.notification_id, 'ntf_'),
     data: parsed.data,
   };
@@ -122,7 +125,7 @@ function summarizeSubscriptionData(data: Record<string, unknown>): Prisma.InputJ
     next_billed_at: isoDate(data.next_billed_at),
     current_billing_period: period ? { starts_at: isoDate(period.starts_at), ends_at: isoDate(period.ends_at) } : null,
     scheduled_change: summarizeScheduledChange(data.scheduled_change),
-    items: subscriptionItems(data).map((item) => ({ price_id: item.priceId, quantity: item.quantity })),
+    items: subscriptionItems(data).map((item) => ({ price: { id: item.priceId }, quantity: item.quantity })),
     custom_data: { minewiki_checkout_intent_id: boundedString(customData?.minewiki_checkout_intent_id, 64) },
   });
 }
