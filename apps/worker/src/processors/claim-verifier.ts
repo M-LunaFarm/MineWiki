@@ -179,6 +179,7 @@ async function applyVerificationResult(
         data: {
           ownerAccountId: snapshot.accountId,
           registrantAccountId: null,
+          registrationLeaseExpiresAt: null,
         },
       });
       if (ownership.count !== 1) {

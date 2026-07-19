@@ -216,7 +216,11 @@ test('successful verification atomically assigns ownership before activating a p
         id: 'server-1',
         OR: [{ ownerAccountId: null }, { ownerAccountId: 'account-1' }],
       },
-      data: { ownerAccountId: 'account-1', registrantAccountId: null },
+      data: {
+        ownerAccountId: 'account-1',
+        registrantAccountId: null,
+        registrationLeaseExpiresAt: null,
+      },
     },
     {
       where: {
