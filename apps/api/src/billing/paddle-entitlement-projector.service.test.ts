@@ -19,6 +19,7 @@ test('a valid unused checkout intent binds once and projects an active entitleme
   assert.equal(result.status, 'projected');
   assert.equal(result.billingSubjectId, 'subject-1');
   assert.equal(fixture.intentStatus, 'attached');
+  assert.equal(fixture.intentOpenLeaseKey, null);
   assert.equal(fixture.entitlements.length, 1);
   assert.deepEqual(fixture.entitlements[0], {
     id: 1n,
@@ -187,6 +188,7 @@ function createFixture(options: {
   readonly entitlements?: ReturnType<typeof entitlement>[];
 } = {}) {
   let intentStatus = 'pending';
+  let intentOpenLeaseKey: string | null = 'sandbox:subject-1';
   let serverLayout = options.selectedLayout ?? 'docs';
   const entitlements = [...(options.entitlements ?? [])];
   const audits: Array<{ action: string }> = [];
@@ -211,7 +213,11 @@ function createFixture(options: {
           billingSubject: subject,
         };
       },
-      async updateMany() { intentStatus = 'attached'; return { count: 1 }; },
+      async updateMany({ data }: { data: { status: string; openLeaseKey: string | null } }) {
+        intentStatus = data.status;
+        intentOpenLeaseKey = data.openLeaseKey;
+        return { count: 1 };
+      },
     },
     paddleBillingSubject: {
       async findUnique() {
@@ -255,6 +261,7 @@ function createFixture(options: {
     entitlements,
     audits,
     get intentStatus() { return intentStatus; },
+    get intentOpenLeaseKey() { return intentOpenLeaseKey; },
     get serverLayout() { return serverLayout; },
   };
 }

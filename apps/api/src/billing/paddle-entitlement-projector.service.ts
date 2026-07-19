@@ -77,7 +77,7 @@ export class PaddleEntitlementProjectorService {
     if (subject.checkoutIntentId) {
       const attached = await tx.paddleCheckoutIntent.updateMany({
         where: { id: subject.checkoutIntentId, status: 'pending' },
-        data: { status: 'attached' },
+        data: { status: 'attached', openLeaseKey: null },
       });
       if (attached.count !== 1) return quarantine(existing, 'checkout_intent_already_used');
     }

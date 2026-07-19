@@ -52,41 +52,80 @@ export class PaddleCheckoutService {
       update: {},
       select: { id: true },
     });
-    const active = await this.prisma.paddleSubscriptionShadow.findFirst({
-      where: {
-        billingSubjectId: subject.id,
-        status: { in: ['active', 'trialing', 'past_due'] },
-      },
-      select: { id: true },
-    });
-    if (active) throw new ConflictException('This server wiki already has an active Paddle subscription.');
-
     const intentId = randomUUID();
     const termsAcceptedAt = new Date();
-    await this.prisma.paddleCheckoutIntent.create({
-      data: {
-        id: intentId,
-        billingSubjectId: subject.id,
-        environment: this.config.get('PADDLE_ENV', 'sandbox'),
-        layoutKey,
-        configuredPriceId: priceId,
-        policyVersion: BILLING_POLICY_VERSION,
-        termsAcceptedAt,
-        productSnapshot: product,
-        status: 'pending',
-        expiresAt: new Date(Date.now() + INTENT_LIFETIME_MS),
-      },
+    const environment = this.config.get('PADDLE_ENV', 'sandbox');
+    const openLeaseKey = `${environment}:${subject.id}`;
+    const intent = await this.prisma.$transaction(async (tx) => {
+      const active = await tx.paddleSubscriptionShadow.findFirst({
+        where: {
+          billingSubjectId: subject.id,
+          status: { in: ['active', 'trialing', 'past_due'] },
+        },
+        select: { id: true },
+      });
+      if (active) throw new ConflictException('This server wiki already has an active Paddle subscription.');
+      return tx.paddleCheckoutIntent.upsert({
+        where: { openLeaseKey },
+        update: {},
+        create: {
+          id: intentId,
+          billingSubjectId: subject.id,
+          environment,
+          layoutKey,
+          configuredPriceId: priceId,
+          policyVersion: BILLING_POLICY_VERSION,
+          termsAcceptedAt,
+          productSnapshot: product,
+          status: 'creating',
+          openLeaseKey,
+          expiresAt: new Date(Date.now() + INTENT_LIFETIME_MS),
+        },
+        select: {
+          id: true,
+          layoutKey: true,
+          status: true,
+          providerTransactionId: true,
+          providerCheckoutUrl: true,
+        },
+      });
     });
+
+    if (intent.id !== intentId) {
+      if (
+        intent.layoutKey === layoutKey
+        && intent.status === 'pending'
+        && intent.providerTransactionId
+        && intent.providerCheckoutUrl
+      ) {
+        return {
+          checkoutUrl: intent.providerCheckoutUrl,
+          transactionId: intent.providerTransactionId,
+        };
+      }
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'PADDLE_CHECKOUT_IN_PROGRESS',
+        message: 'A Paddle checkout is already open for this server wiki.',
+      });
+    }
 
     const transaction = await this.paddle.createTransaction({
       priceId,
       checkoutIntentId: intentId,
       checkoutUrl: this.config.get('PADDLE_CHECKOUT_URL'),
     });
-    await this.prisma.paddleCheckoutIntent.update({
-      where: { id: intentId },
-      data: { providerTransactionId: transaction.transactionId },
+    const attached = await this.prisma.paddleCheckoutIntent.updateMany({
+      where: { id: intentId, status: 'creating', openLeaseKey },
+      data: {
+        status: 'pending',
+        providerTransactionId: transaction.transactionId,
+        providerCheckoutUrl: transaction.checkoutUrl,
+      },
     });
+    if (attached.count !== 1) {
+      throw new ConflictException('The Paddle checkout lease changed while the transaction was being created.');
+    }
     return {
       checkoutUrl: transaction.checkoutUrl,
       transactionId: transaction.transactionId,
