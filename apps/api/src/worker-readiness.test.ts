@@ -28,6 +28,18 @@ test('retained failures are informational while an old pending job degrades its 
   assert.deepEqual(stale.staleQueues, [...OBSERVED_WORKER_QUEUES]);
 });
 
+test('recent final failures degrade the affected queue without treating history as current', async () => {
+  const checked = await checkWorkerReadiness(
+    redis(heartbeat({ failed: 500, recentFailed: 3 })) as never,
+    new Date('2026-07-17T12:00:00.000Z'),
+  );
+  assert.equal(checked.status, 'degraded');
+  assert.equal(checked.message, 'worker_queue_recent_failures');
+  assert.equal(checked.failedJobs, 3_000);
+  assert.equal(checked.recentFailedJobs, 18);
+  assert.deepEqual(checked.failingQueues, [...OBSERVED_WORKER_QUEUES]);
+});
+
 function redis(value: string | null) {
   return { get: async () => value };
 }
@@ -35,6 +47,7 @@ function redis(value: string | null) {
 function heartbeat(overrides: {
   readonly updatedAt?: string;
   readonly failed?: number;
+  readonly recentFailed?: number;
   readonly oldestPendingAt?: string | null;
 }) {
   return JSON.stringify({
@@ -49,6 +62,8 @@ function heartbeat(overrides: {
       active: 0,
       delayed: 0,
       failed: overrides.failed ?? 0,
+      recentFailed: overrides.recentFailed ?? 0,
+      latestFailedAt: overrides.recentFailed ? '2026-07-17T11:59:00.000Z' : null,
       oldestPendingAt: overrides.oldestPendingAt ?? null,
     }])),
   });

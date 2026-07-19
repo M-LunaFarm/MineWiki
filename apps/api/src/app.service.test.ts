@@ -71,6 +71,21 @@ test('readiness exposes retained queue failures as information without degrading
   assert.equal(readiness.checks.worker.message, undefined);
 });
 
+test('readiness exposes recent terminal queue failures as a degraded worker', async () => {
+  const service = new AppService(
+    { $queryRawUnsafe: async () => [{ healthy: 1 }] } as never,
+    new ConfigService({} as NodeJS.ProcessEnv),
+  );
+  Object.assign(service, { redis: redisWithHeartbeat({ failed: 500, recentFailed: 3 }) });
+
+  const readiness = await service.getReadiness();
+
+  assert.equal(readiness.status, 'ok');
+  assert.equal(readiness.checks.worker.status, 'degraded');
+  assert.equal(readiness.checks.worker.message, 'worker_queue_recent_failures');
+  assert.equal(readiness.checks.worker.recentFailedJobs, 18);
+});
+
 test('an overdue waiting job degrades worker health without withdrawing the foreground API', async () => {
   const service = new AppService(
     { $queryRawUnsafe: async () => [{ healthy: 1 }] } as never,
@@ -106,6 +121,7 @@ test('a stale worker heartbeat is explicit while API readiness remains dependenc
 
 function redisWithHeartbeat(overrides: {
   readonly failed?: number;
+  readonly recentFailed?: number;
   readonly updatedAt?: string;
   readonly oldestPendingAt?: string;
 }) {
@@ -116,6 +132,8 @@ function redisWithHeartbeat(overrides: {
     active: 0,
     delayed: 0,
     failed: overrides.failed ?? 0,
+    recentFailed: overrides.recentFailed ?? 0,
+    latestFailedAt: overrides.recentFailed ? new Date().toISOString() : null,
     oldestPendingAt: overrides.oldestPendingAt ?? null,
   }]));
   return {

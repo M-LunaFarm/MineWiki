@@ -10,7 +10,12 @@ test('worker heartbeat is versioned, bounded by TTL, and contains no connection 
   const queues = [{
     name: 'server-ping',
     getJobCounts: async () => ({ waiting: 1, active: 0, delayed: 0, failed: 2 }),
-    getJobs: async () => [{ timestamp: now.getTime() - 1_000 }],
+    getJobs: async ([status]: string[]) => status === 'failed'
+      ? [
+          { finishedOn: now.getTime() - 1_000 },
+          { finishedOn: now.getTime() - 16 * 60_000 },
+        ]
+      : [{ timestamp: now.getTime() - 1_000 }],
   }];
   const now = new Date('2026-07-17T12:00:00.000Z');
   const identity = {
@@ -30,6 +35,8 @@ test('worker heartbeat is versioned, bounded by TTL, and contains no connection 
   const parsed = workerHeartbeatSchema.parse(JSON.parse(String(raw)));
   assert.equal(parsed.updatedAt, now.toISOString());
   assert.equal(parsed.queues['server-ping']?.failed, 2);
+  assert.equal(parsed.queues['server-ping']?.recentFailed, 1);
+  assert.equal(parsed.queues['server-ping']?.latestFailedAt, '2026-07-17T11:59:59.000Z');
   assert.equal(parsed.queues['server-ping']?.oldestPendingAt, '2026-07-17T11:59:59.000Z');
   assert.equal(JSON.stringify(parsed).includes('redis'), false);
 });

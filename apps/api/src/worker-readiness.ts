@@ -4,6 +4,7 @@ import {
   WORKER_HEARTBEAT_KEY,
   WORKER_HEARTBEAT_MAX_AGE_MS,
   WORKER_QUEUE_STALE_AFTER_MS,
+  WORKER_RECENT_FAILURE_DEGRADED_THRESHOLD,
   workerHeartbeatSchema,
 } from '@minewiki/schemas';
 
@@ -12,6 +13,8 @@ export interface WorkerQueueCheck {
   readonly active: number;
   readonly delayed: number;
   readonly failed: number;
+  readonly recentFailed?: number;
+  readonly latestFailedAt?: string | null;
   readonly oldestPendingAt: string | null;
 }
 
@@ -23,6 +26,8 @@ export interface WorkerReadinessCheck {
   readonly updatedAt?: string;
   readonly ageMs?: number;
   readonly failedJobs?: number;
+  readonly recentFailedJobs?: number;
+  readonly failingQueues?: readonly string[];
   readonly staleQueues?: readonly string[];
   readonly queues?: Readonly<Record<string, WorkerQueueCheck>>;
 }
@@ -66,14 +71,29 @@ export async function checkWorkerReadiness(
       ? now.getTime() - Date.parse(oldestPendingAt) > WORKER_QUEUE_STALE_AFTER_MS[queueName]
       : false;
   });
+  const recentFailedJobs = OBSERVED_WORKER_QUEUES.reduce(
+    (total, queueName) => total + (queues[queueName]?.recentFailed ?? 0),
+    0,
+  );
+  const failingQueues = OBSERVED_WORKER_QUEUES.filter(
+    (queueName) => (queues[queueName]?.recentFailed ?? 0) >= WORKER_RECENT_FAILURE_DEGRADED_THRESHOLD,
+  );
+  const isDegraded = staleQueues.length > 0 || failingQueues.length > 0;
+  const message = staleQueues.length > 0
+    ? 'worker_queue_stale'
+    : failingQueues.length > 0
+      ? 'worker_queue_recent_failures'
+      : undefined;
   return {
-    status: staleQueues.length > 0 ? 'degraded' : 'ok',
+    status: isDegraded ? 'degraded' : 'ok',
     latencyMs: Date.now() - startedAt,
-    message: staleQueues.length > 0 ? 'worker_queue_stale' : undefined,
+    message,
     instanceId: heartbeat.instanceId,
     updatedAt: heartbeat.updatedAt,
     ageMs: Math.max(0, ageMs),
     failedJobs,
+    recentFailedJobs,
+    failingQueues,
     staleQueues,
     queues,
   };

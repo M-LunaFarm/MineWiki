@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const WORKER_HEARTBEAT_KEY = 'minewiki:worker:heartbeat:v1';
 export const WORKER_HEARTBEAT_INTERVAL_MS = 10_000;
 export const WORKER_HEARTBEAT_MAX_AGE_MS = 45_000;
+export const WORKER_RECENT_FAILURE_WINDOW_MS = 15 * 60_000;
+export const WORKER_RECENT_FAILURE_DEGRADED_THRESHOLD = 3;
 export const OBSERVED_WORKER_QUEUES = [
   'server-ping',
   'rank-aggregation',
@@ -26,6 +28,8 @@ export const workerQueueHealthSchema = z.object({
   active: z.number().int().nonnegative(),
   delayed: z.number().int().nonnegative(),
   failed: z.number().int().nonnegative(),
+  recentFailed: z.number().int().nonnegative().optional(),
+  latestFailedAt: z.string().datetime().nullable().optional(),
   oldestPendingAt: z.string().datetime().nullable(),
 }).strict();
 
