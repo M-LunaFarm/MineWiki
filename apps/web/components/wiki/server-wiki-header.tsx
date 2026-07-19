@@ -3,6 +3,7 @@ import { BookOpen, ExternalLink, History, Menu, Search } from 'lucide-react';
 import type { ServerWikiPresentation, WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiNavigation } from './server-wiki-navigation';
 import { serverWikiPlatformUrl, serverWikiPublicPath, type ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
+import { ServerWikiReadingModeToggle } from './server-wiki-reading-mode-toggle';
 
 export function ServerWikiHeader({ page, presentation, routeContext }: { readonly page: WikiPageResponse; readonly presentation?: ServerWikiPresentation | null; readonly routeContext?: ServerWikiPublicRouteContext | null }) {
   const wiki = page.serverWiki;
@@ -56,6 +57,8 @@ export function ServerWikiHeader({ page, presentation, routeContext }: { readonl
             />
           </label>
         </form>
+
+        <ServerWikiReadingModeToggle />
 
         <Link
           href={`${rootPath}/_changes`}

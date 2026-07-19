@@ -14,7 +14,7 @@ export function ServerWikiSidebar({ page, presentation, routeContext }: { readon
   const displayName = brand?.name || wiki.name;
 
   return (
-    <aside className="hidden min-w-0 border-[#e8e8e8] bg-[#fbfbfb] lg:sticky lg:top-16 lg:block lg:h-[calc(100vh-4rem)] lg:border-r">
+    <aside className="server-wiki-sidebar hidden min-w-0 border-[#e8e8e8] bg-[#fbfbfb] lg:sticky lg:top-16 lg:block lg:h-[calc(100vh-4rem)] lg:border-r">
       <div className="border-b border-[#e8e8e8] px-6 py-6">
         <Link href={rootPath} className="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30">
           {brand?.logoUrl ? <img src={brand.logoUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-9 rounded-lg object-contain" /> : <span className="rounded-lg bg-[#eef3ff] p-2 text-[#346ddb]" style={{ color: brand?.accentColor ?? undefined }}><BookOpen className="size-5" /></span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}

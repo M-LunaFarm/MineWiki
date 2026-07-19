@@ -95,10 +95,10 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
           {wiki.publicationStatus === 'draft' ? '초안 미리보기' : '비공개 미리보기'} · 권한이 있는 협업자에게만 표시됩니다.
         </aside>
       ) : null}
-      <main className={`mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
+      <main className={`server-wiki-main mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
         <ServerWikiSidebar page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />
 
-        <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
+        <article className="server-wiki-article min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-[#777]">
             <Link href={rootPath} className="hover:text-[#346ddb]">{wiki.name} 위키</Link>
             <span>/</span>
@@ -232,7 +232,7 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
           </div>
         </article>
 
-        <aside className="hidden border-l border-[#ededed] px-8 py-12 2xl:block">
+        <aside className="server-wiki-toc hidden border-l border-[#ededed] px-8 py-12 2xl:block">
           <div className="sticky top-28 space-y-8">
             <section>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-[#444]"><List className="size-4" />이 페이지</h2>
