@@ -1254,7 +1254,7 @@ export class ServerService {
   async updateBanner(id: string, accountId: string, upload: FileImageUploadRequest): Promise<FileImageUploadResponse> {
     const startedAt = Date.now();
     try {
-      await this.ensureExists(id);
+      const server = await this.ensureExists(id);
       const stored = await this.files.createImage(accountId, {
         ...upload,
         usageContext: 'server_banner',
@@ -1263,6 +1263,9 @@ export class ServerService {
         where: { id },
         data: { bannerUrl: stored.publicPath },
       });
+      if (server.bannerUrl && server.bannerUrl !== stored.publicPath) {
+        await this.retireServerBanner(server.bannerUrl, id);
+      }
       void this.telemetry.record('update', 'servers', Date.now() - startedAt, true);
       return stored;
     } catch (error) {
@@ -1776,6 +1779,7 @@ export class ServerService {
         ownerAccountId: true,
         registrantAccountId: true,
         registrationLeaseExpiresAt: true,
+        bannerUrl: true,
         listingStatus: true,
         createdAt: true,
         updatedAt: true,
@@ -1842,7 +1846,21 @@ export class ServerService {
     if (!reclaimed) {
       throw new ConflictException('서버 등록 상태가 변경되었습니다. 다시 시도해 주세요.');
     }
+    await this.retireServerBanner(existing.bannerUrl, existing.id);
     return this.detail(existing.id, serverInput.registrantAccountId);
+  }
+
+  private async retireServerBanner(publicPath: string | null, serverId: string): Promise<void> {
+    if (!publicPath) return;
+    try {
+      await this.files.deleteUnreferencedServerBanner(publicPath);
+    } catch (error) {
+      Logger.warn({
+        err: error,
+        serverId,
+        publicPath,
+      }, 'Unreferenced server banner cleanup failed');
+    }
   }
 
   async getWikiLayoutSettings(serverId: string) {

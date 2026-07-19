@@ -545,6 +545,44 @@ export class FileService {
     });
     return { deleted: true };
   }
+
+  async deleteUnreferencedServerBanner(publicPath: string): Promise<boolean> {
+    const file = await this.prisma.uploadedFile.findFirst({
+      where: {
+        publicPath,
+        usageContext: 'server_banner',
+        status: 'active',
+      },
+    });
+    if (!file) return false;
+    const references = await this.prisma.server.count({ where: { bannerUrl: publicPath } });
+    if (references > 0) return false;
+    const claimed = await this.prisma.uploadedFile.updateMany({
+      where: { id: file.id, status: 'active' },
+      data: { status: 'delete_pending' },
+    });
+    if (claimed.count !== 1) return false;
+    try {
+      await this.uploads.deleteObject(file.storagePath);
+    } catch (error) {
+      await this.prisma.uploadedFile.updateMany({
+        where: { id: file.id, status: 'delete_pending' },
+        data: { status: 'active' },
+      });
+      throw error;
+    }
+    await this.prisma.uploadedFile.update({
+      where: { id: file.id },
+      data: {
+        status: 'deleted',
+        wikiFilename: null,
+        currentWikiFilename: null,
+        deletedAt: new Date(),
+        retainedUntil: null,
+      },
+    });
+    return true;
+  }
 }
 
 function retentionDeadline(deletedAt: Date): Date {

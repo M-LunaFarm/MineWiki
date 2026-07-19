@@ -702,3 +702,77 @@ test('wiki upload rejects invisible Unicode filename controls before creating a 
   assert.equal(files.size, 0);
   assert.equal(getDeleteAttempts(), 1);
 });
+
+test('unreferenced server banner cleanup removes only an inactive server asset', async () => {
+  const updates: Array<Record<string, unknown>> = [];
+  const deletedObjects: string[] = [];
+  const file = {
+    id: 'banner-file-1',
+    publicPath: 'upload://old-banner.webp',
+    storagePath: '/uploads/old-banner.webp',
+    usageContext: 'server_banner',
+    status: 'active',
+  };
+  const prisma = {
+    uploadedFile: {
+      async findFirst() { return file; },
+      async updateMany({ data }: { data: Record<string, unknown> }) {
+        updates.push(data);
+        return { count: 1 };
+      },
+      async update({ data }: { data: Record<string, unknown> }) {
+        updates.push(data);
+        return { ...file, ...data };
+      },
+    },
+    server: { async count() { return 0; } },
+  };
+  const uploads = {
+    async deleteObject(storagePath: string) { deletedObjects.push(storagePath); },
+  };
+  const service = new FileService(prisma as never, uploads as never, {} as never);
+
+  assert.equal(await service.deleteUnreferencedServerBanner(file.publicPath), true);
+  assert.deepEqual(deletedObjects, ['/uploads/old-banner.webp']);
+  assert.equal(updates[0]?.status, 'delete_pending');
+  assert.equal(updates[1]?.status, 'deleted');
+});
+
+test('server banner cleanup preserves an asset that is still referenced', async () => {
+  let writes = 0;
+  const prisma = {
+    uploadedFile: {
+      async findFirst() {
+        return { id: 'banner-file-1', storagePath: '/uploads/banner.webp' };
+      },
+      async updateMany() { writes += 1; return { count: 1 }; },
+    },
+    server: { async count() { return 1; } },
+  };
+  const service = new FileService(prisma as never, {} as never, {} as never);
+
+  assert.equal(await service.deleteUnreferencedServerBanner('upload://banner.webp'), false);
+  assert.equal(writes, 0);
+});
+
+test('failed server banner object deletion releases the cleanup claim for retry', async () => {
+  const statuses: string[] = [];
+  const prisma = {
+    uploadedFile: {
+      async findFirst() { return { id: 'banner-file-1', storagePath: '/uploads/banner.webp' }; },
+      async updateMany({ data }: { data: { status: string } }) {
+        statuses.push(data.status);
+        return { count: 1 };
+      },
+    },
+    server: { async count() { return 0; } },
+  };
+  const uploads = { async deleteObject() { throw new Error('storage unavailable'); } };
+  const service = new FileService(prisma as never, uploads as never, {} as never);
+
+  await assert.rejects(
+    () => service.deleteUnreferencedServerBanner('upload://banner.webp'),
+    /storage unavailable/,
+  );
+  assert.deepEqual(statuses, ['delete_pending', 'active']);
+});

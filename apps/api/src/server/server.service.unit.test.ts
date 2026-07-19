@@ -287,6 +287,7 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
   let storedHost: string | null = null;
   let storedServer: Record<string, unknown> | null = null;
   let clearedClaimMethods = 0;
+  const retiredBanners: string[] = [];
   const now = new Date();
   const prisma = {
     server: {
@@ -297,6 +298,7 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
               ownerAccountId: null,
               registrantAccountId: storedServer.registrantAccountId,
               registrationLeaseExpiresAt: storedServer.registrationLeaseExpiresAt,
+              bannerUrl: storedServer.bannerUrl,
               listingStatus: 'pending',
               createdAt: storedServer.createdAt,
               updatedAt: storedServer.updatedAt,
@@ -359,7 +361,12 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
     },
     $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
   };
-  const service = new ServerService({} as never, prisma as never, {} as never);
+  const service = new ServerService({
+    async deleteUnreferencedServerBanner(publicPath: string) {
+      retiredBanners.push(publicPath);
+      return true;
+    },
+  } as never, prisma as never, {} as never);
   const base = {
     name: 'Canonical Server',
     joinPort: 25565,
@@ -403,6 +410,7 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
   );
   if (storedServer) {
     storedServer.registrationLeaseExpiresAt = new Date(Date.now() - 1_000);
+    storedServer.bannerUrl = 'upload://expired-banner.webp';
   }
   const reclaimed = await service.register({
     ...base,
@@ -412,6 +420,7 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
   assert.equal(reclaimed.id, storedServer?.id);
   assert.equal(storedServer?.registrantAccountId, nextRegistrantAccountId);
   assert.equal(clearedClaimMethods, 1);
+  assert.deepEqual(retiredBanners, ['upload://expired-banner.webp']);
 
   await assert.rejects(
     () => service.register({ ...base, joinHost: '192.168.1.10', joinPort: 25566 }),
@@ -1096,11 +1105,15 @@ test('server banner upload uses canonical file service metadata path', async () 
         height: 160,
       };
     },
+    async deleteUnreferencedServerBanner(publicPath: string) {
+      calls.push(['retire', publicPath]);
+      return true;
+    },
   };
   const updates: unknown[] = [];
   const prisma = {
     server: {
-      findUnique: async () => ({ id: serverId }),
+      findUnique: async () => ({ id: serverId, bannerUrl: 'upload://old-banner.webp' }),
       update: async (args: unknown) => {
         updates.push(args);
         return { id: serverId, bannerUrl: 'upload://banner.webp' };
@@ -1124,6 +1137,7 @@ test('server banner upload uses canonical file service metadata path', async () 
         usageContext: 'server_banner',
       },
     ],
+    ['retire', 'upload://old-banner.webp'],
   ]);
   assert.deepEqual(updates, [
     {
