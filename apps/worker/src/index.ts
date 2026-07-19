@@ -43,7 +43,7 @@ import type {
   ServerPingJob,
   VoteDispatchJob,
 } from '@minewiki/schemas';
-import { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '@minewiki/schemas/claim-methods';
+import { isSupportedClaimMethod } from '@minewiki/schemas/claim-methods';
 import { terminateOnRunLoopFailure } from './runtime-failure';
 import { triggerAccountDeletionSweep } from './account-deletion-scheduler';
 import { processAccountDeletionDiscordRevocations } from './account-deletion-discord-revocations';
@@ -56,6 +56,7 @@ import {
 } from '@minewiki/auth';
 import { publishWorkerHeartbeat } from './worker-heartbeat';
 import { RETRYABLE_SCHEDULED_JOB_OPTIONS } from './queue-options';
+import { buildClaimCheckDueWhere } from './claim-check-policy';
 
 const PING_INTERVAL_MS = 5 * 60 * 1000;
 const RANK_INTERVAL_MS = 60 * 60 * 1000;
@@ -67,8 +68,6 @@ const WIKI_SPECIAL_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000;
 const ACCOUNT_DELETION_INTERVAL_MS = 60 * 60 * 1000;
 const ACCOUNT_DELETION_DISCORD_REVOCATION_INTERVAL_MS = 60 * 1000;
 const BILLING_ENTITLEMENT_INTERVAL_MS = 5 * 60 * 1000;
-const CLAIM_PENDING_THRESHOLD_HOURS = 1;
-const CLAIM_VERIFIED_THRESHOLD_HOURS = 24;
 const MAX_PING_BATCH = 200;
 const MAX_CLAIM_BATCH = 200;
 
@@ -471,25 +470,9 @@ async function enqueueServerPings(): Promise<void> {
 
 async function enqueueClaimChecks(): Promise<void> {
   const now = DateTime.utc();
-  const pendingThreshold = now.minus({ hours: CLAIM_PENDING_THRESHOLD_HOURS }).toJSDate();
-  const verifiedThreshold = now.minus({ hours: CLAIM_VERIFIED_THRESHOLD_HOURS }).toJSDate();
 
   const dueMethods = await prisma.serverClaimMethod.findMany({
-    where: {
-      method: {
-        in: [...SUPPORTED_CLAIM_METHODS],
-      },
-      OR: [
-        {
-          status: 'pending',
-          OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: pendingThreshold } }],
-        },
-        {
-          status: 'verified',
-          OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: verifiedThreshold } }],
-        },
-      ],
-    },
+    where: buildClaimCheckDueWhere(now.toJSDate()),
     take: MAX_CLAIM_BATCH,
   });
 
