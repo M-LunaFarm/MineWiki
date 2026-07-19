@@ -38,7 +38,7 @@ import type { SessionPayload } from '../session/session.service';
 import { RequireStepUp } from '../session/step-up.decorator';
 import { ClaimService } from '../claim/claim.service';
 import { FileService } from '../file/file.service';
-import { serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schemas';
+import { publicHttpUrlSchema, serverRegistrationSchema, votifierTargetSchema } from '@minewiki/schemas';
 import { PluginCredentialService } from './plugin-credential.service';
 import { GuildAccessService } from '../verify/guild-access.service';
 import type { ServerWikiContentSettingsInput } from './server-wiki-content-settings';
@@ -112,8 +112,8 @@ export const serverProfilePayloadSchema = z.object({
   ]),
   shortDescription: z.string().trim().min(1).max(160),
   longDescription: z.string().trim().min(1).max(20_000),
-  websiteUrl: z.string().trim().url().nullable(),
-  discordUrl: z.string().trim().url().nullable(),
+  websiteUrl: publicHttpUrlSchema.nullable(),
+  discordUrl: publicHttpUrlSchema.nullable(),
 }).strict();
 
 const rankingQuerySchema = z.object({

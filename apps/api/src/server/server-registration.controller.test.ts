@@ -137,6 +137,48 @@ test('public registration rejects oversized tenant content before persistence', 
   assert.equal(registrations, 0);
 });
 
+test('server external links reject executable and non-web URL schemes', async () => {
+  let registrations = 0;
+  const controller = new ServerController(
+    { register: async () => { registrations += 1; return {}; } } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    { verifyCaptcha: async () => ({ success: true }) } as never,
+  );
+
+  for (const websiteUrl of ['javascript:alert(1)', 'data:text/html,unsafe', 'ftp://example.com']) {
+    await assert.rejects(
+      controller.register({
+        name: 'Pending Server',
+        joinHost: 'play.example.com',
+        joinPort: 25565,
+        edition: 'java',
+        supportedVersions: ['1.21.1'],
+        tags: ['survival'],
+        shortDescription: 'Ownership verification pending',
+        longDescription: 'A server waiting for ownership verification.',
+        websiteUrl,
+      }, { userId: 'account-1' } as never, { clientIp: '203.0.113.10' } as never),
+      /http.*https/u,
+    );
+    assert.throws(
+      () => serverProfilePayloadSchema.parse({
+        name: 'Pending Server',
+        tags: ['survival'],
+        shortDescription: 'Ownership verification pending',
+        longDescription: 'A server waiting for ownership verification.',
+        websiteUrl,
+        discordUrl: null,
+      }),
+      /http.*https/u,
+    );
+  }
+  assert.equal(registrations, 0);
+});
+
 test('server profile updates are owner-scoped, strict, trimmed, and bounded', async () => {
   const serverId = '22222222-2222-4222-8222-222222222222';
   const accountId = '11111111-1111-4111-8111-111111111111';

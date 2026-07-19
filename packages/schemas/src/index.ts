@@ -417,6 +417,11 @@ export const serverRankingResponseSchema = z.object({
   unrankedCount: z.number().int().nonnegative(),
 });
 
+export const publicHttpUrlSchema = z.string().trim().max(2_048).url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === 'http:' || protocol === 'https:';
+}, 'URL은 http 또는 https 주소여야 합니다.');
+
 export const serverRegistrationSchema = z.object({
   name: z.string().trim().min(3).max(32),
   joinHost: z.string().trim().min(3).max(255),
@@ -430,8 +435,8 @@ export const serverRegistrationSchema = z.object({
   ]),
   shortDescription: z.string().trim().min(1).max(160),
   longDescription: z.string().trim().min(1).max(20_000),
-  websiteUrl: z.string().trim().max(2_048).url().optional().nullable(),
-  discordUrl: z.string().trim().max(2_048).url().optional().nullable(),
+  websiteUrl: publicHttpUrlSchema.optional().nullable(),
+  discordUrl: publicHttpUrlSchema.optional().nullable(),
 }).strict();
 
 export const serverPingSampleSchema = z.object({
