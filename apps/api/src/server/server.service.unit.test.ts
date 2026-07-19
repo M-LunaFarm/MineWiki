@@ -417,8 +417,8 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
           shortDescription: data.shortDescription,
           longDescription: data.longDescription,
           bannerUrl: null,
-          websiteUrl: null,
-          discordUrl: null,
+          websiteUrl: data.websiteUrl,
+          discordUrl: data.discordUrl,
           voteCooldownHours: 24,
           verificationGrade: 'Unverified',
           verifiedAt: null,
@@ -469,14 +469,16 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
     tags: ['survival'],
     shortDescription: 'Canonical endpoint registration',
     longDescription: 'Canonical endpoint registration test.',
-    websiteUrl: null,
-    discordUrl: null,
+    websiteUrl: 'javascript:alert(1)',
+    discordUrl: 'https://user:password@example.com/invite',
     registrantAccountId: randomUUID(),
   };
 
-  await service.register({ ...base, joinHost: ' ONE.ONE.ONE.ONE. ' });
+  const initial = await service.register({ ...base, joinHost: ' ONE.ONE.ONE.ONE. ' });
   assert.equal(storedHost, 'one.one.one.one');
   assert.match(storedEndpointKey ?? '', /^[a-f0-9]{64}$/u);
+  assert.equal(initial.websiteUrl, null);
+  assert.equal(initial.discordUrl, null);
 
   const replay = await service.register({ ...base, joinHost: 'one.one.one.one' });
   assert.equal(replay.id, storedServer?.id);

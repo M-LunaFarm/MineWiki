@@ -149,7 +149,12 @@ test('server external links reject executable and non-web URL schemes', async ()
     { verifyCaptcha: async () => ({ success: true }) } as never,
   );
 
-  for (const websiteUrl of ['javascript:alert(1)', 'data:text/html,unsafe', 'ftp://example.com']) {
+  for (const websiteUrl of [
+    'javascript:alert(1)',
+    'data:text/html,unsafe',
+    'ftp://example.com',
+    'https://user:password@example.com/',
+  ]) {
     await assert.rejects(
       controller.register({
         name: 'Pending Server',

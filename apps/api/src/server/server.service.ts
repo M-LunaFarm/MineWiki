@@ -16,7 +16,7 @@ import type {
   ServerUpdate,
   VotifierTarget,
 } from '@minewiki/schemas';
-import { PUBLIC_SERVER_LISTING_STATUS } from '@minewiki/schemas';
+import { isPublicHttpUrl, PUBLIC_SERVER_LISTING_STATUS } from '@minewiki/schemas';
 import { Prisma, type Server, type ServerWiki } from '@prisma/client';
 import { status, statusBedrock } from 'minecraft-server-util';
 import { resolveSrv } from 'node:dns/promises';
@@ -2933,7 +2933,7 @@ function toSummary(server: {
     reviewsCount: server.reviewsCount,
     voteRequiresOwnership: server.voteRequiresOwnership,
     bannerUrl: server.bannerUrl ?? null,
-    websiteUrl: server.websiteUrl ?? null,
+    websiteUrl: safeServerExternalUrl(server.websiteUrl),
     playersOnline: server.playersOnline ?? null,
     playersMax: server.playersMax ?? null,
     playersLastUpdatedAt: server.playersLastUpdatedAt
@@ -3093,8 +3093,8 @@ function toDetail(
     ...toSummary(server),
     longDescription: server.longDescription,
     bannerUrl: server.bannerUrl ?? null,
-    websiteUrl: server.websiteUrl ?? null,
-    discordUrl: server.discordUrl ?? null,
+    websiteUrl: safeServerExternalUrl(server.websiteUrl),
+    discordUrl: safeServerExternalUrl(server.discordUrl),
     voteCooldownHours: server.voteCooldownHours,
     verificationMethods: [...verificationMethods],
     createdAt: server.createdAt.toISOString(),
@@ -3116,6 +3116,13 @@ function normalizeStringArray(value: Prisma.JsonValue | string[] | null | undefi
   return items
     .map((item) => (typeof item === 'string' ? item.trim() : ''))
     .filter((item) => item.length > 0);
+}
+
+function safeServerExternalUrl(value: string | null | undefined): string | null {
+  if (!value || value.length > 2_048 || !isPublicHttpUrl(value)) {
+    return null;
+  }
+  return value;
 }
 
 function normalizeNumberArray(value: Prisma.JsonValue | number[] | null | undefined): number[] {

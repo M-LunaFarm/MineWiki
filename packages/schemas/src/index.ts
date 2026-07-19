@@ -417,10 +417,21 @@ export const serverRankingResponseSchema = z.object({
   unrankedCount: z.number().int().nonnegative(),
 });
 
-export const publicHttpUrlSchema = z.string().trim().max(2_048).url().refine((value) => {
-  const protocol = new URL(value).protocol;
-  return protocol === 'http:' || protocol === 'https:';
-}, 'URL은 http 또는 https 주소여야 합니다.');
+export function isPublicHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && !parsed.username
+      && !parsed.password;
+  } catch {
+    return false;
+  }
+}
+
+export const publicHttpUrlSchema = z.string().trim().max(2_048).url().refine(
+  isPublicHttpUrl,
+  'URL은 사용자 인증 정보가 없는 http 또는 https 주소여야 합니다.',
+);
 
 export const serverRegistrationSchema = z.object({
   name: z.string().trim().min(3).max(32),
