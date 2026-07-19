@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  ArrowRight,
   CheckCircle2,
   Clipboard,
   Clock3,
@@ -893,6 +894,23 @@ export function ClaimWorkflow() {
       {notice ? (
         <div className="mb-4 rounded-lg border border-[#13ec80]/30 bg-[#13ec80]/10 p-3 text-sm text-[#d8ffef]">
           {notice}
+        </div>
+      ) : null}
+      {verifiedCount > 0 && serverId ? (
+        <div className="mb-6 flex flex-col gap-4 rounded-xl border border-[#13ec80]/30 bg-[#101a14] p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold text-white">소유권 연결이 완료되었습니다.</p>
+            <p className="mt-1 text-sm leading-6 text-[#A0A0A0]">
+              서버 관리 화면에서 프로필과 투표 연동을 설정하고, 자동 준비된 서버 위키 초안을 편집해 첫 릴리스를 발행할 수 있습니다.
+            </p>
+          </div>
+          <Link
+            href={`/servers/${encodeURIComponent(serverId)}`}
+            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#13ec80] px-4 py-2 text-sm font-bold text-black transition hover:bg-[#0fb865]"
+          >
+            서버 관리 계속하기
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
         </div>
       ) : null}
       {error ? (
