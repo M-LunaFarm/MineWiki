@@ -897,12 +897,11 @@ export class WikiDiscussionService {
     pageId: string,
     input: { readonly title?: string; readonly content?: string; readonly poll?: WikiDiscussionPollInput }
   ): Promise<WikiThreadDetail> {
-    const parsedPageId = this.parseId(pageId, 'pageId');
-    const page = await this.prisma.wikiPage.findUnique({ where: { id: parsedPageId } });
-    if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
+    const actor = this.wikiPermissions.actorFromSession(session, profile);
+    const page = await this.readablePage(pageId, session.userId, undefined, actor);
     await this.wikiPermissions.assertCanCreateThread({
-      actor: this.wikiPermissions.actorFromSession(session, profile),
+      actor,
       page
     });
     const title = this.requiredText(input.title, 'title', 255);
@@ -944,10 +943,9 @@ export class WikiDiscussionService {
     if (!thread) throw new NotFoundException('Wiki discussion thread not found.');
     if (thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
     if (thread.status !== 'open') throw new BadRequestException(this.threadWriteBlockedMessage(thread.status));
-    const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
-    if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const actor = this.wikiPermissions.actorFromSession(session, profile);
+    const page = await this.readablePage(thread.pageId.toString(), session.userId, undefined, actor);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
     await this.wikiPermissions.assertCanWriteThreadComment({ actor, page, threadId: thread.id });
     const content = this.requiredText(input.content, 'content', 10_000);
@@ -957,7 +955,10 @@ export class WikiDiscussionService {
       const currentThread = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
       if (!currentThread || currentThread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
       if (currentThread.status !== 'open') throw new BadRequestException(this.threadWriteBlockedMessage(currentThread.status));
-      const currentPage = await tx.wikiPage.findUnique({ where: { id: currentThread.pageId } });
+      const currentLivePage = await tx.wikiPage.findUnique({ where: { id: currentThread.pageId } });
+      const currentPage = currentLivePage
+        ? (await this.pageAtPublicationBoundary(currentLivePage, actor, tx)).page
+        : null;
       await this.wikiPermissions.assertCanWriteThreadComment({ actor, page: currentPage, threadId: currentThread.id, store: tx });
       const comment = await tx.wikiDiscussionComment.create({
         data: { threadId: thread.id, content, status: 'normal', createdBy: profile.id, createdAt: now }
@@ -1011,8 +1012,9 @@ export class WikiDiscussionService {
     const ipHash = this.anonymousIpHash(requestIp);
     const now = new Date();
     const result = await this.prisma.$transaction(async (tx) => {
-      const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
-      if (!page) throw new NotFoundException('Wiki page not found.');
+      const livePage = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
+      if (!livePage) throw new NotFoundException('Wiki page not found.');
+      const page = (await this.pageAtPublicationBoundary(livePage, null, tx)).page;
       await this.wikiPermissions.assertCanCreateThread({ actor: null, page, requestIp, store: tx });
       const openCount = await tx.wikiDiscussionThread.count({
         where: { pageId: page.id, createdBy: null, status: { in: ['open', 'paused'] } },
@@ -1076,8 +1078,9 @@ export class WikiDiscussionService {
       const thread = await tx.wikiDiscussionThread.findUnique({ where: { id } });
       if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
       if (thread.status !== 'open') throw new BadRequestException(this.threadWriteBlockedMessage(thread.status));
-      const page = await tx.wikiPage.findUnique({ where: { id: thread.pageId } });
-      if (!page) throw new NotFoundException('Wiki page not found.');
+      const livePage = await tx.wikiPage.findUnique({ where: { id: thread.pageId } });
+      if (!livePage) throw new NotFoundException('Wiki page not found.');
+      const page = (await this.pageAtPublicationBoundary(livePage, null, tx)).page;
       await this.wikiPermissions.assertCanReadThread({ accountId: null, actor: null, thread, page, requestIp, store: tx });
       await this.wikiPermissions.assertCanWriteThreadComment({ actor: null, page, threadId: thread.id, requestIp, store: tx });
       const owner = await this.getOrCreateAnonymousOwner(tx, now, existingOwnerToken);
@@ -1127,10 +1130,9 @@ export class WikiDiscussionService {
     }
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: threadIdValue } });
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-    const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
-    if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const actor = this.wikiPermissions.actorFromSession(session, profile);
+    const page = await this.readablePage(thread.pageId.toString(), session.userId, undefined, actor);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
@@ -1144,7 +1146,10 @@ export class WikiDiscussionService {
       if (!currentThread || currentThread.status !== 'open') {
         throw new ConflictException(this.threadWriteBlockedMessage(currentThread?.status ?? 'deleted'));
       }
-      const currentPage = await tx.wikiPage.findUnique({ where: { id: currentThread.pageId } });
+      const currentLivePage = await tx.wikiPage.findUnique({ where: { id: currentThread.pageId } });
+      const currentPage = currentLivePage
+        ? (await this.pageAtPublicationBoundary(currentLivePage, actor, tx)).page
+        : null;
       await this.wikiPermissions.assertCanWriteThreadComment({ actor, page: currentPage, threadId: currentThread.id, store: tx });
       if (!currentComment || currentComment.status !== 'normal') throw new ConflictException('Wiki discussion poll is not available.');
       if (!currentPoll || currentPoll.status !== 'open' || (currentPoll.closesAt && currentPoll.closesAt <= now)) {
@@ -1171,10 +1176,9 @@ export class WikiDiscussionService {
     if (!comment || comment.threadId !== threadIdValue) throw new NotFoundException('Wiki discussion poll not found.');
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: threadIdValue } });
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-    const page = await this.prisma.wikiPage.findUnique({ where: { id: thread.pageId } });
-    if (!page) throw new NotFoundException('Wiki page not found.');
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const actor = this.wikiPermissions.actorFromSession(session, profile);
+    const page = await this.readablePage(thread.pageId.toString(), session.userId, undefined, actor);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
     await this.wikiPermissions.assertCanWriteThreadComment({ actor, page, threadId: thread.id });
     if (poll.createdBy !== profile.id && !(await this.wikiPermissions.canModeratePage({ actor, page }))) {
@@ -1185,7 +1189,10 @@ export class WikiDiscussionService {
       await this.lockDiscussionRows(tx, thread.id, comment.id, poll.id);
       const currentThread = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
       if (!currentThread || currentThread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-      const currentPage = await tx.wikiPage.findUnique({ where: { id: currentThread.pageId } });
+      const currentLivePage = await tx.wikiPage.findUnique({ where: { id: currentThread.pageId } });
+      const currentPage = currentLivePage
+        ? (await this.pageAtPublicationBoundary(currentLivePage, actor, tx)).page
+        : null;
       await this.wikiPermissions.assertCanWriteThreadComment({ actor, page: currentPage, threadId: currentThread.id, store: tx });
       const changed = await tx.wikiDiscussionPoll.updateMany({
         where: { id: poll.id, status: 'open' },
@@ -1210,7 +1217,10 @@ export class WikiDiscussionService {
       await this.lockDiscussionRows(tx, thread.id);
       const currentThread = await tx.wikiDiscussionThread.findUnique({ where: { id: thread.id } });
       if (!currentThread || currentThread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-      const currentPage = await tx.wikiPage.findUnique({ where: { id: currentThread.pageId } });
+      const currentLivePage = await tx.wikiPage.findUnique({ where: { id: currentThread.pageId } });
+      const currentPage = currentLivePage
+        ? (await this.pageAtPublicationBoundary(currentLivePage, actor, tx)).page
+        : null;
       await this.wikiPermissions.assertCanReadThread({
         accountId: session.userId, actor, thread: currentThread, page: currentPage, store: tx
       });
@@ -1493,21 +1503,37 @@ export class WikiDiscussionService {
   ): Promise<WikiPage> {
     const page = await this.prisma.wikiPage.findUnique({ where: { id: this.parseId(pageId, 'pageId') } });
     if (!page) throw new NotFoundException('Wiki page not found.');
+    const publication = await this.pageAtPublicationBoundary(page, actor);
+    await this.wikiPermissions.assertCanReadPage({
+      accountId,
+      actor,
+      page: publication.page,
+      requestIp,
+      publicationProof: publication.proof,
+    });
+    return publication.page;
+  }
+
+  private async pageAtPublicationBoundary(
+    page: WikiPage,
+    actor: Awaited<ReturnType<WikiDiscussionService['viewerActor']>>,
+    store: PrismaService | Prisma.TransactionClient = this.prisma,
+  ): Promise<{
+    readonly page: WikiPage;
+    readonly proof?: {
+      readonly boundary: Awaited<ReturnType<WikiPermissionService['resolvePublishedPageBoundary']>> & {};
+      readonly item: ServerWikiReleaseItem;
+    };
+  }> {
     const permissionSurface = this.wikiPermissions as unknown as {
       resolvePublishedPageBoundary?: WikiPermissionService['resolvePublishedPageBoundary'];
     };
     const boundary = permissionSurface.resolvePublishedPageBoundary
-      ? await permissionSurface.resolvePublishedPageBoundary.call(this.wikiPermissions, { actor, page })
+      ? await permissionSurface.resolvePublishedPageBoundary.call(this.wikiPermissions, { actor, page, store: store as never })
       : null;
-    const readablePage = boundary ? this.pageFromReleaseItem(page, boundary.currentItem) : page;
-    await this.wikiPermissions.assertCanReadPage({
-      accountId,
-      actor,
-      page: readablePage,
-      requestIp,
-      publicationProof: boundary ? { boundary, item: boundary.currentItem } : undefined,
-    });
-    return readablePage;
+    return boundary
+      ? { page: this.pageFromReleaseItem(page, boundary.currentItem), proof: { boundary, item: boundary.currentItem } }
+      : { page };
   }
 
   private pageFromReleaseItem(page: WikiPage, item: ServerWikiReleaseItem): WikiPage {
