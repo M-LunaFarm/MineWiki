@@ -108,6 +108,39 @@ export function buildServerWikiToolPath(routePath, tool) {
   return `/${match[1]}/${match[2]}/_tools/${tool}${documentPath}`;
 }
 
+export const SERVER_WIKI_WORKSPACES = Object.freeze([
+  'changes',
+  'discussions',
+  'watchlist',
+  'special',
+]);
+
+export function buildServerWikiWorkspacePath(routePath, workspace) {
+  if (!SERVER_WIKI_WORKSPACES.includes(workspace)) {
+    throw new TypeError(`Unknown server wiki workspace: ${workspace}`);
+  }
+  const match = /^\/(server|serverWiki)\/([^/]+)(?:\/.*)?$/.exec(routePath);
+  if (!match) {
+    throw new TypeError(`Not a server wiki route: ${routePath}`);
+  }
+  return `/${match[1]}/${match[2]}/_${workspace}`;
+}
+
+export function buildMovedServerWikiPagePath(routePath, slug, contentSlug) {
+  const match = /^\/(server|serverWiki)\/([^/]+)(?:\/.*)?$/.exec(routePath);
+  if (!match) {
+    throw new TypeError(`Not a server wiki route: ${routePath}`);
+  }
+  const normalizedSlug = String(slug).replace(/^\/+|\/+$/gu, '');
+  const normalizedContentSlug = String(contentSlug ?? '').replace(/^\/+|\/+$/gu, '');
+  const documentPath = normalizedContentSlug && normalizedSlug.startsWith(`${normalizedContentSlug}/`)
+    ? normalizedSlug.slice(normalizedContentSlug.length + 1)
+    : normalizedSlug === normalizedContentSlug
+      ? ''
+      : normalizedSlug;
+  return `/${match[1]}/${match[2]}${documentPath ? `/${documentPath}` : ''}`;
+}
+
 export function buildWikiRevisionPath(revisionId, returnTo) {
   return appendWikiReturnTo(`/wiki/revision/${encodeURIComponent(revisionId)}`, returnTo);
 }

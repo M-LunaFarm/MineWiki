@@ -550,7 +550,8 @@ export class WikiController {
   async getMyDeletedPages(
     @CurrentSession() session: SessionPayload,
     @Query('cursor') cursor?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
+    @Query('spaceId') spaceId?: string
   ): Promise<WikiDeletedPageListResponse> {
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     return this.wikiRead.getDeletedPages({
@@ -558,7 +559,8 @@ export class WikiController {
       profileId: profile.id,
       includeAll: session.permissions?.includes('wiki.admin') === true || session.groups?.includes('admin') === true,
       cursor,
-      limit
+      limit,
+      spaceId
     });
   }
 

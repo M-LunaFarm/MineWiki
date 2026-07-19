@@ -226,6 +226,7 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
               pageType={page.pageType}
               currentRevisionId={page.revision.id}
               routePath={routePath}
+              serverWikiContentSlug={wiki.contentSlug}
             />}
           </div>
         </article>

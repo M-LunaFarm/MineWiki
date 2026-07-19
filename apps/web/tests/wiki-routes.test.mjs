@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   buildCategoryWikiToolPath,
+  buildMovedServerWikiPagePath,
   buildServerWikiToolPath,
+  buildServerWikiWorkspacePath,
   buildStandardWikiToolPath,
   buildWikiDiffPath,
   buildWikiHistoryPath,
@@ -137,6 +139,21 @@ test('keeps page ACL inside the canonical server wiki workspace', () => {
     tool: 'acl',
     documentSegments: ['luna', 'rules'],
   });
+});
+
+test('keeps server wiki discovery tools and post-move navigation inside the tenant workspace', () => {
+  const routePath = '/serverWiki/luna-docs/guides/start';
+  assert.equal(buildServerWikiWorkspacePath(routePath, 'watchlist'), '/serverWiki/luna-docs/_watchlist');
+  assert.equal(buildServerWikiWorkspacePath(routePath, 'discussions'), '/serverWiki/luna-docs/_discussions');
+  assert.equal(buildServerWikiWorkspacePath(routePath, 'special'), '/serverWiki/luna-docs/_special');
+  assert.equal(buildServerWikiWorkspacePath(routePath, 'changes'), '/serverWiki/luna-docs/_changes');
+  assert.equal(
+    buildMovedServerWikiPagePath(routePath, 'luna/guides/install', 'luna'),
+    '/serverWiki/luna-docs/guides/install',
+  );
+  assert.equal(buildMovedServerWikiPagePath('/server/luna/rules', 'luna', 'luna'), '/server/luna');
+  assert.throws(() => buildServerWikiWorkspacePath('/wiki/대문', 'watchlist'), /Not a server wiki route/);
+  assert.throws(() => buildServerWikiWorkspacePath(routePath, 'deleted'), /Unknown server wiki workspace/);
 });
 
 test('revision and diff links preserve the canonical source document', () => {

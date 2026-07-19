@@ -5,7 +5,12 @@ import { useEffect, useState } from 'react';
 import { ArchiveRestore, History, Loader2 } from 'lucide-react';
 import { fetchWikiDeletedPages, type WikiDeletedPageSummary } from '../../lib/wiki-api';
 
-export function WikiDeletedPagesClient() {
+interface WikiDeletedPagesClientProps {
+  readonly spaceId?: string;
+  readonly returnTo?: string | null;
+}
+
+export function WikiDeletedPagesClient({ spaceId, returnTo }: WikiDeletedPagesClientProps) {
   const [pages, setPages] = useState<WikiDeletedPageSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -13,19 +18,19 @@ export function WikiDeletedPagesClient() {
 
   useEffect(() => {
     let active = true;
-    void fetchWikiDeletedPages()
+    void fetchWikiDeletedPages({ spaceId })
       .then((result) => { if (active) { setPages(result.items); setCursor(result.nextCursor); } })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '삭제 문서함을 불러오지 못했습니다.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [spaceId]);
 
   async function loadMore() {
     if (!cursor || loading) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchWikiDeletedPages(cursor);
+      const result = await fetchWikiDeletedPages({ cursor, spaceId });
       setPages((current) => [...current, ...result.items.filter((item) => !current.some((existing) => existing.id === item.id))]);
       setCursor(result.nextCursor);
     } catch (caught) {
@@ -37,10 +42,10 @@ export function WikiDeletedPagesClient() {
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
-      <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400"><Link href="/recent" className="hover:text-emerald-200">최근 변경</Link><span>/</span><span className="text-slate-200">삭제 문서함</span></nav>
+      <nav className="flex flex-wrap items-center gap-2 text-sm text-slate-400"><Link href={returnTo ?? '/recent'} className="hover:text-emerald-200">{returnTo ? '문서로 돌아가기' : '최근 변경'}</Link><span>/</span><span className="text-slate-200">삭제 문서함</span></nav>
       <header className="border-b border-white/10 pb-6">
         <h1 className="flex items-center gap-3 text-3xl font-bold text-white"><ArchiveRestore className="size-7 text-emerald-300" /> 삭제 문서함</h1>
-        <p className="mt-3 text-sm text-slate-400">직접 만들었거나 관리 권한이 있는 공간에서 삭제된 문서를 복구합니다.</p>
+        <p className="mt-3 text-sm text-slate-400">{spaceId ? '현재 서버 위키 공간에서 삭제된 문서를 복구합니다.' : '직접 만들었거나 관리 권한이 있는 공간에서 삭제된 문서를 복구합니다.'}</p>
       </header>
       {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
       {loading ? <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 불러오는 중입니다.</p> : null}

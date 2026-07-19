@@ -2810,6 +2810,7 @@ export class WikiReadService {
     readonly includeAll?: boolean;
     readonly cursor?: string;
     readonly limit?: string | number;
+    readonly spaceId?: string;
   }): Promise<WikiDeletedPageListResponse> {
     let managedSpaceIds: bigint[] = [];
     if (!input.includeAll) {
@@ -2845,6 +2846,7 @@ export class WikiReadService {
     }
     const cursor = input.cursor ? decodeDeletedPageCursor(input.cursor) : null;
     const limit = Math.min(Math.max(Number(input.limit ?? 50) || 50, 1), 100);
+    const spaceId = input.spaceId ? this.parseBigIntId(input.spaceId, 'spaceId') : null;
     const scope = !input.includeAll
       ? {
           OR: [
@@ -2856,6 +2858,7 @@ export class WikiReadService {
     const pages = await this.prisma.wikiPage.findMany({
       where: {
         status: 'deleted',
+        ...(spaceId ? { spaceId } : {}),
         AND: [
           scope,
           ...(cursor ? [{ OR: [{ updatedAt: { lt: cursor.updatedAt } }, { updatedAt: cursor.updatedAt, id: { lt: cursor.id } }] }] : [])

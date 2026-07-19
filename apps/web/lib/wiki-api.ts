@@ -1525,9 +1525,10 @@ export async function unregisterWikiPushSubscription(): Promise<{ readonly remov
   return mutateWikiBrowser<{ readonly removed: boolean }>('/v1/wiki/notifications/push/subscription', 'DELETE', {});
 }
 
-export async function fetchWikiDeletedPages(cursor?: string): Promise<WikiDeletedPageListResponse> {
+export async function fetchWikiDeletedPages(input: { readonly cursor?: string; readonly spaceId?: string } = {}): Promise<WikiDeletedPageListResponse> {
   const params = new URLSearchParams({ limit: '50' });
-  if (cursor) params.set('cursor', cursor);
+  if (input.cursor) params.set('cursor', input.cursor);
+  if (input.spaceId) params.set('spaceId', input.spaceId);
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/me/deleted-pages?${params.toString()}`, {
     credentials: 'include',
   });

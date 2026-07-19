@@ -1482,6 +1482,13 @@ test('deleted page inbox uses a stable updated-at and id cursor beyond the first
     status: 'deleted',
     AND: [{}, { OR: [{ updatedAt: { lt: secondAt } }, { updatedAt: secondAt, id: { lt: 20n } }] }]
   });
+
+  await service.getDeletedPages({ accountId: 'admin', profileId: 1n, includeAll: true, limit: 2, spaceId: '1' });
+  assert.deepEqual(whereInputs[2], {
+    status: 'deleted',
+    spaceId: 1n,
+    AND: [{}]
+  });
 });
 
 test('deleted-page recovery never previews a hidden or foreign source revision', async () => {

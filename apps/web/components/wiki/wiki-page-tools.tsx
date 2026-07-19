@@ -6,7 +6,12 @@ import { ArchiveRestore, Code2, Compass, FilePenLine, FolderPen, GitCommitHorizo
 import { deleteWikiPage, moveWikiPage } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 import { WikiWatchButton } from './wiki-watch-button';
-import { buildServerWikiToolPath, buildWikiPagePath } from '../../lib/wiki-routes.mjs';
+import {
+  buildMovedServerWikiPagePath,
+  buildServerWikiToolPath,
+  buildServerWikiWorkspacePath,
+  buildWikiPagePath,
+} from '../../lib/wiki-routes.mjs';
 import { WikiReportButton } from './wiki-report-button';
 import { WikiPageSwapForm } from './wiki-page-swap-form';
 
@@ -19,9 +24,10 @@ interface WikiPageToolsProps {
   readonly pageType: string;
   readonly currentRevisionId: string;
   readonly routePath: string;
+  readonly serverWikiContentSlug?: string;
 }
 
-export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle, pageType, currentRevisionId, routePath }: WikiPageToolsProps) {
+export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle, pageType, currentRevisionId, routePath, serverWikiContentSlug }: WikiPageToolsProps) {
   const { account, loading: authLoading } = useAuth();
   const [nextTitle, setNextTitle] = useState(title);
   const [nextNamespace, setNextNamespace] = useState(namespace);
@@ -39,6 +45,11 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
   const requestsHref = isServerWiki ? buildServerWikiToolPath(routePath, 'requests') : `/wiki/edit-requests/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
   const blameHref = isServerWiki ? buildServerWikiToolPath(routePath, 'blame') : `/wiki/blame/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
   const aclHref = isServerWiki ? buildServerWikiToolPath(routePath, 'acl') : `/wiki/acl/${encodeURIComponent(pageId)}?returnTo=${encodeURIComponent(routePath)}`;
+  const watchlistHref = isServerWiki ? buildServerWikiWorkspacePath(routePath, 'watchlist') : '/wiki/watchlist';
+  const recentDiscussionsHref = isServerWiki ? buildServerWikiWorkspacePath(routePath, 'discussions') : '/wiki/discussions';
+  const specialHref = isServerWiki ? buildServerWikiWorkspacePath(routePath, 'special') : '/wiki/special';
+  const deletedHref = `/wiki/deleted?spaceId=${encodeURIComponent(spaceId)}&returnTo=${encodeURIComponent(routePath)}`;
+  const uploadHref = `/wiki/upload?spaceId=${encodeURIComponent(spaceId)}&returnTo=${encodeURIComponent(routePath)}`;
 
   async function move(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,7 +64,9 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
         reason: moveReason,
         leaveRedirect
       });
-      window.location.assign(pageHref(result.namespace, result.slug));
+      window.location.assign(isServerWiki
+        ? buildMovedServerWikiPagePath(routePath, result.slug, serverWikiContentSlug)
+        : pageHref(result.namespace, result.slug));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '문서를 이동하지 못했습니다.');
       setWorking(null);
@@ -70,7 +83,7 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
     setMessage(null);
     try {
       await deleteWikiPage({ pageId, reason: deleteReason });
-      window.location.assign('/recent');
+      window.location.assign(isServerWiki ? buildServerWikiWorkspacePath(routePath, 'changes') : '/recent');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '문서를 삭제하지 못했습니다.');
       setWorking(null);
@@ -88,8 +101,8 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
         >
           <Code2 className="size-3.5" /> 원문
         </Link>
-        {account ? <Link href="/wiki/watchlist" className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ArchiveRestore className="size-3.5" /> 관심 목록</Link> : null}
-        {account ? <Link href={`/wiki/upload?spaceId=${encodeURIComponent(spaceId)}`} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ImagePlus className="size-3.5" /> 파일 업로드</Link> : null}
+        {account ? <Link href={watchlistHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ArchiveRestore className="size-3.5" /> 관심 목록</Link> : null}
+        {account ? <Link href={uploadHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ImagePlus className="size-3.5" /> 파일 업로드</Link> : null}
         <Link
           href={backlinksHref}
           className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"
@@ -103,10 +116,10 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
           <MessageSquareText className="size-3.5" /> 토론
         </Link>
         <Link href={requestsHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><FilePenLine className="size-3.5" /> 편집 요청</Link>
-        <Link href="/wiki/discussions" className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><MessagesSquare className="size-3.5" /> 최근 토론</Link>
+        <Link href={recentDiscussionsHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><MessagesSquare className="size-3.5" /> 최근 토론</Link>
         <Link href={blameHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><GitCommitHorizontal className="size-3.5" /> 기여 추적</Link>
         <Link href={aclHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><ShieldCheck className="size-3.5" /> ACL</Link>
-        <Link href="/wiki/special" className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><Compass className="size-3.5" /> 특수 문서</Link>
+        <Link href={specialHref} className="chip chip-muted inline-flex min-h-11 items-center gap-1.5 px-3"><Compass className="size-3.5" /> 특수 문서</Link>
         <WikiReportButton targetType="page" targetId={pageId} returnTo={routePath} />
       </div>
       {!authLoading && !account ? (
@@ -119,7 +132,7 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
         <p className="mt-2 text-xs leading-5 text-slate-500">
           이동과 삭제는 문서 작성자, 공간 관리자 또는 명시적으로 허용된 ACL 사용자만 실행할 수 있습니다.
         </p>
-        <Link href="/wiki/deleted" className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-300 hover:text-emerald-200">
+        <Link href={deletedHref} className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-300 hover:text-emerald-200">
           <ArchiveRestore className="size-3.5" /> 삭제 문서함
         </Link>
         <form onSubmit={move} className="mt-4 space-y-3">
