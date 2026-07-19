@@ -49,6 +49,7 @@ export interface WikiTableCell {
   darkColor?: string;
   noPadding?: boolean;
   keepAll?: boolean;
+  sortable?: boolean;
 }
 
 export interface WikiTableRow {

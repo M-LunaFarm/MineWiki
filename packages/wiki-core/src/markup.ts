@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.29.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.30.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
@@ -1457,6 +1457,10 @@ function applyWikiTableModifier(
     scopedColors.columnKeepAll = true;
     return true;
   }
+  if (modifier.toLowerCase() === 'sortable') {
+    cell.sortable = true;
+    return true;
+  }
 
   const scopedColorModifier = modifier.match(/^(row|col)(bgcolor|color)=(.+)$/i);
   if (scopedColorModifier) {
@@ -2567,7 +2571,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       nav: ['class', 'aria-label'],
       form: ['class', 'action', 'method', 'role', 'aria-label'],
       input: ['class', 'type', 'name', 'placeholder', 'aria-label', 'autocomplete'],
-      button: ['class', 'type'],
+      button: ['class', 'type', 'data-wiki-sort-column'],
       blockquote: ['class'],
       caption: ['class'],
       span: ['class', 'style', 'title', 'id', 'aria-hidden', 'aria-label'],
@@ -3472,10 +3476,13 @@ function renderWikiTable(
       '--wiki-dark-background-color': row.darkBackgroundColor,
       'word-break': row.keepAll ? 'keep-all' : undefined
     });
+    let visualColumn = 0;
     return {
       isHeader,
       html: `<tr${rowStyles}>${row.cells
       .map((cell) => {
+        const cellVisualColumn = visualColumn;
+        visualColumn += cell.colspan;
         const tag = isHeader ? 'th' : 'td';
         const colspan = cell.colspan > 1 ? ` colspan="${cell.colspan}"` : '';
         const rowspan = cell.rowspan > 1 ? ` rowspan="${cell.rowspan}"` : '';
@@ -3491,7 +3498,10 @@ function renderWikiTable(
           padding: cell.noPadding ? '0' : undefined,
           'word-break': cell.keepAll ? 'keep-all' : undefined
         });
-        const content = cell.blocks ? renderBlocks(cell.blocks) : renderInline(cell.children, footnotes, options);
+        const renderedContent = cell.blocks ? renderBlocks(cell.blocks) : renderInline(cell.children, footnotes, options);
+        const content = isHeader && cell.sortable && cell.colspan === 1 && cell.rowspan === 1 && isPlainSortableCell(cell)
+          ? `<button class="wiki-table-sort-button" type="button" data-wiki-sort-column="${cellVisualColumn}">${renderedContent}<span class="wiki-table-sort-indicator" aria-hidden="true">↕</span></button>`
+          : renderedContent;
         return `<${tag}${colspan}${rowspan}${styles}>${content}</${tag}>`;
       })
       .join('')}</tr>`
@@ -3507,6 +3517,10 @@ function renderWikiTable(
     : 'component-table wiki-table';
   const html = `<table class="${tableClass}"${tableStyles}>${captionHtml}${headRows ? `<thead>${headRows}</thead>` : ''}${bodyRows ? `<tbody>${bodyRows}</tbody>` : ''}</table>`;
   return `<div class="${wrapperClass}"${wrapperStyles}>${html}</div>`;
+}
+
+function isPlainSortableCell(cell: WikiTableCell): boolean {
+  return !cell.blocks && cell.children.every((node) => node.type === 'text' || node.type === 'code');
 }
 
 function styleAttribute(properties: Record<string, string | undefined>) {

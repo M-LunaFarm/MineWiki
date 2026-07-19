@@ -948,13 +948,13 @@ test('renders NamuMark table captions and explicit header rows semantically', ()
 
 test('renders safe thetree table spacing and word-preservation modifiers', () => {
   const parsed = parseMarkup([
-    '||<thead><nopad>헤더||<thead><colkeepall>긴 단어 열||',
+    '||<thead><nopad><sortable>헤더||<thead><colkeepall>긴 단어 열||',
     '||<rowkeepall>행 전체 유지||둘째 열||',
     '||<keepall>셀 유지||열 상속||',
   ].join('\n'));
   const html = renderDocument(parsed.ast);
 
-  assert.match(html, /<th style="padding:0">헤더<\/th>/u);
+  assert.match(html, /<th style="padding:0"><button class="wiki-table-sort-button" type="button" data-wiki-sort-column="0">헤더<span class="wiki-table-sort-indicator" aria-hidden="true">↕<\/span><\/button><\/th>/u);
   assert.match(html, /<tr style="word-break:keep-all"><td>행 전체 유지<\/td>/u);
   assert.match(html, /<td style="word-break:keep-all">셀 유지<\/td>/u);
   assert.match(html, /<td style="word-break:keep-all">열 상속<\/td>/u);
