@@ -155,6 +155,7 @@ async function applyVerificationResult(
       select: {
         ownerAccountId: true,
         registrantAccountId: true,
+        registrationLeaseExpiresAt: true,
         listingStatus: true,
         ownershipVerificationFailures: true,
         ownershipChallengeStartedAt: true,
@@ -187,19 +188,28 @@ async function applyVerificationResult(
       if (!snapshot.accountId) {
         throw new Error('Verified claim is missing its account owner.');
       }
+      const hasActiveRegistrationLease = current.registrantAccountId === snapshot.accountId
+        && current.registrationLeaseExpiresAt !== null
+        && current.registrationLeaseExpiresAt > checkedAt;
+      const firstClaim = current.ownerAccountId === null && hasActiveRegistrationLease;
       const takeover = current.ownerAccountId !== null
-        && current.registrantAccountId === snapshot.accountId
+        && hasActiveRegistrationLease
         && isServerOwnershipManagementSuspended(current);
       ownershipTakeover = takeover;
       const ownership = await transaction.server.updateMany({
         where: {
           id: snapshot.serverId,
           OR: [
-            { ownerAccountId: null },
+            ...(firstClaim ? [{
+              ownerAccountId: null,
+              registrantAccountId: snapshot.accountId,
+              registrationLeaseExpiresAt: { gt: checkedAt },
+            }] : []),
             { ownerAccountId: snapshot.accountId },
             ...(takeover ? [{
               ownerAccountId: current.ownerAccountId,
               registrantAccountId: snapshot.accountId,
+              registrationLeaseExpiresAt: { gt: checkedAt },
               ownershipChallengeSuspendedAt: { not: null },
             }] : []),
           ],

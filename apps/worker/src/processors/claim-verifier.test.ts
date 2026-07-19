@@ -15,6 +15,7 @@ function ownershipServer(overrides: Record<string, unknown> = {}) {
   return {
     ownerAccountId: null,
     registrantAccountId: null,
+    registrationLeaseExpiresAt: null,
     listingStatus: 'pending',
     ownershipVerificationFailures: 0,
     ownershipChallengeStartedAt: null,
@@ -270,7 +271,10 @@ test('successful verification atomically assigns ownership before activating a p
       findMany: async () => [{ method: 'dns', status: 'verified' }],
     },
     server: {
-      findUnique: async () => ownershipServer({ registrantAccountId: 'account-1' }),
+      findUnique: async () => ownershipServer({
+        registrantAccountId: 'account-1',
+        registrationLeaseExpiresAt: new Date(fixedNow.getTime() + 60_000),
+      }),
       update: async () => ({}),
       updateMany: async (query: unknown) => {
         listingUpdates.push(query);
@@ -301,7 +305,11 @@ test('successful verification atomically assigns ownership before activating a p
     {
       where: {
         id: 'server-1',
-        OR: [{ ownerAccountId: null }, { ownerAccountId: 'account-1' }],
+        OR: [{
+          ownerAccountId: null,
+          registrantAccountId: 'account-1',
+          registrationLeaseExpiresAt: { gt: fixedNow },
+        }, { ownerAccountId: 'account-1' }],
       },
       data: {
         ownerAccountId: 'account-1',
@@ -348,6 +356,7 @@ test('worker keeps a verified takeover suspended until wiki ownership reconcilia
       findUnique: async () => ownershipServer({
         ownerAccountId: 'account-old',
         registrantAccountId: 'account-new',
+        registrationLeaseExpiresAt: new Date(fixedNow.getTime() + 60_000),
         listingStatus: 'suspended',
         ownershipChallengeSuspendedAt: suspendedAt,
       }),
@@ -384,6 +393,46 @@ test('worker keeps a verified takeover suspended until wiki ownership reconcilia
   assert.equal((serverWrites[0]?.data as Record<string, unknown>)?.ownershipChallengeSuspendedAt, suspendedAt);
   assert.equal((serverWrites[0]?.data as Record<string, unknown>)?.listingStatus, 'suspended');
   assert.deepEqual(provisionedServers, ['server-1']);
+});
+
+test('worker rejects a verified first claim after its registration lease expires', async () => {
+  const fixedNow = new Date('2026-07-19T12:00:00.000Z');
+  const ownershipWrites: Array<Record<string, unknown>> = [];
+  const record = {
+    id: 'claim-method-expired-lease', serverId: 'server-1', accountId: 'account-1',
+    method: 'dns', version: 1, token: 'proof-a', tokenCiphertext: null,
+    issuedAt: new Date(fixedNow.getTime() - 60_000), status: 'pending', verifiedAt: null,
+  };
+  const prisma = transactionMock({
+    serverClaimMethod: {
+      findUnique: async () => record,
+      updateMany: async () => ({ count: 1 }),
+      findMany: async () => [{ method: 'dns', status: 'verified' }],
+    },
+    server: {
+      findUnique: async () => ownershipServer({
+        registrantAccountId: 'account-1',
+        registrationLeaseExpiresAt: new Date(fixedNow.getTime() - 1),
+      }),
+      update: async () => ({}),
+      updateMany: async (query: Record<string, unknown>) => {
+        ownershipWrites.push(query);
+        return { count: 0 };
+      },
+    },
+  });
+
+  await assert.rejects(createClaimVerifier(prisma as never, {
+    now: () => fixedNow,
+    runVerificationCheck: async () => ({
+      status: 'verified', checkedAt: fixedNow.toISOString(), note: 'dns_token_confirmed',
+    }),
+  }).verify({ serverId: 'server-1', method: 'dns', initiatedAt: fixedNow.toISOString() }),
+  /conflicts with the current server owner/u);
+
+  assert.deepEqual((ownershipWrites[0]?.where as { OR?: unknown[] }).OR, [
+    { ownerAccountId: 'account-1' },
+  ]);
 });
 
 test('successful verification refuses to activate a listing owned by another account', async () => {
