@@ -3303,6 +3303,7 @@ function createReadService(options: {
     publicPath: string;
     mimeType: string;
     originalName: string | null;
+    sizeBytes?: number;
     visibility?: string;
     ownerAccountId?: string | null;
     linkedResourceType?: string | null;
@@ -3513,6 +3514,20 @@ test('wiki read ignores persistent render caches for file-dependent revisions', 
   assert.match(page.html, /wiki-file-align-center/);
   assert.match(page.html, /style="width:320px"/);
   assert.equal(page.html.includes('파일 없음'), false);
+});
+
+test('wiki read forwards stored file size into deferred large-image rendering', async () => {
+  const service = createReadService({
+    contentRaw: '[[파일:large.webp|대형 이미지]]',
+    files: [{
+      filename: 'large.webp', publicPath: '/files/large.webp', mimeType: 'image/webp',
+      originalName: 'large.webp', sizeBytes: 3 * 1024 * 1024,
+    }],
+  });
+  const page = await service.getPage('main', '대문');
+  assert.match(page.html, /data-wiki-file-src="\/files\/large\.webp"/u);
+  assert.match(page.html, /3\.0 MiB/u);
+  assert.doesNotMatch(page.html, /<img[^>]+src="\/files\/large\.webp"/u);
 });
 
 test('wiki read resolves inline files inside prose, lists, and table cells', async () => {

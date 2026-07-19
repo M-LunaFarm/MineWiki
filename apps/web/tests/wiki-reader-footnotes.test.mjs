@@ -15,6 +15,8 @@ test('wiki readers progressively enhance sanitized footnote anchors in both arti
   assert.match(hydrator, /collapsed-headings/u);
   assert.match(hydrator, /aria-expanded/u);
   assert.match(hydrator, /hashchange/u);
+  assert.match(hydrator, /wiki-file-load/u);
+  assert.match(hydrator, /document\.createElement\('img'\)/u);
   assert.match(hydrator, /\.wiki-footnote-ref > a\[href\^="#fn-"\]/u);
   assert.match(hydrator, /cloneNode\(true\)/u);
   assert.match(hydrator, /root\.contains\(note\)/u);

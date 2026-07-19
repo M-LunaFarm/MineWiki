@@ -13,6 +13,18 @@ test('normalizes titles, slugs, search text, and content hashes', () => {
   assert.match(WIKI_RENDERER_VERSION, /^minewiki-bwm-\d+\.\d+\.\d+$/);
 });
 
+test('large wiki files require an explicit size-labelled load while small files stay lazy', () => {
+  const ast = parseMarkup('[[파일:large.webp|큰 이미지]]\n[[파일:small.webp|작은 이미지]]').ast;
+  const html = renderDocument(ast, { files: {
+    'large.webp': { url: '/files/large.webp', mimeType: 'image/webp', originalName: 'large.webp', sizeBytes: 2.5 * 1024 * 1024 },
+    'small.webp': { url: '/files/small.webp', mimeType: 'image/webp', originalName: 'small.webp', sizeBytes: 128 * 1024 },
+  } });
+  assert.match(html, /data-wiki-file-src="\/files\/large\.webp"/u);
+  assert.match(html, /이미지 불러오기 <small>2\.5 MiB<\/small>/u);
+  assert.doesNotMatch(html, /<img[^>]+src="\/files\/large\.webp"/u);
+  assert.match(html, /<img class="wiki-file-image" src="\/files\/small\.webp"[^>]+loading="lazy"/u);
+});
+
 test('resolves canonical wiki route mappings', () => {
   assert.deepEqual(resolveWikiPath('/wiki/대문'), {
     namespace: 'main',

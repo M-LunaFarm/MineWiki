@@ -35,7 +35,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.31.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.32.0';
 const MAX_HIGHLIGHT_CODE_LENGTH = 100_000;
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
@@ -142,6 +142,7 @@ const allowedTags = [
   'samp',
   'mark',
   'small',
+  'noscript',
   'br',
   'time',
   'output',
@@ -2306,7 +2307,7 @@ export interface RenderOptions {
   internalLinkBasePath?: string;
   /** Current document context used to resolve persisted relative-link ASTs. */
   linkResolution?: WikiLinkResolutionContext;
-  files?: Record<string, { url: string; mimeType: string; originalName: string; license?: string | null; sourceUrl?: string | null; sourceText?: string | null }>;
+  files?: Record<string, { url: string; mimeType: string; originalName: string; sizeBytes?: number; license?: string | null; sourceUrl?: string | null; sourceText?: string | null }>;
   officialAreas?: Record<string, { status: string; lastModifiedAt?: string | null; renewalRequiredAt?: string | null }>;
   dataTables?: Record<string, { caption: string; headers: string[]; rows: string[][] }>;
   /** Internal heading scope shared by folding blocks, but not transclusions. */
@@ -2621,7 +2622,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       nav: ['class', 'aria-label'],
       form: ['class', 'action', 'method', 'role', 'aria-label'],
       input: ['class', 'type', 'name', 'placeholder', 'aria-label', 'autocomplete'],
-      button: ['class', 'type', 'data-wiki-sort-column'],
+      button: ['class', 'type', 'style', 'data-wiki-sort-column', 'data-wiki-file-src', 'data-wiki-file-alt'],
       blockquote: ['class'],
       caption: ['class'],
       span: ['class', 'style', 'title', 'id', 'aria-hidden', 'aria-label'],
@@ -3365,11 +3366,19 @@ function renderFile(
     'object-fit': display.objectFit
   });
   const alt = display.alt ?? caption ?? file.originalName;
-  const imageHtml = `<span class="wiki-file-frame"${frameStyles}><img class="wiki-file-image" src="${escapeAttr(file.url)}" alt="${escapeAttr(alt)}" loading="lazy"${imageStyles}></span>`;
+  const image = `<img class="wiki-file-image" src="${escapeAttr(file.url)}" alt="${escapeAttr(alt)}" loading="lazy"${imageStyles}>`;
+  const imageHtml = Number.isFinite(file.sizeBytes) && file.sizeBytes! >= 2 * 1024 * 1024
+    ? `<span class="wiki-file-frame wiki-file-deferred"${frameStyles}><button type="button" class="wiki-file-load" data-wiki-file-src="${escapeAttr(file.url)}" data-wiki-file-alt="${escapeAttr(alt)}"${imageStyles}>이미지 불러오기 <small>${escapeHtml(formatFileSize(file.sizeBytes!))}</small></button><noscript><a href="${escapeAttr(file.url)}">이미지 열기 (${escapeHtml(formatFileSize(file.sizeBytes!))})</a></noscript></span>`
+    : `<span class="wiki-file-frame"${frameStyles}>${image}</span>`;
   if (inline) {
     return `<span class="${outerClass}">${imageHtml}${caption ? `<span>${escapeHtml(caption)}</span>` : ''}${metaHtml}</span>`;
   }
   return `<figure class="${outerClass}">${imageHtml}${caption ? `<figcaption>${escapeHtml(caption)}${metaHtml}</figcaption>` : metaHtml}</figure>`;
+}
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes >= 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KiB`;
 }
 
 function wikiFileLicenseLabel(value: string): string {

@@ -4834,6 +4834,7 @@ export class WikiReadService {
           url: file.publicPath,
           mimeType: file.mimeType,
           originalName: file.originalName ?? file.filename,
+          sizeBytes: file.sizeBytes,
           license: file.license,
           sourceUrl: file.sourceUrl,
           sourceText: file.sourceText

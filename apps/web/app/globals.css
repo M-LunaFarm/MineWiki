@@ -1128,6 +1128,15 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   .wiki-rendered .wiki-file-frame .wiki-file-image {
     @apply block max-h-full max-w-full;
   }
+  .wiki-rendered .wiki-file-deferred {
+    @apply min-h-32;
+  }
+  .wiki-rendered .wiki-file-load {
+    @apply flex min-h-32 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-white/20 bg-black/20 px-5 py-8 text-sm font-semibold text-slate-200 transition hover:border-emerald-300/40 hover:text-emerald-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300;
+  }
+  .wiki-rendered .wiki-file-load small {
+    @apply text-xs font-normal text-slate-400;
+  }
   .wiki-rendered .wiki-file-inline {
     @apply mx-1 inline-flex max-w-full items-center gap-1.5 align-middle;
   }

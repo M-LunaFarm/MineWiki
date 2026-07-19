@@ -14,8 +14,12 @@ export function WikiReaderInteractionHydrator({ targetId, revisionId }: WikiRead
     const root = document.getElementById(targetId);
     if (!root) return;
     const cleanupHeadings = hydrateHeadingSections(root, revisionId);
+    const cleanupDeferredFiles = hydrateDeferredFiles(root);
     const references = Array.from(root.querySelectorAll<HTMLAnchorElement>('.wiki-footnote-ref > a[href^="#fn-"]'));
-    if (references.length === 0) return cleanupHeadings;
+    if (references.length === 0) return () => {
+      cleanupHeadings();
+      cleanupDeferredFiles();
+    };
 
     const popover = document.createElement('aside');
     popover.className = 'wiki-footnote-popover';
@@ -112,6 +116,7 @@ export function WikiReaderInteractionHydrator({ targetId, revisionId }: WikiRead
 
     return () => {
       cleanupHeadings();
+      cleanupDeferredFiles();
       for (const cleanup of cleanups) cleanup();
       clearHideTimer();
       popover.remove();
@@ -121,6 +126,27 @@ export function WikiReaderInteractionHydrator({ targetId, revisionId }: WikiRead
   }, [revisionId, targetId]);
 
   return null;
+}
+
+function hydrateDeferredFiles(root: HTMLElement) {
+  const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('.wiki-file-load[data-wiki-file-src]'));
+  const cleanups = buttons.map((button) => {
+    const onClick = () => {
+      const src = button.dataset.wikiFileSrc;
+      if (!src || (!src.startsWith('/') && !src.startsWith('https://'))) return;
+      const image = document.createElement('img');
+      image.className = 'wiki-file-image';
+      image.src = src;
+      image.alt = button.dataset.wikiFileAlt ?? '';
+      image.loading = 'lazy';
+      image.referrerPolicy = 'no-referrer';
+      image.style.cssText = button.style.cssText;
+      button.replaceWith(image);
+    };
+    button.addEventListener('click', onClick);
+    return () => button.removeEventListener('click', onClick);
+  });
+  return () => { for (const cleanup of cleanups) cleanup(); };
 }
 
 function hydrateHeadingSections(root: HTMLElement, revisionId: string) {
