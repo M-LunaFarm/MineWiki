@@ -39,7 +39,9 @@ export default function LoginPage() {
   return (
     <AuthShellLayout
       title="로그인"
-      description="MineWiki 계정으로 로그인하거나 새 계정을 만들 수 있습니다."
+      description={redirectTarget.startsWith('/servers/register')
+        ? '로그인 후 서버 등록 단계로 자동으로 돌아갑니다. Discord, NAVER 또는 이메일 계정을 사용할 수 있습니다.'
+        : 'MineWiki 계정으로 로그인하거나 새 계정을 만들 수 있습니다.'}
     >
       <AuthForms />
     </AuthShellLayout>
