@@ -526,11 +526,15 @@ export class ClaimService {
 
     try {
       if (method === 'dns') {
-        const verified = await verifyDnsToken(serverId, token, this.serverService);
+        const outcome = await verifyDnsToken(serverId, token, this.serverService);
         return {
-          status: verified ? 'verified' : 'failed',
+          status: outcome === 'verified' ? 'verified' : 'failed',
           checkedAt,
-          note: verified ? 'dns_token_confirmed' : 'dns_token_not_found',
+          note: outcome === 'verified'
+            ? 'dns_token_confirmed'
+            : outcome === 'absent'
+              ? 'dns_token_not_found'
+              : 'dns_lookup_inconclusive',
         };
       }
       if (method === 'motd') {
@@ -624,23 +628,32 @@ async function verifyDnsToken(
   serverId: string,
   token: string,
   serverService: ServerService,
-): Promise<boolean> {
+  resolveRecords: (name: string) => Promise<string[][]> = resolveTxt,
+): Promise<'verified' | 'absent' | 'inconclusive'> {
   const server = await serverService.ensureExists(serverId);
   const host = normalizeHost(server.joinHost);
   const recordNames = [`_cvverify.${host}`, `_minewiki.${host}`, `_claim.${host}`, host];
+  let inconclusive = false;
 
   for (const name of recordNames) {
     try {
-      const records = await resolveTxt(name);
+      const records = await resolveRecords(name);
       const flattened = records.flat().map((entry) => entry.trim());
       if (flattened.some((entry) => matchesToken(entry, token))) {
-        return true;
+        return 'verified';
       }
-    } catch {
-      // ignore lookup failures and continue
+    } catch (error) {
+      if (!isConfirmedDnsAbsence(error)) inconclusive = true;
     }
   }
-  return false;
+  return inconclusive ? 'inconclusive' : 'absent';
+}
+
+function isConfirmedDnsAbsence(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String(error.code)
+    : '';
+  return code === 'ENODATA' || code === 'ENOTFOUND';
 }
 
 async function verifyMotdToken(

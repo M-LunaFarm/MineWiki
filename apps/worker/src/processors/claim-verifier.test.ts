@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { encryptSecret } from '@minewiki/security';
-import { createClaimVerifier, resolveVerificationProof } from './claim-verifier';
+import { createClaimVerifier, resolveVerificationProof, verifyDnsToken } from './claim-verifier';
 
 function transactionMock<T extends object>(prisma: T): T & {
   $transaction<Result>(callback: (transaction: T) => Promise<Result>): Promise<Result>;
@@ -41,6 +41,23 @@ test('worker decrypts the automatic verification proof without using its hash', 
       process.env.APP_ENCRYPTION_KEY = previousKey;
     }
   }
+});
+
+test('DNS ownership checks distinguish confirmed absence from transient resolver failure', async () => {
+  const prisma = {
+    server: { findUnique: async () => ({ joinHost: 'play.example.com' }) },
+  };
+  const dnsError = (code: string) => Object.assign(new Error(code), { code });
+
+  assert.equal(await verifyDnsToken('server-1', 'proof', prisma as never, async () => {
+    throw dnsError('ENOTFOUND');
+  }), 'absent');
+  assert.equal(await verifyDnsToken('server-1', 'proof', prisma as never, async () => {
+    throw dnsError('ETIMEOUT');
+  }), 'inconclusive');
+  assert.equal(await verifyDnsToken('server-1', 'proof', prisma as never, async (name) => (
+    name.startsWith('_minewiki.') ? [['cv-verify=proof']] : []
+  )), 'verified');
 });
 
 test('hash-only claim records remain pending instead of being falsely failed', async () => {

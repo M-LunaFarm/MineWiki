@@ -276,11 +276,15 @@ async function runVerificationCheck(
 
   try {
     if (method === 'dns') {
-      const verified = await verifyDnsToken(serverId, token, prisma);
+      const outcome = await verifyDnsToken(serverId, token, prisma);
       return {
-        status: verified ? 'verified' : 'failed',
+        status: outcome === 'verified' ? 'verified' : 'failed',
         checkedAt,
-        note: verified ? 'dns_token_confirmed' : 'dns_token_not_found',
+        note: outcome === 'verified'
+          ? 'dns_token_confirmed'
+          : outcome === 'absent'
+            ? 'dns_token_not_found'
+            : 'dns_lookup_inconclusive',
       };
     }
     if (method === 'motd') {
@@ -314,30 +318,39 @@ function computeGrade(
   ) ? 'A' : 'Unverified';
 }
 
-async function verifyDnsToken(
+export async function verifyDnsToken(
   serverId: string,
   token: string,
   prisma: PrismaHandle,
-): Promise<boolean> {
+  resolveRecords: (name: string) => Promise<string[][]> = resolveTxt,
+): Promise<'verified' | 'absent' | 'inconclusive'> {
   const server = await prisma.server.findUnique({ where: { id: serverId } });
   if (!server) {
-    return false;
+    return 'inconclusive';
   }
   const host = normalizeHost(server.joinHost);
   const recordNames = [`_cvverify.${host}`, `_minewiki.${host}`, `_claim.${host}`, host];
+  let inconclusive = false;
 
   for (const name of recordNames) {
     try {
-      const records = await resolveTxt(name);
+      const records = await resolveRecords(name);
       const flattened = records.flat().map((entry) => entry.trim());
       if (flattened.some((entry) => matchesToken(entry, token))) {
-        return true;
+        return 'verified';
       }
-    } catch {
-      // ignore lookup failures
+    } catch (error) {
+      if (!isConfirmedDnsAbsence(error)) inconclusive = true;
     }
   }
-  return false;
+  return inconclusive ? 'inconclusive' : 'absent';
+}
+
+function isConfirmedDnsAbsence(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String(error.code)
+    : '';
+  return code === 'ENODATA' || code === 'ENOTFOUND';
 }
 
 async function verifyMotdToken(
