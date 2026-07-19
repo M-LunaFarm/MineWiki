@@ -42,6 +42,7 @@ interface ClaimStatusResponse {
   readonly serverId: string;
   readonly grade: 'Verified' | 'Unverified';
   readonly methods: ClaimMethodStatus[];
+  readonly wikiProvisioning?: 'ready' | 'pending';
 }
 
 interface QueryServerTarget {
@@ -731,7 +732,9 @@ export function ClaimWorkflow() {
       }));
       const selected = result.methods.find((method) => method.method === selectedMethod);
       if (selected?.status === 'verified') {
-        setNotice(`${formatMethodLabel(selectedMethod)} 검증이 완료되었습니다.`);
+        setNotice(result.wikiProvisioning === 'pending'
+          ? `${formatMethodLabel(selectedMethod)} 소유권 검증은 완료되었습니다. 서버 위키 준비는 서버 관리 화면에서 다시 시도할 수 있습니다.`
+          : `${formatMethodLabel(selectedMethod)} 검증과 서버 위키 준비가 완료되었습니다.`);
       } else if (selected?.status === 'failed') {
         const noteMessage = selected.note ? (NOTE_COPY[selected.note] ?? selected.note) : null;
         setError(noteMessage ?? `${formatMethodLabel(selectedMethod)} 검증이 실패했습니다.`);

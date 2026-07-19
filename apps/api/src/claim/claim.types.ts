@@ -21,4 +21,5 @@ export interface ClaimStatusResponse {
   readonly serverId: string;
   readonly grade: 'Verified' | 'Unverified';
   readonly methods: ClaimMethodStatus[];
+  readonly wikiProvisioning?: 'ready' | 'pending';
 }

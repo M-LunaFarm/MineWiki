@@ -232,7 +232,16 @@ export class ClaimService {
       );
     }
     if (result.status === 'verified') {
-      await this.serverService.ensureClaimedServerWiki(serverId);
+      try {
+        await this.serverService.ensureClaimedServerWiki(serverId);
+      } catch (error) {
+        this.logger.error(
+          `Ownership verified but server wiki provisioning is pending for ${serverId}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+        return { ...(await this.getStatus(serverId)), wikiProvisioning: 'pending' };
+      }
+      return { ...(await this.getStatus(serverId)), wikiProvisioning: 'ready' };
     }
     return this.getStatus(serverId);
   }

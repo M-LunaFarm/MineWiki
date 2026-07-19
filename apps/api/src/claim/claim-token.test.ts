@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ConflictException } from '@nestjs/common';
 import { ClaimService, hashClaimToken, matchesClaimToken } from './claim.service';
+import type { ClaimStatusResponse } from './claim.types';
 import { decryptAppSecret } from '../common/secret-codec';
 import {
   SERVER_OWNERSHIP_CHALLENGE_GRACE_MS,
@@ -614,6 +615,40 @@ test('pending claim tokens expire 24 hours after issuance and cannot be verified
   assert.equal(updates.length, 1);
   assert.equal(updates[0]?.status, 'expired');
   assert.equal(updates[0]?.note, 'token_expired');
+});
+
+test('verified ownership remains successful when wiki provisioning needs a retry', async () => {
+  const method = {
+    id: 'claim-method-verified', serverId: 'server-1', accountId: 'account-1', method: 'dns',
+    token: hashClaimToken('proof'), tokenCiphertext: null, issuedAt: new Date(), status: 'pending',
+    verifiedAt: null, lastCheckedAt: null, note: null, version: 1,
+  };
+  const service = new ClaimService({
+    ensureExists: async () => ownershipServer({ ownerAccountId: 'account-1' }),
+    ensureClaimedServerWiki: async () => { throw new Error('temporary provisioning failure'); },
+  } as never, {
+    serverClaimMethod: {
+      findMany: async () => [],
+      findUnique: async () => method,
+    },
+  } as never);
+  const internals = service as unknown as {
+    runVerificationCheck: () => Promise<{ status: 'verified'; checkedAt: string }>;
+    applyVerificationResult: () => Promise<boolean>;
+    getStatus: () => Promise<ClaimStatusResponse>;
+  };
+  internals.runVerificationCheck = async () => ({ status: 'verified', checkedAt: new Date().toISOString() });
+  internals.applyVerificationResult = async () => true;
+  internals.getStatus = async () => ({
+    serverId: 'server-1', grade: 'Verified', methods: [{
+      method: 'dns', issuedAt: method.issuedAt.toISOString(), status: 'verified', verified: true,
+    }],
+  });
+
+  const result = await service.verifyMethod('server-1', 'dns', 'proof', 'account-1');
+
+  assert.equal(result.grade, 'Verified');
+  assert.equal(result.wikiProvisioning, 'pending');
 });
 
 test('verified ownership proofs do not expire and remain available for scheduled rechecks', async () => {
