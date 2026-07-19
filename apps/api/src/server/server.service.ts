@@ -1791,17 +1791,35 @@ export class ServerService {
 
     const isUnclaimedPending = existing.ownerAccountId === null
       && existing.listingStatus === 'pending';
+    const reservationExpiresAt = existing.registrationLeaseExpiresAt
+      ?? new Date(existing.createdAt.getTime() + REGISTRATION_RESERVATION_TTL_MS);
+    const reservationExpired = reservationExpiresAt.getTime() <= Date.now();
     if (
       isUnclaimedPending
       && serverInput.registrantAccountId
       && existing.registrantAccountId === serverInput.registrantAccountId
     ) {
+      if (reservationExpired) {
+        const renewed = await this.prisma.server.updateMany({
+          where: {
+            id: existing.id,
+            ownerAccountId: null,
+            listingStatus: 'pending',
+            registrantAccountId: serverInput.registrantAccountId,
+            registrationLeaseExpiresAt: existing.registrationLeaseExpiresAt,
+            updatedAt: existing.updatedAt,
+          },
+          data: {
+            registrationLeaseExpiresAt: new Date(Date.now() + REGISTRATION_RESERVATION_TTL_MS),
+          },
+        });
+        if (renewed.count !== 1) {
+          throw new ConflictException('서버 등록 상태가 변경되었습니다. 다시 시도해 주세요.');
+        }
+      }
       return this.detail(existing.id, serverInput.registrantAccountId);
     }
 
-    const reservationExpiresAt = existing.registrationLeaseExpiresAt
-      ?? new Date(existing.createdAt.getTime() + REGISTRATION_RESERVATION_TTL_MS);
-    const reservationExpired = reservationExpiresAt.getTime() <= Date.now();
     if (!isUnclaimedPending || !reservationExpired || !serverInput.registrantAccountId) {
       throw new ConflictException('같은 에디션과 접속 주소를 사용하는 서버가 이미 등록되어 있습니다.');
     }

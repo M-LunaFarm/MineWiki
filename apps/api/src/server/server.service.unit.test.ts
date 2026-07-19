@@ -387,6 +387,17 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
   const replay = await service.register({ ...base, joinHost: 'one.one.one.one' });
   assert.equal(replay.id, storedServer?.id);
 
+  if (storedServer) {
+    storedServer.registrationLeaseExpiresAt = new Date(Date.now() - 1_000);
+  }
+  const resumed = await service.register({ ...base, joinHost: 'one.one.one.one' });
+  assert.equal(resumed.id, storedServer?.id);
+  assert.equal(
+    (storedServer?.registrationLeaseExpiresAt as Date).getTime() > Date.now(),
+    true,
+  );
+  assert.equal(clearedClaimMethods, 0);
+
   await assert.rejects(
     () => service.register({
       ...base,
