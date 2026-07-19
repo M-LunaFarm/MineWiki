@@ -187,16 +187,22 @@ export class ClaimService {
       }
 
       if (result.status === 'verified' && snapshot.accountId) {
-        await transaction.server.updateMany({
+        const ownership = await transaction.server.updateMany({
           where: {
             id: snapshot.serverId,
-            ownerAccountId: null,
+            OR: [
+              { ownerAccountId: null },
+              { ownerAccountId: snapshot.accountId },
+            ],
           },
           data: {
             ownerAccountId: snapshot.accountId,
             registrantAccountId: null,
           },
         });
+        if (ownership.count !== 1) {
+          throw new ConflictException('서버 소유권이 다른 계정에 이미 배정되었습니다.');
+        }
       }
 
       const methods = await transaction.serverClaimMethod.findMany({
@@ -212,7 +218,11 @@ export class ClaimService {
       });
       if (grade !== 'Unverified') {
         await transaction.server.updateMany({
-          where: { id: snapshot.serverId, listingStatus: 'pending' },
+          where: {
+            id: snapshot.serverId,
+            listingStatus: 'pending',
+            ownerAccountId: snapshot.accountId ?? { not: null },
+          },
           data: { listingStatus: 'active' },
         });
       }

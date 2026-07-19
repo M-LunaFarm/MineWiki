@@ -23,7 +23,7 @@ interface ClaimSnapshot {
   readonly accountId?: string | null;
 }
 
-type PrismaHandle = Pick<PrismaClient, 'server' | 'serverClaimMethod'>;
+type PrismaHandle = Pick<PrismaClient, '$transaction' | 'server' | 'serverClaimMethod'>;
 
 export interface ClaimVerificationResult {
   readonly status: ClaimMethodState;
@@ -139,44 +139,72 @@ async function applyVerificationResult(
   result: ClaimVerificationResult,
 ): Promise<boolean> {
   const checkedAt = new Date(result.checkedAt);
-  const updated = await prisma.serverClaimMethod.updateMany({
-    where: {
-      id: snapshot.id,
-      version: snapshot.version,
-      token: snapshot.token,
-      issuedAt: snapshot.issuedAt,
-    },
-    data: {
-      version: { increment: 1 },
-      status: result.status,
-      lastCheckedAt: checkedAt,
-      note: result.note ?? null,
-      verifiedAt: result.status === 'verified' ? checkedAt : null,
-    },
-  });
-  if (updated.count !== 1) {
-    return false;
-  }
-
-  const methods = await prisma.serverClaimMethod.findMany({
-    where: { serverId: snapshot.serverId },
-    select: { method: true, status: true },
-  });
-  const grade = computeGrade(methods);
-  await prisma.server.update({
-    where: { id: snapshot.serverId },
-    data: {
-      verificationGrade: grade,
-      verifiedAt: grade === 'Unverified' ? null : checkedAt,
-    },
-  });
-  if (grade !== 'Unverified') {
-    await prisma.server.updateMany({
-      where: { id: snapshot.serverId, listingStatus: 'pending' },
-      data: { listingStatus: 'active' },
+  return prisma.$transaction(async (transaction) => {
+    const updated = await transaction.serverClaimMethod.updateMany({
+      where: {
+        id: snapshot.id,
+        version: snapshot.version,
+        token: snapshot.token,
+        issuedAt: snapshot.issuedAt,
+      },
+      data: {
+        version: { increment: 1 },
+        status: result.status,
+        lastCheckedAt: checkedAt,
+        note: result.note ?? null,
+        verifiedAt: result.status === 'verified' ? checkedAt : null,
+      },
     });
-  }
-  return true;
+    if (updated.count !== 1) {
+      return false;
+    }
+
+    if (result.status === 'verified') {
+      if (!snapshot.accountId) {
+        throw new Error('Verified claim is missing its account owner.');
+      }
+      const ownership = await transaction.server.updateMany({
+        where: {
+          id: snapshot.serverId,
+          OR: [
+            { ownerAccountId: null },
+            { ownerAccountId: snapshot.accountId },
+          ],
+        },
+        data: {
+          ownerAccountId: snapshot.accountId,
+          registrantAccountId: null,
+        },
+      });
+      if (ownership.count !== 1) {
+        throw new Error('Verified claim conflicts with the current server owner.');
+      }
+    }
+
+    const methods = await transaction.serverClaimMethod.findMany({
+      where: { serverId: snapshot.serverId },
+      select: { method: true, status: true },
+    });
+    const grade = computeGrade(methods);
+    await transaction.server.update({
+      where: { id: snapshot.serverId },
+      data: {
+        verificationGrade: grade,
+        verifiedAt: grade === 'Unverified' ? null : checkedAt,
+      },
+    });
+    if (grade !== 'Unverified' && snapshot.accountId) {
+      await transaction.server.updateMany({
+        where: {
+          id: snapshot.serverId,
+          listingStatus: 'pending',
+          ownerAccountId: snapshot.accountId,
+        },
+        data: { listingStatus: 'active' },
+      });
+    }
+    return true;
+  });
 }
 
 async function runVerificationCheck(
