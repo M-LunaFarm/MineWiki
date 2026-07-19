@@ -27,6 +27,7 @@ import { AccountDataExportPanel } from '../../components/account/account-data-ex
 import { WikiUsernamePanel } from '../../components/account/wiki-username-panel';
 import { AccountEmailChangePanel } from '../../components/account/account-email-change-panel';
 import { ServerWikiInvitationsPanel } from '../../components/account/server-wiki-invitations-panel';
+import { ServerOwnershipTransferInbox } from '../../components/account/server-ownership-transfer-inbox';
 import { AuthShellLayout } from '../../components/auth/auth-shell-layout';
 import { MfaStepUpDialog } from '../../components/auth/mfa-step-up-dialog';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
@@ -1092,6 +1093,7 @@ export function AccountClientPage() {
           <WikiUsernamePanel hasPassword={hasPasswordLogin} />
 
           <ServerWikiInvitationsPanel />
+          <ServerOwnershipTransferInbox />
 
           <AccountEmailChangePanel />
 

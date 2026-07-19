@@ -551,6 +551,70 @@ export class WikiNotificationService {
     );
   }
 
+  async notifyServerOwnershipTransferRequested(tx: Prisma.TransactionClient, input: {
+    readonly transferId: string;
+    readonly targetProfileId: bigint;
+    readonly actorProfileId: bigint;
+    readonly serverName: string;
+    readonly requestedAt: Date;
+    readonly version: number;
+  }): Promise<void> {
+    await this.persistDeliveries(
+      tx,
+      `server-ownership-transfer:${input.transferId}:requested:${input.version}`,
+      'server_ownership_transfer_requested',
+      [{
+        profileId: input.targetProfileId,
+        type: 'server_ownership_transfer_requested',
+        pageId: null,
+        actorProfileId: input.actorProfileId,
+        sourceType: 'server_ownership_transfer',
+        sourceId: input.transferId,
+        title: input.serverName,
+        message: '서버 소유권 이전 요청을 받았습니다.',
+        href: '/me#server-ownership-transfers',
+        dedupeKey: `server-ownership-transfer:${input.transferId}:requested:${input.version}:profile:${input.targetProfileId.toString()}`,
+        readAt: null,
+        createdAt: input.requestedAt,
+      }],
+    );
+  }
+
+  async notifyServerOwnershipTransferChanged(tx: Prisma.TransactionClient, input: {
+    readonly transferId: string;
+    readonly recipientProfileId: bigint;
+    readonly actorProfileId: bigint;
+    readonly serverId: string;
+    readonly serverName: string;
+    readonly state: 'accepted' | 'declined' | 'cancelled';
+    readonly changedAt: Date;
+    readonly version: number;
+  }): Promise<void> {
+    if (input.recipientProfileId === input.actorProfileId) return;
+    const label = input.state === 'accepted' ? '수락' : input.state === 'declined' ? '거절' : '취소';
+    await this.persistDeliveries(
+      tx,
+      `server-ownership-transfer:${input.transferId}:${input.state}:${input.version}`,
+      `server_ownership_transfer_${input.state}`,
+      [{
+        profileId: input.recipientProfileId,
+        type: `server_ownership_transfer_${input.state}`,
+        pageId: null,
+        actorProfileId: input.actorProfileId,
+        sourceType: 'server_ownership_transfer',
+        sourceId: input.transferId,
+        title: input.serverName,
+        message: `서버 소유권 이전 요청이 ${label}되었습니다.`,
+        href: input.state === 'accepted'
+          ? `/servers/${encodeURIComponent(input.serverId)}`
+          : '/me#server-ownership-transfers',
+        dedupeKey: `server-ownership-transfer:${input.transferId}:${input.state}:${input.version}:profile:${input.recipientProfileId.toString()}`,
+        readAt: null,
+        createdAt: input.changedAt,
+      }],
+    );
+  }
+
   async notifyServerWikiReleaseReviewChanged(tx: Prisma.TransactionClient, input: {
     readonly candidateId: bigint;
     readonly serverId: string;

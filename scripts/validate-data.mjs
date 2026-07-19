@@ -162,6 +162,31 @@ async function runValidation() {
   );
 
   await errorIfRows(
+    'pending server ownership transfers retain one coherent authority snapshot',
+    `
+      SELECT t.id
+      FROM server_ownership_transfers t
+      JOIN Server s ON s.id = t.server_id
+      LEFT JOIN users source_profile ON source_profile.id = t.source_owner_profile_id
+      LEFT JOIN users target_profile ON target_profile.id = t.target_profile_id
+      LEFT JOIN Account target_account ON target_account.id = t.target_account_id
+      WHERE t.status = 'pending'
+        AND (
+          t.active_server_key <> t.server_id
+          OR s.ownerAccountId <> t.source_owner_account_id
+          OR source_profile.account_id <> t.source_owner_account_id
+          OR source_profile.status <> 'active'
+          OR target_profile.account_id <> t.target_account_id
+          OR target_profile.status <> 'active'
+          OR target_profile.merged_into_profile_id IS NOT NULL
+          OR target_account.lifecycle_status <> 'active'
+          OR (target_account.canonical_account_id IS NOT NULL AND target_account.canonical_account_id <> target_account.id)
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
     'Server wiki reciprocal linkage and canonical identity are consistent',
     `
       SELECT s.id

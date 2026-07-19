@@ -30,11 +30,13 @@ import { ServerWikiDomainProvisioningController } from './server-wiki-domain-pro
 import { CaptchaModule } from '../captcha/captcha.module';
 import { ServerWikiProvisioningInternalController } from './server-wiki-provisioning-internal.controller';
 import { AuthModule } from '../auth/auth.module';
+import { MyServerOwnershipTransferController, ServerOwnershipTransferController } from './server-ownership-transfer.controller';
+import { ServerOwnershipTransferService } from './server-ownership-transfer.service';
 
 @Module({
   imports: [AuthModule, CaptchaModule, FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
-  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseManifestCursorCodec, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService, ServerWikiDomainService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, MyServerWikiCollaboratorInvitationController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiProvisioningInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController, ServerWikiDomainProvisioningController],
+  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerOwnershipTransferService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseManifestCursorCodec, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService, ServerWikiDomainService],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, MyServerWikiCollaboratorInvitationController, ServerOwnershipTransferController, MyServerOwnershipTransferController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiProvisioningInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController, ServerWikiDomainProvisioningController],
   exports: [ServerService]
 })
 export class ServerModule {}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, CheckCheck, GitCommitHorizontal, Loader2, MailOpen, MessageSquareText, PenLine, RotateCcw, UserPlus } from 'lucide-react';
+import { Bell, CheckCheck, GitCommitHorizontal, Loader2, MailOpen, MessageSquareText, PenLine, RotateCcw, ShieldAlert, UserPlus } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -132,6 +132,7 @@ function notificationIcon(type: string) {
   if (type === 'page_revision') return <GitCommitHorizontal className="size-4" />;
   if (type === 'discussion_reply' || type === 'discussion_mention') return <MessageSquareText className="size-4" />;
   if (type === 'server_wiki_collaborator_invited' || type.startsWith('server_wiki_collaborator_invitation_')) return <UserPlus className="size-4" />;
+  if (type.startsWith('server_ownership_transfer_')) return <ShieldAlert className="size-4" />;
   return <PenLine className="size-4" />;
 }
 
@@ -143,6 +144,10 @@ function notificationLabel(type: string) {
   if (type === 'server_wiki_collaborator_invitation_accepted') return '서버 위키 협업 초대가 수락되었습니다.';
   if (type === 'server_wiki_collaborator_invitation_declined') return '서버 위키 협업 초대가 거절되었습니다.';
   if (type === 'server_wiki_collaborator_invitation_cancelled') return '서버 위키 협업 초대가 취소되었습니다.';
+  if (type === 'server_ownership_transfer_requested') return '서버 소유권 이전 요청이 도착했습니다.';
+  if (type === 'server_ownership_transfer_accepted') return '서버 소유권 이전 요청이 수락되었습니다.';
+  if (type === 'server_ownership_transfer_declined') return '서버 소유권 이전 요청이 거절되었습니다.';
+  if (type === 'server_ownership_transfer_cancelled') return '서버 소유권 이전 요청이 취소되었습니다.';
   if (type === 'edit_request_accepted') return '편집 요청이 승인되었습니다.';
   if (type === 'edit_request_rejected') return '편집 요청이 반려되었습니다.';
   return '새 위키 알림이 도착했습니다.';

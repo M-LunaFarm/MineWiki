@@ -223,6 +223,16 @@ async function applyVerificationResult(
       if (ownership.count !== 1) {
         throw new Error('Verified claim conflicts with the current server owner.');
       }
+      if (firstClaim || takeover) {
+        await transaction.serverOwnershipTransfer.updateMany({
+          where: { serverId: snapshot.serverId, status: 'pending' },
+          data: {
+            status: 'superseded', activeServerKey: null, respondedAt: checkedAt,
+            cancelReason: '다른 소유권 검증 절차로 서버 소유자가 변경되었습니다.',
+            version: { increment: 1 },
+          },
+        });
+      }
     }
 
     const methods = await transaction.serverClaimMethod.findMany({

@@ -315,6 +315,16 @@ export class ClaimService {
         if (ownership.count !== 1) {
           throw new ConflictException('서버 소유권이 다른 계정에 이미 배정되었습니다.');
         }
+        if (firstClaim || takeover) {
+          await transaction.serverOwnershipTransfer.updateMany({
+            where: { serverId: snapshot.serverId, status: 'pending' },
+            data: {
+              status: 'superseded', activeServerKey: null, respondedAt: checkedAt,
+              cancelReason: '다른 소유권 검증 절차로 서버 소유자가 변경되었습니다.',
+              version: { increment: 1 },
+            },
+          });
+        }
       }
 
       const methods = await transaction.serverClaimMethod.findMany({

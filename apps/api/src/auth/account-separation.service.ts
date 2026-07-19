@@ -402,6 +402,21 @@ export class AccountSeparationService {
     }
 
     const accountIdFilter = { in: [...accountIds], not: canonicalAccountId };
+    const mergeTime = new Date();
+    await tx.serverOwnershipTransfer.updateMany({
+      where: {
+        status: 'pending',
+        OR: [
+          { sourceOwnerAccountId: { in: [...accountIds] } },
+          { targetAccountId: { in: [...accountIds] } },
+        ],
+      },
+      data: {
+        status: 'superseded', activeServerKey: null, respondedAt: mergeTime,
+        cancelReason: '계정 통합으로 이전 요청의 계정 스냅샷이 변경되었습니다.',
+        version: { increment: 1 },
+      },
+    });
     await tx.server.updateMany({
       where: { ownerAccountId: accountIdFilter },
       data: { ownerAccountId: canonicalAccountId },

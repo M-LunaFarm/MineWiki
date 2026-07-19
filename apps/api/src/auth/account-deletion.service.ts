@@ -22,7 +22,7 @@ const RECENT_AUTHENTICATION_MS = 15 * 60 * 1000;
 const PROCESSING_CLAIM_STALE_MS = 15 * 60 * 1000;
 
 export interface AccountDeletionBlocker {
-  readonly type: 'server' | 'server_registration' | 'server_claim' | 'guild' | 'wiki_space' | 'server_wiki' | 'mod_wiki' | 'wiki_role' | 'entitlement' | 'privileged_role';
+  readonly type: 'server' | 'server_registration' | 'server_claim' | 'server_ownership_transfer' | 'guild' | 'wiki_space' | 'server_wiki' | 'mod_wiki' | 'wiki_role' | 'entitlement' | 'privileged_role';
   readonly id: string;
   readonly name: string;
   readonly reason: string;
@@ -540,10 +540,14 @@ export class AccountDeletionService {
   private async listBlockers(tx: Prisma.TransactionClient, accountIds: string[]): Promise<AccountDeletionBlocker[]> {
     const profiles = await tx.wikiProfile.findMany({ where: { accountId: { in: accountIds } }, select: { id: true } });
     const profileIds = profiles.map((item) => item.id);
-    const [servers, registrations, claims, guilds, spaces, roles, privileged, serverWikis, modWikis] = await Promise.all([
+    const [servers, registrations, claims, ownershipTransfers, guilds, spaces, roles, privileged, serverWikis, modWikis] = await Promise.all([
       tx.server.findMany({ where: { ownerAccountId: { in: accountIds } }, select: { id: true, name: true } }),
       tx.server.findMany({ where: { ownerAccountId: null, registrantAccountId: { in: accountIds } }, select: { id: true, name: true } }),
       tx.serverClaimMethod.findMany({ where: { accountId: { in: accountIds }, status: { in: ['pending', 'verified'] } }, select: { id: true, serverId: true, method: true, status: true } }),
+      tx.serverOwnershipTransfer.findMany({
+        where: { status: 'pending', OR: [{ sourceOwnerAccountId: { in: accountIds } }, { targetAccountId: { in: accountIds } }] },
+        select: { id: true, serverId: true },
+      }),
       this.guilds.listOwnedByAccountIds(accountIds, tx),
       profileIds.length ? tx.wikiSpace.findMany({ where: { OR: [{ ownerUserId: { in: profileIds } }, { createdBy: { in: profileIds } }], status: 'active' }, select: { id: true, title: true, name: true } }) : [],
       profileIds.length ? tx.subwikiRole.findMany({ where: { userId: { in: profileIds }, status: 'active', role: { in: ['owner', 'manager', 'maintainer'] } }, select: { id: true, spaceId: true, role: true } }) : [],
@@ -556,6 +560,7 @@ export class AccountDeletionService {
       ...servers.map((item) => ({ type: 'server' as const, id: item.id, name: item.name, reason: '서버 소유권을 다른 계정으로 이전해야 합니다.' })),
       ...registrations.map((item) => ({ type: 'server_registration' as const, id: item.id, name: item.name, reason: '미소유 서버 등록 관리 권한을 다른 계정으로 이전하거나 등록을 철회해야 합니다.' })),
       ...claims.map((item) => ({ type: 'server_claim' as const, id: item.id, name: `${item.serverId}:${item.method}`, reason: `${item.status} 서버 소유권 인증을 완료하거나 취소해야 합니다.` })),
+      ...ownershipTransfers.map((item) => ({ type: 'server_ownership_transfer' as const, id: item.id, name: item.serverId, reason: '대기 중인 서버 소유권 이전 요청을 수락, 거절 또는 취소해야 합니다.' })),
       ...guilds.map((item) => ({ type: 'guild' as const, id: item.guildId, name: `Discord 길드 ${item.guildId}`, reason: '길드 관리 소유권을 이전해야 합니다.' })),
       ...spaces.map((item) => ({ type: 'wiki_space' as const, id: item.id.toString(), name: item.title ?? item.name, reason: '위키 공간 소유권을 이전해야 합니다.' })),
       ...serverWikis.map((item) => ({ type: 'server_wiki' as const, id: item.id.toString(), name: item.serverName, reason: '서버 위키 관리 권한을 다른 계정으로 이전해야 합니다.' })),

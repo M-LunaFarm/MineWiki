@@ -633,8 +633,8 @@ model Server {
   createdAt                     DateTime            @default(now())
   updatedAt                     DateTime            @updatedAt
 
-  ownerAccount         Account?              @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
-  registrantAccount    Account?              @relation("ServerRegistrant", fields: [registrantAccountId], references: [id], onDelete: SetNull)
+  ownerAccount         Account?                  @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
+  registrantAccount    Account?                  @relation("ServerRegistrant", fields: [registrantAccountId], references: [id], onDelete: SetNull)
   stats                ServerStats?
   pingSamples          ServerPingSample[]
   votes                Vote[]
@@ -644,8 +644,9 @@ model Server {
   votifierTargets      VotifierTarget[]
   rankSnapshots        ServerRankSnapshot[]
   supportTickets       SupportTicket[]
-  wikiSpace            WikiSpace?            @relation("ServerLinkedWikiSpace", fields: [wikiSpaceId], references: [id], onDelete: SetNull)
-  wikiPage             WikiPage?             @relation("ServerLinkedWikiPage", fields: [wikiPageId], references: [id], onDelete: SetNull)
+  wikiSpace            WikiSpace?                @relation("ServerLinkedWikiSpace", fields: [wikiSpaceId], references: [id], onDelete: SetNull)
+  wikiPage             WikiPage?                 @relation("ServerLinkedWikiPage", fields: [wikiPageId], references: [id], onDelete: SetNull)
+  ownershipTransfers   ServerOwnershipTransfer[]
 
   @@index([ownerAccountId])
   @@index([registrantAccountId])
@@ -659,6 +660,33 @@ model Server {
   @@index([votesMonthly])
   @@index([reviewsCount])
   @@index([playersMetricTrust, playersOnline])
+}
+
+model ServerOwnershipTransfer {
+  id                   String    @id @default(uuid()) @db.Char(36)
+  serverId             String    @map("server_id")
+  sourceOwnerAccountId String    @map("source_owner_account_id") @db.VarChar(191)
+  sourceOwnerProfileId BigInt    @map("source_owner_profile_id") @db.UnsignedBigInt
+  targetAccountId      String    @map("target_account_id") @db.VarChar(191)
+  targetProfileId      BigInt    @map("target_profile_id") @db.UnsignedBigInt
+  reason               String    @db.VarChar(500)
+  status               String    @default("pending") @db.VarChar(16)
+  activeServerKey      String?   @unique(map: "uq_server_ownership_transfer_active") @map("active_server_key") @db.VarChar(64)
+  requestedAt          DateTime  @default(now()) @map("requested_at") @db.DateTime(3)
+  expiresAt            DateTime  @map("expires_at") @db.DateTime(3)
+  respondedAt          DateTime? @map("responded_at") @db.DateTime(3)
+  cancelledAt          DateTime? @map("cancelled_at") @db.DateTime(3)
+  cancelledByProfileId BigInt?   @map("cancelled_by_profile_id") @db.UnsignedBigInt
+  cancelReason         String?   @map("cancel_reason") @db.VarChar(500)
+  version              Int       @default(1) @db.UnsignedInt
+  createdAt            DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  server               Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([targetAccountId, status, expiresAt], map: "idx_server_ownership_transfer_target")
+  @@index([serverId, status, requestedAt], map: "idx_server_ownership_transfer_server")
+  @@index([expiresAt, status], map: "idx_server_ownership_transfer_expiry")
+  @@map("server_ownership_transfers")
 }
 
 model ServerStats {
@@ -1973,54 +2001,54 @@ model WikiRecentChange {
 }
 
 model ServerWiki {
-  id                           BigInt                       @id @default(autoincrement()) @db.UnsignedBigInt
-  spaceId                      BigInt                       @unique @map("space_id") @db.UnsignedBigInt
-  voteServerId                 String?                      @unique @map("vote_server_id") @db.Char(36)
-  serverName                   String                       @map("server_name") @db.VarChar(255)
-  slug                         String                       @unique @db.VarChar(255)
-  siteSlug                     String?                      @unique @map("site_slug") @db.VarChar(80)
-  host                         String?                      @db.VarChar(255)
-  port                         Int?                         @db.UnsignedInt
-  edition                      String                       @default("unknown") @db.VarChar(16)
-  supportedVersions            String?                      @map("supported_versions") @db.VarChar(255)
-  genres                       String?                      @db.VarChar(255)
-  verifiedStatus               String                       @default("none") @map("verified_status") @db.VarChar(32)
-  status                       String                       @default("active") @db.VarChar(32)
-  publicationStatus            String                       @default("draft") @map("publication_status") @db.VarChar(16)
-  publicationVersion           Int                          @default(0) @map("publication_version") @db.UnsignedInt
-  publishedAt                  DateTime?                    @map("published_at") @db.DateTime(3)
-  unpublishedAt                DateTime?                    @map("unpublished_at") @db.DateTime(3)
-  publicationUpdatedAt         DateTime?                    @map("publication_updated_at") @db.DateTime(3)
-  publicationUpdatedBy         BigInt?                      @map("publication_updated_by") @db.UnsignedBigInt
-  publishedReleaseId           BigInt?                      @unique @map("published_release_id") @db.UnsignedBigInt
-  layoutKey                    String                       @default("docs") @map("layout_key") @db.VarChar(32)
-  layoutUpdatedAt              DateTime?                    @map("layout_updated_at")
-  layoutUpdatedBy              BigInt?                      @map("layout_updated_by") @db.UnsignedBigInt
-  contributionPolicySource     String?                      @map("contribution_policy_source") @db.Text
-  editHelpSource               String?                      @map("edit_help_source") @db.Text
-  topNoticeSource              String?                      @map("top_notice_source") @db.Text
-  bottomNoticeSource           String?                      @map("bottom_notice_source") @db.Text
-  seoTitle                     String?                      @map("seo_title") @db.VarChar(70)
-  seoDescription               String?                      @map("seo_description") @db.VarChar(200)
-  seoIndexingEnabled           Boolean                      @default(true) @map("seo_indexing_enabled")
-  requireContributionPolicyAck Boolean                      @default(false) @map("require_contribution_policy_ack")
-  contributionPolicyVersion    Int                          @default(0) @map("contribution_policy_version") @db.UnsignedInt
-  contentSettingsVersion       Int                          @default(0) @map("content_settings_version") @db.UnsignedInt
-  contentSettingsUpdatedAt     DateTime?                    @map("content_settings_updated_at")
-  contentSettingsUpdatedBy     BigInt?                      @map("content_settings_updated_by") @db.UnsignedBigInt
-  navigationOrder              Json?                        @map("navigation_order")
-  navigationVersion            Int                          @default(0) @map("navigation_version") @db.UnsignedInt
-  navigationUpdatedAt          DateTime?                    @map("navigation_updated_at")
-  navigationUpdatedBy          BigInt?                      @map("navigation_updated_by") @db.UnsignedBigInt
-  createdBy                    BigInt?                      @map("created_by") @db.UnsignedBigInt
-  createdAt                    DateTime                     @map("created_at")
-  updatedAt                    DateTime                     @map("updated_at")
-  space                        WikiSpace                    @relation("ServerWikiSpace", fields: [spaceId], references: [id], onDelete: Restrict)
+  id                           BigInt                             @id @default(autoincrement()) @db.UnsignedBigInt
+  spaceId                      BigInt                             @unique @map("space_id") @db.UnsignedBigInt
+  voteServerId                 String?                            @unique @map("vote_server_id") @db.Char(36)
+  serverName                   String                             @map("server_name") @db.VarChar(255)
+  slug                         String                             @unique @db.VarChar(255)
+  siteSlug                     String?                            @unique @map("site_slug") @db.VarChar(80)
+  host                         String?                            @db.VarChar(255)
+  port                         Int?                               @db.UnsignedInt
+  edition                      String                             @default("unknown") @db.VarChar(16)
+  supportedVersions            String?                            @map("supported_versions") @db.VarChar(255)
+  genres                       String?                            @db.VarChar(255)
+  verifiedStatus               String                             @default("none") @map("verified_status") @db.VarChar(32)
+  status                       String                             @default("active") @db.VarChar(32)
+  publicationStatus            String                             @default("draft") @map("publication_status") @db.VarChar(16)
+  publicationVersion           Int                                @default(0) @map("publication_version") @db.UnsignedInt
+  publishedAt                  DateTime?                          @map("published_at") @db.DateTime(3)
+  unpublishedAt                DateTime?                          @map("unpublished_at") @db.DateTime(3)
+  publicationUpdatedAt         DateTime?                          @map("publication_updated_at") @db.DateTime(3)
+  publicationUpdatedBy         BigInt?                            @map("publication_updated_by") @db.UnsignedBigInt
+  publishedReleaseId           BigInt?                            @unique @map("published_release_id") @db.UnsignedBigInt
+  layoutKey                    String                             @default("docs") @map("layout_key") @db.VarChar(32)
+  layoutUpdatedAt              DateTime?                          @map("layout_updated_at")
+  layoutUpdatedBy              BigInt?                            @map("layout_updated_by") @db.UnsignedBigInt
+  contributionPolicySource     String?                            @map("contribution_policy_source") @db.Text
+  editHelpSource               String?                            @map("edit_help_source") @db.Text
+  topNoticeSource              String?                            @map("top_notice_source") @db.Text
+  bottomNoticeSource           String?                            @map("bottom_notice_source") @db.Text
+  seoTitle                     String?                            @map("seo_title") @db.VarChar(70)
+  seoDescription               String?                            @map("seo_description") @db.VarChar(200)
+  seoIndexingEnabled           Boolean                            @default(true) @map("seo_indexing_enabled")
+  requireContributionPolicyAck Boolean                            @default(false) @map("require_contribution_policy_ack")
+  contributionPolicyVersion    Int                                @default(0) @map("contribution_policy_version") @db.UnsignedInt
+  contentSettingsVersion       Int                                @default(0) @map("content_settings_version") @db.UnsignedInt
+  contentSettingsUpdatedAt     DateTime?                          @map("content_settings_updated_at")
+  contentSettingsUpdatedBy     BigInt?                            @map("content_settings_updated_by") @db.UnsignedBigInt
+  navigationOrder              Json?                              @map("navigation_order")
+  navigationVersion            Int                                @default(0) @map("navigation_version") @db.UnsignedInt
+  navigationUpdatedAt          DateTime?                          @map("navigation_updated_at")
+  navigationUpdatedBy          BigInt?                            @map("navigation_updated_by") @db.UnsignedBigInt
+  createdBy                    BigInt?                            @map("created_by") @db.UnsignedBigInt
+  createdAt                    DateTime                           @map("created_at")
+  updatedAt                    DateTime                           @map("updated_at")
+  space                        WikiSpace                          @relation("ServerWikiSpace", fields: [spaceId], references: [id], onDelete: Restrict)
   billingSubject               PaddleBillingSubject?
-  releases                     ServerWikiRelease[]          @relation("ServerWikiReleaseHistory")
+  releases                     ServerWikiRelease[]                @relation("ServerWikiReleaseHistory")
   releaseCandidates            ServerWikiReleaseCandidate[]
   releaseApprovals             ServerWikiReleaseApproval[]
-  publishedRelease             ServerWikiRelease?           @relation("PublishedServerWikiRelease", fields: [publishedReleaseId], references: [id], onDelete: SetNull)
+  publishedRelease             ServerWikiRelease?                 @relation("PublishedServerWikiRelease", fields: [publishedReleaseId], references: [id], onDelete: SetNull)
   domain                       ServerWikiDomain?
   siteSlugAliases              ServerWikiSiteSlugAlias[]
   collaboratorInvitations      ServerWikiCollaboratorInvitation[]
@@ -2033,30 +2061,30 @@ model ServerWiki {
 }
 
 model ServerWikiCollaboratorInvitation {
-  id                    String     @id @default(uuid()) @db.Char(36)
-  serverWikiId          BigInt     @map("server_wiki_id") @db.UnsignedBigInt
-  spaceId               BigInt     @map("space_id") @db.UnsignedBigInt
-  targetProfileId       BigInt     @map("target_profile_id") @db.UnsignedBigInt
-  targetAccountId       String     @map("target_account_id") @db.Char(36)
-  role                  String     @db.VarChar(32)
-  reason                String     @db.VarChar(500)
-  status                String     @default("pending") @db.VarChar(16)
-  activeKey             String?    @unique @map("active_key") @db.VarChar(96)
-  invitedByProfileId    BigInt     @map("invited_by_profile_id") @db.UnsignedBigInt
-  invitedByAccountId    String     @map("invited_by_account_id") @db.Char(36)
-  issuerAuthority       String     @map("issuer_authority") @db.VarChar(16)
-  issuedUnderOwnerId    String?    @map("issued_under_owner_id") @db.Char(36)
-  invitedAt             DateTime   @default(now()) @map("invited_at") @db.DateTime(3)
-  expiresAt             DateTime   @map("expires_at") @db.DateTime(3)
-  respondedAt           DateTime?  @map("responded_at") @db.DateTime(3)
-  cancelledByProfileId  BigInt?    @map("cancelled_by_profile_id") @db.UnsignedBigInt
-  cancelReason          String?    @map("cancel_reason") @db.VarChar(500)
-  resentAt              DateTime?  @map("resent_at") @db.DateTime(3)
-  resendCount           Int        @default(0) @map("resend_count") @db.UnsignedInt
-  version               Int        @default(1) @db.UnsignedInt
-  createdAt             DateTime   @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt             DateTime   @updatedAt @map("updated_at") @db.DateTime(3)
-  serverWiki            ServerWiki @relation(fields: [serverWikiId, spaceId], references: [id, spaceId], onDelete: Cascade)
+  id                   String     @id @default(uuid()) @db.Char(36)
+  serverWikiId         BigInt     @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId              BigInt     @map("space_id") @db.UnsignedBigInt
+  targetProfileId      BigInt     @map("target_profile_id") @db.UnsignedBigInt
+  targetAccountId      String     @map("target_account_id") @db.Char(36)
+  role                 String     @db.VarChar(32)
+  reason               String     @db.VarChar(500)
+  status               String     @default("pending") @db.VarChar(16)
+  activeKey            String?    @unique @map("active_key") @db.VarChar(96)
+  invitedByProfileId   BigInt     @map("invited_by_profile_id") @db.UnsignedBigInt
+  invitedByAccountId   String     @map("invited_by_account_id") @db.Char(36)
+  issuerAuthority      String     @map("issuer_authority") @db.VarChar(16)
+  issuedUnderOwnerId   String?    @map("issued_under_owner_id") @db.Char(36)
+  invitedAt            DateTime   @default(now()) @map("invited_at") @db.DateTime(3)
+  expiresAt            DateTime   @map("expires_at") @db.DateTime(3)
+  respondedAt          DateTime?  @map("responded_at") @db.DateTime(3)
+  cancelledByProfileId BigInt?    @map("cancelled_by_profile_id") @db.UnsignedBigInt
+  cancelReason         String?    @map("cancel_reason") @db.VarChar(500)
+  resentAt             DateTime?  @map("resent_at") @db.DateTime(3)
+  resendCount          Int        @default(0) @map("resend_count") @db.UnsignedInt
+  version              Int        @default(1) @db.UnsignedInt
+  createdAt            DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime   @updatedAt @map("updated_at") @db.DateTime(3)
+  serverWiki           ServerWiki @relation(fields: [serverWikiId, spaceId], references: [id, spaceId], onDelete: Cascade)
 
   @@index([targetAccountId, status, expiresAt], map: "idx_server_wiki_invites_target")
   @@index([serverWikiId, status, invitedAt], map: "idx_server_wiki_invites_wiki")

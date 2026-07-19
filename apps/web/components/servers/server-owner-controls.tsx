@@ -11,6 +11,7 @@ import { csrfHeaders } from '../../lib/csrf';
 import { PrivilegedActionGate } from '../auth/privileged-action-gate';
 import { ServerProfileSettings } from './server-profile-settings';
 import { ServerWikiReadinessCard, type ServerWikiReadiness } from './server-wiki-readiness-card';
+import { ServerOwnershipTransferPanel } from './server-ownership-transfer-panel';
 
 interface ServerOwnerControlsProps {
   readonly serverId: string;
@@ -862,6 +863,7 @@ export function ServerOwnerControls({
           </div>
         </div>
       </div>
+      <ServerOwnershipTransferPanel serverId={serverId} serverName={initialProfile.name} />
       </section>
     </PrivilegedActionGate>
   );

@@ -54,6 +54,7 @@ export const STEP_UP_PURPOSES = [
   'wiki_admin',
   'role_admin',
   'server_admin',
+  'server_ownership_transfer',
   'wiki_release_review',
   'review_moderation',
   'vote_admin',

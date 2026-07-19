@@ -6,6 +6,12 @@ import { createClaimVerifier, resolveVerificationProof, verifyDnsToken } from '.
 function transactionMock<T extends object>(prisma: T): T & {
   $transaction<Result>(callback: (transaction: T) => Promise<Result>): Promise<Result>;
 } {
+  Object.assign(prisma, {
+    serverOwnershipTransfer: {
+      updateMany: async () => ({ count: 0 }),
+      ...((prisma as { serverOwnershipTransfer?: object }).serverOwnershipTransfer ?? {}),
+    },
+  });
   return Object.assign(prisma, {
     $transaction: <Result>(callback: (transaction: T) => Promise<Result>) => callback(prisma),
   });

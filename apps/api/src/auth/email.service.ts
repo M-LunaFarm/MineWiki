@@ -181,6 +181,29 @@ export class EmailService {
     });
   }
 
+  async sendServerOwnershipTransferRequestEmail(payload: {
+    email: string;
+    serverName: string;
+    requesterName: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    if (!this.transporter || !this.from) throw new Error('SMTP is not configured.');
+    const baseUrl = this.siteUrl?.replace(/\/$/u, '');
+    const requestUrl = baseUrl ? `${baseUrl}/me#server-ownership-transfers` : undefined;
+    await this.transporter.sendMail({
+      from: this.from,
+      to: payload.email,
+      subject: `${payload.serverName} 서버 소유권 이전 요청`,
+      text: [
+        `${payload.requesterName}님이 ${payload.serverName} 서버의 소유권 이전을 요청했습니다.`,
+        requestUrl ? `요청 확인: ${requestUrl}` : 'MineWiki 내 계정 화면에서 요청을 확인해 주세요.',
+        `만료 시각: ${payload.expiresAt.toISOString()}`,
+        '',
+        '본인이 수락하기 전에는 서버 권한이 변경되지 않습니다.',
+      ].join('\n'),
+    });
+  }
+
   logDeliveryFailure(error: unknown): void {
     this.logger.warn({ err: error }, 'Email delivery failed');
   }
