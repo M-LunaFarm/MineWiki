@@ -68,7 +68,8 @@ export class ClaimService {
     if (
       !server.ownerAccountId &&
       server.registrantAccountId &&
-      server.registrantAccountId !== accountId
+      server.registrantAccountId !== accountId &&
+      (!server.registrationLeaseExpiresAt || server.registrationLeaseExpiresAt > new Date())
     ) {
       throw new ForbiddenException('서버를 등록한 계정만 최초 소유권 검증을 시작할 수 있습니다.');
     }
@@ -96,6 +97,11 @@ export class ClaimService {
                 id: serverId,
                 ownerAccountId: server.ownerAccountId,
                 ownershipChallengeSuspendedAt: { not: null },
+                OR: [
+                  { registrantAccountId: null },
+                  { registrantAccountId: accountId },
+                  { registrationLeaseExpiresAt: { lte: now } },
+                ],
               },
               data: {
                 registrantAccountId: accountId,
@@ -109,6 +115,7 @@ export class ClaimService {
                 OR: [
                   { registrantAccountId: accountId },
                   { registrantAccountId: null },
+                  { registrationLeaseExpiresAt: { lte: now } },
                 ],
               },
               data: {
@@ -122,9 +129,19 @@ export class ClaimService {
           select: {
             ownerAccountId: true,
             registrantAccountId: true,
+            registrationLeaseExpiresAt: true,
             ownershipChallengeSuspendedAt: true,
           },
         });
+        if (current?.ownerAccountId
+          && current.ownerAccountId !== accountId
+          && isServerOwnershipManagementSuspended(current)
+          && current.registrantAccountId
+          && current.registrantAccountId !== accountId
+          && current.registrationLeaseExpiresAt
+          && current.registrationLeaseExpiresAt > now) {
+          throw new ConflictException('다른 계정이 서버 소유권 등록을 진행 중입니다. 등록 lease 만료 후 다시 시도해 주세요.');
+        }
         if (!current || (current.ownerAccountId !== accountId
           && !isServerOwnershipManagementSuspended(current))) {
           throw new ForbiddenException(
@@ -133,6 +150,7 @@ export class ClaimService {
               : '서버를 등록한 계정만 최초 소유권 검증을 시작할 수 있습니다.',
           );
         }
+        throw new ConflictException('서버 소유권 등록 상태가 변경되었습니다. 다시 시도해 주세요.');
       }
       return Promise.all(targets.map((method) =>
         transaction.serverClaimMethod.upsert({
@@ -232,6 +250,7 @@ export class ClaimService {
         select: {
           ownerAccountId: true,
           registrantAccountId: true,
+          registrationLeaseExpiresAt: true,
           listingStatus: true,
           ownershipVerificationFailures: true,
           ownershipChallengeStartedAt: true,
@@ -261,19 +280,28 @@ export class ClaimService {
       }
 
       if (result.status === 'verified' && snapshot.accountId) {
+        const hasActiveRegistrationLease = current.registrantAccountId === snapshot.accountId
+          && current.registrationLeaseExpiresAt !== null
+          && current.registrationLeaseExpiresAt > checkedAt;
+        const firstClaim = current.ownerAccountId === null && hasActiveRegistrationLease;
         const takeover = current.ownerAccountId !== null
-          && current.registrantAccountId === snapshot.accountId
+          && hasActiveRegistrationLease
           && isServerOwnershipManagementSuspended(current);
         ownershipTakeover = takeover;
         const ownership = await transaction.server.updateMany({
           where: {
             id: snapshot.serverId,
             OR: [
-              { ownerAccountId: null },
+              ...(firstClaim ? [{
+                ownerAccountId: null,
+                registrantAccountId: snapshot.accountId,
+                registrationLeaseExpiresAt: { gt: checkedAt },
+              }] : []),
               { ownerAccountId: snapshot.accountId },
               ...(takeover ? [{
                 ownerAccountId: current.ownerAccountId,
                 registrantAccountId: snapshot.accountId,
+                registrationLeaseExpiresAt: { gt: checkedAt },
                 ownershipChallengeSuspendedAt: { not: null },
               }] : []),
             ],
@@ -382,6 +410,8 @@ export class ClaimService {
     return Boolean(
       server.registrantAccountId
         && server.registrantAccountId === accountId
+        && server.registrationLeaseExpiresAt
+        && server.registrationLeaseExpiresAt > new Date()
         && (!server.ownerAccountId || isServerOwnershipManagementSuspended(server)),
     );
   }
@@ -396,6 +426,8 @@ export class ClaimService {
   private assertCanUseClaimMethod(
     server: {
       readonly ownerAccountId: string | null;
+      readonly registrantAccountId?: string | null;
+      readonly registrationLeaseExpiresAt?: Date | null;
       readonly ownershipChallengeSuspendedAt?: Date | null;
     },
     issuerAccountId: string | null,
@@ -403,7 +435,11 @@ export class ClaimService {
   ): void {
     if (server.ownerAccountId) {
       if (server.ownerAccountId !== accountId
-        && !(issuerAccountId === accountId && isServerOwnershipManagementSuspended(server))) {
+        && !(issuerAccountId === accountId
+          && server.registrantAccountId === accountId
+          && server.registrationLeaseExpiresAt
+          && server.registrationLeaseExpiresAt > new Date()
+          && isServerOwnershipManagementSuspended(server))) {
         throw new ForbiddenException('해당 서버를 검증할 권한이 없습니다.');
       }
       return;
@@ -411,6 +447,11 @@ export class ClaimService {
 
     if (!issuerAccountId || issuerAccountId !== accountId) {
       throw new ForbiddenException('검증 토큰을 발급한 계정만 검증을 진행할 수 있습니다.');
+    }
+    if (server.registrantAccountId !== accountId
+      || !server.registrationLeaseExpiresAt
+      || server.registrationLeaseExpiresAt <= new Date()) {
+      throw new ForbiddenException('서버 등록 lease가 만료되었습니다. 검증 토큰을 다시 발급해 주세요.');
     }
   }
 

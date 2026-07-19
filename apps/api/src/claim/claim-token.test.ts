@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { ConflictException } from '@nestjs/common';
 import { ClaimService, hashClaimToken, matchesClaimToken } from './claim.service';
 import { decryptAppSecret } from '../common/secret-codec';
 import {
@@ -11,6 +12,7 @@ function ownershipServer(overrides: Record<string, unknown> = {}) {
   return {
     ownerAccountId: null,
     registrantAccountId: null,
+    registrationLeaseExpiresAt: null,
     listingStatus: 'pending',
     ownershipVerificationFailures: 0,
     ownershipChallengeStartedAt: null,
@@ -223,15 +225,88 @@ test('a suspended ownership challenge admits one fresh takeover claimant', async
 
   assert.ok(issued[0]?.token);
   assert.equal(tokenAccountId, 'account-new');
-  assert.deepEqual(leaseWrites[0]?.where, {
-    id: 'server-1',
-    ownerAccountId: 'account-old',
-    ownershipChallengeSuspendedAt: { not: null },
-  });
+  const leaseWhere = leaseWrites[0]?.where as Record<string, unknown>;
+  assert.equal(leaseWhere.id, 'server-1');
+  assert.equal(leaseWhere.ownerAccountId, 'account-old');
+  assert.deepEqual(leaseWhere.ownershipChallengeSuspendedAt, { not: null });
+  const leaseOr = leaseWhere.OR as Array<Record<string, unknown>>;
+  assert.deepEqual(leaseOr.slice(0, 2), [
+    { registrantAccountId: null },
+    { registrantAccountId: 'account-new' },
+  ]);
+  assert.ok((leaseOr[2]?.registrationLeaseExpiresAt as { lte?: unknown }).lte instanceof Date);
   assert.equal(
     (leaseWrites[0]?.data as Record<string, unknown> | undefined)?.registrantAccountId,
     'account-new',
   );
+});
+
+test('an active suspended-owner registration lease cannot be replaced by another account', async () => {
+  const activeLease = ownershipServer({
+    ownerAccountId: 'account-old',
+    registrantAccountId: 'account-a',
+    registrationLeaseExpiresAt: new Date(Date.now() + 60_000),
+    ownershipChallengeSuspendedAt: new Date(),
+  });
+  let tokenWrites = 0;
+  const prisma = {
+    server: {
+      updateMany: async () => ({ count: 0 }),
+      findUnique: async () => activeLease,
+    },
+    serverClaimMethod: {
+      upsert: async () => { tokenWrites += 1; return {}; },
+    },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+  };
+  const service = new ClaimService(
+    { ensureExists: async () => ownershipServer({ ownerAccountId: 'account-old', ownershipChallengeSuspendedAt: new Date() }) } as never,
+    prisma as never,
+  );
+
+  await assert.rejects(
+    () => service.issueTokens('server-1', 'account-b', ['dns']),
+    (error: unknown) => error instanceof ConflictException && /다른 계정이 서버 소유권 등록을 진행 중/u.test(error.message),
+  );
+  assert.equal(tokenWrites, 0);
+});
+
+test('the same takeover claimant can refresh its lease and an expired lease admits a new claimant', async () => {
+  const suspendedAt = new Date();
+  for (const scenario of [
+    { existing: 'account-a', requester: 'account-a', expiresAt: new Date(Date.now() + 60_000) },
+    { existing: 'account-a', requester: 'account-b', expiresAt: new Date(Date.now() - 60_000) },
+  ]) {
+    let tokenWrites = 0;
+    const server = ownershipServer({
+      ownerAccountId: 'account-old',
+      registrantAccountId: scenario.existing,
+      registrationLeaseExpiresAt: scenario.expiresAt,
+      ownershipChallengeSuspendedAt: suspendedAt,
+    });
+    const prisma = {
+      server: {
+        findUnique: async () => server,
+        updateMany: async ({ where }: { where: { OR?: Array<Record<string, unknown>> } }) => {
+          assert.ok(where.OR?.some((entry) => entry.registrantAccountId === scenario.requester));
+          assert.ok(where.OR?.some((entry) => 'registrationLeaseExpiresAt' in entry));
+          return { count: 1 };
+        },
+        update: async () => ({}),
+      },
+      serverClaimMethod: {
+        upsert: async ({ create }: { create: Record<string, unknown> }) => {
+          tokenWrites += 1;
+          return { ...create, id: `method-${scenario.requester}`, verifiedAt: null };
+        },
+        findMany: async () => [],
+      },
+      $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+    };
+    const service = new ClaimService({ ensureExists: async () => server } as never, prisma as never);
+    await service.issueTokens('server-1', scenario.requester, ['dns']);
+    assert.equal(tokenWrites, 1);
+  }
 });
 
 test('verified takeover replaces the suspended owner while keeping authority locked for wiki reconciliation', async () => {
@@ -239,6 +314,7 @@ test('verified takeover replaces the suspended owner while keeping authority loc
   const current = ownershipServer({
     ownerAccountId: 'account-old',
     registrantAccountId: 'account-new',
+    registrationLeaseExpiresAt: new Date('2026-07-20T00:00:00.000Z'),
     listingStatus: 'suspended',
     ownershipVerificationFailures: 4,
     ownershipChallengeStartedAt: new Date('2026-07-10T00:00:00.000Z'),
@@ -272,18 +348,75 @@ test('verified takeover replaces the suspended owner while keeping authority loc
   };
   const service = new ClaimService({ ensureExists: async () => current } as never, prisma as never);
 
+  const checkedAt = new Date('2026-07-19T12:00:00.000Z');
   assert.equal(await service.applyVerificationResult(snapshot, {
-    status: 'verified', checkedAt: new Date().toISOString(), note: 'dns_token_confirmed',
+    status: 'verified', checkedAt: checkedAt.toISOString(), note: 'dns_token_confirmed',
   }), true);
   assert.equal((ownershipWrites[0]?.data as Record<string, unknown>)?.ownerAccountId, 'account-new');
   assert.deepEqual((ownershipWrites[0]?.where as { OR: unknown[] }).OR.at(-1), {
     ownerAccountId: 'account-old',
     registrantAccountId: 'account-new',
+    registrationLeaseExpiresAt: { gt: checkedAt },
     ownershipChallengeSuspendedAt: { not: null },
   });
   assert.equal(serverUpdates[0]?.ownershipVerificationFailures, 0);
   assert.equal(serverUpdates[0]?.ownershipChallengeSuspendedAt, suspendedAt);
   assert.equal(serverUpdates[0]?.listingStatus, 'suspended');
+});
+
+test('an expired takeover lease cannot promote a stale verification result', async () => {
+  const checkedAt = new Date('2026-07-19T12:00:00.000Z');
+  const current = ownershipServer({
+    ownerAccountId: 'account-old',
+    registrantAccountId: 'account-new',
+    registrationLeaseExpiresAt: new Date('2026-07-19T11:59:59.000Z'),
+    ownershipChallengeSuspendedAt: new Date('2026-07-19T00:00:00.000Z'),
+  });
+  let ownershipAttempts = 0;
+  const snapshot = {
+    id: 'claim-method-new', serverId: 'server-1', accountId: 'account-new', method: 'dns',
+    token: hashClaimToken('proof'), issuedAt: new Date(), version: 1,
+  };
+  const prisma = {
+    serverClaimMethod: {
+      updateMany: async () => ({ count: 1 }),
+      findMany: async () => [{ method: 'dns', status: 'verified' }],
+    },
+    server: {
+      findUnique: async () => current,
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+        if (data.ownerAccountId === 'account-new') ownershipAttempts += 1;
+        return { count: 0 };
+      },
+      update: async () => ({}),
+    },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+  };
+  const service = new ClaimService({ ensureExists: async () => current } as never, prisma as never);
+
+  await assert.rejects(
+    () => service.applyVerificationResult(snapshot, { status: 'verified', checkedAt: checkedAt.toISOString() }),
+    /서버 소유권이 다른 계정에 이미 배정되었습니다/u,
+  );
+  assert.equal(ownershipAttempts, 1);
+});
+
+test('pending registrant access ends with the registration lease', async () => {
+  const active = new ClaimService({
+    ensureExists: async () => ownershipServer({
+      ownerAccountId: 'account-old', registrantAccountId: 'account-new',
+      registrationLeaseExpiresAt: new Date(Date.now() + 60_000), ownershipChallengeSuspendedAt: new Date(),
+    }),
+  } as never, {} as never);
+  const expired = new ClaimService({
+    ensureExists: async () => ownershipServer({
+      ownerAccountId: 'account-old', registrantAccountId: 'account-new',
+      registrationLeaseExpiresAt: new Date(Date.now() - 60_000), ownershipChallengeSuspendedAt: new Date(),
+    }),
+  } as never, {} as never);
+
+  assert.equal(await active.isPendingRegistrant('server-1', 'account-new'), true);
+  assert.equal(await expired.isPendingRegistrant('server-1', 'account-new'), false);
 });
 
 test('successful ownership verification promotes registrant to owner atomically', async () => {
@@ -307,7 +440,10 @@ test('successful ownership verification promotes registrant to owner atomically'
       findMany: async () => [verifiedMethod],
     },
     server: {
-      findUnique: async () => ownershipServer(),
+      findUnique: async () => ownershipServer({
+        registrantAccountId: 'account-registrant',
+        registrationLeaseExpiresAt: new Date(Date.now() + 60_000),
+      }),
       updateMany: async ({ data }: { data: Record<string, unknown> }) => {
         updates.push(data);
         return { count: 1 };
