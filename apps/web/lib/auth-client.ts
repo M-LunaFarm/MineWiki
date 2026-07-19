@@ -104,7 +104,8 @@ export type MfaStepUpPurpose =
   | 'account_moderation'
   | 'account_merge_admin'
   | 'mfa_manage'
-  | 'account_export';
+  | 'account_export'
+  | 'email_login_setup';
 
 export interface MfaStatus {
   readonly mfaEnabled: boolean;
@@ -164,7 +165,12 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload?.message ?? 'Request failed.');
+    throw new ApiClientError(
+      typeof payload?.message === 'string' ? payload.message : 'Request failed.',
+      typeof payload?.code === 'string' ? payload.code : 'request_failed',
+      response.status,
+      payload?.details,
+    );
   }
   return (await response.json()) as T;
 }

@@ -27,6 +27,7 @@ import { AccountDataExportPanel } from '../../components/account/account-data-ex
 import { WikiUsernamePanel } from '../../components/account/wiki-username-panel';
 import { AccountEmailChangePanel } from '../../components/account/account-email-change-panel';
 import { AuthShellLayout } from '../../components/auth/auth-shell-layout';
+import { MfaStepUpDialog } from '../../components/auth/mfa-step-up-dialog';
 import { MinecraftOwnershipPanel } from '../../components/minecraft/ownership-panel';
 import { useAuth } from '../../components/providers/auth-context';
 import { SiteHeader } from '../../components/layout/site-header';
@@ -43,6 +44,7 @@ import {
   updateDisplayName,
   updateProfileAvatar,
   type AccountLinkConflict,
+  ApiClientError,
   AccountDeletionBlockedError,
   type AccountDeletionBlocker,
 } from '../../lib/auth-client';
@@ -143,6 +145,7 @@ export function AccountClientPage() {
   const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
   const [setupFeedback, setSetupFeedback] = useState<FeedbackState | null>(null);
   const [settingUpEmail, setSettingUpEmail] = useState(false);
+  const [emailSetupStepUpOpen, setEmailSetupStepUpOpen] = useState(false);
 
   const [copyFeedback, setCopyFeedback] = useState<FeedbackState | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -575,27 +578,29 @@ export function AccountClientPage() {
     }
   };
 
-  const handleSetupEmailLogin = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSetupFeedback(null);
-
+  const validateEmailLoginSetup = () => {
     const email = setupEmail.trim().toLowerCase();
     if (!email) {
       setSetupFeedback({ type: 'error', text: '이메일을 입력해 주세요.' });
-      return;
+      return null;
     }
     if (!setupPassword || !setupConfirmPassword) {
       setSetupFeedback({ type: 'error', text: '비밀번호와 확인 값을 모두 입력해 주세요.' });
-      return;
+      return null;
     }
     if (setupPassword !== setupConfirmPassword) {
       setSetupFeedback({ type: 'error', text: '비밀번호 확인이 일치하지 않습니다.' });
-      return;
+      return null;
     }
+    return { email, password: setupPassword };
+  };
 
+  const completeEmailLoginSetup = async () => {
+    const payload = validateEmailLoginSetup();
+    if (!payload) return;
     setSettingUpEmail(true);
     try {
-      await setupEmailLogin({ email, password: setupPassword });
+      await setupEmailLogin(payload);
       await refresh();
       setSetupFeedback({
         type: 'success',
@@ -604,6 +609,9 @@ export function AccountClientPage() {
       setSetupPassword('');
       setSetupConfirmPassword('');
     } catch (error) {
+      if (error instanceof ApiClientError && error.code === 'EMAIL_LOGIN_SETUP_REAUTH_REQUIRED') {
+        setEmailSetupStepUpOpen(true);
+      }
       setSetupFeedback({
         type: 'error',
         text: error instanceof Error ? error.message : '이메일 로그인 설정에 실패했습니다.',
@@ -611,6 +619,12 @@ export function AccountClientPage() {
     } finally {
       setSettingUpEmail(false);
     }
+  };
+
+  const handleSetupEmailLogin = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSetupFeedback(null);
+    void completeEmailLoginSetup();
   };
 
   const handleChangePassword = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1155,6 +1169,15 @@ export function AccountClientPage() {
           <AccountTerminationPanel hasPassword={hasPasswordLogin} />
         </div>
       </main>
+      <MfaStepUpDialog
+        open={emailSetupStepUpOpen}
+        purpose="email_login_setup"
+        onClose={() => setEmailSetupStepUpOpen(false)}
+        onSuccess={async () => {
+          setEmailSetupStepUpOpen(false);
+          await completeEmailLoginSetup();
+        }}
+      />
     </div>
   );
 }

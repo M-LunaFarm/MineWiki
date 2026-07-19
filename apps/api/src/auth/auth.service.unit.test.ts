@@ -4,7 +4,40 @@ import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { Algorithm, hash } from '@node-rs/argon2';
 import { ConfigService } from '@minewiki/config';
-import { AuthService } from './auth.service';
+import { AuthService, assertEmailLoginSetupAuthentication } from './auth.service';
+import type { SessionPayload } from '../session/session.service';
+
+test('email login setup requires recent primary authentication or its exact step-up purpose', () => {
+  const now = Date.now();
+  const base = {
+    sessionId: 'session-current',
+    userId: randomUUID(),
+    tokenVersion: 1,
+    isElevated: false,
+    authenticatedAt: new Date(now - 16 * 60_000).toISOString(),
+    authLevel: 'aal1',
+    groups: [],
+    permissions: [],
+  } satisfies SessionPayload;
+
+  assert.throws(
+    () => assertEmailLoginSetupAuthentication(base),
+    (error: unknown) => error instanceof Error
+      && JSON.stringify((error as { response?: unknown }).response).includes('EMAIL_LOGIN_SETUP_REAUTH_REQUIRED'),
+  );
+  assert.doesNotThrow(() => assertEmailLoginSetupAuthentication({
+    ...base,
+    authenticatedAt: new Date(now - 60_000).toISOString(),
+  }));
+  assert.doesNotThrow(() => assertEmailLoginSetupAuthentication({
+    ...base,
+    authLevel: 'aal2',
+    stepUpAt: new Date(now - 30_000).toISOString(),
+    stepUpExpiresAt: new Date(now + 4 * 60_000).toISOString(),
+    stepUpMethod: 'webauthn',
+    stepUpPurpose: 'email_login_setup',
+  }));
+});
 
 test('login performs password work even when the email is unknown', async () => {
   const service = new AuthService(

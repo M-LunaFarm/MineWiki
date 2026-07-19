@@ -17,6 +17,7 @@ test('account moderation is a recognized purpose-bound step-up operation', () =>
   assert.ok(STEP_UP_PURPOSES.includes('account_export'));
   assert.ok(STEP_UP_PURPOSES.includes('account_merge_admin'));
   assert.ok(STEP_UP_PURPOSES.includes('wiki_release_review'));
+  assert.ok(STEP_UP_PURPOSES.includes('email_login_setup'));
 });
 
 if (!hasDatabase) {

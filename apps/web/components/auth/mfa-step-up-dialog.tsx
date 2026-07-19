@@ -26,6 +26,7 @@ const PURPOSE_LABELS: Record<MfaStepUpPurpose, string> = {
   account_merge_admin: '계정 연결 승인',
   mfa_manage: '다중 인증 설정',
   account_export: '계정 데이터 내보내기',
+  email_login_setup: '이메일 로그인 설정',
 };
 
 export function MfaStepUpDialog({

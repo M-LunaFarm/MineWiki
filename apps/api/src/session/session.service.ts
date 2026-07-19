@@ -65,6 +65,7 @@ export const STEP_UP_PURPOSES = [
   'account_merge_admin',
   'mfa_manage',
   'account_export',
+  'email_login_setup',
 ] as const;
 export type StepUpPurpose = (typeof STEP_UP_PURPOSES)[number];
 export type StepUpMethod = 'totp' | 'recovery_code' | 'webauthn';

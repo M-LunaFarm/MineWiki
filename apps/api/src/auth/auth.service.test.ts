@@ -5,7 +5,7 @@ import { BadRequestException, ForbiddenException, UnauthorizedException } from '
 import { ConfigService } from '@minewiki/config';
 import { AuthService, hashAuthToken } from './auth.service';
 import { AccountSeparationService } from './account-separation.service';
-import { SessionService } from '../session/session.service';
+import { SessionService, type SessionPayload } from '../session/session.service';
 import { PrismaService } from '../common/prisma.service';
 import { UploadService } from '../upload/upload.service';
 import { FileService } from '../file/file.service';
@@ -343,7 +343,24 @@ if (!hasDatabase) {
     });
 
     const email = 'oauth-setup-' + randomUUID() + '@example.com';
-    const setup = await service.setupEmailLogin(oauth.account.id, {
+    const recentSession = {
+      sessionId: oauth.sessionId,
+      userId: oauth.account.id,
+      tokenVersion: 1,
+      isElevated: false,
+      authenticatedAt: new Date().toISOString(),
+      authLevel: 'aal1',
+      groups: [],
+      permissions: [],
+    } satisfies SessionPayload;
+    await assert.rejects(
+      () => service.setupEmailLogin({
+        ...recentSession,
+        authenticatedAt: new Date(Date.now() - 16 * 60_000).toISOString(),
+      }, { email, password: 'EnablePW1!' }),
+      (error: unknown) => error instanceof ForbiddenException,
+    );
+    const setup = await service.setupEmailLogin(recentSession, {
       email,
       password: 'EnablePW1!',
     });

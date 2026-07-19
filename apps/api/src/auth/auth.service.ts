@@ -18,7 +18,7 @@ import {
   type AccountLinkRequest,
   type AccountLinkResult,
 } from './account-separation.service';
-import { SessionService } from '../session/session.service';
+import { SessionService, assertFreshStepUp, type SessionPayload } from '../session/session.service';
 import { PrismaService } from '../common/prisma.service';
 import { EmailService } from './email.service';
 import { FileService, type FileImageUploadRequest } from '../file/file.service';
@@ -142,6 +142,7 @@ const PASSWORD_POLICY = /^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,}$/;
 const DUMMY_PASSWORD_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$MjQUBk0H7jTj+SgNScFhCA$LHY2v6BYTGSHHMuOrWQyGqAbW3Xjzpa0jGwLN1CbdA0';
 const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 30; // 30 minutes
+const EMAIL_LOGIN_SETUP_RECENT_AUTH_MS = 1000 * 60 * 15;
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30; // 30 minutes
 const TERMS_POLICY_VERSION = CURRENT_POLICY_VERSIONS.terms.consentVersion;
 const PRIVACY_POLICY_VERSION = CURRENT_POLICY_VERSIONS.privacy.consentVersion;
@@ -315,9 +316,11 @@ export class AuthService {
   }
 
   async setupEmailLogin(
-    accountId: string,
+    session: SessionPayload,
     payload: EmailLoginSetupDto,
   ): Promise<ResendVerificationResult> {
+    assertEmailLoginSetupAuthentication(session);
+    const accountId = session.userId;
     const email = payload.email.trim().toLowerCase();
     if (!email) {
       throw new BadRequestException('이메일이 필요합니다.');
@@ -350,7 +353,7 @@ export class AuthService {
     const verification = await withActiveCanonicalAccountGroup(
       this.prisma,
       [account.id],
-      async (tx) => {
+      async (tx, group) => {
         const fresh = await tx.account.findUnique({
           where: { id: account.id },
           select: { passwordHash: true },
@@ -361,6 +364,12 @@ export class AuthService {
         await tx.account.update({
           where: { id: account.id },
           data: { email, passwordHash, emailVerified: false },
+        });
+        await tx.session.deleteMany({
+          where: {
+            accountId: { in: [...group.accountIds] },
+            id: { not: session.sessionId },
+          },
         });
         return this.createEmailVerification(account.id, email, tx);
       },
@@ -1041,6 +1050,26 @@ export class AuthService {
 
   private generateToken(): string {
     return randomBytes(24).toString('hex');
+  }
+}
+
+export function assertEmailLoginSetupAuthentication(session: SessionPayload): void {
+  const authenticatedAt = Date.parse(session.authenticatedAt);
+  const now = Date.now();
+  if (
+    Number.isFinite(authenticatedAt)
+    && authenticatedAt <= now + 30_000
+    && now - authenticatedAt <= EMAIL_LOGIN_SETUP_RECENT_AUTH_MS
+  ) return;
+  try {
+    assertFreshStepUp(session, 'email_login_setup', now);
+    return;
+  } catch {
+    throw new ForbiddenException({
+      code: 'EMAIL_LOGIN_SETUP_REAUTH_REQUIRED',
+      purpose: 'email_login_setup',
+      message: '이메일 로그인을 설정하려면 다시 로그인하거나 추가 인증을 완료해 주세요.',
+    });
   }
 }
 

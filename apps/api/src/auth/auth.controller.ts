@@ -285,7 +285,7 @@ export class AuthController {
     @Body() body: unknown,
   ): Promise<ResendVerificationResult> {
     const payload = emailLoginSetupRequestSchema.parse(body);
-    return this.auth.setupEmailLogin(session.userId, {
+    return this.auth.setupEmailLogin(session, {
       email: payload.email!,
       password: payload.password!,
     });
