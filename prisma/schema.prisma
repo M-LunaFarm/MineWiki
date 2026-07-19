@@ -671,6 +671,7 @@ model ServerStats {
   sparkline            Json
   latencyMs            Int       @default(0)
   lastPingAt           DateTime?
+  liveStatsRefreshLeaseUntil DateTime? @map("live_stats_refresh_lease_until") @db.DateTime(3)
   rankCalculatedAt     DateTime? @map("rank_calculated_at") @db.DateTime(3)
   lastUpdatedAt        DateTime  @default(now()) @updatedAt
 

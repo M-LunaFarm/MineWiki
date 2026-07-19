@@ -16,6 +16,100 @@ test('server stats downsampling preserves the seven-day range endpoints', () => 
   assert.equal(new Set(downsampled).size, downsampled.length);
 });
 
+test('public stats and updates conceal non-active server listings before dependent reads', async () => {
+  let dependentReads = 0;
+  const prisma = {
+    server: { findFirst: async () => null },
+    serverStats: {
+      upsert: async () => { dependentReads += 1; return {}; },
+      findUnique: async () => { dependentReads += 1; return null; },
+    },
+    serverPingSample: { findMany: async () => { dependentReads += 1; return []; } },
+    serverClaimMethod: { findMany: async () => { dependentReads += 1; return []; } },
+    serverReview: { findMany: async () => { dependentReads += 1; return []; } },
+    vote: { findMany: async () => { dependentReads += 1; return []; } },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+
+  await assert.rejects(() => service.stats(randomUUID()), /not found/u);
+  await assert.rejects(() => service.updates(randomUUID()), /not found/u);
+  assert.equal(dependentReads, 0);
+});
+
+test('concurrent stale public stats reads acquire only one live-probe lease', async () => {
+  const serverId = randomUUID();
+  const stalePingAt = new Date(Date.now() - 10 * 60 * 1000);
+  const storedStats = {
+    serverId,
+    rankCurrent: 1,
+    rankDelta24h: 0,
+    rankBest: 1,
+    votesLast24h: 0,
+    votesLast7d: 0,
+    votesMonthToDate: 0,
+    votesTotal: 0,
+    playersOnline: 0,
+    playersMax: 0,
+    playersLastUpdatedAt: stalePingAt,
+    uptimePercent: 0,
+    sparkline: [],
+    latencyMs: 0,
+    lastPingAt: stalePingAt,
+  };
+  const sample = {
+    timestamp: stalePingAt,
+    online: false,
+    players: null,
+    maxPlayers: null,
+    latency: null,
+  };
+  let refreshLeaseUntil: Date | null = null;
+  const prisma = {
+    server: {
+      findFirst: async () => ({
+        id: serverId,
+        listingStatus: 'active',
+        joinHost: 'tenant.example.test',
+        joinPort: 25565,
+        edition: 'java',
+        verificationGrade: 'A',
+      }),
+    },
+    serverStats: {
+      upsert: async () => ({ ...storedStats }),
+      updateMany: async ({ where, data }: {
+        where: { lastPingAt: Date | null };
+        data: { liveStatsRefreshLeaseUntil: Date };
+      }) => {
+        if (
+          storedStats.lastPingAt.getTime() !== where.lastPingAt?.getTime()
+          || (refreshLeaseUntil && refreshLeaseUntil.getTime() > Date.now())
+        ) {
+          return { count: 0 };
+        }
+        refreshLeaseUntil = data.liveStatsRefreshLeaseUntil;
+        return { count: 1 };
+      },
+      findUnique: async () => ({ ...storedStats }),
+    },
+    serverPingSample: { findMany: async () => [{ ...sample }] },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+  let liveProbes = 0;
+  const liveStats = service as unknown as {
+    refreshServerPingSnapshot(server: unknown): Promise<void>;
+  };
+  liveStats.refreshServerPingSnapshot = async () => {
+    liveProbes += 1;
+  };
+
+  const responses = await Promise.all(Array.from({ length: 8 }, () => service.stats(serverId)));
+
+  assert.equal(liveProbes, 1);
+  assert.equal(responses.every((response) => response.serverId === serverId), true);
+  assert.equal(responses.every((response) => response.lastPingAt === stalePingAt.toISOString()), true);
+});
+
 test('server profile updates sync linked wiki identity and write a bounded audit summary', async () => {
   const serverId = randomUUID();
   const actorAccountId = randomUUID();

@@ -58,6 +58,7 @@ import { buildCanonicalServerWikiPath } from '../wiki/wiki-route-path.resolver';
 import { SUPPORTED_CLAIM_METHODS, isSupportedClaimMethod } from '@minewiki/schemas/claim-methods';
 
 const LIVE_STATS_REFRESH_MS = 2 * 60 * 1000;
+const LIVE_STATS_REFRESH_LEASE_MS = 30 * 1000;
 const LIVE_PING_TIMEOUT_MS = 5000;
 const SAMPLE_RETENTION_DAYS = 7;
 const UPTIME_WINDOW_HOURS = 24;
@@ -312,7 +313,7 @@ export class ServerService {
   async stats(id: string): Promise<ServerStats> {
     const startedAt = Date.now();
     try {
-      const server = await this.ensureExists(id);
+      const server = await this.ensurePubliclyListedServer(id);
       let stats = await this.prisma.serverStats.upsert({
         where: { serverId: id },
         create: {
@@ -343,7 +344,25 @@ export class ServerService {
       });
 
       if (shouldRefreshLiveStats(stats.lastPingAt, samples.length)) {
-        await this.refreshServerPingSnapshot(server);
+        const leaseStartedAt = new Date();
+        const refreshLease = await this.prisma.serverStats.updateMany({
+          where: {
+            serverId: id,
+            lastPingAt: stats.lastPingAt,
+            OR: [
+              { liveStatsRefreshLeaseUntil: null },
+              { liveStatsRefreshLeaseUntil: { lt: leaseStartedAt } },
+            ],
+          },
+          data: {
+            liveStatsRefreshLeaseUntil: new Date(
+              leaseStartedAt.getTime() + LIVE_STATS_REFRESH_LEASE_MS,
+            ),
+          },
+        });
+        if (refreshLease.count === 1) {
+          await this.refreshServerPingSnapshot(server);
+        }
         const [refreshedStats, refreshedSamples] = await Promise.all([
           this.prisma.serverStats.findUnique({ where: { serverId: id } }),
           this.prisma.serverPingSample.findMany({
@@ -530,6 +549,7 @@ export class ServerService {
           sparkline: [],
           latencyMs: online ? latencyValue : 0,
           lastPingAt: now,
+          liveStatsRefreshLeaseUntil: null,
         },
         update: {
           playersOnline: online ? playersOnlineValue : 0,
@@ -538,6 +558,7 @@ export class ServerService {
           uptimePercent,
           latencyMs: online ? latencyValue : 0,
           lastPingAt: now,
+          liveStatsRefreshLeaseUntil: null,
         },
       });
 
@@ -555,17 +576,20 @@ export class ServerService {
     const safeLimit = normalizeUpdateLimit(limit);
     try {
       const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const [server, stats, claimMethods, latestReviews, recentVotes] = await Promise.all([
-        this.prisma.server.findUnique({
-          where: { id },
-          select: {
-            id: true,
-            name: true,
-            verificationGrade: true,
-            verifiedAt: true,
-            updatedAt: true,
-          },
-        }),
+      const server = await this.prisma.server.findFirst({
+        where: { id, listingStatus: PUBLIC_SERVER_LISTING_STATUS },
+        select: {
+          id: true,
+          name: true,
+          verificationGrade: true,
+          verifiedAt: true,
+          updatedAt: true,
+        },
+      });
+      if (!server) {
+        throw new NotFoundException(`Server ${id} not found`);
+      }
+      const [stats, claimMethods, latestReviews, recentVotes] = await Promise.all([
         this.prisma.serverStats.findUnique({
           where: { serverId: id },
           select: { lastPingAt: true },
@@ -607,10 +631,6 @@ export class ServerService {
           },
         }),
       ]);
-
-      if (!server) {
-        throw new NotFoundException(`Server ${id} not found`);
-      }
 
       const events: ServerUpdate[] = [];
 
@@ -713,6 +733,16 @@ export class ServerService {
   }
   async ensureExists(id: string) {
     const server = await this.prisma.server.findUnique({ where: { id } });
+    if (!server) {
+      throw new NotFoundException(`Server ${id} not found`);
+    }
+    return server;
+  }
+
+  private async ensurePubliclyListedServer(id: string) {
+    const server = await this.prisma.server.findFirst({
+      where: { id, listingStatus: PUBLIC_SERVER_LISTING_STATUS },
+    });
     if (!server) {
       throw new NotFoundException(`Server ${id} not found`);
     }
