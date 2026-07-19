@@ -629,7 +629,10 @@ export async function rehomeAccountRolesForCanonicalMerge(
 }
 
 export async function rehomeMfaTotpForCanonicalMerge(
-  tx: Pick<import('@prisma/client').Prisma.TransactionClient, 'mfaTotpCredential'>,
+  tx: Pick<
+    import('@prisma/client').Prisma.TransactionClient,
+    'mfaTotpCredential' | 'mfaRecoveryCode'
+  >,
   canonicalAccountId: string,
   accountIds: readonly string[],
 ): Promise<void> {
@@ -642,7 +645,13 @@ export async function rehomeMfaTotpForCanonicalMerge(
     || Number(right.accountId === canonicalAccountId) - Number(left.accountId === canonicalAccountId),
   );
   const keeper = credentials[0];
-  if (!keeper) return;
+  if (!keeper) {
+    await tx.mfaRecoveryCode.deleteMany({
+      where: { accountId: { in: [...accountIds] } },
+    });
+    return;
+  }
+  const keeperSourceAccountId = keeper.accountId;
   const duplicateIds = credentials.slice(1).map((credential) => credential.id);
   if (duplicateIds.length > 0) {
     await tx.mfaTotpCredential.deleteMany({ where: { id: { in: duplicateIds } } });
@@ -650,6 +659,17 @@ export async function rehomeMfaTotpForCanonicalMerge(
   if (keeper.accountId !== canonicalAccountId) {
     await tx.mfaTotpCredential.update({
       where: { id: keeper.id },
+      data: { accountId: canonicalAccountId },
+    });
+  }
+  await tx.mfaRecoveryCode.deleteMany({
+    where: {
+      accountId: { in: [...accountIds], not: keeperSourceAccountId },
+    },
+  });
+  if (keeperSourceAccountId !== canonicalAccountId) {
+    await tx.mfaRecoveryCode.updateMany({
+      where: { accountId: keeperSourceAccountId },
       data: { accountId: canonicalAccountId },
     });
   }

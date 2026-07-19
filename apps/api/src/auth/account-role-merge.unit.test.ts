@@ -61,6 +61,7 @@ test('canonical account merge preserves and deduplicates roles from every alias'
 
 test('canonical account merge keeps an enabled TOTP credential on the canonical account', async () => {
   const canonicalAccountId = 'canonical';
+  const usedAt = new Date('2026-03-01T00:00:00.000Z');
   const rows = [
     {
       id: 'canonical-pending', accountId: canonicalAccountId, enabledAt: null,
@@ -70,6 +71,11 @@ test('canonical account merge keeps an enabled TOTP credential on the canonical 
       id: 'alias-enabled', accountId: 'alias', enabledAt: new Date('2026-02-01T00:00:00.000Z'),
       createdAt: new Date('2026-02-01T00:00:00.000Z'),
     },
+  ];
+  const recoveryRows = [
+    { id: 'canonical-discarded', accountId: canonicalAccountId, codeHash: 'shared', usedAt: null },
+    { id: 'alias-shared', accountId: 'alias', codeHash: 'shared', usedAt: null },
+    { id: 'alias-used', accountId: 'alias', codeHash: 'used', usedAt },
   ];
   const prisma = {
     mfaTotpCredential: {
@@ -91,6 +97,28 @@ test('canonical account merge keeps an enabled TOTP credential on the canonical 
         return row;
       },
     },
+    mfaRecoveryCode: {
+      deleteMany: async ({ where }: {
+        where: { accountId: { in: string[]; not: string } };
+      }) => {
+        const removed = recoveryRows.filter(
+          (row) => where.accountId.in.includes(row.accountId) && row.accountId !== where.accountId.not,
+        );
+        for (const row of removed) {
+          const index = recoveryRows.findIndex((candidate) => candidate.id === row.id);
+          if (index >= 0) recoveryRows.splice(index, 1);
+        }
+        return { count: removed.length };
+      },
+      updateMany: async ({ where, data }: {
+        where: { accountId: string };
+        data: { accountId: string };
+      }) => {
+        const matching = recoveryRows.filter((row) => row.accountId === where.accountId);
+        for (const row of matching) row.accountId = data.accountId;
+        return { count: matching.length };
+      },
+    },
   };
 
   await rehomeMfaTotpForCanonicalMerge(
@@ -103,4 +131,15 @@ test('canonical account merge keeps an enabled TOTP credential on the canonical 
   assert.equal(rows[0]?.id, 'alias-enabled');
   assert.equal(rows[0]?.accountId, canonicalAccountId);
   assert.ok(rows[0]?.enabledAt);
+  assert.deepEqual(
+    recoveryRows.map(({ id, accountId, usedAt: recoveryUsedAt }) => ({
+      id,
+      accountId,
+      usedAt: recoveryUsedAt,
+    })),
+    [
+      { id: 'alias-shared', accountId: canonicalAccountId, usedAt: null },
+      { id: 'alias-used', accountId: canonicalAccountId, usedAt },
+    ],
+  );
 });
