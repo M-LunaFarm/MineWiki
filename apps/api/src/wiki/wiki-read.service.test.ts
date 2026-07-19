@@ -1197,6 +1197,29 @@ test('public server wiki history lists every distinct published revision and exc
     { id: 12n, pageId: 30n, revisionNo: 2, editSummary: 'release two', editSummaryHidden: false, isMinor: false, createdBy: 1n, createdAt: now, contentHash: 'b', contentSize: 20, visibility: 'public' },
     { id: 11n, pageId: 30n, revisionNo: 1, editSummary: 'release one', editSummaryHidden: false, isMinor: false, createdBy: 1n, createdAt: now, contentHash: 'a', contentSize: 10, visibility: 'public' },
   ];
+  const releaseItem = (releaseId: bigint, revisionId: bigint, title: string, status = 'normal') => ({
+    id: releaseId,
+    releaseId,
+    serverWikiId: 50n,
+    spaceId: 40n,
+    namespaceId: 7,
+    pageId: 30n,
+    revisionId,
+    localPath: title,
+    slug: title,
+    title,
+    displayTitle: title,
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: status,
+    createdBy: 1n,
+    ownerProfileId: null,
+    pageUpdatedAt: now,
+    searchVector: '',
+    createdAt: now,
+  });
+  const currentItem = releaseItem(71n, 12n, 'luna/guide');
+  const historicalItem = releaseItem(70n, 11n, 'luna/old-guide');
   let revisionWhere: { id?: { in: bigint[] }; revisionNo?: { lt: number } } | null = null;
   const prisma = {
     wikiPage: { async findUnique() { return page; } },
@@ -1213,8 +1236,8 @@ test('public server wiki history lists every distinct published revision and exc
   const permissions = {
     async resolvePublishedRevisionScope() {
       return {
-        currentItem: { revisionId: 12n },
-        revisionItems: [{ revisionId: 12n }, { revisionId: 11n }],
+        currentItem,
+        revisionItems: [currentItem, historicalItem],
       };
     },
     async assertCanReadPage() {},
@@ -1227,6 +1250,66 @@ test('public server wiki history lists every distinct published revision and exc
   assert.deepEqual(result.items.map((item) => item.sizeDelta), [10, null]);
   assert.equal(revisionWhere?.id?.in.includes(13n), false);
   assert.deepEqual(revisionWhere?.id?.in, [12n, 11n]);
+});
+
+test('public server wiki history authorizes release snapshots and paginates past concealed revisions', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  const page = {
+    id: 30n, namespaceId: 7, spaceId: 40n, localPath: 'live-draft', slug: 'live-draft',
+    title: 'Live Draft', displayTitle: 'Live Draft', currentRevisionId: 14n, pageType: 'article',
+    protectionLevel: 'owner_only', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now,
+  };
+  const revision = (id: bigint, revisionNo: number) => ({
+    id, pageId: 30n, revisionNo, editSummary: `release ${revisionNo}`, editSummaryHidden: false,
+    isMinor: false, createdBy: 1n, createdAt: now, contentHash: id.toString(),
+    contentSize: revisionNo * 10, visibility: 'public',
+  });
+  const revisions = [revision(13n, 3), revision(12n, 2), revision(11n, 1)];
+  const item = (revisionId: bigint, title: string, pageStatus = 'normal') => ({
+    id: revisionId, releaseId: 70n + revisionId, serverWikiId: 50n, spaceId: 40n,
+    namespaceId: 7, pageId: 30n, revisionId, localPath: title, slug: title, title,
+    displayTitle: title, pageType: 'article', protectionLevel: 'open', pageStatus,
+    createdBy: 1n, ownerProfileId: null, pageUpdatedAt: now, searchVector: '', createdAt: now,
+  });
+  const current = item(13n, 'released/current');
+  const concealed = item(12n, 'released/concealed', 'hidden');
+  const oldest = item(11n, 'released/oldest');
+  const queriedCursors: Array<number | undefined> = [];
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageRevision: {
+      async findMany(input: { where: { revisionNo?: { lt: number } }; take: number }) {
+        queriedCursors.push(input.where.revisionNo?.lt);
+        return revisions
+          .filter((row) => !input.where.revisionNo || row.revisionNo < input.where.revisionNo.lt)
+          .slice(0, input.take);
+      },
+    },
+    wikiProfile: { async findMany() { return []; } },
+  } as unknown as PrismaService;
+  const authorizedTitles: string[] = [];
+  const permissions = {
+    async resolvePublishedRevisionScope() {
+      return { currentItem: current, revisionItems: [current, concealed, oldest] };
+    },
+    async assertCanReadPage(input: { page: { title: string; status: string } }) {
+      authorizedTitles.push(input.page.title);
+      if (input.page.status === 'hidden') throw new NotFoundException('hidden snapshot');
+    },
+    async assertCanUsePageAction() {},
+  } as unknown as WikiPermissionService;
+  const service = new WikiReadService(prisma, permissions);
+
+  const first = await service.getRevisions('30', null, undefined, 1);
+  assert.deepEqual(first.items.map((row) => row.id), ['13']);
+  assert.equal(first.nextCursor, '3');
+  const second = await service.getRevisions('30', null, first.nextCursor ?? undefined, 1);
+  assert.deepEqual(second.items.map((row) => row.id), ['11']);
+  assert.equal(second.nextCursor, null);
+  assert.equal(authorizedTitles.includes('Live Draft'), false);
+  assert.equal(authorizedTitles.includes('released/current'), true);
+  assert.equal(authorizedTitles.includes('released/concealed'), true);
+  assert.deepEqual(queriedCursors, [undefined, 2, 3, 1]);
 });
 
 test('page lifecycle history uses an independent id cursor and redacts cross-space identities', async () => {

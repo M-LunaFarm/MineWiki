@@ -1095,30 +1095,80 @@ export class WikiReadService {
     }
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
     const publication = await this.publishedRevisionScopeForViewer(page, access);
-    await this.wikiPermissions.assertCanReadPage({ ...access, page });
+    const currentPermissionPage = publication
+      ? pageFromServerWikiReleaseItem(publication.currentItem)
+      : page;
+    await this.wikiPermissions.assertCanReadPage({ ...access, page: currentPermissionPage });
     await this.wikiPermissions.assertCanUsePageAction({
       ...access,
       action: 'history',
-      page
+      page: currentPermissionPage
     });
     const limit = Math.min(Math.max(Number(requestedLimit) || 50, 1), 100);
     const cursorRevisionNo = cursor ? this.parsePositiveInt(cursor, 'cursor') : null;
-    const revisions = await this.prisma.wikiPageRevision.findMany({
-      where: {
-        pageId: parsedPageId,
-        visibility: 'public',
-        ...(publication ? { id: { in: publication.revisionItems.map((item) => item.revisionId) } } : {}),
-        ...(cursorRevisionNo ? { revisionNo: { lt: cursorRevisionNo } } : {})
-      },
-      orderBy: [{ revisionNo: 'desc' }],
-      take: limit + 1
-    });
-    const hasMore = revisions.length > limit;
-    const pageRows = revisions.slice(0, limit);
+    const queryRevisions = (beforeRevisionNo: number | null) =>
+      this.prisma.wikiPageRevision.findMany({
+        where: {
+          pageId: parsedPageId,
+          visibility: 'public',
+          ...(publication ? { id: { in: publication.revisionItems.map((item) => item.revisionId) } } : {}),
+          ...(beforeRevisionNo ? { revisionNo: { lt: beforeRevisionNo } } : {})
+        },
+        orderBy: [{ revisionNo: 'desc' as const }],
+        take: limit + 1
+      });
+    const firstRevisionBatch = await queryRevisions(cursorRevisionNo);
+    const releaseItemByRevisionId = new Map(
+      publication?.revisionItems.map((item) => [item.revisionId, item]) ?? [],
+    );
+    const permissionDecisionBySnapshot = new Map<string, Promise<boolean>>();
+    const canReadHistorySnapshot = (revision: (typeof firstRevisionBatch)[number]) => {
+      const releaseItem = releaseItemByRevisionId.get(revision.id);
+      if (!releaseItem) return Promise.resolve(publication === null);
+      const permissionPage = pageFromServerWikiReleaseItem(releaseItem);
+      const snapshotKey = [
+        permissionPage.namespaceId,
+        permissionPage.title,
+        permissionPage.protectionLevel,
+        permissionPage.status,
+        permissionPage.createdBy?.toString() ?? '',
+        permissionPage.ownerProfileId?.toString() ?? '',
+      ].join(':');
+      const cached = permissionDecisionBySnapshot.get(snapshotKey);
+      if (cached) return cached;
+      const decision = Promise.all([
+        this.wikiPermissions.assertCanReadPage({ ...access, page: permissionPage, revision }),
+        this.wikiPermissions.assertCanUsePageAction({
+          ...access,
+          action: 'history',
+          page: permissionPage,
+        }),
+      ]).then(() => true, () => false);
+      permissionDecisionBySnapshot.set(snapshotKey, decision);
+      return decision;
+    };
+    const authorizedRows: typeof firstRevisionBatch = [];
+    let revisionBatch = firstRevisionBatch;
+    let exhausted = false;
+    while (revisionBatch.length > 0 && authorizedRows.length <= limit) {
+      for (const revision of revisionBatch) {
+        if (await canReadHistorySnapshot(revision)) authorizedRows.push(revision);
+        if (authorizedRows.length > limit) break;
+      }
+      if (authorizedRows.length > limit) break;
+      if (revisionBatch.length < limit + 1) {
+        exhausted = true;
+        break;
+      }
+      revisionBatch = await queryRevisions(revisionBatch.at(-1)?.revisionNo ?? null);
+    }
+    if (revisionBatch.length === 0) exhausted = true;
+    const hasMore = authorizedRows.length > limit || !exhausted;
+    const pageRows = authorizedRows.slice(0, limit);
     const profileIds = [...new Set(pageRows.flatMap((revision) => revision.createdBy ? [revision.createdBy] : []))];
     const profileById = await this.canonicalProfileViews(profileIds);
     const items = pageRows.map((revision, index) => {
-      const previous = revisions[index + 1];
+      const previous = authorizedRows[index + 1];
       const publicSummary = publicWikiRevisionEditSummary(revision);
       return {
         id: revision.id.toString(),
@@ -1135,7 +1185,10 @@ export class WikiReadService {
         sizeDelta: previous ? revision.contentSize - previous.contentSize : null
       };
     });
-    return { items, nextCursor: hasMore ? pageRows.at(-1)?.revisionNo.toString() ?? null : null };
+    return {
+      items,
+      nextCursor: hasMore ? pageRows.at(-1)?.revisionNo.toString() ?? null : null,
+    };
   }
 
   private async releasedRevisionForViewer(
