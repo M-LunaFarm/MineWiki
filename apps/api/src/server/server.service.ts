@@ -64,6 +64,7 @@ const UPTIME_WINDOW_HOURS = 24;
 const LIVE_PING_ALLOW_IPV6 = parseBooleanEnv(process.env.SERVER_PING_ALLOW_IPV6);
 const SHORT_CODE_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz';
 const SHORT_CODE_LENGTH = 7;
+const REGISTRATION_RESERVATION_TTL_MS = 24 * 60 * 60 * 1000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHORT_CODE_PATTERN = /^[a-z0-9]{5,12}$/;
 const SERVER_WIKI_SITE_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
@@ -1650,13 +1651,6 @@ export class ServerService {
       normalizedHost,
       serverInput.joinPort,
     );
-    const duplicate = await this.prisma.server.findFirst({
-      where: { registrationEndpointKey },
-      select: { id: true },
-    });
-    if (duplicate) {
-      throw new ConflictException('같은 에디션과 접속 주소를 사용하는 서버가 이미 등록되어 있습니다.');
-    }
     try {
       await validateOutboundTarget(normalizedHost, serverInput.joinPort, {
         label: 'Server registration',
@@ -1668,6 +1662,13 @@ export class ServerService {
           ? '사설망, 루프백 또는 예약된 IP 주소는 서버 주소로 등록할 수 없습니다.'
           : '공개 인터넷에서 확인할 수 있는 서버 도메인만 등록할 수 있습니다.',
       );
+    }
+    const existingRegistration = await this.resolveExistingRegistration(
+      registrationEndpointKey,
+      serverInput,
+    );
+    if (existingRegistration) {
+      return existingRegistration;
     }
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -1722,6 +1723,13 @@ export class ServerService {
         return toDetail(server, SUPPORTED_CLAIM_METHODS);
       } catch (error) {
         if (isEndpointUniqueConstraintError(error)) {
+          const racedRegistration = await this.resolveExistingRegistration(
+            registrationEndpointKey,
+            serverInput,
+          );
+          if (racedRegistration) {
+            return racedRegistration;
+          }
           throw new ConflictException(
             '같은 에디션과 접속 주소를 사용하는 서버가 이미 등록되어 있습니다.',
           );
@@ -1732,6 +1740,94 @@ export class ServerService {
       }
     }
     throw new Error('Failed to generate unique server short code.');
+  }
+
+  private async resolveExistingRegistration(
+    registrationEndpointKey: string,
+    serverInput: {
+      name: string;
+      joinHost: string;
+      joinPort: number;
+      edition: 'java' | 'bedrock';
+      supportedVersions: string[];
+      tags: string[];
+      shortDescription: string;
+      longDescription: string;
+      websiteUrl?: string | null;
+      discordUrl?: string | null;
+      registrantAccountId?: string;
+    },
+  ): Promise<ServerDetail | null> {
+    const existing = await this.prisma.server.findFirst({
+      where: { registrationEndpointKey },
+      select: {
+        id: true,
+        ownerAccountId: true,
+        registrantAccountId: true,
+        listingStatus: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    if (!existing) {
+      return null;
+    }
+
+    const isUnclaimedPending = existing.ownerAccountId === null
+      && existing.listingStatus === 'pending';
+    if (
+      isUnclaimedPending
+      && serverInput.registrantAccountId
+      && existing.registrantAccountId === serverInput.registrantAccountId
+    ) {
+      return this.detail(existing.id, serverInput.registrantAccountId);
+    }
+
+    const reservationExpired = existing.createdAt.getTime()
+      <= Date.now() - REGISTRATION_RESERVATION_TTL_MS;
+    if (!isUnclaimedPending || !reservationExpired || !serverInput.registrantAccountId) {
+      throw new ConflictException('같은 에디션과 접속 주소를 사용하는 서버가 이미 등록되어 있습니다.');
+    }
+
+    const reclaimed = await this.prisma.$transaction(async (transaction) => {
+      const updated = await transaction.server.updateMany({
+        where: {
+          id: existing.id,
+          registrationEndpointKey,
+          ownerAccountId: null,
+          listingStatus: 'pending',
+          registrantAccountId: existing.registrantAccountId,
+          updatedAt: existing.updatedAt,
+        },
+        data: {
+          registrantAccountId: serverInput.registrantAccountId,
+          name: serverInput.name,
+          joinHost: normalizeMinecraftServerHost(serverInput.joinHost),
+          joinPort: serverInput.joinPort,
+          edition: serverInput.edition,
+          supportedVersions: serverInput.supportedVersions,
+          tags: serverInput.tags,
+          shortDescription: serverInput.shortDescription,
+          longDescription: serverInput.longDescription,
+          websiteUrl: serverInput.websiteUrl ?? null,
+          discordUrl: serverInput.discordUrl ?? null,
+          bannerUrl: null,
+          verificationGrade: 'Unverified',
+          verifiedAt: null,
+        },
+      });
+      if (updated.count !== 1) {
+        return false;
+      }
+      await transaction.serverClaimMethod.deleteMany({
+        where: { serverId: existing.id },
+      });
+      return true;
+    });
+    if (!reclaimed) {
+      throw new ConflictException('서버 등록 상태가 변경되었습니다. 다시 시도해 주세요.');
+    }
+    return this.detail(existing.id, serverInput.registrantAccountId);
   }
 
   async getWikiLayoutSettings(serverId: string) {

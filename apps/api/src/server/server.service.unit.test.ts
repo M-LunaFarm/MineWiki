@@ -285,16 +285,27 @@ test('server wiki public slug is tenant-owned, validated, and audited independen
 test('registration canonicalizes endpoints and rejects disguised duplicates', async () => {
   let storedEndpointKey: string | null = null;
   let storedHost: string | null = null;
-  const now = new Date('2026-07-12T00:00:00.000Z');
+  let storedServer: Record<string, unknown> | null = null;
+  let clearedClaimMethods = 0;
+  const now = new Date();
   const prisma = {
     server: {
       findFirst: async ({ where }: { where: { registrationEndpointKey: string } }) =>
-        storedEndpointKey === where.registrationEndpointKey ? { id: 'server-existing' } : null,
-      findUnique: async () => null,
+        storedEndpointKey === where.registrationEndpointKey && storedServer
+          ? {
+              id: storedServer.id,
+              ownerAccountId: null,
+              registrantAccountId: storedServer.registrantAccountId,
+              listingStatus: 'pending',
+              createdAt: storedServer.createdAt,
+              updatedAt: storedServer.updatedAt,
+            }
+          : null,
+      findUnique: async () => storedServer ? { ...storedServer, stats: null } : null,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         storedEndpointKey = String(data.registrationEndpointKey);
         storedHost = String(data.joinHost);
-        return {
+        storedServer = {
           id: randomUUID(),
           shortCode: String(data.shortCode),
           wikiSpaceId: null,
@@ -323,11 +334,28 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
           playersLastUpdatedAt: null,
           isOnline: null,
           latencyMs: null,
+          ownerAccountId: null,
+          registrantAccountId: data.registrantAccountId,
+          listingStatus: 'pending',
           createdAt: now,
           updatedAt: now,
         };
+        return storedServer;
+      },
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+        if (!storedServer) return { count: 0 };
+        Object.assign(storedServer, data, { updatedAt: new Date() });
+        return { count: 1 };
       },
     },
+    serverClaimMethod: {
+      findMany: async () => [],
+      deleteMany: async () => {
+        clearedClaimMethods += 1;
+        return { count: 1 };
+      },
+    },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
   };
   const service = new ServerService({} as never, prisma as never, {} as never);
   const base = {
@@ -347,10 +375,30 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
   assert.equal(storedHost, 'one.one.one.one');
   assert.match(storedEndpointKey ?? '', /^[a-f0-9]{64}$/u);
 
+  const replay = await service.register({ ...base, joinHost: 'one.one.one.one' });
+  assert.equal(replay.id, storedServer?.id);
+
   await assert.rejects(
-    () => service.register({ ...base, joinHost: 'one.one.one.one' }),
+    () => service.register({
+      ...base,
+      joinHost: 'one.one.one.one',
+      registrantAccountId: randomUUID(),
+    }),
     /이미 등록되어 있습니다/,
   );
+
+  const nextRegistrantAccountId = randomUUID();
+  if (storedServer) {
+    storedServer.createdAt = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  }
+  const reclaimed = await service.register({
+    ...base,
+    joinHost: 'one.one.one.one',
+    registrantAccountId: nextRegistrantAccountId,
+  });
+  assert.equal(reclaimed.id, storedServer?.id);
+  assert.equal(storedServer?.registrantAccountId, nextRegistrantAccountId);
+  assert.equal(clearedClaimMethods, 1);
 
   await assert.rejects(
     () => service.register({ ...base, joinHost: '192.168.1.10', joinPort: 25566 }),
