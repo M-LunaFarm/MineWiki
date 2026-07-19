@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.26.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.27.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
@@ -543,11 +543,21 @@ function parseMarkupDocument(
       ? null
       : parseWikiHeadingLine(line, options.gitBookMarkdown === true);
     if (heading) {
+      const headingChildren = parseInline(
+        heading.text,
+        links,
+        errors,
+        blockingErrors,
+        footnotes,
+        options.linkResolution,
+      );
+      const headingText = inlineNodesToPlainText(headingChildren).trim() || heading.text;
       ast.push({
         type: 'heading',
         level: heading.level,
-        text: heading.text,
-        id: makeHeadingId(heading.text),
+        text: headingText,
+        children: headingChildren,
+        id: makeHeadingId(headingText),
         ...(heading.folded ? { folded: true } : {}),
         startLine: i + 1
       });
@@ -1700,13 +1710,25 @@ export function applyIncludeParametersToAst(
     )
   );
   const inline = (nodes: readonly InlineNode[]): InlineNode[] => nodes.map((node) => {
-    if (node.type === 'internal_link') return {
-      ...node,
-      target: replace(node.target),
-      label: replace(node.label),
-      fragment: node.fragment === undefined || node.fragment === null ? node.fragment : replace(node.fragment)
-    };
-    if (node.type === 'external_link') return { ...node, href: replace(node.href), label: replace(node.label) };
+    if (node.type === 'internal_link') {
+      const labelChildren = node.labelChildren ? inline(node.labelChildren) : undefined;
+      return {
+        ...node,
+        target: replace(node.target),
+        label: labelChildren ? inlineNodesToPlainText(labelChildren) : replace(node.label),
+        ...(labelChildren ? { labelChildren } : {}),
+        fragment: node.fragment === undefined || node.fragment === null ? node.fragment : replace(node.fragment)
+      };
+    }
+    if (node.type === 'external_link') {
+      const labelChildren = node.labelChildren ? inline(node.labelChildren) : undefined;
+      return {
+        ...node,
+        href: replace(node.href),
+        label: labelChildren ? inlineNodesToPlainText(labelChildren) : replace(node.label),
+        ...(labelChildren ? { labelChildren } : {})
+      };
+    }
     if (node.type === 'code') return { ...node, code: replace(node.code) };
     if (node.type === 'file') return {
       ...node,
@@ -1728,7 +1750,8 @@ export function applyIncludeParametersToAst(
     if (node.type === 'ref') return {
       ...node,
       name: node.name === null ? null : normalizeFootnoteName(replace(node.name)),
-      text: node.text === null ? null : replace(node.text)
+      text: node.text === null ? null : replace(node.text),
+      ...(node.children ? { children: inline(node.children) } : {})
     };
     if (
       node.type === 'bold'
@@ -1751,10 +1774,12 @@ export function applyIncludeParametersToAst(
   });
   return ast.map((node): AstNode => {
     if (node.type === 'heading') {
-      const text = replace(node.text);
+      const children = node.children ? inline(node.children) : undefined;
+      const text = children ? inlineNodesToPlainText(children) : replace(node.text);
       return {
         ...node,
         text,
+        ...(children ? { children } : {}),
         id: `${headingPrefix}${node.id}`,
         ...(node.legacyId ? { legacyId: `${headingPrefix}${makeHeadingId(text)}` } : {})
       };
@@ -1823,10 +1848,13 @@ function parseInline(
   nestingDepth = 0
 ): InlineNode[] {
   const nodes: InlineNode[] = [];
-  const pattern = /(?<file>\[\[파일:(?<fileBody>[^\]]+)\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>[^\]]+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<literal>\{\{\{(?<literalText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<markdownImage>!\[(?<markdownImageLabel>[^\]\n]*)\]\((?<markdownImageHref>[^)\s\n]+)\))|(?<markdownLink>\[(?<markdownLabel>[^\]\n]+)\]\((?<markdownHref>[^)\s\n]+)\))|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)|(?<escape>\\(?<escapedChar>[\s\S]))/gu;
+  const pattern = /(?<file>\[\[파일:(?<fileBody>[^\]]+)\]\])|(?<refXmlReuse><ref\s+name="(?<refXmlReuseName>[^"]+)"\s*\/>)|(?<refXml><ref(?:\s+name="(?<refXmlName>[^"]+)")?>(?<refXmlText>.*?)<\/ref>)|(?<refShort>\[\*(?<refName>[^\s\]]+)?(?:\s+(?<refShortText>(?:\[\[[^\]]+\]\]|[^\]])+?))?\])|(?<legacyMath><math>(?<legacyMathText>.*?)<\/math>)|(?<code><code>(?<codeText>.*?)<\/code>)|(?<color>\{\{\{#(?<colorValue>[A-Za-z0-9#(),._-]+)\s+(?<colorText>.+?)\}\}\})|(?<size>\{\{\{(?<sizeValue>[+-]\d+)\s+(?<sizeText>.+?)\}\}\})|(?<literal>\{\{\{(?<literalText>.+?)\}\}\})|(?<externalWiki>\[\[(?<externalWikiHref>https?:\/\/[^\]|]+)(?:\|(?<externalWikiLabel>.+?))?\]\])|(?<internal>\[\[(?<internalTarget>.+?)(?:\|(?<internalLabel>.+?))?\]\])|(?<external>\[(?<externalHref>https?:\/\/[^\s\]]+)\s+(?<externalLabel>.+?)\])|(?<markdownImage>!\[(?<markdownImageLabel>[^\]\n]*)\]\((?<markdownImageHref>[^)\s\n]+)\))|(?<markdownLink>\[(?<markdownLabel>[^\]\n]+)\]\((?<markdownHref>[^)\s\n]+)\))|(?<macro>\[(?<macroName>[A-Za-z가-힣][A-Za-z0-9가-힣_-]*)(?:\((?<macroArgs>[^\]\n]*)\))?\])|(?<bold>'''(?<boldText>.+?)''')|(?<italic>''(?<italicText>.+?)'')|(?<strikeTilde>~~(?<strikeTildeText>.+?)~~)|(?<strikeDash>--(?<strikeDashText>.+?)--)|(?<underline>__(?<underlineText>.+?)__)|(?<sup>\^\^(?<supText>.+?)\^\^)|(?<sub>,,(?<subText>.+?),,)|(?<escape>\\(?<escapedChar>[\s\S]))/gu;
   const nested = (value: string): InlineNode[] => nestingDepth >= MAX_INLINE_NESTING
     ? [{ type: 'text', text: value }]
     : parseInline(value, links, errors, blockingErrors, footnotes, linkResolution, nestingDepth + 1);
+  const nestedLabel = (value: string): InlineNode[] => nestingDepth >= MAX_INLINE_NESTING
+    ? [{ type: 'text', text: value }]
+    : parseInline(value, new Set(), [], [], [], linkResolution, nestingDepth + 1);
   let last = 0;
   for (const match of input.matchAll(pattern)) {
     if (match.index! > last) nodes.push({ type: 'text', text: input.slice(last, match.index) });
@@ -1840,7 +1868,12 @@ function parseInline(
       if (rawName !== undefined && name === null) errors.push('각주 이름은 64자 이하의 문자, 숫자, 점, 밑줄, 콜론, 하이픈만 사용할 수 있습니다.');
       if (name === null && !text?.trim()) errors.push('빈 각주가 있습니다.');
       if (text !== null) footnotes.push(text);
-      nodes.push({ type: 'ref', name, text });
+      nodes.push({
+        type: 'ref',
+        name,
+        text,
+        ...(text === null ? {} : { children: stripNestedFootnotes(nested(text)) }),
+      });
     } else if (group.legacyMath !== undefined) {
       const source = (group.legacyMathText ?? '').trim();
       const error = validateMathSource(source);
@@ -1856,10 +1889,18 @@ function parseInline(
       nodes.push({ type: 'code', code: group.literalText ?? '' });
     } else if (group.externalWiki !== undefined) {
       const href = group.externalWikiHref ?? '';
-      nodes.push({ type: 'external_link', href, label: group.externalWikiLabel ?? href });
+      const label = group.externalWikiLabel ?? href;
+      const labelChildren = stripNestedLinks(nestedLabel(label));
+      nodes.push({
+        type: 'external_link',
+        href,
+        label: inlineNodesToPlainText(labelChildren) || label,
+        labelChildren,
+      });
     } else if (group.internal !== undefined) {
       const rawTarget = group.internalTarget ?? '';
       const label = group.internalLabel ?? normalizeTitle(rawTarget);
+      const labelChildren = stripNestedLinks(nestedLabel(label));
       const resolved = resolveWikiLinkTarget(rawTarget, linkResolution);
       if ('error' in resolved) {
         if (!blockingErrors.includes(resolved.error)) blockingErrors.push(resolved.error);
@@ -1869,20 +1910,24 @@ function parseInline(
         nodes.push({
           type: 'internal_link',
           target: resolved.target,
-          label,
+          label: inlineNodesToPlainText(labelChildren) || label,
+          labelChildren,
           ...(resolved.fragment === null ? {} : { fragment: resolved.fragment })
         });
       }
     } else if (group.external !== undefined) {
       const href = group.externalHref ?? '';
-      nodes.push({ type: 'external_link', href, label: group.externalLabel ?? href });
+      const label = group.externalLabel ?? href;
+      const labelChildren = stripNestedLinks(nestedLabel(label));
+      nodes.push({ type: 'external_link', href, label: inlineNodesToPlainText(labelChildren) || label, labelChildren });
     } else if (group.markdownImage !== undefined) {
       nodes.push({ type: 'text', text: group.markdownImage });
     } else if (group.markdownLink !== undefined) {
       const href = group.markdownHref ?? '';
       const label = group.markdownLabel ?? href;
       if (/^(?:https?:\/\/|mailto:)/iu.test(href) || isSafeLocalHref(href)) {
-        nodes.push({ type: 'external_link', href, label });
+        const labelChildren = stripNestedLinks(nestedLabel(label));
+        nodes.push({ type: 'external_link', href, label: inlineNodesToPlainText(labelChildren) || label, labelChildren });
       } else {
         nodes.push({ type: 'text', text: label });
       }
@@ -1909,6 +1954,58 @@ function parseInline(
   }
   if (last < input.length) nodes.push({ type: 'text', text: input.slice(last) });
   return nodes;
+}
+
+function stripNestedLinks(nodes: readonly InlineNode[]): InlineNode[] {
+  return nodes.flatMap((node): InlineNode[] => {
+    if (node.type === 'internal_link' || node.type === 'external_link') {
+      return [{ type: 'text', text: node.label }];
+    }
+    if (node.type === 'ref') {
+      return [{ type: 'text', text: node.text ?? (node.name ? `[${node.name}]` : '') }];
+    }
+    if (node.type === 'file') return [{ type: 'text', text: node.caption || node.fileName }];
+    if (node.type === 'video') return [{ type: 'text', text: `${node.provider}:${node.videoId}` }];
+    if ('children' in node) return [{ ...node, children: stripNestedLinks(node.children) }];
+    return [node];
+  });
+}
+
+function stripNestedFootnotes(nodes: readonly InlineNode[]): InlineNode[] {
+  return nodes.flatMap((node): InlineNode[] => {
+    if (node.type === 'ref') {
+      return [{ type: 'text', text: node.text ?? (node.name ? `[${node.name}]` : '') }];
+    }
+    if ('children' in node) return [{ ...node, children: stripNestedFootnotes(node.children) }];
+    if (node.type === 'internal_link' || node.type === 'external_link') return [{
+      ...node,
+      ...(node.labelChildren ? { labelChildren: stripNestedFootnotes(node.labelChildren) } : {}),
+    }];
+    return [node];
+  });
+}
+
+function inlineNodesToPlainText(nodes: readonly InlineNode[]): string {
+  return nodes.map((node): string => {
+    if (node.type === 'text') return node.text;
+    if (node.type === 'line_break') return ' ';
+    if (node.type === 'clearfix' || node.type === 'anchor') return '';
+    if (node.type === 'ruby') return node.text;
+    if (node.type === 'dynamic_time') return node.date ?? '현재 시각';
+    if (node.type === 'dynamic_stat') return '문서 수';
+    if (node.type === 'video') return `${node.provider}:${node.videoId}`;
+    if (node.type === 'math') return node.source;
+    if (node.type === 'internal_link' || node.type === 'external_link') {
+      return node.labelChildren ? inlineNodesToPlainText(node.labelChildren) : node.label;
+    }
+    if (node.type === 'file') return node.caption || node.fileName;
+    if (node.type === 'unsupported_macro') return `[${node.name}]`;
+    if (node.type === 'code') return node.code;
+    if (node.type === 'ref') return node.children
+      ? inlineNodesToPlainText(node.children)
+      : node.text ?? '';
+    return inlineNodesToPlainText(node.children);
+  }).join('');
 }
 
 function normalizeFootnoteName(value: string): string | null {
@@ -2171,18 +2268,22 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
     return output.length > 0 ? output : [{ type: 'text', text: value }];
   };
 
-  const restrictInline = (nodes: readonly InlineNode[]): InlineNode[] => nodes.flatMap((node): InlineNode[] => {
-    if (node.type === 'text') return injectMentions(node.text);
-    if (node.type === 'line_break' || node.type === 'code' || node.type === 'internal_link' || node.type === 'external_link') return [node];
+  const restrictInline = (nodes: readonly InlineNode[], allowMentions = true): InlineNode[] => nodes.flatMap((node): InlineNode[] => {
+    if (node.type === 'text') return allowMentions ? injectMentions(node.text) : [node];
+    if (node.type === 'internal_link' || node.type === 'external_link') return [{
+      ...node,
+      ...(node.labelChildren ? { labelChildren: restrictInline(node.labelChildren, false) } : {}),
+    }];
+    if (node.type === 'line_break' || node.type === 'code') return [node];
     if (node.type === 'ruby') return [{ type: 'text', text: node.text }];
     if (node.type === 'unsupported_macro' && node.name.toLowerCase() === 'vote') {
       return convertedVoteMacro ? [] : [{ type: 'text', text: '[지원되지 않는 투표 매크로]' }];
     }
     if (node.type === 'bold' || node.type === 'italic' || node.type === 'strike'
       || node.type === 'underline' || node.type === 'sup' || node.type === 'sub') {
-      return [{ ...node, children: restrictInline(node.children) }];
+      return [{ ...node, children: restrictInline(node.children, allowMentions) }];
     }
-    if (node.type === 'color' || node.type === 'size') return restrictInline(node.children);
+    if (node.type === 'color' || node.type === 'size') return restrictInline(node.children, allowMentions);
     return [];
   });
 
@@ -2194,7 +2295,10 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
     })),
   });
   const restrictAst = (nodes: readonly AstNode[]): AstNode[] => nodes.flatMap((node): AstNode[] => {
-    if (node.type === 'heading') return [{ type: 'paragraph', children: [{ type: 'text', text: node.text }] }];
+    if (node.type === 'heading') return [{
+      type: 'paragraph',
+      children: restrictInline(node.children ?? [{ type: 'text', text: node.text }]),
+    }];
     if (node.type === 'paragraph') return [{ ...node, children: restrictInline(node.children) }];
     if (node.type === 'list') return [restrictList(node)];
     if (node.type === 'indent') return [{ ...node, children: restrictAst(node.children) }];
@@ -2224,13 +2328,19 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
 interface RenderedFootnote {
   name: string | null;
   text: string;
+  children?: InlineNode[];
   referenceIds: string[];
+}
+
+interface FootnoteDefinition {
+  text: string;
+  children?: InlineNode[];
 }
 
 interface FootnoteRenderState {
   entries: RenderedFootnote[];
   namedIndexes: Map<string, number>;
-  definitions: Map<string, string>;
+  definitions: Map<string, FootnoteDefinition>;
 }
 
 export function renderDocument(ast: AstNode[], options: RenderOptions = {}): string {
@@ -2254,13 +2364,13 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       if (node.type === 'heading' && node.folded) {
         let sectionEnd = index + 1;
         while (sectionEnd < nodes.length && nodes[sectionEnd]?.type !== 'heading') sectionEnd += 1;
-        const heading = renderHeading(node);
+        const heading = renderHeading(node, footnotes, renderOptions);
         output.push(`<details class="wiki-heading-section"><summary class="wiki-heading-summary">${heading}</summary><div class="wiki-heading-content">${renderNodes(nodes.slice(index + 1, sectionEnd))}</div></details>`);
         index = sectionEnd - 1;
         continue;
       }
       if (node.type === 'heading') {
-        output.push(renderHeading(node));
+        output.push(renderHeading(node, footnotes, renderOptions));
         continue;
       }
       if (node.type === 'paragraph') {
@@ -2360,9 +2470,9 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
   };
   let html = renderNodes(ast);
   for (const marker of footnoteMarkers) {
-    html = html.replace(marker.token, renderFootnoteSection(footnotes, marker.startIndex, marker.endIndex));
+    html = html.replace(marker.token, renderFootnoteSection(footnotes, marker.startIndex, marker.endIndex, renderOptions));
   }
-  const footnoteHtml = renderFootnoteSection(footnotes, emittedFootnotes);
+  const footnoteHtml = renderFootnoteSection(footnotes, emittedFootnotes, footnotes.entries.length, renderOptions);
   return sanitizeHtml(`${html}${footnoteHtml}`, {
     allowedTags,
     allowedAttributes: {
@@ -2498,7 +2608,12 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
   });
 }
 
-function renderFootnoteSection(footnotes: FootnoteRenderState, startIndex: number, endIndex = footnotes.entries.length): string {
+function renderFootnoteSection(
+  footnotes: FootnoteRenderState,
+  startIndex: number,
+  endIndex = footnotes.entries.length,
+  options: RenderOptions = {},
+): string {
   if (startIndex >= endIndex) return '';
   const listStart = startIndex > 0 ? ` start="${startIndex + 1}"` : '';
   const items = footnotes.entries
@@ -2509,20 +2624,30 @@ function renderFootnoteSection(footnotes: FootnoteRenderState, startIndex: numbe
         .map((referenceId, referenceIndex) => `<a href="#${referenceId}" aria-label="각주 ${number}의 ${referenceIndex + 1}번째 참조로 돌아가기">↩${note.referenceIds.length > 1 ? referenceIndex + 1 : ''}</a>`)
         .join(' ')}</span>`;
       const text = note.text || `정의되지 않은 각주: ${note.name ?? number}`;
-      return `<li id="fn-${number}">${escapeHtml(text)}${backlinks ? ` ${backlinks}` : ''}</li>`;
+      const content = note.children?.length
+        ? renderInline(note.children, footnotes, options)
+        : escapeHtml(text);
+      return `<li id="fn-${number}">${content}${backlinks ? ` ${backlinks}` : ''}</li>`;
     })
     .join('');
   return `<section class="footnotes"><h2>각주</h2><ol${listStart}>${items}</ol></section>`;
 }
 
-function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, string> {
-  const definitions = new Map<string, string>();
+function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, FootnoteDefinition> {
+  const definitions = new Map<string, FootnoteDefinition>();
   const collectInline = (nodes: readonly InlineNode[]) => {
     for (const node of nodes) {
       if (node.type === 'ref' && node.name !== null && node.text?.trim() && !definitions.has(node.name)) {
-        definitions.set(node.name, node.text);
-      } else if ('children' in node) {
+        definitions.set(node.name, {
+          text: node.text,
+          ...(node.children ? { children: node.children } : {}),
+        });
+      }
+      if ('children' in node) {
         collectInline(node.children);
+      }
+      if ((node.type === 'internal_link' || node.type === 'external_link') && node.labelChildren) {
+        collectInline(node.labelChildren);
       }
     }
   };
@@ -2533,15 +2658,16 @@ function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, s
     }
   };
   for (const node of ast) {
-    if (node.type === 'paragraph') collectInline(node.children);
+    if (node.type === 'heading' && node.children) collectInline(node.children);
+    else if (node.type === 'paragraph') collectInline(node.children);
     else if (node.type === 'indent') {
-      for (const [name, text] of collectNamedFootnoteDefinitions(node.children)) {
-        if (!definitions.has(name)) definitions.set(name, text);
+      for (const [name, definition] of collectNamedFootnoteDefinitions(node.children)) {
+        if (!definitions.has(name)) definitions.set(name, definition);
       }
     }
     else if (node.type === 'blockquote') {
-      for (const [name, text] of collectNamedFootnoteDefinitions(node.children)) {
-        if (!definitions.has(name)) definitions.set(name, text);
+      for (const [name, definition] of collectNamedFootnoteDefinitions(node.children)) {
+        if (!definitions.has(name)) definitions.set(name, definition);
       }
     }
     else if (node.type === 'list') collectList(node);
@@ -2550,6 +2676,13 @@ function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, s
       for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
     } else if (node.type === 'folding') {
       collectInline(node.title);
+      for (const [name, definition] of collectNamedFootnoteDefinitions(node.children)) {
+        if (!definitions.has(name)) definitions.set(name, definition);
+      }
+    } else if (node.type === 'wiki_style' || (node.type === 'include' && node.children)) {
+      for (const [name, definition] of collectNamedFootnoteDefinitions(node.children)) {
+        if (!definitions.has(name)) definitions.set(name, definition);
+      }
     }
   }
   return definitions;
@@ -2589,11 +2722,18 @@ function assignStructuralHeadingIds(ast: readonly AstNode[]): void {
   }
 }
 
-function renderHeading(node: Extract<AstNode, { type: 'heading' }>): string {
+function renderHeading(
+  node: Extract<AstNode, { type: 'heading' }>,
+  footnotes: FootnoteRenderState,
+  options: RenderOptions,
+): string {
   const legacyAnchor = node.legacyId
     ? `<span class="wiki-anchor" id="${escapeAttr(node.legacyId)}"></span>`
     : '';
-  return `<h${node.level} id="${escapeAttr(node.id)}">${legacyAnchor}${escapeHtml(node.text)}</h${node.level}>`;
+  const content = node.children
+    ? renderInline(node.children, footnotes, options)
+    : escapeHtml(node.text);
+  return `<h${node.level} id="${escapeAttr(node.id)}">${legacyAnchor}${content}</h${node.level}>`;
 }
 
 function renderTableOfContents(
@@ -2655,9 +2795,17 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
       if (node.type === 'external_link') {
         const external = /^https?:\/\//iu.test(node.href);
         const attributes = external ? ' rel="nofollow noopener" target="_blank"' : '';
-        return `<a href="${escapeAttr(node.href)}"${attributes}>${escapeHtml(node.label)}</a>`;
+        const content = node.labelChildren
+          ? renderInline(node.labelChildren, footnotes, options)
+          : escapeHtml(node.label);
+        return `<a href="${escapeAttr(node.href)}"${attributes}>${content}</a>`;
       }
-      if (node.type === 'internal_link') return renderInternalLink(node.target, node.label, options, node.fragment);
+      if (node.type === 'internal_link') {
+        const content = node.labelChildren
+          ? renderInline(node.labelChildren, footnotes, options)
+          : undefined;
+        return renderInternalLink(node.target, node.label, options, node.fragment, content);
+      }
       if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, node.display, options, true);
       if (node.type === 'video') {
         return renderVideo(node);
@@ -2678,19 +2826,31 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
         if (existing !== undefined) {
           index = existing;
           const entry = footnotes.entries[index - 1];
-          if (entry && !entry.text && node.text?.trim()) entry.text = node.text;
+          if (entry && !entry.text && node.text?.trim()) {
+            entry.text = node.text;
+            if (node.children) entry.children = node.children;
+          }
         } else {
           index = footnotes.entries.length + 1;
           footnotes.namedIndexes.set(node.name, index);
+          const definition = footnotes.definitions.get(node.name);
           footnotes.entries.push({
             name: node.name,
-            text: node.text?.trim() ? node.text : (footnotes.definitions.get(node.name) ?? ''),
+            text: node.text?.trim() ? node.text : (definition?.text ?? ''),
+            ...(node.children
+              ? { children: node.children }
+              : definition?.children ? { children: definition.children } : {}),
             referenceIds: []
           });
         }
       } else {
         index = footnotes.entries.length + 1;
-        footnotes.entries.push({ name: null, text: node.text ?? '', referenceIds: [] });
+        footnotes.entries.push({
+          name: null,
+          text: node.text ?? '',
+          ...(node.children ? { children: node.children } : {}),
+          referenceIds: [],
+        });
       }
       const entry = footnotes.entries[index - 1]!;
       const referenceId = `fnref-${index}-${entry.referenceIds.length + 1}`;
@@ -2756,16 +2916,20 @@ function renderMath(source: string, displayMode: boolean, validationError: strin
 }
 
 function countMathNodes(ast: readonly AstNode[]): number {
-  const countInline = (nodes: readonly InlineNode[]) => nodes.reduce(
-    (count, node) => count + (node.type === 'math' ? 1 : ('children' in node ? countInline(node.children) : 0)),
-    0
-  );
+  const countInline = (nodes: readonly InlineNode[]): number => nodes.reduce((count, node) => {
+    let nestedCount = 'children' in node ? countInline(node.children) : 0;
+    if ((node.type === 'internal_link' || node.type === 'external_link') && node.labelChildren) {
+      nestedCount += countInline(node.labelChildren);
+    }
+    return count + (node.type === 'math' ? 1 : 0) + nestedCount;
+  }, 0);
   const countList = (list: WikiListNode): number => list.items.reduce(
     (count, item) => count + countInline(item.children) + item.nested.reduce((nestedCount, nested) => nestedCount + countList(nested), 0),
     0
   );
   return ast.reduce((count, node) => {
     if (node.type === 'math_block') return count + 1;
+    if (node.type === 'heading' && node.children) return count + countInline(node.children);
     if (node.type === 'paragraph') return count + countInline(node.children);
     if (node.type === 'indent') return count + countMathNodes(node.children);
     if (node.type === 'blockquote') return count + countMathNodes(node.children);
@@ -2788,6 +2952,9 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
     for (const node of nodes) {
       if (node.type === 'file') output.add(node.fileName);
       else if ('children' in node) collectInline(node.children);
+      if ((node.type === 'internal_link' || node.type === 'external_link') && node.labelChildren) {
+        collectInline(node.labelChildren);
+      }
     }
   };
   const collectList = (list: WikiListNode) => {
@@ -2799,6 +2966,7 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
 
   for (const node of ast) {
     if (node.type === 'file') output.add(node.fileName);
+    else if (node.type === 'heading' && node.children) collectInline(node.children);
     else if (node.type === 'paragraph') collectInline(node.children);
     else if (node.type === 'indent') collectWikiFileNames(node.children, output);
     else if (node.type === 'blockquote') collectWikiFileNames(node.children, output);
@@ -2820,6 +2988,9 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
         const resolved = resolveWikiLinkTarget(node.target);
         if (!('error' in resolved) && resolved.target) output.add(resolved.target);
       } else if ('children' in node) collectInline(node.children);
+      if ((node.type === 'internal_link' || node.type === 'external_link') && node.labelChildren) {
+        collectInline(node.labelChildren);
+      }
     }
   };
   const collectList = (list: WikiListNode) => {
@@ -2830,7 +3001,8 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
   };
 
   for (const node of ast) {
-    if (node.type === 'paragraph') collectInline(node.children);
+    if (node.type === 'heading' && node.children) collectInline(node.children);
+    else if (node.type === 'paragraph') collectInline(node.children);
     else if (node.type === 'indent') collectWikiLinkTargets(node.children, output);
     else if (node.type === 'blockquote') collectWikiLinkTargets(node.children, output);
     else if (node.type === 'list') collectList(node);
@@ -2853,19 +3025,21 @@ function renderInternalLink(
   target: string,
   label: string,
   options: RenderOptions = {},
-  storedFragment?: string | null
+  storedFragment?: string | null,
+  labelHtml?: string,
 ) {
+  const content = labelHtml ?? escapeHtml(label);
   const resolved = !target && storedFragment
     ? { target: '', fragment: storedFragment }
     : resolveWikiLinkTarget(target, options.linkResolution);
-  if ('error' in resolved) return escapeHtml(label);
+  if ('error' in resolved) return content;
   const resolvedTarget = resolved.target;
   const fragment = storedFragment ?? resolved.fragment;
   const fragmentId = fragment ? makeHeadingId(fragment) : '';
   if (!resolvedTarget) {
     return fragmentId
-      ? `<a class="wiki-link" href="#${encodeURIComponent(fragmentId)}">${escapeHtml(label)}</a>`
-      : escapeHtml(label);
+      ? `<a class="wiki-link" href="#${encodeURIComponent(fragmentId)}">${content}</a>`
+      : content;
   }
   const parsed = parseLinkTarget(resolvedTarget);
   const missing = options.missingLinks?.has(wikiLinkKey(resolvedTarget));
@@ -2879,7 +3053,7 @@ function renderInternalLink(
         .join('/')}`
     : wikiUrl(parsed.namespace, parsed.title);
   const fragmentSuffix = fragmentId ? `#${encodeURIComponent(fragmentId)}` : '';
-  return `<a class="${className}" href="${escapeAttr(`${href}${fragmentSuffix}`)}"${titleAttr}>${escapeHtml(label)}</a>`;
+  return `<a class="${className}" href="${escapeAttr(`${href}${fragmentSuffix}`)}"${titleAttr}>${content}</a>`;
 }
 
 function renderComponent(name: string, props: Record<string, string>, options: RenderOptions = {}) {

@@ -91,6 +91,48 @@ test('renders nested inline markup and collects dependencies inside wrappers', (
   assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['아이콘.png']);
 });
 
+test('renders recursive inline markup in headings and link labels', () => {
+  const parsed = parseMarkup("== '''중요''' [[가이드|''시작하기'']] ==\n[[문서|'''굵은''' ''안내'']]");
+  const html = renderDocument(parsed.ast);
+  const heading = parsed.ast[0];
+
+  assert.equal(heading?.type, 'heading');
+  if (heading?.type === 'heading') {
+    assert.equal(heading.text, '중요 시작하기');
+    assert.ok(heading.children);
+  }
+  assert.match(html, /<h2 id="s-1"><span class="wiki-anchor" id="중요-시작하기"><\/span><strong>중요<\/strong> <a[^>]+><em>시작하기<\/em><\/a><\/h2>/u);
+  assert.match(html, /<p><a[^>]+><strong>굵은<\/strong> <em>안내<\/em><\/a><\/p>/u);
+  assert.equal((html.match(/<a /gu) ?? []).length, 2);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['가이드', '문서']);
+});
+
+test('renders recursive inline markup in footnotes and keeps named definitions reusable', () => {
+  const parsed = parseMarkup("먼저[*note]\n나중[*note [[출처]]와 '''설명''']\n다시[*note]\n[각주]");
+  const html = renderDocument(parsed.ast);
+
+  assert.match(html, /id="fn-1"><a[^>]+>출처<\/a>와 <strong>설명<\/strong> <span class="wiki-footnote-backlinks"/u);
+  assert.equal((html.match(/id="fn-1"/gu) ?? []).length, 1);
+  assert.equal((html.match(/class="wiki-footnote-ref"/gu) ?? []).length, 3);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['출처']);
+});
+
+test('interpolates include parameters inside rich heading, link, and footnote children as plain data', () => {
+  const parsed = parseMarkup("== '''@제목@''' ==\n[[@대상@|''@라벨@'']] [*note '''@설명@''']");
+  const expanded = applyIncludeParametersToAst(parsed.ast, {
+    제목: '<제목>',
+    대상: '가이드',
+    라벨: '<라벨>',
+    설명: '<설명>',
+  }, 'inc-');
+  const html = renderDocument(expanded);
+
+  assert.match(html, /<h2 id="inc-s-1"><span class="wiki-anchor" id="inc-제목"><\/span><strong>&lt;제목&gt;<\/strong><\/h2>/u);
+  assert.match(html, /<a[^>]+><em>&lt;라벨&gt;<\/em><\/a>/u);
+  assert.match(html, /id="fn-1"><strong>&lt;설명&gt;<\/strong>/u);
+  assert.doesNotMatch(html, /<제목>|<라벨>|<설명>/u);
+});
+
 test('groups consecutive source lines into one paragraph with explicit line breaks', () => {
   const parsed = parseMarkup('첫 줄\n둘째 줄\n\n셋째 문단');
   const html = renderDocument(parsed.ast);

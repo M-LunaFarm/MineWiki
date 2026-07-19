@@ -94,7 +94,7 @@ export interface WikiStyleProperties {
 }
 
 export type AstNode =
-  | { type: 'heading'; level: number; text: string; id: string; legacyId?: string; folded?: boolean; startLine?: number; endLine?: number }
+  | { type: 'heading'; level: number; text: string; children?: InlineNode[]; id: string; legacyId?: string; folded?: boolean; startLine?: number; endLine?: number }
   | { type: 'paragraph'; children: InlineNode[] }
   | { type: 'indent'; children: AstNode[] }
   | WikiListNode
@@ -150,12 +150,12 @@ export type InlineNode =
   | { type: 'sub'; children: InlineNode[] }
   | { type: 'color'; color: string; children: InlineNode[] }
   | { type: 'size'; delta: number; children: InlineNode[] }
-  | { type: 'internal_link'; target: string; label: string; fragment?: string | null }
-  | { type: 'external_link'; href: string; label: string }
+  | { type: 'internal_link'; target: string; label: string; labelChildren?: InlineNode[]; fragment?: string | null }
+  | { type: 'external_link'; href: string; label: string; labelChildren?: InlineNode[] }
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null; display?: WikiFileDisplayOptions }
   | { type: 'unsupported_macro'; name: string; rawArgs?: string }
   | { type: 'code'; code: string }
-  | { type: 'ref'; name: string | null; text: string | null };
+  | { type: 'ref'; name: string | null; text: string | null; children?: InlineNode[] };
 
 export interface ParsedDocument {
   ast: AstNode[];
