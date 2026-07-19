@@ -82,6 +82,13 @@ export interface WikiPublishedRevisionScope {
   readonly revisionItems: readonly ServerWikiReleaseItem[];
 }
 
+export type WikiPublishedPageBoundary = Omit<WikiPublishedRevisionScope, 'revisionItems'>;
+
+export interface WikiPublishedRevisionProof {
+  readonly boundary: WikiPublishedPageBoundary;
+  readonly item: ServerWikiReleaseItem;
+}
+
 export interface WikiSectionLockPolicy {
   readonly lockType: string;
   readonly ownerGroup?: string | null;
@@ -141,6 +148,7 @@ export class WikiPermissionService {
     readonly revision?: WikiPermissionRevision | null;
     readonly store?: WikiPermissionStore;
     readonly requestIp?: string | null;
+    readonly publicationProof?: WikiPublishedRevisionProof;
   }): Promise<void> {
     const decision = await this.canReadPage(input);
     if (!decision.allowed) {
@@ -374,6 +382,7 @@ export class WikiPermissionService {
     readonly revision?: WikiPermissionRevision | null;
     readonly store?: WikiPermissionStore;
     readonly requestIp?: string | null;
+    readonly publicationProof?: WikiPublishedRevisionProof;
   }): Promise<WikiPermissionDecision> {
     const store = input.store ?? this.prisma;
     const page = input.page;
@@ -394,10 +403,18 @@ export class WikiPermissionService {
       return deny('revision_not_public');
     }
     const actor = input.actor === undefined ? await this.resolveActor(input.accountId, store) : input.actor;
-    if (!(await this.canReadServerWikiPublication(store, actor, space))) {
+    const publicationProof = input.publicationProof;
+    const hasMatchingPublicationProof = Boolean(publicationProof
+      && publicationProof.boundary.spaceId === page.spaceId
+      && publicationProof.item.serverWikiId === publicationProof.boundary.serverWikiId
+      && publicationProof.item.spaceId === page.spaceId
+      && publicationProof.item.pageId === page.id
+      && (input.revision?.id === undefined || publicationProof.item.revisionId === input.revision.id));
+    if (!hasMatchingPublicationProof && !(await this.canReadServerWikiPublication(store, actor, space))) {
       return deny('server_wiki_not_published');
     }
     if (space.spaceType === 'server_wiki'
+      && !hasMatchingPublicationProof
       && !(await this.canPreviewServerWikiPublication(store, actor, space))
       && !(await this.isReleasedServerWikiPage(store, actor, page, input.revision))) {
       return deny('server_wiki_page_not_released');
@@ -653,6 +670,7 @@ export class WikiPermissionService {
     readonly action: WikiAclAction;
     readonly page: WikiPermissionPage | null;
     readonly store?: WikiPermissionStore;
+    readonly publicationProof?: WikiPublishedRevisionProof;
   }): Promise<void> {
     const decision = await this.canUsePageAction(input);
     if (!decision.allowed) {
@@ -1062,6 +1080,7 @@ export class WikiPermissionService {
     readonly action: WikiAclAction;
     readonly page: WikiPermissionPage | null;
     readonly store?: WikiPermissionStore;
+    readonly publicationProof?: WikiPublishedRevisionProof;
   }): Promise<WikiPermissionDecision> {
     const store = input.store ?? this.prisma;
     if (!input.page) {
@@ -1072,7 +1091,8 @@ export class WikiPermissionService {
       actor: input.actor,
       requestIp: input.requestIp,
       page: input.page,
-      store
+      store,
+      publicationProof: input.publicationProof,
     });
     if (!readDecision.allowed) {
       return readDecision;
@@ -1268,6 +1288,36 @@ export class WikiPermissionService {
     readonly page: WikiPermissionPage;
     readonly store?: WikiPermissionStore;
   }): Promise<WikiPublishedRevisionScope | null> {
+    const boundary = await this.resolvePublishedPageBoundary(input);
+    if (!boundary) return null;
+    const store = input.store ?? this.prisma;
+    const releasedItems = await store.serverWikiReleaseItem.findMany({
+      where: {
+        serverWikiId: boundary.serverWikiId,
+        spaceId: boundary.spaceId,
+        pageId: input.page.id,
+        release: {
+          serverWikiId: boundary.serverWikiId,
+          version: { lte: boundary.currentReleaseVersion },
+        },
+      },
+      orderBy: [{ release: { version: 'desc' } }],
+    });
+    const seen = new Set<bigint>();
+    const revisionItems = releasedItems.filter((item) => {
+      if (seen.has(item.revisionId)) return false;
+      seen.add(item.revisionId);
+      return true;
+    });
+    if (!seen.has(boundary.currentItem.revisionId)) revisionItems.unshift(boundary.currentItem);
+    return { ...boundary, revisionItems };
+  }
+
+  async resolvePublishedPageBoundary(input: {
+    readonly actor?: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPublishedPageBoundary | null> {
     const store = input.store ?? this.prisma;
     const space = await store.wikiSpace.findUnique({
       where: { id: input.page.spaceId },
@@ -1303,33 +1353,37 @@ export class WikiPermissionService {
       },
     });
     if (!currentItem) throw new NotFoundException('Wiki page not found.');
-    const releasedItems = await store.serverWikiReleaseItem.findMany({
-      where: {
-        serverWikiId: wiki.id,
-        spaceId: wiki.spaceId,
-        pageId: input.page.id,
-        release: {
-          serverWikiId: wiki.id,
-          version: { lte: wiki.publishedRelease.version },
-        },
-      },
-      orderBy: [{ release: { version: 'desc' } }],
-    });
-    const seen = new Set<bigint>();
-    const revisionItems = releasedItems.filter((item) => {
-      if (seen.has(item.revisionId)) return false;
-      seen.add(item.revisionId);
-      return true;
-    });
-    if (!seen.has(currentItem.revisionId)) revisionItems.unshift(currentItem);
     return {
       serverWikiId: wiki.id,
       spaceId: wiki.spaceId,
       currentReleaseId: wiki.publishedReleaseId,
       currentReleaseVersion: wiki.publishedRelease.version,
       currentItem,
-      revisionItems,
     };
+  }
+
+  async resolvePublishedRevisionProof(input: {
+    readonly boundary: WikiPublishedPageBoundary;
+    readonly pageId: bigint;
+    readonly revisionId: bigint;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPublishedRevisionProof> {
+    const store = input.store ?? this.prisma;
+    const item = await store.serverWikiReleaseItem.findFirst({
+      where: {
+        serverWikiId: input.boundary.serverWikiId,
+        spaceId: input.boundary.spaceId,
+        pageId: input.pageId,
+        revisionId: input.revisionId,
+        release: {
+          serverWikiId: input.boundary.serverWikiId,
+          version: { lte: input.boundary.currentReleaseVersion },
+        },
+      },
+      orderBy: [{ release: { version: 'desc' } }],
+    });
+    if (!item) throw new NotFoundException('Wiki revision not found.');
+    return { boundary: input.boundary, item };
   }
 
   /**

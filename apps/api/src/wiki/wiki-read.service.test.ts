@@ -2005,6 +2005,14 @@ test('public server wiki blame stops at the released revision and conceals later
     protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now,
   };
   const whereInputs: unknown[] = [];
+  const permissionInputs: Array<{ page: { title: string }; publicationProof?: { item: { revisionId: bigint } } }> = [];
+  const releaseItem = {
+    id: 80n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, pageId: 1n, revisionId: 12n,
+    namespaceId: 7, slug: 'luna/public-guide', title: 'luna/public-guide', displayTitle: 'Public guide',
+    localPath: 'luna/public-guide', pageType: 'article', protectionLevel: 'open', pageStatus: 'normal',
+    createdBy: 1n, ownerProfileId: null, pageUpdatedAt: new Date('2026-07-19T01:00:00Z'),
+    searchVector: '', createdAt: now,
+  };
   const revisions = [
     { id: 11n, revisionNo: 1, contentRaw: '공개 첫 줄', createdBy: 1n, createdAt: now },
     { id: 12n, revisionNo: 2, contentRaw: '공개 첫 줄\n공개 둘째 줄', createdBy: 2n, createdAt: new Date('2026-07-19T01:00:00Z') },
@@ -2017,33 +2025,42 @@ test('public server wiki blame stops at the released revision and conceals later
         return { id: 50n, spaceId: 40n, publicationStatus: 'published', status: 'active', publishedReleaseId: 70n };
       },
     },
-    serverWikiReleaseItem: { async findFirst() { return { revisionId: 12n }; } },
     wikiPageRevision: {
       async count(args: { where: unknown }) { whereInputs.push(args.where); return 2; },
-      async findMany(args: { where: { id?: { in: bigint[] } } }) {
+      async findMany(args: { where: { id?: { in: bigint[] }; serverWikiReleaseItems?: unknown } }) {
         whereInputs.push(args.where);
-        return revisions.filter((revision) => !args.where.id || args.where.id.in.includes(revision.id));
+        return revisions.filter((revision) => revision.id !== 13n);
       },
     },
     wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'first' }, { id: 2n, displayName: 'second' }]; } },
   } as unknown as PrismaService;
   const permissions = {
-    async resolvePublishedRevisionScope() {
+    async resolvePublishedPageBoundary() {
       return {
-        currentItem: { revisionId: 12n },
-        revisionItems: [{ revisionId: 12n }, { revisionId: 11n }],
+        serverWikiId: 50n,
+        spaceId: 40n,
+        currentReleaseId: 70n,
+        currentReleaseVersion: 3,
+        currentItem: releaseItem,
       };
     },
-    async assertCanReadPage() {},
-    async assertCanUsePageAction() {},
+    async assertCanReadPage(input: { page: { title: string }; publicationProof?: { item: { revisionId: bigint } } }) {
+      permissionInputs.push(input);
+    },
+    async assertCanUsePageAction(input: { page: { title: string }; publicationProof?: { item: { revisionId: bigint } } }) {
+      permissionInputs.push(input);
+    },
   } as unknown as WikiPermissionService;
 
   const result = await new WikiReadService(prisma, permissions).getBlame('1');
 
   assert.equal(whereInputs.every((where) => {
-    const ids = (where as { id?: { in?: bigint[] } }).id?.in;
-    return ids?.length === 2 && ids.includes(11n) && ids.includes(12n);
+    const relation = (where as { serverWikiReleaseItems?: { some?: { release?: { version?: { lte?: number } } } } }).serverWikiReleaseItems;
+    return relation?.some?.release?.version?.lte === 3;
   }), true);
+  assert.equal(permissionInputs.every((input) => (
+    input.page.title === 'luna/public-guide' && input.publicationProof?.item.revisionId === 12n
+  )), true);
   assert.equal(result.revisionId, '12');
   assert.doesNotMatch(JSON.stringify(result), /비밀 초안/u);
 });

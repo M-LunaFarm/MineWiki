@@ -19,7 +19,13 @@ import { PUBLIC_WIKI_PAGE_STATUSES, PUBLIC_WIKI_PAGE_STATUS_SQL_LIST } from '@mi
 import { PrismaService } from '../common/prisma.service';
 import { fileReadDecision } from '../file/file-permission.service';
 import type { SessionPayload } from '../session/session.service';
-import { WikiPermissionService, type WikiPermissionActor, type WikiPublishedRevisionScope } from './wiki-permission.service';
+import {
+  WikiPermissionService,
+  type WikiPermissionActor,
+  type WikiPublishedPageBoundary,
+  type WikiPublishedRevisionProof,
+  type WikiPublishedRevisionScope,
+} from './wiki-permission.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 import { WikiIncludeService } from './wiki-include.service';
 import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath, WikiRoutePathResolver, type WikiRoutePathBatch } from './wiki-route-path.resolver';
@@ -546,6 +552,18 @@ function pageFromServerWikiReleaseItem(item: ServerWikiReleaseItem): ReleasedSer
   };
 }
 
+function publishedBoundaryFromScope(
+  scope: WikiPublishedRevisionScope,
+): WikiPublishedPageBoundary {
+  return {
+    serverWikiId: scope.serverWikiId,
+    spaceId: scope.spaceId,
+    currentReleaseId: scope.currentReleaseId,
+    currentReleaseVersion: scope.currentReleaseVersion,
+    currentItem: scope.currentItem,
+  };
+}
+
 const serverWikiNavigationReleaseItemSelect = {
   namespaceId: true,
   spaceId: true,
@@ -1044,27 +1062,42 @@ export class WikiReadService {
     const namespace = await this.prisma.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
     if (!namespace) throw new NotFoundException('Public wiki revision not found.');
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
-    const publication = await this.publishedRevisionScopeForViewer(page, access);
-    const releaseItem = publication?.revisionItems.find((item) => item.revisionId === revision.id) ?? null;
-    if (publication && !releaseItem) {
-      throw new NotFoundException('Public wiki revision not found.');
-    }
+    const boundaryResolver = this.wikiPermissions.resolvePublishedPageBoundary?.bind(this.wikiPermissions);
+    const legacyPublication = boundaryResolver
+      ? null
+      : await this.publishedRevisionScopeForViewer(page, access);
+    const boundary = boundaryResolver
+      ? await boundaryResolver({ actor: access.actor ?? null, page })
+      : legacyPublication
+        ? publishedBoundaryFromScope(legacyPublication)
+        : null;
+    const proof = boundary
+      ? await this.publishedRevisionProof(boundary, page.id, revision.id, legacyPublication)
+      : null;
+    const releaseItem = proof?.item ?? null;
     const renderedPage = releaseItem ? pageFromServerWikiReleaseItem(releaseItem) : page;
-    await this.wikiPermissions.assertCanReadPage({ ...access, page: renderedPage, revision });
+    await this.wikiPermissions.assertCanReadPage({
+      ...access,
+      page: renderedPage,
+      revision,
+      publicationProof: proof ?? undefined,
+    });
     await this.wikiPermissions.assertCanUsePageAction({
       ...access,
       action: 'history',
-      page: renderedPage
+      page: renderedPage,
+      publicationProof: proof ?? undefined,
     });
     const rendered = await this.renderPage(namespace.code, renderedPage, access, {
       followRedirects: false,
       redirectTrail: [],
       revisionId: revision.id,
       releaseId: releaseItem?.releaseId,
+      publicationProof: proof ?? undefined,
     });
     const routePaths = await this.routePaths.preload([renderedPage], new Map([[namespace.id, namespace.code]]));
     const publicSummary = publicWikiRevisionEditSummary(revision);
-    const publicCurrentRevisionId = publication?.currentItem.revisionId ?? page.currentRevisionId;
+    const publicCurrentRevisionId = boundary?.currentItem.revisionId ?? page.currentRevisionId;
     return {
       ...rendered,
       routePath: routePaths.routePath(renderedPage, namespace.code),
@@ -1094,15 +1127,31 @@ export class WikiReadService {
       throw new NotFoundException('Wiki page not found.');
     }
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
-    const publication = await this.publishedRevisionScopeForViewer(page, access);
-    const currentPermissionPage = publication
-      ? pageFromServerWikiReleaseItem(publication.currentItem)
+    const boundaryResolver = this.wikiPermissions.resolvePublishedPageBoundary?.bind(this.wikiPermissions);
+    const legacyPublication = boundaryResolver
+      ? null
+      : await this.publishedRevisionScopeForViewer(page, access);
+    const publicationBoundary = boundaryResolver
+      ? await boundaryResolver({ actor: access.actor ?? null, page })
+      : legacyPublication
+        ? publishedBoundaryFromScope(legacyPublication)
+        : null;
+    const currentPermissionPage = publicationBoundary
+      ? pageFromServerWikiReleaseItem(publicationBoundary.currentItem)
       : page;
-    await this.wikiPermissions.assertCanReadPage({ ...access, page: currentPermissionPage });
+    const currentPublicationProof = publicationBoundary
+      ? { boundary: publicationBoundary, item: publicationBoundary.currentItem }
+      : undefined;
+    await this.wikiPermissions.assertCanReadPage({
+      ...access,
+      page: currentPermissionPage,
+      publicationProof: currentPublicationProof,
+    });
     await this.wikiPermissions.assertCanUsePageAction({
       ...access,
       action: 'history',
-      page: currentPermissionPage
+      page: currentPermissionPage,
+      publicationProof: currentPublicationProof,
     });
     const limit = Math.min(Math.max(Number(requestedLimit) || 50, 1), 100);
     const cursorRevisionNo = cursor ? this.parsePositiveInt(cursor, 'cursor') : null;
@@ -1111,7 +1160,23 @@ export class WikiReadService {
         where: {
           pageId: parsedPageId,
           visibility: 'public',
-          ...(publication ? { id: { in: publication.revisionItems.map((item) => item.revisionId) } } : {}),
+          ...(publicationBoundary
+            ? legacyPublication
+              ? { id: { in: legacyPublication.revisionItems.map((item) => item.revisionId) } }
+              : {
+                  serverWikiReleaseItems: {
+                    some: {
+                      serverWikiId: publicationBoundary.serverWikiId,
+                      spaceId: publicationBoundary.spaceId,
+                      pageId: parsedPageId,
+                      release: {
+                        serverWikiId: publicationBoundary.serverWikiId,
+                        version: { lte: publicationBoundary.currentReleaseVersion },
+                      },
+                    },
+                  },
+                }
+            : {}),
           ...(beforeRevisionNo ? { revisionNo: { lt: beforeRevisionNo } } : {})
         },
         orderBy: [{ revisionNo: 'desc' as const }],
@@ -1119,13 +1184,41 @@ export class WikiReadService {
       });
     const firstRevisionBatch = await queryRevisions(cursorRevisionNo);
     const releaseItemByRevisionId = new Map(
-      publication?.revisionItems.map((item) => [item.revisionId, item]) ?? [],
+      legacyPublication?.revisionItems.map((item) => [item.revisionId, item]) ?? [],
     );
+    const loadReleaseItems = async (revisions: typeof firstRevisionBatch) => {
+      if (!publicationBoundary || legacyPublication || revisions.length === 0) return;
+      const missingRevisionIds = revisions
+        .map((revision) => revision.id)
+        .filter((revisionId) => !releaseItemByRevisionId.has(revisionId));
+      if (missingRevisionIds.length === 0) return;
+      const items = await this.prisma.serverWikiReleaseItem.findMany({
+        where: {
+          serverWikiId: publicationBoundary.serverWikiId,
+          spaceId: publicationBoundary.spaceId,
+          pageId: parsedPageId,
+          revisionId: { in: missingRevisionIds },
+          release: {
+            serverWikiId: publicationBoundary.serverWikiId,
+            version: { lte: publicationBoundary.currentReleaseVersion },
+          },
+        },
+        orderBy: [{ release: { version: 'desc' } }],
+      });
+      for (const item of items) {
+        if (!releaseItemByRevisionId.has(item.revisionId)) {
+          releaseItemByRevisionId.set(item.revisionId, item);
+        }
+      }
+    };
     const permissionDecisionBySnapshot = new Map<string, Promise<boolean>>();
     const canReadHistorySnapshot = (revision: (typeof firstRevisionBatch)[number]) => {
       const releaseItem = releaseItemByRevisionId.get(revision.id);
-      if (!releaseItem) return Promise.resolve(publication === null);
+      if (!releaseItem) return Promise.resolve(publicationBoundary === null);
       const permissionPage = pageFromServerWikiReleaseItem(releaseItem);
+      const publicationProof = publicationBoundary
+        ? { boundary: publicationBoundary, item: releaseItem }
+        : undefined;
       const snapshotKey = [
         permissionPage.namespaceId,
         permissionPage.title,
@@ -1137,11 +1230,17 @@ export class WikiReadService {
       const cached = permissionDecisionBySnapshot.get(snapshotKey);
       if (cached) return cached;
       const decision = Promise.all([
-        this.wikiPermissions.assertCanReadPage({ ...access, page: permissionPage, revision }),
+        this.wikiPermissions.assertCanReadPage({
+          ...access,
+          page: permissionPage,
+          revision,
+          publicationProof,
+        }),
         this.wikiPermissions.assertCanUsePageAction({
           ...access,
           action: 'history',
           page: permissionPage,
+          publicationProof,
         }),
       ]).then(() => true, () => false);
       permissionDecisionBySnapshot.set(snapshotKey, decision);
@@ -1151,6 +1250,7 @@ export class WikiReadService {
     let revisionBatch = firstRevisionBatch;
     let exhausted = false;
     while (revisionBatch.length > 0 && authorizedRows.length <= limit) {
+      await loadReleaseItems(revisionBatch);
       for (const revision of revisionBatch) {
         if (await canReadHistorySnapshot(revision)) authorizedRows.push(revision);
         if (authorizedRows.length > limit) break;
@@ -1214,6 +1314,49 @@ export class WikiReadService {
     const resolver = this.wikiPermissions.resolvePublishedRevisionScope?.bind(this.wikiPermissions);
     if (!resolver) return null;
     return resolver({ actor: access.actor ?? null, page });
+  }
+
+  private async publishedRevisionBoundaryForViewer(
+    page: {
+      readonly id: bigint;
+      readonly spaceId: bigint;
+      readonly title: string;
+      readonly protectionLevel: string;
+      readonly status: string;
+    },
+    access: WikiAccessContext,
+  ): Promise<WikiPublishedPageBoundary | null> {
+    const resolver = this.wikiPermissions.resolvePublishedPageBoundary?.bind(this.wikiPermissions);
+    if (resolver) return resolver({ actor: access.actor ?? null, page });
+    const scope = await this.publishedRevisionScopeForViewer(page, access);
+    return scope ? publishedBoundaryFromScope(scope) : null;
+  }
+
+  private async publishedRevisionProof(
+    boundary: WikiPublishedPageBoundary,
+    pageId: bigint,
+    revisionId: bigint,
+    legacyPublication?: WikiPublishedRevisionScope | null,
+  ): Promise<WikiPublishedRevisionProof> {
+    const resolver = this.wikiPermissions.resolvePublishedRevisionProof?.bind(this.wikiPermissions);
+    if (resolver) return resolver({ boundary, pageId, revisionId });
+    const legacyItem = legacyPublication?.revisionItems.find((item) => item.revisionId === revisionId);
+    if (legacyItem) return { boundary, item: legacyItem };
+    const item = await this.prisma.serverWikiReleaseItem.findFirst({
+      where: {
+        serverWikiId: boundary.serverWikiId,
+        spaceId: boundary.spaceId,
+        pageId,
+        revisionId,
+        release: {
+          serverWikiId: boundary.serverWikiId,
+          version: { lte: boundary.currentReleaseVersion },
+        },
+      },
+      orderBy: [{ release: { version: 'desc' } }],
+    });
+    if (!item) throw new NotFoundException('Public wiki revision not found.');
+    return { boundary, item };
   }
 
   private async releasedItemForViewer(
@@ -3013,13 +3156,48 @@ export class WikiReadService {
     const page = await this.prisma.wikiPage.findUnique({ where: { id } });
     if (!page || page.status === 'deleted') throw new NotFoundException('Wiki page not found.');
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
-    const publication = await this.publishedRevisionScopeForViewer(page, access);
-    await this.wikiPermissions.assertCanReadPage({ ...access, page });
-    await this.wikiPermissions.assertCanUsePageAction({ ...access, action: 'history', page });
+    const boundaryResolver = this.wikiPermissions.resolvePublishedPageBoundary?.bind(this.wikiPermissions);
+    const legacyPublication = boundaryResolver
+      ? null
+      : await this.publishedRevisionScopeForViewer(page, access);
+    const publicationBoundary = boundaryResolver
+      ? await boundaryResolver({ actor: access.actor ?? null, page })
+      : legacyPublication
+        ? publishedBoundaryFromScope(legacyPublication)
+        : null;
+    const permissionPage = publicationBoundary
+      ? pageFromServerWikiReleaseItem(publicationBoundary.currentItem)
+      : page;
+    const publicationProof = publicationBoundary
+      ? { boundary: publicationBoundary, item: publicationBoundary.currentItem }
+      : undefined;
+    await this.wikiPermissions.assertCanReadPage({ ...access, page: permissionPage, publicationProof });
+    await this.wikiPermissions.assertCanUsePageAction({
+      ...access,
+      action: 'history',
+      page: permissionPage,
+      publicationProof,
+    });
     const revisionWhere = {
       pageId: page.id,
       visibility: 'public' as const,
-      ...(publication ? { id: { in: publication.revisionItems.map((item) => item.revisionId) } } : {}),
+      ...(publicationBoundary
+        ? legacyPublication
+          ? { id: { in: legacyPublication.revisionItems.map((item) => item.revisionId) } }
+          : {
+              serverWikiReleaseItems: {
+                some: {
+                  serverWikiId: publicationBoundary.serverWikiId,
+                  spaceId: publicationBoundary.spaceId,
+                  pageId: page.id,
+                  release: {
+                    serverWikiId: publicationBoundary.serverWikiId,
+                    version: { lte: publicationBoundary.currentReleaseVersion },
+                  },
+                },
+              },
+            }
+        : {}),
     };
     const total = await this.prisma.wikiPageRevision.count({ where: revisionWhere });
     const revisions = await this.prisma.wikiPageRevision.findMany({
@@ -3673,6 +3851,7 @@ export class WikiReadService {
     readonly redirectTrail: readonly string[];
     readonly revisionId?: bigint;
     readonly releaseId?: bigint;
+    readonly publicationProof?: WikiPublishedRevisionProof;
     readonly authorizedDeletedRecovery?: boolean;
   }): Promise<WikiPageResponse> {
     const revision = options.revisionId
@@ -3708,7 +3887,8 @@ export class WikiReadService {
       await this.wikiPermissions.assertCanReadPage({
         ...access,
         page,
-        revision
+        revision,
+        publicationProof: options.publicationProof,
       });
     }
     const linkResolution = wikiLinkResolutionContext(namespace, page.localPath);

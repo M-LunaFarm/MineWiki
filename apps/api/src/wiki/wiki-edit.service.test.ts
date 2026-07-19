@@ -286,9 +286,12 @@ test('subtree move redirects clone page ACLs atomically and keep raw old paths r
         const where = input.where ?? {};
         const targetIds = (where.targetId as { in?: bigint[] } | undefined)?.in;
         const targets = where.OR as Array<{ targetType: string; targetId: bigint | null }> | undefined;
+        const actions = typeof where.action === 'string'
+          ? [where.action]
+          : (where.action as { in?: string[] } | undefined)?.in;
         return aclRules.filter((rule) =>
           (where.targetType === undefined || rule.targetType === where.targetType) &&
-          (where.action === undefined || rule.action === where.action) &&
+          (!actions || actions.includes(rule.action)) &&
           (!targetIds || targetIds.includes(rule.targetId)) &&
           (!targets || targets.some((target) => target.targetType === rule.targetType && target.targetId === rule.targetId))
         );
