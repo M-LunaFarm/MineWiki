@@ -68,6 +68,7 @@ const REGISTRATION_RESERVATION_TTL_MS = 24 * 60 * 60 * 1000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHORT_CODE_PATTERN = /^[a-z0-9]{5,12}$/;
 const SERVER_WIKI_SITE_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
+const SERVER_WIKI_SITE_SLUG_MAX_LENGTH = 63;
 const RESERVED_SERVER_WIKI_SITE_SLUGS = new Set([
   'admin',
   'api',
@@ -2356,13 +2357,16 @@ export class ServerService {
     const base = normalizeServerWikiSlug(source);
     const suffix = serverId.replace(/-/g, '').slice(0, 8);
     const firstSuffix = `-${suffix}`;
-    const first = `${base.slice(0, 255 - firstSuffix.length)}${firstSuffix}`;
+    const first = `${base.slice(0, SERVER_WIKI_SITE_SLUG_MAX_LENGTH - firstSuffix.length)}${firstSuffix}`;
     if (await this.isServerWikiSlugAvailable(first)) {
       return first;
     }
     for (let attempt = 2; attempt < 20; attempt += 1) {
       const candidateSuffix = `-${suffix}-${attempt}`;
-      const candidate = `${base.slice(0, 255 - candidateSuffix.length)}${candidateSuffix}`;
+      const candidate = `${base.slice(
+        0,
+        SERVER_WIKI_SITE_SLUG_MAX_LENGTH - candidateSuffix.length,
+      )}${candidateSuffix}`;
       if (await this.isServerWikiSlugAvailable(candidate)) {
         return candidate;
       }

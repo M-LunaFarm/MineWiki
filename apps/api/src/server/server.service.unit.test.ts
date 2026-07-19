@@ -1377,6 +1377,10 @@ test('server wiki slug allocation reserves globally unique site slugs', async ()
       select: { id: true },
     },
   ]);
+
+  const longAllocated = await allocator.generateUniqueServerWikiSlug('a'.repeat(255), serverId);
+  assert.equal(longAllocated.length, 63);
+  assert.equal(longAllocated.endsWith('-12345678'), true);
 });
 
 test('server wiki provisioning retries a unique collision with a fresh slug', async () => {
