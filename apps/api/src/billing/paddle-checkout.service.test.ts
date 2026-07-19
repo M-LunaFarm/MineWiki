@@ -6,6 +6,7 @@ test('checkout persists an immutable intent before calling Paddle and attaches i
   const operations: string[] = [];
   let intent: Record<string, unknown> | null = null;
   const prisma = {
+    async $queryRaw() { return []; },
     server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: {
@@ -65,6 +66,7 @@ test('concurrent checkout requests create one Paddle transaction and keep the op
   const providerStarted = new Promise<void>((resolve) => { markProviderStarted = resolve; });
   const providerRelease = new Promise<void>((resolve) => { releaseProvider = resolve; });
   const prisma = {
+    async $queryRaw() { return []; },
     server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
@@ -115,6 +117,7 @@ test('concurrent checkout requests create one Paddle transaction and keep the op
 test('checkout retry reuses the persisted Paddle transaction URL', async () => {
   let providerCalls = 0;
   const prisma = {
+    async $queryRaw() { return []; },
     server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
@@ -149,6 +152,7 @@ test('checkout retry reuses the persisted Paddle transaction URL', async () => {
 test('checkout rechecks active ownership inside the intent transaction', async () => {
   let persisted = false;
   const prisma = {
+    async $queryRaw() { return []; },
     server: {
       async findUnique() {
         return { ownerAccountId: 'account-id', ownershipChallengeSuspendedAt: new Date() };
@@ -180,6 +184,7 @@ test('an uncertain provider failure keeps the lease and a retry cannot create a 
   let intent: Record<string, unknown> | null = null;
   let providerCalls = 0;
   const prisma = {
+    async $queryRaw() { return []; },
     server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
@@ -228,6 +233,7 @@ test('an expired uncertain checkout reconciles before safely opening a replaceme
   let providerCalls = 0;
   let reconciliationCalls = 0;
   const prisma = {
+    async $queryRaw() { return []; },
     server: { async findUnique() { return activeOwner(); } },
     serverWiki: { async findUnique() { return { id: 9n }; } },
     paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },

@@ -57,3 +57,18 @@ test('dashboard exposes the ownership recovery grace deadline to the recorded ow
   assert.equal(overview.servers[0]?.ownershipStatus, 'verification_grace');
   assert.equal(overview.servers[0]?.ownershipChallengeExpiresAt, expiresAt.toISOString());
 });
+
+test('dashboard exposes the pending registration reservation deadline', async () => {
+  const expiresAt = new Date('2026-07-20T00:00:00.000Z');
+  const service = createService({
+    ...baseServer,
+    ownerAccountId: null,
+    registrantAccountId: 'account-registrant',
+    registrationLeaseExpiresAt: expiresAt,
+  });
+
+  const overview = await service.getOverview('account-registrant');
+
+  assert.equal(overview.servers[0]?.ownershipStatus, 'pending_claim');
+  assert.equal(overview.servers[0]?.registrationLeaseExpiresAt, expiresAt.toISOString());
+});

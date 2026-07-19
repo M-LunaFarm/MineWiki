@@ -329,6 +329,7 @@ test('verified takeover replaces the suspended owner while keeping authority loc
     token: hashClaimToken('proof'), issuedAt: new Date(), version: 1,
   };
   const prisma = {
+    serverOwnershipTransfer: { updateMany: async () => ({ count: 0 }) },
     serverClaimMethod: {
       updateMany: async () => ({ count: 1 }),
       findMany: async () => [{ method: 'dns', status: 'verified' }],
@@ -435,6 +436,7 @@ test('successful ownership verification promotes registrant to owner atomically'
     version: 1,
   };
   const prisma = {
+    serverOwnershipTransfer: { updateMany: async () => ({ count: 0 }) },
     serverClaimMethod: {
       updateMany: async () => ({ count: 1 }),
       findMany: async () => [verifiedMethod],

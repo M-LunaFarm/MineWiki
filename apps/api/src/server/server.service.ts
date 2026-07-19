@@ -886,17 +886,47 @@ export class ServerService {
     }
 
     const now = new Date();
+    if (!server.ownerAccountId) {
+      throw new ConflictException('서버 소유권 검증을 완료한 뒤 서버 위키를 만들 수 있습니다.');
+    }
+    const provisioningOwner = await this.wikiProfiles.ensureWikiProfile(server.ownerAccountId);
     let slug = await this.generateUniqueServerWikiSlug(
       server.wikiSlug ?? server.shortCode ?? server.joinHost ?? server.name,
       server.id,
     );
-    const contentRaw = buildServerWikiMainPage(server);
-
     let linked: { server: Server; serverWiki: ServerWiki } | null = null;
     for (let provisioningAttempt = 0; provisioningAttempt < 5; provisioningAttempt += 1) {
       try {
         linked = await this.prisma.$transaction(async (tx) => {
-      const namespace = await tx.wikiNamespace.upsert({
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM \`Server\` WHERE id = ${server.id} FOR UPDATE
+          `;
+          const lockedServer = await tx.server.findUnique({ where: { id: server.id } });
+          if (!lockedServer?.ownerAccountId) {
+            throw new ConflictException('서버 소유권 검증을 완료한 뒤 서버 위키를 만들 수 있습니다.');
+          }
+          if (lockedServer.wikiSpaceId || lockedServer.wikiPageId || lockedServer.wikiSlug) {
+            throw new ConflictException('서버 위키가 이미 연결되었거나 연결 상태를 복구해야 합니다.');
+          }
+          const actorCanonicalId = await resolveCanonicalAccountId(tx, accountId, true);
+          const ownerCanonicalId = await resolveCanonicalAccountId(tx, lockedServer.ownerAccountId, true);
+          const profileCanonicalId = provisioningOwner.accountId
+            ? await resolveCanonicalAccountId(tx, provisioningOwner.accountId, true)
+            : null;
+          if (!profileCanonicalId || profileCanonicalId !== ownerCanonicalId) {
+            throw new ConflictException('현재 서버 소유자의 위키 프로필 상태가 변경되었습니다.');
+          }
+          if (!options.allowTargetAuthorityBypass) {
+            if (lockedServer.ownershipChallengeSuspendedAt || actorCanonicalId !== ownerCanonicalId) {
+              throw new ForbiddenException('현재 canonical 서버 소유자만 서버 위키를 만들 수 있습니다.');
+            }
+          }
+          const concurrentWiki = await tx.serverWiki.findUnique({
+            where: { voteServerId: lockedServer.id }, select: { id: true },
+          });
+          if (concurrentWiki) throw new ConflictException('서버 위키가 이미 생성되었습니다.');
+          const contentRaw = buildServerWikiMainPage(lockedServer);
+          const namespace = await tx.wikiNamespace.upsert({
         where: { code: 'server' },
         create: {
           code: 'server',
@@ -912,38 +942,48 @@ export class ServerService {
       });
       const space = await tx.wikiSpace.create({
         data: {
-          code: `server-${server.id}`,
-          spaceKey: `server-${server.id}`,
-          name: `${server.name} 위키`,
-          title: `${server.name} 위키`,
+          code: `server-${lockedServer.id}`,
+          spaceKey: `server-${lockedServer.id}`,
+          name: `${lockedServer.name} 위키`,
+          title: `${lockedServer.name} 위키`,
           slug,
           spaceType: 'server_wiki',
           rootNamespaceCode: 'server',
           rootPath: `/server/${slug}`,
-          description: server.shortDescription,
+          description: lockedServer.shortDescription,
           status: 'active',
-          createdBy: actor.id,
-          ownerUserId: actor.id,
+          createdBy: provisioningOwner.id,
+          ownerUserId: provisioningOwner.id,
           createdAt: now,
           updatedAt: now,
+        },
+      });
+      await tx.subwikiRole.create({
+        data: {
+          spaceId: space.id,
+          userId: provisioningOwner.id,
+          role: 'owner',
+          status: 'active',
+          grantedBy: provisioningOwner.id,
+          grantedAt: now,
         },
       });
       const serverWiki = await tx.serverWiki.create({
         data: {
           spaceId: space.id,
-          voteServerId: server.id,
-          serverName: server.name,
+          voteServerId: lockedServer.id,
+          serverName: lockedServer.name,
           slug,
           siteSlug: slug,
-          host: server.joinHost,
-          port: server.joinPort,
-          edition: server.edition,
-          supportedVersions: normalizeStringArray(server.supportedVersions).join(', ') || null,
-          genres: normalizeStringArray(server.tags).join(', ') || null,
-          verifiedStatus: server.verificationGrade === 'Unverified' ? 'none' : 'verified',
+          host: lockedServer.joinHost,
+          port: lockedServer.joinPort,
+          edition: lockedServer.edition,
+          supportedVersions: normalizeStringArray(lockedServer.supportedVersions).join(', ') || null,
+          genres: normalizeStringArray(lockedServer.tags).join(', ') || null,
+          verifiedStatus: lockedServer.verificationGrade === 'Unverified' ? 'none' : 'verified',
           status: 'active',
           publicationStatus: 'draft',
-          createdBy: actor.id,
+          createdBy: provisioningOwner.id,
           createdAt: now,
           updatedAt: now,
         },
@@ -956,11 +996,11 @@ export class ServerService {
           localPath: slug,
           slug,
           title: slug,
-          displayTitle: `${server.name} 대문`,
+          displayTitle: `${lockedServer.name} 대문`,
           pageType: 'server',
           protectionLevel: 'open',
           status: 'normal',
-          createdBy: actor.id,
+          createdBy: provisioningOwner.id,
           createdAt: now,
           updatedAt: now,
         },
@@ -977,9 +1017,9 @@ export class ServerService {
           syntaxVersion: 'bwm-0.3',
           editSummary: '서버 위키 대문 생성',
           isMinor: false,
-          createdBy: actor.id,
+          createdBy: provisioningOwner.id,
           actorType: 'user',
-          actorUserId: actor.id,
+          actorUserId: provisioningOwner.id,
           createdAt: now,
           visibility: 'public',
         },
@@ -989,7 +1029,7 @@ export class ServerService {
         revision,
         contentRaw,
         namespaceCode: namespace.code,
-        actorId: actor.id,
+        actorId: provisioningOwner.id,
         now,
         wikiLinks: this.wikiLinks,
       });
@@ -1000,7 +1040,7 @@ export class ServerService {
           updatedAt: now,
         },
       });
-      for (const starter of buildServerWikiStarterPages(server)) {
+      for (const starter of buildServerWikiStarterPages(lockedServer)) {
         const starterParsed = parseMarkup(starter.contentRaw);
         const starterPage = await tx.wikiPage.create({
           data: {
@@ -1013,7 +1053,7 @@ export class ServerService {
             pageType: 'server',
             protectionLevel: 'open',
             status: 'normal',
-            createdBy: actor.id,
+            createdBy: provisioningOwner.id,
             createdAt: now,
             updatedAt: now,
           },
@@ -1030,9 +1070,9 @@ export class ServerService {
             syntaxVersion: 'bwm-0.3',
             editSummary: `서버 위키 ${starter.title} 생성`,
             isMinor: false,
-            createdBy: actor.id,
+            createdBy: provisioningOwner.id,
             actorType: 'user',
-            actorUserId: actor.id,
+            actorUserId: provisioningOwner.id,
             createdAt: now,
             visibility: 'public',
           },
@@ -1042,13 +1082,13 @@ export class ServerService {
           revision: starterRevision,
           contentRaw: starter.contentRaw,
           namespaceCode: namespace.code,
-          actorId: actor.id,
+          actorId: provisioningOwner.id,
           now,
           wikiLinks: this.wikiLinks,
         });
       }
       const updatedServer = await tx.server.update({
-        where: { id: server.id },
+        where: { id: lockedServer.id },
         data: {
           wikiSpaceId: space.id,
           wikiPageId: page.id,

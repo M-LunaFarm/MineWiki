@@ -256,8 +256,14 @@ export class ServerOwnershipTransferService {
       });
     }
     await tx.serverClaimMethod.updateMany({
-      where: { serverId: server.id, accountId: transfer.sourceOwnerAccountId, status: 'pending' },
-      data: { status: 'expired', note: 'ownership_transfer', version: { increment: 1 }, lastCheckedAt: now },
+      where: { serverId: server.id, accountId: transfer.sourceOwnerAccountId },
+      data: {
+        status: 'expired',
+        verifiedAt: null,
+        note: 'ownership_transfer',
+        version: { increment: 1 },
+        lastCheckedAt: now,
+      },
     });
   }
 

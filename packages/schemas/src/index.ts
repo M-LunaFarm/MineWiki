@@ -623,6 +623,7 @@ export const dashboardServerSummarySchema = z.object({
     'takeover_pending',
   ]).optional(),
   ownershipChallengeExpiresAt: z.string().datetime().nullable().optional(),
+  registrationLeaseExpiresAt: z.string().datetime().nullable().optional(),
   lastSyncedAt: z.string().datetime().nullable().optional(),
 });
 

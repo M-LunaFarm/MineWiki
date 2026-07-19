@@ -383,7 +383,12 @@ export default function DashboardPage() {
                           ) : server.isPendingClaim ? (
                             <>
                               <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
-                              <span>소유권 검증 전까지 운영 설정이 잠겨 있습니다.</span>
+                              <span>
+                                소유권 검증 전까지 운영 설정이 잠겨 있습니다
+                                {server.registrationLeaseExpiresAt
+                                  ? ` · ${formatLeaseStatus(server.registrationLeaseExpiresAt)}`
+                                  : null}
+                              </span>
                             </>
                           ) : server.voteRequiresOwnership ? (
                             <>
@@ -774,6 +779,16 @@ function syncStatus(lastSyncedAt?: string | null) {
     return '지연';
   }
   return '확인 필요';
+}
+
+function formatLeaseStatus(value: string) {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return '만료 시각 확인 필요';
+  if (parsed <= Date.now()) return '예약 만료됨';
+  const deadline = new Intl.DateTimeFormat('ko-KR', {
+    dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Seoul',
+  }).format(parsed);
+  return `${deadline}까지 예약`;
 }
 
 function formatRelative(value?: string | null) {

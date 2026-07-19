@@ -31,6 +31,7 @@ export class DashboardService {
       ),
       ownershipStatus: dashboardOwnershipStatus(server, accountId),
       ownershipChallengeExpiresAt: server.ownershipChallengeExpiresAt?.toISOString() ?? null,
+      registrationLeaseExpiresAt: server.registrationLeaseExpiresAt?.toISOString() ?? null,
       lastSyncedAt: server.stats?.lastUpdatedAt
         ? server.stats.lastUpdatedAt.toISOString()
         : server.updatedAt.toISOString()

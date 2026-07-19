@@ -22,6 +22,8 @@ test('ownership acceptance is serialized, billing-fail-closed, and reconciles te
   assert.match(source, /subwikiRole\.upsert/u);
   assert.match(source, /wikiApiToken\.updateMany/u);
   assert.match(source, /serverClaimMethod\.updateMany/u);
+  assert.match(source, /where: \{ serverId: server\.id, accountId: transfer\.sourceOwnerAccountId \}/u);
+  assert.match(source, /verifiedAt: null/u);
   assert.match(source, /serverWikiCollaboratorInvitation\.updateMany/u);
 });
 

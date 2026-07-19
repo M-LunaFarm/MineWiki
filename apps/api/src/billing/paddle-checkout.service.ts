@@ -41,7 +41,13 @@ export class PaddleCheckoutService {
     const termsAcceptedAt = new Date();
     const environment = this.config.get('PADDLE_ENV', 'sandbox');
     const intent = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM \`Server\` WHERE id = ${serverId} FOR UPDATE
+      `;
       await assertActiveBillingOwner(tx, serverId, accountId);
+      await tx.$queryRaw<Array<{ id: bigint }>>`
+        SELECT id FROM server_wikis WHERE vote_server_id = ${serverId} FOR UPDATE
+      `;
       const serverWiki = await tx.serverWiki.findUnique({
         where: { voteServerId: serverId },
         select: { id: true },
