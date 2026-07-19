@@ -51,6 +51,7 @@ test('Paddle client reconciles an uncertain create through bounded transaction p
     return new Response(JSON.stringify(second ? {
       data: [{
         id: 'txn_01h00000000000000000000000',
+        status: 'draft',
         custom_data: { minewiki_checkout_intent_id: 'intent-1' },
         checkout: { url: 'https://checkout.paddle.com/pay/recovered' },
       }],
@@ -72,11 +73,38 @@ test('Paddle client reconciles an uncertain create through bounded transaction p
     {
       transactionId: 'txn_01h00000000000000000000000',
       checkoutUrl: 'https://checkout.paddle.com/pay/recovered',
+      status: 'draft',
     },
   );
   assert.equal(urls.length, 2);
   assert.match(urls[0]!, /created_at%5BGTE%5D=/u);
   assert.match(urls[1]!, /after=txn_01h11111111111111111111111/u);
+});
+
+test('Paddle client reads and validates one persisted transaction', async (t) => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    assert.match(String(input), /\/transactions\/txn_01h00000000000000000000000$/u);
+    assert.equal(init?.method, 'GET');
+    return new Response(JSON.stringify({
+      data: {
+        id: 'txn_01h00000000000000000000000',
+        status: 'canceled',
+        checkout: null,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  t.after(() => { globalThis.fetch = original; });
+
+  const client = new PaddleClient(config({ PADDLE_MODE: 'live', PADDLE_ENV: 'sandbox', PADDLE_API_KEY: 'secret' }) as never);
+  assert.deepEqual(
+    await client.getTransaction('txn_01h00000000000000000000000'),
+    {
+      transactionId: 'txn_01h00000000000000000000000',
+      checkoutUrl: null,
+      status: 'canceled',
+    },
+  );
 });
 
 function config(values: Record<string, string>) {

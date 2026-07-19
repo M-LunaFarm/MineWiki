@@ -128,6 +128,7 @@ test('checkout retry reuses the persisted Paddle transaction URL', async () => {
         return {
           id: 'existing-intent', layoutKey: 'handbook', status: 'pending',
           providerTransactionId: 'txn_existing', providerCheckoutUrl: 'https://checkout.paddle.com/existing',
+          openLeaseKey: 'sandbox:subject-id', expiresAt: new Date(Date.now() + 60_000),
         };
       },
     },
@@ -274,6 +275,143 @@ test('an expired uncertain checkout reconciles before safely opening a replaceme
   );
   assert.equal(reconciliationCalls, 1);
   assert.equal(providerCalls, 1);
+});
+
+test('an expired uncertain checkout stays leased when Paddle finds a non-canceled transaction without a URL', async () => {
+  const expired = {
+    id: 'expired-intent', billingSubjectId: 'subject-id', environment: 'sandbox', layoutKey: 'handbook',
+    status: 'creating', openLeaseKey: 'sandbox:subject-id', providerTransactionId: null,
+    providerCheckoutUrl: null, expiresAt: new Date(Date.now() - 60_000),
+    createdAt: new Date(Date.now() - 31 * 60_000),
+  };
+  let released = false;
+  const prisma = {
+    async $queryRaw() { return []; },
+    server: { async findUnique() { return activeOwner(); } },
+    serverWiki: { async findUnique() { return { id: 9n }; } },
+    paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    paddleSubscriptionShadow: { async findFirst() { return null; } },
+    paddleCheckoutIntent: {
+      async upsert() { return { ...expired }; },
+      async updateMany() { released = true; return { count: 1 }; },
+    },
+  };
+  const service = new PaddleCheckoutService(
+    prisma as never,
+    config('live') as never,
+    {
+      getProviderPriceId() { return 'pri_handbook'; },
+      getProduct() { return { productCode: 'server_wiki_handbook', layoutKey: 'handbook' }; },
+    } as never,
+    {
+      async findTransactionByCheckoutIntent() {
+        return { transactionId: 'txn_existing', checkoutUrl: null, status: 'completed' };
+      },
+    } as never,
+  );
+
+  await assert.rejects(
+    () => service.create('server-id', 'handbook', 'account-id', '2026-07-19-v2.0'),
+    /without a reusable checkout URL/i,
+  );
+  assert.equal(released, false);
+});
+
+test('an expired pending checkout only opens a replacement after Paddle confirms cancellation', async () => {
+  const expired = {
+    id: 'expired-pending', billingSubjectId: 'subject-id', environment: 'sandbox', layoutKey: 'handbook',
+    status: 'pending', openLeaseKey: 'sandbox:subject-id', providerTransactionId: 'txn_canceled',
+    providerCheckoutUrl: 'https://checkout.paddle.com/canceled', expiresAt: new Date(Date.now() - 60_000),
+    createdAt: new Date(Date.now() - 31 * 60_000),
+  };
+  let openIntent: Record<string, unknown> | null = expired;
+  let providerCalls = 0;
+  const prisma = {
+    async $queryRaw() { return []; },
+    server: { async findUnique() { return activeOwner(); } },
+    serverWiki: { async findUnique() { return { id: 9n }; } },
+    paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    paddleSubscriptionShadow: { async findFirst() { return null; } },
+    paddleCheckoutIntent: {
+      async upsert({ create }: { create: Record<string, unknown> }) {
+        if (!openIntent) openIntent = create;
+        return { ...openIntent };
+      },
+      async updateMany({ where, data }: { where: { id: string }; data: Record<string, unknown> }) {
+        if (!openIntent || openIntent.id !== where.id) return { count: 0 };
+        openIntent = { ...openIntent, ...data };
+        if (data.openLeaseKey === null) openIntent = null;
+        return { count: 1 };
+      },
+    },
+  };
+  const service = new PaddleCheckoutService(
+    prisma as never,
+    config('live') as never,
+    {
+      getProviderPriceId() { return 'pri_handbook'; },
+      getProduct() { return { productCode: 'server_wiki_handbook', layoutKey: 'handbook' }; },
+    } as never,
+    {
+      async getTransaction() {
+        return { transactionId: 'txn_canceled', checkoutUrl: null, status: 'canceled' };
+      },
+      async createTransaction() {
+        providerCalls += 1;
+        return { transactionId: 'txn_replacement', checkoutUrl: 'https://checkout.paddle.com/replacement' };
+      },
+    } as never,
+  );
+
+  assert.deepEqual(
+    await service.create('server-id', 'handbook', 'account-id', '2026-07-19-v2.0'),
+    { transactionId: 'txn_replacement', checkoutUrl: 'https://checkout.paddle.com/replacement' },
+  );
+  assert.equal(providerCalls, 1);
+});
+
+test('an expired pending checkout reuses every non-canceled Paddle transaction', async () => {
+  let providerCalls = 0;
+  const prisma = {
+    async $queryRaw() { return []; },
+    server: { async findUnique() { return activeOwner(); } },
+    serverWiki: { async findUnique() { return { id: 9n }; } },
+    paddleBillingSubject: { async upsert() { return { id: 'subject-id' }; } },
+    async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) { return callback(prisma); },
+    paddleSubscriptionShadow: { async findFirst() { return null; } },
+    paddleCheckoutIntent: {
+      async upsert() {
+        return {
+          id: 'expired-pending', layoutKey: 'handbook', status: 'pending',
+          openLeaseKey: 'sandbox:subject-id', providerTransactionId: 'txn_existing',
+          providerCheckoutUrl: 'https://checkout.paddle.com/old',
+          expiresAt: new Date(Date.now() - 60_000), createdAt: new Date(Date.now() - 31 * 60_000),
+        };
+      },
+    },
+  };
+  const service = new PaddleCheckoutService(
+    prisma as never,
+    config('live') as never,
+    {
+      getProviderPriceId() { return 'pri_handbook'; },
+      getProduct() { return { productCode: 'server_wiki_handbook', layoutKey: 'handbook' }; },
+    } as never,
+    {
+      async getTransaction() {
+        return { transactionId: 'txn_existing', checkoutUrl: 'https://checkout.paddle.com/current', status: 'draft' };
+      },
+      async createTransaction() { providerCalls += 1; throw new Error('must not run'); },
+    } as never,
+  );
+
+  assert.deepEqual(
+    await service.create('server-id', 'handbook', 'account-id', '2026-07-19-v2.0'),
+    { transactionId: 'txn_existing', checkoutUrl: 'https://checkout.paddle.com/current' },
+  );
+  assert.equal(providerCalls, 0);
 });
 
 test('checkout is unavailable without live mode and never touches persistence', async () => {

@@ -25,6 +25,21 @@ export interface PaddleTransactionResult {
   readonly checkoutUrl: string;
 }
 
+export type PaddleTransactionStatus =
+  | 'draft'
+  | 'ready'
+  | 'billed'
+  | 'paid'
+  | 'completed'
+  | 'canceled'
+  | 'past_due';
+
+export interface PaddleTransactionSnapshot {
+  readonly transactionId: string;
+  readonly checkoutUrl: string | null;
+  readonly status: PaddleTransactionStatus;
+}
+
 export interface PaddlePortalResult {
   readonly overviewUrl: string;
 }
@@ -63,7 +78,7 @@ export class PaddleClient {
   async findTransactionByCheckoutIntent(
     checkoutIntentId: string,
     createdAfter: Date,
-  ): Promise<PaddleTransactionResult | null> {
+  ): Promise<PaddleTransactionSnapshot | null> {
     const params = new URLSearchParams({
       'created_at[GTE]': new Date(createdAfter.getTime() - 2 * 60_000).toISOString(),
       origin: 'api',
@@ -80,11 +95,7 @@ export class PaddleClient {
       }
       if (matches.length === 1) {
         const transaction = objectValue(matches[0]);
-        const checkout = objectValue(transaction.checkout);
-        return {
-          transactionId: requiredProviderId(transaction.id, 'txn_', 'transaction'),
-          checkoutUrl: requiredHttpsUrl(checkout.url, 'checkout'),
-        };
+        return transactionSnapshot(transaction);
       }
       const pagination = envelope.meta?.pagination;
       if (pagination?.has_more !== true) return null;
@@ -95,6 +106,20 @@ export class PaddleClient {
       params.set('after', after);
     }
     throw new BadGatewayException('Paddle transaction reconciliation exceeded its safe scan limit.');
+  }
+
+  async getTransaction(transactionId: string): Promise<PaddleTransactionSnapshot> {
+    const safeTransactionId = requiredProviderId(transactionId, 'txn_', 'transaction');
+    const envelope = await this.request(
+      `/transactions/${encodeURIComponent(safeTransactionId)}`,
+      undefined,
+      'GET',
+    );
+    const transaction = transactionSnapshot(objectValue(envelope.data));
+    if (transaction.transactionId !== safeTransactionId) {
+      throw new BadGatewayException('Paddle returned the wrong transaction.');
+    }
+    return transaction;
   }
 
   private async request(
@@ -170,4 +195,30 @@ function requiredHttpsUrl(value: unknown, label: string): string {
   } catch {
     throw new BadGatewayException(`Paddle ${label} URL is invalid.`);
   }
+}
+
+function transactionSnapshot(transaction: Record<string, unknown>): PaddleTransactionSnapshot {
+  const checkout = transaction.checkout === null ? null : objectValue(transaction.checkout);
+  return {
+    transactionId: requiredProviderId(transaction.id, 'txn_', 'transaction'),
+    checkoutUrl: checkout?.url === null || checkout?.url === undefined
+      ? null
+      : requiredHttpsUrl(checkout.url, 'checkout'),
+    status: requiredTransactionStatus(transaction.status),
+  };
+}
+
+function requiredTransactionStatus(value: unknown): PaddleTransactionStatus {
+  if (
+    value !== 'draft'
+    && value !== 'ready'
+    && value !== 'billed'
+    && value !== 'paid'
+    && value !== 'completed'
+    && value !== 'canceled'
+    && value !== 'past_due'
+  ) {
+    throw new BadGatewayException('Paddle transaction status is invalid.');
+  }
+  return value;
 }

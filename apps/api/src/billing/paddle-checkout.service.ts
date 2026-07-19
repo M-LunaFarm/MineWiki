@@ -108,6 +108,25 @@ export class PaddleCheckoutService {
         && intent.providerTransactionId
         && intent.providerCheckoutUrl
       ) {
+        if (intent.expiresAt.getTime() <= Date.now() && intent.openLeaseKey) {
+          const current = await this.paddle.getTransaction(intent.providerTransactionId);
+          if (current.status === 'canceled') {
+            const released = await this.releaseExpiredIntent(
+              intent.id,
+              intent.openLeaseKey,
+              'pending',
+              intent.providerTransactionId,
+            );
+            if (released) {
+              return this.create(serverId, layoutKey, accountId, policyVersion);
+            }
+            throw new ConflictException('The Paddle checkout lease changed while it was being reconciled.');
+          }
+          return {
+            checkoutUrl: current.checkoutUrl ?? intent.providerCheckoutUrl,
+            transactionId: current.transactionId,
+          };
+        }
         return {
           checkoutUrl: intent.providerCheckoutUrl,
           transactionId: intent.providerTransactionId,
@@ -122,23 +141,20 @@ export class PaddleCheckoutService {
           intent.id,
           intent.createdAt,
         );
-        if (recovered) {
+        if (recovered && recovered.status !== 'canceled') {
+          if (!recovered.checkoutUrl) {
+            throw new ServiceUnavailableException(
+              'Paddle found the existing transaction without a reusable checkout URL.',
+            );
+          }
           await this.attachTransaction(intent.id, intent.openLeaseKey, recovered);
           return {
             checkoutUrl: recovered.checkoutUrl,
             transactionId: recovered.transactionId,
           };
         }
-        const released = await this.prisma.paddleCheckoutIntent.updateMany({
-          where: {
-            id: intent.id,
-            status: 'creating',
-            openLeaseKey: intent.openLeaseKey,
-            expiresAt: { lte: new Date() },
-          },
-          data: { status: 'expired', openLeaseKey: null },
-        });
-        if (released.count === 1) {
+        const released = await this.releaseExpiredIntent(intent.id, intent.openLeaseKey, 'creating');
+        if (released) {
           return this.create(serverId, layoutKey, accountId, policyVersion);
         }
       }
@@ -180,5 +196,24 @@ export class PaddleCheckoutService {
     if (attached.count !== 1) {
       throw new ConflictException('The Paddle checkout lease changed while the transaction was being created.');
     }
+  }
+
+  private async releaseExpiredIntent(
+    intentId: string,
+    openLeaseKey: string,
+    status: 'creating' | 'pending',
+    providerTransactionId?: string,
+  ): Promise<boolean> {
+    const released = await this.prisma.paddleCheckoutIntent.updateMany({
+      where: {
+        id: intentId,
+        status,
+        openLeaseKey,
+        expiresAt: { lte: new Date() },
+        ...(providerTransactionId ? { providerTransactionId } : {}),
+      },
+      data: { status: 'expired', openLeaseKey: null },
+    });
+    return released.count === 1;
   }
 }
