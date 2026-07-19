@@ -618,6 +618,53 @@ test('revision source requires raw ACL while diff requires history ACL', async (
   }
 });
 
+test('public server wiki raw and diff reads allow published history but reject unpublished drafts', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  const page = {
+    id: 7n, namespaceId: 7, spaceId: 40n, localPath: 'luna/guide', title: 'luna/guide',
+    protectionLevel: 'open', status: 'normal', currentRevisionId: 13n,
+  };
+  const revision = (id: bigint, revisionNo: number, contentRaw: string) => ({
+    id, pageId: 7n, revisionNo, parentRevisionId: revisionNo > 1 ? id - 1n : null, contentRaw,
+    contentHash: id.toString().padStart(64, '0'), contentSize: contentRaw.length, syntaxVersion: 'bwm-0.3',
+    editSummary: null, editSummaryHidden: false, isMinor: false, createdBy: 3n, actorType: 'user', actorUserId: 3n,
+    actorIp: null, actorIpText: null, actorIpHash: null, createdAt: now, visibility: 'public',
+  });
+  const revisions = new Map([
+    [11n, revision(11n, 1, 'release one')],
+    [12n, revision(12n, 2, 'release two')],
+    [13n, revision(13n, 3, 'unpublished draft')],
+  ]);
+  const releaseItem = (releaseId: bigint, revisionId: bigint, localPath: string) => ({
+    id: releaseId, releaseId, serverWikiId: 50n, spaceId: 40n, namespaceId: 7, pageId: 7n, revisionId,
+    localPath, slug: localPath, title: localPath, displayTitle: localPath, pageType: 'article',
+    protectionLevel: 'open', pageStatus: 'normal', createdBy: 3n, ownerProfileId: null,
+    pageUpdatedAt: now, searchVector: '', createdAt: now,
+  });
+  const historical = releaseItem(70n, 11n, 'luna/old-guide');
+  const current = releaseItem(71n, 12n, 'luna/guide');
+  const prisma = {
+    wikiPageRevision: { async findUnique(input: { where: { id: bigint } }) { return revisions.get(input.where.id) ?? null; } },
+    wikiPage: { async findUnique() { return page; } },
+  } as unknown as PrismaService;
+  const authorizedPaths: string[] = [];
+  const permissions = {
+    async resolvePublishedRevisionScope() { return { currentItem: current, revisionItems: [current, historical] }; },
+    async assertCanReadPage(input: { page: { title: string } }) { authorizedPaths.push(input.page.title); },
+    async assertCanUsePageAction() {},
+  } as unknown as WikiPermissionService;
+  const edits = new WikiEditService(prisma, {} as WikiProfileService, permissions);
+
+  assert.equal((await edits.getRawPage('7')).id, '12');
+  assert.equal((await edits.getRevision('11')).contentRaw, 'release one');
+  assert.deepEqual((await edits.getRevisionDiff('11', '12')).hunks.map((hunk) => hunk.type), ['removed', 'added']);
+  await assert.rejects(() => edits.getRevision('13'), (error: unknown) => error instanceof NotFoundException);
+  await assert.rejects(() => edits.getRevisionDiff('11', '13'), (error: unknown) => error instanceof NotFoundException);
+  assert.equal(authorizedPaths.includes('luna/old-guide'), true);
+  assert.equal(authorizedPaths.includes('luna/guide'), true);
+  assert.equal(authorizedPaths.includes('unpublished draft'), false);
+});
+
 test('raw revision and diff reads preserve browser session ACL claims and request address', async () => {
   const revision = {
     id: 11n, pageId: 7n, revisionNo: 1, parentRevisionId: null, contentRaw: '문서 내용',

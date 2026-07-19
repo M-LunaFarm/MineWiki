@@ -5,6 +5,7 @@ import type { SessionPayload } from '../session/session.service';
 import { WikiAclService, type WikiAclAction, type WikiAclDecision, type WikiThreadAclAction } from './wiki-acl.service';
 import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
 import { hasCanonicalPublicServerWikiParent } from '../server/server-wiki-public-readiness';
+import type { ServerWikiReleaseItem } from '@prisma/client';
 
 type WikiPermissionStore = Pick<
   PrismaService,
@@ -69,6 +70,16 @@ export interface WikiPermissionThread {
 export interface WikiPermissionDecision {
   readonly allowed: boolean;
   readonly reason: string;
+}
+
+export interface WikiPublishedRevisionScope {
+  readonly serverWikiId: bigint;
+  readonly spaceId: bigint;
+  readonly currentReleaseId: bigint;
+  readonly currentReleaseVersion: number;
+  readonly currentItem: ServerWikiReleaseItem;
+  /** One item per published revision, pinned to its latest eligible release snapshot. */
+  readonly revisionItems: readonly ServerWikiReleaseItem[];
 }
 
 export interface WikiSectionLockPolicy {
@@ -388,7 +399,7 @@ export class WikiPermissionService {
     }
     if (space.spaceType === 'server_wiki'
       && !(await this.canPreviewServerWikiPublication(store, actor, space))
-      && !(await this.isReleasedServerWikiPage(store, space.id, page, input.revision))) {
+      && !(await this.isReleasedServerWikiPage(store, actor, page, input.revision))) {
       return deny('server_wiki_page_not_released');
     }
     if (!PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)) {
@@ -1238,28 +1249,87 @@ export class WikiPermissionService {
 
   private async isReleasedServerWikiPage(
     store: WikiPermissionStore,
-    spaceId: bigint,
+    actor: WikiPermissionActor | null,
     page: WikiPermissionPage,
     revision?: WikiPermissionRevision | null,
   ): Promise<boolean> {
+    try {
+      const scope = await this.resolvePublishedRevisionScope({ actor, page, store });
+      if (!scope) return true;
+      return revision?.id === undefined
+        || scope.revisionItems.some((item) => item.revisionId === revision.id);
+    } catch {
+      return false;
+    }
+  }
+
+  async resolvePublishedRevisionScope(input: {
+    readonly actor?: WikiPermissionActor | null;
+    readonly page: WikiPermissionPage;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPublishedRevisionScope | null> {
+    const store = input.store ?? this.prisma;
+    const space = await store.wikiSpace.findUnique({
+      where: { id: input.page.spaceId },
+      select: { id: true, status: true, spaceType: true, rootPageId: true },
+    });
+    if (!space || space.spaceType !== 'server_wiki') return null;
+    if (input.actor && await this.canPreviewServerWikiPublication(store, input.actor, space)) return null;
+    if (!(await this.canReadServerWikiPublication(store, input.actor ?? null, space))) {
+      throw new NotFoundException('Wiki page not found.');
+    }
     const wikis = await store.serverWiki.findMany({
-      where: { spaceId },
-      select: { id: true, status: true, publicationStatus: true, publishedReleaseId: true },
+      where: { spaceId: space.id },
+      select: {
+        id: true,
+        spaceId: true,
+        status: true,
+        publicationStatus: true,
+        publishedReleaseId: true,
+        publishedRelease: { select: { version: true } },
+      },
     });
     const wiki = wikis.length === 1 ? wikis[0] : null;
     if (!wiki || wiki.status !== 'active' || wiki.publicationStatus !== 'published'
-      || wiki.publishedReleaseId === null) return false;
-    const item = await store.serverWikiReleaseItem.findFirst({
+      || wiki.publishedReleaseId === null || !wiki.publishedRelease) {
+      throw new NotFoundException('Wiki page not found.');
+    }
+    const currentItem = await store.serverWikiReleaseItem.findFirst({
       where: {
         releaseId: wiki.publishedReleaseId,
         serverWikiId: wiki.id,
-        spaceId,
-        pageId: page.id,
-        ...(revision?.id !== undefined ? { revisionId: revision.id } : {}),
+        spaceId: wiki.spaceId,
+        pageId: input.page.id,
       },
-      select: { revisionId: true },
     });
-    return Boolean(item);
+    if (!currentItem) throw new NotFoundException('Wiki page not found.');
+    const releasedItems = await store.serverWikiReleaseItem.findMany({
+      where: {
+        serverWikiId: wiki.id,
+        spaceId: wiki.spaceId,
+        pageId: input.page.id,
+        release: {
+          serverWikiId: wiki.id,
+          version: { lte: wiki.publishedRelease.version },
+        },
+      },
+      orderBy: [{ release: { version: 'desc' } }],
+    });
+    const seen = new Set<bigint>();
+    const revisionItems = releasedItems.filter((item) => {
+      if (seen.has(item.revisionId)) return false;
+      seen.add(item.revisionId);
+      return true;
+    });
+    if (!seen.has(currentItem.revisionId)) revisionItems.unshift(currentItem);
+    return {
+      serverWikiId: wiki.id,
+      spaceId: wiki.spaceId,
+      currentReleaseId: wiki.publishedReleaseId,
+      currentReleaseVersion: wiki.publishedRelease.version,
+      currentItem,
+      revisionItems,
+    };
   }
 
   /**

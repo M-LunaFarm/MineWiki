@@ -174,7 +174,8 @@ export interface WikiRenderedRevisionResponse extends WikiPageResponse {
   readonly currentRevisionId: string | null;
   readonly render: {
     readonly rendererVersion: string;
-    readonly dependencyMode: 'live-current';
+    readonly dependencyMode: 'live-current' | 'release-snapshot';
+    readonly releaseId: string | null;
   };
   readonly revision: WikiPageResponse['revision'] & {
     readonly parentRevisionId: string | null;

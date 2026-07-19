@@ -2212,15 +2212,19 @@ export class WikiEditService {
       throw new NotFoundException('Wiki page not found.');
     }
     const access = await resolveWikiAccessContext(this.prisma, this.wikiPermissions, viewer);
+    const publication = await this.resolvePublishedRevisionScope(page, access);
     await this.wikiPermissions.assertCanReadPage({ ...access, page });
     await this.wikiPermissions.assertCanUsePageAction({
       ...access,
       action: 'raw',
       page
     });
-    const revision = revisionId
+    const selectedRevisionId = revisionId
+      ? this.parseBigIntId(revisionId, 'revisionId')
+      : publication?.currentItem.revisionId ?? null;
+    const revision = selectedRevisionId
       ? await this.prisma.wikiPageRevision.findUnique({
-          where: { id: this.parseBigIntId(revisionId, 'revisionId') }
+          where: { id: selectedRevisionId }
         })
       : page.currentRevisionId
         ? await this.prisma.wikiPageRevision.findUnique({ where: { id: page.currentRevisionId } })
@@ -2228,7 +2232,13 @@ export class WikiEditService {
     if (!revision || revision.pageId !== page.id || revision.visibility !== 'public') {
       throw new NotFoundException('Wiki revision not found.');
     }
-    await this.wikiPermissions.assertCanReadPage({ ...access, page, revision });
+    const releaseItem = publication?.revisionItems.find((item) => item.revisionId === revision.id) ?? null;
+    if (publication && !releaseItem) throw new NotFoundException('Wiki revision not found.');
+    await this.wikiPermissions.assertCanReadPage({
+      ...access,
+      page: releaseItem ? this.pagePermissionSnapshot(page, releaseItem) : page,
+      revision,
+    });
     return this.toRevisionResponse(revision);
   }
 
@@ -2247,13 +2257,46 @@ export class WikiEditService {
     if (options.allowedSpaceId !== undefined && page?.spaceId !== options.allowedSpaceId) {
       throw new NotFoundException('Wiki revision not found.');
     }
+    if (!page) throw new NotFoundException('Wiki revision not found.');
+    const publication = await this.resolvePublishedRevisionScope(page, access);
+    const releaseItem = publication?.revisionItems.find((item) => item.revisionId === revision.id) ?? null;
+    if (publication && !releaseItem) throw new NotFoundException('Wiki revision not found.');
+    const permissionPage = releaseItem ? this.pagePermissionSnapshot(page, releaseItem) : page;
     await this.wikiPermissions.assertCanReadPage({
       ...access,
-      page,
+      page: permissionPage,
       revision
     });
-    await this.wikiPermissions.assertCanUsePageAction({ ...access, action, page });
+    await this.wikiPermissions.assertCanUsePageAction({ ...access, action, page: permissionPage });
     return this.toRevisionResponse(revision);
+  }
+
+  private async resolvePublishedRevisionScope(
+    page: { readonly id: bigint; readonly spaceId: bigint; readonly title: string; readonly protectionLevel: string; readonly status: string },
+    access: WikiAccessContext,
+  ) {
+    const resolver = this.wikiPermissions.resolvePublishedRevisionScope?.bind(this.wikiPermissions);
+    return resolver ? resolver({ actor: access.actor ?? null, page }) : null;
+  }
+
+  private pagePermissionSnapshot<T extends {
+    readonly namespaceId: number;
+    readonly title: string;
+    readonly protectionLevel: string;
+    readonly pageStatus: string;
+    readonly createdBy: bigint | null;
+    readonly ownerProfileId: bigint | null;
+  }>(page: { readonly id: bigint; readonly spaceId: bigint }, item: T) {
+    return {
+      id: page.id,
+      namespaceId: item.namespaceId,
+      spaceId: page.spaceId,
+      title: item.title,
+      protectionLevel: item.protectionLevel,
+      status: item.pageStatus,
+      createdBy: item.createdBy,
+      ownerProfileId: item.ownerProfileId,
+    };
   }
 
   async getRevisionDiff(

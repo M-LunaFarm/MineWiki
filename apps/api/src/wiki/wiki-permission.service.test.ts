@@ -69,6 +69,7 @@ function createService(options: {
         status: 'active',
         publicationStatus: 'published',
         publishedReleaseId: 30n,
+        publishedRelease: { version: 2 },
         serverName: 'Server One',
         host: 'play.server-one.test',
         ...options.serverWiki,
@@ -131,12 +132,22 @@ function createService(options: {
       }
     },
     serverWikiReleaseItem: {
-      async findFirst(input: { where: { pageId: bigint; revisionId?: bigint } }) {
+      async findFirst(input: { where: { pageId: bigint; revisionId?: bigint; releaseId?: bigint; release?: unknown } }) {
         if (input.where.pageId !== 1n) return null;
-        if (input.where.revisionId !== undefined && input.where.revisionId !== 11n) return null;
-        return { revisionId: 11n };
+        if (input.where.releaseId === 30n) return { revisionId: 11n };
+        if (input.where.revisionId === 10n && input.where.release) return { revisionId: 10n };
+        return null;
       },
-      async findMany(input: { where: { pageId: { in: bigint[] } } }) {
+      async findMany(input: { where: { pageId: bigint | { in: bigint[] } } }) {
+        if (typeof input.where.pageId === 'bigint') {
+          return input.where.pageId === 1n
+            ? [
+                { releaseId: 30n, serverWikiId: 20n, spaceId: 10n, pageId: 1n, revisionId: 11n },
+                { releaseId: 28n, serverWikiId: 20n, spaceId: 10n, pageId: 1n, revisionId: 11n },
+                { releaseId: 29n, serverWikiId: 20n, spaceId: 10n, pageId: 1n, revisionId: 10n },
+              ]
+            : [];
+        }
         return input.where.pageId.in.includes(1n) ? [{ spaceId: 10n, pageId: 1n }] : [];
       },
     },
@@ -730,6 +741,9 @@ test('published server wiki hides pages and revisions absent from the active rel
     server: { ownerAccountId: 'account-1' },
   });
 
+  const scope = await service.resolvePublishedRevisionScope({ actor: null, page: page() });
+  assert.deepEqual(scope?.revisionItems.map((item) => item.revisionId), [11n, 10n]);
+
   assert.deepEqual(
     await service.canReadPage({ actor: null, page: page({ id: 2n }), revision: { id: 12n, visibility: 'public' } }),
     { allowed: false, reason: 'server_wiki_page_not_released' },
@@ -742,6 +756,11 @@ test('published server wiki hides pages and revisions absent from the active rel
     actor: null,
     page: page(),
     revision: { id: 11n, visibility: 'public' },
+  })).allowed, true);
+  assert.equal((await service.canReadPage({
+    actor: null,
+    page: page(),
+    revision: { id: 10n, visibility: 'public' },
   })).allowed, true);
 });
 

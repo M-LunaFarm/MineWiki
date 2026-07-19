@@ -19,6 +19,7 @@ import {
 } from './wiki-read.service';
 import { serverWikiIdentityConflicts } from '../server/server-wiki-identity';
 import { WikiSpecialCursorCodec } from './wiki-special-cursor';
+import type { WikiRoutePathResolver } from './wiki-route-path.resolver';
 
 const specialCursorCodec = new WikiSpecialCursorCodec({
   get(name: string) { return name === 'APP_ENCRYPTION_KEY' ? 'wiki-special-read-test-secret' : undefined; },
@@ -1184,6 +1185,50 @@ test('revision history uses a stable revision number cursor beyond the first pag
   assert.equal(result.nextCursor, '3');
 });
 
+test('public server wiki history lists every distinct published revision and excludes drafts', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  const page = {
+    id: 30n, namespaceId: 7, spaceId: 40n, localPath: 'luna/guide', slug: 'luna/guide',
+    title: 'luna/guide', displayTitle: 'Guide', currentRevisionId: 13n, pageType: 'article',
+    protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now,
+  };
+  const revisions = [
+    { id: 13n, pageId: 30n, revisionNo: 3, editSummary: 'draft', editSummaryHidden: false, isMinor: false, createdBy: 1n, createdAt: now, contentHash: 'c', contentSize: 30, visibility: 'public' },
+    { id: 12n, pageId: 30n, revisionNo: 2, editSummary: 'release two', editSummaryHidden: false, isMinor: false, createdBy: 1n, createdAt: now, contentHash: 'b', contentSize: 20, visibility: 'public' },
+    { id: 11n, pageId: 30n, revisionNo: 1, editSummary: 'release one', editSummaryHidden: false, isMinor: false, createdBy: 1n, createdAt: now, contentHash: 'a', contentSize: 10, visibility: 'public' },
+  ];
+  let revisionWhere: { id?: { in: bigint[] }; revisionNo?: { lt: number } } | null = null;
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiPageRevision: {
+      async findMany(input: { where: { id?: { in: bigint[] }; revisionNo?: { lt: number } } }) {
+        revisionWhere = input.where;
+        return revisions.filter((revision) =>
+          (!input.where.id || input.where.id.in.includes(revision.id))
+          && (!input.where.revisionNo || revision.revisionNo < input.where.revisionNo.lt));
+      },
+    },
+    wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'Writer', username: 'writer' }]; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async resolvePublishedRevisionScope() {
+      return {
+        currentItem: { revisionId: 12n },
+        revisionItems: [{ revisionId: 12n }, { revisionId: 11n }],
+      };
+    },
+    async assertCanReadPage() {},
+    async assertCanUsePageAction() {},
+  } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getRevisions('30');
+
+  assert.deepEqual(result.items.map((item) => item.id), ['12', '11']);
+  assert.deepEqual(result.items.map((item) => item.sizeDelta), [10, null]);
+  assert.equal(revisionWhere?.id?.in.includes(13n), false);
+  assert.deepEqual(revisionWhere?.id?.in, [12n, 11n]);
+});
+
 test('page lifecycle history uses an independent id cursor and redacts cross-space identities', async () => {
   const now = new Date('2026-07-18T09:00:00Z');
   const page = { id: 1n, namespaceId: 2, spaceId: 20n, localPath: 'new', slug: 'new', title: 'New', displayTitle: 'New', currentRevisionId: 4n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
@@ -1366,6 +1411,7 @@ test('historical revision rendering keeps raw source private and applies read pl
   assert.equal(result.currentRevisionId, '12');
   assert.equal(result.routePath, '/wiki/History');
   assert.equal(result.render.dependencyMode, 'live-current');
+  assert.equal(result.render.releaseId, null);
   assert.match(result.html, /Historical/u);
   assert.equal('contentRaw' in (result as unknown as Record<string, unknown>), false);
   assert.equal(readRevisionId, 11n);
@@ -1375,6 +1421,66 @@ test('historical revision rendering keeps raw source private and applies read pl
   const redacted = await new WikiReadService(prisma, permissions).getRenderedRevision('11');
   assert.equal(redacted.revision.editSummary, null);
   assert.equal(redacted.revision.editSummaryHidden, true);
+});
+
+test('public server wiki renders a historical revision from its immutable release snapshot', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  const page = {
+    id: 30n, namespaceId: 7, spaceId: 40n, localPath: 'luna/current-guide', slug: 'luna/current-guide',
+    title: 'luna/current-guide', displayTitle: 'Current guide', currentRevisionId: 13n, pageType: 'article',
+    protectionLevel: 'open', status: 'normal', createdBy: 1n, ownerProfileId: null, createdAt: now, updatedAt: now,
+  };
+  const revision = {
+    id: 11n, pageId: 30n, revisionNo: 1, parentRevisionId: null, contentRaw: 'historical', contentHash: 'a', contentSize: 10,
+    syntaxVersion: 'bwm-0.3', editSummary: 'first release', editSummaryHidden: false, isMinor: false, editTags: null,
+    contentAst: null, createdBy: 1n, actorType: 'user', actorUserId: 1n, actorIp: null, actorIpText: null, actorIpHash: null,
+    createdAt: now, visibility: 'public',
+  };
+  const historicalItem = {
+    id: 101n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, namespaceId: 7, pageId: 30n, revisionId: 11n,
+    localPath: 'luna/old-guide', slug: 'luna/old-guide', title: 'luna/old-guide', displayTitle: 'Old guide',
+    pageType: 'article', protectionLevel: 'open', pageStatus: 'normal', createdBy: 1n, ownerProfileId: null,
+    pageUpdatedAt: now, searchVector: '', createdAt: now,
+  };
+  const currentItem = { ...historicalItem, id: 102n, releaseId: 71n, revisionId: 12n };
+  const prisma = {
+    wikiPageRevision: { async findFirst() { return revision; } },
+    wikiPage: { async findUnique() { return page; } },
+    wikiNamespace: { async findUnique() { return { id: 7, code: 'server' }; } },
+  } as unknown as PrismaService;
+  let renderedInput: { localPath: string; revisionId?: bigint; releaseId?: bigint } | null = null;
+  const permissions = {
+    async resolvePublishedRevisionScope() {
+      return { currentItem, revisionItems: [currentItem, historicalItem] };
+    },
+    async assertCanReadPage() {},
+    async assertCanUsePageAction() {},
+  } as unknown as WikiPermissionService;
+  const routes = {
+    async preload() { return { routePath(input: { localPath: string }) { return `/server/${input.localPath}`; } }; },
+  } as unknown as WikiRoutePathResolver;
+  const service = new WikiReadService(prisma, permissions, undefined, undefined, routes);
+  (service as unknown as {
+    renderPage(namespace: string, pageInput: typeof page, access: unknown, options: { revisionId?: bigint; releaseId?: bigint }): Promise<unknown>;
+  }).renderPage = async (_namespace, pageInput, _access, options) => {
+    renderedInput = { localPath: pageInput.localPath, revisionId: options.revisionId, releaseId: options.releaseId };
+    return {
+      id: '30', namespace: 'server', spaceId: '40', slug: pageInput.slug, title: pageInput.title,
+      displayTitle: pageInput.displayTitle, pageType: 'article', protectionLevel: 'open', status: 'normal',
+      updatedAt: now.toISOString(), revision: { id: '11', revisionNo: 1, contentHash: 'a', createdAt: now.toISOString(), createdBy: '1' },
+      html: '<p>historical</p>', links: [], categories: [], headings: [], redirectTarget: null, redirectedFrom: null,
+      serverDirectoryPath: null, serverWiki: null,
+    };
+  };
+
+  const result = await service.getRenderedRevision('11');
+
+  assert.deepEqual(renderedInput, { localPath: 'luna/old-guide', revisionId: 11n, releaseId: 70n });
+  assert.equal(result.render.dependencyMode, 'release-snapshot');
+  assert.equal(result.render.releaseId, '70');
+  assert.equal(result.currentRevisionId, '12');
+  assert.equal(result.revision.isCurrent, false);
+  assert.equal(result.routePath, '/server/luna/old-guide');
 });
 
 test('historical revision rendering conceals non-public revisions before ACL evaluation', async () => {
@@ -1830,24 +1936,31 @@ test('public server wiki blame stops at the released revision and conceals later
     },
     serverWikiReleaseItem: { async findFirst() { return { revisionId: 12n }; } },
     wikiPageRevision: {
-      async findFirst() { return { revisionNo: 2 }; },
       async count(args: { where: unknown }) { whereInputs.push(args.where); return 2; },
-      async findMany(args: { where: { revisionNo?: { lte: number } } }) {
+      async findMany(args: { where: { id?: { in: bigint[] } } }) {
         whereInputs.push(args.where);
-        return revisions.filter((revision) => revision.revisionNo <= (args.where.revisionNo?.lte ?? Number.MAX_SAFE_INTEGER));
+        return revisions.filter((revision) => !args.where.id || args.where.id.in.includes(revision.id));
       },
     },
     wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'first' }, { id: 2n, displayName: 'second' }]; } },
   } as unknown as PrismaService;
   const permissions = {
-    async canPreviewServerWikiSpace() { return false; },
+    async resolvePublishedRevisionScope() {
+      return {
+        currentItem: { revisionId: 12n },
+        revisionItems: [{ revisionId: 12n }, { revisionId: 11n }],
+      };
+    },
     async assertCanReadPage() {},
     async assertCanUsePageAction() {},
   } as unknown as WikiPermissionService;
 
   const result = await new WikiReadService(prisma, permissions).getBlame('1');
 
-  assert.equal(whereInputs.every((where) => (where as { revisionNo?: { lte?: number } }).revisionNo?.lte === 2), true);
+  assert.equal(whereInputs.every((where) => {
+    const ids = (where as { id?: { in?: bigint[] } }).id?.in;
+    return ids?.length === 2 && ids.includes(11n) && ids.includes(12n);
+  }), true);
   assert.equal(result.revisionId, '12');
   assert.doesNotMatch(JSON.stringify(result), /비밀 초안/u);
 });
