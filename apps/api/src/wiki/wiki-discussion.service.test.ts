@@ -1222,3 +1222,66 @@ test('discussion invalidation is published only after the database mutation reso
   await discussions.deleteThread(session, '30', '정리');
   assert.equal(published, true);
 });
+
+test('anonymous discussion stores capability ownership and a non-reversible address hash without a profile', async () => {
+  const writes: unknown[] = [];
+  const tx = {
+    wikiPage: { async findUnique() { return page; } },
+    wikiDiscussionThread: {
+      async count() { return 0; },
+      async create(input: { data: unknown }) {
+        writes.push(input.data);
+        return { ...thread, createdBy: null, anonymousOwnerId: 90n, actorIpHash: 'h'.repeat(64) };
+      },
+    },
+    wikiDiscussionComment: {
+      async create(input: { data: unknown }) { writes.push(input.data); return { id: 91n }; },
+    },
+    wikiAnonymousContributorSession: {
+      async findFirst() { return null; },
+      async create() { return { id: 90n }; },
+    },
+  };
+  const store = {
+    ...tx,
+    async $transaction(callback: (client: typeof tx) => Promise<unknown>) { return callback(tx); },
+  } as unknown as PrismaService;
+  const permissions = {
+    async assertCanCreateThread(input: { actor: unknown; requestIp: string }) {
+      assert.equal(input.actor, null);
+      assert.equal(input.requestIp, '192.0.2.44');
+    },
+  } as unknown as WikiPermissionService;
+  const config = {
+    getOptional(key: string) {
+      if (key === 'WIKI_ANONYMOUS_DISCUSSIONS_ENABLED') return 'true';
+      if (key === 'WIKI_ANONYMOUS_IP_HASH_SECRET') return 'test-discussion-ip-secret';
+      return undefined;
+    },
+  };
+  const discussions = new WikiDiscussionService(
+    store,
+    {} as WikiProfileService,
+    permissions,
+    undefined,
+    undefined,
+    undefined,
+    config as never,
+  );
+  discussions.getThread = async () => ({ id: '30' }) as never;
+
+  const result = await discussions.createAnonymousThread(
+    page.id.toString(),
+    { title: '익명 토론', content: '익명 본문' },
+    '192.0.2.44',
+  );
+
+  assert.equal(result.ownerTokenIssued, true);
+  assert.equal(result.ownerToken.length, 43);
+  for (const write of writes as Array<{ createdBy: bigint | null; anonymousOwnerId: bigint; actorIpHash: string }>) {
+    assert.equal(write.createdBy, null);
+    assert.equal(write.anonymousOwnerId, 90n);
+    assert.match(write.actorIpHash, /^[a-f0-9]{64}$/u);
+    assert.notEqual(write.actorIpHash, '192.0.2.44');
+  }
+});

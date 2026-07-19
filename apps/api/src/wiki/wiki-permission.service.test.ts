@@ -1136,6 +1136,49 @@ test('new thread creation requires both comment and create-thread permission', a
   await assert.rejects(service.assertCanCreateThread({ actor: actor(), page: page() }), ForbiddenException);
 });
 
+test('anonymous discussion creation requires explicit guest-compatible ACL allows', async () => {
+  const allowed = createService({
+    acl: {
+      async evaluate(input) {
+        if (input.action === 'read') return { matched: false, allowed: false, reason: 'acl_no_match' };
+        return { matched: true, allowed: true, reason: 'guest_allow' };
+      },
+    } as WikiAclService,
+  });
+  await allowed.assertCanCreateThread({ actor: null, page: page(), requestIp: '192.0.2.20' });
+
+  const noRule = createService({
+    acl: {
+      async evaluate(input) {
+        return { matched: false, allowed: false, reason: `no_${input.action}` };
+      },
+    } as WikiAclService,
+  });
+  await assert.rejects(
+    noRule.assertCanCreateThread({ actor: null, page: page(), requestIp: '192.0.2.20' }),
+    ForbiddenException,
+  );
+});
+
+test('anonymous discussion ACL evaluation preserves the validated request address', async () => {
+  const observed: Array<string | null | undefined> = [];
+  const service = createService({
+    acl: {
+      async evaluate(input) {
+        if (input.action !== 'read') observed.push(input.requestIp);
+        return input.action === 'read'
+          ? { matched: false, allowed: false, reason: 'acl_no_match' }
+          : { matched: true, allowed: false, reason: 'blocked_ip_group' };
+      },
+    } as WikiAclService,
+  });
+  await assert.rejects(
+    service.assertCanWriteThreadComment({ actor: null, page: page(), requestIp: '198.51.100.7' }),
+    /blocked_ip_group/,
+  );
+  assert.deepEqual(observed, ['198.51.100.7']);
+});
+
 test('create-thread deny still permits replies when comment permission allows them', async () => {
   const service = createService({
     acl: {

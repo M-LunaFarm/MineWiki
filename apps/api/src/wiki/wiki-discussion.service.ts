@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { createHmac } from 'node:crypto';
 import { ConfigService } from '@minewiki/config';
+import { normalizeIpOrCidr } from '@minewiki/security';
 import { renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
 import { PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
 import { Prisma, type WikiDiscussionThread, type WikiPage } from '@prisma/client';
@@ -14,6 +16,7 @@ import { buildCanonicalServerWikiPath, buildCanonicalServerWikiToolPath } from '
 import { WikiDiscussionLiveService } from './wiki-discussion-live.service';
 import { extractDiscussionMentions, uniqueDiscussionMentionUsernames } from './wiki-discussion-mention';
 import { wikiLinkResolutionContext } from './wiki-link-context';
+import { createWikiAnonymousContributorToken, WIKI_ANONYMOUS_CONTRIBUTOR_TTL_SECONDS, wikiAnonymousContributorDigest } from './wiki-anonymous-contributor';
 import {
   decodeWikiRecentDiscussionCursor,
   encodeWikiRecentDiscussionCursor,
@@ -26,8 +29,10 @@ export interface WikiThreadSummary {
   readonly pageId: string;
   readonly title: string;
   readonly status: string;
-  readonly createdBy: string;
+  readonly createdBy: string | null;
   readonly createdByName: string;
+  readonly anonymous: boolean;
+  readonly viewerOwns: boolean;
   readonly commentCount: number;
   readonly preview?: WikiThreadPreview;
   readonly createdAt: string;
@@ -39,7 +44,7 @@ export interface WikiThreadCommentPreview {
   readonly status: string;
   readonly contentPreview: string | null;
   readonly truncated: boolean;
-  readonly createdBy: string;
+  readonly createdBy: string | null;
   readonly createdByName: string;
   readonly createdAt: string;
 }
@@ -123,6 +128,7 @@ export interface WikiThreadDetail extends WikiThreadSummary {
     }>;
     readonly createdAt: string | null;
     readonly canDelete: boolean;
+    readonly viewerOwns: boolean;
     readonly canChangeVisibility: boolean;
     readonly pinned: boolean;
     readonly poll: WikiDiscussionPollDetail | null;
@@ -175,7 +181,8 @@ interface ThreadPreviewRow {
   readonly contentPreview: string;
   readonly contentLength: bigint | number;
   readonly status: string;
-  readonly createdBy: bigint;
+  readonly createdBy: bigint | null;
+  readonly anonymousOwnerId: bigint | null;
   readonly createdAt: Date;
   readonly firstRank: bigint | number;
   readonly recentRank: bigint | number;
@@ -392,7 +399,11 @@ export class WikiDiscussionService {
     };
   }
 
-  async getPageDiscussionPermissions(pageId: string, session?: SessionPayload | null): Promise<{ readonly canCreateThread: boolean }> {
+  async getPageDiscussionPermissions(
+    pageId: string,
+    session?: SessionPayload | null,
+    requestIp?: string | null,
+  ): Promise<{ readonly canCreateThread: boolean }> {
     const page = await this.readablePage(pageId, session?.userId ?? null);
     let canCreateThread = false;
     if (session) {
@@ -402,6 +413,13 @@ export class WikiDiscussionService {
           actor: this.wikiPermissions.actorFromSession(session, profile),
           page
         });
+        canCreateThread = true;
+      } catch {
+        canCreateThread = false;
+      }
+    } else if (this.anonymousDiscussionsEnabled() && requestIp) {
+      try {
+        await this.wikiPermissions.assertCanCreateThread({ actor: null, page, requestIp });
         canCreateThread = true;
       } catch {
         canCreateThread = false;
@@ -642,7 +660,9 @@ export class WikiDiscussionService {
     commentCursor?: string,
     requestedLimit = 100,
     focusCommentId?: string,
-    commentDirection: 'older' | 'newer' = 'older'
+    commentDirection: 'older' | 'newer' = 'older',
+    anonymousToken?: string | null,
+    requestIp?: string | null,
   ): Promise<WikiThreadDetail> {
     const id = this.parseId(threadId, 'threadId');
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
@@ -719,7 +739,8 @@ export class WikiDiscussionService {
     const commentCount = await this.prisma.wikiDiscussionComment.count({
       where: { threadId: thread.id, entryType: 'comment', status: 'normal' }
     });
-    const authorIds = [...new Set([thread.createdBy, ...displayComments.map((comment) => comment.createdBy)])];
+    const authorIds = [...new Set([thread.createdBy, ...displayComments.map((comment) => comment.createdBy)]
+      .filter((profileId): profileId is bigint => profileId !== null))];
     const mentionOccurrencesByComment = new Map(displayComments.map((comment) => [
       comment.id,
       comment.entryType === 'system' || comment.status === 'deleted' ? [] : extractDiscussionMentions(comment.content)
@@ -754,6 +775,7 @@ export class WikiDiscussionService {
           actor: this.wikiPermissions.actorFromSession(session, viewer), thread, page
         })).allowed
       : false;
+    const anonymousOwnerId = await this.resolveAnonymousOwnerId(anonymousToken);
     let canReply = false;
     if (viewer && session && thread.status === 'open') {
       try {
@@ -766,7 +788,15 @@ export class WikiDiscussionService {
       } catch {
         canReply = false;
       }
+    } else if (!session && this.anonymousDiscussionsEnabled() && requestIp && thread.status === 'open') {
+      try {
+        await this.wikiPermissions.assertCanWriteThreadComment({ actor: null, page, threadId: thread.id, requestIp });
+        canReply = true;
+      } catch {
+        canReply = false;
+      }
     }
+    const threadViewerOwns = anonymousOwnerId !== null && thread.createdBy === null && thread.anonymousOwnerId === anonymousOwnerId;
     const canModerate = Boolean(viewer && (thread.createdBy === viewer.id || canModeratePage));
     const moderationRows = canModeratePage && displayComments.length > 0
       ? await this.prisma.wikiDiscussionModerationEvent.findMany({
@@ -797,7 +827,7 @@ export class WikiDiscussionService {
     });
     const systemEvents = await this.hydrateSystemEvents(displayComments, session?.userId ?? null);
     return {
-      ...this.toThreadSummary(thread, profileById, commentCount),
+      ...this.toThreadSummary(thread, profileById, commentCount, undefined, threadViewerOwns),
       canModerate,
       canManagePage: Boolean(canManage),
       canManageAcl: Boolean(canManageAcl),
@@ -836,12 +866,13 @@ export class WikiDiscussionService {
               })),
             }),
         status: concealed ? 'hidden' : comment.status,
-        createdBy: concealed ? null : comment.createdBy.toString(),
-        createdByName: concealed ? '비공개 사용자' : profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
-        createdByUsername: concealed ? null : usernameByProfileId.get(comment.createdBy) ?? null,
+        createdBy: concealed ? null : comment.createdBy?.toString() ?? null,
+        createdByName: concealed ? '비공개 사용자' : comment.createdBy === null ? '익명 기여자' : profileById.get(comment.createdBy) ?? '알 수 없는 사용자',
+        createdByUsername: concealed || comment.createdBy === null ? null : usernameByProfileId.get(comment.createdBy) ?? null,
         mentions,
         createdAt: concealed ? null : comment.createdAt.toISOString(),
         canDelete: Boolean(comment.entryType !== 'system' && comment.status !== 'deleted' && viewer && (comment.createdBy === viewer.id || canManage)),
+        viewerOwns: Boolean(!concealed && anonymousOwnerId !== null && comment.createdBy === null && comment.anonymousOwnerId === anonymousOwnerId),
         canChangeVisibility: Boolean(comment.entryType !== 'system' && canManage && comment.status !== 'deleted'),
         pinned: comment.id === thread.pinnedCommentId,
         poll: comment.status === 'deleted' || (comment.status === 'hidden' && !canManage)
@@ -956,6 +987,125 @@ export class WikiDiscussionService {
     this.live?.publish(thread.id);
     await this.audit('wiki.discussion.comment', session, profile.id, page.id, thread.id);
     return this.getThread(thread.id.toString(), session);
+  }
+
+  assertAnonymousDiscussionsEnabled(): void {
+    if (!this.anonymousDiscussionsEnabled()) {
+      throw new ForbiddenException('Anonymous wiki discussions are disabled.');
+    }
+  }
+
+  async createAnonymousThread(
+    pageId: string,
+    input: { readonly title?: string; readonly content?: string; readonly poll?: WikiDiscussionPollInput },
+    requestIp: string,
+    existingOwnerToken?: string | null,
+  ): Promise<{ readonly thread: WikiThreadDetail; readonly ownerToken: string; readonly ownerTokenIssued: boolean }> {
+    this.assertAnonymousDiscussionsEnabled();
+    if (input.poll) throw new ForbiddenException('Anonymous contributors cannot create polls.');
+    const parsedPageId = this.parseId(pageId, 'pageId');
+    const title = this.requiredText(input.title, 'title', 255);
+    const content = this.requiredText(input.content, 'content', 10_000);
+    const ipHash = this.anonymousIpHash(requestIp);
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const page = await tx.wikiPage.findUnique({ where: { id: parsedPageId } });
+      if (!page) throw new NotFoundException('Wiki page not found.');
+      await this.wikiPermissions.assertCanCreateThread({ actor: null, page, requestIp, store: tx });
+      const openCount = await tx.wikiDiscussionThread.count({
+        where: { pageId: page.id, createdBy: null, status: { in: ['open', 'paused'] } },
+      });
+      if (openCount >= 20) throw new ConflictException('This page has too many open anonymous discussions.');
+      const owner = await this.getOrCreateAnonymousOwner(tx, now, existingOwnerToken);
+      const created = await tx.wikiDiscussionThread.create({
+        data: {
+          pageId: page.id,
+          title,
+          status: 'open',
+          createdBy: null,
+          anonymousOwnerId: owner.id,
+          actorIpHash: ipHash,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      await tx.wikiDiscussionComment.create({
+        data: {
+          threadId: created.id,
+          content,
+          status: 'normal',
+          createdBy: null,
+          anonymousOwnerId: owner.id,
+          actorIpHash: ipHash,
+          createdAt: now,
+        },
+      });
+      return { page, created, ...owner };
+    });
+    this.live?.publish(result.created.id);
+    await this.events?.audit('wiki.discussion.create_anonymous', {
+      category: 'wiki',
+      subjectType: 'wiki_discussion_thread',
+      subjectId: result.created.id.toString(),
+      ipAddress: requestIp,
+      metadata: { pageId: result.page.id.toString(), anonymousOwnerId: result.id.toString() },
+    });
+    return {
+      thread: await this.getThread(result.created.id.toString(), null, undefined, 100, undefined, 'older', result.token, requestIp),
+      ownerToken: result.token,
+      ownerTokenIssued: result.issued,
+    };
+  }
+
+  async addAnonymousComment(
+    threadId: string,
+    input: { readonly content?: string; readonly poll?: WikiDiscussionPollInput },
+    requestIp: string,
+    existingOwnerToken?: string | null,
+  ): Promise<{ readonly thread: WikiThreadDetail; readonly ownerToken: string; readonly ownerTokenIssued: boolean }> {
+    this.assertAnonymousDiscussionsEnabled();
+    if (input.poll) throw new ForbiddenException('Anonymous contributors cannot create polls.');
+    const id = this.parseId(threadId, 'threadId');
+    const content = this.requiredText(input.content, 'content', 10_000);
+    const ipHash = this.anonymousIpHash(requestIp);
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockDiscussionRows(tx, id);
+      const thread = await tx.wikiDiscussionThread.findUnique({ where: { id } });
+      if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
+      if (thread.status !== 'open') throw new BadRequestException(this.threadWriteBlockedMessage(thread.status));
+      const page = await tx.wikiPage.findUnique({ where: { id: thread.pageId } });
+      if (!page) throw new NotFoundException('Wiki page not found.');
+      await this.wikiPermissions.assertCanReadThread({ accountId: null, actor: null, thread, page, store: tx });
+      await this.wikiPermissions.assertCanWriteThreadComment({ actor: null, page, threadId: thread.id, requestIp, store: tx });
+      const owner = await this.getOrCreateAnonymousOwner(tx, now, existingOwnerToken);
+      await tx.wikiDiscussionComment.create({
+        data: {
+          threadId: thread.id,
+          content,
+          status: 'normal',
+          createdBy: null,
+          anonymousOwnerId: owner.id,
+          actorIpHash: ipHash,
+          createdAt: now,
+        },
+      });
+      await tx.wikiDiscussionThread.update({ where: { id: thread.id }, data: { updatedAt: now } });
+      return { page, thread, ...owner };
+    });
+    this.live?.publish(result.thread.id);
+    await this.events?.audit('wiki.discussion.comment_anonymous', {
+      category: 'wiki',
+      subjectType: 'wiki_discussion_thread',
+      subjectId: result.thread.id.toString(),
+      ipAddress: requestIp,
+      metadata: { pageId: result.page.id.toString(), anonymousOwnerId: result.id.toString() },
+    });
+    return {
+      thread: await this.getThread(result.thread.id.toString(), null, undefined, 100, undefined, 'older', result.token, requestIp),
+      ownerToken: result.token,
+      ownerTokenIssued: result.issued,
+    };
   }
 
   async votePoll(
@@ -1683,14 +1833,18 @@ export class WikiDiscussionService {
   }
 
   private toThreadSummary(
-    thread: { id: bigint; pageId: bigint; title: string; status: string; createdBy: bigint; createdAt: Date; updatedAt: Date },
+    thread: { id: bigint; pageId: bigint; title: string; status: string; createdBy: bigint | null; createdAt: Date; updatedAt: Date },
     profileById: ReadonlyMap<bigint, string>,
     commentCount: number,
-    preview?: WikiThreadPreview
+    preview?: WikiThreadPreview,
+    viewerOwns = false,
   ): WikiThreadSummary {
     return {
       id: thread.id.toString(), pageId: thread.pageId.toString(), title: thread.title, status: thread.status,
-      createdBy: thread.createdBy.toString(), createdByName: profileById.get(thread.createdBy) ?? '알 수 없는 사용자',
+      createdBy: thread.createdBy?.toString() ?? null,
+      createdByName: thread.createdBy === null ? '익명 기여자' : profileById.get(thread.createdBy) ?? '알 수 없는 사용자',
+      anonymous: thread.createdBy === null,
+      viewerOwns,
       commentCount, ...(preview ? { preview } : {}),
       createdAt: thread.createdAt.toISOString(), updatedAt: thread.updatedAt.toISOString()
     };
@@ -1714,6 +1868,7 @@ export class WikiDiscussionService {
           CHAR_LENGTH(content) AS content_length,
           status,
           created_by,
+          anonymous_owner_id,
           created_at,
           ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY id ASC) AS first_rank,
           ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY id DESC) AS recent_rank,
@@ -1730,6 +1885,7 @@ export class WikiDiscussionService {
         content_length AS contentLength,
         status,
         created_by AS createdBy,
+        anonymous_owner_id AS anonymousOwnerId,
         created_at AS createdAt,
         first_rank AS firstRank,
         recent_rank AS recentRank,
@@ -1777,10 +1933,63 @@ export class WikiDiscussionService {
       status: row.status,
       contentPreview: characters.slice(0, 280).join(''),
       truncated: Number(row.contentLength) > 600 || characters.length > 280,
-      createdBy: row.createdBy.toString(),
-      createdByName: profileById.get(row.createdBy) ?? '알 수 없는 사용자',
+      createdBy: row.createdBy?.toString() ?? null,
+      createdByName: row.createdBy === null ? '익명 기여자' : profileById.get(row.createdBy) ?? '알 수 없는 사용자',
       createdAt: row.createdAt.toISOString()
     };
+  }
+
+  private anonymousDiscussionsEnabled(): boolean {
+    return this.config?.getOptional('WIKI_ANONYMOUS_DISCUSSIONS_ENABLED') === 'true';
+  }
+
+  private anonymousIpHash(requestIp: string): string {
+    const key = this.config?.getOptional('WIKI_ANONYMOUS_IP_HASH_SECRET');
+    if (!key) throw new ForbiddenException('Anonymous discussion attribution is unavailable.');
+    let normalized: string;
+    try {
+      normalized = normalizeIpOrCidr(requestIp).address;
+    } catch {
+      throw new ForbiddenException('Anonymous discussion attribution is unavailable.');
+    }
+    return createHmac('sha256', key).update(`wiki-discussion-ip:v1:${normalized}`).digest('hex');
+  }
+
+  private async resolveAnonymousOwnerId(token?: string | null): Promise<bigint | null> {
+    const digest = token ? wikiAnonymousContributorDigest(token) : null;
+    if (!digest) return null;
+    const owner = await this.prisma.wikiAnonymousContributorSession.findFirst({
+      where: { tokenDigest: digest, revokedAt: null, expiresAt: { gt: new Date() } },
+      select: { id: true },
+    });
+    return owner?.id ?? null;
+  }
+
+  private async getOrCreateAnonymousOwner(
+    tx: Prisma.TransactionClient,
+    now: Date,
+    existingToken?: string | null,
+  ): Promise<{ readonly id: bigint; readonly token: string; readonly issued: boolean }> {
+    const digest = existingToken ? wikiAnonymousContributorDigest(existingToken) : null;
+    const existing = digest ? await tx.wikiAnonymousContributorSession.findFirst({
+      where: { tokenDigest: digest, revokedAt: null, expiresAt: { gt: now } },
+      select: { id: true },
+    }) : null;
+    if (existing && existingToken) {
+      await tx.wikiAnonymousContributorSession.update({ where: { id: existing.id }, data: { lastUsedAt: now } });
+      return { id: existing.id, token: existingToken, issued: false };
+    }
+    const token = createWikiAnonymousContributorToken();
+    const owner = await tx.wikiAnonymousContributorSession.create({
+      data: {
+        tokenDigest: wikiAnonymousContributorDigest(token)!,
+        createdAt: now,
+        lastUsedAt: now,
+        expiresAt: new Date(now.getTime() + WIKI_ANONYMOUS_CONTRIBUTOR_TTL_SECONDS * 1000),
+      },
+      select: { id: true },
+    });
+    return { id: owner.id, token, issued: true };
   }
 
   private requiredText(value: unknown, label: string, maxLength: number): string {

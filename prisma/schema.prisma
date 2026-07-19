@@ -1616,38 +1616,48 @@ model WikiSpecialSnapshot {
 }
 
 model WikiDiscussionThread {
-  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  pageId          BigInt   @map("page_id") @db.UnsignedBigInt
-  title           String   @db.VarChar(255)
-  status          String   @default("open") @db.VarChar(32)
-  createdBy       BigInt   @map("created_by") @db.UnsignedBigInt
-  createdAt       DateTime @map("created_at")
-  updatedAt       DateTime @map("updated_at")
-  pinnedCommentId BigInt?  @map("pinned_comment_id") @db.UnsignedBigInt
+  id               BigInt                           @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId           BigInt                           @map("page_id") @db.UnsignedBigInt
+  title            String                           @db.VarChar(255)
+  status           String                           @default("open") @db.VarChar(32)
+  createdBy        BigInt?                          @map("created_by") @db.UnsignedBigInt
+  anonymousOwnerId BigInt?                          @map("anonymous_owner_id") @db.UnsignedBigInt
+  anonymousOwner   WikiAnonymousContributorSession? @relation(fields: [anonymousOwnerId], references: [id], onDelete: Restrict)
+  actorIpHash      String?                          @map("actor_ip_hash") @db.Char(64)
+  createdAt        DateTime                         @map("created_at")
+  updatedAt        DateTime                         @map("updated_at")
+  pinnedCommentId  BigInt?                          @map("pinned_comment_id") @db.UnsignedBigInt
 
   @@index([pageId, status, updatedAt], map: "idx_wiki_threads_page_status")
   @@index([updatedAt, id], map: "idx_wiki_threads_recent")
   @@index([status, updatedAt, id], map: "idx_wiki_threads_status_recent")
   @@index([createdBy, createdAt], map: "idx_wiki_threads_creator")
+  @@index([anonymousOwnerId, createdAt], map: "idx_wiki_threads_anonymous_owner")
+  @@index([actorIpHash, createdAt], map: "idx_wiki_threads_actor_ip")
   @@map("wiki_discussion_threads")
 }
 
 model WikiDiscussionComment {
-  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  threadId    BigInt    @map("thread_id") @db.UnsignedBigInt
-  content     String    @db.Text
-  status      String    @default("normal") @db.VarChar(32)
-  createdBy   BigInt    @map("created_by") @db.UnsignedBigInt
-  createdAt   DateTime  @map("created_at")
-  updatedAt   DateTime? @map("updated_at")
-  entryType   String    @default("comment") @map("entry_type") @db.VarChar(16)
-  eventType   String?   @map("event_type") @db.VarChar(32)
-  eventBefore String?   @map("event_before") @db.Text
-  eventAfter  String?   @map("event_after") @db.Text
+  id               BigInt                           @id @default(autoincrement()) @db.UnsignedBigInt
+  threadId         BigInt                           @map("thread_id") @db.UnsignedBigInt
+  content          String                           @db.Text
+  status           String                           @default("normal") @db.VarChar(32)
+  createdBy        BigInt?                          @map("created_by") @db.UnsignedBigInt
+  anonymousOwnerId BigInt?                          @map("anonymous_owner_id") @db.UnsignedBigInt
+  anonymousOwner   WikiAnonymousContributorSession? @relation(fields: [anonymousOwnerId], references: [id], onDelete: Restrict)
+  actorIpHash      String?                          @map("actor_ip_hash") @db.Char(64)
+  createdAt        DateTime                         @map("created_at")
+  updatedAt        DateTime?                        @map("updated_at")
+  entryType        String                           @default("comment") @map("entry_type") @db.VarChar(16)
+  eventType        String?                          @map("event_type") @db.VarChar(32)
+  eventBefore      String?                          @map("event_before") @db.Text
+  eventAfter       String?                          @map("event_after") @db.Text
 
   @@index([threadId, id], map: "idx_wiki_comments_thread")
   @@index([threadId, entryType, id], map: "idx_wiki_comments_thread_entry")
   @@index([createdBy, createdAt], map: "idx_wiki_comments_creator")
+  @@index([anonymousOwnerId, createdAt], map: "idx_wiki_comments_anonymous_owner")
+  @@index([actorIpHash, createdAt], map: "idx_wiki_comments_actor_ip")
   @@map("wiki_discussion_comments")
 }
 
@@ -1911,13 +1921,15 @@ model WikiEditRequest {
 }
 
 model WikiAnonymousContributorSession {
-  id          BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
-  tokenDigest String            @unique @map("token_digest") @db.Char(64)
-  createdAt   DateTime          @map("created_at") @db.DateTime(3)
-  lastUsedAt  DateTime          @map("last_used_at") @db.DateTime(3)
-  expiresAt   DateTime          @map("expires_at") @db.DateTime(3)
-  revokedAt   DateTime?         @map("revoked_at") @db.DateTime(3)
-  requests    WikiEditRequest[]
+  id                 BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  tokenDigest        String                  @unique @map("token_digest") @db.Char(64)
+  createdAt          DateTime                @map("created_at") @db.DateTime(3)
+  lastUsedAt         DateTime                @map("last_used_at") @db.DateTime(3)
+  expiresAt          DateTime                @map("expires_at") @db.DateTime(3)
+  revokedAt          DateTime?               @map("revoked_at") @db.DateTime(3)
+  requests           WikiEditRequest[]
+  discussionThreads  WikiDiscussionThread[]
+  discussionComments WikiDiscussionComment[]
 
   @@index([expiresAt, revokedAt], map: "idx_wiki_anonymous_contributor_sessions_expiry")
   @@map("wiki_anonymous_contributor_sessions")

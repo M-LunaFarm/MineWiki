@@ -727,6 +727,7 @@ export class WikiPermissionService {
   async assertCanCreateThread(input: {
     readonly actor: WikiPermissionActor | null;
     readonly page: WikiPermissionPage | null;
+    readonly requestIp?: string | null;
     readonly store?: WikiPermissionStore;
   }): Promise<void> {
     await this.assertCanUseDiscussionAction(input, 'write_thread_comment');
@@ -737,6 +738,7 @@ export class WikiPermissionService {
     readonly actor: WikiPermissionActor | null;
     readonly page: WikiPermissionPage | null;
     readonly threadId?: bigint | null;
+    readonly requestIp?: string | null;
     readonly store?: WikiPermissionStore;
   }): Promise<void> {
     return this.assertCanUseDiscussionAction(input, 'write_thread_comment');
@@ -834,14 +836,15 @@ export class WikiPermissionService {
     readonly actor: WikiPermissionActor | null;
     readonly page: WikiPermissionPage | null;
     readonly threadId?: bigint | null;
+    readonly requestIp?: string | null;
     readonly store?: WikiPermissionStore;
   }, action: Extract<WikiAclAction, 'create_thread' | 'write_thread_comment'>): Promise<void> {
     const store = input.store ?? this.prisma;
     const { actor, page } = input;
-    if (!actor || !ACTIVE_PROFILE_STATUSES.has(actor.status) || !page) {
+    if (!page || (actor && !ACTIVE_PROFILE_STATUSES.has(actor.status))) {
       throw new ForbiddenException('Wiki discussion is not allowed.');
     }
-    await this.assertCanReadPage({ accountId: actor.accountId, actor, page, store });
+    await this.assertCanReadPage({ accountId: actor?.accountId ?? null, actor, page, store, requestIp: input.requestIp });
     const resource = {
       pageId: page.id,
       spaceId: page.spaceId,
@@ -850,23 +853,23 @@ export class WikiPermissionService {
       createdBy: page.createdBy
     };
     if (action === 'write_thread_comment' && input.threadId) {
-      const recoverySpaceIds = await this.threadAclRecoverySpaceIds(store, actor, [page.spaceId]);
-      if (recoverySpaceIds.has(page.spaceId)) return;
+      const recoverySpaceIds = actor ? await this.threadAclRecoverySpaceIds(store, actor, [page.spaceId]) : new Set<bigint>();
+      if (actor && recoverySpaceIds.has(page.spaceId)) return;
       const decisions = await this.evaluateThreadAclBatch(action, actor, [{
         thread: { id: input.threadId, pageId: page.id, status: 'open' },
         page
-      }], store);
+      }], store, input.requestIp);
       const threadAcl = decisions.get(input.threadId);
       if (threadAcl?.matched) {
         if (!threadAcl.allowed) throw new ForbiddenException(`Wiki discussion is not allowed: ${threadAcl.reason}`);
         return;
       }
     }
-    let acl = await this.evaluateAcl(action, actor, resource, store);
+    let acl = await this.evaluateAcl(action, actor, resource, store, input.requestIp);
     if (!acl.matched) {
-      acl = await this.evaluateAcl('discuss', actor, resource, store);
+      acl = await this.evaluateAcl('discuss', actor, resource, store, input.requestIp);
     }
-    if (acl.matched && !acl.allowed) {
+    if ((!actor && (!acl.matched || !acl.allowed)) || (acl.matched && !acl.allowed)) {
       throw new ForbiddenException(`Wiki discussion is not allowed: ${acl.reason}`);
     }
   }
@@ -1472,7 +1475,8 @@ export class WikiPermissionService {
     action: WikiThreadAclAction,
     actor: WikiPermissionActor | null,
     items: readonly T[],
-    store: WikiPermissionStore
+    store: WikiPermissionStore,
+    requestIp?: string | null
   ): Promise<ReadonlyMap<bigint, WikiAclDecision>> {
     return this.wikiAcl?.evaluateThreadBatch({
       actor,
@@ -1485,7 +1489,8 @@ export class WikiPermissionService {
         title: item.page.title,
         createdBy: item.page.createdBy
       })),
-      store
+      store,
+      requestIp
     }) ?? Promise.resolve(new Map());
   }
 

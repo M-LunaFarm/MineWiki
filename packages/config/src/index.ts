@@ -82,6 +82,7 @@ const envSchema = z.object({
   UPLOAD_STORAGE_ROOT: z.string().optional(),
   ACCOUNT_LINKING_ENABLED: z.string().optional(),
   WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED: z.enum(['true', 'false']).default('false'),
+  WIKI_ANONYMOUS_DISCUSSIONS_ENABLED: z.enum(['true', 'false']).default('false'),
   WIKI_ANONYMOUS_IP_HASH_SECRET: z.string().optional(),
   APP_ENCRYPTION_KEY: z.string().optional(),
   WEB_PUSH_ENABLED: z.string().optional(),
@@ -275,13 +276,15 @@ function validateProductionEnvironment(env: EnvSchema): void {
 
   if (env.MINEWIKI_SERVICE === 'api' || env.MINEWIKI_SERVICE === 'all') {
     validateCaptchaConfiguration(env, failures);
-    if (env.WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED === 'true') {
+    if (env.WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED === 'true' || env.WIKI_ANONYMOUS_DISCUSSIONS_ENABLED === 'true') {
       validateRequiredGroup(
         env,
         ['WIKI_ANONYMOUS_IP_HASH_SECRET'],
-        'anonymous wiki edit requests',
+        'anonymous wiki contributions',
         failures,
       );
+    }
+    if (env.WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED === 'true') {
       if (env.NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED !== 'true') {
         failures.push('NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED must be true when anonymous wiki edit requests are enabled');
       }

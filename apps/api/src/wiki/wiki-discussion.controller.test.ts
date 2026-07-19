@@ -22,10 +22,49 @@ test('new discussion captcha is verified and never forwarded into discussion con
     async assertVerified(token: string | undefined, ip: string | undefined) { captchaInput = { token, ip }; }
   } as WikiCaptchaService);
 
-  await controller.create('10', { title: '주제', content: '의견', captchaToken: 'verified-token' }, session, { clientIp: '192.0.2.22' } as FastifyRequest);
+  await controller.create(
+    '10',
+    { title: '주제', content: '의견', captchaToken: 'verified-token' },
+    { clientIp: '192.0.2.22', sessionPayload: session } as FastifyRequest,
+    { header() {} } as never,
+  );
 
   assert.deepEqual(captchaInput, { token: 'verified-token', ip: '192.0.2.22' });
   assert.deepEqual(discussionInput, { receivedSession: session, pageId: '10', body: { title: '주제', content: '의견' } });
+});
+
+test('anonymous discussion creation verifies captcha and issues the shared secure capability cookie', async () => {
+  let received: unknown;
+  let cookie = '';
+  const service = {
+    assertAnonymousDiscussionsEnabled() {},
+    async createAnonymousThread(pageId: string, body: unknown, requestIp: string, token: string | null) {
+      received = { pageId, body, requestIp, token };
+      return { thread: { id: '31' }, ownerToken: 'a'.repeat(43), ownerTokenIssued: true };
+    },
+  } as unknown as WikiDiscussionService;
+  const controller = new WikiDiscussionController(service, {
+    isRequired() { return true; },
+    async assertVerified(token: string | undefined, ip: string | undefined) {
+      assert.deepEqual({ token, ip }, { token: 'captcha', ip: '198.51.100.8' });
+    },
+  } as WikiCaptchaService);
+
+  const result = await controller.create(
+    '10',
+    { title: '익명 주제', content: '익명 의견', captchaToken: 'captcha' },
+    { clientIp: '198.51.100.8', headers: {} } as FastifyRequest,
+    { header(name: string, value: string) { if (name === 'Set-Cookie') cookie = value; } } as never,
+  );
+
+  assert.deepEqual(result, { id: '31' });
+  assert.deepEqual(received, {
+    pageId: '10', body: { title: '익명 주제', content: '익명 의견' }, requestIp: '198.51.100.8', token: null,
+  });
+  assert.match(cookie, /^__Host-mw_wiki_contributor=/u);
+  assert.match(cookie, /HttpOnly/u);
+  assert.match(cookie, /Secure/u);
+  assert.doesNotMatch(cookie, /actor_ip_hash|tokenDigest/u);
 });
 
 const session = { userId: 'account-1' } as SessionPayload;
