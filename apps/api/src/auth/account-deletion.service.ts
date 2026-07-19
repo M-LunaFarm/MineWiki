@@ -549,10 +549,30 @@ export class AccountDeletionService {
         select: { id: true, serverId: true },
       }),
       this.guilds.listOwnedByAccountIds(accountIds, tx),
-      profileIds.length ? tx.wikiSpace.findMany({ where: { OR: [{ ownerUserId: { in: profileIds } }, { createdBy: { in: profileIds } }], status: 'active' }, select: { id: true, title: true, name: true } }) : [],
+      profileIds.length ? tx.wikiSpace.findMany({
+        where: {
+          status: 'active',
+          OR: [
+            { ownerUserId: { in: profileIds } },
+            { ownerUserId: null, createdBy: { in: profileIds } },
+          ],
+        },
+        select: { id: true, title: true, name: true },
+      }) : [],
       profileIds.length ? tx.subwikiRole.findMany({ where: { userId: { in: profileIds }, status: 'active', role: { in: ['owner', 'manager', 'maintainer'] } }, select: { id: true, spaceId: true, role: true } }) : [],
       tx.accountRole.findMany({ where: { accountId: { in: accountIds }, role: { code: { in: ['owner', 'admin'] } } }, select: { id: true, role: { select: { code: true } } } }),
-      profileIds.length ? tx.serverWiki.findMany({ where: { createdBy: { in: profileIds }, status: { not: 'deleted' } }, select: { id: true, serverName: true } }) : [],
+      profileIds.length ? tx.serverWiki.findMany({
+        where: {
+          status: { not: 'deleted' },
+          space: {
+            OR: [
+              { ownerUserId: { in: profileIds } },
+              { ownerUserId: null, createdBy: { in: profileIds } },
+            ],
+          },
+        },
+        select: { id: true, serverName: true },
+      }) : [],
       profileIds.length ? tx.modWiki.findMany({ where: { verifiedBy: { in: profileIds }, status: 'active' }, select: { id: true, modName: true } }) : [],
     ]);
     const entitlements = serverWikis.length ? await tx.serverWikiLayoutEntitlement.findMany({ where: { serverWikiId: { in: serverWikis.map((item) => item.id) }, status: 'active', OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { id: true, layoutKey: true, serverWikiId: true } }) : [];

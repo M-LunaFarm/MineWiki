@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { ServerOwnershipTransferService } from './server-ownership-transfer.service';
 
 const root = new URL('../../../../', import.meta.url);
 
@@ -32,4 +33,36 @@ test('ownership transfer migration enforces one active request and terminal stat
   assert.match(migration, /UNIQUE INDEX `uq_server_ownership_transfer_active` \(`active_server_key`\)/u);
   assert.match(migration, /CHECK \(`status` IN \('pending', 'accepted', 'declined', 'cancelled', 'expired', 'superseded'\)\)/u);
   assert.match(migration, /CHECK \(`source_owner_account_id` <> `target_account_id`\)/u);
+});
+
+test('ownership transfer email is fenced by current transfer, profile, account, and email state', async () => {
+  const transfer = {
+    status: 'pending', version: 1, expiresAt: new Date(Date.now() + 60_000),
+    targetAccountId: 'account-target', targetProfileId: 8n,
+  };
+  const account = {
+    id: 'account-target', email: 'target@example.com', emailVerified: true,
+    lifecycleStatus: 'active', canonicalAccountId: 'account-target',
+  };
+  const prisma = {
+    serverOwnershipTransfer: { async findUnique() { return transfer; } },
+    wikiProfile: { async findUnique() { return { accountId: 'account-target', status: 'active', mergedIntoProfileId: null }; } },
+    account: { async findUnique() { return account; } },
+  };
+  const service = new ServerOwnershipTransferService(prisma as never, {} as never, {} as never, {} as never);
+  const fence = service as unknown as { canDeliverRequestEmail(input: {
+    transferId: string; transferVersion: number; targetAccountId: string;
+    targetProfileId: bigint; email: string;
+  }): Promise<boolean> };
+  const delivery = {
+    transferId: 'transfer-1', transferVersion: 1, targetAccountId: 'account-target',
+    targetProfileId: 8n, email: 'target@example.com',
+  };
+
+  assert.equal(await fence.canDeliverRequestEmail(delivery), true);
+  transfer.status = 'cancelled';
+  assert.equal(await fence.canDeliverRequestEmail(delivery), false);
+  transfer.status = 'pending';
+  account.email = 'changed@example.com';
+  assert.equal(await fence.canDeliverRequestEmail(delivery), false);
 });

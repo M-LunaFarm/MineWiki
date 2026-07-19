@@ -67,18 +67,36 @@ export class ServerOwnershipTransferService {
     const reason = transferReason(input.reason);
     const actorAccountId = await this.canonicalAccount(this.prisma, actor.accountId);
     const sourceProfile = await this.wikiProfiles.ensureWikiProfile(actorAccountId);
+    const targetProfileSnapshot = await this.prisma.wikiProfile.findUnique({
+      where: { username },
+      select: { id: true, accountId: true, status: true, mergedIntoProfileId: true },
+    });
+    if (!targetProfileSnapshot?.accountId
+      || targetProfileSnapshot.status !== 'active'
+      || targetProfileSnapshot.mergedIntoProfileId) throw invalidTarget();
+    const targetAccountSnapshot = await this.canonicalAccount(this.prisma, targetProfileSnapshot.accountId);
+    if (targetAccountSnapshot !== targetProfileSnapshot.accountId) throw invalidTarget();
     const result = await this.serializable(async (tx) => {
       const now = new Date();
+      await this.lockCanonicalAccounts(tx, [actorAccountId, targetAccountSnapshot]);
       const server = await this.lockServer(tx, serverId);
-      if (await this.lockCanonicalAccount(tx, actorAccountId) !== actorAccountId) throw invalidTarget();
       if (server.ownerAccountId !== actorAccountId) throw new ForbiddenException('현재 서버 소유자만 이전을 요청할 수 있습니다.');
       this.assertTransferWindow(server, now);
-      await this.expirePending(now, { serverId }, tx);
       await this.lockTransferRows(tx, serverId);
+      await this.expirePending(now, { serverId }, tx);
       if (await tx.serverOwnershipTransfer.findFirst({ where: { serverId, status: 'pending' } })) {
         throw new ConflictException('이미 응답을 기다리는 소유권 이전 요청이 있습니다.');
       }
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${sourceProfile.id} FOR UPDATE`;
+      const lockedSourceProfile = await tx.wikiProfile.findUnique({
+        where: { id: sourceProfile.id },
+        select: { accountId: true, status: true, mergedIntoProfileId: true },
+      });
+      if (lockedSourceProfile?.accountId !== actorAccountId
+        || lockedSourceProfile.status !== 'active'
+        || lockedSourceProfile.mergedIntoProfileId) throw invalidTarget();
       const target = await this.targetByUsername(tx, username);
+      if (target.profile.id !== targetProfileSnapshot.id || target.accountId !== targetAccountSnapshot) throw invalidTarget();
       if (target.accountId === actorAccountId) throw new BadRequestException('자기 자신에게 소유권을 이전할 수 없습니다.');
       await this.assertNoBillingSubject(tx, server);
       const transfer = await tx.serverOwnershipTransfer.create({
@@ -101,12 +119,16 @@ export class ServerOwnershipTransferService {
       return {
         item: await this.item(tx, transfer),
         delivery: account?.emailVerified && account.email ? {
+          transferId: transfer.id,
+          transferVersion: transfer.version,
+          targetAccountId: target.accountId,
+          targetProfileId: target.profile.id,
           email: account.email, serverName: server.name, requesterName: sourceProfile.displayName,
           expiresAt: transfer.expiresAt,
         } : null,
       };
     });
-    if (result.delivery && this.email.isEnabled()) {
+    if (result.delivery && this.email.isEnabled() && await this.canDeliverRequestEmail(result.delivery)) {
       await this.email.sendServerOwnershipTransferRequestEmail(result.delivery)
         .catch((error) => this.email.logDeliveryFailure(error));
     }
@@ -124,10 +146,10 @@ export class ServerOwnershipTransferService {
     const accountId = await this.canonicalAccount(this.prisma, actor.accountId);
     const profile = await this.wikiProfiles.ensureWikiProfile(accountId);
     return this.serializable(async (tx) => {
+      await this.lockCanonicalAccounts(tx, [accountId]);
       const server = await this.lockServer(tx, serverId);
-      if (await this.lockCanonicalAccount(tx, accountId) !== accountId) throw invalidTarget();
       if (server.ownerAccountId !== accountId) throw new ForbiddenException('현재 서버 소유자만 요청을 취소할 수 있습니다.');
-      await this.lockTransfer(tx, transferId);
+      await this.lockTransferRows(tx, serverId);
       const row = await tx.serverOwnershipTransfer.findUnique({ where: { id: transferId }, include: { server: { select: { name: true, joinHost: true, joinPort: true, edition: true } } } });
       this.assertPending(row, serverId, expectedVersion);
       const now = new Date();
@@ -167,16 +189,19 @@ export class ServerOwnershipTransferService {
     const reason = transferReason(input.reason);
     const accountId = await this.canonicalAccount(this.prisma, actor.accountId);
     const profile = await this.wikiProfiles.ensureWikiProfile(accountId);
-    const lookup = await this.prisma.serverOwnershipTransfer.findUnique({ where: { id: transferId }, select: { serverId: true } });
+    const lookup = await this.prisma.serverOwnershipTransfer.findUnique({
+      where: { id: transferId },
+      select: { serverId: true, sourceOwnerAccountId: true, targetAccountId: true },
+    });
     if (!lookup) throw new NotFoundException('소유권 이전 요청을 찾을 수 없습니다.');
     return this.serializable(async (tx) => {
+      await this.lockCanonicalAccounts(tx, [lookup.sourceOwnerAccountId, lookup.targetAccountId]);
       const server = await this.lockServer(tx, lookup.serverId);
       await this.lockTransferRows(tx, server.id);
       const row = await tx.serverOwnershipTransfer.findUnique({ where: { id: transferId }, include: { server: { select: { name: true, joinHost: true, joinPort: true, edition: true } } } });
       this.assertPending(row, server.id, expectedVersion);
-      for (const id of [row!.sourceOwnerAccountId, row!.targetAccountId].sort()) {
-        if (await this.lockCanonicalAccount(tx, id) !== id) throw staleTransfer('요청 계정 상태가 변경되었습니다.');
-      }
+      if (row!.sourceOwnerAccountId !== lookup.sourceOwnerAccountId
+        || row!.targetAccountId !== lookup.targetAccountId) throw staleTransfer('요청 계정 상태가 변경되었습니다.');
       if (row!.targetAccountId !== accountId || row!.targetProfileId !== profile.id) {
         throw new NotFoundException('소유권 이전 요청을 찾을 수 없습니다.');
       }
@@ -268,6 +293,49 @@ export class ServerOwnershipTransferService {
     });
   }
 
+  private async canDeliverRequestEmail(delivery: {
+    readonly transferId: string;
+    readonly transferVersion: number;
+    readonly targetAccountId: string;
+    readonly targetProfileId: bigint;
+    readonly email: string;
+  }): Promise<boolean> {
+    const now = new Date();
+    const transfer = await this.prisma.serverOwnershipTransfer.findUnique({
+      where: { id: delivery.transferId },
+      select: {
+        status: true,
+        version: true,
+        expiresAt: true,
+        targetAccountId: true,
+        targetProfileId: true,
+      },
+    });
+    if (!transfer
+      || transfer.status !== 'pending'
+      || transfer.version !== delivery.transferVersion
+      || transfer.expiresAt <= now
+      || transfer.targetAccountId !== delivery.targetAccountId
+      || transfer.targetProfileId !== delivery.targetProfileId) return false;
+    const [profile, account] = await Promise.all([
+      this.prisma.wikiProfile.findUnique({
+        where: { id: delivery.targetProfileId },
+        select: { accountId: true, status: true, mergedIntoProfileId: true },
+      }),
+      this.prisma.account.findUnique({
+        where: { id: delivery.targetAccountId },
+        select: { id: true, email: true, emailVerified: true, lifecycleStatus: true, canonicalAccountId: true },
+      }),
+    ]);
+    return profile?.status === 'active'
+      && profile.mergedIntoProfileId === null
+      && profile.accountId === delivery.targetAccountId
+      && account?.lifecycleStatus === 'active'
+      && (!account.canonicalAccountId || account.canonicalAccountId === account.id)
+      && account.emailVerified
+      && account.email === delivery.email;
+  }
+
   private async lockServer(tx: Prisma.TransactionClient, serverId: string): Promise<LockedServer> {
     await tx.$queryRaw`SELECT id FROM \`Server\` WHERE id = ${serverId} FOR UPDATE`;
     const server = await tx.server.findUnique({ where: { id: serverId }, select: {
@@ -346,6 +414,12 @@ export class ServerOwnershipTransferService {
       id = next;
     }
     throw invalidTarget();
+  }
+
+  private async lockCanonicalAccounts(tx: Prisma.TransactionClient, accountIds: readonly string[]): Promise<void> {
+    for (const accountId of [...new Set(accountIds)].sort()) {
+      if (await this.lockCanonicalAccount(tx, accountId) !== accountId) throw invalidTarget();
+    }
   }
 
   private async item(store: PrismaService | Prisma.TransactionClient, row: TransferWithServer): Promise<OwnershipTransferItem> {

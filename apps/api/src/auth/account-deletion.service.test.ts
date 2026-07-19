@@ -182,6 +182,50 @@ if (!hasDatabase) {
     }
   });
 
+  test('transferred wiki provenance does not block the former owner from terminating the account', async () => {
+    const group = await createGroup();
+    const targetAccountId = randomUUID();
+    const now = new Date();
+    await prisma.account.create({ data: {
+      id: targetAccountId,
+      canonicalAccountId: targetAccountId,
+      provider: 'email',
+      providerUserId: `transfer-target-${targetAccountId}@example.com`,
+      email: `transfer-target-${targetAccountId}@example.com`,
+      emailVerified: true,
+    } });
+    const sourceProfile = await prisma.wikiProfile.create({ data: {
+      accountId: group.firstId, username: `source_${randomUUID().slice(0, 20)}`,
+      displayName: '이전 소유자', status: 'active', createdAt: now, updatedAt: now,
+    } });
+    const targetProfile = await prisma.wikiProfile.create({ data: {
+      accountId: targetAccountId, username: `target_${randomUUID().slice(0, 20)}`,
+      displayName: '현재 소유자', status: 'active', createdAt: now, updatedAt: now,
+    } });
+    const space = await prisma.wikiSpace.create({ data: {
+      code: `transferred-${randomUUID()}`, name: '이전된 공간', title: '이전된 공간',
+      rootNamespaceCode: 'server', rootPath: `transferred-${randomUUID()}`,
+      status: 'active', createdBy: sourceProfile.id, ownerUserId: targetProfile.id,
+      createdAt: now, updatedAt: now,
+    } });
+    const serverWiki = await prisma.serverWiki.create({ data: {
+      spaceId: space.id, serverName: '이전된 서버 위키', slug: `transferred-${randomUUID()}`,
+      status: 'active', createdBy: sourceProfile.id, createdAt: now, updatedAt: now,
+    } });
+    try {
+      const requested = await service.requestDeletion({ session: group.session, password: 'CurrentPW1!' });
+      assert.equal(requested.status, 'requested');
+      await service.cancel(requested.cancelToken);
+    } finally {
+      await prisma.serverWiki.delete({ where: { id: serverWiki.id } }).catch(() => undefined);
+      await prisma.wikiSpace.delete({ where: { id: space.id } }).catch(() => undefined);
+      await prisma.wikiProfile.delete({ where: { id: sourceProfile.id } }).catch(() => undefined);
+      await prisma.wikiProfile.delete({ where: { id: targetProfile.id } }).catch(() => undefined);
+      await cleanup([group.firstId, group.secondId]);
+      await prisma.account.delete({ where: { id: targetAccountId } }).catch(() => undefined);
+    }
+  });
+
   test('an OAuth-only account can request deletion only within 15 minutes of a new login', async () => {
     const group = await createGroup();
     await prisma.account.update({ where: { id: group.firstId }, data: { passwordHash: null } });

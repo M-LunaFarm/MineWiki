@@ -5,6 +5,7 @@
   BadRequestException
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import type { z } from 'zod';
 import { authProviderSchema } from '@minewiki/schemas';
 import { PrismaService } from '../common/prisma.service';
@@ -403,6 +404,39 @@ export class AccountSeparationService {
 
     const accountIdFilter = { in: [...accountIds], not: canonicalAccountId };
     const mergeTime = new Date();
+    const [transferServers, ownedServers] = await Promise.all([
+      tx.serverOwnershipTransfer.findMany({
+        where: {
+          status: 'pending',
+          OR: [
+            { sourceOwnerAccountId: { in: [...accountIds] } },
+            { targetAccountId: { in: [...accountIds] } },
+          ],
+        },
+        select: { serverId: true },
+      }),
+      tx.server.findMany({
+        where: {
+          OR: [
+            { ownerAccountId: accountIdFilter },
+            { registrantAccountId: accountIdFilter },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
+    const affectedServerIds = [...new Set([
+      ...transferServers.map((row) => row.serverId),
+      ...ownedServers.map((row) => row.id),
+    ])].sort();
+    if (affectedServerIds.length > 0) {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM \`Server\` WHERE id IN (${Prisma.join(affectedServerIds)}) ORDER BY id FOR UPDATE`,
+      );
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM server_ownership_transfers WHERE server_id IN (${Prisma.join(affectedServerIds)}) ORDER BY id FOR UPDATE`,
+      );
+    }
     await tx.serverOwnershipTransfer.updateMany({
       where: {
         status: 'pending',

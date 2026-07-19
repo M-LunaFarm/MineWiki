@@ -12,6 +12,7 @@ interface DeliveryPayload {
   actorProfileId: string | null;
   sourceType: string;
   sourceId: string;
+  sourceVersion?: number;
   title: string;
   message: string | null;
   href: string;
@@ -44,7 +45,8 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
       const parsedDeliveries = parseDeliveries(event.payloadJson);
       await prisma.$transaction(async (tx) => {
         const releaseAuthorized = await filterAuthorizedReleaseReviewDeliveries(tx, parsedDeliveries);
-        const deliveries = await filterCurrentCollaboratorInvitationDeliveries(tx, releaseAuthorized);
+        const invitationAuthorized = await filterCurrentCollaboratorInvitationDeliveries(tx, releaseAuthorized);
+        const deliveries = await filterCurrentOwnershipTransferDeliveries(tx, invitationAuthorized);
         if (deliveries.length > 0) await tx.wikiNotification.createMany({
           data: deliveries.map((delivery) => ({
             profileId: BigInt(delivery.profileId), type: delivery.type,
@@ -127,6 +129,56 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
     }
   }
   return processed;
+}
+
+async function filterCurrentOwnershipTransferDeliveries(
+  tx: Prisma.TransactionClient,
+  deliveries: readonly DeliveryPayload[],
+): Promise<DeliveryPayload[]> {
+  const transferDeliveries = deliveries.filter((delivery) => delivery.sourceType === 'server_ownership_transfer');
+  if (transferDeliveries.length === 0) return [...deliveries];
+  const ids = [...new Set(transferDeliveries
+    .filter((delivery) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(delivery.sourceId))
+    .map((delivery) => delivery.sourceId.toLowerCase()))];
+  const transfers = ids.length > 0 ? await tx.serverOwnershipTransfer.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      status: true,
+      version: true,
+      expiresAt: true,
+      sourceOwnerProfileId: true,
+      targetProfileId: true,
+    },
+  }) : [];
+  const transferById = new Map(transfers.map((transfer) => [transfer.id, transfer]));
+  return deliveries.filter((delivery) => {
+    if (delivery.sourceType !== 'server_ownership_transfer') return true;
+    const transfer = transferById.get(delivery.sourceId.toLowerCase());
+    if (!transfer) return false;
+    const sourceVersion = delivery.sourceVersion ?? transferVersionFromDedupeKey(delivery.dedupeKey);
+    if (sourceVersion !== transfer.version) return false;
+    const recipientId = BigInt(delivery.profileId);
+    if (delivery.type === 'server_ownership_transfer_requested') {
+      return transfer.status === 'pending'
+        && transfer.expiresAt > new Date()
+        && transfer.targetProfileId === recipientId;
+    }
+    const expectedStatus = delivery.type.replace('server_ownership_transfer_', '');
+    if (!['accepted', 'declined', 'cancelled'].includes(expectedStatus) || transfer.status !== expectedStatus) {
+      return false;
+    }
+    return expectedStatus === 'cancelled'
+      ? transfer.targetProfileId === recipientId
+      : transfer.sourceOwnerProfileId === recipientId;
+  });
+}
+
+function transferVersionFromDedupeKey(dedupeKey: string): number | null {
+  const match = /^server-ownership-transfer:[^:]+:(?:requested|accepted|declined|cancelled):(\d+):profile:/u.exec(dedupeKey);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 async function filterCurrentCollaboratorInvitationDeliveries(
@@ -242,6 +294,9 @@ function parseDeliveries(payload: unknown): DeliveryPayload[] {
       throw new Error('Incomplete wiki notification delivery.');
     }
     if (Number.isNaN(new Date(item.createdAt).getTime())) throw new Error('Invalid notification delivery date.');
+    if (item.sourceVersion !== undefined && (!Number.isSafeInteger(item.sourceVersion) || item.sourceVersion < 1)) {
+      throw new Error('Invalid notification source version.');
+    }
     return { ...item, pageId: item.pageId ?? null, actorProfileId: item.actorProfileId ?? null, message: item.message ?? null } as DeliveryPayload;
   });
 }

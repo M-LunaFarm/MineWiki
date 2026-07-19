@@ -34,6 +34,7 @@ interface PendingNotificationDelivery {
   readonly actorProfileId: bigint | null;
   readonly sourceType: string;
   readonly sourceId: string;
+  readonly sourceVersion?: number;
   readonly title: string;
   readonly message: string | null;
   readonly href: string;
@@ -570,6 +571,7 @@ export class WikiNotificationService {
         actorProfileId: input.actorProfileId,
         sourceType: 'server_ownership_transfer',
         sourceId: input.transferId,
+        sourceVersion: input.version,
         title: input.serverName,
         message: '서버 소유권 이전 요청을 받았습니다.',
         href: '/me#server-ownership-transfers',
@@ -603,6 +605,7 @@ export class WikiNotificationService {
         actorProfileId: input.actorProfileId,
         sourceType: 'server_ownership_transfer',
         sourceId: input.transferId,
+        sourceVersion: input.version,
         title: input.serverName,
         message: `서버 소유권 이전 요청이 ${label}되었습니다.`,
         href: input.state === 'accepted'

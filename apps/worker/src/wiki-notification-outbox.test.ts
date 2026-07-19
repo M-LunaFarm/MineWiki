@@ -206,3 +206,54 @@ test('late collaborator invite delivery is discarded after the invitation is can
   assert.equal(delivered, false);
   assert.equal(completed, true);
 });
+
+test('late ownership transfer request delivery is discarded after cancellation', async () => {
+  let delivered = false;
+  let completed = false;
+  const transferId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const event = {
+    id: 6n, status: 'processing', attempts: 1,
+    payloadJson: { deliveries: [{
+      profileId: '8', type: 'server_ownership_transfer_requested', pageId: null,
+      actorProfileId: '7', sourceType: 'server_ownership_transfer', sourceId: transferId,
+      sourceVersion: 1,
+      title: '서버 소유권 이전 요청', message: 'Luna', href: '/me#server-ownership-transfers',
+      dedupeKey: `transfer:${transferId}:requested:profile:8`, createdAt: new Date().toISOString(),
+    }] },
+  };
+  const eventStore = {
+    async updateMany(args: { where: { id?: bigint; status?: string }; data: { status?: string } }) {
+      if (args.where.id === 6n && args.where.status === 'pending') return { count: 1 };
+      if (args.where.id === 6n && args.where.status === 'processing' && args.data.status === 'processed') {
+        completed = true;
+        return { count: 1 };
+      }
+      return { count: 0 };
+    },
+    async findMany() { return [{ id: 6n }]; },
+    async findUnique() { return event; },
+  };
+  const tx = {
+    serverOwnershipTransfer: {
+      async findMany() {
+        return [{
+          id: transferId, status: 'cancelled', version: 2, expiresAt: new Date(Date.now() + 60_000),
+          sourceOwnerProfileId: 7n, targetProfileId: 8n,
+        }];
+      },
+    },
+    wikiNotification: {
+      async createMany() { delivered = true; return { count: 1 }; },
+      async findMany() { return []; },
+    },
+    wikiNotificationEvent: eventStore,
+  };
+  const prisma = {
+    wikiNotificationEvent: eventStore,
+    async $transaction(callback: (store: typeof tx) => Promise<void>) { await callback(tx); },
+  } as unknown as PrismaClient;
+
+  assert.equal(await processWikiNotificationOutbox(prisma, 'worker-6'), 1);
+  assert.equal(delivered, false);
+  assert.equal(completed, true);
+});
