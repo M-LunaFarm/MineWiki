@@ -7,7 +7,11 @@ import {
   slugifyTitle
 } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
-import { WikiPermissionService, type WikiPermissionActor } from './wiki-permission.service';
+import {
+  WikiPermissionService,
+  type WikiPermissionActor,
+  type WikiPublishedPageBoundary,
+} from './wiki-permission.service';
 import { wikiLinkResolutionContext } from './wiki-link-context';
 
 const MAX_INCLUDE_OCCURRENCES = 20;
@@ -41,6 +45,7 @@ export class WikiIncludeService {
     readonly sourceNamespace: string;
     readonly sourceLocalPath: string;
     readonly releaseId?: bigint;
+    readonly publicationBoundary?: WikiPublishedPageBoundary;
   }): Promise<WikiIncludeExpansion> {
     let occurrence = 0;
     let includedSourceBytes = 0;
@@ -83,6 +88,7 @@ export class WikiIncludeService {
           actor: input.actor,
           requestIp: input.requestIp,
           releaseId: input.releaseId,
+          publicationBoundary: input.publicationBoundary,
         });
         memo.set(targetKey, sourcePromise);
       }
@@ -120,6 +126,7 @@ export class WikiIncludeService {
       readonly actor?: WikiPermissionActor | null;
       readonly requestIp?: string | null;
       readonly releaseId?: bigint;
+      readonly publicationBoundary?: WikiPublishedPageBoundary;
     }
   ): Promise<IncludeSource | null> {
     try {
@@ -167,7 +174,14 @@ export class WikiIncludeService {
         }
       });
       if (!revision) return null;
-      await this.wikiPermissions.assertCanReadPage({ ...access, page, revision });
+      await this.wikiPermissions.assertCanReadPage({
+        ...access,
+        page,
+        revision,
+        publicationProof: releasedItem && access.publicationBoundary
+          ? { boundary: access.publicationBoundary, item: releasedItem }
+          : undefined,
+      });
       const parsed = parseMarkup(revision.contentRaw, {
         linkResolution: wikiLinkResolutionContext(namespaceCode, page.localPath),
       });

@@ -45,7 +45,10 @@ export default async function WikiRevisionPage({ params, searchParams }: PagePro
         ) : null}
       </header>
       <aside className="rounded-lg border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
-        {revision.isCurrent ? '현재 공개 판을 렌더링한 화면입니다.' : `이 화면은 rev ${revision.revisionNo}의 보존된 원문을 렌더링한 과거 판입니다.`} Include·내부 링크·첨부 파일·서버 정보와 동적 시간 값은 현재 데이터와 접근 권한을 기준으로 표시됩니다.
+        {revision.isCurrent ? '현재 공개 판을 렌더링한 화면입니다.' : `이 화면은 rev ${revision.revisionNo}의 보존된 원문을 렌더링한 과거 판입니다.`}{' '}
+        {page.render.dependencyMode === 'release-snapshot'
+          ? 'Include·내부 링크·문서 탐색·레이아웃은 이 판이 공개된 릴리스 스냅샷을 기준으로 표시됩니다. 첨부 파일 접근, 서버 디렉터리의 실시간 상태와 동적 시간 값은 현재 데이터와 권한을 따릅니다.'
+          : 'Include·내부 링크·첨부 파일·서버 정보와 동적 시간 값은 현재 데이터와 접근 권한을 기준으로 표시됩니다.'}
       </aside>
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <article id={contentId} className="wiki-rendered min-w-0" dangerouslySetInnerHTML={{ __html: page.html }} />

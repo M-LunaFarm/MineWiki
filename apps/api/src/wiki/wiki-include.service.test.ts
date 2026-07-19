@@ -115,25 +115,30 @@ test('expands a readable include with AST-safe parameters and disables nested in
 });
 
 test('server wiki includes resolve from the same immutable release instead of the draft revision', async () => {
+  const releaseItem = {
+    id: 80n,
+    releaseId: 70n,
+    serverWikiId: 50n,
+    namespaceId: 3,
+    pageId: 2n,
+    revisionId: 20n,
+    spaceId: 10n,
+    localPath: 'luna/template',
+    slug: 'luna/template',
+    title: 'luna/template',
+    displayTitle: 'Template',
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 1n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-19T00:00:00Z'),
+    searchVector: '',
+    createdAt: new Date('2026-07-19T00:00:00Z'),
+  };
   const prisma = {
     wikiNamespace: { async findUnique() { return { id: 3 }; } },
-    serverWikiReleaseItem: {
-      async findFirst() {
-        return {
-          releaseId: 70n,
-          namespaceId: 3,
-          pageId: 2n,
-          revisionId: 20n,
-          spaceId: 10n,
-          localPath: 'luna/template',
-          title: 'luna/template',
-          protectionLevel: 'open',
-          pageStatus: 'normal',
-          createdBy: 1n,
-          ownerProfileId: null,
-        };
-      },
-    },
+    serverWikiReleaseItem: { async findFirst() { return releaseItem; } },
     wikiPage: {
       async findUnique() {
         return { id: 2n, currentRevisionId: 99n, contentRaw: '절대 노출되면 안 되는 작업본' };
@@ -147,8 +152,18 @@ test('server wiki includes resolve from the same immutable release instead of th
       },
     },
   };
+  const publicationBoundary = {
+    serverWikiId: 50n,
+    spaceId: 10n,
+    currentReleaseId: 90n,
+    currentReleaseVersion: 4,
+    currentItem: { ...releaseItem, releaseId: 90n },
+  };
+  let permissionProof: { item: { revisionId: bigint }; boundary: { currentReleaseId: bigint } } | undefined;
   const service = new WikiIncludeService(prisma as never, {
-    async assertCanReadPage() {},
+    async assertCanReadPage(input: { publicationProof?: typeof permissionProof }) {
+      permissionProof = input.publicationProof;
+    },
   } as never);
   const parsed = parseMarkup('[include(템플릿)]');
   const result = await service.expand({
@@ -158,11 +173,14 @@ test('server wiki includes resolve from the same immutable release instead of th
     sourceNamespace: 'server',
     sourceLocalPath: 'luna/home',
     releaseId: 70n,
+    publicationBoundary: publicationBoundary as never,
   });
 
   const html = renderDocument(result.ast);
   assert.match(html, /고정된 공개 릴리스/u);
   assert.doesNotMatch(html, /작업본/u);
+  assert.equal(permissionProof?.item.revisionId, 20n);
+  assert.equal(permissionProof?.boundary.currentReleaseId, 90n);
 });
 
 test('renders denied and missing include targets identically without target disclosure', async () => {

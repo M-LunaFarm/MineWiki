@@ -565,6 +565,9 @@ function publishedBoundaryFromScope(
 }
 
 const serverWikiNavigationReleaseItemSelect = {
+  id: true,
+  releaseId: true,
+  serverWikiId: true,
   namespaceId: true,
   spaceId: true,
   pageId: true,
@@ -1010,7 +1013,24 @@ export class WikiReadService {
     const publicKeys = new Set(publicRevisions.map((revision) => `${revision.pageId}:${revision.id}`));
     const publicPages = draftPages.filter((page) => page.currentRevisionId
       && publicKeys.has(`${page.id}:${page.currentRevisionId}`));
-    const readablePages = await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
+    const releaseItemByPageId = releaseId
+      ? new Map((pageRows as NavigationReleaseItem[]).map((item) => [item.pageId, item]))
+      : new Map<bigint, NavigationReleaseItem>();
+    const readablePages = publicationBoundary && releaseId
+      ? (await Promise.all(publicPages.map(async (candidate) => {
+          const item = releaseItemByPageId.get(candidate.id);
+          if (!item) return null;
+          const decision = await this.wikiPermissions.canReadPage({
+            ...access,
+            page: candidate,
+            publicationProof: {
+              boundary: publicationBoundary,
+              item: item as ServerWikiReleaseItem,
+            },
+          });
+          return decision.allowed ? candidate : null;
+        }))).filter((candidate) => candidate !== null)
+      : await this.wikiPermissions.filterReadablePages({ ...access, pages: publicPages });
     return {
       key: `draft:${wiki.navigationVersion}:${wiki.contentSettingsVersion}`,
       cacheable: false,
@@ -3736,6 +3756,7 @@ export class WikiReadService {
     targets: readonly string[],
     access: WikiAccessContext,
     releaseId?: bigint,
+    publicationBoundary?: WikiPublishedPageBoundary,
   ): Promise<Set<string>> {
     const resolvedByLinkKey = new Map<string, { namespace: string; slug: string }>();
     for (const target of targets) {
@@ -3785,6 +3806,7 @@ export class WikiReadService {
             ...access,
             page: pageFromServerWikiReleaseItem(item),
             revision,
+            publicationProof: publicationBoundary ? { boundary: publicationBoundary, item } : undefined,
           });
           readableTargets.add(`${namespaceCode}:${item.slug}`);
         } catch {
@@ -3918,6 +3940,7 @@ export class WikiReadService {
       page.id,
       access,
       options.releaseId,
+      options.publicationProof?.boundary,
     );
     const expanded = parsed.includes.length > 0 && this.wikiIncludes
       ? await this.wikiIncludes.expand({
@@ -3929,6 +3952,7 @@ export class WikiReadService {
           sourceNamespace: namespace,
           sourceLocalPath: page.localPath,
           releaseId: options.releaseId,
+          publicationBoundary: options.publicationProof?.boundary,
         })
       : { ast: parsed.ast, includedSourceBytes: 0 };
     const links = [...collectWikiLinkTargets(expanded.ast)];
@@ -3947,7 +3971,14 @@ export class WikiReadService {
         });
     const files = cache ? {} : await this.findRenderableFiles(expanded.ast, access);
     const missingLinks = hasLinkDependencies
-      ? await this.findMissingLinks(namespace, page.localPath, links, access, options.releaseId)
+      ? await this.findMissingLinks(
+          namespace,
+          page.localPath,
+          links,
+          access,
+          options.releaseId,
+          options.publicationProof?.boundary,
+        )
       : new Set<string>();
     const html = cache?.html ?? renderDocument(expanded.ast, {
       files,
@@ -4006,6 +4037,7 @@ export class WikiReadService {
     currentPageId: bigint,
     access: WikiAccessContext,
     releaseId?: bigint,
+    publicationBoundary?: WikiPublishedPageBoundary,
   ) {
     if (namespace !== 'server') {
       return null;
@@ -4042,10 +4074,11 @@ export class WikiReadService {
           siteSlug: serverWiki.siteSlug ?? serverWiki.slug,
           currentPageId,
           access,
+          publicationBoundary,
         })
       : null;
     const now = new Date();
-    const [server, pageRows, layoutEntitlements, release] = await Promise.all([
+    const [server, pageRows, release] = await Promise.all([
       serverWiki.voteServerId
         ? this.prisma.server.findUnique({
             where: { id: serverWiki.voteServerId },
@@ -4095,19 +4128,6 @@ export class WikiReadService {
             where: { spaceId, status: { not: 'deleted' }, pageType: { not: 'redirect' } },
             orderBy: [{ localPath: 'asc' }, { id: 'asc' }]
           }),
-      serverWiki.layoutKey === 'handbook' || serverWiki.layoutKey === 'brand'
-        ? this.prisma.serverWikiLayoutEntitlement.findMany({
-            where: {
-              serverWikiId: serverWiki.id,
-              layoutKey: serverWiki.layoutKey,
-              status: 'active',
-              startsAt: { lte: now },
-              OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-            },
-            select: { layoutKey: true, status: true, startsAt: true, expiresAt: true },
-            take: 1,
-          })
-        : Promise.resolve([]),
       releaseId
         ? this.prisma.serverWikiRelease.findFirst({
             where: { id: releaseId, serverWikiId: serverWiki.id },
@@ -4160,6 +4180,19 @@ export class WikiReadService {
     const releasedLayoutKey = presentation && typeof presentation.layoutKey === 'string'
       ? presentation.layoutKey
       : serverWiki.layoutKey;
+    const layoutEntitlements = releasedLayoutKey === 'handbook' || releasedLayoutKey === 'brand'
+      ? await this.prisma.serverWikiLayoutEntitlement.findMany({
+          where: {
+            serverWikiId: serverWiki.id,
+            layoutKey: releasedLayoutKey,
+            status: 'active',
+            startsAt: { lte: now },
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+          },
+          select: { layoutKey: true, status: true, startsAt: true, expiresAt: true },
+          take: 1,
+        })
+      : [];
     const navigation = releasedNavigation ? [] : buildServerWikiNavigation(
       serverWiki.slug,
       readablePages,
@@ -4248,6 +4281,7 @@ export class WikiReadService {
     readonly siteSlug: string;
     readonly currentPageId: bigint;
     readonly access: WikiAccessContext;
+    readonly publicationBoundary?: WikiPublishedPageBoundary;
   }): Promise<{ readonly previous: ServerWikiNavigationDocumentLink | null; readonly next: ServerWikiNavigationDocumentLink | null } | null> {
     const current = await this.prisma.serverWikiReleaseNavigationNode.findFirst({
       where: {
@@ -4284,10 +4318,23 @@ export class WikiReadService {
           },
           select: serverWikiNavigationReleaseItemSelect,
         });
-        const readable = await this.wikiPermissions.filterReadablePages({
-          ...input.access,
-          pages: releaseItems.map(pageFromNavigationReleaseItem),
-        });
+        const readable = input.publicationBoundary
+          ? (await Promise.all(releaseItems.map(async (item) => {
+              const page = pageFromNavigationReleaseItem(item);
+              const decision = await this.wikiPermissions.canReadPage({
+                ...input.access,
+                page,
+                publicationProof: {
+                  boundary: input.publicationBoundary!,
+                  item: item as ServerWikiReleaseItem,
+                },
+              });
+              return decision.allowed ? page : null;
+            }))).filter((page): page is NonNullable<typeof page> => page !== null)
+          : await this.wikiPermissions.filterReadablePages({
+              ...input.access,
+              pages: releaseItems.map(pageFromNavigationReleaseItem),
+            });
         const readableIds = new Set(readable.map((page) => page.id));
         const itemByPageId = new Map(releaseItems.map((item) => [item.pageId, item]));
         const node = nodes.find((candidate) => candidate.pageId !== null && readableIds.has(candidate.pageId));
