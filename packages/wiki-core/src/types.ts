@@ -35,6 +35,7 @@ export interface WikiListNode {
 
 export interface WikiTableCell {
   children: InlineNode[];
+  blocks?: AstNode[];
   colspan: number;
   rowspan: number;
   header?: boolean;

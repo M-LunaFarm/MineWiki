@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.27.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.28.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
@@ -285,6 +285,7 @@ function mergeNestedMetadata(
 export interface ParseMarkupOptions {
   linkResolution?: WikiLinkResolutionContext;
   gitBookMarkdown?: boolean;
+  headingsAsProse?: boolean;
 }
 
 export function parseMarkup(raw: string, options: ParseMarkupOptions | number = {}): ParsedDocument {
@@ -296,7 +297,7 @@ function parseMarkupDocument(
   raw: string,
   options: ParseMarkupOptions,
   foldingDepth: number,
-  nestingKind: 'folding' | 'blockquote' | 'indent' = 'folding'
+  nestingKind: 'folding' | 'blockquote' | 'indent' | 'table' = 'folding'
 ): ParsedDocument {
   if (Buffer.byteLength(raw, 'utf8') > MAX_DOCUMENT_BYTES) {
     return rejectedDocument('문서 크기 제한을 초과했습니다.');
@@ -539,7 +540,7 @@ function parseMarkupDocument(
     // Canonical NamuMark indentation uses the block lexer, which deliberately
     // treats heading-shaped text as prose instead of promoting it into the
     // document outline.
-    const heading = nestingKind === 'indent'
+    const heading = nestingKind === 'indent' || nestingKind === 'table' || options.headingsAsProse
       ? null
       : parseWikiHeadingLine(line, options.gitBookMarkdown === true);
     if (heading) {
@@ -619,14 +620,30 @@ function parseMarkupDocument(
         ? []
         : parseInline(tableStart.caption, links, errors, blockingErrors, footnotes, options.linkResolution);
       if (tableStart.firstRow !== null) {
-        const row = parseWikiTableRow(tableStart.firstRow, tableOptions, tableParseState, links, errors, blockingErrors, footnotes, options.linkResolution);
+        const row = parseWikiTableRow(
+          tableStart.firstRow,
+          tableOptions,
+          tableParseState,
+          { links, categories, includes, components, footnotes, errors, blockingErrors },
+          options,
+          foldingDepth,
+        );
         if (row.cells.length > 0) rows.push(row);
       }
       if (tableStart.consumeNextLine) i += 1;
       while (i < lines.length && lines[i]?.trim().startsWith('||')) {
-        const row = parseWikiTableRow(lines[i] ?? '', tableOptions, tableParseState, links, errors, blockingErrors, footnotes, options.linkResolution);
+        const logicalRow = readWikiTableLogicalRow(lines, i);
+        if (!logicalRow.closed) errors.push('닫히지 않은 표 셀 블록을 문서 끝까지 처리했습니다.');
+        const row = parseWikiTableRow(
+          logicalRow.source,
+          tableOptions,
+          tableParseState,
+          { links, categories, includes, components, footnotes, errors, blockingErrors },
+          options,
+          foldingDepth,
+        );
         if (row.cells.length > 0) rows.push(row);
-        i += 1;
+        i = logicalRow.endIndex + 1;
       }
       i -= 1;
       ast.push({ type: 'wiki_table', caption, rows, options: tableOptions });
@@ -966,11 +983,17 @@ function parseWikiTableRow(
   line: string,
   tableOptions: WikiTableOptions,
   tableState: WikiTableParseState,
-  links: Set<string>,
-  errors: string[],
-  blockingErrors: string[],
-  footnotes: string[],
-  linkResolution?: WikiLinkResolutionContext
+  metadata: {
+    links: Set<string>;
+    categories: Set<string>;
+    includes: string[];
+    components: Array<{ name: string; props: Record<string, string> }>;
+    footnotes: string[];
+    errors: string[];
+    blockingErrors: string[];
+  },
+  options: ParseMarkupOptions,
+  foldingDepth: number,
 ): WikiTableRow {
   const row: WikiTableRow = { cells: [] };
   const cells: WikiTableCell[] = [];
@@ -993,7 +1016,7 @@ function parseWikiTableRow(
       const end = content.indexOf('>');
       if (end < 0) break;
       const modifier = content.slice(1, end).trim();
-      if (!applyWikiTableModifier(modifier, cell, row, scopedColors, tableOptions, errors)) break;
+      if (!applyWikiTableModifier(modifier, cell, row, scopedColors, tableOptions, metadata.errors)) break;
       content = content.slice(end + 1);
     }
     if (!cell.align) {
@@ -1003,7 +1026,26 @@ function parseWikiTableRow(
       else if (startsWithSpace) cell.align = 'right';
       else if (endsWithSpace) cell.align = 'left';
     }
-    cell.children = parseInline(content.trim(), links, errors, blockingErrors, footnotes, linkResolution);
+    const normalizedContent = content.trim();
+    if (normalizedContent.includes('\n')) {
+      const nested = parseMarkupDocument(
+        normalizedContent,
+        { ...options, headingsAsProse: true },
+        foldingDepth + 1,
+        'table',
+      );
+      mergeNestedMetadata(nested, metadata);
+      cell.blocks = nested.ast;
+    } else {
+      cell.children = parseInline(
+        normalizedContent,
+        metadata.links,
+        metadata.errors,
+        metadata.blockingErrors,
+        metadata.footnotes,
+        options.linkResolution,
+      );
+    }
     const placement = findWikiTableVisualColumn(
       occupiedSpans,
       occupiedSpanCursor,
@@ -1799,7 +1841,11 @@ export function applyIncludeParametersToAst(
       caption: inline(node.caption),
       rows: node.rows.map((row) => ({
         ...row,
-        cells: row.cells.map((cell) => ({ ...cell, children: inline(cell.children) }))
+        cells: row.cells.map((cell) => ({
+          ...cell,
+          children: inline(cell.children),
+          ...(cell.blocks ? { blocks: applyIncludeParametersToAst(cell.blocks, params, headingPrefix, reservedParams) } : {}),
+        }))
       }))
     };
     if (node.type === 'folding') return {
@@ -2310,7 +2356,11 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
         caption: restrictInline(node.caption),
         rows: node.rows.map((row) => ({
           ...row,
-          cells: row.cells.map((cell) => ({ ...cell, children: restrictInline(cell.children) })),
+          cells: row.cells.map((cell) => ({
+            ...cell,
+            children: restrictInline(cell.children),
+            ...(cell.blocks ? { blocks: restrictAst(cell.blocks) } : {}),
+          })),
         })),
       }];
     }
@@ -2394,7 +2444,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         continue;
       }
       if (node.type === 'wiki_table') {
-        output.push(renderWikiTable(node.caption, node.rows, node.options, footnotes, renderOptions));
+        output.push(renderWikiTable(node.caption, node.rows, node.options, footnotes, renderOptions, renderNodes));
         continue;
       }
       if (node.type === 'folding') {
@@ -2673,7 +2723,12 @@ function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, F
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
       collectInline(node.caption);
-      for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
+      for (const row of node.rows) for (const cell of row.cells) {
+        collectInline(cell.children);
+        if (cell.blocks) for (const [name, definition] of collectNamedFootnoteDefinitions(cell.blocks)) {
+          if (!definitions.has(name)) definitions.set(name, definition);
+        }
+      }
     } else if (node.type === 'folding') {
       collectInline(node.title);
       for (const [name, definition] of collectNamedFootnoteDefinitions(node.children)) {
@@ -2936,7 +2991,10 @@ function countMathNodes(ast: readonly AstNode[]): number {
     if (node.type === 'list') return count + countList(node);
     if (node.type === 'wiki_table') {
       return count + countInline(node.caption) + node.rows.reduce(
-        (rowCount, row) => rowCount + row.cells.reduce((cellCount, cell) => cellCount + countInline(cell.children), 0),
+        (rowCount, row) => rowCount + row.cells.reduce(
+          (cellCount, cell) => cellCount + countInline(cell.children) + (cell.blocks ? countMathNodes(cell.blocks) : 0),
+          0,
+        ),
         0
       );
     }
@@ -2973,7 +3031,10 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
       collectInline(node.caption);
-      for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
+      for (const row of node.rows) for (const cell of row.cells) {
+        collectInline(cell.children);
+        if (cell.blocks) collectWikiFileNames(cell.blocks, output);
+      }
     } else if (node.type === 'folding' || node.type === 'wiki_style' || (node.type === 'include' && node.children)) {
       collectWikiFileNames(node.children, output);
     }
@@ -3008,7 +3069,10 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
     else if (node.type === 'list') collectList(node);
     else if (node.type === 'wiki_table') {
       collectInline(node.caption);
-      for (const row of node.rows) for (const cell of row.cells) collectInline(cell.children);
+      for (const row of node.rows) for (const cell of row.cells) {
+        collectInline(cell.children);
+        if (cell.blocks) collectWikiLinkTargets(cell.blocks, output);
+      }
     } else if (node.type === 'folding') {
       collectInline(node.title);
       collectWikiLinkTargets(node.children, output);
@@ -3349,7 +3413,8 @@ function renderWikiTable(
   rows: WikiTableRow[],
   tableOptions: WikiTableOptions,
   footnotes: FootnoteRenderState,
-  options: RenderOptions
+  options: RenderOptions,
+  renderBlocks: (nodes: readonly AstNode[]) => string,
 ) {
   const tableStyles = styleAttribute({
     width: tableOptions.width ? '100%' : undefined,
@@ -3395,7 +3460,8 @@ function renderWikiTable(
           'text-align': cell.align,
           'vertical-align': cell.verticalAlign
         });
-        return `<${tag}${colspan}${rowspan}${styles}>${renderInline(cell.children, footnotes, options)}</${tag}>`;
+        const content = cell.blocks ? renderBlocks(cell.blocks) : renderInline(cell.children, footnotes, options);
+        return `<${tag}${colspan}${rowspan}${styles}>${content}</${tag}>`;
       })
       .join('')}</tr>`
     };
@@ -3424,10 +3490,73 @@ function wrapTable(html: string) {
   return `<div class="table-scroll">${html}</div>`;
 }
 
-function splitWikiTableRow(line: string) {
-  const trimmedStart = line.trimStart();
-  const withoutStart = trimmedStart.startsWith('||') ? trimmedStart.slice(2) : trimmedStart;
-  return withoutStart.replace(/\|\|\s*$/, '').split('||');
+function readWikiTableLogicalRow(lines: readonly string[], startIndex: number): {
+  source: string;
+  endIndex: number;
+  closed: boolean;
+} {
+  const collected: string[] = [];
+  let tripleBraceDepth = 0;
+  let endIndex = startIndex;
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    collected.push(line);
+    tripleBraceDepth = scanTripleBraceDepth(line, tripleBraceDepth);
+    endIndex = index;
+    if (tripleBraceDepth === 0 && line.trimEnd().endsWith('||')) {
+      return { source: collected.join('\n'), endIndex, closed: true };
+    }
+  }
+  return { source: collected.join('\n'), endIndex, closed: false };
+}
+
+function splitWikiTableRow(line: string): string[] {
+  const source = line.trimStart();
+  let index = source.startsWith('||') ? 2 : 0;
+  let tripleBraceDepth = 0;
+  let cell = '';
+  const cells: string[] = [];
+  while (index < source.length) {
+    const marker = source.slice(index, index + 3);
+    if (!isEscapedAt(source, index) && marker === '{{{') {
+      tripleBraceDepth += 1;
+      cell += marker;
+      index += 3;
+      continue;
+    }
+    if (!isEscapedAt(source, index) && marker === '}}}' && tripleBraceDepth > 0) {
+      tripleBraceDepth -= 1;
+      cell += marker;
+      index += 3;
+      continue;
+    }
+    if (tripleBraceDepth === 0 && source.slice(index, index + 2) === '||') {
+      cells.push(cell);
+      cell = '';
+      index += 2;
+      continue;
+    }
+    cell += source[index] ?? '';
+    index += 1;
+  }
+  if (cell.length > 0) cells.push(cell);
+  return cells;
+}
+
+function scanTripleBraceDepth(line: string, initialDepth: number): number {
+  let depth = initialDepth;
+  for (let index = 0; index <= line.length - 3; index += 1) {
+    if (isEscapedAt(line, index)) continue;
+    const marker = line.slice(index, index + 3);
+    if (marker === '{{{') {
+      depth += 1;
+      index += 2;
+    } else if (marker === '}}}' && depth > 0) {
+      depth -= 1;
+      index += 2;
+    }
+  }
+  return depth;
 }
 
 function normalizeInlineColor(value: string) {

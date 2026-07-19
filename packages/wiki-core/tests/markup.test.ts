@@ -971,6 +971,38 @@ test('renders GitBook-style Markdown tables with alignment and mobile-safe wrapp
   assert.equal(parsed.ast[1]?.type, 'paragraph');
 });
 
+test('parses multiline block content inside NamuMark table cells without splitting literal delimiters', () => {
+  const parsed = parseMarkup([
+    '||{{{#!folding 세부 정보',
+    ' * [[가이드]]',
+    ' [[파일:inside.png]]',
+    '== 셀 안 제목 ==',
+    '}}}||{{{',
+    'literal || delimiter',
+    '}}}||',
+    '표 다음 문단',
+  ].join('\n'));
+  const table = parsed.ast[0];
+  assert.equal(table?.type, 'wiki_table');
+  if (table?.type !== 'wiki_table') return;
+  assert.equal(table.rows.length, 1);
+  assert.equal(table.rows[0]?.cells.length, 2);
+  assert.ok(table.rows[0]?.cells.every((cell) => (cell.blocks?.length ?? 0) > 0));
+  assert.deepEqual(parsed.links, ['가이드']);
+  assert.deepEqual([...collectWikiFileNames(parsed.ast)], ['inside.png']);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['가이드']);
+  assert.equal(parsed.headings.length, 0);
+  assert.equal(parsed.ast[1]?.type, 'paragraph');
+
+  const html = renderDocument(parsed.ast, {
+    files: { 'inside.png': { url: '/inside.png', mimeType: 'image/png', originalName: 'inside.png' } },
+  });
+  assert.match(html, /<th><details class="fold wiki-fold"><summary>세부 정보<\/summary>/u);
+  assert.match(html, /<pre class="codeblock"[^>]*><code>literal \|\| delimiter<\/code><\/pre>/u);
+  assert.match(html, /표 다음 문단/u);
+  assert.equal(html.includes('<h2'), false);
+});
+
 test('renders sanitized GitBook HTML tables only in GitBook compatibility mode', () => {
   const source = [
     '# 서버 안내',
