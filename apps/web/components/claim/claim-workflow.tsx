@@ -355,6 +355,7 @@ export function ClaimWorkflow() {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [registrationBannerWarning, setRegistrationBannerWarning] = useState(false);
   const [logsHiddenAfter, setLogsHiddenAfter] = useState<number | null>(null);
   const [claimedRequestedServerIds, setClaimedRequestedServerIds] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
@@ -372,6 +373,7 @@ export function ClaimWorkflow() {
     }
     const params = new URLSearchParams(window.location.search);
     setQueryServerLookup(params.get('serverId'));
+    setRegistrationBannerWarning(params.get('registrationBanner') === 'failed');
   }, []);
 
   useEffect(() => {
@@ -897,6 +899,12 @@ export function ClaimWorkflow() {
       {notice ? (
         <div role="status" aria-live="polite" className="mb-4 rounded-lg border border-[#13ec80]/30 bg-[#13ec80]/10 p-3 text-sm text-[#d8ffef]">
           {notice}
+        </div>
+      ) : null}
+      {registrationBannerWarning ? (
+        <div role="status" className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <span>서버 등록은 완료됐지만 배너 업로드가 끝나지 않았습니다. 소유권 검증 후 서버 관리 화면에서 다시 업로드할 수 있습니다.</span>
+          <button type="button" onClick={() => setRegistrationBannerWarning(false)} className="min-h-10 shrink-0 rounded-lg border border-amber-200/30 px-3 font-semibold hover:bg-amber-200/10">확인</button>
         </div>
       ) : null}
       {verifiedCount > 0 && serverId ? (

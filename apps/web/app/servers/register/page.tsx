@@ -82,6 +82,7 @@ function parseList(value: string): string[] {
 
 const MAX_SUPPORTED_VERSIONS = 8;
 const MAX_BANNER_SIZE_BYTES = 2 * 1024 * 1024;
+const REGISTRATION_DRAFT_KEY_PREFIX = 'minewiki:server-registration-draft';
 
 const VERSION_OPTIONS: Record<FormState['edition'], string[]> = {
   java: [
@@ -163,6 +164,7 @@ export default function ServerRegisterPage() {
   const [bannerDragActive, setBannerDragActive] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const [draftOwnerId, setDraftOwnerId] = useState<string | null>(null);
   const captchaRequired = isCaptchaConfigured();
   const availableVersions = useMemo(() => VERSION_OPTIONS[form.edition], [form.edition]);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
@@ -171,6 +173,31 @@ export default function ServerRegisterPage() {
   useEffect(() => {
     if (errors.length > 0) errorSummaryRef.current?.focus();
   }, [errors]);
+
+  useEffect(() => {
+    if (!account?.id) return;
+    try {
+      const saved = window.localStorage.getItem(`${REGISTRATION_DRAFT_KEY_PREFIX}:${account.id}`);
+      const restored = parseStoredRegistrationDraft(saved);
+      if (restored) {
+        setForm(restored);
+        setNotice('이 계정에서 작성하던 서버 등록 초안을 복원했습니다.');
+      }
+    } catch {
+      // Registration remains available when browser storage is blocked.
+    } finally {
+      setDraftOwnerId(account.id);
+    }
+  }, [account?.id]);
+
+  useEffect(() => {
+    if (!account?.id || draftOwnerId !== account.id) return;
+    try {
+      window.localStorage.setItem(`${REGISTRATION_DRAFT_KEY_PREFIX}:${account.id}`, JSON.stringify(form));
+    } catch {
+      // Registration remains available when browser storage is full or blocked.
+    }
+  }, [account?.id, draftOwnerId, form]);
 
   const handleChange =
     (field: keyof FormState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -350,6 +377,7 @@ export default function ServerRegisterPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
           credentials: 'include',
+          signal: AbortSignal.timeout(15_000),
           body: JSON.stringify({ data: dataUrl }),
         });
         if (!response.ok) {
@@ -468,15 +496,21 @@ export default function ServerRegisterPage() {
         throw new Error(body?.message ?? '서버 등록에 실패했습니다.');
       }
       const detail = (await response.json()) as ServerDetail;
+      try {
+        window.localStorage.removeItem(`${REGISTRATION_DRAFT_KEY_PREFIX}:${account.id}`);
+      } catch {
+        // A completed registration must not fail because draft cleanup is unavailable.
+      }
       setRegisteredServer(detail);
       const claimUrl = `/claim?serverId=${detail.id}`;
       setNotice('서버가 등록되었습니다. 검증 마법사에서 소유권 확인을 완료하세요.');
       router.prefetch(claimUrl);
+      let bannerUploaded = true;
       if (bannerDataUrl) {
-        // The optional image must never hold the ownership-verification path open.
-        void uploadBanner(detail.id, bannerDataUrl);
+        // Complete the optional follow-up while the registrant lease is active, but bound the wait.
+        bannerUploaded = await uploadBanner(detail.id, bannerDataUrl);
       }
-      router.push(claimUrl);
+      router.push(`${claimUrl}${bannerUploaded ? '' : '&registrationBanner=failed'}`);
     } catch (submitError) {
       setCaptchaToken(null);
       setCaptchaResetKey((current) => current + 1);
@@ -1210,4 +1244,32 @@ export default function ServerRegisterPage() {
       </main>
     </div>
   );
+}
+
+function parseStoredRegistrationDraft(raw: string | null): FormState | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<Record<keyof FormState, unknown>>;
+    if (!value || typeof value !== 'object') return null;
+    if (value.edition !== 'java' && value.edition !== 'bedrock') return null;
+    const stringFields = ['name', 'joinHost', 'joinPort', 'tags', 'shortDescription', 'longDescription', 'websiteUrl', 'discordUrl'] as const;
+    if (!stringFields.every((field) => typeof value[field] === 'string')) return null;
+    if (!Array.isArray(value.supportedVersions)
+      || value.supportedVersions.length > MAX_SUPPORTED_VERSIONS
+      || !value.supportedVersions.every((item) => typeof item === 'string')) return null;
+    return {
+      name: value.name,
+      joinHost: value.joinHost,
+      joinPort: value.joinPort,
+      edition: value.edition,
+      supportedVersions: value.supportedVersions,
+      tags: value.tags,
+      shortDescription: value.shortDescription,
+      longDescription: value.longDescription,
+      websiteUrl: value.websiteUrl,
+      discordUrl: value.discordUrl,
+    } as FormState;
+  } catch {
+    return null;
+  }
 }
