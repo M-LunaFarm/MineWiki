@@ -40,12 +40,16 @@ export function rewriteServerWikiHtmlLinks(
 ): string {
   if (!context) return html;
   const prefix = `/serverWiki/${encodeURIComponent(context.siteSlug)}`;
-  return html.replace(/\bhref=(['"])([^'"]+)\1/giu, (match, quote: string, href: string) => {
+  const links = html.replace(/\bhref=(['"])([^'"]+)\1/giu, (match, quote: string, href: string) => {
     if (href !== prefix && !href.startsWith(`${prefix}/`) && !href.startsWith(`${prefix}?`) && !href.startsWith(`${prefix}#`)) {
       return match;
     }
     return `href=${quote}${serverWikiPublicPath(href, context)}${quote}`;
   });
+  const platformSearchPath = `${prefix}/_search`;
+  return links.replace(/\baction=(['"])([^'"]+)\1/giu, (match, quote: string, action: string) => (
+    action === platformSearchPath ? `action=${quote}/_search${quote}` : match
+  ));
 }
 
 export function readServerWikiPublicRouteContext(

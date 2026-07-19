@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.25.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.26.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
@@ -2894,7 +2894,11 @@ function renderComponent(name: string, props: Record<string, string>, options: R
     )}</span><small>${escapeHtml(props['사유'] ?? formatComponentValue('확인일', props['확인일'] ?? ''))}</small></aside>`;
   }
   if (name === 'front_intro') return `<section class="front-wiki-component front-wiki-intro"><h2>${escapeHtml(props['제목'] ?? 'MineWiki')}</h2><p>${escapeHtml(props['설명'] ?? '')}</p></section>`;
-  if (name === 'front_search') return `<section class="front-wiki-component front-wiki-search"><form class="search-page" action="/search" method="get" role="search" aria-label="위키 검색"><input class="search-page-input" type="search" name="q" placeholder="${escapeAttr(props['예시'] ?? '검색')}" aria-label="검색어" autocomplete="off"><button class="search-page-submit" type="submit">검색</button></form></section>`;
+  if (name === 'front_search') {
+    const basePath = options.internalLinkBasePath?.replace(/\/$/u, '');
+    const searchPath = basePath?.startsWith('/serverWiki/') ? `${basePath}/_search` : '/search';
+    return `<section class="front-wiki-component front-wiki-search"><form class="search-page" action="${escapeAttr(searchPath)}" method="get" role="search" aria-label="위키 검색"><input class="search-page-input" type="search" name="q" placeholder="${escapeAttr(props['예시'] ?? '검색')}" aria-label="검색어" autocomplete="off"><button class="search-page-submit" type="submit">검색</button></form></section>`;
+  }
   if (name === 'front_card') {
     const links = Object.entries(props)
       .filter(([key, value]) => /^링크\d+$/.test(key) && value)

@@ -68,6 +68,12 @@ test('keeps front-page search interactive and supports legacy card link targets'
   assert.match(html, /class="front-wiki-component front-wiki-card"/u);
   assert.match(html, /<a href="\/servers">서버 찾기<\/a>/u);
   assert.equal(html.includes('<form action="https://example.com">'), false);
+
+  const serverHtml = renderDocument(parsed.ast, { internalLinkBasePath: '/serverWiki/luna-farm' });
+  assert.match(serverHtml, /action="\/serverWiki\/luna-farm\/_search"/u);
+  const unsafeBaseHtml = renderDocument(parsed.ast, { internalLinkBasePath: 'https://evil.example/serverWiki/luna' });
+  assert.match(unsafeBaseHtml, /action="\/search"/u);
+  assert.doesNotMatch(unsafeBaseHtml, /evil\.example/u);
 });
 
 test('renders nested inline markup and collects dependencies inside wrappers', () => {

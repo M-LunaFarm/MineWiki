@@ -20,6 +20,9 @@ test('custom server wiki hosts resolve through a fail-closed anonymous middlewar
   assert.match(middleware, /pathname\.startsWith\('\/_tools\/'\)/u);
   assert.match(route, /serverWikiCanonicalUrl/u);
   assert.match(route, /rewriteServerWikiHtmlLinks/u);
+  assert.match(route, /platformSearchPath/u);
+  assert.match(route, /action === platformSearchPath/u);
+  assert.match(middleware, /target\.pathname = `\/serverWiki\/\$\{encodeURIComponent\(route\.siteSlug\)\}\$\{suffix\}`/u);
   assert.match(layout, /<AuthProvider publicOnly=\{publicOnly\}>/u);
   assert.match(auth, /if \(!publicOnly\) void refresh\(\)/u);
 });
