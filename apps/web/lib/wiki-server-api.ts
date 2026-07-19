@@ -193,11 +193,13 @@ export async function searchWiki(input: {
 export async function fetchWikiSpecial(input: {
   readonly type: WikiSpecialDocumentType;
   readonly namespace?: string;
+  readonly serverSlug?: string;
   readonly limit?: number;
   readonly cursor?: string;
 }): Promise<WikiSpecialDocumentResponse> {
   const params = new URLSearchParams({ type: input.type, limit: String(input.limit ?? 50) });
   if (input.namespace) params.set('namespace', input.namespace);
+  if (input.serverSlug) params.set('serverSlug', input.serverSlug);
   if (input.cursor) params.set('cursor', input.cursor);
   const response = await wikiFetch(`/v1/wiki/special?${params.toString()}`);
   return readWikiResponse<WikiSpecialDocumentResponse>(response, 'Failed to load special wiki documents.');

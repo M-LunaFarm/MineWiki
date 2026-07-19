@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Compass, MessagesSquare, Star } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiCreateLink } from './server-wiki-create-link';
 import { ServerWikiNavigation } from './server-wiki-navigation';
@@ -42,6 +42,11 @@ export function ServerWikiSidebar({ page, routeContext }: { readonly page: WikiP
           문서
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1"><ServerWikiNavigation items={wiki.navigation} storageKey={`minewiki:server-wiki:${wiki.slug}:collapsed`} /></div>
+        <div className="mt-3 space-y-1 border-t border-[#e8e8e8] pt-3">
+          <Link href={serverWikiPublicPath(`/serverWiki/${encodeURIComponent(wiki.slug)}/_discussions`, routeContext)} className="flex min-h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-[#666] hover:bg-[#f0f3f8] hover:text-[#346ddb]"><MessagesSquare className="size-3.5" /> 토론</Link>
+          <Link href={routeContext ? serverWikiPlatformUrl(`/serverWiki/${encodeURIComponent(wiki.slug)}/_watchlist`) : `/serverWiki/${encodeURIComponent(wiki.slug)}/_watchlist`} className="flex min-h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-[#666] hover:bg-[#f0f3f8] hover:text-[#346ddb]"><Star className="size-3.5" /> 관심 문서</Link>
+          <Link href={serverWikiPublicPath(`/serverWiki/${encodeURIComponent(wiki.slug)}/_special`, routeContext)} className="flex min-h-9 items-center gap-2 rounded-lg px-2 text-xs font-medium text-[#666] hover:bg-[#f0f3f8] hover:text-[#346ddb]"><Compass className="size-3.5" /> 특수 문서</Link>
+        </div>
         <div className="mt-3">
           {routeContext ? <Link href={serverWikiPlatformUrl(`/serverWiki/${encodeURIComponent(wiki.slug)}/_tools/edit/새-문서`)} className="flex min-h-11 items-center rounded-lg px-2 text-xs font-semibold text-[#346ddb] hover:bg-[#edf3ff]">MineWiki에서 문서 작성</Link> : <ServerWikiCreateLink serverSlug={wiki.slug} />}
         </div>

@@ -21,16 +21,17 @@ export function wikiRecentDiscussionQuery(input = {}) {
   const filters = normalizeWikiRecentDiscussionFilters(input);
   const params = new URLSearchParams({ limit: '30', status: filters.status, sort: filters.sort });
   if (input.cursor) params.set('cursor', input.cursor);
+  if (input.serverSlug) params.set('serverSlug', input.serverSlug);
   return params.toString();
 }
 
-export function wikiRecentDiscussionHref(status, sort) {
+export function wikiRecentDiscussionHref(status, sort, basePath = '/wiki/discussions') {
   const filters = normalizeWikiRecentDiscussionFilters({ status, sort });
   const params = new URLSearchParams();
   if (filters.status !== 'all') params.set('status', filters.status);
   if (filters.sort !== 'newest') params.set('sort', filters.sort);
   const query = params.toString();
-  return `/wiki/discussions${query ? `?${query}` : ''}`;
+  return `${basePath}${query ? `?${query}` : ''}`;
 }
 
 export function wikiDiscussionStatusLabel(status) {

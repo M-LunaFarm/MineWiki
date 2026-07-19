@@ -25,6 +25,10 @@ export default async function ServerWikiPage({ params, searchParams }: PageProps
   if (path.length === 2 && path[1] === '_changes') {
     return <ServerWikiRecentPage slug={path[0] ?? ''} routePrefix="server" />;
   }
+  if (path.length === 2 && ['_discussions', '_watchlist', '_special'].includes(path[1] ?? '')) {
+    const query = new URLSearchParams(Object.entries(await searchParams).flatMap(([key, value]) => value ? [[key, value]] : []));
+    redirect(`/serverWiki/${encodeURIComponent(path[0] ?? '')}/${path[1]}${query.size > 0 ? `?${query.toString()}` : ''}`);
+  }
   const toolRoute = parseServerWikiToolRoute(path);
   if (toolRoute?.tool === 'raw' || toolRoute?.tool === 'backlinks' || toolRoute?.tool === 'discuss' || toolRoute?.tool === 'requests' || toolRoute?.tool === 'blame' || toolRoute?.tool === 'acl') {
     return <ServerWikiToolRoutePage segments={toolRoute.documentSegments} tool={toolRoute.tool} />;

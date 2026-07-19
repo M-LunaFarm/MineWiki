@@ -6,23 +6,24 @@ import { useEffect, useState } from 'react';
 import { fetchWikiWatchlist, setWikiPageWatched, type WikiWatchlistItem } from '../../lib/wiki-api';
 import { useAuth } from '../providers/auth-context';
 
-export function WikiWatchlistClient() {
+export function WikiWatchlistClient({ serverSlug, returnTo = '/wiki/watchlist' }: { readonly serverSlug?: string; readonly returnTo?: string } = {}) {
   const { account, loading: authLoading } = useAuth();
   const [items, setItems] = useState<WikiWatchlistItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const serverMode = Boolean(serverSlug);
 
   useEffect(() => {
     let active = true;
     if (!account) { setLoading(false); return () => { active = false; }; }
-    void fetchWikiWatchlist()
+    void fetchWikiWatchlist(undefined, serverSlug)
       .then((result) => { if (active) { setItems(result.items); setCursor(result.nextCursor); } })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : '관심 문서를 불러오지 못했습니다.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [account]);
+  }, [account, serverSlug]);
 
   async function remove(pageId: string) {
     try {
@@ -38,7 +39,7 @@ export function WikiWatchlistClient() {
     setLoadingMore(true);
     setError(null);
     try {
-      const result = await fetchWikiWatchlist(cursor);
+      const result = await fetchWikiWatchlist(cursor, serverSlug);
       setItems((current) => [...current, ...result.items.filter((item) => !current.some((existing) => existing.pageId === item.pageId))]);
       setCursor(result.nextCursor);
     } catch (caught) {
@@ -49,17 +50,17 @@ export function WikiWatchlistClient() {
   }
 
   if (authLoading || loading) return <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="size-4 animate-spin" /> 관심 문서를 불러오는 중입니다.</p>;
-  if (!account) return <p className="text-sm text-slate-300"><Link href="/login?returnTo=%2Fwiki%2Fwatchlist" className="text-emerald-300 hover:underline">로그인</Link>하면 관심 문서와 읽지 않은 변경을 확인할 수 있습니다.</p>;
+  if (!account) return <p className="text-sm text-slate-300"><Link href={`/login?returnTo=${encodeURIComponent(returnTo)}`} className="text-emerald-300 hover:underline">로그인</Link>하면 관심 문서와 읽지 않은 변경을 확인할 수 있습니다.</p>;
 
   return (
     <div className="space-y-4">
       {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
       {items.map((item) => (
-        <article key={item.pageId} className="flex flex-col gap-4 border border-white/10 bg-[#111821] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <article key={item.pageId} className={`flex flex-col gap-4 border p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 ${serverMode ? 'border-[#e2e2e2] bg-white' : 'border-white/10 bg-[#111821]'}`}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               {item.unread ? <BellRing className="size-4 shrink-0 text-emerald-300" aria-label="읽지 않은 변경" /> : null}
-              <Link href={item.routePath} className="truncate font-semibold text-white hover:text-emerald-200">{item.title}</Link>
+              <Link href={item.routePath} className={`truncate font-semibold ${serverMode ? 'text-[#222] hover:text-[#346ddb]' : 'text-white hover:text-emerald-200'}`}>{item.title}</Link>
               {item.unread ? <span className="chip chip-accent">새 변경</span> : null}
             </div>
             <p className="mt-2 text-xs text-slate-500">{item.namespace} · {formatDate(item.updatedAt)}</p>

@@ -6,6 +6,9 @@ import { WikiHistoryRoutePage } from '../../../components/wiki/wiki-history-rout
 import { ServerWikiToolRoutePage } from '../../../components/wiki/server-wiki-tool-route-page';
 import { ServerWikiSearchPage } from '../../../components/wiki/server-wiki-search-page';
 import { ServerWikiRecentPage } from '../../../components/wiki/server-wiki-recent-page';
+import { ServerWikiDiscussionsPage } from '../../../components/wiki/server-wiki-discussions-page';
+import { ServerWikiWatchlistPage } from '../../../components/wiki/server-wiki-watchlist-page';
+import { ServerWikiSpecialPage } from '../../../components/wiki/server-wiki-special-page';
 import { parseServerWikiToolRoute } from '../../../lib/wiki-routes.mjs';
 import { buildWikiRoutePath } from '../../../lib/wiki-routes.mjs';
 import { fetchPublicServerWikiPresentation, fetchPublicWikiPageByPath } from '../../../lib/wiki-server-api';
@@ -18,7 +21,7 @@ import {
 
 interface PageProps {
   readonly params: Promise<{ path?: string[] }>;
-  readonly searchParams: Promise<{ q?: string; target?: string; cursor?: string }>;
+  readonly searchParams: Promise<{ q?: string; target?: string; cursor?: string; status?: string; sort?: string; type?: string }>;
 }
 
 export const dynamic = 'force-dynamic';
@@ -67,6 +70,15 @@ export default async function ServerWikiSitePage({ params, searchParams }: PageP
   }
   if (path.length === 2 && path[1] === '_changes') {
     return <ServerWikiRecentPage slug={path[0] ?? ''} routeContext={routeContext} />;
+  }
+  if (path.length === 2 && path[1] === '_discussions') {
+    return <ServerWikiDiscussionsPage slug={path[0] ?? ''} routeContext={routeContext} searchParams={searchParams} />;
+  }
+  if (path.length === 2 && path[1] === '_watchlist') {
+    return <ServerWikiWatchlistPage slug={path[0] ?? ''} routeContext={routeContext} />;
+  }
+  if (path.length === 2 && path[1] === '_special') {
+    return <ServerWikiSpecialPage slug={path[0] ?? ''} routeContext={routeContext} searchParams={searchParams} />;
   }
   const toolRoute = parseServerWikiToolRoute(path);
   if (toolRoute?.tool === 'raw' || toolRoute?.tool === 'backlinks' || toolRoute?.tool === 'discuss' || toolRoute?.tool === 'requests' || toolRoute?.tool === 'blame' || toolRoute?.tool === 'acl') {

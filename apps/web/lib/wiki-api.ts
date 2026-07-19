@@ -1589,6 +1589,7 @@ export async function fetchRecentWikiThreads(input: {
   readonly cursor?: string;
   readonly status?: 'all' | 'active' | 'open' | 'paused' | 'closed';
   readonly sort?: 'newest' | 'oldest';
+  readonly serverSlug?: string;
   readonly signal?: AbortSignal;
 } = {}): Promise<WikiRecentThreadListResponse> {
   const response = await fetch(`${apiBaseUrl()}/v1/wiki/discussions/recent?${wikiRecentDiscussionQuery(input)}`, {
@@ -1692,9 +1693,10 @@ export async function markWikiPageWatchRead(pageId: string): Promise<WikiWatchSt
   return mutateWikiBrowser<WikiWatchStatus>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/watch/read`, 'POST', {});
 }
 
-export async function fetchWikiWatchlist(cursor?: string): Promise<WikiWatchlistResponse> {
+export async function fetchWikiWatchlist(cursor?: string, serverSlug?: string): Promise<WikiWatchlistResponse> {
   const params = new URLSearchParams({ limit: '50' });
   if (cursor) params.set('cursor', cursor);
+  if (serverSlug) params.set('serverSlug', serverSlug);
   return readWikiBrowser<WikiWatchlistResponse>(`/v1/wiki/watchlist?${params.toString()}`);
 }
 
