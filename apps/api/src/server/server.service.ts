@@ -1657,17 +1657,17 @@ export class ServerService {
     if (duplicate) {
       throw new ConflictException('같은 에디션과 접속 주소를 사용하는 서버가 이미 등록되어 있습니다.');
     }
-    if (isIP(normalizedHost) !== 0) {
-      try {
-        await validateOutboundTarget(normalizedHost, serverInput.joinPort, {
-          label: 'Server registration',
-          allowIpv6: LIVE_PING_ALLOW_IPV6,
-        });
-      } catch {
-        throw new BadRequestException(
-          '사설망, 루프백 또는 예약된 IP 주소는 서버 주소로 등록할 수 없습니다.',
-        );
-      }
+    try {
+      await validateOutboundTarget(normalizedHost, serverInput.joinPort, {
+        label: 'Server registration',
+        allowIpv6: LIVE_PING_ALLOW_IPV6,
+      });
+    } catch {
+      throw new BadRequestException(
+        isIP(normalizedHost) !== 0
+          ? '사설망, 루프백 또는 예약된 IP 주소는 서버 주소로 등록할 수 없습니다.'
+          : '공개 인터넷에서 확인할 수 있는 서버 도메인만 등록할 수 있습니다.',
+      );
     }
 
     for (let attempt = 0; attempt < 8; attempt += 1) {

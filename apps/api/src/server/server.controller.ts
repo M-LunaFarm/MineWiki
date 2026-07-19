@@ -46,6 +46,7 @@ import {
   ServerWikiCollaboratorService,
   type ServerWikiContentSettingsAuthority,
 } from './server-wiki-collaborator.service';
+import { CaptchaService } from '../captcha/captcha.service';
 
 const votifierPayloadSchema = z.object({
   targets: z.array(votifierTargetSchema).min(1)
@@ -140,6 +141,10 @@ type RequiredServerRegistrationPayload =
   Required<Omit<ServerRegistrationPayload, 'websiteUrl' | 'discordUrl'>> &
     Pick<ServerRegistrationPayload, 'websiteUrl' | 'discordUrl'>;
 
+const unavailableCaptchaVerifier = {
+  verifyCaptcha: async () => ({ success: false, errors: ['verification_unavailable'] }),
+} as CaptchaService;
+
 @Controller({
   path: 'v1/servers'
 })
@@ -151,6 +156,7 @@ export class ServerController {
     private readonly pluginCredentials: PluginCredentialService,
     private readonly guildAccess: GuildAccessService,
     private readonly wikiCollaborators: ServerWikiCollaboratorService,
+    private readonly captcha: CaptchaService = unavailableCaptchaVerifier,
   ) {}
 
   @Get()
@@ -341,9 +347,18 @@ export class ServerController {
   @Throttle({ default: { limit: 5, ttl: 300 } })
   async register(
     @Body() body: unknown,
-    @CurrentSession() session: SessionPayload
+    @CurrentSession() session: SessionPayload,
+    @Req() request: FastifyRequest,
   ): Promise<ServerDetail> {
-    const payload = serverRegistrationSchema.parse(body) as RequiredServerRegistrationPayload;
+    const requestBody = z.object({
+      captchaToken: z.string().trim().min(1).optional(),
+    }).passthrough().parse(body);
+    const { captchaToken, ...registrationBody } = requestBody;
+    const verification = await this.captcha.verifyCaptcha(captchaToken, request.clientIp);
+    if (!verification.success) {
+      throw new BadRequestException('보안 확인에 실패했습니다. CAPTCHA를 다시 완료해 주세요.');
+    }
+    const payload = serverRegistrationSchema.parse(registrationBody) as RequiredServerRegistrationPayload;
     return this.serverService.register({
       ...payload,
       registrantAccountId: session.userId

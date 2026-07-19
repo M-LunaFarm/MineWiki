@@ -343,12 +343,12 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
     registrantAccountId: randomUUID(),
   };
 
-  await service.register({ ...base, joinHost: ' PLAY.Example.COM. ' });
-  assert.equal(storedHost, 'play.example.com');
+  await service.register({ ...base, joinHost: ' ONE.ONE.ONE.ONE. ' });
+  assert.equal(storedHost, 'one.one.one.one');
   assert.match(storedEndpointKey ?? '', /^[a-f0-9]{64}$/u);
 
   await assert.rejects(
-    () => service.register({ ...base, joinHost: 'play.example.com' }),
+    () => service.register({ ...base, joinHost: 'one.one.one.one' }),
     /이미 등록되어 있습니다/,
   );
 

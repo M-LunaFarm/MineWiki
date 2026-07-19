@@ -18,6 +18,7 @@ test('Minecraft server hosts are canonicalized without accepting URLs or embedde
 
 test('public registration records a pending registrant without granting ownership', async () => {
   let registration: Record<string, unknown> | null = null;
+  let captchaRequest: { token?: string | null; remoteIp?: string } | null = null;
   const controller = new ServerController(
     {
       register: async (payload: Record<string, unknown>) => {
@@ -30,6 +31,12 @@ test('public registration records a pending registrant without granting ownershi
     {} as never,
     {} as never,
     {} as never,
+    {
+      verifyCaptcha: async (token?: string | null, remoteIp?: string) => {
+        captchaRequest = { token, remoteIp };
+        return { success: true };
+      },
+    } as never,
   );
 
   await controller.register(
@@ -44,15 +51,49 @@ test('public registration records a pending registrant without granting ownershi
       longDescription: 'A server waiting for DNS or MOTD ownership verification.',
       websiteUrl: null,
       discordUrl: null,
+      captchaToken: 'verified-captcha-token',
     },
     { userId: '11111111-1111-4111-8111-111111111111' } as never,
+    { clientIp: '203.0.113.10' } as never,
   );
 
+  assert.deepEqual(captchaRequest, {
+    token: 'verified-captcha-token',
+    remoteIp: '203.0.113.10',
+  });
   assert.equal(
     registration?.registrantAccountId,
     '11111111-1111-4111-8111-111111111111',
   );
   assert.equal('ownerAccountId' in (registration ?? {}), false);
+});
+
+test('public registration fails closed before persistence when CAPTCHA is rejected', async () => {
+  let registrations = 0;
+  const controller = new ServerController(
+    { register: async () => { registrations += 1; return {}; } } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    { verifyCaptcha: async () => ({ success: false, errors: ['missing_token'] }) } as never,
+  );
+
+  await assert.rejects(
+    controller.register({
+      name: 'Pending Server',
+      joinHost: 'play.example.com',
+      joinPort: 25565,
+      edition: 'java',
+      supportedVersions: ['1.21.1'],
+      tags: [],
+      shortDescription: 'Ownership verification pending',
+      longDescription: 'A server waiting for ownership verification.',
+    }, { userId: 'account-1' } as never, { clientIp: '203.0.113.10' } as never),
+    /CAPTCHA/u,
+  );
+  assert.equal(registrations, 0);
 });
 
 test('server profile updates are owner-scoped, strict, trimmed, and bounded', async () => {

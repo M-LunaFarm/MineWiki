@@ -42,6 +42,10 @@ import {
   getServerPreviewInitial,
   getServerPreviewSeed,
 } from '../../../lib/server-preview';
+import {
+  CaptchaChallenge,
+  isCaptchaConfigured,
+} from '../../../components/security/captcha-challenge';
 
 type FormState = {
   name: string;
@@ -157,6 +161,9 @@ export default function ServerRegisterPage() {
   const [customVersion, setCustomVersion] = useState('');
   const [bannerState, setBannerState] = useState<BannerState>(() => ({ ...INITIAL_BANNER_STATE }));
   const [bannerDragActive, setBannerDragActive] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const captchaRequired = isCaptchaConfigured();
   const availableVersions = useMemo(() => VERSION_OPTIONS[form.edition], [form.edition]);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -425,6 +432,11 @@ export default function ServerRegisterPage() {
     }
     setVersionError(null);
 
+    if (captchaRequired && !captchaToken) {
+      setErrors(['서버 등록 전에 보안 확인을 완료해 주세요.']);
+      return;
+    }
+
     const payload = buildPayload();
     const parsed = serverRegistrationSchema.safeParse(payload);
     if (!parsed.success) {
@@ -441,7 +453,10 @@ export default function ServerRegisterPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await csrfHeaders()) },
         credentials: 'include',
-        body: JSON.stringify(parsed.data),
+        body: JSON.stringify({
+          ...parsed.data,
+          ...(captchaToken ? { captchaToken } : {}),
+        }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -462,6 +477,8 @@ export default function ServerRegisterPage() {
       }
       router.push(claimUrl);
     } catch (submitError) {
+      setCaptchaToken(null);
+      setCaptchaResetKey((current) => current + 1);
       setErrors([
         submitError instanceof Error
           ? submitError.message
@@ -1083,6 +1100,15 @@ export default function ServerRegisterPage() {
                     </div>
                   ) : null}
 
+                  {captchaRequired ? (
+                    <CaptchaChallenge
+                      resetKey={captchaResetKey}
+                      onTokenChange={setCaptchaToken}
+                      title="서버 등록 보안 확인"
+                      description="자동 등록과 주소 선점을 막기 위해 한 번만 확인합니다."
+                    />
+                  ) : null}
+
                   <div className="mb-6 flex gap-3 rounded-lg border border-[#13ec80]/20 bg-[#13ec80]/5 p-3">
                     <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#13ec80]" aria-hidden="true" />
                     <p className="text-xs leading-relaxed text-[#A0A0A0]">
@@ -1094,7 +1120,7 @@ export default function ServerRegisterPage() {
                   <button
                     className="group flex w-full items-center justify-center gap-2 rounded-xl bg-[#13ec80] px-6 py-3.5 text-sm font-bold text-black transition hover:bg-[#0fb865] disabled:cursor-not-allowed disabled:opacity-60"
                     type="submit"
-                    disabled={submitting}
+                    disabled={submitting || (captchaRequired && !captchaToken)}
                   >
                     {submitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

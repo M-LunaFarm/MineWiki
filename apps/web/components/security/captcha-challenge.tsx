@@ -22,16 +22,20 @@ export function isCaptchaConfigured(): boolean {
 export function CaptchaChallenge({
   resetKey,
   onTokenChange,
+  title = '새 콘텐츠 보안 확인',
+  description = '새 문서나 토론을 만들 때 한 번만 확인합니다.',
 }: {
   readonly resetKey: number;
   readonly onTokenChange: (token: string | null) => void;
+  readonly title?: string;
+  readonly description?: string;
 }) {
   if (!isCaptchaConfigured()) return null;
   return (
     <div className="space-y-3 rounded-lg border border-dashed border-white/15 bg-white/[0.025] p-4">
       <div className="flex gap-2 text-sm text-slate-300">
         <ShieldCheck className="mt-0.5 size-4 flex-none text-emerald-300" />
-        <div><p className="font-medium text-white">새 콘텐츠 보안 확인</p><p className="mt-1 text-xs leading-5 text-slate-400">새 문서나 토론을 만들 때 한 번만 확인합니다.</p></div>
+        <div><p className="font-medium text-white">{title}</p><p className="mt-1 text-xs leading-5 text-slate-400">{description}</p></div>
       </div>
       {turnstileSiteKey ? (
         <Turnstile
