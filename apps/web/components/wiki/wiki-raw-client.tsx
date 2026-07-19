@@ -5,13 +5,13 @@ import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { fetchWikiRaw, type WikiRevisionResponse } from '../../lib/wiki-api';
 
-export function WikiRawClient({ pageId, returnTo }: { readonly pageId: string; readonly returnTo: string }) {
+export function WikiRawClient({ pageId, returnTo, revisionId }: { readonly pageId: string; readonly returnTo: string; readonly revisionId?: string }) {
   const [revision, setRevision] = useState<WikiRevisionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    void fetchWikiRaw(pageId)
+    void fetchWikiRaw(pageId, revisionId)
       .then((result) => {
         if (active) setRevision(result);
       })
@@ -21,7 +21,7 @@ export function WikiRawClient({ pageId, returnTo }: { readonly pageId: string; r
     return () => {
       active = false;
     };
-  }, [pageId]);
+  }, [pageId, revisionId]);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">

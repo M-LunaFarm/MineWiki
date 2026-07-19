@@ -20,7 +20,7 @@ import {
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.28.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.29.0';
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
@@ -1060,8 +1060,12 @@ function parseWikiTableRow(
     if (scopedColors.columnColor) {
       tableState.columnColors.set(visualColumn, scopedColors.columnColor);
     }
+    if (scopedColors.columnKeepAll) {
+      tableState.columnKeepAll.add(visualColumn);
+    }
     applyInheritedWikiTableColor(cell, 'backgroundColor', tableState.columnBackgroundColors.get(visualColumn));
     applyInheritedWikiTableColor(cell, 'color', tableState.columnColors.get(visualColumn));
+    if (tableState.columnKeepAll.has(visualColumn)) cell.keepAll = true;
     if (cell.rowspan > 1) {
       tableState.activeRowSpans.push({
         start: visualColumn,
@@ -1088,6 +1092,7 @@ interface WikiTableColorPair {
 interface WikiTableScopedColors {
   columnBackgroundColor?: WikiTableColorPair;
   columnColor?: WikiTableColorPair;
+  columnKeepAll?: boolean;
 }
 
 interface WikiTableRowSpan {
@@ -1100,6 +1105,7 @@ interface WikiTableParseState {
   rowIndex: number;
   columnBackgroundColors: Map<number, WikiTableColorPair>;
   columnColors: Map<number, WikiTableColorPair>;
+  columnKeepAll: Set<number>;
   activeRowSpans: WikiTableRowSpan[];
 }
 
@@ -1108,6 +1114,7 @@ function createWikiTableParseState(): WikiTableParseState {
     rowIndex: 0,
     columnBackgroundColors: new Map(),
     columnColors: new Map(),
+    columnKeepAll: new Set(),
     activeRowSpans: []
   };
 }
@@ -1432,6 +1439,22 @@ function applyWikiTableModifier(
   }
   if (modifier.toLowerCase() === 'thead') {
     cell.header = true;
+    return true;
+  }
+  if (modifier.toLowerCase() === 'nopad') {
+    cell.noPadding = true;
+    return true;
+  }
+  if (modifier.toLowerCase() === 'keepall') {
+    cell.keepAll = true;
+    return true;
+  }
+  if (modifier.toLowerCase() === 'rowkeepall') {
+    row.keepAll = true;
+    return true;
+  }
+  if (modifier.toLowerCase() === 'colkeepall') {
+    scopedColors.columnKeepAll = true;
     return true;
   }
 
@@ -2631,6 +2654,7 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       tr: {
         color: [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
+        'word-break': [/^keep-all$/],
         '--wiki-dark-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
         '--wiki-dark-background-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
       },
@@ -2641,6 +2665,8 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'text-align': [/^(?:left|center|right)$/],
         'vertical-align': [/^(?:top|middle|bottom)$/],
+        padding: [/^0$/],
+        'word-break': [/^keep-all$/],
         '--wiki-dark-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
         '--wiki-dark-background-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
       },
@@ -2651,6 +2677,8 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         'background-color': [/^#[0-9a-f]{3,8}$/i, /^[a-z]{1,32}$/i],
         'text-align': [/^(?:left|center|right)$/],
         'vertical-align': [/^(?:top|middle|bottom)$/],
+        padding: [/^0$/],
+        'word-break': [/^keep-all$/],
         '--wiki-dark-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i],
         '--wiki-dark-background-color': [/^(?:#[0-9a-f]{3,8}|[a-z]{1,32})$/i]
       }
@@ -3441,7 +3469,8 @@ function renderWikiTable(
       color: row.color,
       'background-color': row.backgroundColor,
       '--wiki-dark-color': row.darkColor,
-      '--wiki-dark-background-color': row.darkBackgroundColor
+      '--wiki-dark-background-color': row.darkBackgroundColor,
+      'word-break': row.keepAll ? 'keep-all' : undefined
     });
     return {
       isHeader,
@@ -3458,7 +3487,9 @@ function renderWikiTable(
           '--wiki-dark-color': cell.darkColor,
           '--wiki-dark-background-color': cell.darkBackgroundColor,
           'text-align': cell.align,
-          'vertical-align': cell.verticalAlign
+          'vertical-align': cell.verticalAlign,
+          padding: cell.noPadding ? '0' : undefined,
+          'word-break': cell.keepAll ? 'keep-all' : undefined
         });
         const content = cell.blocks ? renderBlocks(cell.blocks) : renderInline(cell.children, footnotes, options);
         return `<${tag}${colspan}${rowspan}${styles}>${content}</${tag}>`;

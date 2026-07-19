@@ -207,8 +207,12 @@ export class WikiController {
 
   @Get('pages/:id/blame')
   @UseGuards(OptionalSessionGuard)
-  getBlame(@Param('id') pageId: string, @Req() request: FastifyRequest): Promise<WikiBlameResponse> {
-    return this.wikiRead.getBlame(pageId, request.sessionPayload ?? null);
+  getBlame(
+    @Param('id') pageId: string,
+    @Req() request: FastifyRequest,
+    @Query('revisionId') revisionId?: string,
+  ): Promise<WikiBlameResponse> {
+    return this.wikiRead.getBlame(pageId, request.sessionPayload ?? null, revisionId);
   }
 
   @Get('recent')

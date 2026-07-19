@@ -946,6 +946,20 @@ test('renders NamuMark table captions and explicit header rows semantically', ()
   assert.match(html, /<tbody><tr><td>MineWiki<\/td><td>온라인<\/td><\/tr><\/tbody>/);
 });
 
+test('renders safe thetree table spacing and word-preservation modifiers', () => {
+  const parsed = parseMarkup([
+    '||<thead><nopad>헤더||<thead><colkeepall>긴 단어 열||',
+    '||<rowkeepall>행 전체 유지||둘째 열||',
+    '||<keepall>셀 유지||열 상속||',
+  ].join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.match(html, /<th style="padding:0">헤더<\/th>/u);
+  assert.match(html, /<tr style="word-break:keep-all"><td>행 전체 유지<\/td>/u);
+  assert.match(html, /<td style="word-break:keep-all">셀 유지<\/td>/u);
+  assert.match(html, /<td style="word-break:keep-all">열 상속<\/td>/u);
+});
+
 test('renders GitBook-style Markdown tables with alignment and mobile-safe wrappers', () => {
   const parsed = parseMarkup([
     '| 명령어 | 설명 | 상태 |',

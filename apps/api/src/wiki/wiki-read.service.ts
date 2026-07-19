@@ -3570,7 +3570,7 @@ export class WikiReadService {
     };
   }
 
-  async getBlame(pageId: string, viewer?: WikiAccessViewer): Promise<WikiBlameResponse> {
+  async getBlame(pageId: string, viewer?: WikiAccessViewer, revisionId?: string): Promise<WikiBlameResponse> {
     const id = this.parseBigIntId(pageId, 'pageId');
     const page = await this.prisma.wikiPage.findUnique({ where: { id } });
     if (!page) throw new NotFoundException('Wiki page not found.');
@@ -3621,9 +3621,22 @@ export class WikiReadService {
             }
         : {}),
     };
-    const total = await this.prisma.wikiPageRevision.count({ where: revisionWhere });
+    const requestedRevisionId = revisionId ? this.parseBigIntId(revisionId, 'revisionId') : null;
+    const requestedRevision = requestedRevisionId
+      ? await this.prisma.wikiPageRevision.findFirst({
+          where: { ...revisionWhere, id: requestedRevisionId },
+          select: { revisionNo: true },
+        })
+      : null;
+    if (requestedRevisionId && !requestedRevision) {
+      throw new NotFoundException('Public wiki revision not found.');
+    }
+    const boundedRevisionWhere = requestedRevision
+      ? { ...revisionWhere, revisionNo: { lte: requestedRevision.revisionNo } }
+      : revisionWhere;
+    const total = await this.prisma.wikiPageRevision.count({ where: boundedRevisionWhere });
     const revisions = await this.prisma.wikiPageRevision.findMany({
-      where: revisionWhere,
+      where: boundedRevisionWhere,
       orderBy: [{ revisionNo: 'asc' }],
       ...(total > 500 ? { skip: total - 500 } : {}),
       take: 500,

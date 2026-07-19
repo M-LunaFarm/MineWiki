@@ -1399,8 +1399,11 @@ export async function fetchWikiBacklinks(pageId: string, input: { readonly curso
   return response.json();
 }
 
-export async function fetchWikiBlame(pageId: string): Promise<WikiBlameResponse> {
-  return readWikiBrowser<WikiBlameResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/blame`);
+export async function fetchWikiBlame(pageId: string, revisionId?: string): Promise<WikiBlameResponse> {
+  const params = new URLSearchParams();
+  if (revisionId) params.set('revisionId', revisionId);
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return readWikiBrowser<WikiBlameResponse>(`/v1/wiki/pages/${encodeURIComponent(pageId)}/blame${suffix}`);
 }
 
 export async function fetchWikiPageAcl(pageId: string): Promise<WikiPageAclResponse> {

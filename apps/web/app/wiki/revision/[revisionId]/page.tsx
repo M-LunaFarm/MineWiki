@@ -41,6 +41,8 @@ export default async function WikiRevisionPage({ params, searchParams }: PagePro
           <div className="mt-5 flex flex-col gap-2 sm:flex-row">
             <Link href={context.returnTo} className="btn-primary min-h-11 w-full sm:w-auto">현재 문서로 돌아가기</Link>
             {context.historyPath ? <Link href={context.historyPath} className="btn-secondary min-h-11 w-full sm:w-auto">문서 역사</Link> : null}
+            <Link href={`/wiki/raw/${encodeURIComponent(page.id)}?revisionId=${encodeURIComponent(revision.id)}&returnTo=${encodeURIComponent(context.returnTo)}`} className="btn-secondary min-h-11 w-full sm:w-auto">이 판의 원문</Link>
+            <Link href={`/wiki/blame/${encodeURIComponent(page.id)}?revisionId=${encodeURIComponent(revision.id)}&returnTo=${encodeURIComponent(context.returnTo)}`} className="btn-secondary min-h-11 w-full sm:w-auto">이 판의 기여 추적</Link>
           </div>
         ) : null}
       </header>

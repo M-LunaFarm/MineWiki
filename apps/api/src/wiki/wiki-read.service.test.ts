@@ -2228,6 +2228,41 @@ test('blame keeps attribution for lines preserved across later revisions', async
   ]);
 });
 
+test('blame can stop at an explicitly selected public revision', async () => {
+  const now = new Date('2026-07-19T00:00:00Z');
+  const page = { id: 1n, namespaceId: 1, spaceId: 1n, localPath: 'doc', slug: 'doc', title: '문서', displayTitle: '문서', currentRevisionId: 13n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now };
+  const revisions = [
+    { id: 11n, revisionNo: 1, contentRaw: '첫 줄', createdBy: 1n, createdAt: now },
+    { id: 12n, revisionNo: 2, contentRaw: '첫 줄\n둘째 줄', createdBy: 2n, createdAt: new Date('2026-07-19T01:00:00Z') },
+    { id: 13n, revisionNo: 3, contentRaw: '현재 판', createdBy: 2n, createdAt: new Date('2026-07-19T02:00:00Z') },
+  ];
+  const prisma = {
+    wikiPage: { async findUnique() { return page; } },
+    serverWiki: { async findFirst() { return null; } },
+    wikiPageRevision: {
+      async findFirst(args: { where: { id: bigint } }) {
+        return revisions.find((revision) => revision.id === args.where.id) ?? null;
+      },
+      async count(args: { where: { revisionNo?: { lte?: number } } }) {
+        return revisions.filter((revision) => revision.revisionNo <= (args.where.revisionNo?.lte ?? Infinity)).length;
+      },
+      async findMany(args: { where: { revisionNo?: { lte?: number } } }) {
+        return revisions.filter((revision) => revision.revisionNo <= (args.where.revisionNo?.lte ?? Infinity));
+      },
+    },
+    wikiProfile: { async findMany() { return [{ id: 1n, displayName: 'first' }, { id: 2n, displayName: 'second' }]; } },
+  } as unknown as PrismaService;
+  const permissions = { async assertCanReadPage() {}, async assertCanUsePageAction() {} } as unknown as WikiPermissionService;
+
+  const result = await new WikiReadService(prisma, permissions).getBlame('1', null, '12');
+
+  assert.equal(result.revisionId, '12');
+  assert.equal(result.revisionNo, 2);
+  assert.equal(result.revisionCount, 2);
+  assert.deepEqual(result.lines.map((line) => line.content), ['첫 줄', '둘째 줄']);
+  assert.doesNotMatch(JSON.stringify(result), /현재 판/u);
+});
+
 test('public server wiki blame stops at the released revision and conceals later draft content', async () => {
   const now = new Date('2026-07-19T00:00:00Z');
   const page = {

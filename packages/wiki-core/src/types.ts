@@ -47,6 +47,8 @@ export interface WikiTableCell {
   darkBackgroundColor?: string;
   color?: string;
   darkColor?: string;
+  noPadding?: boolean;
+  keepAll?: boolean;
 }
 
 export interface WikiTableRow {
@@ -55,6 +57,7 @@ export interface WikiTableRow {
   darkBackgroundColor?: string;
   color?: string;
   darkColor?: string;
+  keepAll?: boolean;
 }
 
 export interface WikiTableOptions {
