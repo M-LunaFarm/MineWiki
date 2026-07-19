@@ -180,7 +180,7 @@ async function runValidation() {
           OR target_profile.status <> 'active'
           OR target_profile.merged_into_profile_id IS NOT NULL
           OR target_account.lifecycle_status <> 'active'
-          OR (target_account.canonical_account_id IS NOT NULL AND target_account.canonical_account_id <> target_account.id)
+          OR (target_account.canonicalAccountId IS NOT NULL AND target_account.canonicalAccountId <> target_account.id)
         )
       LIMIT ${args.sampleLimit}
     `,
