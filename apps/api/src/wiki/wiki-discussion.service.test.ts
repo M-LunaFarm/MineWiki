@@ -779,6 +779,78 @@ test('page discussion lists paginate beyond the legacy one-hundred thread window
   assert.equal((pageQueries[2]?.where as { status: unknown }).status, 'paused');
 });
 
+test('page discussions evaluate public server wiki ACLs against the published release snapshot', async () => {
+  const livePage = {
+    ...page,
+    namespaceId: 9,
+    spaceId: 40n,
+    localPath: 'luna/private-draft',
+    slug: 'luna/private-draft',
+    title: 'luna/private-draft',
+    displayTitle: 'Private draft',
+    currentRevisionId: 13n,
+    protectionLevel: 'admin',
+  };
+  const releaseItem = {
+    id: 80n,
+    releaseId: 70n,
+    serverWikiId: 50n,
+    spaceId: 40n,
+    namespaceId: 2,
+    pageId: page.id,
+    revisionId: 12n,
+    localPath: 'luna/public-guide',
+    slug: 'luna/public-guide',
+    title: 'luna/public-guide',
+    displayTitle: 'Public guide',
+    pageType: 'article',
+    protectionLevel: 'open',
+    pageStatus: 'normal',
+    createdBy: 20n,
+    ownerProfileId: null,
+    pageUpdatedAt: new Date('2026-07-18T00:00:00Z'),
+  };
+  const boundary = {
+    serverWikiId: 50n,
+    spaceId: 40n,
+    currentReleaseId: 70n,
+    currentReleaseVersion: 2,
+    currentItem: releaseItem,
+  };
+  const checkedPages: Array<{ title: string; protectionLevel: string; currentRevisionId: bigint | null }> = [];
+  let proofItem: typeof releaseItem | undefined;
+  const store = {
+    wikiPage: { async findUnique() { return livePage; } },
+    wikiDiscussionThread: { async findMany() { return [thread]; } },
+    wikiDiscussionComment: { async groupBy() { return []; } },
+    wikiProfile: { async findMany() { return [{ id: 20n, displayName: '테스터' }]; } },
+  };
+  const permissions = {
+    async resolvePublishedPageBoundary() { return boundary; },
+    async assertCanReadPage(input: {
+      page: { title: string; protectionLevel: string; currentRevisionId: bigint | null };
+      publicationProof?: { item: typeof releaseItem };
+    }) {
+      checkedPages.push(input.page);
+      proofItem = input.publicationProof?.item;
+    },
+    async filterReadableThreads<T>({ items }: { items: T[] }) { return items; },
+  } as unknown as WikiPermissionService;
+  const discussions = new WikiDiscussionService(
+    store as unknown as PrismaService,
+    {} as WikiProfileService,
+    permissions,
+  );
+
+  const result = await discussions.listThreads(page.id.toString(), null);
+
+  assert.equal(result.length, 1);
+  assert.equal(checkedPages[0]?.title, 'luna/public-guide');
+  assert.equal(checkedPages[0]?.protectionLevel, 'open');
+  assert.equal(checkedPages[0]?.currentRevisionId, 12n);
+  assert.equal(proofItem, releaseItem);
+});
+
 test('discussion previews expose the first and latest comments without hidden or deleted content', async () => {
   const previewRows = [
     { id: 1n, threadId: 30n, contentPreview: 'first comment', contentLength: 13n, status: 'normal', createdBy: 20n, createdAt: new Date('2026-01-01T00:00:00Z'), firstRank: 1n, recentRank: 2n, commentCount: 2n },

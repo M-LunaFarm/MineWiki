@@ -4,7 +4,7 @@ import { ConfigService } from '@minewiki/config';
 import { normalizeIpOrCidr } from '@minewiki/security';
 import { renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
 import { PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
-import { Prisma, type WikiDiscussionThread, type WikiPage } from '@prisma/client';
+import { Prisma, type ServerWikiReleaseItem, type WikiDiscussionThread, type WikiPage } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
 import type { SessionPayload } from '../session/session.service';
@@ -229,13 +229,13 @@ export class WikiDiscussionService {
 
   async listThreads(pageId: string, viewer?: WikiDiscussionViewer): Promise<WikiThreadSummary[]> {
     const accountId = this.viewerAccountId(viewer);
-    const page = await this.readablePage(pageId, accountId);
+    const actor = await this.viewerActor(viewer);
+    const page = await this.readablePage(pageId, accountId, undefined, actor);
     const candidates = await this.prisma.wikiDiscussionThread.findMany({
       where: { pageId: page.id, status: { not: 'deleted' } },
       orderBy: [{ updatedAt: 'desc' }],
       take: 100
     });
-    const actor = await this.viewerActor(viewer);
     const visible = await this.wikiPermissions.filterReadableThreads({
       accountId,
       actor,
@@ -263,7 +263,8 @@ export class WikiDiscussionService {
     includePreview = false
   ): Promise<WikiThreadListResponse> {
     const accountId = this.viewerAccountId(viewer);
-    const page = await this.readablePage(pageId, accountId);
+    const actor = await this.viewerActor(viewer);
+    const page = await this.readablePage(pageId, accountId, undefined, actor);
     const limit = Math.min(Math.max(requestedLimit, 1), 50);
     const cursorScope: WikiRecentDiscussionCursorScope = {
       kind: 'page', pageId: page.id.toString(), status: statusFilter, sort: 'newest',
@@ -286,7 +287,6 @@ export class WikiDiscussionService {
         ]
       } : {})
     });
-    const actor = await this.viewerActor(viewer);
     const visibleThreads: WikiDiscussionThread[] = [];
     let scanPosition = decoded ? { updatedAt: decoded.updatedAt, id: decoded.id } : null;
     let lastScanned: WikiDiscussionThread | undefined;
@@ -404,7 +404,8 @@ export class WikiDiscussionService {
     session?: SessionPayload | null,
     requestIp?: string | null,
   ): Promise<{ readonly canCreateThread: boolean }> {
-    const page = await this.readablePage(pageId, session?.userId ?? null, requestIp);
+    const actor = await this.viewerActor(session);
+    const page = await this.readablePage(pageId, session?.userId ?? null, requestIp, actor);
     let canCreateThread = false;
     if (session) {
       const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
@@ -667,9 +668,9 @@ export class WikiDiscussionService {
     const id = this.parseId(threadId, 'threadId');
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id } });
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-    const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null, requestIp);
-    const markupContext = await this.discussionMarkupContext(page);
     const viewerActor = await this.viewerActor(session);
+    const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null, requestIp, viewerActor);
+    const markupContext = await this.discussionMarkupContext(page);
     await this.wikiPermissions.assertCanReadThread({
       accountId: session?.userId ?? null,
       actor: viewerActor,
@@ -1200,9 +1201,9 @@ export class WikiDiscussionService {
   async setSubscription(session: SessionPayload, threadId: string, subscribed: boolean): Promise<{ readonly subscribed: boolean }> {
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: this.parseId(threadId, 'threadId') } });
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-    const page = await this.readablePage(thread.pageId.toString(), session.userId);
     const profile = await this.wikiProfiles.ensureWikiProfile(session.userId);
     const actor = this.wikiPermissions.actorFromSession(session, profile);
+    const page = await this.readablePage(thread.pageId.toString(), session.userId, undefined, actor);
     await this.wikiPermissions.assertCanReadThread({ accountId: session.userId, actor, thread, page });
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
@@ -1334,10 +1335,11 @@ export class WikiDiscussionService {
   async getCommentRaw(threadId: string, commentId: string, session?: SessionPayload | null): Promise<string> {
     const thread = await this.prisma.wikiDiscussionThread.findUnique({ where: { id: this.parseId(threadId, 'threadId') } });
     if (!thread || thread.status === 'deleted') throw new NotFoundException('Wiki discussion thread not found.');
-    const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null);
+    const actor = await this.viewerActor(session);
+    const page = await this.readablePage(thread.pageId.toString(), session?.userId ?? null, undefined, actor);
     await this.wikiPermissions.assertCanReadThread({
       accountId: session?.userId ?? null,
-      actor: await this.viewerActor(session),
+      actor,
       thread,
       page
     });
@@ -1483,11 +1485,48 @@ export class WikiDiscussionService {
     return this.getThread(thread.id.toString(), session);
   }
 
-  private async readablePage(pageId: string, accountId: string | null, requestIp?: string | null) {
+  private async readablePage(
+    pageId: string,
+    accountId: string | null,
+    requestIp?: string | null,
+    actor?: Awaited<ReturnType<WikiDiscussionService['viewerActor']>>,
+  ): Promise<WikiPage> {
     const page = await this.prisma.wikiPage.findUnique({ where: { id: this.parseId(pageId, 'pageId') } });
     if (!page) throw new NotFoundException('Wiki page not found.');
-    await this.wikiPermissions.assertCanReadPage({ accountId, page, requestIp });
-    return page;
+    const permissionSurface = this.wikiPermissions as unknown as {
+      resolvePublishedPageBoundary?: WikiPermissionService['resolvePublishedPageBoundary'];
+    };
+    const boundary = permissionSurface.resolvePublishedPageBoundary
+      ? await permissionSurface.resolvePublishedPageBoundary.call(this.wikiPermissions, { actor, page })
+      : null;
+    const readablePage = boundary ? this.pageFromReleaseItem(page, boundary.currentItem) : page;
+    await this.wikiPermissions.assertCanReadPage({
+      accountId,
+      actor,
+      page: readablePage,
+      requestIp,
+      publicationProof: boundary ? { boundary, item: boundary.currentItem } : undefined,
+    });
+    return readablePage;
+  }
+
+  private pageFromReleaseItem(page: WikiPage, item: ServerWikiReleaseItem): WikiPage {
+    return {
+      ...page,
+      namespaceId: item.namespaceId,
+      spaceId: item.spaceId,
+      localPath: item.localPath,
+      slug: item.slug,
+      title: item.title,
+      displayTitle: item.displayTitle,
+      currentRevisionId: item.revisionId,
+      pageType: item.pageType,
+      protectionLevel: item.protectionLevel,
+      status: item.pageStatus,
+      createdBy: item.createdBy,
+      ownerProfileId: item.ownerProfileId,
+      updatedAt: item.pageUpdatedAt,
+    };
   }
 
   private async discussionMarkupContext(page: { namespaceId: number; spaceId: bigint; localPath: string }) {
