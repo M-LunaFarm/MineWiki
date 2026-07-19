@@ -556,7 +556,7 @@ model OAuthCredential {
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@unique([accountId, provider, providerUserId])
-  @@index([provider, providerUserId])
+  @@unique([provider, providerUserId])
   @@index([expiresAt])
   @@map("oauth_credentials")
 }

@@ -257,6 +257,40 @@ if (!hasDatabase) {
     }
   });
 
+  test('OAuth credential writes rehome one provider identity onto the canonical account', async () => {
+    const canonicalId = await createAccount();
+    const aliasId = await createAccount();
+    const providerUserId = `discord-${randomUUID()}`;
+    const config = { getOptional() { return undefined; } };
+    try {
+      await prisma.accountLink.createMany({ data: [
+        { primaryAccountId: canonicalId, linkedAccountId: aliasId },
+        { primaryAccountId: aliasId, linkedAccountId: canonicalId },
+      ] });
+      await prisma.account.updateMany({
+        where: { id: { in: [canonicalId, aliasId] } },
+        data: { canonicalAccountId: canonicalId },
+      });
+      const oauth = new OAuthFlowService(config as never, prisma);
+      await oauth.storeCredential(aliasId, 'discord', providerUserId, {
+        accessToken: 'first-token',
+        refreshToken: 'first-refresh',
+      });
+      await oauth.storeCredential(canonicalId, 'discord', providerUserId, {
+        accessToken: 'second-token',
+        refreshToken: 'second-refresh',
+      });
+
+      const credentials = await prisma.oAuthCredential.findMany({
+        where: { provider: 'discord', providerUserId },
+        select: { accountId: true },
+      });
+      assert.deepEqual(credentials, [{ accountId: canonicalId }]);
+    } finally {
+      await cleanup([canonicalId, aliasId]);
+    }
+  });
+
   async function createAccount(options: { email?: string; passwordHash?: string } = {}): Promise<string> {
     const id = randomUUID();
     const email = options.email ?? `fence-${id}@example.invalid`;

@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, Optional, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@minewiki/config';
 import { PrismaService } from '../common/prisma.service';
 import { decryptAppSecret, encryptAppSecret } from '../common/secret-codec';
@@ -29,6 +29,7 @@ type OAuthCredentialRecord = {
 
 @Injectable()
 export class GuildAccessService {
+  private readonly logger = new Logger(GuildAccessService.name);
   private readonly guildSettings: GuildSettingsRepository;
 
   constructor(
@@ -81,16 +82,29 @@ export class GuildAccessService {
       orderBy: [{ updatedAt: 'desc' }],
     });
 
-    const manageable = new Set<string>();
+    const credentialByIdentity = new Map<string, OAuthCredentialRecord>();
     for (const credential of credentials) {
+      if (!credentialByIdentity.has(credential.providerUserId)) {
+        credentialByIdentity.set(credential.providerUserId, credential);
+      }
+    }
+    const manageable = new Set<string>();
+    for (const credential of credentialByIdentity.values()) {
       if (!hasScope(credential.scope, 'guilds')) {
         continue;
       }
-      const guilds = await this.fetchDiscordGuilds(await this.ensureFreshCredential(credential));
-      for (const guild of guilds) {
-        if (guild.id && canManageDiscordGuild(guild)) {
-          manageable.add(guild.id);
+      try {
+        const guilds = await this.fetchDiscordGuilds(await this.ensureFreshCredential(credential));
+        for (const guild of guilds) {
+          if (guild.id && canManageDiscordGuild(guild)) {
+            manageable.add(guild.id);
+          }
         }
+      } catch (error) {
+        this.logger.warn({
+          credentialId: credential.id,
+          reason: error instanceof Error ? error.name : 'unknown',
+        }, 'Discord OAuth credential could not be used for guild access');
       }
     }
     return manageable;

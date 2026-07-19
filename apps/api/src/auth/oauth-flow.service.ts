@@ -1,5 +1,6 @@
 ﻿import {
   BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -344,17 +345,31 @@ export class OAuthFlowService {
     if (!credential?.accessToken) {
       return;
     }
-    await withActiveCanonicalAccountGroup(this.prisma, [accountId], async (tx) => {
+    await withActiveCanonicalAccountGroup(this.prisma, [accountId], async (tx, group) => {
+      const account = await tx.account.findUnique({
+        where: { id: accountId },
+        select: { canonicalAccountId: true },
+      });
+      const canonicalAccountId = account?.canonicalAccountId ?? accountId;
+      if (!group.accountIds.includes(canonicalAccountId)) {
+        throw new ConflictException('OAuth 계정의 canonical 연결 상태가 올바르지 않습니다.');
+      }
+      const owner = await tx.oAuthCredential.findUnique({
+        where: { provider_providerUserId: { provider, providerUserId } },
+        select: { accountId: true },
+      });
+      if (owner && !group.accountIds.includes(owner.accountId)) {
+        throw new ConflictException('이 OAuth 계정은 다른 MineWiki 계정에 연결되어 있습니다.');
+      }
       await tx.oAuthCredential.upsert({
       where: {
-        accountId_provider_providerUserId: {
-          accountId,
+        provider_providerUserId: {
           provider,
           providerUserId
         }
       },
       create: {
-        accountId,
+        accountId: canonicalAccountId,
         provider,
         providerUserId,
         accessToken: encryptAppSecret(credential.accessToken) ?? credential.accessToken,
@@ -364,6 +379,7 @@ export class OAuthFlowService {
         expiresAt: credential.expiresAt ?? null
       },
       update: {
+        accountId: canonicalAccountId,
         accessToken: encryptAppSecret(credential.accessToken) ?? credential.accessToken,
         refreshToken: encryptAppSecret(credential.refreshToken),
         tokenType: credential.tokenType ?? null,

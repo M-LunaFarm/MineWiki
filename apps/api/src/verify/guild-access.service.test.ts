@@ -119,6 +119,38 @@ test('discord oauth guild permission allows manage guild access only', async () 
   }
 });
 
+test('guild access deduplicates Discord identities and isolates one stale credential', async () => {
+  const originalFetch = global.fetch;
+  const requestedTokens: string[] = [];
+  global.fetch = async (_input, init) => {
+    const token = new Headers(init?.headers).get('Authorization') ?? '';
+    requestedTokens.push(token);
+    if (token === 'Bearer stale-token') return new Response('{}', { status: 401 });
+    return new Response(JSON.stringify([{ id: 'guild-safe', owner: true, permissions: '0' }]), { status: 200 });
+  };
+  const prisma = {
+    accountLink: { async findMany() { return []; } },
+    oAuthCredential: {
+      async findMany() {
+        return [
+          { id: 'newest-duplicate', accountId: 'account-1', providerUserId: 'discord-duplicate', accessToken: 'stale-token', refreshToken: null, tokenType: 'Bearer', scope: 'guilds', expiresAt: null },
+          { id: 'older-duplicate', accountId: 'account-2', providerUserId: 'discord-duplicate', accessToken: 'must-not-run', refreshToken: null, tokenType: 'Bearer', scope: 'guilds', expiresAt: null },
+          { id: 'working', accountId: 'account-1', providerUserId: 'discord-working', accessToken: 'working-token', refreshToken: null, tokenType: 'Bearer', scope: 'guilds', expiresAt: null },
+        ];
+      },
+    },
+  };
+  const service = new GuildAccessService(prisma as never, config() as never);
+  const session = { sessionId: 'session-1', userId: 'account-1', isElevated: false };
+
+  try {
+    await assert.doesNotReject(() => service.assertCanManageGuild(session, 'guild-safe'));
+    assert.deepEqual(requestedTokens, ['Bearer stale-token', 'Bearer working-token']);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 function config(): Pick<ConfigService, 'getOptional'> {
   return {
     getOptional() {
