@@ -296,6 +296,7 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
               id: storedServer.id,
               ownerAccountId: null,
               registrantAccountId: storedServer.registrantAccountId,
+              registrationLeaseExpiresAt: storedServer.registrationLeaseExpiresAt,
               listingStatus: 'pending',
               createdAt: storedServer.createdAt,
               updatedAt: storedServer.updatedAt,
@@ -336,6 +337,7 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
           latencyMs: null,
           ownerAccountId: null,
           registrantAccountId: data.registrantAccountId,
+          registrationLeaseExpiresAt: data.registrationLeaseExpiresAt,
           listingStatus: 'pending',
           createdAt: now,
           updatedAt: now,
@@ -390,6 +392,17 @@ test('registration canonicalizes endpoints and rejects disguised duplicates', as
   const nextRegistrantAccountId = randomUUID();
   if (storedServer) {
     storedServer.createdAt = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  }
+  await assert.rejects(
+    () => service.register({
+      ...base,
+      joinHost: 'one.one.one.one',
+      registrantAccountId: nextRegistrantAccountId,
+    }),
+    /이미 등록되어 있습니다/,
+  );
+  if (storedServer) {
+    storedServer.registrationLeaseExpiresAt = new Date(Date.now() - 1_000);
   }
   const reclaimed = await service.register({
     ...base,

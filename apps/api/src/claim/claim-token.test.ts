@@ -21,10 +21,11 @@ test('legacy plaintext claim tokens remain verifiable during rotation', () => {
 test('token issuance stores a hash plus encrypted proof and reveals the token once', async () => {
   let storedToken = '';
   let storedCiphertext = '';
+  let leaseUpdate: Record<string, unknown> | null = null;
   const previousKey = process.env.APP_ENCRYPTION_KEY;
   process.env.APP_ENCRYPTION_KEY = 'claim-token-test-key';
   const serverService = {
-    ensureExists: async () => ({ ownerAccountId: null }),
+    ensureExists: async () => ({ ownerAccountId: null, registrantAccountId: 'account-1' }),
   };
   const prisma = {
     serverClaimMethod: {
@@ -41,9 +42,13 @@ test('token issuance stores a hash plus encrypted proof and reveals the token on
       findMany: async () => [],
     },
     server: {
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+        leaseUpdate = data;
+        return { count: 1 };
+      },
       update: async () => ({}),
     },
-    $transaction: async (operations: Array<Promise<unknown>>) => Promise.all(operations),
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
   };
   try {
     const service = new ClaimService(serverService as never, prisma as never);
@@ -56,6 +61,11 @@ test('token issuance stores a hash plus encrypted proof and reveals the token on
     assert.notEqual(storedCiphertext, issued.token);
     assert.equal(matchesClaimToken(storedToken, issued.token), true);
     assert.equal(decryptAppSecret(storedCiphertext), issued.token);
+    assert.equal(leaseUpdate?.registrantAccountId, 'account-1');
+    assert.ok(leaseUpdate?.registrationLeaseExpiresAt instanceof Date);
+    assert.ok(
+      (leaseUpdate.registrationLeaseExpiresAt as Date).getTime() > Date.now() + 23 * 60 * 60 * 1000,
+    );
   } finally {
     if (previousKey === undefined) {
       delete process.env.APP_ENCRYPTION_KEY;
@@ -92,6 +102,32 @@ test('only the registering account can start the first ownership claim', async (
     () => service.issueTokens('server-1', 'account-attacker', ['dns']),
     /서버를 등록한 계정만 최초 소유권 검증을 시작할 수 있습니다/,
   );
+});
+
+test('token issuance rechecks the registration lease inside the write transaction', async () => {
+  let tokenWrites = 0;
+  const prisma = {
+    server: {
+      updateMany: async () => ({ count: 0 }),
+      findUnique: async () => ({ ownerAccountId: null, registrantAccountId: 'account-new' }),
+    },
+    serverClaimMethod: {
+      upsert: async () => { tokenWrites += 1; return {}; },
+    },
+    $transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback(prisma),
+  };
+  const service = new ClaimService(
+    {
+      ensureExists: async () => ({ ownerAccountId: null, registrantAccountId: 'account-old' }),
+    } as never,
+    prisma as never,
+  );
+
+  await assert.rejects(
+    () => service.issueTokens('server-1', 'account-old', ['dns']),
+    /서버를 등록한 계정만 최초 소유권 검증을 시작할 수 있습니다/,
+  );
+  assert.equal(tokenWrites, 0);
 });
 
 test('successful ownership verification promotes registrant to owner atomically', async () => {
@@ -140,7 +176,7 @@ test('successful ownership verification promotes registrant to owner atomically'
   });
 
   assert.deepEqual(updates, [
-    { ownerAccountId: 'account-registrant', registrantAccountId: null },
+    { ownerAccountId: 'account-registrant', registrantAccountId: null, registrationLeaseExpiresAt: null },
     { listingStatus: 'active' },
   ]);
 });

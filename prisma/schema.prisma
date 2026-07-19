@@ -589,43 +589,44 @@ model MinecraftIdentity {
 }
 
 model Server {
-  id                      String              @id @default(uuid())
-  shortCode               String?             @unique @db.VarChar(12)
-  ownerAccountId          String?
-  registrantAccountId     String?
-  registrationEndpointKey String?             @unique @db.Char(64)
-  wikiSpaceId             BigInt?             @unique @db.UnsignedBigInt
-  wikiPageId              BigInt?             @unique @db.UnsignedBigInt
-  wikiSlug                String?
-  name                    String
-  joinHost                String
-  joinPort                Int
-  edition                 ServerEdition
-  listingStatus           ServerListingStatus @default(pending)
-  supportedVersions       Json
-  tags                    Json
-  shortDescription        String
-  longDescription         String
-  bannerUrl               String?
-  websiteUrl              String?
-  discordUrl              String?
-  voteCooldownHours       Int                 @default(24)
-  verificationGrade       VerificationGrade   @default(Unverified)
-  verifiedAt              DateTime?
-  votes24h                Int                 @default(0)
-  votesMonthly            Int?
-  reviewsCount            Int                 @default(0)
-  voteRequiresOwnership   Boolean             @default(false)
-  playersOnline           Int?
-  playersMax              Int?
-  playersLastUpdatedAt    DateTime?
-  playersMetricTrust      PlayerMetricTrust   @default(unknown)
-  playersMetricSource     PlayerMetricSource?
-  playersAnomalyReason    String?             @db.VarChar(64)
-  isOnline                Boolean?
-  latencyMs               Int?
-  createdAt               DateTime            @default(now())
-  updatedAt               DateTime            @updatedAt
+  id                         String              @id @default(uuid())
+  shortCode                  String?             @unique @db.VarChar(12)
+  ownerAccountId             String?
+  registrantAccountId        String?
+  registrationLeaseExpiresAt DateTime?           @map("registration_lease_expires_at") @db.DateTime(3)
+  registrationEndpointKey    String?             @unique @db.Char(64)
+  wikiSpaceId                BigInt?             @unique @db.UnsignedBigInt
+  wikiPageId                 BigInt?             @unique @db.UnsignedBigInt
+  wikiSlug                   String?
+  name                       String
+  joinHost                   String
+  joinPort                   Int
+  edition                    ServerEdition
+  listingStatus              ServerListingStatus @default(pending)
+  supportedVersions          Json
+  tags                       Json
+  shortDescription           String
+  longDescription            String
+  bannerUrl                  String?
+  websiteUrl                 String?
+  discordUrl                 String?
+  voteCooldownHours          Int                 @default(24)
+  verificationGrade          VerificationGrade   @default(Unverified)
+  verifiedAt                 DateTime?
+  votes24h                   Int                 @default(0)
+  votesMonthly               Int?
+  reviewsCount               Int                 @default(0)
+  voteRequiresOwnership      Boolean             @default(false)
+  playersOnline              Int?
+  playersMax                 Int?
+  playersLastUpdatedAt       DateTime?
+  playersMetricTrust         PlayerMetricTrust   @default(unknown)
+  playersMetricSource        PlayerMetricSource?
+  playersAnomalyReason       String?             @db.VarChar(64)
+  isOnline                   Boolean?
+  latencyMs                  Int?
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
 
   ownerAccount         Account?              @relation("ServerOwner", fields: [ownerAccountId], references: [id], onDelete: SetNull)
   registrantAccount    Account?              @relation("ServerRegistrant", fields: [registrantAccountId], references: [id], onDelete: SetNull)
@@ -643,6 +644,7 @@ model Server {
 
   @@index([ownerAccountId])
   @@index([registrantAccountId])
+  @@index([listingStatus, registrationLeaseExpiresAt], map: "idx_server_registration_lease")
   @@index([wikiSpaceId])
   @@index([wikiSlug])
   @@index([verificationGrade])

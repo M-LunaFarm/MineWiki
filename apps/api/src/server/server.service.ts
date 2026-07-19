@@ -1699,6 +1699,9 @@ export class ServerService {
             discordUrl: serverInput.discordUrl ?? null,
             ownerAccountId: serverInput.ownerAccountId ?? null,
             registrantAccountId: serverInput.registrantAccountId ?? null,
+            registrationLeaseExpiresAt: serverInput.registrantAccountId && !serverInput.ownerAccountId
+              ? new Date(Date.now() + REGISTRATION_RESERVATION_TTL_MS)
+              : null,
             voteCooldownHours: 24,
             verificationGrade: 'Unverified',
             votes24h: 0,
@@ -1772,6 +1775,7 @@ export class ServerService {
         id: true,
         ownerAccountId: true,
         registrantAccountId: true,
+        registrationLeaseExpiresAt: true,
         listingStatus: true,
         createdAt: true,
         updatedAt: true,
@@ -1791,8 +1795,9 @@ export class ServerService {
       return this.detail(existing.id, serverInput.registrantAccountId);
     }
 
-    const reservationExpired = existing.createdAt.getTime()
-      <= Date.now() - REGISTRATION_RESERVATION_TTL_MS;
+    const reservationExpiresAt = existing.registrationLeaseExpiresAt
+      ?? new Date(existing.createdAt.getTime() + REGISTRATION_RESERVATION_TTL_MS);
+    const reservationExpired = reservationExpiresAt.getTime() <= Date.now();
     if (!isUnclaimedPending || !reservationExpired || !serverInput.registrantAccountId) {
       throw new ConflictException('같은 에디션과 접속 주소를 사용하는 서버가 이미 등록되어 있습니다.');
     }
@@ -1805,10 +1810,12 @@ export class ServerService {
           ownerAccountId: null,
           listingStatus: 'pending',
           registrantAccountId: existing.registrantAccountId,
+          registrationLeaseExpiresAt: existing.registrationLeaseExpiresAt,
           updatedAt: existing.updatedAt,
         },
         data: {
           registrantAccountId: serverInput.registrantAccountId,
+          registrationLeaseExpiresAt: new Date(Date.now() + REGISTRATION_RESERVATION_TTL_MS),
           name: serverInput.name,
           joinHost: normalizeMinecraftServerHost(serverInput.joinHost),
           joinPort: serverInput.joinPort,

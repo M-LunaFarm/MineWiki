@@ -29,6 +29,7 @@ export interface ClaimVerificationResult {
 }
 
 const METHOD_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24h
+const REGISTRATION_LEASE_MS = 24 * 60 * 60 * 1000;
 type StoredVerificationGrade = 'A' | 'B' | 'C' | 'Unverified';
 
 interface ClaimMethodSnapshot {
@@ -77,9 +78,36 @@ export class ClaimService {
     );
 
     const now = new Date();
-    const updates = await this.prisma.$transaction(
-      targets.map((method) =>
-        this.prisma.serverClaimMethod.upsert({
+    const updates = await this.prisma.$transaction(async (transaction) => {
+      const lease = await transaction.server.updateMany({
+        where: {
+          id: serverId,
+          ownerAccountId: null,
+          OR: [
+            { registrantAccountId: accountId },
+            { registrantAccountId: null },
+          ],
+        },
+        data: {
+          registrantAccountId: accountId,
+          registrationLeaseExpiresAt: new Date(now.getTime() + REGISTRATION_LEASE_MS),
+        },
+      });
+      if (lease.count !== 1) {
+        const current = await transaction.server.findUnique({
+          where: { id: serverId },
+          select: { ownerAccountId: true, registrantAccountId: true },
+        });
+        if (!current || current.ownerAccountId !== accountId) {
+          throw new ForbiddenException(
+            current?.ownerAccountId
+              ? '해당 서버를 검증할 권한이 없습니다.'
+              : '서버를 등록한 계정만 최초 소유권 검증을 시작할 수 있습니다.',
+          );
+        }
+      }
+      return Promise.all(targets.map((method) =>
+        transaction.serverClaimMethod.upsert({
           where: {
             serverId_method: {
               serverId,
@@ -109,8 +137,8 @@ export class ClaimService {
             version: { increment: 1 },
           },
         }),
-      ),
-    );
+      ));
+    });
 
     await this.syncGrade(serverId);
     return updates.map((method) =>
@@ -201,6 +229,7 @@ export class ClaimService {
           data: {
             ownerAccountId: snapshot.accountId,
             registrantAccountId: null,
+            registrationLeaseExpiresAt: null,
           },
         });
         if (ownership.count !== 1) {
