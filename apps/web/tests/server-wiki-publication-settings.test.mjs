@@ -33,6 +33,7 @@ test('server wiki settings exposes a mobile-safe publication lifecycle', async (
   assert.match(publication, /publication\.readiness\.ready/u);
   for (const blocker of [
     'missing_required_documents',
+    'thin_required_document',
     'incomplete_introduction',
     'placeholder_rules',
     'missing_official_channel',

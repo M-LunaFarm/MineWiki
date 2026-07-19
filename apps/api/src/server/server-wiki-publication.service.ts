@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { isPublicWikiPageStatus } from '@minewiki/wiki-core/page-status';
-import { buildWikiSearchVector, hashContent } from '@minewiki/wiki-core';
+import { buildWikiSearchVector, hashContent, parseMarkup } from '@minewiki/wiki-core';
 import { PrismaService } from '../common/prisma.service';
 import { toAuditJson } from '../events/business-event.service';
 import { writeAuditRecord } from '../events/audit-event-writer';
@@ -110,6 +110,7 @@ export type ServerWikiPublicationReadinessBlocker =
   | 'missing_public_root_revision'
   | 'missing_public_document'
   | 'missing_required_documents'
+  | 'thin_required_document'
   | 'incomplete_introduction'
   | 'placeholder_rules'
   | 'missing_official_channel'
@@ -984,7 +985,7 @@ export class ServerWikiPublicationService {
             id: { in: documents.flatMap((page) => page.currentRevisionId ? [page.currentRevisionId] : []) },
             visibility: 'public',
           },
-          select: { id: true, pageId: true, contentHash: true },
+          select: { id: true, pageId: true, contentHash: true, contentRaw: true },
         })
       : [];
     const revisionById = new Map(revisions.map((revision) => [revision.id, revision]));
@@ -998,6 +999,11 @@ export class ServerWikiPublicationService {
     const publicRequiredPaths = requiredPaths.filter(isPublicCurrentDocument);
     if (publicRequiredPaths.length === 0) blockers.push('missing_public_document');
     if (publicRequiredPaths.length !== requiredPaths.length) blockers.push('missing_required_documents');
+    if (publicRequiredPaths.some((path) => {
+      const page = documentByPath.get(path)!;
+      const revision = revisionById.get(page.currentRevisionId!)!;
+      return parseMarkup(revision.contentRaw).plainText.length < 120;
+    })) blockers.push('thin_required_document');
 
     if (isPublicCurrentDocument(context.contentSlug)) {
       const page = documentByPath.get(context.contentSlug)!;

@@ -15,6 +15,7 @@ type ReadinessBlocker =
   | 'missing_public_root_revision'
   | 'missing_public_document'
   | 'missing_required_documents'
+  | 'thin_required_document'
   | 'incomplete_introduction'
   | 'placeholder_rules'
   | 'missing_official_channel'
@@ -97,6 +98,7 @@ const BLOCKER_COPY: Record<ReadinessBlocker, string> = {
   missing_public_root_revision: '대문에 공개 가능한 최신 판이 없습니다.',
   missing_public_document: '공개 가능한 문서를 한 개 이상 준비해 주세요.',
   missing_required_documents: '대문·시작하기·규칙·FAQ 문서를 모두 공개 가능한 상태로 준비해 주세요.',
+  thin_required_document: '대문·시작하기·규칙·FAQ에 각각 실제 안내 내용을 120자 이상 작성해 주세요.',
   incomplete_introduction: '대문에 실제 서버 소개를 80자 이상 작성하거나 기본 본문을 직접 보강해 주세요.',
   placeholder_rules: '기본 규칙 체크리스트를 서버의 실제 공식 규칙으로 교체해 주세요.',
   missing_official_channel: '공식 홈페이지 또는 Discord 채널을 서버 정보에 등록해 주세요.',

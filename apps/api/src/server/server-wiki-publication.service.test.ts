@@ -27,6 +27,7 @@ interface FixtureOptions {
   readonly shortIntroduction?: boolean;
   readonly missingOfficialChannel?: boolean;
   readonly staleSearchIndex?: boolean;
+  readonly thinRequiredDocument?: boolean;
   readonly reviewerConfigured?: boolean;
   readonly ownershipSuspended?: boolean;
   readonly notifications?: {
@@ -95,10 +96,24 @@ function createFixture(options: FixtureOptions = {}) {
     ...starters.map((page) => ({
       path: `${wiki.slug}/${page.path}`,
       contentRaw: page.path === '규칙' && !options.placeholderRules
-        ? '= 공식 서버 규칙 =\n\n서버 운영자가 확인한 실제 플레이 및 커뮤니티 정책입니다.'
+        ? `= 공식 서버 규칙 =
+
+== 플레이 기준 ==
+* 허용되지 않은 클라이언트와 자동화 도구를 사용하지 않습니다.
+* 다른 플레이어의 건축물과 아이템을 동의 없이 훼손하거나 가져가지 않습니다.
+
+== 커뮤니티 기준 ==
+* 채팅에서는 욕설, 혐오 표현, 도배와 개인정보 공개를 금지합니다.
+* 제재에 이의가 있으면 공식 홈페이지 문의 양식으로 증거와 함께 접수합니다.
+
+규칙 변경은 공식 공지 채널에 시행 시각과 함께 안내합니다.`
         : page.contentRaw,
     })),
   ].filter((page) => !(options.missingRequiredDocument && page.path.endsWith('/FAQ')));
+  if (options.thinRequiredDocument) {
+    const faq = sourceDocuments.find((page) => page.path.endsWith('/FAQ'));
+    if (faq) faq.contentRaw = 'x';
+  }
   const documentRows = sourceDocuments.map((document, index) => ({
     id: BigInt(100 + index),
     namespaceId: 7,
@@ -486,13 +501,14 @@ test('publish copies the submitted immutable candidate after the working draft c
   const fixture = createFixture();
   const submission = await fixture.submitCandidate();
   const root = fixture.documentRows[0]!;
+  const changedAfterReview = '= 검토 뒤 작업본 =\n\n검토가 끝난 뒤 작성 중인 작업본은 충분한 안내 내용을 담고 있지만, 이번 공개에는 제출 당시의 불변 후보만 포함되어야 합니다. 서버 접속 정보, 이용 규칙, 문의 경로와 변경 공지를 별도 검토 없이 앞당겨 공개해서는 안 됩니다.';
   root.currentRevisionId = 999n;
   root.searchDocument.revisionId = 999n;
   fixture.revisionRows.push({
     ...fixture.revisionRows[0]!,
     id: 999n,
-    contentRaw: '= changed after review =',
-    contentHash: hashContent('= changed after review ='),
+    contentRaw: changedAfterReview,
+    contentHash: hashContent(changedAfterReview),
   });
 
   const published = await fixture.service.update(serverId, {
@@ -898,6 +914,16 @@ test('publish blocks thin starter content, missing channels, and stale search in
       && JSON.stringify(error.getResponse()).includes('missing_required_documents'),
   );
   assert.equal(missingDocument.audits.length, 0);
+
+  const thinDocument = createFixture({ thinRequiredDocument: true });
+  await assert.rejects(
+    () => thinDocument.service.update(serverId, {
+      status: 'published', expectedVersion: 0, candidateId: '1', expectedCandidateToken: '0'.repeat(64), reason: 'attempted one-character document launch',
+    }, thinDocument.actor),
+    (error: unknown) => error instanceof ConflictException
+      && JSON.stringify(error.getResponse()).includes('thin_required_document'),
+  );
+  assert.equal(thinDocument.audits.length, 0);
 });
 
 test('stale versions, repeated unpublish, and inconsistent links fail without audit', async () => {

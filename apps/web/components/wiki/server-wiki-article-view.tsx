@@ -60,6 +60,9 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
   };
   const contentId = `wiki-content-${page.id}`;
   const documentTitle = serverWikiDocumentTitle(page.displayTitle, [wiki.slug, wiki.contentSlug], wiki.name);
+  const hidesLeadingContentTitle = page.headings[0]?.level === 1
+    && normalizeDocumentTitle(page.headings[0].title) === normalizeDocumentTitle(documentTitle);
+  const visibleHeadings = hidesLeadingContentTitle ? page.headings.slice(1) : page.headings;
 
   const updatedAt = new Intl.DateTimeFormat('ko-KR', {
     dateStyle: 'medium',
@@ -158,15 +161,15 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
             />
           ) : null}
 
-          {page.headings.length > 0 ? (
+          {visibleHeadings.length > 0 ? (
             <details className="mt-6 border-y border-[#e8e8e8] 2xl:hidden">
               <summary className="flex min-h-12 cursor-pointer items-center gap-2 py-2 text-sm font-semibold text-[#444]">
                 <List className="size-4 text-[#777]" aria-hidden="true" />
                 <span>이 페이지에서 찾기</span>
-                <span className="ml-auto text-xs font-normal text-[#888]">{page.headings.length}개 섹션</span>
+                <span className="ml-auto text-xs font-normal text-[#888]">{visibleHeadings.length}개 섹션</span>
               </summary>
               <ul className="space-y-1 border-t border-[#ededed] py-3">
-                {page.headings.map((heading, index) => (
+                {visibleHeadings.map((heading, index) => (
                   <li key={`${heading.anchor}-mobile-${index}`} className="flex items-center gap-2 text-sm">
                     <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-h-11 min-w-0 flex-1 py-3 text-[#666] hover:text-[#346ddb]">{heading.title}</a>
                     <Link href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`} className="grid size-11 shrink-0 place-items-center rounded text-[#888] hover:bg-[#f3f3f3] hover:text-[#346ddb]" aria-label={`${heading.title} 섹션 편집`}><PencilLine className="size-3.5" /></Link>
@@ -176,7 +179,7 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
             </details>
           ) : null}
 
-          <div id={contentId} className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: rewriteServerWikiHtmlLinks(page.html, routeContext) }} />
+          <div id={contentId} className={`server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0 ${hidesLeadingContentTitle ? 'server-wiki-hide-leading-title' : ''}`} dangerouslySetInnerHTML={{ __html: rewriteServerWikiHtmlLinks(page.html, routeContext) }} />
           <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
           <WikiReaderInteractionHydrator targetId={contentId} revisionId={page.revision.id} />
 
@@ -239,7 +242,7 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
             <section>
               <h2 className="flex items-center gap-2 text-sm font-semibold text-[#444]"><List className="size-4" />이 페이지</h2>
               <nav className="mt-4 space-y-2 border-l border-[#e2e2e2] pl-4 text-sm" aria-label="문서 목차">
-                {(page.headings?.length ?? 0) > 0 ? page.headings.map((heading) => (
+                {visibleHeadings.length > 0 ? visibleHeadings.map((heading) => (
                   <span key={`${heading.anchor}-${heading.level}`} className={`flex items-center gap-2 ${heading.level > 2 ? 'pl-3 text-xs' : ''}`}>
                     <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-w-0 flex-1 truncate text-[#666] transition hover:text-[#346ddb]">{heading.title}</a>
                     <Link href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`} className="rounded p-1 text-[#999] hover:bg-[#f3f3f3] hover:text-[#346ddb]" aria-label={`${heading.title} 섹션 편집`}><PencilLine className="size-3" /></Link>
@@ -258,6 +261,10 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
 
 function Info({ label, value }: { readonly label: string; readonly value: string }) {
   return <div><p className="text-xs font-semibold uppercase tracking-wider text-[#777]">{label}</p><p className="mt-2 break-all text-sm font-medium text-[#333]">{value}</p></div>;
+}
+
+function normalizeDocumentTitle(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/gu, ' ').trim().toLocaleLowerCase('ko-KR');
 }
 
 function WikiPager({ item, direction }: { readonly item: { title: string; path: string } | null; readonly direction: 'previous' | 'next' }) {
