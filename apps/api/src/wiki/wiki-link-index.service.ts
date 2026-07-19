@@ -7,6 +7,15 @@ type WikiLinkStore = Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPag
 
 @Injectable()
 export class WikiLinkIndexService {
+  async clearForPage(store: WikiLinkStore, pageId: bigint): Promise<void> {
+    await store.wikiPageLink.deleteMany({ where: { sourcePageId: pageId } });
+    await store.wikiSearchDocument.deleteMany({ where: { pageId } });
+    await store.wikiPage.update({
+      where: { id: pageId },
+      data: { currentContentSize: 0, currentCategoryCount: 0 }
+    });
+  }
+
   async replaceForRevision(
     store: WikiLinkStore,
     pageId: bigint,

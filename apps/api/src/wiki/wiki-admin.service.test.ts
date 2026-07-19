@@ -4,6 +4,7 @@ import type { PrismaService } from '../common/prisma.service';
 import { WikiAdminService } from './wiki-admin.service';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { WikiLinkIndexService } from './wiki-link-index.service';
 
 interface TestRevision {
   id: bigint;
@@ -26,7 +27,7 @@ interface RevisionWhere {
   revisionNo?: { lt?: number };
 }
 
-function createService() {
+function createService(options: { readonly failIndex?: boolean } = {}) {
   const now = new Date('2026-07-06T00:00:00.000Z');
   const page = {
     id: 10n,
@@ -40,6 +41,7 @@ function createService() {
     pageType: 'article',
     protectionLevel: 'open',
     status: 'normal',
+    visibilityAutoHidden: false,
     createdBy: 1n,
     createdAt: now,
     updatedAt: now
@@ -83,9 +85,19 @@ function createService() {
   const changes: TestRecentChange[] = [];
   const renderCaches: Array<Record<string, unknown>> = [];
   const operations: string[] = [];
+  const indexEvents: Array<{ kind: 'replace' | 'clear'; revisionId?: bigint; contentRaw?: string }> = [];
   const prisma = {
     async $transaction<T>(callback: (tx: typeof prisma) => Promise<T>) {
-      return callback(prisma);
+      const pageSnapshot = { ...page };
+      const revisionSnapshots = new Map([...revisions].map(([id, revision]) => [id, { ...revision }]));
+      try {
+        return await callback(prisma);
+      } catch (error) {
+        Object.assign(page, pageSnapshot);
+        revisions.clear();
+        for (const [id, revision] of revisionSnapshots) revisions.set(id, revision);
+        throw error;
+      }
     },
     async $queryRaw() {
       operations.push('page:lock');
@@ -172,14 +184,35 @@ function createService() {
       }
     }
   };
+  const wikiLinks = {
+    async replaceForRevision(
+      _store: unknown,
+      _pageId: bigint,
+      revisionId: bigint,
+      _links: readonly string[],
+      _categories: readonly string[],
+      _includes: readonly string[],
+      metrics?: { readonly contentRaw?: string }
+    ) {
+      if (options.failIndex) throw new Error('derived index rebuild failed');
+      operations.push('index:replace');
+      indexEvents.push({ kind: 'replace', revisionId, contentRaw: metrics?.contentRaw });
+    },
+    async clearForPage() {
+      if (options.failIndex) throw new Error('derived index clear failed');
+      operations.push('index:clear');
+      indexEvents.push({ kind: 'clear' });
+    }
+  } as unknown as WikiLinkIndexService;
   return {
-    service: new WikiAdminService(prisma as unknown as PrismaService),
+    service: new WikiAdminService(prisma as unknown as PrismaService, undefined, wikiLinks),
     prisma: prisma as unknown as PrismaService,
     page,
     revisions,
     changes,
     renderCaches,
-    operations
+    operations,
+    indexEvents
   };
 }
 
@@ -410,7 +443,7 @@ test('wiki admin service hides current revision and falls back to previous publi
 });
 
 test('wiki admin hides a page when its sole public revision is hidden', async () => {
-  const { service, page, revisions } = createService();
+  const { service, page, revisions, indexEvents } = createService();
   revisions.get(100n)!.visibility = 'hidden';
 
   await service.updateRevisionVisibility({
@@ -419,6 +452,76 @@ test('wiki admin hides a page when its sole public revision is hidden', async ()
 
   assert.equal(page.currentRevisionId, null);
   assert.equal(page.status, 'hidden');
+  assert.equal(page.visibilityAutoHidden, true);
+  assert.deepEqual(indexEvents, [{ kind: 'clear' }]);
+});
+
+test('wiki admin atomically restores an auto-hidden page and rebuilds its derived index', async () => {
+  const { service, page, revisions, indexEvents } = createService();
+  revisions.get(100n)!.visibility = 'hidden';
+
+  await service.updateRevisionVisibility({
+    revisionId: '101', visibility: 'hidden', actorProfileId: 99n, reason: '유일 공개 판 숨김'
+  });
+  assert.equal(page.status, 'hidden');
+  assert.equal(page.currentRevisionId, null);
+
+  await service.updateRevisionVisibility({
+    revisionId: '101', visibility: 'public', actorProfileId: 99n, reason: '검토 완료 후 공개 복구'
+  });
+
+  assert.equal(page.status, 'normal');
+  assert.equal(page.visibilityAutoHidden, false);
+  assert.equal(page.currentRevisionId, 101n);
+  assert.deepEqual(indexEvents, [
+    { kind: 'clear' },
+    { kind: 'replace', revisionId: 101n, contentRaw: '두 번째 내용' }
+  ]);
+});
+
+test('wiki admin never auto-publishes an explicitly hidden page while restoring a revision', async () => {
+  const { service, page, revisions } = createService();
+  page.status = 'hidden';
+  page.currentRevisionId = 100n;
+  revisions.get(101n)!.visibility = 'hidden';
+
+  await service.updateRevisionVisibility({
+    revisionId: '101', visibility: 'public', actorProfileId: 99n, reason: '판만 공개 상태로 복원'
+  });
+
+  assert.equal(page.status, 'hidden');
+  assert.equal(page.currentRevisionId, 101n);
+});
+
+test('wiki admin never auto-publishes a deleted page while restoring a revision', async () => {
+  const { service, page, revisions, indexEvents } = createService();
+  page.status = 'deleted';
+  page.currentRevisionId = null;
+  revisions.get(101n)!.visibility = 'hidden';
+
+  await service.updateRevisionVisibility({
+    revisionId: '101', visibility: 'public', actorProfileId: 99n, reason: '삭제 문서의 판만 복원'
+  });
+
+  assert.equal(page.status, 'deleted');
+  assert.equal(page.currentRevisionId, 101n);
+  assert.deepEqual(indexEvents, [{ kind: 'clear' }]);
+});
+
+test('wiki admin rolls revision visibility and page state back when derived index synchronization fails', async () => {
+  const { service, page, revisions, changes } = createService({ failIndex: true });
+
+  await assert.rejects(
+    service.updateRevisionVisibility({
+      revisionId: '101', visibility: 'hidden', actorProfileId: 99n, reason: '파생 인덱스 실패 검증'
+    }),
+    /derived index rebuild failed/
+  );
+
+  assert.equal(revisions.get(101n)?.visibility, 'public');
+  assert.equal(page.currentRevisionId, 101n);
+  assert.equal(page.status, 'normal');
+  assert.equal(changes.length, 0);
 });
 
 test('wiki admin promotes a restored newer public revision back to current', async () => {
@@ -445,6 +548,23 @@ test('wiki admin refuses to restore a page without a public revision', async () 
     ConflictException
   );
   assert.equal(page.status, 'deleted');
+});
+
+test('wiki admin explicit delete and restore synchronize derived indexes and clear auto-hide provenance', async () => {
+  const { service, page, indexEvents } = createService();
+  page.visibilityAutoHidden = true;
+
+  await service.setPageStatus({ pageId: '10', status: 'deleted', actorProfileId: 99n, reason: '관리자 삭제' });
+  assert.equal(page.status, 'deleted');
+  assert.equal(page.visibilityAutoHidden, false);
+
+  await service.setPageStatus({ pageId: '10', status: 'normal', actorProfileId: 99n, reason: '관리자 복구' });
+  assert.equal(page.status, 'normal');
+  assert.equal(page.currentRevisionId, 101n);
+  assert.deepEqual(indexEvents, [
+    { kind: 'clear' },
+    { kind: 'replace', revisionId: 101n, contentRaw: '두 번째 내용' }
+  ]);
 });
 
 test('wiki admin visibility change never overwrites a newer current revision', async () => {

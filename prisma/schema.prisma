@@ -1458,6 +1458,7 @@ model WikiPage {
   pageType               String                  @default("article") @map("page_type") @db.VarChar(32)
   protectionLevel        String                  @default("open") @map("protection_level") @db.VarChar(32)
   status                 String                  @default("normal") @db.VarChar(32)
+  visibilityAutoHidden   Boolean                 @default(false) @map("visibility_auto_hidden")
   currentContentSize     Int                     @default(0) @map("current_content_size") @db.UnsignedInt
   currentCategoryCount   Int                     @default(0) @map("current_category_count") @db.UnsignedInt
   createdBy              BigInt?                 @map("created_by") @db.UnsignedBigInt

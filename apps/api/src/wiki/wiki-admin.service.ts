@@ -791,12 +791,34 @@ export class WikiAdminService {
           where: { id: revision.pageId },
           data: {
             currentRevisionId: latestPublic?.id ?? null,
-            ...(!latestPublic && page.status !== 'deleted' && page.status !== 'hidden'
-              ? { status: 'hidden' }
-              : {}),
+            ...(latestPublic && page.status === 'hidden' && page.currentRevisionId === null && page.visibilityAutoHidden
+              ? { status: 'normal', visibilityAutoHidden: false }
+              : !latestPublic && page.status !== 'deleted' && page.status !== 'hidden'
+                ? { status: 'hidden', visibilityAutoHidden: true }
+                : {}),
             updatedAt: new Date()
           }
         });
+        const wikiLinks = this.requiredWikiLinkIndex();
+        if (latestPublic && page.status !== 'deleted') {
+          const parsed = parseMarkup(latestPublic.contentRaw);
+          await wikiLinks.replaceForRevision(
+            tx,
+            page.id,
+            latestPublic.id,
+            parsed.links,
+            parsed.categories,
+            parsed.includes,
+            {
+              contentSize: latestPublic.contentSize,
+              contentRaw: latestPublic.contentRaw,
+              fileNames: [...collectWikiFileNames(parsed.ast)],
+              redirectTarget: parsed.redirectTarget
+            }
+          );
+        } else {
+          await wikiLinks.clearForPage(tx, page.id);
+        }
       }
       const namespace = await tx.wikiNamespace.findUnique({ where: { id: page.namespaceId } });
       await this.insertRecentChange({
@@ -895,7 +917,7 @@ export class WikiAdminService {
           }
         });
       }
-      await this.wikiLinks?.replaceForRevision(
+      await this.requiredWikiLinkIndex().replaceForRevision(
         tx,
         page.id,
         revision.id,
@@ -974,10 +996,31 @@ export class WikiAdminService {
         where: { id: pageId },
         data: {
           status: input.status,
+          visibilityAutoHidden: false,
           ...(latestPublic ? { currentRevisionId: latestPublic.id } : {}),
           updatedAt: new Date()
         }
       });
+      const wikiLinks = this.requiredWikiLinkIndex();
+      if (latestPublic) {
+        const parsed = parseMarkup(latestPublic.contentRaw);
+        await wikiLinks.replaceForRevision(
+          tx,
+          page.id,
+          latestPublic.id,
+          parsed.links,
+          parsed.categories,
+          parsed.includes,
+          {
+            contentSize: latestPublic.contentSize,
+            contentRaw: latestPublic.contentRaw,
+            fileNames: [...collectWikiFileNames(parsed.ast)],
+            redirectTarget: parsed.redirectTarget
+          }
+        );
+      } else {
+        await wikiLinks.clearForPage(tx, page.id);
+      }
       const namespace = await tx.wikiNamespace.findUnique({ where: { id: updated.namespaceId } });
       if (input.status === 'normal' && this.wikiPermissions) {
         try {
@@ -1012,6 +1055,13 @@ export class WikiAdminService {
       }
     });
     return (await this.toPageSummaries([updated]))[0];
+  }
+
+  private requiredWikiLinkIndex(): WikiLinkIndexService {
+    if (!this.wikiLinks) {
+      throw new Error('Wiki link index service is required for page publication state changes.');
+    }
+    return this.wikiLinks;
   }
 
   private async insertRecentChange(input: {

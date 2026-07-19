@@ -69,6 +69,24 @@ test('link index atomically materializes current source metrics', async () => {
   );
 });
 
+test('link index clears every derived page artifact when no public revision remains', async () => {
+  const calls: string[] = [];
+  const store = {
+    wikiPageLink: { async deleteMany() { calls.push('links'); return { count: 3 }; } },
+    wikiSearchDocument: { async deleteMany() { calls.push('search'); return { count: 1 }; } },
+    wikiPage: {
+      async update(input: { data: Record<string, unknown> }) {
+        calls.push('metrics');
+        assert.deepEqual(input.data, { currentContentSize: 0, currentCategoryCount: 0 });
+        return { id: 10n };
+      }
+    }
+  } as unknown as Pick<PrismaService, 'wikiPage' | 'wikiNamespace' | 'wikiPageLink' | 'wikiSearchDocument'>;
+
+  await new WikiLinkIndexService().clearForPage(store, 10n);
+  assert.deepEqual(calls, ['links', 'search', 'metrics']);
+});
+
 test('link index materializes redirects as a distinct backlink type', async () => {
   const { store, calls } = createStore('main', '옛 문서');
   await new WikiLinkIndexService().replaceForRevision(
