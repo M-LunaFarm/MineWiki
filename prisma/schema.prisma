@@ -1999,11 +1999,39 @@ model ServerWiki {
   releaseCandidates            ServerWikiReleaseCandidate[]
   releaseApprovals             ServerWikiReleaseApproval[]
   publishedRelease             ServerWikiRelease?           @relation("PublishedServerWikiRelease", fields: [publishedReleaseId], references: [id], onDelete: SetNull)
+  domain                       ServerWikiDomain?
 
+  @@unique([id, spaceId], map: "uq_server_wiki_tenant")
   @@index([status])
   @@index([publicationStatus])
   @@index([verifiedStatus])
   @@map("server_wikis")
+}
+
+model ServerWikiDomain {
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  serverWikiId          BigInt    @unique @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId               BigInt    @map("space_id") @db.UnsignedBigInt
+  hostname              String    @unique @db.VarChar(253)
+  status                String    @default("pending") @db.VarChar(16)
+  verificationTokenHash String    @map("verification_token_hash") @db.Char(64)
+  verificationExpiresAt DateTime  @map("verification_expires_at") @db.DateTime(3)
+  version               Int       @default(0) @db.UnsignedInt
+  verifiedAt            DateTime? @map("verified_at") @db.DateTime(3)
+  activatedAt           DateTime? @map("activated_at") @db.DateTime(3)
+  disabledAt            DateTime? @map("disabled_at") @db.DateTime(3)
+  lastCheckedAt         DateTime? @map("last_checked_at") @db.DateTime(3)
+  createdBy             String?   @map("created_by")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  serverWiki ServerWiki @relation(fields: [serverWikiId, spaceId], references: [id, spaceId], onDelete: Cascade)
+
+  @@unique([serverWikiId, spaceId], map: "uq_server_wiki_domain_tenant")
+  @@index([status, hostname], map: "idx_server_wiki_domains_route")
+  @@index([spaceId, status], map: "idx_server_wiki_domains_tenant")
+  @@index([verificationExpiresAt], map: "idx_server_wiki_domains_verification_expiry")
+  @@map("server_wiki_domains")
 }
 
 model ServerWikiRelease {

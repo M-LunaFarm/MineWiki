@@ -24,11 +24,13 @@ import { ServerWikiTemplateService } from './server-wiki-template.service';
 import { ServerWikiReleaseReviewQueueController } from './server-wiki-release-review-queue.controller';
 import { ServerWikiReleaseReviewQueueService } from './server-wiki-release-review-queue.service';
 import { ServerWikiReleaseManifestCursorCodec } from './server-wiki-release-manifest-cursor';
+import { ServerWikiDomainController, ServerWikiDomainRouteController } from './server-wiki-domain.controller';
+import { ServerWikiDomainService } from './server-wiki-domain.service';
 
 @Module({
   imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
-  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseManifestCursorCodec, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController],
+  providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseManifestCursorCodec, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService, ServerWikiDomainService],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController],
   exports: [ServerService]
 })
 export class ServerModule {}
