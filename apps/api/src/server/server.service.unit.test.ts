@@ -1340,6 +1340,112 @@ function createServerWikiLinkFixture(input: {
   };
 }
 
+test('server wiki slug allocation reserves globally unique site slugs', async () => {
+  const serverId = '12345678-1234-1234-1234-123456789abc';
+  const checkedServerWikiQueries: unknown[] = [];
+  const prisma = {
+    serverWiki: {
+      findFirst: async (args: { where: { OR: Array<{ slug?: string; siteSlug?: string }> } }) => {
+        checkedServerWikiQueries.push(args);
+        return args.where.OR.some((candidate) => candidate.siteSlug === 'tenant-12345678')
+          ? { id: 1n }
+          : null;
+      },
+    },
+    wikiSpace: { findFirst: async () => null },
+    wikiNamespace: { findUnique: async () => null },
+  };
+  const service = new ServerService({} as never, prisma as never, {} as never);
+  const allocator = service as unknown as {
+    generateUniqueServerWikiSlug(source: string, targetServerId: string): Promise<string>;
+  };
+
+  const allocated = await allocator.generateUniqueServerWikiSlug('Tenant', serverId);
+
+  assert.equal(allocated, 'tenant-12345678-2');
+  assert.deepEqual(checkedServerWikiQueries, [
+    {
+      where: {
+        OR: [{ slug: 'tenant-12345678' }, { siteSlug: 'tenant-12345678' }],
+      },
+      select: { id: true },
+    },
+    {
+      where: {
+        OR: [{ slug: 'tenant-12345678-2' }, { siteSlug: 'tenant-12345678-2' }],
+      },
+      select: { id: true },
+    },
+  ]);
+});
+
+test('server wiki provisioning retries a unique collision with a fresh slug', async () => {
+  const serverId = randomUUID();
+  const accountId = randomUUID();
+  const server = {
+    id: serverId,
+    shortCode: 'tenant',
+    ownerAccountId: accountId,
+    wikiSpaceId: null,
+    wikiPageId: null,
+    wikiSlug: null,
+    name: 'Tenant',
+    joinHost: 'tenant.example.test',
+    joinPort: 25565,
+    edition: 'java',
+    supportedVersions: ['1.21'],
+    tags: ['survival'],
+    shortDescription: 'Tenant server',
+    longDescription: 'Tenant server description',
+    websiteUrl: null,
+    discordUrl: null,
+    verificationGrade: 'A',
+  };
+  let transactionAttempts = 0;
+  const prisma = {
+    server: { findUnique: async () => ({ ...server }) },
+    serverWiki: { findUnique: async () => null },
+    async $transaction() {
+      transactionAttempts += 1;
+      if (transactionAttempts === 1) {
+        throw new Prisma.PrismaClientKnownRequestError('unique collision', {
+          code: 'P2002',
+          clientVersion: 'test',
+        });
+      }
+      return {
+        server: {
+          ...server,
+          wikiSpaceId: 101n,
+          wikiPageId: 102n,
+          wikiSlug: 'tenant-retry',
+        },
+        serverWiki: {
+          id: 103n,
+          spaceId: 101n,
+          slug: 'tenant-retry',
+          siteSlug: 'tenant-retry',
+        },
+      };
+    },
+  };
+  const wikiProfiles = { ensureWikiProfile: async () => ({ id: 104n }) };
+  const service = new ServerService({} as never, prisma as never, wikiProfiles as never);
+  const allocatedSlugs = ['tenant-first', 'tenant-retry'];
+  const allocator = service as unknown as {
+    generateUniqueServerWikiSlug(source: string, targetServerId: string): Promise<string>;
+  };
+  allocator.generateUniqueServerWikiSlug = async () => allocatedSlugs.shift() ?? 'unexpected';
+
+  const linked = await service.createServerWiki(serverId, accountId);
+
+  assert.equal(transactionAttempts, 2);
+  assert.equal(linked.status, 'linked');
+  assert.equal(linked.wikiSlug, 'tenant-retry');
+  assert.equal(linked.wikiUrl, '/serverWiki/tenant-retry');
+  assert.deepEqual(allocatedSlugs, []);
+});
+
 function restoreObject<T extends object>(target: T, snapshot: T): void {
   for (const key of Object.keys(target)) {
     if (!(key in snapshot)) delete (target as Record<string, unknown>)[key];

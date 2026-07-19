@@ -845,13 +845,16 @@ export class ServerService {
 
     const actor = await this.wikiProfiles.ensureWikiProfile(accountId);
     const now = new Date();
-    const slug = await this.generateUniqueServerWikiSlug(
+    let slug = await this.generateUniqueServerWikiSlug(
       server.wikiSlug ?? server.shortCode ?? server.joinHost ?? server.name,
       server.id,
     );
     const contentRaw = buildServerWikiMainPage(server);
 
-    const linked = await this.prisma.$transaction(async (tx) => {
+    let linked: { server: Server; serverWiki: ServerWiki } | null = null;
+    for (let provisioningAttempt = 0; provisioningAttempt < 5; provisioningAttempt += 1) {
+      try {
+        linked = await this.prisma.$transaction(async (tx) => {
       const namespace = await tx.wikiNamespace.upsert({
         where: { code: 'server' },
         create: {
@@ -1011,8 +1014,25 @@ export class ServerService {
           wikiSlug: slug,
         },
       });
-      return { server: updatedServer, serverWiki };
-    });
+          return { server: updatedServer, serverWiki };
+        });
+        break;
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) throw error;
+        const concurrentlyCreated = await this.findServerWikiForServer(server.id, server.wikiSpaceId);
+        if (concurrentlyCreated) {
+          return this.createServerWiki(serverId, accountId, options);
+        }
+        if (provisioningAttempt === 4) {
+          throw new ConflictException('서버 위키 주소 충돌이 반복되었습니다. 다시 시도해 주세요.');
+        }
+        slug = await this.generateUniqueServerWikiSlug(
+          server.wikiSlug ?? server.shortCode ?? server.joinHost ?? server.name,
+          server.id,
+        );
+      }
+    }
+    if (!linked) throw new ConflictException('서버 위키를 생성하지 못했습니다. 다시 시도해 주세요.');
 
     const response = toServerWikiLinkResponse(linked.server, linked.serverWiki);
     await this.events?.audit('server.wiki.create', {
@@ -2335,12 +2355,14 @@ export class ServerService {
   private async generateUniqueServerWikiSlug(source: string, serverId: string): Promise<string> {
     const base = normalizeServerWikiSlug(source);
     const suffix = serverId.replace(/-/g, '').slice(0, 8);
-    const first = `${base}-${suffix}`.slice(0, 255);
+    const firstSuffix = `-${suffix}`;
+    const first = `${base.slice(0, 255 - firstSuffix.length)}${firstSuffix}`;
     if (await this.isServerWikiSlugAvailable(first)) {
       return first;
     }
     for (let attempt = 2; attempt < 20; attempt += 1) {
-      const candidate = `${base}-${suffix}-${attempt}`.slice(0, 255);
+      const candidateSuffix = `-${suffix}-${attempt}`;
+      const candidate = `${base.slice(0, 255 - candidateSuffix.length)}${candidateSuffix}`;
       if (await this.isServerWikiSlugAvailable(candidate)) {
         return candidate;
       }
@@ -2350,7 +2372,10 @@ export class ServerService {
 
   private async isServerWikiSlugAvailable(slug: string): Promise<boolean> {
     const [serverWiki, space, namespace] = await Promise.all([
-      this.prisma.serverWiki.findUnique({ where: { slug } }),
+      this.prisma.serverWiki.findFirst({
+        where: { OR: [{ slug }, { siteSlug: slug }] },
+        select: { id: true },
+      }),
       this.prisma.wikiSpace.findFirst({
         where: {
           OR: [{ slug }, { rootPath: `/server/${slug}` }],
