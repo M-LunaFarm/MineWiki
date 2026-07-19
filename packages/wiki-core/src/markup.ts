@@ -2321,9 +2321,16 @@ export interface DiscussionMarkupMention {
   readonly href: string;
 }
 
+export interface DiscussionMarkupCommentReference {
+  readonly id: string;
+  readonly href: string;
+}
+
 export interface DiscussionMarkupOptions extends RenderOptions {
   /** Mentions already validated against active wiki profiles by the caller. */
   mentions?: readonly DiscussionMarkupMention[];
+  /** Same-thread comments already filtered through the viewer's visibility rules. */
+  commentReferences?: readonly DiscussionMarkupCommentReference[];
   /** A persisted structured poll already represents the legacy vote macro. */
   convertedVoteMacro?: boolean;
 }
@@ -2331,6 +2338,20 @@ export interface DiscussionMarkupOptions extends RenderOptions {
 export interface DiscussionVoteMacro {
   readonly question: string;
   readonly options: readonly string[];
+}
+
+/** Collect bounded numeric reference candidates; rendering still excludes code and link literals. */
+export function extractDiscussionCommentReferenceIds(raw: string, limit = 20): readonly string[] {
+  const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+  const ids = new Set<string>();
+  const pattern = /(?:^|[^\p{L}\p{N}_])#([1-9]\d{0,19})(?![\p{L}\p{N}_])/gu;
+  for (const match of String(raw).matchAll(pattern)) {
+    const id = match[1];
+    if (!id) continue;
+    ids.add(id);
+    if (ids.size >= boundedLimit) break;
+  }
+  return [...ids];
 }
 
 /** Extract vote macros through the real parser so code and link literals are never converted. */
@@ -2357,35 +2378,52 @@ export function extractDiscussionVoteMacros(raw: string): readonly DiscussionVot
 
 /** Render the deliberately small NamuMark subset supported inside discussions. */
 export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOptions = {}): string {
-  const { mentions = [], convertedVoteMacro = false, ...renderOptions } = options;
+  const { mentions = [], commentReferences = [], convertedVoteMacro = false, ...renderOptions } = options;
   const parsed = parseMarkup(raw, { linkResolution: renderOptions.linkResolution });
   const mentionByUsername = new Map(mentions
     .filter((mention) => /^[A-Za-z0-9_]{3,16}$/u.test(mention.username) && /^\/user\/[A-Za-z0-9_%._~-]+$/u.test(mention.href))
     .map((mention) => [mention.username.toLocaleLowerCase('en-US'), mention]));
+  const commentReferenceById = new Map(commentReferences
+    .filter((reference) => /^[1-9]\d{0,19}$/u.test(reference.id) && reference.href === `#comment-${reference.id}`)
+    .map((reference) => [reference.id, reference]));
 
-  const injectMentions = (value: string): InlineNode[] => {
-    if (mentionByUsername.size === 0 || !value.includes('@')) return [{ type: 'text', text: value }];
+  const injectDiscussionLinks = (value: string): InlineNode[] => {
+    if ((mentionByUsername.size === 0 || !value.includes('@'))
+      && (commentReferenceById.size === 0 || !value.includes('#'))) return [{ type: 'text', text: value }];
     const output: InlineNode[] = [];
     let plainStart = 0;
     let cursor = 0;
     while (cursor < value.length) {
-      if (value[cursor] !== '@' || (cursor > 0 && /[A-Za-z0-9_]/u.test(value[cursor - 1] ?? ''))) {
-        cursor += 1;
-        continue;
+      const marker = value[cursor];
+      let href: string | undefined;
+      let tokenLength = 0;
+      if (marker === '@' && !(cursor > 0 && /[A-Za-z0-9_]/u.test(value[cursor - 1] ?? ''))) {
+        const match = value.slice(cursor + 1).match(/^[A-Za-z0-9_]{3,16}/u);
+        const username = match?.[0] ?? '';
+        const next = value[cursor + 1 + username.length] ?? '';
+        const mention = username && !/[A-Za-z0-9_]/u.test(next)
+          ? mentionByUsername.get(username.toLocaleLowerCase('en-US'))
+          : undefined;
+        if (mention) {
+          href = mention.href;
+          tokenLength = username.length + 1;
+        }
+      } else if (marker === '#' && !(cursor > 0 && /[\p{L}\p{N}_]/u.test(value[cursor - 1] ?? ''))) {
+        const id = value.slice(cursor + 1).match(/^\d{1,20}/u)?.[0] ?? '';
+        const next = value[cursor + 1 + id.length] ?? '';
+        const reference = id && !/[\p{L}\p{N}_]/u.test(next) ? commentReferenceById.get(id) : undefined;
+        if (reference) {
+          href = reference.href;
+          tokenLength = id.length + 1;
+        }
       }
-      const match = value.slice(cursor + 1).match(/^[A-Za-z0-9_]{3,16}/u);
-      const username = match?.[0] ?? '';
-      const next = value[cursor + 1 + username.length] ?? '';
-      const mention = username && !/[A-Za-z0-9_]/u.test(next)
-        ? mentionByUsername.get(username.toLocaleLowerCase('en-US'))
-        : undefined;
-      if (!mention) {
+      if (!href || tokenLength === 0) {
         cursor += 1;
         continue;
       }
       if (cursor > plainStart) output.push({ type: 'text', text: value.slice(plainStart, cursor) });
-      output.push({ type: 'external_link', href: mention.href, label: value.slice(cursor, cursor + username.length + 1) });
-      cursor += username.length + 1;
+      output.push({ type: 'external_link', href, label: value.slice(cursor, cursor + tokenLength) });
+      cursor += tokenLength;
       plainStart = cursor;
     }
     if (plainStart < value.length) output.push({ type: 'text', text: value.slice(plainStart) });
@@ -2393,7 +2431,7 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
   };
 
   const restrictInline = (nodes: readonly InlineNode[], allowMentions = true): InlineNode[] => nodes.flatMap((node): InlineNode[] => {
-    if (node.type === 'text') return allowMentions ? injectMentions(node.text) : [node];
+    if (node.type === 'text') return allowMentions ? injectDiscussionLinks(node.text) : [node];
     if (node.type === 'internal_link' || node.type === 'external_link') return [{
       ...node,
       ...(node.labelChildren ? { labelChildren: restrictInline(node.labelChildren, false) } : {}),

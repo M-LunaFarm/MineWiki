@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, extractDiscussionVoteMacros, parseMarkup, renderDiscussionMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
+import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, extractDiscussionCommentReferenceIds, extractDiscussionVoteMacros, parseMarkup, renderDiscussionMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
 import { parseLinkTarget, resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
@@ -566,6 +566,33 @@ test('links only validated discussion mentions outside code and existing links',
   assert.match(html, /href="https:\/\/example\.com\/@Alice" rel="nofollow noopener" target="_blank">@Alice<\/a>/u);
   assert.match(html, /mail@Alice\.example/u);
   assert.match(html, /@Unknown/u);
+});
+
+test('links only viewer-visible same-thread comment references outside code and existing links', () => {
+  const raw = [
+    '#41 확인 #42 #999',
+    '{{{#41}}}',
+    '[[문서|#41]]',
+    '[https://example.com/#41 #41]',
+    'tag#41 #41suffix 0#41',
+  ].join('\n');
+  const html = renderDiscussionMarkup(raw, {
+    commentReferences: [
+      { id: '41', href: '#comment-41' },
+      { id: '42', href: '#comment-42' },
+      { id: '999', href: '#comment-other-thread' },
+    ],
+  });
+
+  assert.equal((html.match(/href="#comment-41"/gu) ?? []).length, 1);
+  assert.equal((html.match(/href="#comment-42"/gu) ?? []).length, 1);
+  assert.match(html, /<a href="#comment-41">#41<\/a>/u);
+  assert.match(html, /<code>#41<\/code>/u);
+  assert.match(html, /href="\/wiki\/%EB%AC%B8%EC%84%9C">#41<\/a>/u);
+  assert.match(html, /href="https:\/\/example\.com\/#41" rel="nofollow noopener" target="_blank">#41<\/a>/u);
+  assert.match(html, /#999/u);
+  assert.match(html, /tag#41 #41suffix 0#41/u);
+  assert.deepEqual(extractDiscussionCommentReferenceIds(raw), ['41', '42', '999']);
 });
 
 test('renders fragments without indexing same-page anchors as page links', () => {

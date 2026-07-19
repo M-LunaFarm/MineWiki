@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { createHmac } from 'node:crypto';
 import { ConfigService } from '@minewiki/config';
 import { normalizeIpOrCidr } from '@minewiki/security';
-import { extractDiscussionVoteMacros, renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
+import { extractDiscussionCommentReferenceIds, extractDiscussionVoteMacros, renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
 import { PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
 import { Prisma, type ServerWikiReleaseItem, type WikiDiscussionThread, type WikiPage } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -883,6 +883,27 @@ export class WikiDiscussionService {
     }
     const threadViewerOwns = anonymousOwnerId !== null && thread.createdBy === null && thread.anonymousOwnerId === anonymousOwnerId;
     const canModerate = Boolean(viewer && (thread.createdBy === viewer.id || canModeratePage));
+    const requestedReferenceIds = [...new Set(displayComments.flatMap((comment) => {
+      const visible = comment.entryType !== 'system'
+        && comment.status !== 'deleted'
+        && (comment.status !== 'hidden' || Boolean(canManage));
+      return visible ? extractDiscussionCommentReferenceIds(comment.content) : [];
+    }))].slice(0, 100).map((commentId) => BigInt(commentId));
+    const referenceRows = requestedReferenceIds.length > 0
+      ? await this.prisma.wikiDiscussionComment.findMany({
+          where: {
+            threadId: thread.id,
+            id: { in: requestedReferenceIds },
+            entryType: 'comment',
+            status: canManage ? { in: ['normal', 'hidden'] } : 'normal',
+          },
+          select: { id: true },
+        })
+      : [];
+    const commentReferences = referenceRows.map((comment) => ({
+      id: comment.id.toString(),
+      href: `#comment-${comment.id.toString()}`,
+    }));
     const moderationRows = canModeratePage && displayComments.length > 0
       ? await this.prisma.wikiDiscussionModerationEvent.findMany({
           where: {
@@ -952,6 +973,7 @@ export class WikiDiscussionService {
                 username: mention.username,
                 href: `/user/${encodeURIComponent(mention.username)}`,
               })),
+              commentReferences,
               convertedVoteMacro: commentPoll !== null,
             }),
         status: concealed ? 'hidden' : comment.status,

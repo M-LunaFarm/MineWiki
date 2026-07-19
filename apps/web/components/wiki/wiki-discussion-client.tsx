@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { ArrowLeft, BarChart3, Bell, BellOff, Code2, Eye, EyeOff, FileInput, History, Loader2, MessageSquarePlus, MessagesSquare, Pause, Pencil, Pin, Plus, Reply, Search, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { addWikiThreadComment, closeWikiDiscussionPoll, createWikiThread, deleteWikiThreadComment, deleteWikiThread, fetchWikiDiscussionPermissions, fetchWikiThread, fetchWikiThreadCommentRaw, fetchWikiThreads, moveWikiThread, searchWiki, setWikiThreadStatus, setWikiThreadSubscription, setWikiThreadPinnedComment, setWikiThreadCommentVisibility, updateWikiThreadTopic, voteWikiDiscussionPoll, wikiDiscussionEventsUrl, WikiApiError, type WikiDiscussionPollDetail, type WikiDiscussionPollInput, type WikiDiscussionPollResultsVisibility, type WikiDiscussionStatus, type WikiDiscussionStatusCounts, type WikiDiscussionStatusFilter, type WikiThreadDetail, type WikiThreadListResponse, type WikiSearchResult, type WikiThreadSummary } from '../../lib/wiki-api';
@@ -66,13 +66,40 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
   const replyTextarea = useRef<HTMLTextAreaElement | null>(null);
   const needsCaptcha = isCaptchaConfigured();
 
-  function mentionAuthor(username: string) {
-    const mention = `@${username} `;
-    setComment((current) => current.length === 0 ? mention : `${current.replace(/\s*$/u, '')}\n${mention}`);
+  function referenceComment(commentId: string, username: string | null) {
+    const reference = `#${commentId}${username ? ` @${username}` : ''} `;
+    setComment((current) => current.length === 0 ? reference : `${current.replace(/\s*$/u, '')}\n${reference}`);
     requestAnimationFrame(() => {
       replyTextarea.current?.focus();
       replyTextarea.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
+  }
+
+  async function followCommentReference(event: ReactMouseEvent<HTMLElement>) {
+    if (!selected || !(event.target instanceof Element)) return;
+    const anchor = event.target.closest<HTMLAnchorElement>('a[href^="#comment-"]');
+    const commentId = anchor?.getAttribute('href')?.slice('#comment-'.length) ?? '';
+    if (!anchor || !/^\d+$/u.test(commentId)) return;
+    event.preventDefault();
+    setActiveCommentId(commentId);
+    setThreadInUrl(selected.id, commentId);
+    const existing = document.getElementById(`comment-${commentId}`);
+    if (existing) {
+      existing.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      existing.focus({ preventScroll: true });
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const detail = await fetchWikiThread(selected.id, undefined, commentId);
+      if (detail.pageId !== pageId) throw new Error('이 문서의 토론이 아닙니다.');
+      setSelected(detail);
+    } catch (caught) {
+      setError(message(caught));
+    } finally {
+      setLoading(false);
+    }
   }
 
   const applyThreadResult = useCallback((result: WikiThreadListResponse) => {
@@ -709,7 +736,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
             </p>
           ) : null}
           {selected ? (
-            <div className="space-y-4">
+            <div className="space-y-4" onClick={(event) => void followCommentReference(event)}>
               <button type="button" onClick={closeThread} className="inline-flex min-h-11 items-center gap-2 text-sm text-slate-300 lg:hidden">
                 <ArrowLeft className="size-4" /> 토론 목록
               </button>
@@ -875,6 +902,9 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                 <article id={`comment-${item.id}`} tabIndex={-1} data-highlighted={item.id === requestedCommentId || undefined} key={item.id} className={`border p-4 outline-none data-[highlighted=true]:border-emerald-300/60 data-[highlighted=true]:bg-emerald-300/10 ${item.status === 'hidden' ? 'border-amber-300/30 bg-amber-300/[0.04]' : item.pinned ? 'border-amber-300/50 bg-[#111821]' : 'border-white/10 bg-[#111821]'}`}>
                   <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
                     <span className="flex items-center gap-2">
+                      <a href={`#comment-${item.id}`} className="font-semibold text-emerald-300 hover:text-emerald-200" aria-label={`댓글 #${item.id} 바로가기`}>
+                        #{item.id}
+                      </a>
                       {item.pinned ? (
                         <span className="inline-flex items-center gap-1 text-amber-200">
                           <Pin className="size-3.5" /> 고정됨
@@ -885,8 +915,8 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
                           {item.createdByName}
                         </Link>
                       ) : <span>{item.createdByName}</span>}
-                      {selected.canReply && item.createdByUsername ? (
-                        <button type="button" onClick={() => mentionAuthor(item.createdByUsername!)} className="inline-flex min-h-11 items-center gap-1 hover:text-emerald-200" aria-label={`${item.createdByName}님에게 답글`}>
+                      {selected.canReply ? (
+                        <button type="button" onClick={() => referenceComment(item.id, item.createdByUsername)} className="inline-flex min-h-11 items-center gap-1 hover:text-emerald-200" aria-label={`댓글 #${item.id}에 답글`}>
                           <Reply className="size-3.5" /> 답글
                         </button>
                       ) : null}
@@ -1009,7 +1039,7 @@ export function WikiDiscussionClient({ pageId, returnTo }: { readonly pageId: st
               ) : null}
               {selected.canReply ? (
                 <form onSubmit={reply} className="space-y-3">
-                  <textarea ref={replyTextarea} value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder={account ? '댓글 작성 · @사용자명으로 멘션' : '익명 댓글 작성'} aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
+                  <textarea ref={replyTextarea} value={comment} onChange={(event) => setComment(event.target.value)} required maxLength={10000} rows={5} placeholder={account ? '댓글 작성 · #번호로 댓글 참조 · @사용자명으로 멘션' : '익명 댓글 작성 · #번호로 댓글 참조'} aria-label="토론 댓글" className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white" />
                   {account ? <PollComposer enabled={replyPollEnabled} onEnabledChange={setReplyPollEnabled} draft={replyPollDraft} onDraftChange={setReplyPollDraft} /> : (
                     <p className="text-xs leading-5 text-slate-500">익명 댓글에는 설문·멘션 알림·구독 기능이 적용되지 않습니다.</p>
                   )}

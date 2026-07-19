@@ -438,7 +438,7 @@ test('discussion comments expose sanitized restricted NamuMark with server-wiki 
     id: 40n,
     threadId: thread.id,
     content: [
-      "'''안내''' @Alice",
+      "'''안내''' @Alice · #41 · #99",
       '||항목||값||',
       '{{{@Alice}}}',
       '[[../규칙]]',
@@ -456,7 +456,17 @@ test('discussion comments expose sanitized restricted NamuMark with server-wiki 
     wikiNamespace: { async findUnique() { return { code: 'server' }; } },
     serverWiki: { async findUnique() { return { slug: 'luna', status: 'active' }; } },
     wikiDiscussionThread: { async findUnique() { return thread; } },
-    wikiDiscussionComment: { async count() { return 1; }, async findMany() { return [comment]; } },
+    wikiDiscussionComment: {
+      async count() { return 1; },
+      async findMany(args: { select?: { id?: boolean }; where?: { threadId?: bigint; id?: { in?: bigint[] } } }) {
+        if (args.select?.id) {
+          assert.equal(args.where?.threadId, thread.id);
+          assert.deepEqual(args.where?.id?.in, [41n, 99n]);
+          return [{ id: 41n }];
+        }
+        return [comment];
+      },
+    },
     wikiDiscussionSubscription: { async findUnique() { return null; } },
     wikiProfile: {
       async findMany() {
@@ -479,6 +489,8 @@ test('discussion comments expose sanitized restricted NamuMark with server-wiki 
   assert.match(rendered?.contentHtml ?? '', /<table class="component-table wiki-table"/u);
   assert.match(rendered?.contentHtml ?? '', /href="\/server\/luna\/%EA%B0%80%EC%9D%B4%EB%93%9C\/%EA%B7%9C%EC%B9%99"/u);
   assert.equal((rendered?.contentHtml?.match(/href="\/user\/Alice"/gu) ?? []).length, 1);
+  assert.match(rendered?.contentHtml ?? '', /href="#comment-41">#41<\/a>/u);
+  assert.doesNotMatch(rendered?.contentHtml ?? '', /href="#comment-99"/u);
   assert.match(rendered?.contentHtml ?? '', /<code>@Alice<\/code>/u);
   assert.equal(rendered?.contentHtml?.includes('wiki-transclusion'), false);
   assert.equal(rendered?.contentHtml?.includes('<iframe'), false);
