@@ -27,6 +27,7 @@
     "check": "turbo run check build --continue",
     "db:deploy": "node scripts/deploy-database.mjs",
     "env:prepare": "node scripts/prepare-production-env.mjs",
+    "env:sync-voteweb-oauth": "node scripts/sync-voteweb-oauth.mjs",
     "deploy:build": "pnpm install --frozen-lockfile && pnpm db:deploy && pnpm seed && pnpm build && pnpm data:backfill-wiki-search && pnpm deploy:web-release",
     "deploy:web-release": "node scripts/prepare-web-release.mjs",
     "deploy:smoke": "pnpm smoke",
