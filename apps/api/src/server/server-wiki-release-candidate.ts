@@ -53,6 +53,10 @@ export interface ServerWikiPresentationSnapshot {
   readonly seoTitle: string | null;
   readonly seoDescription: string | null;
   readonly seoIndexingEnabled: boolean;
+  readonly brandName?: string | null;
+  readonly brandLogoUrl?: string | null;
+  readonly brandFaviconUrl?: string | null;
+  readonly brandAccentColor?: string | null;
   readonly requireContributionPolicyAck: boolean;
   readonly contributionPolicyVersion: number;
   readonly contentSettingsVersion: number;
@@ -330,6 +334,7 @@ function presentationChanges(
     contentSettingsChanged: !baseline || [
       'contributionPolicySource', 'editHelpSource', 'topNoticeSource', 'bottomNoticeSource',
       'requireContributionPolicyAck', 'contributionPolicyVersion', 'contentSettingsVersion',
+      'brandName', 'brandLogoUrl', 'brandFaviconUrl', 'brandAccentColor',
     ].some((key) => !jsonEqual(
       baseline[key as keyof ServerWikiPresentationSnapshot] ?? null,
       current[key as keyof ServerWikiPresentationSnapshot] ?? null,

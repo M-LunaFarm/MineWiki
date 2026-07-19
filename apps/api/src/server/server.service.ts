@@ -2259,6 +2259,10 @@ export class ServerService {
         seoTitle: true,
         seoDescription: true,
         seoIndexingEnabled: true,
+        brandName: true,
+        brandLogoUrl: true,
+        brandFaviconUrl: true,
+        brandAccentColor: true,
         requireContributionPolicyAck: true,
         contributionPolicyVersion: true,
         contentSettingsVersion: true,
@@ -2385,6 +2389,7 @@ export class ServerService {
     serverId: string,
     input: ServerWikiContentSettingsInput,
     actorAccountId: string,
+    canManageBranding = false,
   ) {
     const normalized = normalizeServerWikiContentSettings(input);
     const current = await this.prisma.serverWiki.findUnique({
@@ -2400,6 +2405,10 @@ export class ServerService {
         seoTitle: true,
         seoDescription: true,
         seoIndexingEnabled: true,
+        brandName: true,
+        brandLogoUrl: true,
+        brandFaviconUrl: true,
+        brandAccentColor: true,
         requireContributionPolicyAck: true,
         contributionPolicyVersion: true,
         contentSettingsVersion: true,
@@ -2408,6 +2417,14 @@ export class ServerService {
     if (!current) throw new NotFoundException('Server wiki not found.');
     if (current.contentSettingsVersion !== normalized.expectedVersion) {
       throwWikiSettingsConflict(current.contentSettingsVersion);
+    }
+    const brandFields = ['brandName', 'brandLogoUrl', 'brandFaviconUrl', 'brandAccentColor'] as const;
+    const brandingChanged = brandFields.some((field) => (current[field] ?? null) !== normalized[field]);
+    if (brandingChanged && !canManageBranding) {
+      throw new ForbiddenException('서버 위키 브랜딩은 서버 소유자 또는 관리자만 변경할 수 있습니다.');
+    }
+    if (brandingChanged && (await this.getWikiLayoutSettings(serverId)).selected !== 'brand') {
+      throw new ForbiddenException('브랜드 설정은 활성 Brand 레이아웃에서만 변경할 수 있습니다.');
     }
 
     const sourceFields = [
@@ -2423,6 +2440,9 @@ export class ServerService {
       changedFields.push('requireContributionPolicyAck');
     }
     for (const field of ['seoTitle', 'seoDescription', 'seoIndexingEnabled'] as const) {
+      if ((current[field] ?? null) !== normalized[field]) changedFields.push(field);
+    }
+    for (const field of brandFields) {
       if (current[field] !== normalized[field]) changedFields.push(field);
     }
     const policyChanged =
@@ -2443,6 +2463,10 @@ export class ServerService {
           seoTitle: normalized.seoTitle,
           seoDescription: normalized.seoDescription,
           seoIndexingEnabled: normalized.seoIndexingEnabled,
+          brandName: normalized.brandName,
+          brandLogoUrl: normalized.brandLogoUrl,
+          brandFaviconUrl: normalized.brandFaviconUrl,
+          brandAccentColor: normalized.brandAccentColor,
           requireContributionPolicyAck: normalized.requireContributionPolicyAck,
           contributionPolicyVersion: policyChanged ? { increment: 1 } : undefined,
           contentSettingsVersion: { increment: 1 },
@@ -2470,6 +2494,10 @@ export class ServerService {
           seoTitle: true,
           seoDescription: true,
           seoIndexingEnabled: true,
+          brandName: true,
+          brandLogoUrl: true,
+          brandFaviconUrl: true,
+          brandAccentColor: true,
           requireContributionPolicyAck: true,
           contributionPolicyVersion: true,
           contentSettingsVersion: true,
@@ -2505,6 +2533,7 @@ export class ServerService {
       where: { slug },
       select: {
         slug: true,
+        layoutKey: true,
         contributionPolicySource: true,
         editHelpSource: true,
         topNoticeSource: true,
@@ -2512,6 +2541,10 @@ export class ServerService {
         seoTitle: true,
         seoDescription: true,
         seoIndexingEnabled: true,
+        brandName: true,
+        brandLogoUrl: true,
+        brandFaviconUrl: true,
+        brandAccentColor: true,
         requireContributionPolicyAck: true,
         contributionPolicyVersion: true,
         contentSettingsVersion: true,
@@ -2541,6 +2574,11 @@ export class ServerService {
           seoTitle: jsonNullableString(snapshot.seoTitle),
           seoDescription: jsonNullableString(snapshot.seoDescription),
           seoIndexingEnabled: snapshot.seoIndexingEnabled !== false,
+          brandName: jsonNullableString(snapshot.brandName),
+          brandLogoUrl: jsonNullableString(snapshot.brandLogoUrl),
+          brandFaviconUrl: jsonNullableString(snapshot.brandFaviconUrl),
+          brandAccentColor: jsonNullableString(snapshot.brandAccentColor),
+          layoutKey: jsonNullableString(snapshot.layoutKey) ?? 'docs',
         }
       : settings;
     const rendered = renderServerWikiPresentation(presentationSettings);
@@ -2562,6 +2600,12 @@ export class ServerService {
       seoTitle: presentationSettings.seoTitle,
       seoDescription: presentationSettings.seoDescription,
       seoIndexingEnabled: presentationSettings.seoIndexingEnabled,
+      branding: presentationSettings.layoutKey === 'brand' ? {
+        name: presentationSettings.brandName,
+        logoUrl: presentationSettings.brandLogoUrl,
+        faviconUrl: presentationSettings.brandFaviconUrl,
+        accentColor: presentationSettings.brandAccentColor,
+      } : null,
     };
   }
 
@@ -2718,6 +2762,10 @@ interface ServerWikiContentSettingsRecord {
   readonly seoTitle: string | null;
   readonly seoDescription: string | null;
   readonly seoIndexingEnabled: boolean;
+  readonly brandName: string | null;
+  readonly brandLogoUrl: string | null;
+  readonly brandFaviconUrl: string | null;
+  readonly brandAccentColor: string | null;
   readonly requireContributionPolicyAck: boolean;
   readonly contributionPolicyVersion: number;
   readonly contentSettingsVersion: number;
@@ -2789,6 +2837,10 @@ function toWikiContentSettingsResponse(settings: ServerWikiContentSettingsRecord
     seoTitle: settings.seoTitle,
     seoDescription: settings.seoDescription,
     seoIndexingEnabled: settings.seoIndexingEnabled,
+    brandName: settings.brandName,
+    brandLogoUrl: settings.brandLogoUrl,
+    brandFaviconUrl: settings.brandFaviconUrl,
+    brandAccentColor: settings.brandAccentColor,
     requireContributionPolicyAck: settings.requireContributionPolicyAck,
     updatedAt: settings.contentSettingsUpdatedAt?.toISOString() ?? null,
     updatedByProfileId: settings.contentSettingsUpdatedBy?.toString() ?? null,

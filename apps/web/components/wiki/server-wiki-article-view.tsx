@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { CSSProperties } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -87,15 +88,15 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
     : [];
 
   return (
-    <div className="server-wiki-layout min-h-screen bg-white text-[#333]">
-      <ServerWikiHeader page={pageWithNavigation} routeContext={routeContext} />
+    <div className="server-wiki-layout min-h-screen bg-white text-[#333]" style={{ '--server-wiki-accent': presentation?.branding?.accentColor ?? '#346ddb' } as CSSProperties}>
+      <ServerWikiHeader page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />
       {wiki.publicationStatus !== 'published' ? (
         <aside className="border-y border-amber-300/40 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-950" role="status">
           {wiki.publicationStatus === 'draft' ? '초안 미리보기' : '비공개 미리보기'} · 권한이 있는 협업자에게만 표시됩니다.
         </aside>
       ) : null}
       <main className={`mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
-        <ServerWikiSidebar page={pageWithNavigation} routeContext={routeContext} />
+        <ServerWikiSidebar page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-[#777]">

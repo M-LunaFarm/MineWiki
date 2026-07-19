@@ -962,6 +962,59 @@ test('server wiki settings reject a stale expected version', async () => {
   );
 });
 
+test('server wiki branding rejects content collaborators before any write', async () => {
+  let writes = 0;
+  const service = new ServerService(
+    {} as never,
+    {
+      serverWiki: {
+        async findUnique() {
+          return {
+            id: 5n,
+            slug: 'sample-server',
+            contributionPolicySource: null,
+            editHelpSource: null,
+            topNoticeSource: null,
+            bottomNoticeSource: null,
+            seoTitle: null,
+            seoDescription: null,
+            seoIndexingEnabled: true,
+            brandName: null,
+            brandLogoUrl: null,
+            brandFaviconUrl: null,
+            brandAccentColor: null,
+            requireContributionPolicyAck: false,
+            contributionPolicyVersion: 0,
+            contentSettingsVersion: 1,
+          };
+        },
+        async updateMany() { writes += 1; return { count: 1 }; },
+      },
+    } as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    () => service.updateWikiContentSettings(randomUUID(), {
+      expectedVersion: 1,
+      contributionPolicySource: null,
+      editHelpSource: null,
+      topNoticeSource: null,
+      bottomNoticeSource: null,
+      seoTitle: null,
+      seoDescription: null,
+      seoIndexingEnabled: true,
+      brandName: 'Unauthorized brand',
+      brandLogoUrl: null,
+      brandFaviconUrl: null,
+      brandAccentColor: '#346ddb',
+      requireContributionPolicyAck: false,
+    }, randomUUID(), false),
+    /소유자 또는 관리자/u,
+  );
+  assert.equal(writes, 0);
+});
+
 test('server wiki navigation persists versioned groups with optimistic concurrency and audit metadata', async () => {
   const serverId = randomUUID();
   const actorAccountId = randomUUID();

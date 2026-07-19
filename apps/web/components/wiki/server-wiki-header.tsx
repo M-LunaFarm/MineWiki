@@ -1,16 +1,18 @@
 import Link from 'next/link';
 import { BookOpen, ExternalLink, History, Menu, Search } from 'lucide-react';
-import type { WikiPageResponse } from '../../lib/wiki-api';
+import type { ServerWikiPresentation, WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiNavigation } from './server-wiki-navigation';
 import { serverWikiPlatformUrl, serverWikiPublicPath, type ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
 
-export function ServerWikiHeader({ page, routeContext }: { readonly page: WikiPageResponse; readonly routeContext?: ServerWikiPublicRouteContext | null }) {
+export function ServerWikiHeader({ page, presentation, routeContext }: { readonly page: WikiPageResponse; readonly presentation?: ServerWikiPresentation | null; readonly routeContext?: ServerWikiPublicRouteContext | null }) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
   const rootPath = serverWikiPublicPath(`/serverWiki/${encodeURIComponent(wiki.slug)}`, routeContext);
   const directoryPath = routeContext
     ? serverWikiPlatformUrl(page.serverDirectoryPath ?? '/servers')
     : page.serverDirectoryPath ?? '/servers';
+  const brand = presentation?.branding;
+  const displayName = brand?.name || wiki.name;
 
   return (
     <header className="sticky top-0 z-50 border-b border-[#e6e6e6] bg-white/95 text-[#1f1f1f] backdrop-blur-xl">
@@ -25,7 +27,7 @@ export function ServerWikiHeader({ page, routeContext }: { readonly page: WikiPa
               <label className="relative block">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#888]" aria-hidden="true" />
                 <span className="sr-only">서버 문서 검색</span>
-                <input type="search" name="q" placeholder={`${wiki.name} 문서 검색`} className="h-10 w-full rounded-lg border border-[#dedede] bg-[#fafafa] pl-10 pr-3 text-sm outline-none placeholder:text-[#999] focus:border-[#9ab5ef] focus:bg-white" />
+                <input type="search" name="q" placeholder={`${displayName} 문서 검색`} className="h-10 w-full rounded-lg border border-[#dedede] bg-[#fafafa] pl-10 pr-3 text-sm outline-none placeholder:text-[#999] focus:border-[#9ab5ef] focus:bg-white" />
               </label>
             </form>
             <ServerWikiNavigation items={wiki.navigation} storageKey={`minewiki:server-wiki:${wiki.slug}:mobile-collapsed`} />
@@ -35,11 +37,9 @@ export function ServerWikiHeader({ page, routeContext }: { readonly page: WikiPa
           href={rootPath}
           className="flex min-w-0 items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30"
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#346ddb] text-white">
-            <BookOpen className="size-4.5" aria-hidden="true" />
-          </span>
+          {brand?.logoUrl ? <img src={brand.logoUrl} alt="" referrerPolicy="no-referrer" className="size-8 shrink-0 rounded-lg object-contain" /> : <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#346ddb] text-white" style={{ backgroundColor: brand?.accentColor ?? undefined }}><BookOpen className="size-4.5" aria-hidden="true" /></span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
           <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold text-[#202020] sm:text-base">{wiki.name}</span>
+            <span className="block truncate text-sm font-semibold text-[#202020] sm:text-base">{displayName}</span>
             <span className="hidden text-[11px] text-[#7a7a7a] sm:block">Documentation</span>
           </span>
         </Link>
@@ -51,7 +51,7 @@ export function ServerWikiHeader({ page, routeContext }: { readonly page: WikiPa
             <input
               type="search"
               name="q"
-              placeholder={`${wiki.name} 문서 검색`}
+              placeholder={`${displayName} 문서 검색`}
               className="h-10 w-full rounded-lg border border-[#dedede] bg-[#fafafa] pl-10 pr-3 text-sm text-[#252525] outline-none transition placeholder:text-[#999] focus:border-[#9ab5ef] focus:bg-white"
             />
           </label>

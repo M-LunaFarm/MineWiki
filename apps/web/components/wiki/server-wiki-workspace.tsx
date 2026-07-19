@@ -1,9 +1,9 @@
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiHeader } from './server-wiki-header';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
-import { fetchPublicServerWikiNavigation, fetchServerWikiNavigation } from '../../lib/wiki-server-api';
+import { fetchPublicServerWikiNavigation, fetchPublicServerWikiPresentation, fetchServerWikiNavigation, fetchServerWikiPresentation } from '../../lib/wiki-server-api';
 import { serverWikiPublicPath, type ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
 
 export async function ServerWikiWorkspace({
@@ -18,11 +18,13 @@ export async function ServerWikiWorkspace({
   readonly routeContext?: ServerWikiPublicRouteContext | null;
 }) {
   const wiki = page.serverWiki;
-  const navigationResponse = wiki
-    ? await (routeContext
+  const [navigationResponse, presentation] = wiki
+    ? await Promise.all([(routeContext
       ? fetchPublicServerWikiNavigation(wiki.contentSlug, wiki.navigationKey)
-      : fetchServerWikiNavigation(wiki.contentSlug, wiki.navigationKey)).catch(() => null)
-    : null;
+      : fetchServerWikiNavigation(wiki.contentSlug, wiki.navigationKey)).catch(() => null), (routeContext
+      ? fetchPublicServerWikiPresentation(wiki.contentSlug)
+      : fetchServerWikiPresentation(wiki.contentSlug)).catch(() => null)])
+    : [null, null];
   const pageWithNavigation: WikiPageResponse = wiki ? {
     ...page,
     serverWiki: {
@@ -35,10 +37,10 @@ export async function ServerWikiWorkspace({
     },
   } : page;
   return (
-    <div className="server-wiki-layout min-h-screen bg-white text-[#333]">
-      <ServerWikiHeader page={pageWithNavigation} routeContext={routeContext} />
+    <div className="server-wiki-layout min-h-screen bg-white text-[#333]" style={{ '--server-wiki-accent': presentation?.branding?.accentColor ?? '#346ddb' } as CSSProperties}>
+      <ServerWikiHeader page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />
       <main className="mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] lg:grid-cols-[288px_minmax(0,1fr)]">
-        <ServerWikiSidebar page={pageWithNavigation} routeContext={routeContext} />
+        <ServerWikiSidebar page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />
         <section className="min-w-0 px-5 py-8 sm:px-8 lg:px-12 lg:py-10 xl:px-16">
           <nav className="mb-6 flex flex-wrap items-center gap-2 text-sm text-[#777]" aria-label="현재 위치">
             <Link href={serverWikiPublicPath(`/serverWiki/${encodeURIComponent(pageWithNavigation.serverWiki?.slug ?? '')}`, routeContext)} className="hover:text-[#346ddb]">{pageWithNavigation.serverWiki?.name}</Link>

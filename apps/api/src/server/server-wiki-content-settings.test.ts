@@ -49,6 +49,32 @@ test('server wiki SEO text is bounded, single-line, and keeps indexing explicit'
   );
 });
 
+test('server wiki branding accepts only bounded HTTPS or owned upload assets and canonical colors', () => {
+  const normalized = normalizeServerWikiContentSettings({
+    ...emptySettings,
+    brandName: '  Example\nNetwork ',
+    brandLogoUrl: 'https://cdn.example.com/logo.png',
+    brandFaviconUrl: '/uploads/server-wiki/favicon.png',
+    brandAccentColor: '#A1B2C3',
+  });
+  assert.equal(normalized.brandName, 'Example Network');
+  assert.equal(normalized.brandLogoUrl, 'https://cdn.example.com/logo.png');
+  assert.equal(normalized.brandFaviconUrl, '/uploads/server-wiki/favicon.png');
+  assert.equal(normalized.brandAccentColor, '#a1b2c3');
+  assert.throws(
+    () => normalizeServerWikiContentSettings({ ...emptySettings, brandLogoUrl: 'http://example.com/logo.png' }),
+    hasErrorCode('SERVER_WIKI_BRAND_URL_INVALID'),
+  );
+  assert.throws(
+    () => normalizeServerWikiContentSettings({ ...emptySettings, brandLogoUrl: '/uploads/../private/logo.png' }),
+    hasErrorCode('SERVER_WIKI_BRAND_URL_INVALID'),
+  );
+  assert.throws(
+    () => normalizeServerWikiContentSettings({ ...emptySettings, brandAccentColor: 'red' }),
+    hasErrorCode('SERVER_WIKI_BRAND_COLOR_INVALID'),
+  );
+});
+
 test('server wiki presentation keeps bounded indentation compatible with restricted content', () => {
   const rendered = renderServerWikiPresentation({
     contributionPolicySource: '기여 원칙\n 세부 설명',

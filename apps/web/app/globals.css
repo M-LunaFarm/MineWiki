@@ -1239,11 +1239,11 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
     border-color: #e7e7e7;
   }
   .server-wiki-layout .wiki-rendered a {
-    color: #346ddb;
+    color: var(--server-wiki-accent, #346ddb);
     text-decoration-color: rgba(52, 109, 219, 0.3);
   }
   .server-wiki-layout .wiki-rendered a:hover {
-    color: #2458bd;
+    color: color-mix(in srgb, var(--server-wiki-accent, #346ddb) 78%, #111);
   }
   .server-wiki-layout .wiki-rendered blockquote {
     border-color: #9ab5ef;

@@ -1,25 +1,25 @@
 import Link from 'next/link';
 import { BookOpen, Compass, MessagesSquare, Star } from 'lucide-react';
-import type { WikiPageResponse } from '../../lib/wiki-api';
+import type { ServerWikiPresentation, WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiCreateLink } from './server-wiki-create-link';
 import { ServerWikiNavigation } from './server-wiki-navigation';
 import { serverWikiPlatformUrl, serverWikiPublicPath, type ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
 
-export function ServerWikiSidebar({ page, routeContext }: { readonly page: WikiPageResponse; readonly routeContext?: ServerWikiPublicRouteContext | null }) {
+export function ServerWikiSidebar({ page, presentation, routeContext }: { readonly page: WikiPageResponse; readonly presentation?: ServerWikiPresentation | null; readonly routeContext?: ServerWikiPublicRouteContext | null }) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
   const rootPath = serverWikiPublicPath(`/serverWiki/${encodeURIComponent(wiki.slug)}`, routeContext);
   const address = wiki.host ? `${wiki.host}${wiki.port && wiki.port !== 25565 ? `:${wiki.port}` : ''}` : null;
+  const brand = presentation?.branding;
+  const displayName = brand?.name || wiki.name;
 
   return (
     <aside className="hidden min-w-0 border-[#e8e8e8] bg-[#fbfbfb] lg:sticky lg:top-16 lg:block lg:h-[calc(100vh-4rem)] lg:border-r">
       <div className="border-b border-[#e8e8e8] px-6 py-6">
         <Link href={rootPath} className="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30">
-          <span className="rounded-lg bg-[#eef3ff] p-2 text-[#346ddb]">
-            <BookOpen className="size-5" />
-          </span>
+          {brand?.logoUrl ? <img src={brand.logoUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-9 rounded-lg object-contain" /> : <span className="rounded-lg bg-[#eef3ff] p-2 text-[#346ddb]" style={{ color: brand?.accentColor ?? undefined }}><BookOpen className="size-5" /></span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
           <span className="min-w-0">
-            <span className="block truncate text-base font-semibold text-[#242424]">{wiki.name}</span>
+            <span className="block truncate text-base font-semibold text-[#242424]">{displayName}</span>
             <span className="mt-0.5 block text-xs text-[#777]">서버 위키</span>
           </span>
         </Link>
@@ -36,7 +36,7 @@ export function ServerWikiSidebar({ page, routeContext }: { readonly page: WikiP
         </div>
       </div>
 
-      <nav className="flex h-[calc(100vh-13rem)] flex-col px-4 py-5" aria-label={`${wiki.name} 위키 문서 트리`}>
+      <nav className="flex h-[calc(100vh-13rem)] flex-col px-4 py-5" aria-label={`${displayName} 위키 문서 트리`}>
         <div className="flex items-center gap-2 px-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#888]">
           <BookOpen className="size-4" />
           문서

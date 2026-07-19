@@ -21,7 +21,7 @@ test('server detail promotes linked documentation as a first-class child experie
 });
 
 test('server wiki uses its own documentation shell and enriches the root document with navigation', () => {
-  const header = wiki.indexOf('<ServerWikiHeader page={pageWithNavigation} routeContext={routeContext} />');
+  const header = wiki.indexOf('<ServerWikiHeader page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />');
   const article = wiki.indexOf('id={contentId}');
   const startHere = wiki.indexOf('id="server-wiki-start-here-title"');
 

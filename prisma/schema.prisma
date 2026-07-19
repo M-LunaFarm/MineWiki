@@ -2031,6 +2031,10 @@ model ServerWiki {
   seoTitle                     String?                            @map("seo_title") @db.VarChar(70)
   seoDescription               String?                            @map("seo_description") @db.VarChar(200)
   seoIndexingEnabled           Boolean                            @default(true) @map("seo_indexing_enabled")
+  brandName                    String?                            @map("brand_name") @db.VarChar(80)
+  brandLogoUrl                 String?                            @map("brand_logo_url") @db.VarChar(512)
+  brandFaviconUrl              String?                            @map("brand_favicon_url") @db.VarChar(512)
+  brandAccentColor             String?                            @map("brand_accent_color") @db.Char(7)
   requireContributionPolicyAck Boolean                            @default(false) @map("require_contribution_policy_ack")
   contributionPolicyVersion    Int                                @default(0) @map("contribution_policy_version") @db.UnsignedInt
   contentSettingsVersion       Int                                @default(0) @map("content_settings_version") @db.UnsignedInt

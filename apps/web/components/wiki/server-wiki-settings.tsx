@@ -28,6 +28,10 @@ interface ContentSettings {
   readonly seoTitle: string | null;
   readonly seoDescription: string | null;
   readonly seoIndexingEnabled: boolean;
+  readonly brandName: string | null;
+  readonly brandLogoUrl: string | null;
+  readonly brandFaviconUrl: string | null;
+  readonly brandAccentColor: string | null;
   readonly requireContributionPolicyAck: boolean;
   readonly updatedAt: string | null;
   readonly updatedByProfileId: string | null;
@@ -41,7 +45,7 @@ interface SettingsAccess {
 }
 
 type SourceField = 'contributionPolicySource' | 'editHelpSource' | 'topNoticeSource' | 'bottomNoticeSource';
-type FormState = Pick<ContentSettings, SourceField | 'requireContributionPolicyAck' | 'seoTitle' | 'seoDescription' | 'seoIndexingEnabled'>;
+type FormState = Pick<ContentSettings, SourceField | 'requireContributionPolicyAck' | 'seoTitle' | 'seoDescription' | 'seoIndexingEnabled' | 'brandName' | 'brandLogoUrl' | 'brandFaviconUrl' | 'brandAccentColor'>;
 type SettingsTab = 'content' | 'structure' | 'templates' | 'domain' | 'layout' | 'collaborators';
 
 const FIELD_LIMITS: Record<SourceField, number> = {
@@ -60,6 +64,10 @@ const EMPTY_FORM: FormState = {
   seoTitle: null,
   seoDescription: null,
   seoIndexingEnabled: true,
+  brandName: null,
+  brandLogoUrl: null,
+  brandFaviconUrl: null,
+  brandAccentColor: null,
 };
 
 export function ServerWikiSettings({ serverId }: { readonly serverId: string }) {
@@ -290,6 +298,19 @@ function ContentSettingsForm({ serverId, onAccessLoaded }: { readonly serverId: 
       {notice ? <Message tone="success">{notice}</Message> : null}
       {conflictVersion !== null ? <div className="flex flex-col gap-3 rounded-xl border border-amber-300/25 bg-amber-400/10 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between"><span>다른 관리자의 변경이 먼저 저장되었습니다. 현재 버전은 {conflictVersion}입니다.</span><button type="button" onClick={() => void load()} className="btn-secondary min-h-11">최신 설정 다시 불러오기</button></div> : null}
       {settings.access.canManageLayout ? <SiteAddressForm serverId={serverId} initialSiteSlug={settings.siteSlug} /> : null}
+      {settings.access.canManageLayout ? <section className="rounded-xl border border-fuchsia-300/20 bg-fuchsia-400/[0.04] p-4 sm:p-5">
+        <div><strong className="text-sm text-white">Brand 레이아웃 브랜딩</strong><p className="mt-1 text-xs leading-5 text-slate-400">Brand 요금제가 활성화된 위키에서 로고, 파비콘, 표시 이름과 강조색을 공개 릴리스에 고정합니다. 이미지 주소는 HTTPS 또는 MineWiki 업로드 경로만 허용됩니다.</p></div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <label className="grid gap-2 text-sm text-slate-300">브랜드 표시 이름<input value={form.brandName ?? ''} onChange={(event) => setForm((current) => ({ ...current, brandName: event.target.value }))} maxLength={80} placeholder="기본값: 서버 이름" className="input min-h-11" /></label>
+          <label className="grid gap-2 text-sm text-slate-300">강조색<span className="flex min-h-11 overflow-hidden rounded-lg border border-white/10 bg-[#0d1219]"><input type="color" value={form.brandAccentColor ?? '#346ddb'} onChange={(event) => setForm((current) => ({ ...current, brandAccentColor: event.target.value }))} className="h-11 w-14 cursor-pointer border-0 bg-transparent p-1" aria-label="브랜드 강조색 선택" /><input value={form.brandAccentColor ?? ''} onChange={(event) => setForm((current) => ({ ...current, brandAccentColor: event.target.value.toLowerCase() }))} maxLength={7} pattern="#[0-9a-fA-F]{6}" placeholder="#346ddb" className="min-w-0 flex-1 bg-transparent px-3 font-mono text-sm text-white outline-none" /></span></label>
+          <label className="grid gap-2 text-sm text-slate-300">로고 이미지 URL<input type="url" value={form.brandLogoUrl ?? ''} onChange={(event) => setForm((current) => ({ ...current, brandLogoUrl: event.target.value }))} maxLength={512} placeholder="https://… 또는 /uploads/…" className="input min-h-11" /></label>
+          <label className="grid gap-2 text-sm text-slate-300">파비콘 이미지 URL<input type="url" value={form.brandFaviconUrl ?? ''} onChange={(event) => setForm((current) => ({ ...current, brandFaviconUrl: event.target.value }))} maxLength={512} placeholder="https://… 또는 /uploads/…" className="input min-h-11" /></label>
+        </div>
+        <div className="mt-4 flex items-center gap-3 rounded-lg border border-white/10 bg-[#0d1219] p-4" style={{ borderLeftColor: form.brandAccentColor ?? '#346ddb', borderLeftWidth: 4 }}>
+          {form.brandLogoUrl ? <img src={form.brandLogoUrl} alt="" referrerPolicy="no-referrer" className="size-10 rounded-lg object-contain" /> : <span className="grid size-10 place-items-center rounded-lg text-sm font-bold text-white" style={{ backgroundColor: form.brandAccentColor ?? '#346ddb' }}>B</span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
+          <span><strong className="block text-sm text-white">{form.brandName?.trim() || '서버 이름'}</strong><span className="text-xs text-slate-400">Documentation</span></span>
+        </div>
+      </section> : null}
       <section className="rounded-xl border border-sky-300/20 bg-sky-400/[0.04] p-4 sm:p-5">
         <div><strong className="text-sm text-white">검색 및 링크 공유</strong><p className="mt-1 text-xs leading-5 text-slate-400">검색 결과와 Discord 등 링크 미리보기에 사용할 정보입니다. 저장 후 다음 서버 위키 릴리스가 게시될 때 공개됩니다.</p></div>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -368,8 +389,8 @@ function Message({ tone, children }: { readonly tone: 'error' | 'success'; reado
   return <div className={`flex gap-3 rounded-xl border p-4 text-sm ${tone === 'error' ? 'border-red-300/20 bg-red-500/10 text-red-100' : 'border-emerald-300/20 bg-emerald-500/10 text-emerald-100'}`}>{tone === 'error' ? <AlertTriangle className="mt-0.5 size-4 flex-none" /> : null}<span>{children}</span></div>;
 }
 
-function toForm(settings: ContentSettings): FormState { return { contributionPolicySource: settings.contributionPolicySource, editHelpSource: settings.editHelpSource, topNoticeSource: settings.topNoticeSource, bottomNoticeSource: settings.bottomNoticeSource, requireContributionPolicyAck: settings.requireContributionPolicyAck, seoTitle: settings.seoTitle, seoDescription: settings.seoDescription, seoIndexingEnabled: settings.seoIndexingEnabled }; }
-function normalizeForm(form: FormState): FormState { const clean = (value: string | null) => value?.trim() ? value.replaceAll('\r\n', '\n').trim() : null; const cleanSeo = (value: string | null) => value ? Array.from(value, (character) => { const code = character.codePointAt(0) ?? 0; return code <= 31 || code === 127 ? ' ' : character; }).join('').replace(/\s+/gu, ' ').trim() || null : null; const contributionPolicySource = clean(form.contributionPolicySource); return { contributionPolicySource, editHelpSource: clean(form.editHelpSource), topNoticeSource: clean(form.topNoticeSource), bottomNoticeSource: clean(form.bottomNoticeSource), requireContributionPolicyAck: Boolean(contributionPolicySource && form.requireContributionPolicyAck), seoTitle: cleanSeo(form.seoTitle), seoDescription: cleanSeo(form.seoDescription), seoIndexingEnabled: form.seoIndexingEnabled }; }
+function toForm(settings: ContentSettings): FormState { return { contributionPolicySource: settings.contributionPolicySource, editHelpSource: settings.editHelpSource, topNoticeSource: settings.topNoticeSource, bottomNoticeSource: settings.bottomNoticeSource, requireContributionPolicyAck: settings.requireContributionPolicyAck, seoTitle: settings.seoTitle, seoDescription: settings.seoDescription, seoIndexingEnabled: settings.seoIndexingEnabled, brandName: settings.brandName, brandLogoUrl: settings.brandLogoUrl, brandFaviconUrl: settings.brandFaviconUrl, brandAccentColor: settings.brandAccentColor }; }
+function normalizeForm(form: FormState): FormState { const clean = (value: string | null) => value?.trim() ? value.replaceAll('\r\n', '\n').trim() : null; const cleanSeo = (value: string | null) => value ? Array.from(value, (character) => { const code = character.codePointAt(0) ?? 0; return code <= 31 || code === 127 ? ' ' : character; }).join('').replace(/\s+/gu, ' ').trim() || null : null; const contributionPolicySource = clean(form.contributionPolicySource); return { contributionPolicySource, editHelpSource: clean(form.editHelpSource), topNoticeSource: clean(form.topNoticeSource), bottomNoticeSource: clean(form.bottomNoticeSource), requireContributionPolicyAck: Boolean(contributionPolicySource && form.requireContributionPolicyAck), seoTitle: cleanSeo(form.seoTitle), seoDescription: cleanSeo(form.seoDescription), seoIndexingEnabled: form.seoIndexingEnabled, brandName: cleanSeo(form.brandName), brandLogoUrl: clean(form.brandLogoUrl), brandFaviconUrl: clean(form.brandFaviconUrl), brandAccentColor: clean(form.brandAccentColor)?.toLowerCase() ?? null }; }
 function serializeForm(form: FormState): string { return JSON.stringify(normalizeForm(form)); }
 function bytes(value: string): number { return new TextEncoder().encode(value).byteLength; }
 function settingsAccess(settings: ContentSettings): SettingsAccess {

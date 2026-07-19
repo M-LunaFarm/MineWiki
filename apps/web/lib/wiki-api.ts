@@ -203,6 +203,12 @@ export interface ServerWikiPresentation {
   readonly seoTitle: string | null;
   readonly seoDescription: string | null;
   readonly seoIndexingEnabled: boolean;
+  readonly branding?: {
+    readonly name: string | null;
+    readonly logoUrl: string | null;
+    readonly faviconUrl: string | null;
+    readonly accentColor: string | null;
+  } | null;
 }
 
 export interface WikiPolicyAcceptance {

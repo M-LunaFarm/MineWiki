@@ -20,7 +20,14 @@ export interface ServerWikiSeoSettings {
   readonly seoIndexingEnabled: boolean;
 }
 
-export interface ServerWikiContentSettingsInput extends ServerWikiContentSources, ServerWikiSeoSettings {
+export interface ServerWikiBrandSettings {
+  readonly brandName?: string | null;
+  readonly brandLogoUrl?: string | null;
+  readonly brandFaviconUrl?: string | null;
+  readonly brandAccentColor?: string | null;
+}
+
+export interface ServerWikiContentSettingsInput extends ServerWikiContentSources, ServerWikiSeoSettings, ServerWikiBrandSettings {
   readonly expectedVersion: number;
   readonly requireContributionPolicyAck: boolean;
 }
@@ -47,12 +54,51 @@ export function normalizeServerWikiContentSettings(
     seoTitle: normalizeSeoText(input.seoTitle ?? null, 70, 'seoTitle'),
     seoDescription: normalizeSeoText(input.seoDescription ?? null, 200, 'seoDescription'),
     seoIndexingEnabled: input.seoIndexingEnabled !== false,
+    brandName: normalizeSeoText(input.brandName ?? null, 80, 'brandName'),
+    brandLogoUrl: normalizeBrandAssetUrl(input.brandLogoUrl ?? null, 'brandLogoUrl'),
+    brandFaviconUrl: normalizeBrandAssetUrl(input.brandFaviconUrl ?? null, 'brandFaviconUrl'),
+    brandAccentColor: normalizeBrandAccentColor(input.brandAccentColor ?? null),
     requireContributionPolicyAck: input.requireContributionPolicyAck,
   };
   if (!normalized.contributionPolicySource) {
     normalized.requireContributionPolicyAck = false;
   }
   validateSources(normalized);
+  return normalized;
+}
+
+function normalizeBrandAssetUrl(value: string | null, field: string): string | null {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) return null;
+  if (normalized.length > 512) {
+    throw new BadRequestException({ code: 'SERVER_WIKI_BRAND_URL_TOO_LONG', field, maxLength: 512 });
+  }
+  if (normalized.startsWith('/uploads/')) {
+    const segments = normalized.slice('/uploads/'.length).split('/');
+    if (segments.length > 0 && segments.every((segment) => segment.length > 0
+      && segment !== '.' && segment !== '..' && /^[a-zA-Z0-9._-]+$/u.test(segment))) {
+      return normalized;
+    }
+    throw new BadRequestException({ code: 'SERVER_WIKI_BRAND_URL_INVALID', field });
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new BadRequestException({ code: 'SERVER_WIKI_BRAND_URL_INVALID', field });
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+    throw new BadRequestException({ code: 'SERVER_WIKI_BRAND_URL_INVALID', field });
+  }
+  return parsed.toString();
+}
+
+function normalizeBrandAccentColor(value: string | null): string | null {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  if (!normalized) return null;
+  if (!/^#[0-9a-f]{6}$/u.test(normalized)) {
+    throw new BadRequestException({ code: 'SERVER_WIKI_BRAND_COLOR_INVALID', field: 'brandAccentColor' });
+  }
   return normalized;
 }
 

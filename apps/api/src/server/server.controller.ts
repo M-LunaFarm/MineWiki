@@ -82,6 +82,10 @@ const serverWikiContentSettingsPayloadSchema = z.object({
   seoTitle: z.string().nullable().optional().default(null),
   seoDescription: z.string().nullable().optional().default(null),
   seoIndexingEnabled: z.boolean().optional().default(true),
+  brandName: z.string().nullable().optional().default(null),
+  brandLogoUrl: z.string().nullable().optional().default(null),
+  brandFaviconUrl: z.string().nullable().optional().default(null),
+  brandAccentColor: z.string().nullable().optional().default(null),
   requireContributionPolicyAck: z.boolean(),
 });
 const serverWikiNavigationDocumentSchema = z.object({
@@ -277,7 +281,12 @@ export class ServerController {
   ) {
     const authority = await this.authorizeWikiContentSettings(id, session);
     const payload = serverWikiContentSettingsPayloadSchema.parse(body) as ServerWikiContentSettingsInput;
-    const settings = await this.serverService.updateWikiContentSettings(id, payload, authority.accountId);
+    const settings = await this.serverService.updateWikiContentSettings(
+      id,
+      payload,
+      authority.accountId,
+      authority.kind !== 'manager',
+    );
     return withWikiSettingsAccess(settings, authority);
   }
 

@@ -75,7 +75,7 @@ test('thetree vote macro creates one structured poll in the comment transaction'
 
   await discussion.createThread(session, page.id.toString(), {
     title: '버전 투표',
-    content: '다음 버전은? [vote(선호 버전,1.20,1.21)]',
+    content: '다음 버전을 선택해 주세요. [vote(선호 버전,1.20,1.21)]',
   });
 
   assert.equal(pollData?.question, '선호 버전');

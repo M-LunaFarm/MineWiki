@@ -48,7 +48,7 @@ export async function generateMetadata({ params }: Pick<PageProps, 'params'>): P
     const siteTitle = presentation?.seoTitle ?? `${page.serverWiki.name} 위키`;
     const description = presentation?.seoDescription
       ?? metadataDescription(page.html, page.serverWiki.directoryOverview?.shortDescription);
-    return createPageMetadata({
+    const metadata = createPageMetadata({
       title: `${page.displayTitle} | ${siteTitle}`,
       description,
       path: canonicalPath,
@@ -56,6 +56,9 @@ export async function generateMetadata({ params }: Pick<PageProps, 'params'>): P
       imageDescription: description,
       noIndex: presentation?.seoIndexingEnabled === false,
     });
+    return presentation?.branding?.faviconUrl
+      ? { ...metadata, icons: { icon: presentation.branding.faviconUrl } }
+      : metadata;
   } catch {
     return createPageMetadata({ title: '서버 위키', description: DEFAULT_SITE_DESCRIPTION, path: canonicalPath, noIndex: true });
   }
