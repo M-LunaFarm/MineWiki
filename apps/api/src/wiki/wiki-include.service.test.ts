@@ -114,6 +114,36 @@ test('expands a readable include with AST-safe parameters and disables nested in
   assert.equal(permissionCalls[0]?.requestIp, '192.0.2.44');
 });
 
+test('never loads includes inside a hidden conditional block', async () => {
+  const template: FixturePage = {
+    ...basePage,
+    id: 3n,
+    namespaceId: 2,
+    localPath: '비밀',
+    slug: '비밀',
+    title: '비밀',
+    currentRevisionId: 30n,
+    contentRaw: '노출되면 안 됨',
+  };
+  const fixture = createFixture([template]);
+  const parent = parseMarkup([
+    '{{{#!if false',
+    '[include(틀:비밀)]',
+    '}}}',
+  ].join('\n'));
+  const result = await fixture.service.expand({
+    ast: parent.ast,
+    accountId: null,
+    sourcePageId: 1n,
+    sourceNamespace: 'main',
+    sourceLocalPath: '대문',
+  });
+
+  assert.equal(fixture.pageLookups(), 0);
+  assert.equal(result.includedSourceBytes, 0);
+  assert.equal(renderDocument(result.ast), '');
+});
+
 test('server wiki includes resolve from the same immutable release instead of the draft revision', async () => {
   const releaseItem = {
     id: 80n,

@@ -60,6 +60,10 @@ export class WikiIncludeService {
       if (node.type === 'folding') {
         return { ...node, children: await expandNodes(node.children) };
       }
+      if (node.type === 'conditional') {
+        if (node.state === 'hidden') return node;
+        return { ...node, children: await expandNodes(node.children) };
+      }
       if (node.type === 'wiki_style') {
         return { ...node, children: await expandNodes(node.children) };
       }
@@ -208,6 +212,9 @@ function disableNestedIncludes(nodes: readonly AstNode[]): AstNode[] {
     if (node.type === 'include') return unavailable(node);
     if (node.type === 'indent') return { ...node, children: disableNestedIncludes(node.children) };
     if (node.type === 'folding') return { ...node, children: disableNestedIncludes(node.children) };
+    if (node.type === 'conditional') return node.state === 'visible'
+      ? { ...node, children: disableNestedIncludes(node.children) }
+      : node;
     if (node.type === 'wiki_style') return { ...node, children: disableNestedIncludes(node.children) };
     if (node.type === 'blockquote') return { ...node, children: disableNestedIncludes(node.children) };
     return node;

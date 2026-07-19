@@ -2895,6 +2895,7 @@ export function astContainsInclude(ast: readonly AstNode[]): boolean {
     if (
       node.type === 'indent'
       || node.type === 'folding'
+      || node.type === 'conditional'
       || node.type === 'wiki_style'
       || node.type === 'blockquote'
     ) {

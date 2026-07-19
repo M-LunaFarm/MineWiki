@@ -1,3 +1,4 @@
+export * from './conditional.js';
 export * from './markup.js';
 export * from './namespaces.js';
 export * from './normalize.js';

@@ -571,6 +571,7 @@ test('links only validated discussion mentions outside code and existing links',
 test('links only viewer-visible same-thread comment references outside code and existing links', () => {
   const raw = [
     '#41 확인 #42 #999',
+    '#99999999999999999999',
     '{{{#41}}}',
     '[[문서|#41]]',
     '[https://example.com/#41 #41]',

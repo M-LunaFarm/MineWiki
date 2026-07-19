@@ -34,8 +34,9 @@ import {
   type WikiLinkResolutionContext
 } from './namespaces.js';
 import { normalizeTitle, slugifyTitle } from './normalize.js';
+import { evaluateConditionalExpression } from './conditional.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.32.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.33.0';
 const MAX_HIGHLIGHT_CODE_LENGTH = 100_000;
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
@@ -414,6 +415,25 @@ function parseMarkupDocument(
         ast.push({ type: 'indent', children: nested.ast });
         continue;
       }
+    }
+
+    const conditional = line.match(/^\s*\{\{\{#!if\s+(.+?)\s*$/iu);
+    if (conditional) {
+      const expression = conditional[1]?.trim() ?? '';
+      const block = readNestedTripleBraceBlock(lines, i);
+      const nested = parseMarkupDocument(block.body.join('\n'), options, foldingDepth + 1);
+      mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
+      const evaluation = evaluateConditionalExpression(expression, {});
+      if (evaluation.error) errors.push(`조건식 오류: ${evaluation.error}`);
+      if (!block.closed) errors.push('닫히지 않은 조건 블록을 문서 끝까지 처리했습니다.');
+      ast.push({
+        type: 'conditional',
+        expression,
+        state: evaluation.value ? 'visible' : 'hidden',
+        children: nested.ast,
+      });
+      i = block.endIndex;
+      continue;
     }
 
     const wikiStyle = line.match(/^\s*\{\{\{#!wiki(?:\s+(.*?))?\s*$/i);
@@ -1931,6 +1951,14 @@ export function applyIncludeParametersToAst(
       title: inline(node.title),
       children: applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams)
     };
+    if (node.type === 'conditional') {
+      const evaluation = evaluateConditionalExpression(node.expression, params, reservedParams);
+      return {
+        ...node,
+        state: evaluation.value ? 'visible' : 'hidden',
+        children: applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams),
+      };
+    }
     if (node.type === 'wiki_style') return {
       ...node,
       children: applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams)
@@ -2348,6 +2376,9 @@ export function extractDiscussionCommentReferenceIds(raw: string, limit = 20): r
   for (const match of String(raw).matchAll(pattern)) {
     const id = match[1];
     if (!id) continue;
+    // Prisma/MariaDB discussion IDs are signed BIGINT values. Reject larger
+    // numeric-looking input before it reaches a database query.
+    if (BigInt(id) > 9_223_372_036_854_775_807n) continue;
     ids.add(id);
     if (ids.size >= boundedLimit) break;
   }
@@ -2484,6 +2515,7 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
       const title = restrictInline(node.title);
       return [...(title.length > 0 ? [{ type: 'paragraph' as const, children: title }] : []), ...restrictAst(node.children)];
     }
+    if (node.type === 'conditional') return node.state === 'visible' ? restrictAst(node.children) : [];
     if (node.type === 'wiki_style') return restrictAst(node.children);
     return [];
   });
@@ -2565,6 +2597,10 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       }
       if (node.type === 'folding') {
         output.push(`<details class="fold wiki-fold"><summary>${renderInline(node.title, footnotes, renderOptions)}</summary>${renderDocument(node.children, { ...renderOptions, tocHeadings })}</details>`);
+        continue;
+      }
+      if (node.type === 'conditional') {
+        if (node.state === 'visible') output.push(renderNodes(node.children));
         continue;
       }
       if (node.type === 'wiki_style') {
@@ -2855,7 +2891,11 @@ function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, F
       for (const [name, definition] of collectNamedFootnoteDefinitions(node.children)) {
         if (!definitions.has(name)) definitions.set(name, definition);
       }
-    } else if (node.type === 'wiki_style' || (node.type === 'include' && node.children)) {
+    } else if (
+      node.type === 'wiki_style'
+      || (node.type === 'conditional' && node.state === 'visible')
+      || (node.type === 'include' && node.children)
+    ) {
       for (const [name, definition] of collectNamedFootnoteDefinitions(node.children)) {
         if (!definitions.has(name)) definitions.set(name, definition);
       }
@@ -2870,7 +2910,13 @@ function collectTocHeadings(ast: readonly AstNode[]): Array<{ level: number; tex
     if (node.type === 'heading') headings.push(node);
     // Included headings belong to their own heading scope and must not leak into
     // the caller's table of contents.
-    if (node.type === 'folding' || node.type === 'wiki_style' || node.type === 'blockquote' || node.type === 'indent') {
+    if (
+      node.type === 'folding'
+      || node.type === 'wiki_style'
+      || node.type === 'blockquote'
+      || node.type === 'indent'
+      || (node.type === 'conditional' && node.state === 'visible')
+    ) {
       headings.push(...collectTocHeadings(node.children));
     }
   }
@@ -3120,6 +3166,7 @@ function countMathNodes(ast: readonly AstNode[]): number {
       );
     }
     if (node.type === 'folding') return count + countInline(node.title) + countMathNodes(node.children);
+    if (node.type === 'conditional' && node.state === 'visible') return count + countMathNodes(node.children);
     if (node.type === 'wiki_style') return count + countMathNodes(node.children);
     if (node.type === 'include' && node.children) return count + countMathNodes(node.children);
     return count;
@@ -3156,7 +3203,12 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
         collectInline(cell.children);
         if (cell.blocks) collectWikiFileNames(cell.blocks, output);
       }
-    } else if (node.type === 'folding' || node.type === 'wiki_style' || (node.type === 'include' && node.children)) {
+    } else if (
+      node.type === 'folding'
+      || node.type === 'wiki_style'
+      || (node.type === 'conditional' && node.state === 'visible')
+      || (node.type === 'include' && node.children)
+    ) {
       collectWikiFileNames(node.children, output);
     }
   }
@@ -3198,6 +3250,8 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
       collectInline(node.title);
       collectWikiLinkTargets(node.children, output);
     } else if (node.type === 'wiki_style') {
+      collectWikiLinkTargets(node.children, output);
+    } else if (node.type === 'conditional' && node.state === 'visible') {
       collectWikiLinkTargets(node.children, output);
     } else if (node.type === 'include' && node.children) {
       collectWikiLinkTargets(node.children, output);
