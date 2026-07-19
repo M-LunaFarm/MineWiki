@@ -1732,41 +1732,6 @@ export class ServerService {
     }
   }
 
-  async recheckVerification(
-    id: string,
-    options: VerificationRecheckOptions,
-  ): Promise<VerificationRecheckResult> {
-    const current = await this.prisma.server.findUnique({
-      where: { id },
-      select: { verificationGrade: true },
-    });
-    if (!current) {
-      throw new NotFoundException(`Server ${id} not found`);
-    }
-    const previousGrade = current.verificationGrade as StoredVerificationGrade;
-    const checkedAtIso = normalizeTimestamp(options.checkedAt);
-
-    const nextGrade: StoredVerificationGrade = options.passed ? previousGrade : 'Unverified';
-    const downgraded = previousGrade !== nextGrade;
-
-    await this.prisma.server.update({
-      where: { id },
-      data: {
-        verificationGrade: nextGrade,
-        verifiedAt: nextGrade === 'Unverified' ? null : new Date(checkedAtIso),
-      },
-    });
-
-    return {
-      serverId: id,
-      grade: toPublicVerificationGrade(nextGrade),
-      previousGrade: toPublicVerificationGrade(previousGrade),
-      downgraded,
-      checkedAt: checkedAtIso,
-      reason: options.reason ?? (options.passed ? 'verification_passed' : 'recheck_failed'),
-    };
-  }
-
   async register(serverInput: {
     name: string;
     joinHost: string;
@@ -2698,31 +2663,6 @@ function throwWikiNavigationConflict(currentVersion: number): never {
     message: '다른 관리자가 서버 위키 문서 구조를 먼저 변경했습니다.',
     currentVersion,
   });
-}
-
-export interface VerificationRecheckOptions {
-  readonly passed: boolean;
-  readonly checkedAt?: string;
-  readonly reason?: string;
-}
-
-export interface VerificationRecheckResult {
-  readonly serverId: string;
-  readonly grade: ServerDetail['verificationGrade'];
-  readonly previousGrade: ServerDetail['verificationGrade'];
-  readonly downgraded: boolean;
-  readonly checkedAt: string;
-  readonly reason: string;
-}
-
-function normalizeTimestamp(timestamp?: string): string {
-  if (timestamp) {
-    const parsed = new Date(timestamp);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString();
-    }
-  }
-  return new Date().toISOString();
 }
 
 export function buildOrder(sort: ServerSort): Prisma.ServerOrderByWithRelationInput[] {

@@ -2,7 +2,6 @@ import {
   Body,
   BadRequestException,
   Controller,
-  ForbiddenException,
   Param,
   ParseUUIDPipe,
   Post,
@@ -10,26 +9,20 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
-import {
-  ServerService,
-  type VerificationRecheckOptions,
-  type VerificationRecheckResult,
-} from './server.service';
 import { ClaimService } from '../claim/claim.service';
+import type { ClaimStatusResponse } from '../claim/claim.types';
 import { SessionGuard } from '../session/session.guard';
 import { CurrentSession } from '../session/session.decorator';
 import type { SessionPayload } from '../session/session.service';
 
 const recheckSchema = z.object({
-  passed: z.boolean(),
-  checkedAt: z.string().datetime().optional(),
-  reason: z.string().min(3).max(160).optional(),
-});
+  method: z.enum(['dns', 'motd']),
+  proof: z.string().trim().min(1).max(512),
+}).strict();
 
 @Controller('v1/servers/:serverId/verification')
 export class ServerVerificationController {
   constructor(
-    private readonly serverService: ServerService,
     private readonly claimService: ClaimService,
   ) {}
 
@@ -40,15 +33,16 @@ export class ServerVerificationController {
     @Param('serverId', new ParseUUIDPipe()) serverId: string,
     @Body() body: unknown,
     @CurrentSession() session: SessionPayload,
-  ): Promise<VerificationRecheckResult> {
-    if (!(await this.claimService.isOwner(serverId, session.userId))) {
-      throw new ForbiddenException('해당 서버의 검증 상태를 변경할 권한이 없습니다.');
-    }
+  ): Promise<ClaimStatusResponse> {
     const parsed = recheckSchema.safeParse(body);
     if (!parsed.success) {
       throw new BadRequestException('검증 재점검 요청 형식을 확인해주세요.');
     }
-    const payload = parsed.data as VerificationRecheckOptions;
-    return this.serverService.recheckVerification(serverId, payload);
+    return this.claimService.verifyMethod(
+      serverId,
+      parsed.data.method,
+      parsed.data.proof,
+      session.userId,
+    );
   }
 }
