@@ -6,14 +6,16 @@ import { WikiNamespaceFrontPage } from './wiki-namespace-front-page';
 import { ServerWikiArticleView } from './server-wiki-article-view';
 import { WikiUserProfileHeader, WikiUserProfileHub } from './wiki-user-profile-header';
 import { WikiDocumentContext } from './wiki-document-context';
+import type { ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
 
 interface WikiRoutePageProps {
   readonly prefix: 'wiki' | 'mod' | 'modpack' | 'server' | 'serverWiki' | 'dev' | 'guide' | 'data' | 'help' | 'project' | 'template' | 'user' | 'category' | 'file';
   readonly segments?: string[];
   readonly followRedirects?: boolean;
+  readonly serverWikiRouteContext?: ServerWikiPublicRouteContext | null;
 }
 
-export async function WikiRoutePage({ prefix, segments = [], followRedirects = true }: WikiRoutePageProps) {
+export async function WikiRoutePage({ prefix, segments = [], followRedirects = true, serverWikiRouteContext }: WikiRoutePageProps) {
   const routePath = buildWikiRoutePath(prefix, segments);
   const page = await fetchWikiPageByPath(routePath, { followRedirects });
   if (prefix === 'user') {
@@ -33,7 +35,7 @@ export async function WikiRoutePage({ prefix, segments = [], followRedirects = t
     notFound();
   }
   if ((prefix === 'server' || prefix === 'serverWiki') && page.serverWiki) {
-    return <ServerWikiArticleView page={page} routePath={routePath} />;
+    return <ServerWikiArticleView page={page} routePath={routePath} routeContext={serverWikiRouteContext} />;
   }
   if (page.title === '대문' && isStandardFrontPagePrefix(prefix)) {
     const namespace = prefix === 'wiki' ? 'main' : prefix;

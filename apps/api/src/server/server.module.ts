@@ -26,11 +26,12 @@ import { ServerWikiReleaseReviewQueueService } from './server-wiki-release-revie
 import { ServerWikiReleaseManifestCursorCodec } from './server-wiki-release-manifest-cursor';
 import { ServerWikiDomainController, ServerWikiDomainRouteController } from './server-wiki-domain.controller';
 import { ServerWikiDomainService } from './server-wiki-domain.service';
+import { ServerWikiDomainProvisioningController } from './server-wiki-domain-provisioning.controller';
 
 @Module({
   imports: [FileModule, forwardRef(() => ClaimModule), TelemetryModule, SessionModule, WikiModule, EventsModule, VerifyModule],
   providers: [ServerService, PluginCredentialService, ServerWikiCollaboratorService, ServerWikiLayoutEntitlementAdminService, ServerWikiLayoutEntitlementLifecycleService, ServerWikiPublicationService, ServerWikiReleaseManifestCursorCodec, ServerWikiReleaseReviewQueueService, ServerWikiTemplateService, ServerWikiDomainService],
-  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController],
+  controllers: [ServerController, ServerVerificationController, ServerWikiPresentationController, ServerWikiCollaboratorController, ServerWikiLayoutEntitlementAdminController, ServerWikiLayoutEntitlementInternalController, ServerWikiPublicationController, ServerWikiReleaseReviewQueueController, ServerWikiTemplateController, ServerWikiDomainController, ServerWikiDomainRouteController, ServerWikiDomainProvisioningController],
   exports: [ServerService]
 })
 export class ServerModule {}

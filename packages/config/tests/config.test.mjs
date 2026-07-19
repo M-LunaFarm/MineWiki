@@ -299,6 +299,7 @@ function validProductionEnv() {
     WEBAUTHN_ORIGIN: 'https://minewiki.kr',
     WEBAUTHN_RP_ID: 'minewiki.kr',
     INTERNAL_API_BASE_URL: 'http://127.0.0.1:3000',
+    SERVER_WIKI_DOMAIN_TARGET: 'domains.minewiki.kr',
     API_HOST: '127.0.0.1',
     API_PORT: '3000',
     VERIFY_PUBLIC_BASE_URL: 'https://verify.minewiki.kr',

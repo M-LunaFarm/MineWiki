@@ -2,11 +2,15 @@ import Link from 'next/link';
 import { BookOpen, ExternalLink, History, Menu, Search } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiNavigation } from './server-wiki-navigation';
+import { serverWikiPlatformUrl, serverWikiPublicPath, type ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
 
-export function ServerWikiHeader({ page }: { readonly page: WikiPageResponse }) {
+export function ServerWikiHeader({ page, routeContext }: { readonly page: WikiPageResponse; readonly routeContext?: ServerWikiPublicRouteContext | null }) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
-  const rootPath = `/serverWiki/${encodeURIComponent(wiki.slug)}`;
+  const rootPath = serverWikiPublicPath(`/serverWiki/${encodeURIComponent(wiki.slug)}`, routeContext);
+  const directoryPath = routeContext
+    ? serverWikiPlatformUrl(page.serverDirectoryPath ?? '/servers')
+    : page.serverDirectoryPath ?? '/servers';
 
   return (
     <header className="sticky top-0 z-50 border-b border-[#e6e6e6] bg-white/95 text-[#1f1f1f] backdrop-blur-xl">
@@ -62,7 +66,7 @@ export function ServerWikiHeader({ page }: { readonly page: WikiPageResponse }) 
         </Link>
 
         <Link
-          href={page.serverDirectoryPath ?? '/servers'}
+          href={directoryPath}
           className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-medium text-[#666] transition hover:bg-[#f5f5f5] hover:text-[#202020] sm:text-sm"
         >
           서버 정보

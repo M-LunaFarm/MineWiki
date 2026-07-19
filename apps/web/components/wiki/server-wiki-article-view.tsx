@@ -10,7 +10,12 @@ import {
 } from 'lucide-react';
 
 import type { WikiPageResponse } from '../../lib/wiki-api';
-import { fetchServerWikiNavigation, fetchServerWikiPresentation } from '../../lib/wiki-server-api';
+import {
+  fetchPublicServerWikiNavigation,
+  fetchPublicServerWikiPresentation,
+  fetchServerWikiNavigation,
+  fetchServerWikiPresentation,
+} from '../../lib/wiki-server-api';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
 import { ServerWikiHeader } from './server-wiki-header';
 import { WikiPageTools } from './wiki-page-tools';
@@ -18,21 +23,33 @@ import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
 import { serverWikiDocumentTitle } from '../../lib/server-wiki-navigation.mjs';
 import { ServerWikiDirectoryOverview } from './server-wiki-directory-overview';
+import {
+  serverWikiPlatformUrl,
+  serverWikiPublicPath,
+  rewriteServerWikiHtmlLinks,
+  type ServerWikiPublicRouteContext,
+} from '../../lib/server-wiki-public-route';
 
 interface ServerWikiArticleViewProps {
   readonly page: WikiPageResponse;
   readonly routePath: string;
+  readonly routeContext?: ServerWikiPublicRouteContext | null;
 }
 
-export async function ServerWikiArticleView({ page, routePath }: ServerWikiArticleViewProps) {
+export async function ServerWikiArticleView({ page, routePath, routeContext }: ServerWikiArticleViewProps) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
   const [presentation, navigationResponse] = await Promise.all([
-    fetchServerWikiPresentation(wiki.contentSlug),
-    fetchServerWikiNavigation(wiki.contentSlug, wiki.navigationKey).catch(() => null),
+    routeContext
+      ? fetchPublicServerWikiPresentation(wiki.contentSlug)
+      : fetchServerWikiPresentation(wiki.contentSlug),
+    (routeContext
+      ? fetchPublicServerWikiNavigation(wiki.contentSlug, wiki.navigationKey)
+      : fetchServerWikiNavigation(wiki.contentSlug, wiki.navigationKey)).catch(() => null),
   ]);
   const navigation = (navigationResponse?.items ?? wiki.navigation).map((item) => ({
     ...item,
+    path: item.path ? serverWikiPublicPath(item.path, routeContext) : null,
     current: item.kind === 'page' && item.id === page.id,
   }));
   const pageWithNavigation: WikiPageResponse = {
@@ -59,7 +76,10 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
     : isHandbook
       ? 'lg:grid-cols-[292px_minmax(0,1fr)] 2xl:grid-cols-[292px_minmax(0,1fr)_292px]'
       : 'lg:grid-cols-[330px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_292px]';
-  const editPath = buildServerWikiToolPath(routePath, 'edit');
+  const editPath = serverWikiPlatformUrl(buildServerWikiToolPath(routePath, 'edit'));
+  const historyPath = serverWikiPlatformUrl(buildServerWikiToolPath(routePath, 'history'));
+  const rootPath = serverWikiPublicPath(`/serverWiki/${encodeURIComponent(wiki.slug)}`, routeContext);
+  const publicRoutePath = serverWikiPublicPath(routePath, routeContext);
   const isWikiHome = currentIndex === 0;
   const directoryOverview = isWikiHome ? wiki.directoryOverview : null;
   const startHereDocuments = isWikiHome
@@ -68,18 +88,18 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
 
   return (
     <div className="server-wiki-layout min-h-screen bg-white text-[#333]">
-      <ServerWikiHeader page={pageWithNavigation} />
+      <ServerWikiHeader page={pageWithNavigation} routeContext={routeContext} />
       {wiki.publicationStatus !== 'published' ? (
         <aside className="border-y border-amber-300/40 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-950" role="status">
           {wiki.publicationStatus === 'draft' ? '초안 미리보기' : '비공개 미리보기'} · 권한이 있는 협업자에게만 표시됩니다.
         </aside>
       ) : null}
       <main className={`mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] ${gridClass}`}>
-        <ServerWikiSidebar page={pageWithNavigation} />
+        <ServerWikiSidebar page={pageWithNavigation} routeContext={routeContext} />
 
         <article className="min-w-0 px-5 py-8 sm:px-9 lg:px-12 lg:py-12 xl:px-16">
           <nav className="flex flex-wrap items-center gap-2 text-sm text-[#777]">
-            <Link href={`/serverWiki/${encodeURIComponent(wiki.slug)}`} className="hover:text-[#346ddb]">{wiki.name} 위키</Link>
+            <Link href={rootPath} className="hover:text-[#346ddb]">{wiki.name} 위키</Link>
             <span>/</span>
             <span className="text-[#333]">{documentTitle}</span>
           </nav>
@@ -91,7 +111,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               </h1>
               <div className="flex flex-wrap items-center gap-2">
                 <Link
-                  href={buildServerWikiToolPath(routePath, 'history')}
+                  href={historyPath}
                   className="inline-flex items-center gap-2 rounded-lg border border-[#dedede] px-3 py-2 text-sm text-[#666] transition hover:border-[#b8c9ed] hover:bg-[#f7f9ff] hover:text-[#2458bd]"
                 >
                   <History className="size-4" />
@@ -106,7 +126,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
                 </Link>
               </div>
             </div>
-            <p className="mt-5 text-sm text-[#888]">{routePath} · 최근 수정 {updatedAt}</p>
+            <p className="mt-5 text-sm text-[#888]">{publicRoutePath} · 최근 수정 {updatedAt}</p>
           </header>
 
           {directoryOverview ? (
@@ -132,7 +152,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               className="server-wiki-notice wiki-rendered mt-8 rounded-xl border border-[#cbd9f6] border-l-4 border-l-[#346ddb] bg-[#f5f8ff] px-5 py-4 text-sm text-[#444]"
               role="note"
               aria-label="서버 위키 상단 안내"
-              dangerouslySetInnerHTML={{ __html: presentation.topNoticeHtml }}
+              dangerouslySetInnerHTML={{ __html: rewriteServerWikiHtmlLinks(presentation.topNoticeHtml, routeContext) }}
             />
           ) : null}
 
@@ -154,7 +174,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
             </details>
           ) : null}
 
-          <div id={contentId} className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: page.html }} />
+          <div id={contentId} className="server-wiki-rendered wiki-rendered mt-8 border-0 bg-transparent px-0 py-0" dangerouslySetInnerHTML={{ __html: rewriteServerWikiHtmlLinks(page.html, routeContext) }} />
           <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
 
           {startHereDocuments.length > 0 ? (
@@ -184,7 +204,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               className="server-wiki-notice wiki-rendered mt-8 rounded-xl border border-[#e2e2e2] bg-[#fafafa] px-5 py-4 text-sm text-[#666]"
               role="note"
               aria-label="서버 위키 하단 안내"
-              dangerouslySetInnerHTML={{ __html: presentation.bottomNoticeHtml }}
+              dangerouslySetInnerHTML={{ __html: rewriteServerWikiHtmlLinks(presentation.bottomNoticeHtml, routeContext) }}
             />
           ) : null}
 
@@ -193,7 +213,11 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
             <WikiPager item={next} direction="next" />
           </div>
           <div className="mt-8">
-            <WikiPageTools
+            {routeContext ? <aside className="rounded-xl border border-[#e2e2e2] bg-[#fafafa] p-5 text-sm text-[#666]">
+              <p className="font-semibold text-[#333]">이 문서는 MineWiki에서 관리됩니다.</p>
+              <p className="mt-1 leading-6">편집, 역사, 토론과 ACL 관리는 보안을 위해 MineWiki 계정 영역에서 진행합니다.</p>
+              <Link href={historyPath} className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-[#dedede] bg-white px-4 font-semibold text-[#346ddb] hover:border-[#9ab5ef]">문서 관리 열기</Link>
+            </aside> : <WikiPageTools
               pageId={page.id}
               namespace={page.namespace}
               spaceId={page.spaceId}
@@ -202,7 +226,7 @@ export async function ServerWikiArticleView({ page, routePath }: ServerWikiArtic
               pageType={page.pageType}
               currentRevisionId={page.revision.id}
               routePath={routePath}
-            />
+            />}
           </div>
         </article>
 

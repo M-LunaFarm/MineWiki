@@ -2019,8 +2019,11 @@ model ServerWikiDomain {
   version               Int       @default(0) @db.UnsignedInt
   verifiedAt            DateTime? @map("verified_at") @db.DateTime(3)
   activatedAt           DateTime? @map("activated_at") @db.DateTime(3)
+  tlsReadyAt            DateTime? @map("tls_ready_at") @db.DateTime(3)
   disabledAt            DateTime? @map("disabled_at") @db.DateTime(3)
   lastCheckedAt         DateTime? @map("last_checked_at") @db.DateTime(3)
+  nextCheckAt           DateTime? @map("next_check_at") @db.DateTime(3)
+  consecutiveFailures   Int       @default(0) @map("consecutive_failures") @db.UnsignedInt
   createdBy             String?   @map("created_by")
   createdAt             DateTime  @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
@@ -2031,6 +2034,7 @@ model ServerWikiDomain {
   @@index([status, hostname], map: "idx_server_wiki_domains_route")
   @@index([spaceId, status], map: "idx_server_wiki_domains_tenant")
   @@index([verificationExpiresAt], map: "idx_server_wiki_domains_verification_expiry")
+  @@index([status, nextCheckAt], map: "idx_server_wiki_domains_recheck")
   @@map("server_wiki_domains")
 }
 

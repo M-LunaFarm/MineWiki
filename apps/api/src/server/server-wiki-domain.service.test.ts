@@ -28,7 +28,7 @@ test('configuration returns the DNS token once while persisting only its digest'
   assert.deepEqual(fixture.audit.map((event) => event.action), ['server.wiki_domain.configure']);
 });
 
-test('verification requires both exact TXT ownership and MineWiki routing before activation', async () => {
+test('verification requires both exact TXT ownership and MineWiki routing before TLS provisioning', async () => {
   const fixture = domainFixture();
   const service = new ServerWikiDomainService(fixture.prisma as never, fixture.dns);
   const configured = await service.configure(SERVER_ID, 'docs.example.com', 0, 'account-1');
@@ -38,7 +38,8 @@ test('verification requires both exact TXT ownership and MineWiki routing before
   fixture.cnames = ['domains.minewiki.kr.'];
   const verified = await service.verify(SERVER_ID, configured.version, 'account-1');
 
-  assert.equal(verified.status, 'active');
+  assert.equal(verified.status, 'verified');
+  assert.equal(verified.tlsReadyAt, null);
   assert.equal(verified.version, 2);
   assert.ok(verified.verifiedAt);
   await assert.rejects(service.verify(SERVER_ID, configured.version, 'account-1'), ConflictException);
@@ -52,8 +53,13 @@ test('public domain routing exposes only a canonical active published release', 
   fixture.cnames = ['domains.minewiki.kr'];
   await service.verify(SERVER_ID, 1, 'account-1');
 
+  await assert.rejects(service.resolveActiveHost('docs.example.com'), NotFoundException);
+  const active = await service.activateProvisioned('docs.example.com', 2);
+  assert.equal(active.status, 'active');
+  assert.ok(active.tlsReadyAt);
+
   assert.deepEqual(await service.resolveActiveHost('DOCS.EXAMPLE.COM.'), {
-    hostname: 'docs.example.com', siteSlug: 'example', bindingVersion: 2,
+    hostname: 'docs.example.com', siteSlug: 'example', bindingVersion: 3,
   });
   fixture.wiki.publicationStatus = 'draft';
   await assert.rejects(service.resolveActiveHost('docs.example.com'), NotFoundException);
@@ -99,7 +105,8 @@ function domainFixture() {
       async findUniqueOrThrow() { if (!domain) throw new Error('missing'); return domain; },
       async create(input: { data: Record<string, unknown> }) {
         domain = {
-          id: 1n, verifiedAt: null, activatedAt: null, disabledAt: null, lastCheckedAt: null,
+          id: 1n, verifiedAt: null, activatedAt: null, tlsReadyAt: null, disabledAt: null,
+          lastCheckedAt: null, nextCheckAt: null, consecutiveFailures: 0,
           ...input.data,
         };
         return domain;

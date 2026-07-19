@@ -37,13 +37,18 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children, publicOnly = false }: { children: React.ReactNode; readonly publicOnly?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const [account, setAccount] = useState<AuthAccount | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!publicOnly);
 
   const refresh = useCallback(async () => {
+    if (publicOnly) {
+      setAccount(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const current = await fetchCurrentAccount();
@@ -54,14 +59,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [publicOnly]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (!publicOnly) void refresh();
+  }, [publicOnly, refresh]);
 
   useEffect(() => {
     if (
+      publicOnly ||
       loading ||
       !account?.policyConsent?.required ||
       pathname.startsWith('/policies') ||
@@ -71,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     const currentPath = `${pathname}${typeof window === 'undefined' ? '' : window.location.search}`;
     router.replace(`/policies/consent?returnTo=${encodeURIComponent(currentPath)}`);
-  }, [account, loading, pathname, router]);
+  }, [account, loading, pathname, publicOnly, router]);
 
   const login = useCallback(async (payload: { email: string; password: string }) => {
     setLoading(true);

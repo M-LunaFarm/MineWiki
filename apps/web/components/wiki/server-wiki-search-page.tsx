@@ -3,18 +3,22 @@ import { notFound } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { fetchWikiPageByPath, searchWiki } from '../../lib/wiki-server-api';
 import { ServerWikiWorkspace } from './server-wiki-workspace';
+import { serverWikiPublicPath, type ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
 
 export async function ServerWikiSearchPage({
   slug,
   routePrefix = 'server',
   searchParams,
+  routeContext,
 }: {
   readonly slug: string;
   readonly routePrefix?: 'server' | 'serverWiki';
   readonly searchParams: { q?: string; target?: string; cursor?: string };
+  readonly routeContext?: ServerWikiPublicRouteContext | null;
 }) {
-  const rootPath = `/${routePrefix}/${encodeURIComponent(slug)}`;
-  const page = await fetchWikiPageByPath(rootPath);
+  const platformRootPath = `/${routePrefix}/${encodeURIComponent(slug)}`;
+  const rootPath = serverWikiPublicPath(platformRootPath, routeContext);
+  const page = await fetchWikiPageByPath(platformRootPath);
   if (!page?.serverWiki) notFound();
   const query = searchParams.q?.trim().slice(0, 100) ?? '';
   const target = searchParams.target === 'title' || searchParams.target === 'content'
@@ -26,7 +30,7 @@ export async function ServerWikiSearchPage({
     : { items: [], nextCursor: null };
 
   return (
-    <ServerWikiWorkspace page={page} section="문서 검색">
+    <ServerWikiWorkspace page={page} section="문서 검색" routeContext={routeContext}>
       <header className="border-b border-[#e8e8e8] pb-7">
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#346ddb]">Documentation search</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#1f1f1f] sm:text-4xl">{page.serverWiki.name} 문서 검색</h1>
@@ -52,7 +56,7 @@ export async function ServerWikiSearchPage({
           <p className="mb-4 text-sm text-[#666]"><strong className="text-[#222]">‘{query}’</strong> 검색 결과 {result.items.length.toLocaleString('ko-KR')}개</p>
           <div className="divide-y divide-[#ededed] border-y border-[#ededed]">
             {result.items.map((item) => (
-              <Link key={item.pageId} href={item.routePath} className="block px-1 py-5 transition hover:bg-[#fafafa] sm:px-3">
+              <Link key={item.pageId} href={serverWikiPublicPath(item.routePath, routeContext)} className="block px-1 py-5 transition hover:bg-[#fafafa] sm:px-3">
                 <h2 className="font-semibold text-[#252525]">{item.displayTitle}</h2>
                 <p className="mt-2 line-clamp-2 text-sm leading-6 text-[#777]">{item.snippet}</p>
               </Link>

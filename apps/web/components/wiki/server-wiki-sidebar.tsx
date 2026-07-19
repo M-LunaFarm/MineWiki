@@ -3,11 +3,12 @@ import { BookOpen } from 'lucide-react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiCreateLink } from './server-wiki-create-link';
 import { ServerWikiNavigation } from './server-wiki-navigation';
+import { serverWikiPlatformUrl, serverWikiPublicPath, type ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
 
-export function ServerWikiSidebar({ page }: { readonly page: WikiPageResponse }) {
+export function ServerWikiSidebar({ page, routeContext }: { readonly page: WikiPageResponse; readonly routeContext?: ServerWikiPublicRouteContext | null }) {
   const wiki = page.serverWiki;
   if (!wiki) return null;
-  const rootPath = `/serverWiki/${encodeURIComponent(wiki.slug)}`;
+  const rootPath = serverWikiPublicPath(`/serverWiki/${encodeURIComponent(wiki.slug)}`, routeContext);
   const address = wiki.host ? `${wiki.host}${wiki.port && wiki.port !== 25565 ? `:${wiki.port}` : ''}` : null;
 
   return (
@@ -42,7 +43,7 @@ export function ServerWikiSidebar({ page }: { readonly page: WikiPageResponse })
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1"><ServerWikiNavigation items={wiki.navigation} storageKey={`minewiki:server-wiki:${wiki.slug}:collapsed`} /></div>
         <div className="mt-3">
-          <ServerWikiCreateLink serverSlug={wiki.slug} />
+          {routeContext ? <Link href={serverWikiPlatformUrl(`/serverWiki/${encodeURIComponent(wiki.slug)}/_tools/edit/새-문서`)} className="flex min-h-11 items-center rounded-lg px-2 text-xs font-semibold text-[#346ddb] hover:bg-[#edf3ff]">MineWiki에서 문서 작성</Link> : <ServerWikiCreateLink serverSlug={wiki.slug} />}
         </div>
         {address ? <p className="mt-4 break-all px-2 font-mono text-xs text-[#888]">{address}</p> : null}
         <a href="https://github.com/GitbookIO/gitbook" target="_blank" rel="noreferrer" className="mt-4 border-t border-[#e8e8e8] px-2 pt-4 text-xs text-[#888] hover:text-[#346ddb]">GitBook 스타일의 서버 문서</a>

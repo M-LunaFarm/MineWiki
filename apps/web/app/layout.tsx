@@ -3,11 +3,13 @@ import 'katex/dist/katex.min.css';
 
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { headers } from 'next/headers';
 import { Inter, Noto_Sans_KR, Noto_Serif_KR, JetBrains_Mono } from 'next/font/google';
 import { AuthProvider } from '../components/providers/auth-context';
 import { QueryClientProvider } from '../components/providers/query-client-provider';
 import { AppShell } from '../components/layout/app-shell';
 import { DEFAULT_SITE_DESCRIPTION, SITE_NAME, getSiteUrl } from '../lib/metadata';
+import { CUSTOM_DOMAIN_HOST_HEADER } from '../lib/server-wiki-public-route';
 
 export const metadata: Metadata = {
   metadataBase: new URL(getSiteUrl()),
@@ -64,7 +66,8 @@ const monoFont = JetBrains_Mono({
   variable: '--font-mono',
 });
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const publicOnly = Boolean((await headers()).get(CUSTOM_DOMAIN_HOST_HEADER));
   return (
     <html lang="ko" data-theme="dark" suppressHydrationWarning>
       <head>
@@ -75,7 +78,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         className={`${displayFont.variable} ${bodyFont.variable} ${editorialFont.variable} ${monoFont.variable} min-h-screen bg-surface-100 font-sans text-slate-100 antialiased`}
       >
         <QueryClientProvider>
-          <AuthProvider>
+          <AuthProvider publicOnly={publicOnly}>
             <AppShell>{children}</AppShell>
           </AuthProvider>
         </QueryClientProvider>

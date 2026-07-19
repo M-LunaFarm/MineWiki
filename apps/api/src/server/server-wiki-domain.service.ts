@@ -17,7 +17,11 @@ import { hasCanonicalPublicServerWikiParent } from './server-wiki-public-readine
 
 const VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 const TOKEN_PREFIX = 'minewiki-verification=';
-const DOMAIN_STATUS = ['pending', 'active', 'disabled'] as const;
+const DOMAIN_STATUS = ['pending', 'verified', 'provisioning', 'active', 'disabled'] as const;
+const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const RECHECK_RETRY_MS = 15 * 60 * 1000;
+const ROUTE_FRESHNESS_MS = 48 * 60 * 60 * 1000;
+const FAILURE_DISABLE_THRESHOLD = 3;
 const RESERVED_SUFFIXES = ['minewiki.kr'] as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -44,7 +48,10 @@ export interface ServerWikiDomainResponse {
   };
   readonly verifiedAt: string | null;
   readonly activatedAt: string | null;
+  readonly tlsReadyAt: string | null;
   readonly lastCheckedAt: string | null;
+  readonly nextCheckAt: string | null;
+  readonly consecutiveFailures: number;
 }
 
 @Injectable()
@@ -113,9 +120,12 @@ export class ServerWikiDomainService {
             verificationExpiresAt: expiresAt,
             version: { increment: 1 },
             verifiedAt: null,
-            activatedAt: null,
-            disabledAt: null,
-            lastCheckedAt: null,
+              activatedAt: null,
+              tlsReadyAt: null,
+              disabledAt: null,
+              lastCheckedAt: null,
+              nextCheckAt: null,
+              consecutiveFailures: 0,
             updatedAt: now,
           },
         });
@@ -174,18 +184,21 @@ export class ServerWikiDomainService {
           status: { in: ['pending', 'active'] },
         },
         data: {
-          status: 'active',
+          status: 'verified',
           version: { increment: 1 },
           verifiedAt: now,
-          activatedAt: domain.activatedAt ?? now,
+          activatedAt: null,
+          tlsReadyAt: null,
           lastCheckedAt: now,
+          nextCheckAt: new Date(now.getTime() + RECHECK_INTERVAL_MS),
+          consecutiveFailures: 0,
           disabledAt: null,
           updatedAt: now,
         },
       });
       if (updated.count !== 1) throw staleDomainVersion();
       const active = await tx.serverWikiDomain.findUniqueOrThrow({ where: { id: domain.id } });
-      await this.audit(tx, 'server.wiki_domain.activate', actorAccountId, context.serverWikiId, {
+      await this.audit(tx, 'server.wiki_domain.verify', actorAccountId, context.serverWikiId, {
         hostname: active.hostname, version: active.version,
       }, now);
       return active;
@@ -236,12 +249,98 @@ export class ServerWikiDomainService {
         },
       },
     });
-    if (!domain || domain.status !== 'active') throw domainNotFound();
+    const freshnessFloor = new Date(Date.now() - ROUTE_FRESHNESS_MS);
+    if (!domain || domain.status !== 'active' || !domain.tlsReadyAt || !domain.lastCheckedAt || domain.lastCheckedAt < freshnessFloor) {
+      throw domainNotFound();
+    }
     const wiki = domain.serverWiki;
     if (wiki.spaceId !== domain.spaceId || !wiki.voteServerId || !wiki.siteSlug || !wiki.publishedReleaseId) throw domainNotFound();
     const server = await this.prisma.server.findUnique({ where: { id: wiki.voteServerId } });
     if (!hasCanonicalPublicServerWikiParent({ space: wiki.space, wiki, server })) throw domainNotFound();
     return { hostname: domain.hostname, siteSlug: wiki.siteSlug, bindingVersion: domain.version };
+  }
+
+  async isTlsAllowed(hostnameInput: string): Promise<boolean> {
+    const hostname = normalizeCustomHostname(hostnameInput);
+    const domain = await this.prisma.serverWikiDomain.findUnique({ where: { hostname } });
+    if (!domain || !['verified', 'provisioning', 'active'].includes(domain.status) || !domain.verifiedAt) return false;
+    const wiki = await this.prisma.serverWiki.findUnique({
+      where: { id: domain.serverWikiId },
+      include: { space: true },
+    });
+    if (!wiki || wiki.spaceId !== domain.spaceId || !wiki.voteServerId || !wiki.publishedReleaseId) return false;
+    const server = await this.prisma.server.findUnique({ where: { id: wiki.voteServerId } });
+    return hasCanonicalPublicServerWikiParent({ space: wiki.space, wiki, server });
+  }
+
+  async markProvisioning(hostnameInput: string): Promise<void> {
+    const hostname = normalizeCustomHostname(hostnameInput);
+    await this.prisma.serverWikiDomain.updateMany({
+      where: { hostname, status: 'verified' },
+      data: { status: 'provisioning', updatedAt: new Date() },
+    });
+  }
+
+  async activateProvisioned(hostnameInput: string, expectedVersion: number): Promise<ServerWikiDomainResponse> {
+    const hostname = normalizeCustomHostname(hostnameInput);
+    const now = new Date();
+    const current = await this.prisma.serverWikiDomain.findUnique({ where: { hostname } });
+    if (!current || !['verified', 'provisioning', 'active'].includes(current.status)) throw domainNotFound();
+    if (current.version !== expectedVersion) throw staleDomainVersion();
+    const updated = await this.prisma.serverWikiDomain.updateMany({
+      where: { id: current.id, version: expectedVersion, status: { in: ['verified', 'provisioning', 'active'] } },
+      data: {
+        status: 'active',
+        version: { increment: 1 },
+        activatedAt: current.activatedAt ?? now,
+        tlsReadyAt: now,
+        lastCheckedAt: now,
+        nextCheckAt: new Date(now.getTime() + RECHECK_INTERVAL_MS),
+        consecutiveFailures: 0,
+        disabledAt: null,
+        updatedAt: now,
+      },
+    });
+    if (updated.count !== 1) throw staleDomainVersion();
+    return response(await this.prisma.serverWikiDomain.findUniqueOrThrow({ where: { id: current.id } }), this.routingTarget, null);
+  }
+
+  async revalidateDue(limit = 50): Promise<{ readonly checked: number; readonly disabled: number }> {
+    const now = new Date();
+    const due = await this.prisma.serverWikiDomain.findMany({
+      where: { status: { in: ['verified', 'provisioning', 'active'] }, nextCheckAt: { lte: now } },
+      orderBy: { nextCheckAt: 'asc' },
+      take: Math.max(1, Math.min(100, Math.trunc(limit))),
+    });
+    let disabled = 0;
+    for (const domain of due) {
+      const [ownsDomain, routesToMineWiki] = await Promise.all([
+        this.hasOwnershipProof(domain.hostname, domain.verificationTokenHash),
+        this.routesToMineWiki(domain.hostname),
+      ]);
+      if (ownsDomain && routesToMineWiki) {
+        await this.prisma.serverWikiDomain.updateMany({
+          where: { id: domain.id, version: domain.version },
+          data: { lastCheckedAt: now, nextCheckAt: new Date(now.getTime() + RECHECK_INTERVAL_MS), consecutiveFailures: 0, updatedAt: now },
+        });
+        continue;
+      }
+      const failures = domain.consecutiveFailures + 1;
+      const shouldDisable = failures >= FAILURE_DISABLE_THRESHOLD;
+      const result = await this.prisma.serverWikiDomain.updateMany({
+        where: { id: domain.id, version: domain.version },
+        data: {
+          status: shouldDisable ? 'disabled' : domain.status,
+          consecutiveFailures: failures,
+          lastCheckedAt: now,
+          nextCheckAt: shouldDisable ? null : new Date(now.getTime() + RECHECK_RETRY_MS),
+          disabledAt: shouldDisable ? now : domain.disabledAt,
+          updatedAt: now,
+        },
+      });
+      if (shouldDisable && result.count === 1) disabled += 1;
+    }
+    return { checked: due.length, disabled };
   }
 
   private async hasOwnershipProof(hostname: string, expectedHash: string): Promise<boolean> {
@@ -367,7 +466,8 @@ function safeHashEqual(left: string, right: string): boolean {
 function response(
   domain: {
     hostname: string; status: string; version: number; verificationExpiresAt: Date;
-    verifiedAt: Date | null; activatedAt: Date | null; lastCheckedAt: Date | null;
+    verifiedAt: Date | null; activatedAt: Date | null; tlsReadyAt: Date | null;
+    lastCheckedAt: Date | null; nextCheckAt: Date | null; consecutiveFailures: number;
   },
   routingTarget: string,
   token: string | null,
@@ -387,7 +487,10 @@ function response(
     routing: { type: 'CNAME', name: domain.hostname, value: routingTarget },
     verifiedAt: domain.verifiedAt?.toISOString() ?? null,
     activatedAt: domain.activatedAt?.toISOString() ?? null,
+    tlsReadyAt: domain.tlsReadyAt?.toISOString() ?? null,
     lastCheckedAt: domain.lastCheckedAt?.toISOString() ?? null,
+    nextCheckAt: domain.nextCheckAt?.toISOString() ?? null,
+    consecutiveFailures: domain.consecutiveFailures,
   };
 }
 

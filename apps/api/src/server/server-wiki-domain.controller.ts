@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, NotFoundException, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, NotFoundException, Param, ParseUUIDPipe, Post, Put, Res, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { ClaimService } from '../claim/claim.service';
 import { CurrentSession } from '../session/session.decorator';
@@ -84,6 +85,14 @@ export class ServerWikiDomainController {
 @Controller('v1/wiki/domain-routes')
 export class ServerWikiDomainRouteController {
   constructor(private readonly domains: ServerWikiDomainService) {}
+
+  @Get(':hostname/tls-allowed')
+  @Throttle({ default: { limit: 30, ttl: 60 } })
+  async tlsAllowed(@Param('hostname') hostname: string, @Res() reply: FastifyReply) {
+    if (!(await this.domains.isTlsAllowed(hostname))) throw new NotFoundException();
+    await this.domains.markProvisioning(hostname);
+    return reply.status(204).send();
+  }
 
   @Get(':hostname')
   @Throttle({ default: { limit: 120, ttl: 60 } })

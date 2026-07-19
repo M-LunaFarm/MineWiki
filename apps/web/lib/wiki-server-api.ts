@@ -86,6 +86,16 @@ export async function fetchServerWikiNavigation(slug: string, navigationKey: str
   return readWikiResponse<ServerWikiNavigationResponse>(response, 'Failed to load server wiki navigation.');
 }
 
+export async function fetchPublicServerWikiNavigation(slug: string, navigationKey: string): Promise<ServerWikiNavigationResponse | null> {
+  const params = new URLSearchParams({ key: navigationKey });
+  const response = await fetch(
+    `${API_BASE}/v1/wiki/server-wikis/${encodeURIComponent(slug)}/navigation?${params.toString()}`,
+    { cache: 'no-store' },
+  );
+  if (response.status === 404) return null;
+  return readWikiResponse<ServerWikiNavigationResponse>(response, 'Failed to load public server wiki navigation.');
+}
+
 export async function fetchWikiRevision(revisionId: string): Promise<WikiRevisionResponse> {
   const response = await wikiFetch(`/v1/wiki/revisions/${encodeURIComponent(revisionId)}`);
   return readWikiResponse<WikiRevisionResponse>(response, 'Failed to load wiki revision.');

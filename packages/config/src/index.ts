@@ -61,6 +61,10 @@ const envSchema = z.object({
     z.string().min(1).max(253).optional()
   ),
   INTERNAL_API_BASE_URL: z.string().url().optional(),
+  SERVER_WIKI_DOMAIN_TARGET: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u).optional(),
+  ),
   DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().url().optional(),
   DISCORD_BOT_TOKEN: z.string().optional(),
@@ -130,6 +134,7 @@ const apiProductionKeys: Array<keyof EnvSchema> = [
   'WEBAUTHN_ORIGIN',
   'WEBAUTHN_RP_ID',
   'INTERNAL_API_BASE_URL',
+  'SERVER_WIKI_DOMAIN_TARGET',
   'API_HOST',
   'API_PORT',
   'VERIFY_PUBLIC_BASE_URL',
