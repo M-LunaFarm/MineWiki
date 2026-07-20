@@ -4,6 +4,10 @@ import './load-environment.mjs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import {
+  describeServerWikiPublicationCoverage,
+  readServerWikiPublicationCoverage,
+} from './server-wiki-publication-health.mjs';
 
 const require = createRequire(import.meta.url);
 const { PrismaClient } = require('@prisma/client');
@@ -250,6 +254,8 @@ async function runValidation() {
       LIMIT ${args.sampleLimit}
     `,
   );
+
+  await validateServerWikiPublicationHealth();
 
   await errorIfRows(
     'WikiEditRequest has exactly one private submitter identity',
@@ -621,6 +627,100 @@ async function validatePublicReviewCounts() {
   `);
   summary.fixes += fixed;
   pass('Server.reviewsCount matches public reviews', `reconciled ${fixed} server counters`);
+}
+
+async function validateServerWikiPublicationHealth() {
+  await errorIfRows(
+    'active canonical ServerWiki publication lifecycle is coherent',
+    `
+      SELECT sw.id
+      FROM server_wikis sw
+      JOIN Server s
+        ON s.id = sw.vote_server_id
+       AND s.wikiSpaceId = sw.space_id
+       AND s.wikiSlug = sw.slug
+      LEFT JOIN server_wiki_releases release_row ON release_row.id = sw.published_release_id
+      WHERE sw.status = 'active'
+        AND s.listingStatus = 'active'
+        AND (
+          sw.publication_status NOT IN ('draft', 'published', 'unpublished')
+          OR (
+            sw.publication_status = 'draft'
+            AND (sw.publication_version <> 0 OR sw.published_release_id IS NOT NULL)
+          )
+          OR (
+            sw.publication_status = 'published'
+            AND (
+              sw.publication_version = 0
+              OR sw.published_at IS NULL
+              OR sw.published_release_id IS NULL
+              OR release_row.id IS NULL
+              OR release_row.server_wiki_id <> sw.id
+              OR release_row.version <> sw.publication_version
+            )
+          )
+          OR (
+            sw.publication_status = 'unpublished'
+            AND (
+              sw.publication_version = 0
+              OR sw.unpublished_at IS NULL
+              OR sw.published_release_id IS NULL
+              OR release_row.id IS NULL
+              OR release_row.server_wiki_id <> sw.id
+              OR release_row.version >= sw.publication_version
+            )
+          )
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'current published ServerWiki release graph is tenant-safe and non-empty',
+    `
+      SELECT sw.id
+      FROM server_wikis sw
+      JOIN server_wiki_releases release_row ON release_row.id = sw.published_release_id
+      LEFT JOIN server_wiki_release_items all_item ON all_item.release_id = release_row.id
+      LEFT JOIN server_wiki_release_items valid_item
+        ON valid_item.id = all_item.id
+       AND valid_item.server_wiki_id = sw.id
+       AND valid_item.space_id = sw.space_id
+      WHERE sw.status = 'active'
+        AND sw.publication_status = 'published'
+      GROUP BY sw.id, release_row.id
+      HAVING COUNT(all_item.id) = 0
+         OR COUNT(valid_item.id) <> COUNT(all_item.id)
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT
+      COUNT(*) AS active_canonical,
+      COALESCE(SUM(sw.publication_status = 'published'), 0) AS published,
+      COALESCE(SUM(sw.published_release_id IS NULL), 0) AS never_released
+    FROM server_wikis sw
+    JOIN Server s
+      ON s.id = sw.vote_server_id
+     AND s.wikiSpaceId = sw.space_id
+     AND s.wikiSlug = sw.slug
+    WHERE sw.status = 'active'
+      AND s.listingStatus = 'active'
+      AND s.ownerAccountId IS NOT NULL
+  `);
+  const coverage = readServerWikiPublicationCoverage(rows[0]);
+  const detail = describeServerWikiPublicationCoverage(coverage);
+  if (coverage.activeCanonical === 0) {
+    warn('ServerWiki publication coverage', detail);
+  } else if (coverage.neverReleased > 0) {
+    warn(
+      'ServerWiki publication coverage',
+      `${detail}; owners must complete readiness and publish an immutable release`,
+    );
+  } else {
+    pass('ServerWiki publication coverage', detail);
+  }
 }
 
 async function validateReviewHelpfulCounts() {
