@@ -190,6 +190,8 @@ async function runValidation() {
     `,
   );
 
+  await validateServerRegistrationHealth();
+
   await errorIfRows(
     'Server wiki reciprocal linkage and canonical identity are consistent',
     `
@@ -720,6 +722,67 @@ async function validateServerWikiPublicationHealth() {
     );
   } else {
     pass('ServerWiki publication coverage', detail);
+  }
+}
+
+async function validateServerRegistrationHealth() {
+  await errorIfRows(
+    'pending server registrations retain a bounded tenant reservation',
+    `
+      SELECT s.id
+      FROM Server s
+      LEFT JOIN Account registrant ON registrant.id = s.registrantAccountId
+      WHERE s.listingStatus = 'pending'
+        AND (
+          s.ownerAccountId IS NOT NULL
+          OR s.registrantAccountId IS NULL
+          OR registrant.id IS NULL
+          OR registrant.lifecycle_status <> 'active'
+          OR s.registrationEndpointKey IS NULL
+          OR s.registration_lease_expires_at IS NULL
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  await errorIfRows(
+    'verified server claims agree with canonical ownership',
+    `
+      SELECT claim.id
+      FROM ServerClaimMethod claim
+      LEFT JOIN Server s ON s.id = claim.serverId
+      LEFT JOIN Account claim_account ON claim_account.id = claim.accountId
+      LEFT JOIN Account owner_account ON owner_account.id = s.ownerAccountId
+      WHERE claim.status = 'verified'
+        AND (
+          s.id IS NULL
+          OR s.listingStatus <> 'active'
+          OR claim.verifiedAt IS NULL
+          OR claim_account.id IS NULL
+          OR owner_account.id IS NULL
+          OR claim_account.lifecycle_status <> 'active'
+          OR owner_account.lifecycle_status <> 'active'
+          OR COALESCE(claim_account.canonicalAccountId, claim_account.id)
+             <> COALESCE(owner_account.canonicalAccountId, owner_account.id)
+        )
+      LIMIT ${args.sampleLimit}
+    `,
+  );
+
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT COUNT(*) AS expired_pending
+    FROM Server
+    WHERE listingStatus = 'pending'
+      AND registration_lease_expires_at < NOW(3)
+  `);
+  const expired = Number(rows[0]?.expired_pending ?? 0);
+  if (expired > 0) {
+    warn(
+      'expired pending server registrations',
+      `${expired} abandoned reservations are eligible for safe endpoint reuse`,
+    );
+  } else {
+    pass('expired pending server registrations', 'no stale reservations');
   }
 }
 
