@@ -27,6 +27,7 @@ import { ServerOverviewCard } from './server-overview-card';
 import { ServerStatsCard } from './server-stats-card';
 import { ServerReviewSection } from './server-review-section';
 import { ServerOwnerControls } from './server-owner-controls';
+import { ServerWikiOwnerProgress } from './server-wiki-owner-progress';
 import { ServerReferralList } from './server-referral-list';
 import {
   getServerPreviewFallbackClass,
@@ -148,6 +149,11 @@ export function ServerDetailShowcase({
         </div>
 
         <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
+          <ServerWikiOwnerProgress
+            serverId={serverId}
+            apiBaseUrl={apiBaseUrl}
+            publicWikiUrl={wikiHref}
+          />
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
             <section id="server-overview" className="min-w-0 xl:col-start-1 xl:row-start-1">
               <ServerOverviewCard detail={detail} />
