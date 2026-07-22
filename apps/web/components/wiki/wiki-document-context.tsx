@@ -79,7 +79,7 @@ function DocumentList({
   readonly eyebrow: string;
   readonly title: string;
   readonly description: string;
-  readonly items: ReadonlyArray<{ readonly pageId?: string; readonly sourcePageId?: string; readonly routePath: string; readonly displayTitle: string; readonly namespace: string }>;
+  readonly items: ReadonlyArray<{ readonly pageId?: string; readonly sourcePageId?: string; readonly routePath: string; readonly displayTitle: string; readonly namespace: string; readonly categoryLabel?: string | null }>;
 }) {
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
@@ -96,7 +96,7 @@ function DocumentList({
           {items.map((item) => (
             <li key={`${item.namespace}:${item.pageId ?? item.sourcePageId ?? item.routePath}`}>
               <Link href={item.routePath} className="group flex min-h-14 items-center gap-3 py-3">
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-300 group-hover:text-white">{item.displayTitle}</span>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-300 group-hover:text-white">{item.categoryLabel ?? item.displayTitle}</span>
                 <span className="shrink-0 text-[11px] uppercase tracking-wide text-slate-600">{item.namespace}</span>
                 <ArrowRight className="size-3.5 shrink-0 text-slate-700 group-hover:text-emerald-300" aria-hidden="true" />
               </Link>

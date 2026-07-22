@@ -854,6 +854,8 @@ export class ServerWikiPublicationService {
           targetNamespaceCode: link.targetNamespaceCode,
           targetSlug: link.targetSlug,
           linkType: link.linkType,
+          categoryLabel: link.categoryLabel,
+          categoryBlurred: link.categoryBlurred,
           createdAt: now,
         })),
       });
@@ -945,7 +947,16 @@ export class ServerWikiPublicationService {
         message: 'A revision captured by this release candidate is no longer publishable.',
       });
     }
-    if (snapshot.snapshotVersion === 2 && snapshot.includeDependencies.length > 0) {
+    const validLinkSources = new Set(revisionPairs.map((pair) => `${pair.pageId}:${pair.revisionId}`));
+    if (snapshot.links.some((link) => !validLinkSources.has(`${link.sourcePageId}:${link.sourceRevisionId}`)
+      || (link.linkType !== 'category' && (link.categoryLabel !== null || link.categoryBlurred)))) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'SERVER_WIKI_RELEASE_LINK_GRAPH_INVALID',
+        message: 'The release candidate link graph is inconsistent.',
+      });
+    }
+    if (snapshot.snapshotVersion >= 2 && snapshot.includeDependencies.length > 0) {
       const dependencies = await tx.wikiPageRevision.findMany({
         where: {
           id: { in: snapshot.includeDependencies.map((dependency) => dependency.targetRevisionId) },
@@ -967,7 +978,7 @@ export class ServerWikiPublicationService {
         });
       }
     }
-    if (snapshot.snapshotVersion === 2 && snapshot.assets.length > 0) {
+    if (snapshot.snapshotVersion >= 2 && snapshot.assets.length > 0) {
       const files = await tx.uploadedFile.findMany({
         where: { id: { in: snapshot.assets.map((asset) => asset.uploadedFileId) }, deletedAt: null },
         select: { id: true, sha256: true, publicPath: true, status: true },

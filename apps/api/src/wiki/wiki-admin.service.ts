@@ -807,7 +807,7 @@ export class WikiAdminService {
             page.id,
             latestPublic.id,
             parsed.links,
-            parsed.categories,
+            parsed.categoryLinks,
             parsed.includes,
             {
               contentSize: latestPublic.contentSize,
@@ -922,7 +922,7 @@ export class WikiAdminService {
         page.id,
         revision.id,
         parsed.links,
-        parsed.categories,
+        parsed.categoryLinks,
         parsed.includes,
         {
           contentSize: revision.contentSize,
@@ -1009,7 +1009,7 @@ export class WikiAdminService {
           page.id,
           latestPublic.id,
           parsed.links,
-          parsed.categories,
+          parsed.categoryLinks,
           parsed.includes,
           {
             contentSize: latestPublic.contentSize,

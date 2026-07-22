@@ -467,6 +467,8 @@ export interface WikiCategoryResponse {
     readonly category: string;
     readonly displayTitle: string;
     readonly routePath: string;
+    readonly categoryLabel: string | null;
+    readonly categoryBlurred: boolean;
   }>;
   readonly isRoot: boolean;
   readonly isOrphan: boolean;
@@ -478,6 +480,8 @@ export interface WikiCategoryResponse {
     readonly displayTitle: string;
     readonly routePath: string;
     readonly updatedAt: string;
+    readonly categoryLabel: string | null;
+    readonly categoryBlurred: boolean;
   }>;
   readonly nextCursor: string | null;
 }

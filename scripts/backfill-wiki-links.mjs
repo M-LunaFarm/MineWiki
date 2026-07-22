@@ -47,7 +47,7 @@ try {
       if (!revision || !namespaceCode) continue;
       const parsed = parseMarkup(revision.contentRaw);
       const links = normalizeLinks(namespaceCode, page.localPath, parsed.links, 'link');
-      const categories = normalizeCategories(parsed.categories);
+      const categories = normalizeCategories(parsed.categoryLinks);
       const includes = normalizeLinks(namespaceCode, page.localPath, parsed.includes, 'include');
       const files = [...new Set([...collectWikiFileNames(parsed.ast)])]
         .filter((fileName) => fileName && fileName.length <= 255 && !containsPlaceholder(fileName))
@@ -57,7 +57,7 @@ try {
         : [];
       const records = [
         ...links,
-        ...categories.map((category) => ({ targetNamespaceCode: 'category', targetSlug: category, linkType: 'category' })),
+        ...categories,
         ...includes,
         ...files,
         ...redirects
@@ -72,6 +72,8 @@ try {
               targetNamespaceCode: link.targetNamespaceCode,
               targetSlug: link.targetSlug,
               linkType: link.linkType,
+              categoryLabel: link.categoryLabel ?? null,
+              categoryBlurred: link.categoryBlurred ?? false,
               createdAt: new Date()
             })),
             skipDuplicates: true
@@ -93,7 +95,19 @@ try {
 }
 
 function normalizeCategories(categories) {
-  return [...new Set(categories.map((category) => slugifyTitle(category)).filter((category) => category && category.length <= 255))];
+  const normalized = new Map();
+  for (const category of categories) {
+    const targetSlug = slugifyTitle(category.title);
+    if (!targetSlug || targetSlug.length > 255 || normalized.has(targetSlug)) continue;
+    normalized.set(targetSlug, {
+      targetNamespaceCode: 'category',
+      targetSlug,
+      linkType: 'category',
+      categoryLabel: category.label,
+      categoryBlurred: category.blurred,
+    });
+  }
+  return [...normalized.values()];
 }
 
 function normalizeLinks(namespaceCode, localPath, targets, linkType) {

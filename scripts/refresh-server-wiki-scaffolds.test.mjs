@@ -18,6 +18,7 @@ test('server wiki scaffold refresh preserves canonical tenant boundaries and mat
   assert.match(source, /isCanonicalLink\(server, serverWiki\)/u);
   assert.match(source, /SELECT id FROM Server WHERE id = \? FOR UPDATE/u);
   assert.match(source, /wikiLinks\.replaceForRevision/u);
+  assert.match(source, /parsed\.categoryLinks/u);
   assert.match(source, /wikiPageRenderCache\.deleteMany/u);
   assert.match(source, /server_wiki_scaffold_refresh/u);
 });

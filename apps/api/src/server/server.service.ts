@@ -3224,7 +3224,7 @@ async function finalizeCreatedServerWikiPage(
       input.page.id,
       input.revision.id,
       parsed.links,
-      parsed.categories,
+      parsed.categoryLinks,
       parsed.includes,
       {
         contentSize: input.revision.contentSize,

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import type { PrismaService } from '../common/prisma.service';
 import { WikiLinkIndexService } from './wiki-link-index.service';
 
+const category = (title: string, label: string | null = null, blurred = false) => ({ title, label, blurred });
+
 function createStore(namespaceCode: string, localPath: string) {
   const calls: Array<Record<string, unknown>> = [];
   const metricUpdates: Array<Record<string, unknown>> = [];
@@ -39,7 +41,7 @@ function createStore(namespaceCode: string, localPath: string) {
 
 test('link index normalizes and deduplicates generic wiki targets', async () => {
   const { store, calls } = createStore('main', '대문');
-  await new WikiLinkIndexService().replaceForRevision(store, 10n, 20n, ['문서 A', '문서 A', 'server:서버/규칙'], ['가이드', '가이드']);
+  await new WikiLinkIndexService().replaceForRevision(store, 10n, 20n, ['문서 A', '문서 A', 'server:서버/규칙'], [category('가이드', '처음'), category('가이드', '나중')]);
 
   assert.equal(calls.length, 3);
   assert.deepEqual(
@@ -47,6 +49,7 @@ test('link index normalizes and deduplicates generic wiki targets', async () => 
     [['main', '문서_A'], ['server', '서버/규칙'], ['category', '가이드']]
   );
   assert.equal(calls.at(-1)?.linkType, 'category');
+  assert.equal(calls.at(-1)?.categoryLabel, '처음');
   assert.ok(calls.every((item) => item.sourceRevisionId === 20n));
 });
 
@@ -57,7 +60,7 @@ test('link index atomically materializes current source metrics', async () => {
     10n,
     20n,
     [],
-    ['가이드', '운영'],
+    [category('가이드'), category('운영')],
     [],
     { contentSize: 4096, fileNames: ['image.webp', 'image.webp'] }
   );
@@ -67,6 +70,25 @@ test('link index atomically materializes current source metrics', async () => {
     calls.filter((item) => item.linkType === 'file').map((item) => [item.targetNamespaceCode, item.targetSlug]),
     [['file', 'image.webp']]
   );
+});
+
+test('link index persists category presentation metadata only on category relations', async () => {
+  const { store, calls } = createStore('main', '대문');
+  await new WikiLinkIndexService().replaceForRevision(
+    store,
+    10n,
+    20n,
+    ['일반 문서'],
+    [category('스포일러', '숨겨진 분류', true)],
+    ['틀:안내'],
+  );
+
+  const categoryLink = calls.find((item) => item.linkType === 'category');
+  assert.equal(categoryLink?.categoryLabel, '숨겨진 분류');
+  assert.equal(categoryLink?.categoryBlurred, true);
+  assert.equal(calls.filter((item) => item.linkType !== 'category').every((item) => (
+    item.categoryLabel === null && item.categoryBlurred === false
+  )), true);
 });
 
 test('link index clears every derived page artifact when no public revision remains', async () => {
@@ -126,7 +148,7 @@ test('link index skips unresolved template placeholders', async () => {
     10n,
     20n,
     ['가이드/@문서@', '공통'],
-    ['@분류=기타@', '틀'],
+    [category('@분류=기타@'), category('틀')],
     []
   );
 

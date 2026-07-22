@@ -344,7 +344,7 @@ export class WikiUsernameService {
       page.id,
       revision.id,
       parsed.links,
-      parsed.categories,
+      parsed.categoryLinks,
       parsed.includes,
       {
         contentSize: revision.contentSize,

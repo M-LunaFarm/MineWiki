@@ -65,9 +65,11 @@ const linkSchema = z.object({
   targetNamespaceCode: z.string().max(32),
   targetSlug: z.string().max(255),
   linkType: z.string().max(32),
+  categoryLabel: z.string().max(255).nullable().default(null),
+  categoryBlurred: z.boolean().default(false),
 }).strict();
 const releaseSnapshotSchema = z.object({
-  snapshotVersion: z.number().int().min(1).max(2).default(1),
+  snapshotVersion: z.number().int().min(1).max(3).default(1),
   presentation: z.object({
     layoutKey: z.string(),
     navigationOrder: z.unknown().nullable(),
@@ -248,6 +250,7 @@ const candidateRecordSelection = {
   contentSlug: true,
   manifestSnapshot: true,
   releaseSnapshot: true,
+  snapshotVersion: true,
   changeRequest: {
     select: { note: true, reviewerProfileId: true, decidedAt: true },
   },
@@ -281,6 +284,8 @@ function serializeReleaseSnapshot(snapshot: ReleaseCandidateSnapshot): Prisma.In
       targetNamespaceCode: link.targetNamespaceCode,
       targetSlug: link.targetSlug,
       linkType: link.linkType,
+      categoryLabel: link.categoryLabel,
+      categoryBlurred: link.categoryBlurred,
     })),
     includeDependencies: snapshot.includeDependencies.map(serializeIncludeDependency),
     assets: snapshot.assets.map(serializeAsset),
@@ -345,6 +350,7 @@ function restoreStoredCandidate(
     readonly contentSlug: string;
     readonly manifestSnapshot: Prisma.JsonValue;
     readonly releaseSnapshot: Prisma.JsonValue;
+    readonly snapshotVersion: number;
     readonly changeRequest: {
       readonly note: string;
       readonly reviewerProfileId: bigint;
@@ -355,8 +361,23 @@ function restoreStoredCandidate(
   spaceId: bigint,
 ): StoredServerWikiReleaseCandidate {
   if (record.serverWikiId !== serverWikiId || record.spaceId !== spaceId) throw candidateUnavailable();
+  const rawRelease = record.releaseSnapshot && typeof record.releaseSnapshot === 'object' && !Array.isArray(record.releaseSnapshot)
+    ? record.releaseSnapshot as Prisma.JsonObject
+    : null;
+  const embeddedSnapshotVersion = typeof rawRelease?.snapshotVersion === 'number' ? rawRelease.snapshotVersion : 1;
+  if (record.snapshotVersion !== embeddedSnapshotVersion) throw candidateCorrupt();
+  if (embeddedSnapshotVersion === 3) {
+    const rawLinks = Array.isArray(rawRelease?.links) ? rawRelease.links : [];
+    if (rawLinks.some((link) => !link || typeof link !== 'object' || Array.isArray(link)
+      || !Object.hasOwn(link, 'categoryLabel') || !Object.hasOwn(link, 'categoryBlurred'))) {
+      throw candidateCorrupt();
+    }
+  }
   const release = releaseSnapshotSchema.safeParse(record.releaseSnapshot);
   if (!release.success) throw candidateCorrupt();
+  if (release.data.snapshotVersion === 3 && release.data.links.some((link) => (
+    link.linkType !== 'category' && (link.categoryLabel !== null || link.categoryBlurred)
+  ))) throw candidateCorrupt();
   const manifest = record.manifestSnapshot as unknown as ServerWikiReleaseCandidate;
   if (!manifest || manifest.token !== record.token || !Array.isArray(manifest.pages)) throw candidateCorrupt();
   const pages = release.data.pages.map((page) => ({
@@ -371,7 +392,7 @@ function restoreStoredCandidate(
   if (pages.some((page) => page.spaceId !== spaceId)) throw candidateCorrupt();
   const revisionContentByPageId = new Map(pages.map((page) => [page.id, page.revisionContent]));
   const snapshot: ReleaseCandidateSnapshot = {
-    snapshotVersion: release.data.snapshotVersion === 2 ? 2 : 1,
+    snapshotVersion: release.data.snapshotVersion === 3 ? 3 : release.data.snapshotVersion === 2 ? 2 : 1,
     candidate: manifest,
     presentation: release.data.presentation as ServerWikiPresentationSnapshot,
     pages: pages.map((page) => ({
@@ -398,6 +419,8 @@ function restoreStoredCandidate(
       targetNamespaceCode: link.targetNamespaceCode,
       targetSlug: link.targetSlug,
       linkType: link.linkType,
+      categoryLabel: link.categoryLabel,
+      categoryBlurred: link.categoryBlurred,
     })),
     includeDependencies: release.data.includeDependencies.map((dependency): ReleaseCandidateIncludeDependency => ({
       sourcePageId: BigInt(dependency.sourcePageId),

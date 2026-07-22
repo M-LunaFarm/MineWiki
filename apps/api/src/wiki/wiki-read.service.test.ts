@@ -2742,12 +2742,12 @@ test('category membership mixes released and preview server spaces without expos
     pageUpdatedAt: new Date('2026-07-18T08:00:00.000Z'), searchVector: '', createdAt: now,
   };
   const currentLinks = [
-    { id: 1n, sourcePageId: 20n, sourceRevisionId: 201n, linkType: 'category' },
-    { id: 2n, sourcePageId: 21n, sourceRevisionId: 301n, linkType: 'category' },
+    { id: 1n, sourcePageId: 20n, sourceRevisionId: 201n, linkType: 'category', categoryLabel: '공개 초안 누출', categoryBlurred: true },
+    { id: 2n, sourcePageId: 21n, sourceRevisionId: 301n, linkType: 'category', categoryLabel: '미리보기 표시', categoryBlurred: false },
   ];
   const releasedLinks = [
-    { id: 1n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'category' },
-    { id: 2n, releaseId: 71n, serverWikiId: 51n, spaceId: 41n, sourcePageId: 21n, sourceRevisionId: 300n, linkType: 'category' },
+    { id: 1n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'category', categoryLabel: '공개 릴리스 표시', categoryBlurred: false },
+    { id: 2n, releaseId: 71n, serverWikiId: 51n, spaceId: 41n, sourcePageId: 21n, sourceRevisionId: 300n, linkType: 'category', categoryLabel: '낡은 릴리스', categoryBlurred: true },
   ];
   const prisma = {
     wikiNamespace: {
@@ -2772,6 +2772,11 @@ test('category membership mixes released and preview server spaces without expos
     ['21', '미리보기 초안'],
     ['20', '공개 배포'],
   ]);
+  assert.deepEqual(response.items.map((item) => [item.id, item.categoryLabel, item.categoryBlurred]), [
+    ['21', '미리보기 표시', false],
+    ['20', '공개 릴리스 표시', false],
+  ]);
+  assert.equal(response.items.some((item) => item.categoryLabel === '공개 초안 누출'), false);
   assert.equal(new Set(response.items.map((item) => item.id)).size, 2);
   assert.equal(response.items.some((item) => item.displayTitle === '공개 공간 초안'), false);
 });
@@ -2829,8 +2834,8 @@ test('category hierarchy exposes its document, parents, and current readable sub
   const child = { ...category, id: 102n, slug: '적대적_몹', title: '적대적 몹', displayTitle: '적대적 몹', currentRevisionId: 1002n };
   const member = { ...category, id: 20n, namespaceId: 1, spaceId: 1n, slug: '좀비', title: '좀비', displayTitle: '좀비', currentRevisionId: 200n };
   const parentLink = { id: 10n, sourcePageId: 101n, sourceRevisionId: 1001n, targetSlug: '분류' };
-  const childLink = { id: 9n, sourcePageId: 102n, sourceRevisionId: 1002n, targetSlug: '몹' };
-  const memberLink = { id: 8n, sourcePageId: 20n, sourceRevisionId: 200n, targetSlug: '몹' };
+  const childLink = { id: 9n, sourcePageId: 102n, sourceRevisionId: 1002n, targetSlug: '몹', categoryLabel: '적대적 생물', categoryBlurred: false };
+  const memberLink = { id: 8n, sourcePageId: 20n, sourceRevisionId: 200n, targetSlug: '몹', categoryLabel: '대표 언데드', categoryBlurred: true };
   const prisma = {
     wikiNamespace: {
       async findUnique() { return { id: 2, code: 'category' }; },
@@ -2862,6 +2867,9 @@ test('category hierarchy exposes its document, parents, and current readable sub
   assert.deepEqual(response.parents, [{ category: '분류', routePath: '/wiki/category/%EB%B6%84%EB%A5%98' }]);
   assert.deepEqual(response.subcategories.map((item) => item.pageId), ['102']);
   assert.deepEqual(response.items.map((item) => item.pageId), ['20']);
+  assert.equal(response.subcategories[0]?.categoryLabel, '적대적 생물');
+  assert.equal(response.items[0]?.categoryLabel, '대표 언데드');
+  assert.equal(response.items[0]?.categoryBlurred, true);
   assert.equal(response.isOrphan, false);
 });
 

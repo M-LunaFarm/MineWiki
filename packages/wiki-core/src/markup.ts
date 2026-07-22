@@ -57,6 +57,7 @@ const MAX_INLINE_NESTING = 16;
 const MAX_FOOTNOTE_NAME_LENGTH = 64;
 const MAX_FILE_OPTION_VALUE_LENGTH = 256;
 const MAX_FILE_OPTIONS = 16;
+const MAX_CATEGORY_LABEL_LENGTH = 255;
 const INCLUDE_PARAM_KEY = /^[A-Za-z0-9가-힣_]+$/u;
 
 hljs.registerLanguage('bash', bash);
@@ -694,11 +695,15 @@ function parseMarkupDocument(
       for (const category of inlineCategories) {
         const title = normalizeTitle(category[1] ?? '');
         if (!title) continue;
+        const label = category[3]?.trim() || null;
+        if (label && [...label].length > MAX_CATEGORY_LABEL_LENGTH) {
+          blockingErrors.push(`분류 표시 이름은 ${MAX_CATEGORY_LABEL_LENGTH}자까지 사용할 수 있습니다.`);
+        }
         categories.add(title);
         if (!categoryLinks.has(title)) {
           categoryLinks.set(title, {
             title,
-            label: category[3]?.trim() || null,
+            label,
             blurred: category[2]?.toLowerCase() === 'blur',
           });
         }

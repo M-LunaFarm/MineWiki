@@ -213,7 +213,7 @@ test('server wiki includes resolve from the same immutable release instead of th
   assert.equal(permissionProof?.boundary.currentReleaseId, 90n);
 });
 
-test('v2 server wiki release resolves cross-namespace includes only from its pinned dependency', async () => {
+test('v3 server wiki release preserves v2 pinned cross-namespace include semantics', async () => {
   const dependency = {
     releaseId: 70n,
     sourcePageId: 1n,
@@ -236,7 +236,7 @@ test('v2 server wiki release resolves cross-namespace includes only from its pin
   let livePageLookups = 0;
   const prisma = {
     wikiNamespace: { async findUnique() { return { id: 2 }; } },
-    serverWikiRelease: { async findUnique() { return { snapshotVersion: 2 }; } },
+    serverWikiRelease: { async findUnique() { return { snapshotVersion: 3 }; } },
     serverWikiReleaseItem: { async findFirst() { return null; } },
     serverWikiReleaseInclude: { async findFirst() { return dependency; } },
     wikiPage: { async findUnique() { livePageLookups += 1; return null; } },

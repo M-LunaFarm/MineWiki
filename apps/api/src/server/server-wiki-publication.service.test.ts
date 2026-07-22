@@ -279,9 +279,11 @@ function createFixture(options: FixtureOptions = {}) {
         return documentRows.slice(1).map((page, index) => ({
           sourcePageId: page.id,
           sourceRevisionId: page.currentRevisionId,
-          targetNamespaceCode: 'server',
-          targetSlug: documentRows[index]!.slug,
-          linkType: 'link',
+          targetNamespaceCode: index === 0 ? 'category' : 'server',
+          targetSlug: index === 0 ? '시작하기' : documentRows[index]!.slug,
+          linkType: index === 0 ? 'category' : 'link',
+          categoryLabel: index === 0 ? '처음 읽을 문서' : null,
+          categoryBlurred: index === 0,
         }));
       },
     },
@@ -550,6 +552,9 @@ test('owner publishes a ready draft atomically with version, timestamps, and an 
     .every((term) => String(fixture.releaseItems[0]?.searchVector).split(' ').includes(term)));
   assert.equal(fixture.releaseLinks.length, 3);
   assert.ok(fixture.releaseLinks.every((link) => link.releaseId === BigInt(result.release!.id)));
+  const releasedCategory = fixture.releaseLinks.find((link) => link.linkType === 'category');
+  assert.equal(releasedCategory?.categoryLabel, '처음 읽을 문서');
+  assert.equal(releasedCategory?.categoryBlurred, true);
   assert.deepEqual(fixture.isolationLevels, [
     Prisma.TransactionIsolationLevel.Serializable,
     Prisma.TransactionIsolationLevel.Serializable,

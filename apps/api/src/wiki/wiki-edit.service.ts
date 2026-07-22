@@ -2671,7 +2671,7 @@ export class WikiEditService {
       input.pageId,
       revision.id,
       parsed.links,
-      parsed.categories,
+      parsed.categoryLinks,
       parsed.includes,
       {
         contentSize: revision.contentSize,
@@ -2705,7 +2705,7 @@ export class WikiEditService {
       pageId,
       revision.id,
       parsed.links,
-      parsed.categories,
+      parsed.categoryLinks,
       parsed.includes,
       {
         contentSize: revision.contentSize,

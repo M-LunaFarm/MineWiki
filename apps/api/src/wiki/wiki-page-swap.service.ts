@@ -440,7 +440,7 @@ export class WikiPageSwapService {
       page.id,
       revision.id,
       parsed.links,
-      parsed.categories,
+      parsed.categoryLinks,
       parsed.includes,
       {
         contentSize: revision.contentSize,

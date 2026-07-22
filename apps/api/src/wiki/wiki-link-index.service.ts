@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { buildWikiSearchVector, parseLinkTarget, resolveWikiLinkTarget, slugifyTitle } from '@minewiki/wiki-core';
+import type { WikiCategoryLink } from '@minewiki/wiki-core';
 import type { PrismaService } from '../common/prisma.service';
 import { wikiLinkResolutionContext } from './wiki-link-context';
 
@@ -21,7 +22,7 @@ export class WikiLinkIndexService {
     pageId: bigint,
     revisionId: bigint,
     links: readonly string[],
-    categories: readonly string[] = [],
+    categories: readonly WikiCategoryLink[] = [],
     includes: readonly string[] = [],
     metrics?: { readonly contentSize: number; readonly contentRaw?: string; readonly fileNames?: readonly string[]; readonly redirectTarget?: string | null }
   ): Promise<void> {
@@ -36,23 +37,41 @@ export class WikiLinkIndexService {
     });
     if (!namespace) return;
 
-    const normalized = new Map<string, { targetNamespaceCode: string; targetSlug: string; linkType: string }>();
+    const normalized = new Map<string, {
+      targetNamespaceCode: string;
+      targetSlug: string;
+      linkType: string;
+      categoryLabel: string | null;
+      categoryBlurred: boolean;
+    }>();
     for (const target of links) {
       if (containsIncludePlaceholder(target)) continue;
       const resolved = resolveTarget(namespace.code, page.localPath, target);
       if (!resolved.targetSlug || resolved.targetSlug.length > 255 || resolved.targetNamespaceCode.length > 32) {
         continue;
       }
-      normalized.set(`link:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, { ...resolved, linkType: 'link' });
+      normalized.set(`link:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, {
+        ...resolved,
+        linkType: 'link',
+        categoryLabel: null,
+        categoryBlurred: false,
+      });
     }
     for (const category of categories) {
-      if (containsIncludePlaceholder(category)) continue;
-      const targetSlug = slugifyTitle(category);
+      if (containsIncludePlaceholder(category.title)) continue;
+      if (category.label && [...category.label].length > 255) {
+        throw new Error('Category label exceeds the parser limit.');
+      }
+      const targetSlug = slugifyTitle(category.title);
       if (!targetSlug || targetSlug.length > 255) continue;
-      normalized.set(`category:category:${targetSlug}`, {
+      const categoryKey = `category:category:${targetSlug}`;
+      if (normalized.has(categoryKey)) continue;
+      normalized.set(categoryKey, {
         targetNamespaceCode: 'category',
         targetSlug,
-        linkType: 'category'
+        linkType: 'category',
+        categoryLabel: category.label,
+        categoryBlurred: category.blurred,
       });
     }
     for (const include of includes) {
@@ -62,7 +81,9 @@ export class WikiLinkIndexService {
       }
       normalized.set(`include:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, {
         ...resolved,
-        linkType: 'include'
+        linkType: 'include',
+        categoryLabel: null,
+        categoryBlurred: false,
       });
     }
     for (const fileName of metrics?.fileNames ?? []) {
@@ -70,7 +91,9 @@ export class WikiLinkIndexService {
       normalized.set(`file:file:${fileName}`, {
         targetNamespaceCode: 'file',
         targetSlug: fileName,
-        linkType: 'file'
+        linkType: 'file',
+        categoryLabel: null,
+        categoryBlurred: false,
       });
     }
     if (metrics?.redirectTarget && !containsIncludePlaceholder(metrics.redirectTarget)) {
@@ -78,7 +101,9 @@ export class WikiLinkIndexService {
       if (resolved.targetSlug && resolved.targetSlug.length <= 255 && resolved.targetNamespaceCode.length <= 32) {
         normalized.set(`redirect:${resolved.targetNamespaceCode}:${resolved.targetSlug}`, {
           ...resolved,
-          linkType: 'redirect'
+          linkType: 'redirect',
+          categoryLabel: null,
+          categoryBlurred: false,
         });
       }
     }
@@ -91,6 +116,8 @@ export class WikiLinkIndexService {
           targetNamespaceCode: target.targetNamespaceCode,
           targetSlug: target.targetSlug,
           linkType: target.linkType,
+          categoryLabel: target.categoryLabel,
+          categoryBlurred: target.categoryBlurred,
           createdAt: new Date()
         })),
         skipDuplicates: true

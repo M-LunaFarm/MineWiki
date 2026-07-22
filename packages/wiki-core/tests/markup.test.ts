@@ -449,6 +449,11 @@ test('extracts category display labels and blur metadata without corrupting targ
   assert.match(renderDocument(parsed.ast), /본문 끝/);
 });
 
+test('rejects category display labels that cannot fit the indexed relation contract', () => {
+  const parsed = parseMarkup(`[[분류:가이드|${'가'.repeat(256)}]]`);
+  assert.equal(parsed.blockingErrors.includes('분류 표시 이름은 255자까지 사용할 수 있습니다.'), true);
+});
+
 test('renders validated wiki file license and source attribution', () => {
   const parsed = parseMarkup('[[파일:guide.webp|섬네일|설치 화면]]');
   const html = renderDocument(parsed.ast, {

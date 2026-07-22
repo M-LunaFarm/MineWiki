@@ -1623,6 +1623,8 @@ model WikiPageLink {
   targetNamespaceCode String   @map("target_namespace_code") @db.VarChar(32)
   targetSlug          String   @map("target_slug") @db.VarChar(255)
   linkType            String   @default("link") @map("link_type") @db.VarChar(32)
+  categoryLabel       String?  @map("category_label") @db.VarChar(255)
+  categoryBlurred     Boolean  @default(false) @map("category_blurred")
   createdAt           DateTime @map("created_at")
 
   @@unique([sourcePageId, targetNamespaceCode, targetSlug, linkType], map: "uk_page_links_source_target")
@@ -2349,6 +2351,8 @@ model ServerWikiReleaseLink {
   targetNamespaceCode String   @map("target_namespace_code") @db.VarChar(32)
   targetSlug          String   @map("target_slug") @db.VarChar(255)
   linkType            String   @map("link_type") @db.VarChar(32)
+  categoryLabel       String?  @map("category_label") @db.VarChar(255)
+  categoryBlurred     Boolean  @default(false) @map("category_blurred")
   createdAt           DateTime @default(now()) @map("created_at") @db.DateTime(3)
 
   release ServerWikiRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)

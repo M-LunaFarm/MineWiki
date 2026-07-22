@@ -459,6 +459,8 @@ export interface WikiCategoryResponse {
     readonly category: string;
     readonly displayTitle: string;
     readonly routePath: string;
+    readonly categoryLabel: string | null;
+    readonly categoryBlurred: boolean;
   }>;
   readonly isRoot: boolean;
   readonly isOrphan: boolean;
@@ -470,6 +472,8 @@ export interface WikiCategoryResponse {
     readonly displayTitle: string;
     readonly routePath: string;
     readonly updatedAt: string;
+    readonly categoryLabel: string | null;
+    readonly categoryBlurred: boolean;
   }>;
   readonly nextCursor: string | null;
 }
@@ -2224,7 +2228,9 @@ export class WikiReadService {
         pageId: childPage.id.toString(),
         category: childPage.title,
         displayTitle: childPage.displayTitle,
-        routePath: wikiUrl('category', childPage.title)
+        routePath: wikiUrl('category', childPage.title),
+        categoryLabel: link.categoryLabel,
+        categoryBlurred: link.categoryBlurred,
       });
     }
     subcategories.sort((left, right) => left.displayTitle.localeCompare(right.displayTitle, 'ko'));
@@ -2271,34 +2277,36 @@ export class WikiReadService {
     const namespaceById = new Map(namespaces.map((item) => [item.id, item.code]));
     const projection = await this.projectDerivedPagesWithContext(pages, namespaceById, access);
     const routePaths = await this.routePaths.preload(projection.pages, namespaceById);
-    const currentLinkKeys = new Set(currentLinks.map((link) => `${link.sourcePageId}:${link.sourceRevisionId}`));
-    const releaseLinkKeys = new Set(releasedLinks.map((link) => [
+    const currentLinkByKey = new Map(currentLinks.map((link) => [`${link.sourcePageId}:${link.sourceRevisionId}`, link]));
+    const releaseLinkByKey = new Map(releasedLinks.map((link) => [[
       link.releaseId,
       link.serverWikiId,
       link.spaceId,
       link.sourcePageId,
       link.sourceRevisionId,
-    ].join(':')));
+    ].join(':'), link]));
     const visiblePages: typeof projection.pages = [];
+    const relationByPageId = new Map<bigint, (typeof currentLinks)[number] | (typeof releasedLinks)[number]>();
     for (const page of projection.pages) {
       if (!page.currentRevisionId) continue;
       const source = projection.sourceByPageId.get(page.id);
-      const hasMatchingLink = source?.kind === 'release'
-        ? releaseLinkKeys.has([
+      const relation = source?.kind === 'release'
+        ? releaseLinkByKey.get([
             source.releaseId,
             source.serverWikiId,
             source.spaceId,
             page.id,
             page.currentRevisionId,
           ].join(':'))
-        : currentLinkKeys.has(`${page.id}:${page.currentRevisionId}`);
-      if (!hasMatchingLink) continue;
+        : currentLinkByKey.get(`${page.id}:${page.currentRevisionId}`);
+      if (!relation) continue;
       try {
         await this.wikiPermissions.assertCanReadPage({ ...access, page });
       } catch {
         continue;
       }
       visiblePages.push(page);
+      relationByPageId.set(page.id, relation);
     }
     visiblePages.sort(compareCategoryPages);
     const cursor = parseCategoryCursor(input.cursor, categorySlug, namespace?.code ?? null, projection.signature);
@@ -2309,6 +2317,7 @@ export class WikiReadService {
     const pageRows = afterCursor.slice(0, limit);
     const items: WikiCategoryResponse['items'][number][] = pageRows.map((page) => {
       const namespaceCode = namespaceById.get(page.namespaceId) ?? 'main';
+      const relation = relationByPageId.get(page.id);
       return {
         id: page.id.toString(),
         pageId: page.id.toString(),
@@ -2316,7 +2325,9 @@ export class WikiReadService {
         title: page.title,
         displayTitle: page.displayTitle,
         routePath: routePaths.routePath(page, namespaceCode),
-        updatedAt: page.updatedAt.toISOString()
+        updatedAt: page.updatedAt.toISOString(),
+        categoryLabel: relation?.categoryLabel ?? null,
+        categoryBlurred: relation?.categoryBlurred ?? false,
       };
     });
     const last = pageRows.at(-1);
@@ -4812,7 +4823,7 @@ export class WikiReadService {
       const release = releaseDelegate
         ? await releaseDelegate.findUnique({ where: { id: releaseId }, select: { snapshotVersion: true } })
         : null;
-      if (release?.snapshotVersion === 2) {
+      if ((release?.snapshotVersion ?? 0) >= 2) {
         const assets = await this.prisma.serverWikiReleaseAsset.findMany({
           where: { releaseId, wikiFilename: { in: fileNames } },
           orderBy: [{ wikiFilename: 'asc' }, { id: 'asc' }],

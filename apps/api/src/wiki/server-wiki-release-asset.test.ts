@@ -3,12 +3,12 @@ import test from 'node:test';
 import { parseMarkup } from '@minewiki/wiki-core';
 import { WikiReadService } from './wiki-read.service';
 
-test('v2 release renders the pinned asset instead of the replacement sharing its logical filename', async () => {
+test('v3 release preserves v2 pinned asset semantics instead of using a live replacement', async () => {
   const requestedFileIds: string[][] = [];
   const oldFileId = '11111111-1111-4111-8111-111111111111';
   const replacementId = '22222222-2222-4222-8222-222222222222';
   const prisma = {
-    serverWikiRelease: { async findUnique() { return { snapshotVersion: 2 }; } },
+    serverWikiRelease: { async findUnique() { return { snapshotVersion: 3 }; } },
     serverWikiReleaseAsset: {
       async findMany() {
         return [{

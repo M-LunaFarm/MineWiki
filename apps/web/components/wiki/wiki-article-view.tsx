@@ -182,7 +182,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
               <div className="mt-3 flex flex-wrap gap-2">
                 {page.categoryTags.map((category) => (
                   <Link key={category.title} href={`/wiki/category/${encodeURIComponent(category.title)}`} className={`chip chip-muted hover:border-emerald-300/40 hover:text-emerald-100 ${category.blurred ? 'blur-sm transition-[filter] hover:blur-none focus:blur-none' : ''}`}>
-                    {category.label ?? category.title}
+                    {category.title}
                   </Link>
                 ))}
               </div>

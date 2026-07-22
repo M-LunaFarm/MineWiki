@@ -87,7 +87,7 @@ function CategoryDirectory({ result, namespace }: { readonly result: WikiCategor
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {result.subcategories.map((child) => (
               <Link key={child.pageId} href={child.routePath} className="flex min-h-12 items-center justify-between gap-3 border border-white/10 px-3 py-2 text-sm text-slate-200 transition hover:border-emerald-300/35 hover:bg-emerald-300/[0.04]">
-                <span className="truncate">{child.displayTitle}</span><ArrowRight className="size-4 shrink-0 text-slate-500" />
+                <span className="truncate">{child.categoryLabel ?? child.displayTitle}</span><ArrowRight className="size-4 shrink-0 text-slate-500" />
               </Link>
             ))}
           </div>
@@ -107,7 +107,7 @@ function CategoryDirectory({ result, namespace }: { readonly result: WikiCategor
       <div className="divide-y divide-white/10 border border-white/10 bg-[#111821]" aria-label={`${result.category} 분류 문서`}>
         {result.items.map((item) => (
           <Link key={item.id} href={item.routePath} className="flex min-h-16 items-center justify-between gap-4 p-4 transition hover:bg-white/[0.035] sm:p-5">
-            <div className="min-w-0"><p className="truncate font-semibold text-white">{item.displayTitle}</p><p className="mt-1 truncate text-xs text-slate-500">{item.namespace}:{item.title}</p></div>
+            <div className="min-w-0"><p className="truncate font-semibold text-white">{item.categoryLabel ?? item.displayTitle}</p><p className="mt-1 truncate text-xs text-slate-500">{item.namespace}:{item.title}</p></div>
             <ArrowRight className="size-4 shrink-0 text-slate-500" />
           </Link>
         ))}

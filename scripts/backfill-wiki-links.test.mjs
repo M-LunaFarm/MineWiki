@@ -7,6 +7,9 @@ const source = await readFile(new URL('./backfill-wiki-links.mjs', import.meta.u
 test('wiki link backfill rebuilds every materialized relation type together', () => {
   assert.match(source, /parsed\.links, 'link'/u);
   assert.match(source, /parsed\.includes, 'include'/u);
+  assert.match(source, /normalizeCategories\(parsed\.categoryLinks\)/u);
+  assert.match(source, /categoryLabel: category\.label/u);
+  assert.match(source, /categoryBlurred: category\.blurred/u);
   assert.match(source, /collectWikiFileNames\(parsed\.ast\)/u);
   assert.match(source, /parsed\.redirectTarget/u);
   assert.match(source, /'redirect'/u);
@@ -18,4 +21,6 @@ test('wiki link backfill deletes old rows only after constructing a complete rep
   assert.match(source, /deleteMany\(\{ where: \{ sourcePageId: page\.id \} \}\)/u);
   assert.match(source, /data: records\.map/u);
   assert.match(source, /skipDuplicates: true/u);
+  assert.match(source, /categoryLabel: link\.categoryLabel \?\? null/u);
+  assert.match(source, /categoryBlurred: link\.categoryBlurred \?\? false/u);
 });

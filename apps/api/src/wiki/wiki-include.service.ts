@@ -159,7 +159,7 @@ export class WikiIncludeService {
             },
           })
         : null;
-      const releasedInclude = access.releaseId && release?.snapshotVersion === 2 && namespaceCode !== 'server'
+      const releasedInclude = access.releaseId && (release?.snapshotVersion ?? 0) >= 2 && namespaceCode !== 'server'
         ? await this.prisma.serverWikiReleaseInclude.findFirst({
             where: {
               releaseId: access.releaseId,
@@ -169,7 +169,7 @@ export class WikiIncludeService {
             },
           })
         : null;
-      if (access.releaseId && release?.snapshotVersion === 2 && namespaceCode !== 'server' && !releasedInclude) {
+      if (access.releaseId && (release?.snapshotVersion ?? 0) >= 2 && namespaceCode !== 'server' && !releasedInclude) {
         return null;
       }
       if (releasedInclude?.publicReadAllowed === false) return null;

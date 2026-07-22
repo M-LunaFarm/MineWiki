@@ -128,10 +128,12 @@ export interface ReleaseCandidateLink {
   readonly targetNamespaceCode: string;
   readonly targetSlug: string;
   readonly linkType: string;
+  readonly categoryLabel: string | null;
+  readonly categoryBlurred: boolean;
 }
 
 export interface ReleaseCandidateSnapshot {
-  readonly snapshotVersion: 1 | 2;
+  readonly snapshotVersion: 1 | 2 | 3;
   readonly candidate: ServerWikiReleaseCandidate;
   readonly presentation: ServerWikiPresentationSnapshot;
   readonly pages: readonly ReleaseCandidateCurrentPage[];
@@ -300,6 +302,7 @@ export async function buildServerWikiReleaseCandidate(
     accessChanged,
   };
   const token = createHash('sha256').update(canonicalJson({
+    snapshotVersion: 3,
     serverWikiId: input.serverWikiId.toString(),
     siteSlug: input.siteSlug,
     contentSlug: input.contentSlug,
@@ -314,7 +317,7 @@ export async function buildServerWikiReleaseCandidate(
   const hasChanges = counts.added + counts.updated + counts.moved + counts.removed > 0
     || Object.values(presentation).some(Boolean);
   return {
-    snapshotVersion: 2,
+    snapshotVersion: 3,
     candidate: {
       token,
       baselineReleaseId: input.publishedRelease?.id.toString() ?? null,
@@ -339,6 +342,8 @@ const linkSelection = {
   targetNamespaceCode: true,
   targetSlug: true,
   linkType: true,
+  categoryLabel: true,
+  categoryBlurred: true,
 } as const;
 
 async function loadCurrentPages(store: Prisma.TransactionClient | PrismaService, spaceId: bigint) {
@@ -573,7 +578,7 @@ function tokenPage(page: ReleaseCandidateCurrentPage) {
 function linkFingerprint(links: readonly ReleaseCandidateLink[]): readonly string[] {
   return links.map((link) => [
     link.sourcePageId.toString(), link.sourceRevisionId.toString(), link.targetNamespaceCode,
-    link.targetSlug, link.linkType,
+    link.targetSlug, link.linkType, link.categoryLabel ?? '', String(link.categoryBlurred ?? false),
   ].join('\u0000')).sort();
 }
 

@@ -25,6 +25,8 @@ test('candidate token pins external include revisions and immutable file version
   let targetContent = '공용 틀 첫 버전';
   let fileId = '11111111-1111-4111-8111-111111111111';
   let fileVersionId = 31n;
+  let categoryLabel: string | null = null;
+  let categoryBlurred = false;
   const store = {
     async $queryRaw() { return []; },
     wikiPage: {
@@ -73,8 +75,9 @@ test('candidate token pins external include revisions and immutable file version
     wikiPageLink: {
       async findMany() {
         return [
-          { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'template', targetSlug: '공용', linkType: 'include' },
-          { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'file', targetSlug: 'logo.png', linkType: 'file' },
+          { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'template', targetSlug: '공용', linkType: 'include', categoryLabel: null, categoryBlurred: false },
+          { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'file', targetSlug: 'logo.png', linkType: 'file', categoryLabel: null, categoryBlurred: false },
+          { sourcePageId: 1n, sourceRevisionId: 11n, targetNamespaceCode: 'category', targetSlug: '추천', linkType: 'category', categoryLabel, categoryBlurred },
         ];
       },
     },
@@ -147,10 +150,18 @@ test('candidate token pins external include revisions and immutable file version
   fileId = '22222222-2222-4222-8222-222222222222';
   fileVersionId = 32n;
   const fileChanged = await buildServerWikiReleaseCandidate(store as never, input, false);
+  categoryLabel = '추천 문서';
+  const categoryLabelChanged = await buildServerWikiReleaseCandidate(store as never, input, false);
+  categoryBlurred = true;
+  const categoryBlurChanged = await buildServerWikiReleaseCandidate(store as never, input, false);
 
-  assert.equal(first.snapshotVersion, 2);
+  assert.equal(first.snapshotVersion, 3);
   assert.equal(first.includeDependencies[0]?.targetRevisionId, 21n);
   assert.equal(first.assets[0]?.uploadedFileId, '11111111-1111-4111-8111-111111111111');
   assert.notEqual(first.candidate.token, includeChanged.candidate.token);
   assert.notEqual(includeChanged.candidate.token, fileChanged.candidate.token);
+  assert.notEqual(fileChanged.candidate.token, categoryLabelChanged.candidate.token);
+  assert.notEqual(categoryLabelChanged.candidate.token, categoryBlurChanged.candidate.token);
+  assert.equal(categoryBlurChanged.links.find((link) => link.linkType === 'category')?.categoryLabel, '추천 문서');
+  assert.equal(categoryBlurChanged.links.find((link) => link.linkType === 'category')?.categoryBlurred, true);
 });
