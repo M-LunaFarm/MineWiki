@@ -50,12 +50,6 @@ if (!token || !clientId) {
 
   client.once(Events.ClientReady, () => {
     Logger.info({ tag: client.user?.tag }, 'Discord bot ready');
-    void registerCommands(rest, clientId)
-      .then(() => Logger.info('Registered global Discord application commands.'))
-      .catch((error) => Logger.error({ err: error }, 'Failed to register Discord commands'));
-    void processDueDigests(subscriptions, digestQueue).catch((error) => {
-      Logger.error({ err: error }, 'Initial digest scheduling failed');
-    });
   });
 
   client.on('interactionCreate', async (interaction: Interaction) => {
@@ -267,10 +261,26 @@ if (!token || !clientId) {
     await digestQueue.waitUntilReady();
     assertSupportedQueueServer(await redis.info('server'));
     await client.login(token);
+    await registerCommands(rest, clientId);
+    Logger.info('Registered global Discord application commands.');
+    await processDueDigests(subscriptions, digestQueue);
+
+    let consecutiveSchedulerFailures = 0;
     scheduler = setInterval(() => {
-      void processDueDigests(subscriptions, digestQueue).catch((error) => {
-        Logger.error({ err: error }, 'Digest scheduling loop failed');
-      });
+      void processDueDigests(subscriptions, digestQueue)
+        .then(() => {
+          consecutiveSchedulerFailures = 0;
+        })
+        .catch((error) => {
+          consecutiveSchedulerFailures += 1;
+          Logger.error(
+            { err: error, consecutiveFailures: consecutiveSchedulerFailures },
+            'Digest scheduling loop failed',
+          );
+          if (consecutiveSchedulerFailures >= 3) {
+            void shutdown('digest-scheduler-unhealthy', 1);
+          }
+        });
     }, 60_000);
     Logger.info('Discord bot dependencies are ready and scheduler is active');
   };

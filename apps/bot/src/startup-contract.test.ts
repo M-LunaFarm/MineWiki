@@ -10,6 +10,8 @@ test('bot gates login and scheduling on database and queue readiness', () => {
   const queueReady = source.indexOf('await digestQueue.waitUntilReady()', bootstrap);
   const queueCompatible = source.indexOf('assertSupportedQueueServer', queueReady);
   const login = source.indexOf('await client.login(token)', bootstrap);
+  const commands = source.indexOf('await registerCommands(rest, clientId)', bootstrap);
+  const initialDigest = source.indexOf('await processDueDigests(subscriptions, digestQueue)', bootstrap);
   const scheduler = source.indexOf('scheduler = setInterval', bootstrap);
 
   assert.ok(bootstrap >= 0);
@@ -17,7 +19,10 @@ test('bot gates login and scheduling on database and queue readiness', () => {
   assert.ok(queueReady > databaseReady);
   assert.ok(queueCompatible > queueReady);
   assert.ok(login > queueCompatible);
-  assert.ok(scheduler > login);
-  assert.match(source, /Initial digest scheduling failed/);
+  assert.ok(commands > login);
+  assert.ok(initialDigest > commands);
+  assert.ok(scheduler > initialDigest);
+  assert.match(source, /consecutiveSchedulerFailures >= 3/);
+  assert.match(source, /digest-scheduler-unhealthy/);
   assert.match(source, /Discord bot bootstrap failed/);
 });
