@@ -2017,8 +2017,11 @@ export class WikiReadService {
         linkType: { in: [...ALL_BACKLINK_TYPES] }
       }
     });
-    const releasedLinks = namespace.code === 'server'
-      ? await this.prisma.serverWikiReleaseLink.findMany({
+    const releaseLinkDelegate = (this.prisma as unknown as {
+      serverWikiReleaseLink?: PrismaService['serverWikiReleaseLink'];
+    }).serverWikiReleaseLink;
+    const releasedLinks = releaseLinkDelegate
+      ? await releaseLinkDelegate.findMany({
           where: {
             targetNamespaceCode: namespace.code,
             targetSlug: projectedTarget.slug,

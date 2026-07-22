@@ -2565,6 +2565,57 @@ test('public server wiki backlinks use released target and source identities whi
   assert.deepEqual(previewResult.items.map((item) => [item.displayTitle, item.sourceRevisionId]), [['비공개 초안 소스', '201']]);
 });
 
+test('non-server targets include backlinks from released server wiki sources', async () => {
+  const now = new Date('2026-07-22T00:00:00.000Z');
+  const target = {
+    id: 10n, namespaceId: 1, spaceId: 1n, slug: '공용-규칙', title: '공용 규칙', displayTitle: '공용 규칙',
+    currentRevisionId: 100n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n,
+    ownerProfileId: null, createdAt: now, updatedAt: now, localPath: '공용-규칙',
+  };
+  const draftSource = {
+    ...target, id: 20n, namespaceId: 7, spaceId: 40n, slug: 'luna/draft', title: 'luna/draft',
+    displayTitle: '초안', currentRevisionId: 201n, localPath: 'luna/draft',
+  };
+  const releasedSource = {
+    id: 81n, releaseId: 70n, serverWikiId: 50n, spaceId: 40n, namespaceId: 7, pageId: 20n,
+    revisionId: 200n, slug: 'luna/public', title: 'luna/public', displayTitle: '공개 소스', localPath: 'luna/public',
+    pageType: 'article', protectionLevel: 'open', pageStatus: 'normal', createdBy: 1n, ownerProfileId: null,
+    pageUpdatedAt: now, searchVector: 'release', createdAt: now,
+  };
+  let releaseLinkQuery: Record<string, unknown> | undefined;
+  const prisma = {
+    wikiPage: { async findUnique() { return target; }, async findMany() { return [draftSource]; } },
+    wikiNamespace: {
+      async findUnique() { return { id: 1, code: 'main' }; },
+      async findMany() { return [{ id: 7, code: 'server' }]; },
+    },
+    wikiPageRevision: { async findUnique() { return { visibility: 'public' }; }, async findMany() { return []; } },
+    wikiPageLink: { async findMany() { return []; } },
+    serverWikiReleaseLink: {
+      async findMany(args: { where: Record<string, unknown> }) {
+        releaseLinkQuery = args.where;
+        return [{ id: 1n, sourcePageId: 20n, sourceRevisionId: 200n, linkType: 'link' }];
+      },
+    },
+    serverWiki: {
+      async findMany() {
+        return [{ id: 50n, spaceId: 40n, slug: 'luna', siteSlug: 'luna-docs', publicationStatus: 'published', publishedReleaseId: 70n }];
+      },
+    },
+    serverWikiReleaseItem: { async findMany() { return [releasedSource]; } },
+  } as unknown as PrismaService;
+  const permissions = {
+    async canPreviewServerWikiSpace() { return false; },
+    async assertCanReadPage() {},
+  } as unknown as WikiPermissionService;
+
+  const response = await new WikiReadService(prisma, permissions).getBacklinks({ pageId: '10' });
+
+  assert.equal(releaseLinkQuery?.targetNamespaceCode, 'main');
+  assert.equal(releaseLinkQuery?.targetSlug, '공용-규칙');
+  assert.deepEqual(response.items.map((item) => [item.displayTitle, item.sourceRevisionId]), [['공개 소스', '200']]);
+});
+
 test('backlinks validate and forward type filters without leaking hidden namespace counts', async () => {
   const now = new Date('2026-07-13T00:00:00Z');
   const target = { id: 10n, namespaceId: 1, spaceId: 1n, slug: '대문', title: '대문', displayTitle: '대문', currentRevisionId: 100n, pageType: 'article', protectionLevel: 'open', status: 'normal', createdBy: 1n, createdAt: now, updatedAt: now, localPath: '대문' };
