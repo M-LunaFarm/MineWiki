@@ -131,6 +131,13 @@ test('server wiki presentation rejects active and document-level markup', () => 
     }),
     hasErrorCode('SERVER_WIKI_CONTENT_UNSUPPORTED_MARKUP'),
   );
+  assert.throws(
+    () => normalizeServerWikiContentSettings({
+      ...emptySettings,
+      contributionPolicySource: '안내 [include(틀:비밀,token=SECRET)]',
+    }),
+    hasErrorCode('SERVER_WIKI_CONTENT_UNSUPPORTED_MARKUP'),
+  );
 });
 
 function hasErrorCode(code: string) {

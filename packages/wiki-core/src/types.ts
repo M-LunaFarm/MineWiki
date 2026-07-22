@@ -133,6 +133,13 @@ export type AstNode =
 
 export type InlineNode =
   | { type: 'text'; text: string }
+  | {
+      type: 'include';
+      target: string;
+      params: Record<string, string>;
+      state: 'unresolved' | 'resolved' | 'unavailable';
+      children?: AstNode[];
+    }
   | { type: 'line_break' }
   | { type: 'clearfix' }
   | { type: 'anchor'; id: string }

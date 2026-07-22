@@ -114,6 +114,44 @@ test('expands a readable include with AST-safe parameters and disables nested in
   assert.equal(permissionCalls[0]?.requestIp, '192.0.2.44');
 });
 
+test('expands inline includes across headings, paragraphs, lists, tables, and folding titles', async () => {
+  const template: FixturePage = {
+    ...basePage,
+    id: 12n,
+    namespaceId: 2,
+    localPath: '인라인',
+    slug: '인라인',
+    title: '인라인',
+    currentRevisionId: 120n,
+    contentRaw: '포함된 @값@',
+  };
+  const fixture = createFixture([template]);
+  const parsed = parseMarkup([
+    '== 제목 [include(틀:인라인,값=머리)] ==',
+    '문단 [include(틀:인라인,값=본문)]',
+    ' * 목록 [include(틀:인라인,값=목록)]',
+    '||셀 [include(틀:인라인,값=표)]||',
+    '{{{#!folding 접기 [include(틀:인라인,값=접기)]',
+    '안쪽',
+    '}}}',
+  ].join('\n'));
+
+  assert.equal(parsed.includes.length, 5);
+  const result = await fixture.service.expand({
+    ast: parsed.ast,
+    accountId: null,
+    sourcePageId: 1n,
+    sourceNamespace: 'main',
+    sourceLocalPath: '대문',
+  });
+  const html = renderDocument(result.ast);
+
+  for (const value of ['머리', '본문', '목록', '표', '접기']) assert.match(html, new RegExp(`포함된 ${value}`, 'u'));
+  assert.doesNotMatch(html, /저장한 뒤|불러올 수 없습니다/u);
+  assert.equal(fixture.pageLookups(), 1);
+  assert.equal(result.includedSourceBytes, Buffer.byteLength(template.contentRaw, 'utf8') * 5);
+});
+
 test('never loads includes inside a hidden conditional block', async () => {
   const template: FixturePage = {
     ...basePage,

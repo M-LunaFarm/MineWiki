@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, extractDiscussionCommentReferenceIds, extractDiscussionVoteMacros, parseMarkup, renderDiscussionMarkup, renderDocument, WIKI_RENDERER_VERSION } from '../src/markup.js';
+import { applyIncludeParametersToAst, collectWikiFileNames, collectWikiLinkTargets, extractDiscussionCommentReferenceIds, extractDiscussionVoteMacros, parseMarkup, renderDiscussionMarkup, renderDocument, stripDiscussionControlMacros, WIKI_RENDERER_VERSION } from '../src/markup.js';
 import { parseLinkTarget, resolveWikiPath, wikiLinkKey, wikiUrl } from '../src/namespaces.js';
 import { hashContent, normalizeSearch, normalizeTitle, slugifyTitle } from '../src/normalize.js';
 
@@ -678,6 +678,21 @@ test('links only viewer-visible same-thread comment references outside code and 
   assert.deepEqual(extractDiscussionCommentReferenceIds(raw), ['41', '42', '999']);
 });
 
+test('drops inline include controls before discussion rendering and side-effect extraction', () => {
+  const source = '실제 @Alice #42 [include(틀:비밀,사용자=@Mallory,댓글=#41)]';
+  const safeText = stripDiscussionControlMacros(source);
+  const html = renderDiscussionMarkup(source, {
+    mentions: [{ username: 'Alice', href: '/user/Alice' }, { username: 'Mallory', href: '/user/Mallory' }],
+    commentReferences: [{ id: '42', href: '#comment-42' }, { id: '41', href: '#comment-41' }],
+  });
+
+  assert.equal(safeText.includes('Mallory'), false);
+  assert.deepEqual(extractDiscussionCommentReferenceIds(source), ['42']);
+  assert.match(html, /href="\/user\/Alice"/u);
+  assert.match(html, /href="#comment-42"/u);
+  assert.doesNotMatch(html, /Mallory|comment-41|틀:비밀|wiki-transclusion/u);
+});
+
 test('renders fragments without indexing same-page anchors as page links', () => {
   const parsed = parseMarkup('[[#Anchor]] · [[#설치 안내|안내]] · [[다른 문서#세부 항목]]');
   const html = renderDocument(parsed.ast, {
@@ -913,12 +928,48 @@ test('parses standalone include macros and bounded parameters', () => {
   assert.match(renderDocument(parsed.ast), /포함 문서는 저장한 뒤/);
 });
 
-test('does not parse include syntax inside literal code blocks or inline prose', () => {
+test('keeps include inert in literal code while parsing inline and leading placements', () => {
   const parsed = parseMarkup('{{{\n[include(틀:비밀)]\n}}}\n문장 안 [include(틀:인라인)]');
 
-  assert.deepEqual(parsed.includes, []);
+  assert.deepEqual(parsed.includes, ['틀:인라인']);
   assert.equal(parsed.ast[0]?.type, 'codeblock');
   assert.equal(parsed.ast[1]?.type, 'paragraph');
+  const inline = parsed.ast[1]?.type === 'paragraph'
+    ? parsed.ast[1].children.find((node) => node.type === 'include')
+    : null;
+  assert.deepEqual(inline, {
+    type: 'include', target: '틀:인라인', params: {}, state: 'unresolved'
+  });
+
+  const leading = parseMarkup('[include(틀:앞)] 뒤 문장');
+  assert.deepEqual(leading.includes, ['틀:앞']);
+  assert.equal(leading.ast[0]?.type, 'include');
+  assert.equal(leading.ast[1]?.type, 'paragraph');
+  assert.match(renderDocument(leading.ast), /뒤 문장/u);
+});
+
+test('renders resolved inline includes without exposing unavailable targets', () => {
+  const parsed = parseMarkup('앞 [include(틀:인라인,이름=루나)] 뒤');
+  const paragraph = parsed.ast[0];
+  assert.equal(paragraph?.type, 'paragraph');
+  if (paragraph?.type !== 'paragraph') return;
+  const include = paragraph.children.find((node) => node.type === 'include');
+  assert.equal(include?.type, 'include');
+  if (include?.type !== 'include') return;
+  include.state = 'resolved';
+  include.children = parseMarkup('포함 문단\n||표||값||').ast;
+  const html = renderDocument(parsed.ast);
+  assert.match(html, /wiki-paragraph/u);
+  assert.match(html, /wiki-transclusion-inline/u);
+  assert.match(html, /포함 문단/u);
+  assert.match(html, /wiki-table/u);
+
+  include.state = 'unavailable';
+  include.children = undefined;
+  const unavailable = renderDocument(parsed.ast);
+  assert.doesNotMatch(unavailable, /틀:인라인|이름=루나/u);
+  assert.match(unavailable, /불러올 수 없습니다/u);
+  assert.equal(parsed.plainText, '앞 뒤');
 });
 
 test('rejects malformed, duplicate, and excessive include parameters', () => {

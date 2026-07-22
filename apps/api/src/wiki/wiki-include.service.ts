@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   applyIncludeParametersToAst,
   type AstNode,
+  type InlineNode,
   parseLinkTarget,
   parseMarkup,
   slugifyTitle
@@ -53,37 +54,17 @@ export class WikiIncludeService {
     const sourceKey = `${input.sourceNamespace}:${slugifyTitle(input.sourceLocalPath)}`;
     const memo = new Map<string, Promise<IncludeSource | null>>();
 
-    const expandNodes = async (nodes: readonly AstNode[]): Promise<AstNode[]> => Promise.all(nodes.map(async (node): Promise<AstNode> => {
-      if (node.type === 'indent') {
-        return { ...node, children: await expandNodes(node.children) };
-      }
-      if (node.type === 'folding') {
-        return { ...node, children: await expandNodes(node.children) };
-      }
-      if (node.type === 'conditional') {
-        if (node.state === 'hidden') return node;
-        return { ...node, children: await expandNodes(node.children) };
-      }
-      if (node.type === 'wiki_style') {
-        return { ...node, children: await expandNodes(node.children) };
-      }
-      if (node.type === 'blockquote') {
-        return { ...node, children: await expandNodes(node.children) };
-      }
-      if (node.type !== 'include') return node;
-
+    const resolveInclude = async (node: {
+      readonly target: string;
+      readonly params: Record<string, string>;
+    }): Promise<AstNode[] | null> => {
       occurrence += 1;
       const includeIndex = occurrence;
-      if (includeIndex > MAX_INCLUDE_OCCURRENCES) return unavailable(node);
+      if (includeIndex > MAX_INCLUDE_OCCURRENCES) return null;
       const target = resolveContextualTarget(input.sourceNamespace, input.sourceLocalPath, node.target);
       const targetKey = `${target.namespace}:${slugifyTitle(target.title)}`;
       uniqueTargets.add(targetKey);
-      if (
-        targetKey === sourceKey ||
-        uniqueTargets.size > MAX_UNIQUE_INCLUDE_TARGETS
-      ) {
-        return unavailable(node);
-      }
+      if (targetKey === sourceKey || uniqueTargets.size > MAX_UNIQUE_INCLUDE_TARGETS) return null;
 
       let sourcePromise = memo.get(targetKey);
       if (!sourcePromise) {
@@ -98,15 +79,11 @@ export class WikiIncludeService {
         memo.set(targetKey, sourcePromise);
       }
       const source = await sourcePromise;
-      if (
-        !source ||
-        source.pageId === input.sourcePageId ||
-        includedSourceBytes + source.bytes > MAX_INCLUDED_SOURCE_BYTES
-      ) {
-        return unavailable(node);
+      if (!source || source.pageId === input.sourcePageId || includedSourceBytes + source.bytes > MAX_INCLUDED_SOURCE_BYTES) {
+        return null;
       }
       includedSourceBytes += source.bytes;
-      const children = disableNestedIncludes(
+      return disableNestedIncludes(
         applyIncludeParametersToAst(
           source.ast,
           node.params,
@@ -114,8 +91,100 @@ export class WikiIncludeService {
           { calleeTitle: callerFullTitle(input.sourceNamespace, input.sourceLocalPath) }
         )
       );
-      return { ...node, state: 'resolved', children };
-    }));
+    };
+
+    const expandInline = async (nodes: readonly InlineNode[]): Promise<InlineNode[]> => {
+      const output: InlineNode[] = [];
+      for (const node of nodes) {
+        if (node.type === 'include') {
+          const children = await resolveInclude(node);
+          output.push(children
+            ? { ...node, state: 'resolved', children }
+            : unavailableInline(node));
+          continue;
+        }
+        if (node.type === 'internal_link' || node.type === 'external_link') {
+          output.push(node.labelChildren
+            ? { ...node, labelChildren: await expandInline(node.labelChildren) }
+            : node);
+          continue;
+        }
+        if ('children' in node && node.children) {
+          output.push({ ...node, children: await expandInline(node.children) } as InlineNode);
+          continue;
+        }
+        output.push(node);
+      }
+      return output;
+    };
+
+    const expandList = async (node: Extract<AstNode, { type: 'list' }>): Promise<Extract<AstNode, { type: 'list' }>> => ({
+      ...node,
+      items: await mapSequential(node.items, async (item) => ({
+        children: await expandInline(item.children),
+        nested: await mapSequential(item.nested, expandList),
+      })),
+    });
+
+    const expandNodes = async (nodes: readonly AstNode[]): Promise<AstNode[]> => {
+      const output: AstNode[] = [];
+      for (const node of nodes) {
+      if (node.type === 'heading') {
+        output.push(node.children ? { ...node, children: await expandInline(node.children) } : node);
+        continue;
+      }
+      if (node.type === 'paragraph') {
+        output.push({ ...node, children: await expandInline(node.children) });
+        continue;
+      }
+      if (node.type === 'list') {
+        output.push(await expandList(node));
+        continue;
+      }
+      if (node.type === 'wiki_table') {
+        output.push({
+          ...node,
+          caption: await expandInline(node.caption),
+          rows: await mapSequential(node.rows, async (row) => ({
+            ...row,
+            cells: await mapSequential(row.cells, async (cell) => ({
+              ...cell,
+              children: await expandInline(cell.children),
+              ...(cell.blocks ? { blocks: await expandNodes(cell.blocks) } : {}),
+            })),
+          })),
+        });
+        continue;
+      }
+      if (node.type === 'indent') {
+        output.push({ ...node, children: await expandNodes(node.children) });
+        continue;
+      }
+      if (node.type === 'folding') {
+        output.push({ ...node, title: await expandInline(node.title), children: await expandNodes(node.children) });
+        continue;
+      }
+      if (node.type === 'conditional') {
+        output.push(node.state === 'hidden' ? node : { ...node, children: await expandNodes(node.children) });
+        continue;
+      }
+      if (node.type === 'wiki_style') {
+        output.push({ ...node, children: await expandNodes(node.children) });
+        continue;
+      }
+      if (node.type === 'blockquote') {
+        output.push({ ...node, children: await expandNodes(node.children) });
+        continue;
+      }
+      if (node.type === 'include') {
+        const children = await resolveInclude(node);
+        output.push(children ? { ...node, state: 'resolved', children } : unavailable(node));
+        continue;
+      }
+      output.push(node);
+      }
+      return output;
+    };
 
     return {
       ast: await expandNodes(input.ast),
@@ -249,11 +318,42 @@ function unavailable(node: Extract<AstNode, { type: 'include' }>): AstNode {
   return { ...node, state: 'unavailable', children: undefined };
 }
 
+function unavailableInline(node: Extract<InlineNode, { type: 'include' }>): InlineNode {
+  return { ...node, state: 'unavailable', children: undefined };
+}
+
+async function mapSequential<T, U>(values: readonly T[], mapper: (value: T) => Promise<U>): Promise<U[]> {
+  const output: U[] = [];
+  for (const value of values) output.push(await mapper(value));
+  return output;
+}
+
 function disableNestedIncludes(nodes: readonly AstNode[]): AstNode[] {
   return nodes.map((node): AstNode => {
     if (node.type === 'include') return unavailable(node);
+    if (node.type === 'heading') return node.children
+      ? { ...node, children: disableNestedInlineIncludes(node.children) }
+      : node;
+    if (node.type === 'paragraph') return { ...node, children: disableNestedInlineIncludes(node.children) };
+    if (node.type === 'list') return disableNestedListIncludes(node);
+    if (node.type === 'wiki_table') return {
+      ...node,
+      caption: disableNestedInlineIncludes(node.caption),
+      rows: node.rows.map((row) => ({
+        ...row,
+        cells: row.cells.map((cell) => ({
+          ...cell,
+          children: disableNestedInlineIncludes(cell.children),
+          ...(cell.blocks ? { blocks: disableNestedIncludes(cell.blocks) } : {}),
+        })),
+      })),
+    };
     if (node.type === 'indent') return { ...node, children: disableNestedIncludes(node.children) };
-    if (node.type === 'folding') return { ...node, children: disableNestedIncludes(node.children) };
+    if (node.type === 'folding') return {
+      ...node,
+      title: disableNestedInlineIncludes(node.title),
+      children: disableNestedIncludes(node.children),
+    };
     if (node.type === 'conditional') return node.state === 'visible'
       ? { ...node, children: disableNestedIncludes(node.children) }
       : node;
@@ -261,6 +361,29 @@ function disableNestedIncludes(nodes: readonly AstNode[]): AstNode[] {
     if (node.type === 'blockquote') return { ...node, children: disableNestedIncludes(node.children) };
     return node;
   });
+}
+
+function disableNestedInlineIncludes(nodes: readonly InlineNode[]): InlineNode[] {
+  return nodes.map((node): InlineNode => {
+    if (node.type === 'include') return unavailableInline(node);
+    if (node.type === 'internal_link' || node.type === 'external_link') return node.labelChildren
+      ? { ...node, labelChildren: disableNestedInlineIncludes(node.labelChildren) }
+      : node;
+    if ('children' in node && node.children) {
+      return { ...node, children: disableNestedInlineIncludes(node.children) } as InlineNode;
+    }
+    return node;
+  });
+}
+
+function disableNestedListIncludes(node: Extract<AstNode, { type: 'list' }>): Extract<AstNode, { type: 'list' }> {
+  return {
+    ...node,
+    items: node.items.map((item) => ({
+      children: disableNestedInlineIncludes(item.children),
+      nested: item.nested.map(disableNestedListIncludes),
+    })),
+  };
 }
 
 function callerFullTitle(namespace: string, localPath: string) {

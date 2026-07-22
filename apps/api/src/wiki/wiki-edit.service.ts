@@ -6,7 +6,7 @@ import {
   NotFoundException,
   Optional
 } from '@nestjs/common';
-import { collectWikiFileNames, hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION, type AstNode } from '@minewiki/wiki-core';
+import { collectWikiFileNames, hashContent, parseMarkup, renderDocument, slugifyTitle, WIKI_RENDERER_VERSION, type AstNode, type InlineNode } from '@minewiki/wiki-core';
 import type { Prisma, WikiEditRequest } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { BusinessEventService } from '../events/business-event.service';
@@ -2891,8 +2891,27 @@ export function astContainsFile(ast: readonly AstNode[]): boolean {
 }
 
 export function astContainsInclude(ast: readonly AstNode[]): boolean {
+  const inlineContainsInclude = (nodes: readonly InlineNode[]): boolean => nodes.some((node) => {
+    if (node.type === 'include') return true;
+    if (node.type === 'internal_link' || node.type === 'external_link') {
+      return node.labelChildren ? inlineContainsInclude(node.labelChildren) : false;
+    }
+    return 'children' in node && Array.isArray(node.children)
+      ? inlineContainsInclude(node.children as InlineNode[])
+      : false;
+  });
+  const listContainsInclude = (node: Extract<AstNode, { type: 'list' }>): boolean => node.items.some((item) => (
+    inlineContainsInclude(item.children) || item.nested.some(listContainsInclude)
+  ));
   return ast.some((node) => {
     if (node.type === 'include') return true;
+    if (node.type === 'heading') return node.children ? inlineContainsInclude(node.children) : false;
+    if (node.type === 'paragraph') return inlineContainsInclude(node.children);
+    if (node.type === 'list') return listContainsInclude(node);
+    if (node.type === 'wiki_table') return inlineContainsInclude(node.caption) || node.rows.some((row) => row.cells.some((cell) => (
+      inlineContainsInclude(cell.children) || (cell.blocks ? astContainsInclude(cell.blocks) : false)
+    )));
+    if (node.type === 'folding' && inlineContainsInclude(node.title)) return true;
     if (
       node.type === 'indent'
       || node.type === 'folding'

@@ -565,6 +565,8 @@ test('preview expands readable includes with the authenticated page context', as
 test('include detection covers nested preview containers', () => {
   assert.equal(astContainsInclude(parseMarkup('문서').ast), false);
   assert.equal(astContainsInclude(parseMarkup('{{{#!folding 안내\n[include(틀:안내)]\n}}}').ast), true);
+  assert.equal(astContainsInclude(parseMarkup('문장 안 [include(틀:인라인)]').ast), true);
+  assert.equal(astContainsInclude(parseMarkup('||셀 [include(틀:표)]||').ast), true);
 });
 
 test('revision diff aligns unchanged lines after an insertion', () => {

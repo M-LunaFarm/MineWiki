@@ -37,7 +37,7 @@ import {
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 import { evaluateConditionalExpression } from './conditional.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.37.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.38.0';
 const MAX_HIGHLIGHT_CODE_LENGTH = 100_000;
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_RAW_HTML_BLOCKS = 16;
@@ -460,6 +460,12 @@ function parseMarkupDocument(
     if (!line.trim()) continue;
     if (i === redirectLineIndex && redirectTarget) continue;
 
+    const leadingInclude = splitLeadingIncludeLine(line);
+    if (leadingInclude?.remainder.trim()) {
+      lines.splice(i, 1, leadingInclude.macro, leadingInclude.remainder.trimStart());
+      line = leadingInclude.macro;
+    }
+
     const rawHtml = readRawHtmlBlock(lines, i);
     if (rawHtml) {
       const sourceBytes = Buffer.byteLength(rawHtml.source, 'utf8');
@@ -878,6 +884,10 @@ function parseMarkupDocument(
   if (/<\s*(script|style|iframe|object|embed|img)\b/i.test(sourceOutsideRawHtml) || /\son[a-z]+\s*=/i.test(sourceOutsideRawHtml)) {
     blockingErrors.push('허용되지 않은 HTML이 포함되어 있습니다.');
   }
+  const parsedIncludeTargets = collectIncludeTargets(ast);
+  if (parsedIncludeTargets.length > MAX_INCLUDE_OCCURRENCES) {
+    blockingErrors.push(`include 문서는 문서당 ${MAX_INCLUDE_OCCURRENCES}개까지 사용할 수 있습니다.`);
+  }
   if (countMathNodes(ast) > MAX_MATH_NODES) {
     blockingErrors.push(`수식은 문서당 ${MAX_MATH_NODES}개까지 사용할 수 있습니다.`);
   }
@@ -887,7 +897,7 @@ function parseMarkupDocument(
     links: [...links],
     categories: [...categories],
     categoryLinks: [...categoryLinks.values()],
-    includes,
+    includes: parsedIncludeTargets.slice(0, MAX_INCLUDE_OCCURRENCES),
     components,
     headings: headings.map((heading) => ({
       level: heading.level,
@@ -902,6 +912,7 @@ function parseMarkupDocument(
       .replace(/^\s*\{\{\{#!wiki[^\r\n]*(?:\r?\n|$)/gimu, ' ')
       .replace(/^\s*\}\}\}\s*$/gmu, ' ')
       .replace(/\{\{[\s\S]*?\}\}/g, ' ')
+      .replace(/\[include\([^\]\r\n]*\)\]/giu, ' ')
       .replace(/\[\[분류:.+?\]\]/g, ' ')
       .replace(/\[\[(.+?)(?:\|(.+?))?\]\]/g, '$2$1')
       .replace(/'{2,3}/g, '')
@@ -1064,6 +1075,12 @@ function parseIncludeLine(line: string): ParsedIncludeLine | null {
     params[key] = value;
   }
   return { target, params };
+}
+
+function splitLeadingIncludeLine(line: string): { macro: string; remainder: string } | null {
+  const match = line.match(/^\s*(\[include\([^\]\r\n]*\)\])([\s\S]*)$/iu);
+  if (!match) return null;
+  return { macro: match[1] ?? '', remainder: match[2] ?? '' };
 }
 
 function splitIncludeArguments(value: string): string[] {
@@ -2023,6 +2040,12 @@ export function applyIncludeParametersToAst(
     )
   );
   const inline = (nodes: readonly InlineNode[]): InlineNode[] => nodes.map((node) => {
+    if (node.type === 'include') return {
+      ...node,
+      target: replace(node.target),
+      params: Object.fromEntries(Object.entries(node.params).map(([key, value]) => [key, replace(value)])),
+      children: node.children ? applyIncludeParametersToAst(node.children, params, headingPrefix, reservedParams) : undefined,
+    };
     if (node.type === 'internal_link') {
       const labelChildren = node.labelChildren ? inline(node.labelChildren) : undefined;
       return {
@@ -2263,8 +2286,18 @@ function parseInline(
       }
     } else if (group.macro !== undefined) {
       const name = (group.macroName ?? '').slice(0, 64);
-      const macro = parseSafeInlineMacro(name, group.macroArgs, errors);
-      nodes.push(macro);
+      if (name.toLowerCase() === 'include') {
+        const include = parseIncludeLine(match[0]);
+        if (!include || 'error' in include) {
+          const error = include && 'error' in include ? include.error : 'include 문법이 올바르지 않습니다.';
+          if (!blockingErrors.includes(error)) blockingErrors.push(error);
+        } else {
+          nodes.push({ type: 'include', target: include.target, params: include.params, state: 'unresolved' });
+        }
+      } else {
+        const macro = parseSafeInlineMacro(name, group.macroArgs, errors);
+        nodes.push(macro);
+      }
     } else if (group.bold !== undefined) {
       nodes.push({ type: 'bold', children: nested(group.boldText ?? '') });
     } else if (group.italic !== undefined) {
@@ -2288,6 +2321,7 @@ function parseInline(
 
 function stripNestedLinks(nodes: readonly InlineNode[]): InlineNode[] {
   return nodes.flatMap((node): InlineNode[] => {
+    if (node.type === 'include') return [node];
     if (node.type === 'internal_link' || node.type === 'external_link') {
       return [{ type: 'text', text: node.label }];
     }
@@ -2303,6 +2337,7 @@ function stripNestedLinks(nodes: readonly InlineNode[]): InlineNode[] {
 
 function stripNestedFootnotes(nodes: readonly InlineNode[]): InlineNode[] {
   return nodes.flatMap((node): InlineNode[] => {
+    if (node.type === 'include') return [node];
     if (node.type === 'ref') {
       return [{ type: 'text', text: node.text ?? (node.name ? `[${node.name}]` : '') }];
     }
@@ -2329,6 +2364,9 @@ function inlineNodesToPlainText(nodes: readonly InlineNode[]): string {
       return node.labelChildren ? inlineNodesToPlainText(node.labelChildren) : node.label;
     }
     if (node.type === 'file') return node.caption || node.fileName;
+    if (node.type === 'include') return node.state === 'resolved' && node.children
+      ? astNodesToPlainText(node.children)
+      : '';
     if (node.type === 'unsupported_macro') return `[${node.name}]`;
     if (node.type === 'code') return node.code;
     if (node.type === 'ref') return node.children
@@ -2336,6 +2374,77 @@ function inlineNodesToPlainText(nodes: readonly InlineNode[]): string {
       : node.text ?? '';
     return inlineNodesToPlainText(node.children);
   }).join('');
+}
+
+function astNodesToPlainText(nodes: readonly AstNode[]): string {
+  return nodes.map((node): string => {
+    if (node.type === 'heading') return node.children ? inlineNodesToPlainText(node.children) : node.text;
+    if (node.type === 'paragraph') return inlineNodesToPlainText(node.children);
+    if (node.type === 'list') return node.items.map((item) => (
+      `${inlineNodesToPlainText(item.children)} ${item.nested.map((nested) => astNodesToPlainText([nested])).join(' ')}`
+    )).join(' ');
+    if (node.type === 'wiki_table') return [
+      inlineNodesToPlainText(node.caption),
+      ...node.rows.flatMap((row) => row.cells.map((cell) => cell.blocks
+        ? astNodesToPlainText(cell.blocks)
+        : inlineNodesToPlainText(cell.children)))
+    ].join(' ');
+    if (node.type === 'folding') return `${inlineNodesToPlainText(node.title)} ${astNodesToPlainText(node.children)}`;
+    if (node.type === 'indent' || node.type === 'blockquote' || node.type === 'wiki_style') return astNodesToPlainText(node.children);
+    if (node.type === 'conditional') return node.state === 'visible' ? astNodesToPlainText(node.children) : '';
+    if (node.type === 'include') return node.state === 'resolved' && node.children ? astNodesToPlainText(node.children) : '';
+    if (node.type === 'file') return node.caption || node.fileName;
+    if (node.type === 'codeblock') return node.code;
+    return '';
+  }).join(' ');
+}
+
+function collectIncludeTargets(nodes: readonly AstNode[]): string[] {
+  const targets: string[] = [];
+  const visitInline = (inline: readonly InlineNode[]) => {
+    for (const node of inline) {
+      if (node.type === 'include') {
+        targets.push(node.target);
+        if (node.children) visitAst(node.children);
+        continue;
+      }
+      if (node.type === 'internal_link' || node.type === 'external_link') {
+        if (node.labelChildren) visitInline(node.labelChildren);
+        continue;
+      }
+      if ('children' in node && node.children) visitInline(node.children);
+    }
+  };
+  const visitList = (list: WikiListNode) => {
+    for (const item of list.items) {
+      visitInline(item.children);
+      item.nested.forEach(visitList);
+    }
+  };
+  const visitAst = (ast: readonly AstNode[]) => {
+    for (const node of ast) {
+      if (node.type === 'include') {
+        targets.push(node.target);
+        if (node.children) visitAst(node.children);
+      } else if (node.type === 'heading' && node.children) visitInline(node.children);
+      else if (node.type === 'paragraph') visitInline(node.children);
+      else if (node.type === 'list') visitList(node);
+      else if (node.type === 'wiki_table') {
+        visitInline(node.caption);
+        for (const row of node.rows) for (const cell of row.cells) {
+          visitInline(cell.children);
+          if (cell.blocks) visitAst(cell.blocks);
+        }
+      } else if (node.type === 'folding') {
+        visitInline(node.title);
+        visitAst(node.children);
+      } else if (node.type === 'indent' || node.type === 'blockquote' || node.type === 'wiki_style' || node.type === 'conditional') {
+        visitAst(node.children);
+      }
+    }
+  };
+  visitAst(nodes);
+  return targets;
 }
 
 function normalizeFootnoteName(value: string): string | null {
@@ -2520,6 +2629,8 @@ export interface RenderOptions {
   tocHeadings?: ReadonlyArray<{ level: number; text: string; id: string }>;
   /** Internal guard propagated through folding blocks and transclusions. */
   disableMathRendering?: boolean;
+  /** Internal transclusion mode matching NamuMark's no-top-paragraph parse. */
+  unwrapParagraphs?: boolean;
 }
 
 export interface DiscussionMarkupMention {
@@ -2551,7 +2662,7 @@ export function extractDiscussionCommentReferenceIds(raw: string, limit = 20): r
   const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
   const ids = new Set<string>();
   const pattern = /(?:^|[^\p{L}\p{N}_])#([1-9]\d{0,19})(?![\p{L}\p{N}_])/gu;
-  for (const match of String(raw).matchAll(pattern)) {
+  for (const match of stripDiscussionControlMacros(String(raw)).matchAll(pattern)) {
     const id = match[1];
     if (!id) continue;
     // Prisma/MariaDB discussion IDs are signed BIGINT values. Reject larger
@@ -2561,6 +2672,13 @@ export function extractDiscussionCommentReferenceIds(raw: string, limit = 20): r
     if (ids.size >= boundedLimit) break;
   }
   return [...ids];
+}
+
+/** Removes document-only control macros before mention/reference side effects. */
+export function stripDiscussionControlMacros(raw: string): string {
+  return raw
+    .replace(/\[include\([^\]\r\n]*\)\]/giu, ' ')
+    .replace(/\[vote(?:\([^\]\r\n]*\))?\]/giu, ' ');
 }
 
 /** Extract vote macros through the real parser so code and link literals are never converted. */
@@ -2640,6 +2758,7 @@ export function renderDiscussionMarkup(raw: string, options: DiscussionMarkupOpt
   };
 
   const restrictInline = (nodes: readonly InlineNode[], allowMentions = true): InlineNode[] => nodes.flatMap((node): InlineNode[] => {
+    if (node.type === 'include') return [];
     if (node.type === 'text') return allowMentions ? injectDiscussionLinks(node.text) : [node];
     if (node.type === 'internal_link' || node.type === 'external_link') return [{
       ...node,
@@ -2750,7 +2869,10 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
         continue;
       }
       if (node.type === 'paragraph') {
-        output.push(`<p>${renderInline(node.children, footnotes, renderOptions)}</p>`);
+        const content = renderInline(node.children, footnotes, renderOptions);
+        if (renderOptions.unwrapParagraphs) output.push(content);
+        else if (inlineTreeContainsInclude(node.children)) output.push(`<div class="wiki-paragraph">${content}</div>`);
+        else output.push(`<p>${content}</p>`);
         continue;
       }
       if (node.type === 'list') {
@@ -3042,6 +3164,14 @@ function collectNamedFootnoteDefinitions(ast: readonly AstNode[]): Map<string, F
           ...(node.children ? { children: node.children } : {}),
         });
       }
+      if (node.type === 'include') {
+        if (node.children) {
+          for (const [name, definition] of collectNamedFootnoteDefinitions(node.children)) {
+            if (!definitions.has(name)) definitions.set(name, definition);
+          }
+        }
+        continue;
+      }
       if ('children' in node) {
         collectInline(node.children);
       }
@@ -3221,6 +3351,15 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
         return renderInternalLink(node.target, node.label, options, node.fragment, content);
       }
       if (node.type === 'file') return renderFile(node.fileName, node.thumbnail, node.caption, node.display, options, true);
+      if (node.type === 'include') {
+        if (node.state === 'resolved' && node.children) {
+          return `<span class="wiki-transclusion wiki-transclusion-inline">${renderDocument(node.children, { ...options, unwrapParagraphs: true })}</span>`;
+        }
+        const message = node.state === 'unavailable'
+          ? '포함 문서를 불러올 수 없습니다.'
+          : '포함 문서는 저장한 뒤 표시됩니다.';
+        return `<span class="wiki-include-notice">${message}</span>`;
+      }
       if (node.type === 'video') {
         return renderVideo(node);
       }
@@ -3273,6 +3412,18 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
       return `<sup class="wiki-footnote-ref" id="${referenceId}"><a href="#fn-${index}" aria-label="각주 ${escapeAttr(visibleLabel)}">[${escapeHtml(visibleLabel)}]</a></sup>`;
     })
     .join('');
+}
+
+function inlineTreeContainsInclude(nodes: readonly InlineNode[]): boolean {
+  return nodes.some((node) => {
+    if (node.type === 'include') return true;
+    if (node.type === 'internal_link' || node.type === 'external_link') {
+      return node.labelChildren ? inlineTreeContainsInclude(node.labelChildren) : false;
+    }
+    return 'children' in node && Array.isArray(node.children)
+      ? inlineTreeContainsInclude(node.children as InlineNode[])
+      : false;
+  });
 }
 
 function renderVideo(node: Extract<InlineNode, { type: 'video' }>): string {
@@ -3332,7 +3483,9 @@ function renderMath(source: string, displayMode: boolean, validationError: strin
 
 function countMathNodes(ast: readonly AstNode[]): number {
   const countInline = (nodes: readonly InlineNode[]): number => nodes.reduce((count, node) => {
-    let nestedCount = 'children' in node ? countInline(node.children) : 0;
+    let nestedCount = node.type === 'include'
+      ? (node.children ? countMathNodes(node.children) : 0)
+      : ('children' in node ? countInline(node.children) : 0);
     if ((node.type === 'internal_link' || node.type === 'external_link') && node.labelChildren) {
       nestedCount += countInline(node.labelChildren);
     }
@@ -3370,6 +3523,9 @@ export function collectWikiFileNames(ast: readonly AstNode[], output = new Set<s
   const collectInline = (nodes: readonly InlineNode[]) => {
     for (const node of nodes) {
       if (node.type === 'file') output.add(node.fileName);
+      else if (node.type === 'include') {
+        if (node.children) collectWikiFileNames(node.children, output);
+      }
       else if ('children' in node) collectInline(node.children);
       if ((node.type === 'internal_link' || node.type === 'external_link') && node.labelChildren) {
         collectInline(node.labelChildren);
@@ -3414,6 +3570,8 @@ export function collectWikiLinkTargets(ast: readonly AstNode[], output = new Set
       if (node.type === 'internal_link') {
         const resolved = resolveWikiLinkTarget(node.target);
         if (!('error' in resolved) && resolved.target) output.add(resolved.target);
+      } else if (node.type === 'include') {
+        if (node.children) collectWikiLinkTargets(node.children, output);
       } else if ('children' in node) collectInline(node.children);
       if ((node.type === 'internal_link' || node.type === 'external_link') && node.labelChildren) {
         collectInline(node.labelChildren);

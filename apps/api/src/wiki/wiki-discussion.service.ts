@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { createHmac } from 'node:crypto';
 import { ConfigService } from '@minewiki/config';
 import { normalizeIpOrCidr } from '@minewiki/security';
-import { extractDiscussionCommentReferenceIds, extractDiscussionVoteMacros, renderDiscussionMarkup, wikiUrl } from '@minewiki/wiki-core';
+import { extractDiscussionCommentReferenceIds, extractDiscussionVoteMacros, renderDiscussionMarkup, stripDiscussionControlMacros, wikiUrl } from '@minewiki/wiki-core';
 import { PUBLIC_WIKI_PAGE_STATUSES } from '@minewiki/wiki-core/page-status';
 import { Prisma, type ServerWikiReleaseItem, type WikiDiscussionThread, type WikiPage } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
@@ -828,7 +828,7 @@ export class WikiDiscussionService {
       .filter((profileId): profileId is bigint => profileId !== null))];
     const mentionOccurrencesByComment = new Map(displayComments.map((comment) => [
       comment.id,
-      comment.entryType === 'system' || comment.status === 'deleted' ? [] : extractDiscussionMentions(comment.content)
+      comment.entryType === 'system' || comment.status === 'deleted' ? [] : extractDiscussionMentions(stripDiscussionControlMacros(comment.content))
     ]));
     const mentionUsernames = [...new Set([...mentionOccurrencesByComment.values()].flat().map((mention) => mention.username))];
     const identityRows = await this.prisma.wikiProfile.findMany({
@@ -2148,7 +2148,7 @@ export class WikiDiscussionService {
   }
 
   private discussionTextWithoutVoteMacros(content: string): string {
-    return content.replace(/\[vote(?:\([^\]\n]*\))?\]/giu, ' ');
+    return stripDiscussionControlMacros(content);
   }
 
   private anonymousIpHash(requestIp: string): string {
