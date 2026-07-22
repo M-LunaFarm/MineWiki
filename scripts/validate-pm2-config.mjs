@@ -23,6 +23,12 @@ for (const [name, expectedService] of expectedServices) {
       `${name} must use MINEWIKI_SERVICE=${expectedService}, got ${String(processConfig.env?.MINEWIKI_SERVICE)}`,
     );
   }
+  if (
+    processConfig.cwd !== resolve('.') ||
+    !processConfig.script?.endsWith('/scripts/run-service-release.mjs')
+  ) {
+    throw new Error(`${name} must run through the immutable service release wrapper.`);
+  }
 }
 
 const web = config.apps?.find((app) => app.name === 'minewiki-web');

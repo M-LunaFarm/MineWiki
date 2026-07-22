@@ -16,6 +16,8 @@ const apiPort = '4321';
 const internalApiBaseUrl = `http://127.0.0.1:${apiPort}`;
 const webCwd = repoRoot;
 const webScript = path.join(repoRoot, 'scripts/run-web-release.mjs');
+const serviceCwd = repoRoot;
+const serviceScript = path.join(repoRoot, 'scripts/run-service-release.mjs');
 
 module.exports = {
   apps: [
@@ -74,8 +76,8 @@ module.exports = {
     },
     {
       name: 'minewiki-api',
-      cwd: path.join(repoRoot, 'apps/api'),
-      script: 'dist/apps/api/src/main.js',
+      cwd: serviceCwd,
+      script: serviceScript,
       wait_ready: true,
       listen_timeout: 15000,
       kill_timeout: 10000,
@@ -90,8 +92,8 @@ module.exports = {
     },
     {
       name: 'minewiki-worker',
-      cwd: path.join(repoRoot, 'apps/worker'),
-      script: 'dist/apps/worker/src/index.js',
+      cwd: serviceCwd,
+      script: serviceScript,
       env: {
         NODE_ENV: 'production',
         MINEWIKI_SERVICE: 'worker',
@@ -100,8 +102,8 @@ module.exports = {
     },
     {
       name: 'minewiki-bot',
-      cwd: path.join(repoRoot, 'apps/bot'),
-      script: 'dist/apps/bot/src/index.js',
+      cwd: serviceCwd,
+      script: serviceScript,
       env: {
         NODE_ENV: 'production',
         MINEWIKI_SERVICE: 'bot',
