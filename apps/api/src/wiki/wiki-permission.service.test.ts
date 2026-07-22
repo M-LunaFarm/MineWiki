@@ -70,7 +70,7 @@ function createService(options: {
         status: 'active',
         publicationStatus: 'published',
         publishedReleaseId: 30n,
-        publishedRelease: { version: 2 },
+        publishedRelease: { version: 2, snapshotVersion: 2 },
         serverName: 'Server One',
         host: 'play.server-one.test',
         ...options.serverWiki,
@@ -763,6 +763,78 @@ test('published server wiki hides pages and revisions absent from the active rel
     page: page(),
     revision: { id: 10n, visibility: 'public' },
   })).allowed, true);
+});
+
+test('release public eligibility cannot be widened by a later ACL relaxation', async () => {
+  const service = createService({
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki', rootPageId: 1n },
+    acl: {
+      async evaluate() {
+        return { matched: false, allowed: false, reason: 'acl_inherit' };
+      },
+    } as WikiAclService,
+  });
+  const decision = await service.canReadPage({
+    actor: null,
+    page: page(),
+    revision: { id: 11n, visibility: 'public' },
+    publicationProof: {
+      boundary: {
+        serverWikiId: 20n,
+        spaceId: 10n,
+        currentReleaseId: 30n,
+        currentReleaseVersion: 2,
+        currentReleaseSnapshotVersion: 2,
+        currentItem: {} as never,
+      },
+      item: {
+        serverWikiId: 20n,
+        spaceId: 10n,
+        pageId: 1n,
+        revisionId: 11n,
+        releaseId: 30n,
+        publicReadAllowed: false,
+      } as never,
+    },
+  });
+
+  assert.deepEqual(decision, { allowed: false, reason: 'release_not_public' });
+});
+
+test('current ACL deny remains an emergency revocation boundary for a public release item', async () => {
+  const service = createService({
+    space: { id: 10n, status: 'active', spaceType: 'server_wiki', rootPageId: 1n },
+    acl: {
+      async evaluate() {
+        return { matched: true, allowed: false, reason: 'acl_emergency_deny' };
+      },
+    } as WikiAclService,
+  });
+  const decision = await service.canReadPage({
+    actor: null,
+    page: page(),
+    revision: { id: 11n, visibility: 'public' },
+    publicationProof: {
+      boundary: {
+        serverWikiId: 20n,
+        spaceId: 10n,
+        currentReleaseId: 30n,
+        currentReleaseVersion: 2,
+        currentReleaseSnapshotVersion: 2,
+        currentItem: {} as never,
+      },
+      item: {
+        serverWikiId: 20n,
+        spaceId: 10n,
+        pageId: 1n,
+        revisionId: 11n,
+        releaseId: 30n,
+        publicReadAllowed: true,
+      } as never,
+    },
+  });
+
+  assert.deepEqual(decision, { allowed: false, reason: 'acl_emergency_deny' });
 });
 
 test('linked server wiki authority ignores provenance and follows active canonical server ownership', async () => {

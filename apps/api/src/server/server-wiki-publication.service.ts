@@ -33,6 +33,7 @@ import {
 } from './server-wiki-release-review';
 import { buildServerWikiReleaseNavigation } from '../wiki/server-wiki-navigation-order';
 import { WikiNotificationService } from '../wiki/wiki-notification.service';
+import { WikiPermissionService } from '../wiki/wiki-permission.service';
 
 export const SERVER_WIKI_PUBLICATION_STATUSES = ['draft', 'published', 'unpublished'] as const;
 export type ServerWikiPublicationStatus = (typeof SERVER_WIKI_PUBLICATION_STATUSES)[number];
@@ -159,6 +160,7 @@ export class ServerWikiPublicationService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly notifications?: WikiNotificationService,
+    @Optional() private readonly wikiPermissions?: WikiPermissionService,
   ) {}
 
   async get(
@@ -168,7 +170,7 @@ export class ServerWikiPublicationService {
     const serverId = parseServerId(serverIdInput);
     const context = await this.resolveContext(this.prisma, serverId, actor, false);
     const blockers = await this.readinessBlockers(this.prisma, context);
-    const snapshot = await buildServerWikiReleaseCandidate(this.prisma, candidateInput(context), false);
+    const snapshot = await this.buildCandidate(this.prisma, context, false);
     const submission = await loadLatestSubmittedServerWikiReleaseCandidate(this.prisma, context);
     const review = submission
       ? submission.candidate.status === 'pending_review'
@@ -193,7 +195,7 @@ export class ServerWikiPublicationService {
       if (context.publication.version !== expectedVersion) throw publicationConflict(context.publication.version);
       const blockers = await this.readinessBlockers(tx, context);
       if (blockers.length > 0) throw publicationNotReady(blockers);
-      const snapshot = await buildServerWikiReleaseCandidate(tx, candidateInput(context), true);
+      const snapshot = await this.buildCandidate(tx, context, true);
       if (snapshot.candidate.token !== expectedCandidateToken) throw candidateChanged(snapshot.candidate);
       if (!snapshot.candidate.hasChanges) throw candidateEmpty(snapshot.candidate);
       const requiredApprovals = await requiredServerWikiReleaseApprovalCount(tx, context, true);
@@ -562,7 +564,7 @@ export class ServerWikiPublicationService {
           });
           if (marked.count !== 1) throw candidateUnavailable();
         }
-        const responseCandidate = (await buildServerWikiReleaseCandidate(tx, candidateInput(responseContext), false)).candidate;
+        const responseCandidate = (await this.buildCandidate(tx, responseContext, false)).candidate;
         return toResponse(responseContext, blockers, responseCandidate, null, emptyReviewState());
       });
     } catch (error) {
@@ -788,6 +790,7 @@ export class ServerWikiPublicationService {
         createdAt: now,
         publishedAt: now,
         candidateId: submission.id,
+        snapshotVersion: snapshot.snapshotVersion,
       },
       select: { id: true, version: true, publishedAt: true },
     });
@@ -816,6 +819,7 @@ export class ServerWikiPublicationService {
           page.localPath,
           snapshot.revisionContentByPageId.get(page.id) ?? '',
         ]),
+        publicReadAllowed: page.publicReadAllowed,
         createdAt: now,
       })),
     });
@@ -850,6 +854,57 @@ export class ServerWikiPublicationService {
           targetNamespaceCode: link.targetNamespaceCode,
           targetSlug: link.targetSlug,
           linkType: link.linkType,
+          createdAt: now,
+        })),
+      });
+    }
+    if (snapshot.includeDependencies.length > 0) {
+      await tx.serverWikiReleaseInclude.createMany({
+        data: snapshot.includeDependencies.map((dependency) => ({
+          releaseId: release.id,
+          serverWikiId: context.serverWikiId,
+          spaceId: context.spaceId,
+          sourcePageId: dependency.sourcePageId,
+          sourceRevisionId: dependency.sourceRevisionId,
+          targetNamespaceId: dependency.targetNamespaceId,
+          targetNamespaceCode: dependency.targetNamespaceCode,
+          targetSlug: dependency.targetSlug,
+          targetPageId: dependency.targetPageId,
+          targetSpaceId: dependency.targetSpaceId,
+          targetRevisionId: dependency.targetRevisionId,
+          targetLocalPath: dependency.targetLocalPath,
+          targetTitle: dependency.targetTitle,
+          targetProtectionLevel: dependency.targetProtectionLevel,
+          targetPageStatus: dependency.targetPageStatus,
+          targetCreatedBy: dependency.targetCreatedBy,
+          targetOwnerProfileId: dependency.targetOwnerProfileId,
+          contentHash: dependency.contentHash,
+          contentSize: dependency.contentSize,
+          publicReadAllowed: dependency.publicReadAllowed,
+          createdAt: now,
+        })),
+      });
+    }
+    if (snapshot.assets.length > 0) {
+      await tx.serverWikiReleaseAsset.createMany({
+        data: snapshot.assets.map((asset) => ({
+          releaseId: release.id,
+          serverWikiId: context.serverWikiId,
+          spaceId: context.spaceId,
+          wikiFilename: asset.wikiFilename,
+          uploadedFileId: asset.uploadedFileId,
+          wikiFileVersionId: asset.wikiFileVersionId,
+          sha256: asset.sha256,
+          publicPath: asset.publicPath,
+          mimeType: asset.mimeType,
+          originalName: asset.originalName,
+          sizeBytes: asset.sizeBytes,
+          width: asset.width,
+          height: asset.height,
+          license: asset.license,
+          sourceUrl: asset.sourceUrl,
+          sourceText: asset.sourceText,
+          publicReadAllowed: asset.publicReadAllowed,
           createdAt: now,
         })),
       });
@@ -889,6 +944,64 @@ export class ServerWikiPublicationService {
         code: 'SERVER_WIKI_RELEASE_CANDIDATE_REVISION_UNAVAILABLE',
         message: 'A revision captured by this release candidate is no longer publishable.',
       });
+    }
+    if (snapshot.snapshotVersion === 2 && snapshot.includeDependencies.length > 0) {
+      const dependencies = await tx.wikiPageRevision.findMany({
+        where: {
+          id: { in: snapshot.includeDependencies.map((dependency) => dependency.targetRevisionId) },
+          visibility: 'public',
+        },
+        select: { id: true, pageId: true, contentHash: true, contentSize: true },
+      });
+      const dependencyByKey = new Map(dependencies.map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
+      if (snapshot.includeDependencies.some((dependency) => {
+        const revision = dependencyByKey.get(`${dependency.targetPageId}:${dependency.targetRevisionId}`);
+        return !revision
+          || revision.contentHash !== dependency.contentHash
+          || revision.contentSize !== dependency.contentSize;
+      })) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'SERVER_WIKI_RELEASE_INCLUDE_UNAVAILABLE',
+          message: 'An include captured by this release candidate is no longer available.',
+        });
+      }
+    }
+    if (snapshot.snapshotVersion === 2 && snapshot.assets.length > 0) {
+      const files = await tx.uploadedFile.findMany({
+        where: { id: { in: snapshot.assets.map((asset) => asset.uploadedFileId) }, deletedAt: null },
+        select: { id: true, sha256: true, publicPath: true, status: true },
+      });
+      const fileById = new Map(files.map((file) => [file.id, file]));
+      if (snapshot.assets.some((asset) => {
+        const file = fileById.get(asset.uploadedFileId);
+        return !file
+          || !['active', 'retained', 'delete_pending'].includes(file.status)
+          || file.sha256 !== asset.sha256
+          || file.publicPath !== asset.publicPath;
+      })) {
+        throw new ConflictException({
+          statusCode: 409,
+          code: 'SERVER_WIKI_RELEASE_ASSET_UNAVAILABLE',
+          message: 'A file captured by this release candidate is no longer available.',
+        });
+      }
+      const versionIds = snapshot.assets.flatMap((asset) => asset.wikiFileVersionId ? [asset.wikiFileVersionId] : []);
+      if (versionIds.length > 0) {
+        const versions = await tx.wikiFileVersion.findMany({
+          where: { id: { in: versionIds } },
+          select: { id: true, uploadedFileId: true },
+        });
+        const versionById = new Map(versions.map((version) => [version.id, version.uploadedFileId]));
+        if (snapshot.assets.some((asset) => asset.wikiFileVersionId
+          && versionById.get(asset.wikiFileVersionId) !== asset.uploadedFileId)) {
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'SERVER_WIKI_RELEASE_ASSET_VERSION_UNAVAILABLE',
+            message: 'A file version captured by this release candidate is no longer available.',
+          });
+        }
+      }
     }
   }
 
@@ -1061,6 +1174,23 @@ export class ServerWikiPublicationService {
       accountId = account.canonicalAccountId;
     }
     throw new ConflictException('Account alias chain is too deep.');
+  }
+
+  private buildCandidate(
+    store: Prisma.TransactionClient | PrismaService,
+    context: PublicationContext,
+    lock: boolean,
+  ): Promise<ReleaseCandidateSnapshot> {
+    return buildServerWikiReleaseCandidate(store, {
+      ...candidateInput(context),
+      resolvePublicReadAllowed: this.wikiPermissions
+        ? async (page, revision) => (await this.wikiPermissions!.canPublishPagePublicly({
+            page,
+            revision,
+            store,
+          })).allowed
+        : undefined,
+    }, lock);
   }
 
   private async serializable<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {

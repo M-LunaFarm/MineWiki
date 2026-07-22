@@ -77,6 +77,7 @@ export interface WikiPublishedRevisionScope {
   readonly spaceId: bigint;
   readonly currentReleaseId: bigint;
   readonly currentReleaseVersion: number;
+  readonly currentReleaseSnapshotVersion: number;
   readonly currentItem: ServerWikiReleaseItem;
   /** One item per published revision, pinned to its latest eligible release snapshot. */
   readonly revisionItems: readonly ServerWikiReleaseItem[];
@@ -410,6 +411,12 @@ export class WikiPermissionService {
       && publicationProof.item.spaceId === page.spaceId
       && publicationProof.item.pageId === page.id
       && (input.revision?.id === undefined || publicationProof.item.revisionId === input.revision.id));
+    if (hasMatchingPublicationProof
+      && publicationProof?.boundary.currentReleaseSnapshotVersion >= 2
+      && publicationProof.item.releaseId === publicationProof.boundary.currentReleaseId
+      && publicationProof.item.publicReadAllowed === false) {
+      return deny('release_not_public');
+    }
     if (!hasMatchingPublicationProof && !(await this.canReadServerWikiPublication(store, actor, space))) {
       return deny('server_wiki_not_published');
     }
@@ -435,6 +442,41 @@ export class WikiPermissionService {
       return deny(acl.reason);
     }
     return allow('public_read');
+  }
+
+  async canPublishPagePublicly(input: {
+    readonly page: WikiPermissionPage | null;
+    readonly revision?: WikiPermissionRevision | null;
+    readonly store?: WikiPermissionStore;
+  }): Promise<WikiPermissionDecision> {
+    const store = input.store ?? this.prisma;
+    const page = input.page;
+    if (!page) return deny('page_missing');
+    const space = await store.wikiSpace.findUnique({
+      where: { id: page.spaceId },
+      select: { id: true, status: true },
+    });
+    if (!space || !ACTIVE_SPACE_STATUSES.has(space.status)) return deny('space_not_active');
+    if (!isPublicWikiPageStatus(page.status)) return deny('page_not_public');
+    if (input.revision && !PUBLIC_REVISION_VISIBILITIES.has(input.revision.visibility)) {
+      return deny('revision_not_public');
+    }
+    if (!PUBLIC_READ_PROTECTION_LEVELS.has(page.protectionLevel)) {
+      return deny('protection_not_readable');
+    }
+    const acl = await this.evaluateAcl(
+      'read',
+      null,
+      {
+        pageId: page.id,
+        spaceId: page.spaceId,
+        namespaceId: page.namespaceId,
+        title: page.title,
+        createdBy: page.createdBy,
+      },
+      store,
+    );
+    return acl.matched && !acl.allowed ? deny(acl.reason) : allow('public_read');
   }
 
   async assertCanEditPage(input: {
@@ -1336,7 +1378,7 @@ export class WikiPermissionService {
         status: true,
         publicationStatus: true,
         publishedReleaseId: true,
-        publishedRelease: { select: { version: true } },
+        publishedRelease: { select: { version: true, snapshotVersion: true } },
       },
     });
     const wiki = wikis.length === 1 ? wikis[0] : null;
@@ -1358,6 +1400,7 @@ export class WikiPermissionService {
       spaceId: wiki.spaceId,
       currentReleaseId: wiki.publishedReleaseId,
       currentReleaseVersion: wiki.publishedRelease.version,
+      currentReleaseSnapshotVersion: wiki.publishedRelease.snapshotVersion,
       currentItem,
     };
   }

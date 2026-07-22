@@ -92,6 +92,7 @@ export class WikiIncludeService {
           actor: input.actor,
           requestIp: input.requestIp,
           releaseId: input.releaseId,
+          sourcePageId: input.sourcePageId,
           publicationBoundary: input.publicationBoundary,
         });
         memo.set(targetKey, sourcePromise);
@@ -130,6 +131,7 @@ export class WikiIncludeService {
       readonly actor?: WikiPermissionActor | null;
       readonly requestIp?: string | null;
       readonly releaseId?: bigint;
+      readonly sourcePageId: bigint;
       readonly publicationBoundary?: WikiPublishedPageBoundary;
     }
   ): Promise<IncludeSource | null> {
@@ -139,6 +141,15 @@ export class WikiIncludeService {
         select: { id: true }
       });
       if (!namespace) return null;
+      const releaseDelegate = (this.prisma as unknown as {
+        serverWikiRelease?: { findUnique(args: unknown): Promise<{ snapshotVersion: number } | null> };
+      }).serverWikiRelease;
+      const release = access.releaseId && releaseDelegate
+        ? await releaseDelegate.findUnique({
+            where: { id: access.releaseId },
+            select: { snapshotVersion: true },
+          })
+        : null;
       const releasedItem = access.releaseId && namespaceCode === 'server'
         ? await this.prisma.serverWikiReleaseItem.findFirst({
             where: {
@@ -148,6 +159,20 @@ export class WikiIncludeService {
             },
           })
         : null;
+      const releasedInclude = access.releaseId && release?.snapshotVersion === 2 && namespaceCode !== 'server'
+        ? await this.prisma.serverWikiReleaseInclude.findFirst({
+            where: {
+              releaseId: access.releaseId,
+              sourcePageId: access.sourcePageId,
+              targetNamespaceCode: namespaceCode,
+              targetSlug: slugifyTitle(title),
+            },
+          })
+        : null;
+      if (access.releaseId && release?.snapshotVersion === 2 && namespaceCode !== 'server' && !releasedInclude) {
+        return null;
+      }
+      if (releasedInclude?.publicReadAllowed === false) return null;
       const page = releasedItem
         ? {
             id: releasedItem.pageId,
@@ -161,6 +186,19 @@ export class WikiIncludeService {
             ownerProfileId: releasedItem.ownerProfileId,
             currentRevisionId: releasedItem.revisionId,
           }
+        : releasedInclude
+          ? {
+              id: releasedInclude.targetPageId,
+              namespaceId: releasedInclude.targetNamespaceId,
+              spaceId: releasedInclude.targetSpaceId,
+              localPath: releasedInclude.targetLocalPath,
+              title: releasedInclude.targetTitle,
+              protectionLevel: releasedInclude.targetProtectionLevel,
+              status: releasedInclude.targetPageStatus,
+              createdBy: releasedInclude.targetCreatedBy,
+              ownerProfileId: releasedInclude.targetOwnerProfileId,
+              currentRevisionId: releasedInclude.targetRevisionId,
+            }
         : await this.prisma.wikiPage.findUnique({
             where: {
               namespaceId_slug: {
@@ -178,6 +216,10 @@ export class WikiIncludeService {
         }
       });
       if (!revision) return null;
+      if (releasedInclude && (
+        revision.contentHash !== releasedInclude.contentHash
+        || revision.contentSize !== releasedInclude.contentSize
+      )) return null;
       await this.wikiPermissions.assertCanReadPage({
         ...access,
         page,

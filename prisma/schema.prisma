@@ -1119,32 +1119,33 @@ model PluginServer {
 }
 
 model UploadedFile {
-  id                  String            @id @default(uuid()) @db.Char(36)
-  ownerAccountId      String?           @map("owner_account_id") @db.Char(36)
-  filename            String            @db.VarChar(255)
-  wikiFilename        String?           @map("wiki_filename") @db.VarChar(255)
-  currentWikiFilename String?           @unique(map: "uk_uploaded_files_current_wiki_filename") @map("current_wiki_filename") @db.VarChar(255)
-  originalName        String?           @map("original_name") @db.VarChar(255)
-  mimeType            String            @map("mime_type") @db.VarChar(128)
-  sizeBytes           Int               @map("size_bytes") @db.UnsignedInt
-  width               Int?              @db.UnsignedInt
-  height              Int?              @db.UnsignedInt
-  sha256              String            @db.Char(64)
-  storagePath         String            @map("storage_path") @db.VarChar(1024)
-  publicPath          String            @map("public_path") @db.VarChar(1024)
-  usageContext        String            @default("general") @map("usage_context") @db.VarChar(64)
-  visibility          String            @default("public") @db.VarChar(32)
-  license             String?           @db.VarChar(64)
-  sourceUrl           String?           @map("source_url") @db.VarChar(1024)
-  sourceText          String?           @map("source_text") @db.VarChar(255)
-  linkedResourceType  String?           @map("linked_resource_type") @db.VarChar(64)
-  linkedResourceId    String?           @map("linked_resource_id") @db.VarChar(128)
-  status              String            @default("active") @db.VarChar(32)
-  deletedAt           DateTime?         @map("deleted_at") @db.DateTime(3)
-  retainedUntil       DateTime?         @map("retained_until") @db.DateTime(3)
-  createdAt           DateTime          @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt           DateTime          @updatedAt @map("updated_at") @db.DateTime(3)
-  wikiFileVersions    WikiFileVersion[]
+  id                      String                   @id @default(uuid()) @db.Char(36)
+  ownerAccountId          String?                  @map("owner_account_id") @db.Char(36)
+  filename                String                   @db.VarChar(255)
+  wikiFilename            String?                  @map("wiki_filename") @db.VarChar(255)
+  currentWikiFilename     String?                  @unique(map: "uk_uploaded_files_current_wiki_filename") @map("current_wiki_filename") @db.VarChar(255)
+  originalName            String?                  @map("original_name") @db.VarChar(255)
+  mimeType                String                   @map("mime_type") @db.VarChar(128)
+  sizeBytes               Int                      @map("size_bytes") @db.UnsignedInt
+  width                   Int?                     @db.UnsignedInt
+  height                  Int?                     @db.UnsignedInt
+  sha256                  String                   @db.Char(64)
+  storagePath             String                   @map("storage_path") @db.VarChar(1024)
+  publicPath              String                   @map("public_path") @db.VarChar(1024)
+  usageContext            String                   @default("general") @map("usage_context") @db.VarChar(64)
+  visibility              String                   @default("public") @db.VarChar(32)
+  license                 String?                  @db.VarChar(64)
+  sourceUrl               String?                  @map("source_url") @db.VarChar(1024)
+  sourceText              String?                  @map("source_text") @db.VarChar(255)
+  linkedResourceType      String?                  @map("linked_resource_type") @db.VarChar(64)
+  linkedResourceId        String?                  @map("linked_resource_id") @db.VarChar(128)
+  status                  String                   @default("active") @db.VarChar(32)
+  deletedAt               DateTime?                @map("deleted_at") @db.DateTime(3)
+  retainedUntil           DateTime?                @map("retained_until") @db.DateTime(3)
+  createdAt               DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt               DateTime                 @updatedAt @map("updated_at") @db.DateTime(3)
+  wikiFileVersions        WikiFileVersion[]
+  serverWikiReleaseAssets ServerWikiReleaseAsset[]
 
   @@index([ownerAccountId])
   @@index([usageContext])
@@ -1166,7 +1167,8 @@ model WikiFileVersion {
   createdByAccountId String?  @map("created_by_account_id") @db.Char(36)
   createdAt          DateTime @default(now()) @map("created_at") @db.DateTime(3)
 
-  uploadedFile UploadedFile @relation(fields: [uploadedFileId], references: [id], onDelete: Restrict)
+  uploadedFile            UploadedFile             @relation(fields: [uploadedFileId], references: [id], onDelete: Restrict)
+  serverWikiReleaseAssets ServerWikiReleaseAsset[]
 
   @@unique([filePageId, versionNo])
   @@index([filePageId, isCurrent])
@@ -2148,12 +2150,15 @@ model ServerWikiRelease {
   createdAt            DateTime @default(now()) @map("created_at") @db.DateTime(3)
   publishedAt          DateTime @map("published_at") @db.DateTime(3)
   candidateId          BigInt?  @unique @map("candidate_id") @db.UnsignedBigInt
+  snapshotVersion      Int      @default(1) @map("snapshot_version") @db.UnsignedInt
 
   serverWiki   ServerWiki                        @relation("ServerWikiReleaseHistory", fields: [serverWikiId], references: [id], onDelete: Cascade)
   publishedFor ServerWiki?                       @relation("PublishedServerWikiRelease")
   items        ServerWikiReleaseItem[]
   links        ServerWikiReleaseLink[]
   navigation   ServerWikiReleaseNavigationNode[]
+  includes     ServerWikiReleaseInclude[]
+  assets       ServerWikiReleaseAsset[]
   candidate    ServerWikiReleaseCandidate?       @relation("CandidatePublishedRelease", fields: [candidateId], references: [id], onDelete: Restrict)
 
   @@unique([serverWikiId, version], map: "uq_server_wiki_release_version")
@@ -2199,6 +2204,7 @@ model ServerWikiReleaseCandidate {
   submissionReason         String   @map("submission_reason") @db.VarChar(500)
   manifestSnapshot         Json     @map("manifest_snapshot")
   releaseSnapshot          Json     @map("release_snapshot")
+  snapshotVersion          Int      @default(1) @map("snapshot_version") @db.UnsignedInt
   createdBy                BigInt?  @map("created_by") @db.UnsignedBigInt
   submittedAt              DateTime @map("submitted_at") @db.DateTime(3)
   createdAt                DateTime @default(now()) @map("created_at") @db.DateTime(3)
@@ -2236,25 +2242,26 @@ model ServerWikiReleaseChangeRequest {
 }
 
 model ServerWikiReleaseItem {
-  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  releaseId       BigInt   @map("release_id") @db.UnsignedBigInt
-  serverWikiId    BigInt   @map("server_wiki_id") @db.UnsignedBigInt
-  spaceId         BigInt   @map("space_id") @db.UnsignedBigInt
-  namespaceId     Int      @map("namespace_id") @db.UnsignedInt
-  pageId          BigInt   @map("page_id") @db.UnsignedBigInt
-  revisionId      BigInt   @map("revision_id") @db.UnsignedBigInt
-  localPath       String   @map("local_path") @db.VarChar(500)
-  slug            String   @db.VarChar(255)
-  title           String   @db.VarChar(255)
-  displayTitle    String   @map("display_title") @db.VarChar(255)
-  pageType        String   @map("page_type") @db.VarChar(32)
-  protectionLevel String   @map("protection_level") @db.VarChar(32)
-  pageStatus      String   @map("page_status") @db.VarChar(32)
-  createdBy       BigInt?  @map("created_by") @db.UnsignedBigInt
-  ownerProfileId  BigInt?  @map("owner_profile_id") @db.UnsignedBigInt
-  pageUpdatedAt   DateTime @map("page_updated_at") @db.DateTime(3)
-  searchVector    String   @map("search_vector") @db.LongText
-  createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  releaseId         BigInt   @map("release_id") @db.UnsignedBigInt
+  serverWikiId      BigInt   @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId           BigInt   @map("space_id") @db.UnsignedBigInt
+  namespaceId       Int      @map("namespace_id") @db.UnsignedInt
+  pageId            BigInt   @map("page_id") @db.UnsignedBigInt
+  revisionId        BigInt   @map("revision_id") @db.UnsignedBigInt
+  localPath         String   @map("local_path") @db.VarChar(500)
+  slug              String   @db.VarChar(255)
+  title             String   @db.VarChar(255)
+  displayTitle      String   @map("display_title") @db.VarChar(255)
+  pageType          String   @map("page_type") @db.VarChar(32)
+  protectionLevel   String   @map("protection_level") @db.VarChar(32)
+  pageStatus        String   @map("page_status") @db.VarChar(32)
+  createdBy         BigInt?  @map("created_by") @db.UnsignedBigInt
+  ownerProfileId    BigInt?  @map("owner_profile_id") @db.UnsignedBigInt
+  pageUpdatedAt     DateTime @map("page_updated_at") @db.DateTime(3)
+  searchVector      String   @map("search_vector") @db.LongText
+  publicReadAllowed Boolean  @default(false) @map("public_read_allowed")
+  createdAt         DateTime @default(now()) @map("created_at") @db.DateTime(3)
 
   release  ServerWikiRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
   page     WikiPage          @relation(fields: [pageId], references: [id], onDelete: Restrict)
@@ -2267,6 +2274,69 @@ model ServerWikiReleaseItem {
   @@index([revisionId, pageId], map: "idx_server_wiki_release_item_revision")
   @@fulltext([searchVector], map: "idx_server_wiki_release_items_search")
   @@map("server_wiki_release_items")
+}
+
+model ServerWikiReleaseInclude {
+  id                    BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  releaseId             BigInt   @map("release_id") @db.UnsignedBigInt
+  serverWikiId          BigInt   @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId               BigInt   @map("space_id") @db.UnsignedBigInt
+  sourcePageId          BigInt   @map("source_page_id") @db.UnsignedBigInt
+  sourceRevisionId      BigInt   @map("source_revision_id") @db.UnsignedBigInt
+  targetNamespaceId     Int      @map("target_namespace_id") @db.UnsignedInt
+  targetNamespaceCode   String   @map("target_namespace_code") @db.VarChar(32)
+  targetSlug            String   @map("target_slug") @db.VarChar(255)
+  targetPageId          BigInt   @map("target_page_id") @db.UnsignedBigInt
+  targetSpaceId         BigInt   @map("target_space_id") @db.UnsignedBigInt
+  targetRevisionId      BigInt   @map("target_revision_id") @db.UnsignedBigInt
+  targetLocalPath       String   @map("target_local_path") @db.VarChar(500)
+  targetTitle           String   @map("target_title") @db.VarChar(255)
+  targetProtectionLevel String   @map("target_protection_level") @db.VarChar(32)
+  targetPageStatus      String   @map("target_page_status") @db.VarChar(32)
+  targetCreatedBy       BigInt?  @map("target_created_by") @db.UnsignedBigInt
+  targetOwnerProfileId  BigInt?  @map("target_owner_profile_id") @db.UnsignedBigInt
+  contentHash           String   @map("content_hash") @db.Char(64)
+  contentSize           Int      @map("content_size") @db.UnsignedInt
+  publicReadAllowed     Boolean  @default(false) @map("public_read_allowed")
+  createdAt             DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  release ServerWikiRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, sourcePageId, targetNamespaceCode, targetSlug], map: "uq_server_wiki_release_include")
+  @@index([releaseId, sourcePageId], map: "idx_server_wiki_release_include_source")
+  @@index([targetPageId, targetRevisionId], map: "idx_server_wiki_release_include_target")
+  @@map("server_wiki_release_includes")
+}
+
+model ServerWikiReleaseAsset {
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  releaseId         BigInt   @map("release_id") @db.UnsignedBigInt
+  serverWikiId      BigInt   @map("server_wiki_id") @db.UnsignedBigInt
+  spaceId           BigInt   @map("space_id") @db.UnsignedBigInt
+  wikiFilename      String   @map("wiki_filename") @db.VarChar(255)
+  uploadedFileId    String   @map("uploaded_file_id") @db.Char(36)
+  wikiFileVersionId BigInt?  @map("wiki_file_version_id") @db.UnsignedBigInt
+  sha256            String   @db.Char(64)
+  publicPath        String   @map("public_path") @db.VarChar(1024)
+  mimeType          String   @map("mime_type") @db.VarChar(128)
+  originalName      String   @map("original_name") @db.VarChar(255)
+  sizeBytes         Int      @map("size_bytes") @db.UnsignedInt
+  width             Int?     @db.UnsignedInt
+  height            Int?     @db.UnsignedInt
+  license           String?  @db.VarChar(64)
+  sourceUrl         String?  @map("source_url") @db.VarChar(1024)
+  sourceText        String?  @map("source_text") @db.VarChar(255)
+  publicReadAllowed Boolean  @default(false) @map("public_read_allowed")
+  createdAt         DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  release         ServerWikiRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  uploadedFile    UploadedFile      @relation(fields: [uploadedFileId], references: [id], onDelete: Restrict)
+  wikiFileVersion WikiFileVersion?  @relation(fields: [wikiFileVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([releaseId, wikiFilename], map: "uq_server_wiki_release_asset")
+  @@index([uploadedFileId], map: "idx_server_wiki_release_asset_file")
+  @@index([wikiFileVersionId], map: "idx_server_wiki_release_asset_version")
+  @@map("server_wiki_release_assets")
 }
 
 model ServerWikiReleaseLink {

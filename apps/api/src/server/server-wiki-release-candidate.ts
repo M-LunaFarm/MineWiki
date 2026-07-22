@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { isPublicWikiPageStatus } from '@minewiki/wiki-core/page-status';
 import { Prisma } from '@prisma/client';
+import { collectWikiFileNames, parseMarkup } from '@minewiki/wiki-core';
 import { createHash } from 'node:crypto';
 import type { PrismaService } from '../common/prisma.service';
 import { buildCanonicalServerWikiPath } from '../wiki/wiki-route-path.resolver';
@@ -39,6 +40,8 @@ export interface ServerWikiReleaseCandidate {
     readonly contentSettingsChanged: boolean;
     readonly layoutChanged: boolean;
     readonly linkGraphChanged: boolean;
+    readonly dependencyChanged: boolean;
+    readonly accessChanged: boolean;
   };
   readonly hasChanges: boolean;
 }
@@ -78,6 +81,45 @@ export interface ReleaseCandidateCurrentPage {
   readonly createdBy: bigint | null;
   readonly ownerProfileId: bigint | null;
   readonly updatedAt: Date;
+  readonly publicReadAllowed: boolean;
+}
+
+export interface ReleaseCandidateIncludeDependency {
+  readonly sourcePageId: bigint;
+  readonly sourceRevisionId: bigint;
+  readonly targetNamespaceId: number;
+  readonly targetNamespaceCode: string;
+  readonly targetSlug: string;
+  readonly targetPageId: bigint;
+  readonly targetSpaceId: bigint;
+  readonly targetRevisionId: bigint;
+  readonly targetLocalPath: string;
+  readonly targetTitle: string;
+  readonly targetProtectionLevel: string;
+  readonly targetPageStatus: string;
+  readonly targetCreatedBy: bigint | null;
+  readonly targetOwnerProfileId: bigint | null;
+  readonly contentRaw: string;
+  readonly contentHash: string;
+  readonly contentSize: number;
+  readonly publicReadAllowed: boolean;
+}
+
+export interface ReleaseCandidateAsset {
+  readonly wikiFilename: string;
+  readonly uploadedFileId: string;
+  readonly wikiFileVersionId: bigint | null;
+  readonly sha256: string;
+  readonly publicPath: string;
+  readonly mimeType: string;
+  readonly originalName: string;
+  readonly sizeBytes: number;
+  readonly width: number | null;
+  readonly height: number | null;
+  readonly license: string | null;
+  readonly sourceUrl: string | null;
+  readonly sourceText: string | null;
+  readonly publicReadAllowed: boolean;
 }
 
 export interface ReleaseCandidateLink {
@@ -89,11 +131,14 @@ export interface ReleaseCandidateLink {
 }
 
 export interface ReleaseCandidateSnapshot {
+  readonly snapshotVersion: 1 | 2;
   readonly candidate: ServerWikiReleaseCandidate;
   readonly presentation: ServerWikiPresentationSnapshot;
   readonly pages: readonly ReleaseCandidateCurrentPage[];
   readonly revisionContentByPageId: ReadonlyMap<bigint, string>;
   readonly links: readonly ReleaseCandidateLink[];
+  readonly includeDependencies: readonly ReleaseCandidateIncludeDependency[];
+  readonly assets: readonly ReleaseCandidateAsset[];
 }
 
 export interface ReleaseCandidateInput {
@@ -106,6 +151,10 @@ export interface ReleaseCandidateInput {
     readonly presentationSnapshot: Prisma.JsonValue;
   } | null;
   readonly presentation: ServerWikiPresentationSnapshot;
+  readonly resolvePublicReadAllowed?: (
+    page: Omit<ReleaseCandidateCurrentPage, 'publicReadAllowed'>,
+    revision: { readonly id: bigint; readonly pageId: bigint; readonly visibility: string },
+  ) => Promise<boolean>;
 }
 
 export async function buildServerWikiReleaseCandidate(
@@ -123,15 +172,25 @@ export async function buildServerWikiReleaseCandidate(
   const revisions = revisionIds.length > 0
     ? await store.wikiPageRevision.findMany({
         where: { id: { in: revisionIds }, visibility: 'public' },
-        select: { id: true, pageId: true, contentRaw: true },
+        select: { id: true, pageId: true, contentRaw: true, contentHash: true, contentSize: true, visibility: true },
       })
     : [];
   const revisionByKey = new Map(revisions.map((revision) => [`${revision.pageId}:${revision.id}`, revision]));
-  const pages: ReleaseCandidateCurrentPage[] = pageRows.flatMap((page) => page.currentRevisionId !== null
-    && revisionByKey.has(`${page.id}:${page.currentRevisionId}`)
-    && isPublicWikiPageStatus(page.status)
-    ? [{ ...page, currentRevisionId: page.currentRevisionId }]
-    : []);
+  const pages: ReleaseCandidateCurrentPage[] = [];
+  for (const page of pageRows) {
+    if (page.currentRevisionId === null || !isPublicWikiPageStatus(page.status)) continue;
+    const revision = revisionByKey.get(`${page.id}:${page.currentRevisionId}`);
+    if (!revision) continue;
+    const candidatePage = { ...page, currentRevisionId: page.currentRevisionId };
+    const publicReadAllowed = input.resolvePublicReadAllowed
+      ? await input.resolvePublicReadAllowed(candidatePage, revision)
+      : true;
+    if (!publicReadAllowed) continue;
+    pages.push({
+      ...candidatePage,
+      publicReadAllowed,
+    });
+  }
   if (pages.some((page) => page.spaceId !== input.spaceId)) {
     throw new ConflictException('Server wiki release candidate is inconsistent.');
   }
@@ -144,6 +203,8 @@ export async function buildServerWikiReleaseCandidate(
   if (links.some((link) => currentRevisionByPageId.get(link.sourcePageId) !== link.sourceRevisionId)) {
     throw new ConflictException('Server wiki release candidate link graph is inconsistent.');
   }
+  const includeDependencies = await loadIncludeDependencies(store, links, input.resolvePublicReadAllowed);
+  const assets = await loadReleaseAssets(store, pages, revisionContentByPageId, includeDependencies);
 
   const baselineItems = input.publishedRelease
     ? await store.serverWikiReleaseItem.findMany({
@@ -157,6 +218,12 @@ export async function buildServerWikiReleaseCandidate(
         orderBy: [{ sourcePageId: 'asc' }, { targetNamespaceCode: 'asc' }, { targetSlug: 'asc' }, { linkType: 'asc' }],
         select: linkSelection,
       })
+    : [];
+  const baselineIncludes = input.publishedRelease
+    ? await optionalReleaseRows<ReleaseCandidateIncludeDependency>(store, 'serverWikiReleaseInclude', input.publishedRelease.id)
+    : [];
+  const baselineAssets = input.publishedRelease
+    ? await optionalReleaseRows<ReleaseCandidateAsset>(store, 'serverWikiReleaseAsset', input.publishedRelease.id)
     : [];
   const baselineByPageId = new Map(baselineItems.map((item) => [item.pageId, item]));
   const currentByPageId = new Map(pages.map((page) => [page.id, page]));
@@ -221,7 +288,17 @@ export async function buildServerWikiReleaseCandidate(
   });
   const counts = candidateCounts(candidatePages);
   const baselinePresentation = parsePresentationSnapshot(input.publishedRelease?.presentationSnapshot);
-  const presentation = presentationChanges(input.presentation, baselinePresentation, links, baselineLinks);
+  const dependencyChanged = !jsonEqual(includeFingerprint(baselineIncludes), includeFingerprint(includeDependencies))
+    || !jsonEqual(assetFingerprint(baselineAssets), assetFingerprint(assets));
+  const accessChanged = pages.some((page) => {
+    const baseline = baselineByPageId.get(page.id);
+    return baseline ? (baseline.publicReadAllowed ?? true) !== page.publicReadAllowed : false;
+  });
+  const presentation = {
+    ...presentationChanges(input.presentation, baselinePresentation, links, baselineLinks),
+    dependencyChanged,
+    accessChanged,
+  };
   const token = createHash('sha256').update(canonicalJson({
     serverWikiId: input.serverWikiId.toString(),
     siteSlug: input.siteSlug,
@@ -230,10 +307,14 @@ export async function buildServerWikiReleaseCandidate(
     pages: pages.map(tokenPage),
     presentation: input.presentation,
     links: linkFingerprint(links),
+    publicAccess: pages.map((page) => [page.id.toString(), page.publicReadAllowed]),
+    includes: includeFingerprint(includeDependencies),
+    assets: assetFingerprint(assets),
   })).digest('hex');
   const hasChanges = counts.added + counts.updated + counts.moved + counts.removed > 0
     || Object.values(presentation).some(Boolean);
   return {
+    snapshotVersion: 2,
     candidate: {
       token,
       baselineReleaseId: input.publishedRelease?.id.toString() ?? null,
@@ -247,6 +328,8 @@ export async function buildServerWikiReleaseCandidate(
     pages,
     revisionContentByPageId,
     links,
+    includeDependencies,
+    assets,
   };
 }
 
@@ -285,6 +368,136 @@ async function loadCurrentLinks(
         select: linkSelection,
       })
     : [];
+}
+
+async function loadIncludeDependencies(
+  store: Prisma.TransactionClient | PrismaService,
+  links: readonly ReleaseCandidateLink[],
+  resolvePublicReadAllowed: ReleaseCandidateInput['resolvePublicReadAllowed'],
+): Promise<ReleaseCandidateIncludeDependency[]> {
+  const requested = links.filter((link) => link.linkType === 'include' && link.targetNamespaceCode !== 'server');
+  if (requested.length === 0) return [];
+  const namespaceCodes = [...new Set(requested.map((link) => link.targetNamespaceCode))];
+  const namespaces = await store.wikiNamespace.findMany({
+    where: { code: { in: namespaceCodes } },
+    select: { id: true, code: true },
+  });
+  const namespaceByCode = new Map(namespaces.map((namespace) => [namespace.code, namespace]));
+  const dependencies: ReleaseCandidateIncludeDependency[] = [];
+  for (const link of requested) {
+    const namespace = namespaceByCode.get(link.targetNamespaceCode);
+    if (!namespace) continue;
+    const page = await store.wikiPage.findUnique({
+      where: { namespaceId_slug: { namespaceId: namespace.id, slug: link.targetSlug } },
+      select: {
+        id: true, namespaceId: true, spaceId: true, localPath: true, slug: true, title: true,
+        displayTitle: true, currentRevisionId: true, pageType: true, protectionLevel: true,
+        status: true, createdBy: true, ownerProfileId: true, updatedAt: true,
+      },
+    });
+    if (!page?.currentRevisionId || !isPublicWikiPageStatus(page.status)) continue;
+    const revision = await store.wikiPageRevision.findFirst({
+      where: { id: page.currentRevisionId, pageId: page.id, visibility: 'public' },
+      select: {
+        id: true, pageId: true, contentRaw: true, contentHash: true, contentSize: true, visibility: true,
+      },
+    });
+    if (!revision) continue;
+    const candidatePage = { ...page, currentRevisionId: page.currentRevisionId };
+    dependencies.push({
+      sourcePageId: link.sourcePageId,
+      sourceRevisionId: link.sourceRevisionId,
+      targetNamespaceId: namespace.id,
+      targetNamespaceCode: namespace.code,
+      targetSlug: link.targetSlug,
+      targetPageId: page.id,
+      targetSpaceId: page.spaceId,
+      targetRevisionId: revision.id,
+      targetLocalPath: page.localPath,
+      targetTitle: page.title,
+      targetProtectionLevel: page.protectionLevel,
+      targetPageStatus: page.status,
+      targetCreatedBy: page.createdBy,
+      targetOwnerProfileId: page.ownerProfileId,
+      contentRaw: revision.contentRaw,
+      contentHash: revision.contentHash,
+      contentSize: revision.contentSize,
+      publicReadAllowed: resolvePublicReadAllowed
+        ? await resolvePublicReadAllowed(candidatePage, revision)
+        : true,
+    });
+  }
+  return dependencies.sort((left, right) => includeKey(left).localeCompare(includeKey(right)));
+}
+
+async function loadReleaseAssets(
+  store: Prisma.TransactionClient | PrismaService,
+  pages: readonly ReleaseCandidateCurrentPage[],
+  revisionContentByPageId: ReadonlyMap<bigint, string>,
+  includes: readonly ReleaseCandidateIncludeDependency[],
+): Promise<ReleaseCandidateAsset[]> {
+  const names = new Set<string>();
+  for (const content of [
+    ...pages.map((page) => revisionContentByPageId.get(page.id) ?? ''),
+    ...includes.map((dependency) => dependency.contentRaw),
+  ]) {
+    const parsed = parseMarkup(content);
+    for (const name of collectWikiFileNames(parsed.ast)) names.add(name);
+  }
+  if (names.size === 0) return [];
+  const files = await store.uploadedFile.findMany({
+    where: {
+      currentWikiFilename: { in: [...names] },
+      usageContext: 'wiki_editor',
+      status: 'active',
+    },
+    orderBy: [{ currentWikiFilename: 'asc' }, { id: 'asc' }],
+  });
+  const fileIds = files.map((file) => file.id);
+  const versions = fileIds.length > 0
+    ? await store.wikiFileVersion.findMany({
+        where: { uploadedFileId: { in: fileIds }, isCurrent: true },
+        select: { id: true, uploadedFileId: true },
+      })
+    : [];
+  const versionByFileId = new Map(versions.map((version) => [version.uploadedFileId, version.id]));
+  const pageIds = new Set(pages.map((page) => page.id.toString()));
+  const spaceIds = new Set(pages.map((page) => page.spaceId.toString()));
+  return files.flatMap((file): ReleaseCandidateAsset[] => {
+    const wikiFilename = file.currentWikiFilename ?? file.wikiFilename;
+    if (!wikiFilename) return [];
+    const linkedId = file.linkedResourceId?.trim() ?? '';
+    const publicReadAllowed = ['public', 'unlisted'].includes(file.visibility)
+      || (file.visibility === 'restricted' && (
+        (file.linkedResourceType === 'wiki_page' && pageIds.has(linkedId))
+        || (file.linkedResourceType === 'wiki_space' && spaceIds.has(linkedId))
+      ));
+    return [{
+      wikiFilename,
+      uploadedFileId: file.id,
+      wikiFileVersionId: versionByFileId.get(file.id) ?? null,
+      sha256: file.sha256,
+      publicPath: file.publicPath,
+      mimeType: file.mimeType,
+      originalName: file.originalName ?? file.filename,
+      sizeBytes: file.sizeBytes,
+      width: file.width,
+      height: file.height,
+      license: file.license,
+      sourceUrl: file.sourceUrl,
+      sourceText: file.sourceText,
+      publicReadAllowed,
+    }];
+  }).sort((left, right) => left.wikiFilename.localeCompare(right.wikiFilename));
+}
+
+async function optionalReleaseRows<T>(
+  store: Prisma.TransactionClient | PrismaService,
+  delegateName: 'serverWikiReleaseInclude' | 'serverWikiReleaseAsset',
+  releaseId: bigint,
+): Promise<T[]> {
+  const delegate = (store as unknown as Record<string, { findMany?: (args: unknown) => Promise<T[]> }>)[delegateName];
+  return delegate?.findMany ? delegate.findMany({ where: { releaseId } }) : [];
 }
 
 function candidateIdentity(
@@ -361,6 +574,28 @@ function linkFingerprint(links: readonly ReleaseCandidateLink[]): readonly strin
   return links.map((link) => [
     link.sourcePageId.toString(), link.sourceRevisionId.toString(), link.targetNamespaceCode,
     link.targetSlug, link.linkType,
+  ].join('\u0000')).sort();
+}
+
+function includeKey(include: Pick<ReleaseCandidateIncludeDependency,
+  'sourcePageId' | 'targetNamespaceCode' | 'targetSlug'>): string {
+  return [include.sourcePageId.toString(), include.targetNamespaceCode, include.targetSlug].join('\u0000');
+}
+
+function includeFingerprint(includes: readonly ReleaseCandidateIncludeDependency[]): readonly string[] {
+  return includes.map((include) => [
+    includeKey(include), include.sourceRevisionId.toString(), include.targetPageId.toString(),
+    include.targetSpaceId.toString(), include.targetRevisionId.toString(), include.contentHash, String(include.contentSize),
+    String(include.publicReadAllowed),
+  ].join('\u0000')).sort();
+}
+
+function assetFingerprint(assets: readonly ReleaseCandidateAsset[]): readonly string[] {
+  return assets.map((asset) => [
+    asset.wikiFilename, asset.uploadedFileId, asset.wikiFileVersionId?.toString() ?? '',
+    asset.sha256, asset.publicPath, asset.mimeType, asset.originalName, String(asset.sizeBytes),
+    asset.width?.toString() ?? '', asset.height?.toString() ?? '', asset.license ?? '',
+    asset.sourceUrl ?? '', asset.sourceText ?? '', String(asset.publicReadAllowed),
   ].join('\u0000')).sort();
 }
 

@@ -71,7 +71,13 @@ function session(userId: string, isElevated = false, permissions: string[] = [])
   };
 }
 
-function createService(options: { denyUploadFile?: boolean; failFileDocument?: boolean; referencedWikiFilename?: string; failObjectDelete?: boolean } = {}) {
+function createService(options: {
+  denyUploadFile?: boolean;
+  failFileDocument?: boolean;
+  referencedWikiFilename?: string;
+  failObjectDelete?: boolean;
+  retainedByRelease?: boolean;
+} = {}) {
   const files = new Map<string, TestFile>();
   const actionCalls: string[] = [];
   const fileDocuments: Array<{
@@ -213,6 +219,11 @@ function createService(options: { denyUploadFile?: boolean; failFileDocument?: b
           ? null
           : { id: where.id, ...fileVersions[index] };
       }
+    },
+    serverWikiReleaseAsset: {
+      async count() {
+        return options.retainedByRelease ? 1 : 0;
+      },
     },
     wikiPage: {
       async findUnique(args: { where: { id: bigint } }) {
@@ -502,6 +513,21 @@ test('file service requires owner before delete', async () => {
   await assert.doesNotReject(() => service.deleteFile(uploaded.id, session('account-1')));
   assert.equal(files.get(uploaded.id)?.status, 'deleted');
   assert.equal(getDeleteAttempts(), 1);
+});
+
+test('published server wiki release assets are immutable garbage-collection roots', async () => {
+  const { service, files, getDeleteAttempts } = createService({ retainedByRelease: true });
+  const uploaded = await service.createImage('account-1', {
+    data: 'data:image/png;base64,aW1hZ2U=',
+    filename: 'release-asset.png',
+  });
+
+  await assert.rejects(
+    () => service.deleteFile(uploaded.id, session('account-1')),
+    /retained by a published server wiki release/,
+  );
+  assert.equal(files.get(uploaded.id)?.status, 'active');
+  assert.equal(getDeleteAttempts(), 0);
 });
 
 test('wiki file deletion blocks current references and keeps failed object deletion retryable', async () => {

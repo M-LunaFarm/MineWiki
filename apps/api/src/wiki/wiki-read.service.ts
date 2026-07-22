@@ -560,6 +560,7 @@ function publishedBoundaryFromScope(
     spaceId: scope.spaceId,
     currentReleaseId: scope.currentReleaseId,
     currentReleaseVersion: scope.currentReleaseVersion,
+    currentReleaseSnapshotVersion: scope.currentReleaseSnapshotVersion,
     currentItem: scope.currentItem,
   };
 }
@@ -1566,7 +1567,7 @@ export class WikiReadService {
         siteSlug: true,
         publicationStatus: true,
         publishedReleaseId: true,
-        publishedRelease: { select: { version: true } },
+        publishedRelease: { select: { version: true, snapshotVersion: true } },
       },
     });
     const constrainedSpaceIds = new Set<bigint>();
@@ -1640,6 +1641,7 @@ export class WikiReadService {
           spaceId: wiki.spaceId,
           currentReleaseId: wiki.publishedReleaseId,
           currentReleaseVersion: wiki.publishedRelease.version,
+          currentReleaseSnapshotVersion: wiki.publishedRelease.snapshotVersion,
           currentItem,
         },
         contentSlug: wiki.slug,
@@ -4402,7 +4404,7 @@ export class WikiReadService {
             }
           }
         });
-    const files = cache ? {} : await this.findRenderableFiles(expanded.ast, access);
+    const files = cache ? {} : await this.findRenderableFiles(expanded.ast, access, options.releaseId);
     const missingLinks = hasLinkDependencies
       ? await this.findMissingLinks(
           namespace,
@@ -4789,10 +4791,57 @@ export class WikiReadService {
     return { previous, next };
   }
 
-  private async findRenderableFiles(ast: AstNode[], access: WikiAccessContext) {
+  private async findRenderableFiles(ast: AstNode[], access: WikiAccessContext, releaseId?: bigint) {
     const fileNames = Array.from(collectWikiFileNames(ast));
     if (fileNames.length === 0) {
       return {};
+    }
+    if (releaseId) {
+      const releaseDelegate = (this.prisma as unknown as {
+        serverWikiRelease?: { findUnique(args: unknown): Promise<{ snapshotVersion: number } | null> };
+      }).serverWikiRelease;
+      const release = releaseDelegate
+        ? await releaseDelegate.findUnique({ where: { id: releaseId }, select: { snapshotVersion: true } })
+        : null;
+      if (release?.snapshotVersion === 2) {
+        const assets = await this.prisma.serverWikiReleaseAsset.findMany({
+          where: { releaseId, wikiFilename: { in: fileNames } },
+          orderBy: [{ wikiFilename: 'asc' }, { id: 'asc' }],
+        });
+        const liveFiles = assets.length > 0
+          ? await this.prisma.uploadedFile.findMany({
+              where: { id: { in: assets.map((asset) => asset.uploadedFileId) } },
+            })
+          : [];
+        const releasePageIds = new Set((assets.length > 0
+          ? await this.prisma.serverWikiReleaseItem.findMany({
+              where: { releaseId },
+              select: { pageId: true },
+            })
+          : []).map((item) => item.pageId.toString()));
+        const liveById = new Map(liveFiles.map((file) => [file.id, file]));
+        return Object.fromEntries(assets.flatMap((asset) => {
+          const live = liveById.get(asset.uploadedFileId);
+          if (!asset.publicReadAllowed || !live || live.deletedAt !== null) return [];
+          if (!['active', 'retained', 'delete_pending'].includes(live.status)) return [];
+          const linkedId = live.linkedResourceId?.trim() ?? '';
+          const stillReadable = ['public', 'unlisted'].includes(live.visibility)
+            || (live.visibility === 'restricted' && (
+              (live.linkedResourceType === 'wiki_space' && linkedId === asset.spaceId.toString())
+              || (live.linkedResourceType === 'wiki_page' && releasePageIds.has(linkedId))
+            ));
+          if (!stillReadable) return [];
+          return [[asset.wikiFilename, {
+            url: asset.publicPath,
+            mimeType: asset.mimeType,
+            originalName: asset.originalName,
+            sizeBytes: asset.sizeBytes,
+            license: asset.license,
+            sourceUrl: asset.sourceUrl,
+            sourceText: asset.sourceText,
+          }]];
+        }));
+      }
     }
     const files = await this.prisma.uploadedFile.findMany({
       where: {

@@ -1662,6 +1662,16 @@ if (!hasDatabase) {
         updatedAt: new Date(),
       },
     });
+    await prisma.subwikiRole.create({
+      data: {
+        spaceId: space.id,
+        userId: profile.id,
+        role: 'owner',
+        status: 'active',
+        grantedBy: profile.id,
+        grantedAt: new Date(),
+      },
+    });
     let pageId: string | undefined;
     try {
       await assert.rejects(
@@ -1708,6 +1718,7 @@ if (!hasDatabase) {
         await prisma.wikiPageRevision.deleteMany({ where: { pageId: BigInt(pageId) } });
         await prisma.wikiPage.delete({ where: { id: BigInt(pageId) } }).catch(() => {});
       }
+      await prisma.subwikiRole.deleteMany({ where: { spaceId: space.id } });
       await prisma.serverWiki.deleteMany({ where: { spaceId: space.id } });
       await prisma.wikiSpace.delete({ where: { id: space.id } }).catch(() => {});
       await prisma.wikiProfile.deleteMany({ where: { accountId: account.id } });

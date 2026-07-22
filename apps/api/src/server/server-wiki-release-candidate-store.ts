@@ -4,6 +4,8 @@ import { z } from 'zod';
 import type { PrismaService } from '../common/prisma.service';
 import type {
   ReleaseCandidateSnapshot,
+  ReleaseCandidateAsset,
+  ReleaseCandidateIncludeDependency,
   ServerWikiPresentationSnapshot,
   ServerWikiReleaseCandidate,
 } from './server-wiki-release-candidate';
@@ -55,6 +57,7 @@ const pageSchema = z.object({
   ownerProfileId: nullableBigintString,
   updatedAt: dateString,
   revisionContent: z.string(),
+  publicReadAllowed: z.boolean().default(true),
 }).strict();
 const linkSchema = z.object({
   sourcePageId: bigintString,
@@ -64,6 +67,7 @@ const linkSchema = z.object({
   linkType: z.string().max(32),
 }).strict();
 const releaseSnapshotSchema = z.object({
+  snapshotVersion: z.number().int().min(1).max(2).default(1),
   presentation: z.object({
     layoutKey: z.string(),
     navigationOrder: z.unknown().nullable(),
@@ -85,6 +89,42 @@ const releaseSnapshotSchema = z.object({
   }).strict(),
   pages: z.array(pageSchema),
   links: z.array(linkSchema),
+  includeDependencies: z.array(z.object({
+    sourcePageId: bigintString,
+    sourceRevisionId: bigintString,
+    targetNamespaceId: z.number().int().min(0).max(4_294_967_295),
+    targetNamespaceCode: z.string().max(32),
+    targetSlug: z.string().max(255),
+    targetPageId: bigintString,
+    targetSpaceId: bigintString,
+    targetRevisionId: bigintString,
+    targetLocalPath: z.string().max(500),
+    targetTitle: z.string().max(255),
+    targetProtectionLevel: z.string().max(32),
+    targetPageStatus: z.string().max(32),
+    targetCreatedBy: nullableBigintString,
+    targetOwnerProfileId: nullableBigintString,
+    contentRaw: z.string(),
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/u),
+    contentSize: z.number().int().min(0),
+    publicReadAllowed: z.boolean(),
+  }).strict()).default([]),
+  assets: z.array(z.object({
+    wikiFilename: z.string().max(255),
+    uploadedFileId: z.string().uuid(),
+    wikiFileVersionId: nullableBigintString,
+    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    publicPath: z.string().max(1024),
+    mimeType: z.string().max(128),
+    originalName: z.string().max(255),
+    sizeBytes: z.number().int().min(0),
+    width: z.number().int().min(0).nullable(),
+    height: z.number().int().min(0).nullable(),
+    license: z.string().max(64).nullable(),
+    sourceUrl: z.string().max(1024).nullable(),
+    sourceText: z.string().max(255).nullable(),
+    publicReadAllowed: z.boolean(),
+  }).strict()).default([]),
 }).strict();
 
 export async function submitServerWikiReleaseCandidate(
@@ -130,6 +170,7 @@ export async function submitServerWikiReleaseCandidate(
       submissionReason: input.submissionReason,
       manifestSnapshot: snapshot.candidate as unknown as Prisma.InputJsonValue,
       releaseSnapshot: serializeReleaseSnapshot(snapshot),
+      snapshotVersion: snapshot.snapshotVersion,
       createdBy: input.actorProfileId,
       submittedAt: input.submittedAt,
     },
@@ -214,6 +255,7 @@ const candidateRecordSelection = {
 
 function serializeReleaseSnapshot(snapshot: ReleaseCandidateSnapshot): Prisma.InputJsonValue {
   return {
+    snapshotVersion: snapshot.snapshotVersion,
     presentation: snapshot.presentation as unknown as Prisma.InputJsonValue,
     pages: snapshot.pages.map((page) => ({
       id: page.id.toString(),
@@ -231,6 +273,7 @@ function serializeReleaseSnapshot(snapshot: ReleaseCandidateSnapshot): Prisma.In
       ownerProfileId: page.ownerProfileId?.toString() ?? null,
       updatedAt: page.updatedAt.toISOString(),
       revisionContent: snapshot.revisionContentByPageId.get(page.id) ?? '',
+      publicReadAllowed: page.publicReadAllowed,
     })),
     links: snapshot.links.map((link) => ({
       sourcePageId: link.sourcePageId.toString(),
@@ -239,7 +282,51 @@ function serializeReleaseSnapshot(snapshot: ReleaseCandidateSnapshot): Prisma.In
       targetSlug: link.targetSlug,
       linkType: link.linkType,
     })),
+    includeDependencies: snapshot.includeDependencies.map(serializeIncludeDependency),
+    assets: snapshot.assets.map(serializeAsset),
   } as Prisma.InputJsonObject;
+}
+
+function serializeIncludeDependency(dependency: ReleaseCandidateIncludeDependency): Prisma.InputJsonObject {
+  return {
+    sourcePageId: dependency.sourcePageId.toString(),
+    sourceRevisionId: dependency.sourceRevisionId.toString(),
+    targetNamespaceId: dependency.targetNamespaceId,
+    targetNamespaceCode: dependency.targetNamespaceCode,
+    targetSlug: dependency.targetSlug,
+    targetPageId: dependency.targetPageId.toString(),
+    targetSpaceId: dependency.targetSpaceId.toString(),
+    targetRevisionId: dependency.targetRevisionId.toString(),
+    targetLocalPath: dependency.targetLocalPath,
+    targetTitle: dependency.targetTitle,
+    targetProtectionLevel: dependency.targetProtectionLevel,
+    targetPageStatus: dependency.targetPageStatus,
+    targetCreatedBy: dependency.targetCreatedBy?.toString() ?? null,
+    targetOwnerProfileId: dependency.targetOwnerProfileId?.toString() ?? null,
+    contentRaw: dependency.contentRaw,
+    contentHash: dependency.contentHash,
+    contentSize: dependency.contentSize,
+    publicReadAllowed: dependency.publicReadAllowed,
+  };
+}
+
+function serializeAsset(asset: ReleaseCandidateAsset): Prisma.InputJsonObject {
+  return {
+    wikiFilename: asset.wikiFilename,
+    uploadedFileId: asset.uploadedFileId,
+    wikiFileVersionId: asset.wikiFileVersionId?.toString() ?? null,
+    sha256: asset.sha256,
+    publicPath: asset.publicPath,
+    mimeType: asset.mimeType,
+    originalName: asset.originalName,
+    sizeBytes: asset.sizeBytes,
+    width: asset.width,
+    height: asset.height,
+    license: asset.license,
+    sourceUrl: asset.sourceUrl,
+    sourceText: asset.sourceText,
+    publicReadAllowed: asset.publicReadAllowed,
+  };
 }
 
 function restoreStoredCandidate(
@@ -284,6 +371,7 @@ function restoreStoredCandidate(
   if (pages.some((page) => page.spaceId !== spaceId)) throw candidateCorrupt();
   const revisionContentByPageId = new Map(pages.map((page) => [page.id, page.revisionContent]));
   const snapshot: ReleaseCandidateSnapshot = {
+    snapshotVersion: release.data.snapshotVersion === 2 ? 2 : 1,
     candidate: manifest,
     presentation: release.data.presentation as ServerWikiPresentationSnapshot,
     pages: pages.map((page) => ({
@@ -301,6 +389,7 @@ function restoreStoredCandidate(
       createdBy: page.createdBy,
       ownerProfileId: page.ownerProfileId,
       updatedAt: page.updatedAt,
+      publicReadAllowed: page.publicReadAllowed,
     })),
     revisionContentByPageId,
     links: release.data.links.map((link) => ({
@@ -309,6 +398,42 @@ function restoreStoredCandidate(
       targetNamespaceCode: link.targetNamespaceCode,
       targetSlug: link.targetSlug,
       linkType: link.linkType,
+    })),
+    includeDependencies: release.data.includeDependencies.map((dependency): ReleaseCandidateIncludeDependency => ({
+      sourcePageId: BigInt(dependency.sourcePageId),
+      sourceRevisionId: BigInt(dependency.sourceRevisionId),
+      targetNamespaceId: dependency.targetNamespaceId!,
+      targetNamespaceCode: dependency.targetNamespaceCode!,
+      targetSlug: dependency.targetSlug!,
+      targetPageId: BigInt(dependency.targetPageId),
+      targetSpaceId: BigInt(dependency.targetSpaceId),
+      targetRevisionId: BigInt(dependency.targetRevisionId),
+      targetLocalPath: dependency.targetLocalPath!,
+      targetTitle: dependency.targetTitle!,
+      targetProtectionLevel: dependency.targetProtectionLevel!,
+      targetPageStatus: dependency.targetPageStatus!,
+      targetCreatedBy: dependency.targetCreatedBy ? BigInt(dependency.targetCreatedBy) : null,
+      targetOwnerProfileId: dependency.targetOwnerProfileId ? BigInt(dependency.targetOwnerProfileId) : null,
+      contentRaw: dependency.contentRaw!,
+      contentHash: dependency.contentHash!,
+      contentSize: dependency.contentSize!,
+      publicReadAllowed: dependency.publicReadAllowed!,
+    })),
+    assets: release.data.assets.map((asset): ReleaseCandidateAsset => ({
+      wikiFilename: asset.wikiFilename!,
+      uploadedFileId: asset.uploadedFileId!,
+      wikiFileVersionId: asset.wikiFileVersionId ? BigInt(asset.wikiFileVersionId) : null,
+      sha256: asset.sha256!,
+      publicPath: asset.publicPath!,
+      mimeType: asset.mimeType!,
+      originalName: asset.originalName!,
+      sizeBytes: asset.sizeBytes!,
+      width: asset.width ?? null,
+      height: asset.height ?? null,
+      license: asset.license ?? null,
+      sourceUrl: asset.sourceUrl ?? null,
+      sourceText: asset.sourceText ?? null,
+      publicReadAllowed: asset.publicReadAllowed!,
     })),
   };
   return {

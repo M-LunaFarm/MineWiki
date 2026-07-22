@@ -2310,6 +2310,7 @@ export class WikiEditService {
       spaceId: scope.spaceId,
       currentReleaseId: scope.currentReleaseId,
       currentReleaseVersion: scope.currentReleaseVersion,
+      currentReleaseSnapshotVersion: scope.currentReleaseSnapshotVersion,
       currentItem: scope.currentItem,
     } : null;
   }

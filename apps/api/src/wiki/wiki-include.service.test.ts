@@ -213,6 +213,64 @@ test('server wiki includes resolve from the same immutable release instead of th
   assert.equal(permissionProof?.boundary.currentReleaseId, 90n);
 });
 
+test('v2 server wiki release resolves cross-namespace includes only from its pinned dependency', async () => {
+  const dependency = {
+    releaseId: 70n,
+    sourcePageId: 1n,
+    targetNamespaceId: 2,
+    targetNamespaceCode: 'template',
+    targetSlug: '공용',
+    targetPageId: 9n,
+    targetSpaceId: 3n,
+    targetRevisionId: 90n,
+    targetLocalPath: '공용',
+    targetTitle: '공용',
+    targetProtectionLevel: 'open',
+    targetPageStatus: 'normal',
+    targetCreatedBy: null,
+    targetOwnerProfileId: null,
+    contentHash: 'a'.repeat(64),
+    contentSize: Buffer.byteLength('고정된 공용 틀', 'utf8'),
+    publicReadAllowed: true,
+  };
+  let livePageLookups = 0;
+  const prisma = {
+    wikiNamespace: { async findUnique() { return { id: 2 }; } },
+    serverWikiRelease: { async findUnique() { return { snapshotVersion: 2 }; } },
+    serverWikiReleaseItem: { async findFirst() { return null; } },
+    serverWikiReleaseInclude: { async findFirst() { return dependency; } },
+    wikiPage: { async findUnique() { livePageLookups += 1; return null; } },
+    wikiPageRevision: {
+      async findFirst(input: { where: { id: bigint } }) {
+        return input.where.id === 90n
+          ? {
+              id: 90n,
+              pageId: 9n,
+              contentRaw: '고정된 공용 틀',
+              contentHash: dependency.contentHash,
+              contentSize: dependency.contentSize,
+              visibility: 'public',
+            }
+          : null;
+      },
+    },
+  };
+  const service = new WikiIncludeService(prisma as never, {
+    async assertCanReadPage() {},
+  } as never);
+  const result = await service.expand({
+    ast: parseMarkup('[include(틀:공용)]').ast,
+    accountId: null,
+    sourcePageId: 1n,
+    sourceNamespace: 'server',
+    sourceLocalPath: 'luna/대문',
+    releaseId: 70n,
+  });
+
+  assert.match(renderDocument(result.ast), /고정된 공용 틀/u);
+  assert.equal(livePageLookups, 0);
+});
+
 test('renders denied and missing include targets identically without target disclosure', async () => {
   const privateTemplate: FixturePage = {
     ...basePage,

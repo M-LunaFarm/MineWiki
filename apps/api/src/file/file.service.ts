@@ -502,6 +502,12 @@ export class FileService {
     const file = await this.prisma.$transaction(async (tx) => {
       const current = await tx.uploadedFile.findUnique({ where: { id } });
       this.permissions.assertCanDelete(current, session);
+      const releaseAssetDelegate = (tx as unknown as {
+        serverWikiReleaseAsset?: { count(args: unknown): Promise<number> };
+      }).serverWikiReleaseAsset;
+      if (releaseAssetDelegate && await releaseAssetDelegate.count({ where: { uploadedFileId: id } }) > 0) {
+        throw new ConflictException('File is retained by a published server wiki release.');
+      }
       if (current.status === 'active' && current.usageContext === 'wiki_editor') {
         const references = await tx.$queryRaw<Array<{ sourcePageId: bigint }>>`
           SELECT l.source_page_id AS sourcePageId
