@@ -80,6 +80,66 @@ test('parses links, categories, components, and safe HTML', () => {
   assert.equal(html.includes('class="wiki-link missing"'), true);
 });
 
+test('renders constrained document HTML blocks without reparsing wiki markup', () => {
+  const parsed = parseMarkup([
+    '{{{#!html',
+    '<p>안내 <b>중요</b> [[숨은 문서]] [include(비공개)] [*note]</p>',
+    '<table><tbody><tr><th colspan="2">제목</th></tr></tbody></table>',
+    '<details open><summary>더 보기</summary><ruby>字<rt>자</rt></ruby></details>',
+    '<a href="https://example.com/path" title="외부">외부</a>',
+    '<a href="/wiki/안내">내부</a>',
+    '}}}',
+  ].join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.ast.some((node) => node.type === 'raw_html'), true);
+  assert.deepEqual(parsed.links, []);
+  assert.deepEqual(parsed.includes, []);
+  assert.deepEqual(parsed.footnotes, []);
+  assert.equal(parsed.blockingErrors.length, 0);
+  assert.match(html, /<div class="wiki-raw-html"><p>안내 <strong>중요<\/strong> \[\[숨은 문서\]\] \[include\(비공개\)\] \[\*note\]<\/p>/u);
+  assert.match(html, /<th colspan="2">제목<\/th>/u);
+  assert.match(html, /<details open><summary>더 보기<\/summary><ruby>字<rt>자<\/rt><\/ruby><\/details>/u);
+  assert.match(html, /href="https:\/\/example\.com\/path"[^>]*class="wiki-external"[^>]*target="_blank"[^>]*rel="nofollow noopener noreferrer ugc"/u);
+  assert.match(html, /href="\/wiki\/안내">내부<\/a>/u);
+  assert.match(parsed.plainText, /안내 중요 .* 외부 내부/u);
+  assert.doesNotMatch(parsed.plainText, /#!html/u);
+});
+
+test('sanitizes dangerous document HTML and re-sanitizes include parameters', () => {
+  const parsed = parseMarkup('{{{#!html <div id="owned" class="owned" data-x="1" onclick="alert(1)"><script>alert(2)</script><style>body{display:none}</style><iframe src="https://example.com"></iframe><img src=x><form><button>전송</button></form><a href="javascript:alert(3)" target="_self">링크</a></div> }}}');
+  const html = renderDocument(parsed.ast);
+
+  assert.equal(parsed.blockingErrors.length, 0);
+  assert.doesNotMatch(html, /script|style|iframe|<img|<form|<button|onclick|owned|data-x|javascript:/iu);
+  assert.match(html, /<div>.*링크.*<\/div>/u);
+
+  const template = parseMarkup('{{{#!html <a href="@url@">@label@</a> }}}');
+  const expanded = applyIncludeParametersToAst(template.ast, {
+    url: 'javascript:alert(1)',
+    label: '<img src=x onerror=alert(2)>안전',
+  }, 'include-');
+  const expandedHtml = renderDocument(expanded);
+  assert.doesNotMatch(expandedHtml, /javascript:|<img|onerror/iu);
+  assert.match(expandedHtml, /안전/u);
+});
+
+test('keeps document HTML blocks out of discussions and enforces resource limits', () => {
+  assert.doesNotMatch(renderDiscussionMarkup('{{{#!html <strong>비밀 HTML</strong> }}}'), /비밀 HTML|wiki-raw-html/u);
+
+  const unclosed = parseMarkup('{{{#!html\n<p>끝나지 않음</p>');
+  assert.equal(unclosed.blockingErrors.includes('닫히지 않은 HTML 블록이 있습니다.'), true);
+
+  const tooMany = parseMarkup(Array.from({ length: 17 }, (_, index) => `{{{#!html <p>${index}</p> }}}`).join('\n'));
+  assert.equal(tooMany.blockingErrors.some((error) => error.includes('문서당 16개')), true);
+
+  const tooLarge = parseMarkup(`{{{#!html ${'가'.repeat(22_000)} }}}`);
+  assert.equal(tooLarge.blockingErrors.some((error) => error.includes('64KiB')), true);
+
+  const aggregate = parseMarkup(Array.from({ length: 3 }, () => `{{{#!html ${'a'.repeat(50_000)} }}}`).join('\n'));
+  assert.equal(aggregate.blockingErrors.some((error) => error.includes('문서 전체에서 128KiB')), true);
+});
+
 test('keeps front-page search interactive and supports legacy card link targets', () => {
   const parsed = parseMarkup([
     '{{대문 검색|예시=블록, 명령어, 서버 이름 검색}}',

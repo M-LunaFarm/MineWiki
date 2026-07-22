@@ -37,9 +37,12 @@ import {
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 import { evaluateConditionalExpression } from './conditional.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.36.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.37.0';
 const MAX_HIGHLIGHT_CODE_LENGTH = 100_000;
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
+const MAX_RAW_HTML_BLOCKS = 16;
+const MAX_RAW_HTML_BLOCK_BYTES = 64 * 1024;
+const MAX_RAW_HTML_DOCUMENT_BYTES = 128 * 1024;
 const MAX_FOLDING_DEPTH = 16;
 const MAX_INDENT_DEPTH = 16;
 const MAX_LIST_DEPTH = 32;
@@ -217,6 +220,58 @@ const allowedTags = [
   'path'
 ];
 
+function readRawHtmlBlock(
+  lines: readonly string[],
+  startIndex: number,
+): { source: string; endIndex: number; closed: boolean } | null {
+  const line = lines[startIndex] ?? '';
+  const opener = /^\s*\{\{\{#!html(?=\s|<|$)/iu.exec(line);
+  if (!opener) return null;
+  const firstSource = line.slice(opener[0].length);
+  const firstClose = firstSource.indexOf('}}}');
+  if (firstClose >= 0) {
+    const trailing = firstSource.slice(firstClose + 3);
+    return {
+      source: firstSource.slice(0, firstClose).trim(),
+      endIndex: startIndex,
+      closed: trailing.trim().length === 0,
+    };
+  }
+
+  const body = firstSource.trimStart() ? [firstSource.trimStart()] : [];
+  for (let index = startIndex + 1; index < lines.length; index += 1) {
+    const current = lines[index] ?? '';
+    const closeIndex = current.indexOf('}}}');
+    if (closeIndex < 0) {
+      body.push(current);
+      continue;
+    }
+    body.push(current.slice(0, closeIndex));
+    return {
+      source: body.join('\n').trim(),
+      endIndex: index,
+      closed: current.slice(closeIndex + 3).trim().length === 0,
+    };
+  }
+  return { source: body.join('\n').trim(), endIndex: Math.max(startIndex, lines.length - 1), closed: false };
+}
+
+function replaceRawHtmlBlocks(source: string, replacement: (html: string) => string): string {
+  const lines = source.split('\n');
+  const output: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const block = readRawHtmlBlock(lines, index);
+    if (!block) {
+      output.push(lines[index] ?? '');
+      continue;
+    }
+    output.push(replacement(block.source));
+    for (let consumed = index + 1; consumed <= block.endIndex; consumed += 1) output.push('');
+    index = block.endIndex;
+  }
+  return output.join('\n');
+}
+
 function readNestedTripleBraceBlock(lines: readonly string[], startIndex: number) {
   const body: string[] = [];
   let depth = 1;
@@ -346,6 +401,15 @@ export interface ParseMarkupOptions {
   headingsAsProse?: boolean;
 }
 
+interface ParseResourceBudget {
+  rawHtmlBlocks: number;
+  rawHtmlBytes: number;
+}
+
+interface InternalParseMarkupOptions extends ParseMarkupOptions {
+  resourceBudget?: ParseResourceBudget;
+}
+
 export function parseMarkup(raw: string, options: ParseMarkupOptions | number = {}): ParsedDocument {
   if (typeof options === 'number') return parseMarkupDocument(raw, {}, options);
   return parseMarkupDocument(raw, options, 0);
@@ -353,7 +417,7 @@ export function parseMarkup(raw: string, options: ParseMarkupOptions | number = 
 
 function parseMarkupDocument(
   raw: string,
-  options: ParseMarkupOptions,
+  options: InternalParseMarkupOptions,
   foldingDepth: number,
   nestingKind: 'folding' | 'blockquote' | 'indent' | 'table' = 'folding'
 ): ParsedDocument {
@@ -367,6 +431,8 @@ function parseMarkupDocument(
         ? `들여쓰기는 ${MAX_INDENT_DEPTH}단계까지 사용할 수 있습니다.`
         : '접기 블록 중첩 제한을 초과했습니다.');
   }
+  const resourceBudget = options.resourceBudget ?? { rawHtmlBlocks: 0, rawHtmlBytes: 0 };
+  options = { ...options, resourceBudget };
   const source = maskWikiCommentLines(raw.replace(/\r\n/g, '\n'), options.gitBookMarkdown === true);
   const lines = source.split('\n');
   const ast: AstNode[] = [];
@@ -392,6 +458,26 @@ function parseMarkupDocument(
     let line = lines[i] ?? '';
     if (!line.trim()) continue;
     if (i === redirectLineIndex && redirectTarget) continue;
+
+    const rawHtml = readRawHtmlBlock(lines, i);
+    if (rawHtml) {
+      const sourceBytes = Buffer.byteLength(rawHtml.source, 'utf8');
+      resourceBudget.rawHtmlBlocks += 1;
+      resourceBudget.rawHtmlBytes += sourceBytes;
+      if (!rawHtml.closed) {
+        blockingErrors.push('닫히지 않은 HTML 블록이 있습니다.');
+      } else if (sourceBytes > MAX_RAW_HTML_BLOCK_BYTES) {
+        blockingErrors.push(`HTML 블록은 ${MAX_RAW_HTML_BLOCK_BYTES / 1024}KiB까지 사용할 수 있습니다.`);
+      } else if (resourceBudget.rawHtmlBlocks > MAX_RAW_HTML_BLOCKS) {
+        blockingErrors.push(`HTML 블록은 문서당 ${MAX_RAW_HTML_BLOCKS}개까지 사용할 수 있습니다.`);
+      } else if (resourceBudget.rawHtmlBytes > MAX_RAW_HTML_DOCUMENT_BYTES) {
+        blockingErrors.push(`HTML 블록은 문서 전체에서 ${MAX_RAW_HTML_DOCUMENT_BYTES / 1024}KiB까지 사용할 수 있습니다.`);
+      } else {
+        ast.push({ type: 'raw_html', source: rawHtml.source });
+      }
+      i = rawHtml.endIndex;
+      continue;
+    }
 
     // NamuMark lists also begin with whitespace, so they must win before the
     // ordinary leading-space indentation block is considered.
@@ -783,7 +869,8 @@ function parseMarkupDocument(
       errors.push('정보 컴포넌트가 없습니다.');
     }
   }
-  if (/<\s*(script|style|iframe|object|embed|img)\b/i.test(source) || /\son[a-z]+\s*=/i.test(source)) {
+  const sourceOutsideRawHtml = replaceRawHtmlBlocks(source, () => '');
+  if (/<\s*(script|style|iframe|object|embed|img)\b/i.test(sourceOutsideRawHtml) || /\son[a-z]+\s*=/i.test(sourceOutsideRawHtml)) {
     blockingErrors.push('허용되지 않은 HTML이 포함되어 있습니다.');
   }
   if (countMathNodes(ast) > MAX_MATH_NODES) {
@@ -806,7 +893,7 @@ function parseMarkupDocument(
     })),
     footnotes,
     redirectTarget,
-    plainText: source
+    plainText: replaceRawHtmlBlocks(source, (html) => sanitizeRawWikiHtml(html, true))
       .replace(/^\s*\{\{\{#!wiki[^\r\n]*(?:\r?\n|$)/gimu, ' ')
       .replace(/^\s*\}\}\}\s*$/gmu, ' ')
       .replace(/\{\{[\s\S]*?\}\}/g, ' ')
@@ -827,6 +914,7 @@ function startsMarkupBlock(lines: readonly string[], index: number): boolean {
   if (!trimmed) return true;
   if (/^#(?:넘겨주기|REDIRECT)\s+\[\[.+?\]\]/iu.test(trimmed)) return true;
   if (/^\s*\{\{\{#!wiki(?:\s|$)/iu.test(line)) return true;
+  if (/^\s*\{\{\{#!html(?=\s|<|$)/iu.test(line)) return true;
   if (/^\{\{\{#!(?:latex|syntax|highlight|folding)(?:\s|$)/iu.test(line)) return true;
   if (trimmed === '{{{') return true;
   if (parseIncludeLine(line)) return true;
@@ -848,8 +936,20 @@ function startsMarkupBlock(lines: readonly string[], index: number): boolean {
 
 function maskWikiCommentLines(source: string, gitBookMarkdown = false): string {
   let literalDepth = 0;
-  return source.split('\n').map((line) => {
-    if (literalDepth === 0 && line.startsWith('##') && !(gitBookMarkdown && /^#{1,6}\s+\S/u.test(line))) return '';
+  const lines = source.split('\n');
+  const output: string[] = [];
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const rawHtml = literalDepth === 0 ? readRawHtmlBlock(lines, lineIndex) : null;
+    if (rawHtml) {
+      output.push(...lines.slice(lineIndex, rawHtml.endIndex + 1));
+      lineIndex = rawHtml.endIndex;
+      continue;
+    }
+    const line = lines[lineIndex] ?? '';
+    if (literalDepth === 0 && line.startsWith('##') && !(gitBookMarkdown && /^#{1,6}\s+\S/u.test(line))) {
+      output.push('');
+      continue;
+    }
     for (let index = 0; index <= line.length - 3; index += 1) {
       if (isEscapedAt(line, index)) continue;
       const marker = line.slice(index, index + 3);
@@ -861,8 +961,9 @@ function maskWikiCommentLines(source: string, gitBookMarkdown = false): string {
         index += 2;
       }
     }
-    return line;
-  }).join('\n');
+    output.push(line);
+  }
+  return output.join('\n');
 }
 
 function isEscapedAt(value: string, index: number): boolean {
@@ -1399,6 +1500,46 @@ function appendGitBookHtmlInline(
 
 function decodeGitBookHtmlText(source: string): string {
   return sanitizeHtml(source, { allowedTags: [], allowedAttributes: {} }).replace(/\s+/gu, ' ').trim();
+}
+
+const RAW_HTML_ALLOWED_TAGS = [
+  'a', 'p', 'div', 'span', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'mark',
+  'br', 'hr', 'blockquote', 'pre', 'code', 'kbd', 'samp', 'ul', 'ol', 'li',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td', 'caption', 'details', 'summary',
+  'ruby', 'rt', 'rp', 'sup', 'sub'
+];
+
+function sanitizeRawWikiHtml(source: string, plainText = false): string {
+  const sanitized = sanitizeHtml(source, {
+    allowedTags: RAW_HTML_ALLOWED_TAGS,
+    allowedAttributes: {
+      a: ['href', 'title', 'class', 'target', 'rel'],
+      th: ['colspan', 'rowspan'],
+      td: ['colspan', 'rowspan'],
+      details: ['open']
+    },
+    allowedSchemes: ['http', 'https', 'mailto'],
+    allowProtocolRelative: false,
+    transformTags: {
+      b: 'strong',
+      i: 'em',
+      a: (_tagName, attributes) => {
+        const href = attributes.href;
+        const safeAttributes: Record<string, string> = {};
+        if (href) safeAttributes.href = href;
+        if (attributes.title) safeAttributes.title = attributes.title;
+        if (href && /^https?:\/\//iu.test(href)) {
+          safeAttributes.class = 'wiki-external';
+          safeAttributes.target = '_blank';
+          safeAttributes.rel = 'nofollow noopener noreferrer ugc';
+        }
+        return { tagName: 'a', attribs: safeAttributes };
+      }
+    }
+  });
+  return plainText
+    ? sanitizeHtml(sanitized, { allowedTags: [], allowedAttributes: {} })
+    : sanitized;
 }
 
 function readGitBookHtmlSpan(attributes: string, name: 'colspan' | 'rowspan'): number {
@@ -2006,6 +2147,7 @@ export function applyIncludeParametersToAst(
       display: replaceWikiFileDisplayOptions(node.display, replace)
     };
     if (node.type === 'redirect') return { ...node, target: replace(node.target) };
+    if (node.type === 'raw_html') return { ...node, source: replace(node.source) };
     if (node.type === 'math_block') {
       const source = replace(node.source);
       return { ...node, source, error: validateMathSource(source) };
@@ -2688,6 +2830,10 @@ export function renderDocument(ast: AstNode[], options: RenderOptions = {}): str
       }
       if (node.type === 'codeblock') {
         output.push(renderCodeBlock(node.code, node.lang));
+        continue;
+      }
+      if (node.type === 'raw_html') {
+        output.push(`<div class="wiki-raw-html">${sanitizeRawWikiHtml(node.source)}</div>`);
         continue;
       }
       if (node.name === 'references') {

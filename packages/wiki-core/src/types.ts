@@ -127,6 +127,7 @@ export type AstNode =
   | { type: 'category'; title: string; label: string | null; blurred: boolean }
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null; display?: WikiFileDisplayOptions }
   | { type: 'redirect'; target: string }
+  | { type: 'raw_html'; source: string }
   | { type: 'math_block'; source: string; error: string | null }
   | { type: 'codeblock'; lang: string | null; code: string };
 
