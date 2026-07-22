@@ -86,6 +86,20 @@ for (const relativePath of ['infra/nginx/minewiki.conf', 'infra/nginx/minewiki.r
   }
 }
 
+for (const relativePath of [
+  'infra/nginx/minewiki.conf',
+  'infra/nginx/minewiki.routes.conf',
+  'infra/nginx/container.conf',
+]) {
+  const nginxConfig = readFileSync(resolve(relativePath), 'utf8');
+  if (
+    !nginxConfig.includes('location = /api/v1/internal') ||
+    !nginxConfig.includes('location ^~ /api/v1/internal/')
+  ) {
+    throw new Error(`${relativePath} must block internal API routes at public ingress.`);
+  }
+}
+
 console.log(
   `PM2 service labels and loopback ports are valid (web=${webPort}, verify=${verifyWebPort}, api=${apiPort}).`,
 );
