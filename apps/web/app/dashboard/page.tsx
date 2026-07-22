@@ -357,6 +357,51 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
+                    {server.serverWiki ? (
+                      <div className="mb-5 rounded-md border border-emerald-400/20 bg-emerald-400/[0.055] p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold text-emerald-300">서버 위키 준비도</p>
+                            <p className="mt-1 text-sm font-bold text-white">
+                              {server.serverWiki.completedChecks}/{server.serverWiki.totalChecks}단계 완료
+                              {server.serverWiki.publicationStatus === 'published'
+                                ? ' · 공개 중'
+                                : server.serverWiki.publicationStatus
+                                  ? ' · 비공개'
+                                  : ' · 생성 전'}
+                            </p>
+                          </div>
+                          {server.serverWiki.status === 'ready' ? (
+                            <BadgeCheck className="h-5 w-5 shrink-0 text-emerald-300" aria-label="위키 준비 완료" />
+                          ) : (
+                            <CircleDashed className="h-5 w-5 shrink-0 text-amber-300" aria-label="위키 준비 진행 중" />
+                          )}
+                        </div>
+                        <div
+                          className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#30363d]"
+                          role="progressbar"
+                          aria-label={`${server.name} 서버 위키 준비도`}
+                          aria-valuemin={0}
+                          aria-valuemax={server.serverWiki.totalChecks}
+                          aria-valuenow={server.serverWiki.completedChecks}
+                        >
+                          <div
+                            className="h-full rounded-full bg-[#13ec80] transition-[width]"
+                            style={{ width: `${Math.round((server.serverWiki.completedChecks / server.serverWiki.totalChecks) * 100)}%` }}
+                          />
+                        </div>
+                        {server.serverWiki.nextAction ? (
+                          <Link
+                            href={server.serverWiki.nextAction.href}
+                            className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-emerald-300 hover:text-emerald-200"
+                          >
+                            {server.serverWiki.nextAction.label}
+                            <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+                          </Link>
+                        ) : null}
+                      </div>
+                    ) : null}
+
                     <div className="mt-2 border-t border-dashed border-[#30363d] pt-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2 text-xs text-[#b8c0c8]">

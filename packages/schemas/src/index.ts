@@ -625,6 +625,17 @@ export const dashboardServerSummarySchema = z.object({
   ownershipChallengeExpiresAt: z.string().datetime().nullable().optional(),
   registrationLeaseExpiresAt: z.string().datetime().nullable().optional(),
   lastSyncedAt: z.string().datetime().nullable().optional(),
+  serverWiki: z.object({
+    status: z.enum(['unlinked', 'repair_required', 'needs_attention', 'ready']),
+    publicationStatus: z.enum(['draft', 'published', 'unpublished']).nullable(),
+    completedChecks: z.number().int().nonnegative(),
+    totalChecks: z.number().int().positive(),
+    wikiUrl: z.string().startsWith('/').nullable(),
+    nextAction: z.object({
+      label: z.string().min(1).max(100),
+      href: z.string().startsWith('/').max(512),
+    }).nullable(),
+  }).nullable().optional(),
 });
 
 export const dashboardActivityItemSchema = z.object({
