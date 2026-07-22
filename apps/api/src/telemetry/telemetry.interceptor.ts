@@ -34,7 +34,7 @@ export class TelemetryInterceptor implements NestInterceptor {
       catchError((error) => {
         span.recordException(error);
         span.setStatus({ code: SpanStatusCode.ERROR, message: error?.message });
-        if (Sentry.getCurrentHub().getClient()) {
+        if (Sentry.getClient()) {
           Sentry.captureException(error);
         }
         throw error;
