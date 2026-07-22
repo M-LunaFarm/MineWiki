@@ -182,6 +182,32 @@ test('never loads includes inside a hidden conditional block', async () => {
   assert.equal(renderDocument(result.ast), '');
 });
 
+test('never loads includes inside a hidden conditional table row', async () => {
+  const template: FixturePage = {
+    ...basePage,
+    id: 13n,
+    namespaceId: 2,
+    localPath: '표 비밀',
+    slug: '표_비밀',
+    title: '표 비밀',
+    currentRevisionId: 130n,
+    contentRaw: '노출되면 안 됨',
+  };
+  const fixture = createFixture([template]);
+  const parent = parseMarkup('||<rowif=false>숨김 [include(틀:표 비밀)]||');
+  const result = await fixture.service.expand({
+    ast: parent.ast,
+    accountId: null,
+    sourcePageId: 1n,
+    sourceNamespace: 'main',
+    sourceLocalPath: '대문',
+  });
+
+  assert.equal(fixture.pageLookups(), 0);
+  assert.equal(result.includedSourceBytes, 0);
+  assert.doesNotMatch(renderDocument(result.ast), /숨김|노출되면 안 됨|표 비밀/u);
+});
+
 test('server wiki includes resolve from the same immutable release instead of the draft revision', async () => {
   const releaseItem = {
     id: 80n,

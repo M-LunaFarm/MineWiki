@@ -2908,7 +2908,7 @@ export function astContainsInclude(ast: readonly AstNode[]): boolean {
     if (node.type === 'heading') return node.children ? inlineContainsInclude(node.children) : false;
     if (node.type === 'paragraph') return inlineContainsInclude(node.children);
     if (node.type === 'list') return listContainsInclude(node);
-    if (node.type === 'wiki_table') return inlineContainsInclude(node.caption) || node.rows.some((row) => row.cells.some((cell) => (
+    if (node.type === 'wiki_table') return inlineContainsInclude(node.caption) || node.rows.some((row) => row.condition?.state !== 'hidden' && row.cells.some((cell) => (
       inlineContainsInclude(cell.children) || (cell.blocks ? astContainsInclude(cell.blocks) : false)
     )));
     if (node.type === 'folding' && inlineContainsInclude(node.title)) return true;

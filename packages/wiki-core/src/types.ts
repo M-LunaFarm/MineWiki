@@ -54,6 +54,11 @@ export interface WikiTableCell {
 
 export interface WikiTableRow {
   cells: WikiTableCell[];
+  condition?: {
+    expression: string;
+    state: 'visible' | 'hidden';
+    error: string | null;
+  };
   backgroundColor?: string;
   darkBackgroundColor?: string;
   color?: string;

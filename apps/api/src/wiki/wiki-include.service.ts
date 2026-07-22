@@ -147,7 +147,7 @@ export class WikiIncludeService {
           caption: await expandInline(node.caption),
           rows: await mapSequential(node.rows, async (row) => ({
             ...row,
-            cells: await mapSequential(row.cells, async (cell) => ({
+            cells: row.condition?.state === 'hidden' ? row.cells : await mapSequential(row.cells, async (cell) => ({
               ...cell,
               children: await expandInline(cell.children),
               ...(cell.blocks ? { blocks: await expandNodes(cell.blocks) } : {}),
@@ -341,7 +341,7 @@ function disableNestedIncludes(nodes: readonly AstNode[]): AstNode[] {
       caption: disableNestedInlineIncludes(node.caption),
       rows: node.rows.map((row) => ({
         ...row,
-        cells: row.cells.map((cell) => ({
+        cells: row.condition?.state === 'hidden' ? row.cells : row.cells.map((cell) => ({
           ...cell,
           children: disableNestedInlineIncludes(cell.children),
           ...(cell.blocks ? { blocks: disableNestedIncludes(cell.blocks) } : {}),

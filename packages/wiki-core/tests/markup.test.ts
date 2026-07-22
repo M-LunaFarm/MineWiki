@@ -1149,6 +1149,43 @@ test('renders NamuMark table captions and explicit header rows semantically', ()
   assert.match(html, /<tbody><tr><td>MineWiki<\/td><td>온라인<\/td><\/tr><\/tbody>/);
 });
 
+test('renders bounded rowif table conditions without leaking hidden row content or metadata', () => {
+  const parsed = parseMarkup([
+    '||<rowif=true><thead>표시 머리||값||',
+    '||<rowif=false>숨김 [[비밀 링크]] [[파일:secret.png]] [include(틀:비밀)] [[분류:비밀]] <math>x</math>||값||',
+    '||일반 행||값||',
+  ].join('\n'));
+  const html = renderDocument(parsed.ast);
+
+  assert.match(html, /<thead>[^]*표시 머리/u);
+  assert.match(html, /<tbody>[^]*일반 행/u);
+  assert.doesNotMatch(html, /rowif|숨김|비밀 링크|secret\.png|틀:비밀/u);
+  assert.doesNotMatch(parsed.plainText, /숨김|비밀 링크|secret\.png|틀:비밀/u);
+  assert.deepEqual(parsed.includes, []);
+  assert.deepEqual(parsed.categories, []);
+  assert.deepEqual([...collectWikiFileNames(parsed.ast)], []);
+  assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], []);
+});
+
+test('reevaluates rowif with include parameters and rejects executable expressions', () => {
+  const template = parseMarkup([
+    '||<rowif=edition == "java" && defined(version)>Java @version@||',
+    '||<rowif=calleeTitle == "틀:호출자">예약 값||',
+    '||<rowif=value.constructor>실행 금지||',
+  ].join('\n'));
+  const expanded = applyIncludeParametersToAst(template.ast, {
+    edition: 'java',
+    version: '1.21',
+    calleeTitle: '위조',
+  }, 'inc-1-', { calleeTitle: '틀:호출자' });
+  const html = renderDocument(expanded);
+
+  assert.match(html, /Java 1\.21/u);
+  assert.match(html, /예약 값/u);
+  assert.doesNotMatch(html, /실행 금지|rowif/u);
+  assert.ok(template.errors.some((error) => error.includes('지원되지 않는 조건식 문자')));
+});
+
 test('renders safe thetree table spacing and word-preservation modifiers', () => {
   const parsed = parseMarkup([
     '||<thead><nopad><sortable>헤더||<thead><colkeepall>긴 단어 열||',
