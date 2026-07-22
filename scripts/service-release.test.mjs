@@ -8,6 +8,8 @@ import {
   prepareServiceRelease,
   rollbackServiceRelease,
   SERVICE_DEFINITIONS,
+  sha256Directory,
+  sha256WorkspacePackage,
 } from './service-release-lib.mjs';
 
 async function createFixture() {
@@ -40,11 +42,17 @@ async function createFixture() {
 
 test('prepares an immutable service set and swaps current/previous during rollback', async () => {
   const repoRoot = await createFixture();
+  const packageRoot = path.join(repoRoot, 'packages/config');
   try {
     const first = await prepareServiceRelease(repoRoot, {
       createdAt: new Date('2026-07-22T00:00:00.000Z'),
     });
     assert.equal(await readlink(path.join(repoRoot, '.releases/services/current')), first.releaseKey);
+    assert.equal(
+      first.services.api.distSha256,
+      await sha256Directory(path.join(repoRoot, 'apps/api/dist')),
+    );
+    assert.equal(first.workspacePackageSha256.config, await sha256WorkspacePackage(packageRoot));
     assert.equal(
       await readFile(
         path.join(repoRoot, '.releases/services', first.releaseKey, 'packages/config/dist/index.js'),
@@ -76,11 +84,18 @@ test('prepares an immutable service set and swaps current/previous during rollba
     });
     assert.equal(await readlink(path.join(repoRoot, '.releases/services/current')), second.releaseKey);
     assert.equal(await readlink(path.join(repoRoot, '.releases/services/previous')), first.releaseKey);
+    assert.notEqual(second.releaseKey.slice(-12), first.releaseKey.slice(-12));
+
+    await writeFile(path.join(packageRoot, 'dist/index.js'), 'module.exports = { frozen: false };\n', 'utf8');
+    const workspaceChanged = await prepareServiceRelease(repoRoot, {
+      createdAt: new Date('2026-07-22T00:00:02.000Z'),
+    });
+    assert.notEqual(workspaceChanged.releaseKey.slice(-12), second.releaseKey.slice(-12));
 
     const rollback = await rollbackServiceRelease(repoRoot);
-    assert.deepEqual(rollback, { current: first.releaseKey, previous: second.releaseKey });
-    assert.equal(await readlink(path.join(repoRoot, '.releases/services/current')), first.releaseKey);
-    assert.equal(await readlink(path.join(repoRoot, '.releases/services/previous')), second.releaseKey);
+    assert.deepEqual(rollback, { current: second.releaseKey, previous: workspaceChanged.releaseKey });
+    assert.equal(await readlink(path.join(repoRoot, '.releases/services/current')), second.releaseKey);
+    assert.equal(await readlink(path.join(repoRoot, '.releases/services/previous')), workspaceChanged.releaseKey);
   } finally {
     await rm(repoRoot, { recursive: true, force: true });
   }

@@ -15,6 +15,40 @@ export async function sha256File(filePath) {
   return createHash('sha256').update(await readFile(filePath)).digest('hex');
 }
 
+async function appendDirectoryHash(hash, root, relativeRoot = '') {
+  const directory = path.join(root, relativeRoot);
+  const entries = (await readdir(directory, { withFileTypes: true }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const relativePath = path.posix.join(relativeRoot.split(path.sep).join('/'), entry.name);
+    if (entry.isDirectory()) {
+      await appendDirectoryHash(hash, root, relativePath);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    hash.update(relativePath).update('\0').update(await sha256File(path.join(root, relativePath))).update('\0');
+  }
+}
+
+export async function sha256Directory(root) {
+  const hash = createHash('sha256');
+  await appendDirectoryHash(hash, root);
+  return hash.digest('hex');
+}
+
+export async function sha256WorkspacePackage(root) {
+  const hash = createHash('sha256');
+  const rootEntries = (await readdir(root, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && (entry.name === 'package.json' || /\.(?:c?js|mjs|json)$/u.test(entry.name)))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of rootEntries) {
+    hash.update(entry.name).update('\0').update(await sha256File(path.join(root, entry.name))).update('\0');
+  }
+  const distRoot = path.join(root, 'dist');
+  if (existsSync(distRoot)) await appendDirectoryHash(hash, root, 'dist');
+  return hash.digest('hex');
+}
+
 export function assertReleaseKey(releaseKey) {
   if (!RELEASE_KEY_PATTERN.test(releaseKey)) {
     throw new Error(`Invalid service release key: ${releaseKey}`);
@@ -80,8 +114,17 @@ export async function prepareServiceRelease(repoRoot, options = {}) {
       throw new Error(`Missing ${service} build output: ${entrypoint}`);
     }
     const entrypointSha256 = await sha256File(entrypoint);
-    sourceFingerprint.update(service).update(entrypointSha256);
-    serviceManifest[service] = { ...definition, entrypointSha256 };
+    const distSha256 = await sha256Directory(path.join(repoRoot, definition.appRoot, 'dist'));
+    sourceFingerprint.update(service).update(distSha256);
+    serviceManifest[service] = { ...definition, entrypointSha256, distSha256 };
+  }
+
+  const workspacePackages = await discoverWorkspacePackages(repoRoot);
+  const workspacePackageSha256 = {};
+  for (const [packageName, sourceRoot] of [...workspacePackages.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const packageSha256 = await sha256WorkspacePackage(sourceRoot);
+    workspacePackageSha256[packageName] = packageSha256;
+    sourceFingerprint.update(packageName).update(packageSha256);
   }
 
   const releaseKey = `${createdAt.getTime()}-${sourceFingerprint.digest('hex').slice(0, 12)}`;
@@ -98,7 +141,6 @@ export async function prepareServiceRelease(repoRoot, options = {}) {
     );
   }
 
-  const workspacePackages = await discoverWorkspacePackages(repoRoot);
   for (const [packageName, sourceRoot] of workspacePackages) {
     const destinationRoot = path.join(releaseRoot, 'packages', packageName);
     await copyWorkspacePackage(sourceRoot, destinationRoot);
@@ -114,6 +156,7 @@ export async function prepareServiceRelease(repoRoot, options = {}) {
     dependencyLockSha256,
     services: serviceManifest,
     workspacePackages: [...workspacePackages.keys()].sort(),
+    workspacePackageSha256,
   };
   await writeFile(path.join(releaseRoot, 'release.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 

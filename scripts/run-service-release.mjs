@@ -2,7 +2,7 @@ import Module from 'node:module';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { assertReleaseKey, SERVICE_DEFINITIONS, sha256File } from './service-release-lib.mjs';
+import { assertReleaseKey, SERVICE_DEFINITIONS, sha256Directory, sha256File, sha256WorkspacePackage } from './service-release-lib.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const service = process.env.MINEWIKI_SERVICE?.trim();
@@ -31,6 +31,23 @@ if (!entrypoint.startsWith(`${releaseRoot}${path.sep}`) || !existsSync(entrypoin
 }
 if (await sha256File(entrypoint) !== serviceManifest.entrypointSha256) {
   throw new Error(`Service release entrypoint checksum mismatch for ${service}.`);
+}
+if (serviceManifest.distSha256
+  && await sha256Directory(path.join(releaseRoot, serviceManifest.appRoot, 'dist')) !== serviceManifest.distSha256) {
+  throw new Error(`Service release tree checksum mismatch for ${service}.`);
+}
+if (manifest.workspacePackageSha256 && typeof manifest.workspacePackageSha256 === 'object') {
+  for (const [packageName, expectedSha256] of Object.entries(manifest.workspacePackageSha256)) {
+    if (!/^[a-z0-9-]+$/u.test(packageName) || typeof expectedSha256 !== 'string') {
+      throw new Error('Service release workspace checksum manifest is invalid.');
+    }
+    const packageRoot = path.join(releaseRoot, 'packages', packageName);
+    if (!packageRoot.startsWith(`${path.join(releaseRoot, 'packages')}${path.sep}`)
+      || !existsSync(packageRoot)
+      || await sha256WorkspacePackage(packageRoot) !== expectedSha256) {
+      throw new Error(`Service release workspace checksum mismatch for @minewiki/${packageName}.`);
+    }
+  }
 }
 
 const externalModulePaths = [
