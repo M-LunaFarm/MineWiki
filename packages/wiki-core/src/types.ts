@@ -124,7 +124,7 @@ export type AstNode =
       children?: AstNode[];
     }
   | { type: 'component'; name: string; props: Record<string, string> }
-  | { type: 'category'; title: string }
+  | { type: 'category'; title: string; label: string | null; blurred: boolean }
   | { type: 'file'; fileName: string; thumbnail: boolean; caption: string | null; display?: WikiFileDisplayOptions }
   | { type: 'redirect'; target: string }
   | { type: 'math_block'; source: string; error: string | null }
@@ -167,6 +167,7 @@ export interface ParsedDocument {
   ast: AstNode[];
   links: string[];
   categories: string[];
+  categoryLinks: WikiCategoryLink[];
   includes: string[];
   components: Array<{ name: string; props: Record<string, string> }>;
   headings: Array<{ level: number; title: string; anchor: string; startLine: number; endLine: number }>;
@@ -175,4 +176,10 @@ export interface ParsedDocument {
   plainText: string;
   errors: string[];
   blockingErrors: string[];
+}
+
+export interface WikiCategoryLink {
+  title: string;
+  label: string | null;
+  blurred: boolean;
 }

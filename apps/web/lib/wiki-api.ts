@@ -85,6 +85,11 @@ export interface WikiPageResponse {
   readonly html: string;
   readonly links: string[];
   readonly categories: string[];
+  readonly categoryTags: ReadonlyArray<{
+    readonly title: string;
+    readonly label: string | null;
+    readonly blurred: boolean;
+  }>;
   readonly headings: ReadonlyArray<{
     readonly level: number;
     readonly title: string;

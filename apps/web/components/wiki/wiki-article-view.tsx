@@ -175,13 +175,13 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
             currentRevisionId={page.revision.id}
             routePath={routePath}
           />
-          {page.categories.length > 0 ? (
+          {page.categoryTags.length > 0 ? (
             <section className="surface-flat p-4">
               <h2 className="text-sm font-semibold text-white">분류</h2>
               <div className="mt-3 flex flex-wrap gap-2">
-                {page.categories.map((category) => (
-                  <Link key={category} href={`/wiki/category/${encodeURIComponent(category)}`} className="chip chip-muted hover:border-emerald-300/40 hover:text-emerald-100">
-                    {category}
+                {page.categoryTags.map((category) => (
+                  <Link key={category.title} href={`/wiki/category/${encodeURIComponent(category.title)}`} className={`chip chip-muted hover:border-emerald-300/40 hover:text-emerald-100 ${category.blurred ? 'blur-sm transition-[filter] hover:blur-none focus:blur-none' : ''}`}>
+                    {category.label ?? category.title}
                   </Link>
                 ))}
               </div>

@@ -19,6 +19,7 @@ import type {
   AstNode,
   InlineNode,
   ParsedDocument,
+  WikiCategoryLink,
   WikiFileDisplayOptions,
   WikiListKind,
   WikiListNode,
@@ -36,7 +37,7 @@ import {
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 import { evaluateConditionalExpression } from './conditional.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.34.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.35.0';
 const MAX_HIGHLIGHT_CODE_LENGTH = 100_000;
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
@@ -319,6 +320,7 @@ function mergeNestedMetadata(
   target: {
     links: Set<string>;
     categories: Set<string>;
+    categoryLinks: Map<string, WikiCategoryLink>;
     includes: string[];
     components: Array<{ name: string; props: Record<string, string> }>;
     footnotes: string[];
@@ -328,6 +330,9 @@ function mergeNestedMetadata(
 ) {
   nested.links.forEach((link) => target.links.add(link));
   nested.categories.forEach((category) => target.categories.add(category));
+  nested.categoryLinks.forEach((category) => {
+    if (!target.categoryLinks.has(category.title)) target.categoryLinks.set(category.title, category);
+  });
   target.includes.push(...nested.includes);
   target.components.push(...nested.components);
   target.footnotes.push(...nested.footnotes);
@@ -367,6 +372,7 @@ function parseMarkupDocument(
   const ast: AstNode[] = [];
   const links = new Set<string>();
   const categories = new Set<string>();
+  const categoryLinks = new Map<string, WikiCategoryLink>();
   const includes: string[] = [];
   const components: Array<{ name: string; props: Record<string, string> }> = [];
   const errors: string[] = [];
@@ -412,7 +418,7 @@ function parseMarkupDocument(
         }
         i -= 1;
         const nested = parseMarkupDocument(indentLines.join('\n'), options, foldingDepth + 1, 'indent');
-        mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
+        mergeNestedMetadata(nested, { links, categories, categoryLinks, includes, components, footnotes, errors, blockingErrors });
         ast.push({ type: 'indent', children: nested.ast });
         continue;
       }
@@ -423,7 +429,7 @@ function parseMarkupDocument(
       const expression = conditional[1]?.trim() ?? '';
       const block = readNestedTripleBraceBlock(lines, i);
       const nested = parseMarkupDocument(block.body.join('\n'), options, foldingDepth + 1);
-      mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
+      mergeNestedMetadata(nested, { links, categories, categoryLinks, includes, components, footnotes, errors, blockingErrors });
       const evaluation = evaluateConditionalExpression(expression, {});
       if (evaluation.error) errors.push(`조건식 오류: ${evaluation.error}`);
       if (!block.closed) errors.push('닫히지 않은 조건 블록을 문서 끝까지 처리했습니다.');
@@ -441,7 +447,7 @@ function parseMarkupDocument(
     if (wikiStyle) {
       const block = readNestedTripleBraceBlock(lines, i);
       const nested = parseMarkupDocument(block.body.join('\n'), options, foldingDepth + 1);
-      mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
+      mergeNestedMetadata(nested, { links, categories, categoryLinks, includes, components, footnotes, errors, blockingErrors });
       const parsedStyle = parseWikiStyleAttributes(wikiStyle[1] ?? '');
       if (parsedStyle.ignored) {
         errors.push('지원되지 않는 wiki style 속성을 무시했습니다.');
@@ -501,6 +507,9 @@ function parseMarkupDocument(
       const nested = parseMarkupDocument(bodyLines.join('\n'), options, foldingDepth + 1);
       nested.links.forEach((link) => links.add(link));
       nested.categories.forEach((categoryTitle) => categories.add(categoryTitle));
+      nested.categoryLinks.forEach((category) => {
+        if (!categoryLinks.has(category.title)) categoryLinks.set(category.title, category);
+      });
       nested.includes.forEach((target) => includes.push(target));
       nested.components.forEach((component) => components.push(component));
       nested.footnotes.forEach((note) => footnotes.push(note));
@@ -593,17 +602,31 @@ function parseMarkupDocument(
       continue;
     }
 
-    const inlineCategories = [...line.matchAll(/\[\[분류:([^|\]]+)(?:\|[^\]]*)?\]\]/g)];
+    const categoryPattern = /\[\[분류:([^|\]#]+?)(?:#(blur))?(?:\|([^\]]*))?\]\]/giu;
+    const inlineCategories = [...line.matchAll(categoryPattern)];
     if (inlineCategories.length > 0) {
       for (const category of inlineCategories) {
         const title = normalizeTitle(category[1] ?? '');
-        if (title) categories.add(title);
+        if (!title) continue;
+        categories.add(title);
+        if (!categoryLinks.has(title)) {
+          categoryLinks.set(title, {
+            title,
+            label: category[3]?.trim() || null,
+            blurred: category[2]?.toLowerCase() === 'blur',
+          });
+        }
       }
-      line = line.replace(/\[\[분류:([^|\]]+)(?:\|[^\]]*)?\]\]/g, '').trimEnd();
+      line = line.replace(categoryPattern, '').trimEnd();
       if (!line.trim()) {
         for (const category of inlineCategories) {
           const title = normalizeTitle(category[1] ?? '');
-          if (title) ast.push({ type: 'category', title });
+          if (title) ast.push({
+            type: 'category',
+            title,
+            label: category[3]?.trim() || null,
+            blurred: category[2]?.toLowerCase() === 'blur',
+          });
         }
         continue;
       }
@@ -650,7 +673,7 @@ function parseMarkupDocument(
       }
       i -= 1;
       const nested = parseMarkupDocument(quoteLines.join('\n'), options, foldingDepth + 1, 'blockquote');
-      mergeNestedMetadata(nested, { links, categories, includes, components, footnotes, errors, blockingErrors });
+      mergeNestedMetadata(nested, { links, categories, categoryLinks, includes, components, footnotes, errors, blockingErrors });
       ast.push({ type: 'blockquote', children: nested.ast });
       continue;
     }
@@ -696,7 +719,7 @@ function parseMarkupDocument(
           tableStart.firstRow,
           tableOptions,
           tableParseState,
-          { links, categories, includes, components, footnotes, errors, blockingErrors },
+          { links, categories, categoryLinks, includes, components, footnotes, errors, blockingErrors },
           options,
           foldingDepth,
         );
@@ -710,7 +733,7 @@ function parseMarkupDocument(
           logicalRow.source,
           tableOptions,
           tableParseState,
-          { links, categories, includes, components, footnotes, errors, blockingErrors },
+          { links, categories, categoryLinks, includes, components, footnotes, errors, blockingErrors },
           options,
           foldingDepth,
         );
@@ -771,6 +794,7 @@ function parseMarkupDocument(
     ast,
     links: [...links],
     categories: [...categories],
+    categoryLinks: [...categoryLinks.values()],
     includes,
     components,
     headings: headings.map((heading) => ({
@@ -881,6 +905,7 @@ function rejectedDocument(message: string): ParsedDocument {
     ast: [],
     links: [],
     categories: [],
+    categoryLinks: [],
     includes: [],
     components: [],
     headings: [],
@@ -1058,6 +1083,7 @@ function parseWikiTableRow(
   metadata: {
     links: Set<string>;
     categories: Set<string>;
+    categoryLinks: Map<string, WikiCategoryLink>;
     includes: string[];
     components: Array<{ name: string; props: Record<string, string> }>;
     footnotes: string[];
@@ -1968,7 +1994,11 @@ export function applyIncludeParametersToAst(
       ...node,
       props: Object.fromEntries(Object.entries(node.props).map(([key, value]) => [key, replace(value)]))
     };
-    if (node.type === 'category') return { ...node, title: replace(node.title) };
+    if (node.type === 'category') return {
+      ...node,
+      title: replace(node.title),
+      label: node.label === null ? null : replace(node.label),
+    };
     if (node.type === 'file') return {
       ...node,
       fileName: replace(node.fileName),

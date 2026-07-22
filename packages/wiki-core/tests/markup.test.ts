@@ -376,10 +376,14 @@ test('math parsing enforces per-formula and per-document resource bounds', () =>
   assert.match(transcluded, /수식 문법 오류/);
 });
 
-test('extracts inline categories without rendering them as document links', () => {
-  const parsed = parseMarkup('본문 끝 [[분류:가이드|정렬 키]] [[분류:초보자]]');
+test('extracts category display labels and blur metadata without corrupting target titles', () => {
+  const parsed = parseMarkup('본문 끝 [[분류:가이드|초보자 안내]] [[분류:초보자#blur]]');
 
   assert.deepEqual(parsed.categories, ['가이드', '초보자']);
+  assert.deepEqual(parsed.categoryLinks, [
+    { title: '가이드', label: '초보자 안내', blurred: false },
+    { title: '초보자', label: null, blurred: true },
+  ]);
   assert.deepEqual(parsed.links, []);
   assert.equal(renderDocument(parsed.ast).includes('분류:'), false);
   assert.match(renderDocument(parsed.ast), /본문 끝/);
