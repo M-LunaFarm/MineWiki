@@ -136,7 +136,7 @@ test('renders recursive inline markup in footnotes and keeps named definitions r
   const parsed = parseMarkup("먼저[*note]\n나중[*note [[출처]]와 '''설명''']\n다시[*note]\n[각주]");
   const html = renderDocument(parsed.ast);
 
-  assert.match(html, /id="fn-1"><a[^>]+>출처<\/a>와 <strong>설명<\/strong> <span class="wiki-footnote-backlinks"/u);
+  assert.match(html, /id="fn-1"><span class="wiki-footnote-label">\[note\]<\/span> <a[^>]+>출처<\/a>와 <strong>설명<\/strong> <span class="wiki-footnote-backlinks"/u);
   assert.equal((html.match(/id="fn-1"/gu) ?? []).length, 1);
   assert.equal((html.match(/class="wiki-footnote-ref"/gu) ?? []).length, 3);
   assert.deepEqual([...collectWikiLinkTargets(parsed.ast)], ['출처']);
@@ -154,7 +154,7 @@ test('interpolates include parameters inside rich heading, link, and footnote ch
 
   assert.match(html, /<h2 id="inc-s-1"><span class="wiki-anchor" id="inc-제목"><\/span><strong>&lt;제목&gt;<\/strong><\/h2>/u);
   assert.match(html, /<a[^>]+><em>&lt;라벨&gt;<\/em><\/a>/u);
-  assert.match(html, /id="fn-1"><strong>&lt;설명&gt;<\/strong>/u);
+  assert.match(html, /id="fn-1"><span class="wiki-footnote-label">\[note\]<\/span> <strong>&lt;설명&gt;<\/strong>/u);
   assert.doesNotMatch(html, /<제목>|<라벨>|<설명>/u);
 });
 
@@ -996,7 +996,16 @@ test('ignores unsafe table controls and reports a non-blocking warning', () => {
   assert.equal(parsed.errors.some((error) => error.includes('표 제어자')), true);
   assert.equal(html.includes('position:fixed'), false);
   assert.equal(html.includes('javascript:'), false);
-  assert.match(html, />안전<\/th>/);
+  assert.match(html, />안전<\/td>/);
+});
+
+test('keeps ordinary NamuMark table rows in tbody unless thead is explicit', () => {
+  const ordinary = renderDocument(parseMarkup('||항목||값||\n||서버||온라인||').ast);
+  const explicit = renderDocument(parseMarkup('||<thead>항목||값||\n||서버||온라인||').ast);
+
+  assert.match(ordinary, /<tbody><tr><td>항목<\/td><td>값<\/td><\/tr><tr><td>서버<\/td><td>온라인<\/td><\/tr><\/tbody>/u);
+  assert.equal(ordinary.includes('<thead>'), false);
+  assert.match(explicit, /<thead><tr><th>항목<\/th><th>값<\/th><\/tr><\/thead>/u);
 });
 
 test('renders NamuMark table captions and explicit header rows semantically', () => {
@@ -1089,7 +1098,7 @@ test('parses multiline block content inside NamuMark table cells without splitti
   const html = renderDocument(parsed.ast, {
     files: { 'inside.png': { url: '/inside.png', mimeType: 'image/png', originalName: 'inside.png' } },
   });
-  assert.match(html, /<th><details class="fold wiki-fold"><summary>세부 정보<\/summary>/u);
+  assert.match(html, /<td><details class="fold wiki-fold"><summary>세부 정보<\/summary>/u);
   assert.match(html, /<pre class="codeblock"[^>]*><code>literal \|\| delimiter<\/code><\/pre>/u);
   assert.match(html, /표 다음 문단/u);
   assert.equal(html.includes('<h2'), false);
@@ -1283,7 +1292,7 @@ test('consumes invalid row and column colors without exposing unsafe syntax', ()
   assert.equal(html.includes('javascript:'), false);
   assert.equal(html.includes('rowbgcolor'), false);
   assert.equal(html.includes('colcolor'), false);
-  assert.match(html, />안전<\/th>/);
+  assert.match(html, />안전<\/td>/);
 });
 
 test('accepts compact NamuMark table captions and interpolates include parameters safely', () => {
@@ -1575,6 +1584,8 @@ test('reuses named footnotes with one note and a backlink for every reference', 
   assert.match(html, /id="fnref-1-1"/);
   assert.match(html, /id="fnref-1-2"/);
   assert.match(html, /href="#fnref-1-1"[^>]*>↩1<\/a> <a href="#fnref-1-2"[^>]*>↩2<\/a>/);
+  assert.equal((html.match(/>\[source\]</gu) ?? []).length, 3);
+  assert.match(html, /<span class="wiki-footnote-label">\[source\]<\/span> 공식 문서/u);
 });
 
 test('updates backlinks when a named footnote is reused after an in-document marker', () => {
@@ -1582,7 +1593,7 @@ test('updates backlinks when a named footnote is reused after an in-document mar
   const html = renderDocument(parsed.ast);
 
   assert.equal((html.match(/<section class="footnotes">/g) ?? []).length, 1);
-  assert.match(html, /id="fn-1">공식 문서[^<]*<span class="wiki-footnote-backlinks"[^>]*><a href="#fnref-1-1"[^>]*>↩1<\/a> <a href="#fnref-1-2"[^>]*>↩2<\/a>/);
+  assert.match(html, /id="fn-1"><span class="wiki-footnote-label">\[source\]<\/span> 공식 문서[^<]*<span class="wiki-footnote-backlinks"[^>]*><a href="#fnref-1-1"[^>]*>↩1<\/a> <a href="#fnref-1-2"[^>]*>↩2<\/a>/);
   assert.ok(html.indexOf('id="fn-1"') < html.indexOf('표시 뒤 재참조'));
 });
 
@@ -1590,8 +1601,8 @@ test('resolves forward named references and XML-style reusable notes safely', ()
   const parsed = parseMarkup('먼저[*later] XML<ref name="xml" />\n정의[*later 나중 정의] <ref name="xml">XML 정의</ref>');
   const html = renderDocument(parsed.ast);
 
-  assert.match(html, /id="fn-1">나중 정의/);
-  assert.match(html, /id="fn-2">XML 정의/);
+  assert.match(html, /id="fn-1"><span class="wiki-footnote-label">\[later\]<\/span> 나중 정의/);
+  assert.match(html, /id="fn-2"><span class="wiki-footnote-label">\[xml\]<\/span> XML 정의/);
   assert.equal((html.match(/href="#fn-1"/g) ?? []).length, 2);
   assert.equal((html.match(/href="#fn-2"/g) ?? []).length, 2);
   assert.equal(html.includes('<ref'), false);
@@ -1601,7 +1612,7 @@ test('renders an explicit safe label for an undefined named footnote', () => {
   const parsed = parseMarkup('미정의 참조[*missing]');
   const html = renderDocument(parsed.ast);
 
-  assert.match(html, /id="fn-1">정의되지 않은 각주: missing/);
+  assert.match(html, /id="fn-1"><span class="wiki-footnote-label">\[missing\]<\/span> 정의되지 않은 각주: missing/);
   assert.equal(html.includes('undefined'), false);
 });
 

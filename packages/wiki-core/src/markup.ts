@@ -37,7 +37,7 @@ import {
 import { normalizeTitle, slugifyTitle } from './normalize.js';
 import { evaluateConditionalExpression } from './conditional.js';
 
-export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.35.0';
+export const WIKI_RENDERER_VERSION = 'minewiki-bwm-0.36.0';
 const MAX_HIGHLIGHT_CODE_LENGTH = 100_000;
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
 const MAX_FOLDING_DEPTH = 16;
@@ -2872,7 +2872,10 @@ function renderFootnoteSection(
       const content = note.children?.length
         ? renderInline(note.children, footnotes, options)
         : escapeHtml(text);
-      return `<li id="fn-${number}">${content}${backlinks ? ` ${backlinks}` : ''}</li>`;
+      const label = note.name
+        ? `<span class="wiki-footnote-label">[${escapeHtml(note.name)}]</span> `
+        : '';
+      return `<li id="fn-${number}">${label}${content}${backlinks ? ` ${backlinks}` : ''}</li>`;
     })
     .join('');
   return `<section class="footnotes"><h2>각주</h2><ol${listStart}>${items}</ol></section>`;
@@ -3115,7 +3118,8 @@ export function renderInline(nodes: InlineNode[], footnotes: FootnoteRenderState
       const entry = footnotes.entries[index - 1]!;
       const referenceId = `fnref-${index}-${entry.referenceIds.length + 1}`;
       entry.referenceIds.push(referenceId);
-      return `<sup class="wiki-footnote-ref" id="${referenceId}"><a href="#fn-${index}" aria-label="각주 ${index}">[${index}]</a></sup>`;
+      const visibleLabel = node.name ?? String(index);
+      return `<sup class="wiki-footnote-ref" id="${referenceId}"><a href="#fn-${index}" aria-label="각주 ${escapeAttr(visibleLabel)}">[${escapeHtml(visibleLabel)}]</a></sup>`;
     })
     .join('');
 }
@@ -3666,11 +3670,10 @@ function renderWikiTable(
     'margin-right': tableOptions.align === 'center' ? 'auto' : undefined
   });
   const wrapperClass = tableOptions.align ? `table-scroll table-${tableOptions.align}` : 'table-scroll';
-  const hasExplicitHeaders = rows.some((row) => row.cells.some((cell) => cell.header));
   let bodyStarted = false;
-  const renderedRows = rows.map((row, rowIndex) => {
+  const renderedRows = rows.map((row) => {
     const requestedHeader = row.cells.some((cell) => cell.header);
-    const isHeader = hasExplicitHeaders ? requestedHeader && !bodyStarted : rowIndex === 0;
+    const isHeader = requestedHeader && !bodyStarted;
     if (!isHeader) bodyStarted = true;
     const rowStyles = styleAttribute({
       color: row.color,
