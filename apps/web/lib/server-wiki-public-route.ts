@@ -1,4 +1,5 @@
 import { getSiteUrl } from './metadata';
+import { rewriteWikiRenderedMedia } from './wiki-rendered-media.mjs';
 
 export const CUSTOM_DOMAIN_HOST_HEADER = 'x-minewiki-custom-host';
 export const CUSTOM_DOMAIN_SITE_SLUG_HEADER = 'x-minewiki-site-slug';
@@ -38,9 +39,10 @@ export function rewriteServerWikiHtmlLinks(
   html: string,
   context?: ServerWikiPublicRouteContext | null,
 ): string {
-  if (!context) return html;
+  if (!context) return rewriteWikiRenderedMedia(html);
+  const renderedHtml = rewriteWikiRenderedMedia(html, { platformOrigin: getSiteUrl() });
   const prefix = `/serverWiki/${encodeURIComponent(context.siteSlug)}`;
-  const links = html.replace(/\bhref=(['"])([^'"]+)\1/giu, (match, quote: string, href: string) => {
+  const links = renderedHtml.replace(/\bhref=(['"])([^'"]+)\1/giu, (match, quote: string, href: string) => {
     if (href !== prefix && !href.startsWith(`${prefix}/`) && !href.startsWith(`${prefix}?`) && !href.startsWith(`${prefix}#`)) {
       return match;
     }

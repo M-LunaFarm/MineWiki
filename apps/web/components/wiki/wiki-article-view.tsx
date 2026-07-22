@@ -6,6 +6,7 @@ import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiTo
 import { WikiPageTools } from './wiki-page-tools';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
 import { WikiReaderInteractionHydrator } from './wiki-reader-interaction-hydrator';
+import { rewriteWikiRenderedMedia } from '../../lib/wiki-rendered-media.mjs';
 
 interface WikiArticleViewProps {
   readonly page: WikiPageResponse;
@@ -95,7 +96,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
         <article
           id={contentId}
           className="wiki-rendered wiki-mobile-full min-w-0"
-          dangerouslySetInnerHTML={{ __html: page.html }}
+          dangerouslySetInnerHTML={{ __html: rewriteWikiRenderedMedia(page.html) }}
         />
         <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
         <WikiReaderInteractionHydrator targetId={contentId} revisionId={page.revision.id} />
