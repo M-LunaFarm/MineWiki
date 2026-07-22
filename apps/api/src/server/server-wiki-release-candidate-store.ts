@@ -369,7 +369,8 @@ function restoreStoredCandidate(
   if (embeddedSnapshotVersion === 3) {
     const rawLinks = Array.isArray(rawRelease?.links) ? rawRelease.links : [];
     if (rawLinks.some((link) => !link || typeof link !== 'object' || Array.isArray(link)
-      || !Object.hasOwn(link, 'categoryLabel') || !Object.hasOwn(link, 'categoryBlurred'))) {
+      || !Object.prototype.hasOwnProperty.call(link, 'categoryLabel')
+      || !Object.prototype.hasOwnProperty.call(link, 'categoryBlurred'))) {
       throw candidateCorrupt();
     }
   }
