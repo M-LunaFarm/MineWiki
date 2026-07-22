@@ -37,6 +37,16 @@ async function copyWorkspacePackage(sourceRoot, destinationRoot) {
       await cp(path.join(sourceRoot, entry.name), path.join(destinationRoot, entry.name), { force: true });
     }
   }
+
+  const sourceModules = path.join(sourceRoot, 'node_modules');
+  if (!existsSync(sourceModules)) return;
+  const destinationModules = path.join(destinationRoot, 'node_modules');
+  await mkdir(destinationModules, { recursive: true });
+  for (const entry of await readdir(sourceModules, { withFileTypes: true })) {
+    if (entry.name === '@minewiki' || entry.name.startsWith('.')) continue;
+    const sourceDependency = path.join(sourceModules, entry.name);
+    await symlink(await realpath(sourceDependency), path.join(destinationModules, entry.name));
+  }
 }
 
 async function discoverWorkspacePackages(repoRoot) {
@@ -61,6 +71,8 @@ export async function prepareServiceRelease(repoRoot, options = {}) {
   const createdAt = options.createdAt ?? new Date();
   const sourceFingerprint = createHash('sha256');
   const serviceManifest = {};
+  const dependencyLockSha256 = await sha256File(path.join(repoRoot, 'pnpm-lock.yaml'));
+  sourceFingerprint.update(dependencyLockSha256);
 
   for (const [service, definition] of Object.entries(SERVICE_DEFINITIONS)) {
     const entrypoint = path.join(repoRoot, definition.appRoot, definition.entrypoint);
@@ -99,6 +111,7 @@ export async function prepareServiceRelease(repoRoot, options = {}) {
     releaseKey,
     createdAt: createdAt.toISOString(),
     nodeVersion: process.version,
+    dependencyLockSha256,
     services: serviceManifest,
     workspacePackages: [...workspacePackages.keys()].sort(),
   };

@@ -12,6 +12,7 @@ import {
 
 async function createFixture() {
   const repoRoot = await mkdtemp(path.join(os.tmpdir(), 'minewiki-service-release-'));
+  await writeFile(path.join(repoRoot, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n', 'utf8');
   for (const [service, definition] of Object.entries(SERVICE_DEFINITIONS)) {
     const entrypoint = path.join(repoRoot, definition.appRoot, definition.entrypoint);
     await mkdir(path.dirname(entrypoint), { recursive: true });
@@ -26,6 +27,11 @@ async function createFixture() {
     'utf8',
   );
   await writeFile(path.join(packageRoot, 'dist/index.js'), 'module.exports = { frozen: true };\n', 'utf8');
+  const externalDependency = path.join(repoRoot, 'node_modules/.pnpm/pino/node_modules/pino');
+  await mkdir(externalDependency, { recursive: true });
+  await writeFile(path.join(externalDependency, 'package.json'), '{"name":"pino"}\n', 'utf8');
+  await mkdir(path.join(packageRoot, 'node_modules'), { recursive: true });
+  await symlink(externalDependency, path.join(packageRoot, 'node_modules/pino'));
   const scopeRoot = path.join(repoRoot, 'apps/api/node_modules/@minewiki');
   await mkdir(scopeRoot, { recursive: true });
   await symlink(path.relative(scopeRoot, packageRoot), path.join(scopeRoot, 'config'));
@@ -45,6 +51,18 @@ test('prepares an immutable service set and swaps current/previous during rollba
         'utf8',
       ),
       'module.exports = { frozen: true };\n',
+    );
+    assert.equal(
+      await readFile(
+        path.join(
+          repoRoot,
+          '.releases/services',
+          first.releaseKey,
+          'packages/config/node_modules/pino/package.json',
+        ),
+        'utf8',
+      ),
+      '{"name":"pino"}\n',
     );
 
     const apiEntrypoint = path.join(

@@ -17,6 +17,9 @@ if (!releaseRoot.startsWith(`${releasesRoot}${path.sep}`)) {
   throw new Error('Current service release escapes the releases directory.');
 }
 const manifest = JSON.parse(readFileSync(path.join(releaseRoot, 'release.json'), 'utf8'));
+if (await sha256File(path.join(repoRoot, 'pnpm-lock.yaml')) !== manifest.dependencyLockSha256) {
+  throw new Error('Service release dependency lock checksum mismatch. Prepare a new service release.');
+}
 const serviceManifest = manifest.services?.[service];
 if (!serviceManifest || serviceManifest.appRoot !== SERVICE_DEFINITIONS[service].appRoot) {
   throw new Error(`Service release manifest is invalid for ${service}.`);
