@@ -484,7 +484,7 @@ export function ServerListExplorer({
                     <span className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-lg bg-amber-500/10"><Activity className="h-5 w-5 text-amber-700" /></span>
                     <div><h2 className="font-bold text-[#252925]">투표 순위 집계 전입니다</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-[#676c64]">유효한 투표가 생긴 서버부터 정기 집계에 순위가 표시됩니다. 아래 서버는 순위 번호 없이 최신 등록순으로 안내합니다.</p></div>
                   </div>
-                  <Link href={unrankedBrowseHref} className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-[#247253] px-4 text-sm font-bold text-white transition hover:bg-[#1d6045]">등록된 서버 전체 보기</Link>
+                  <Link href={unrankedBrowseHref} className="theme-on-brand inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-[#247253] px-4 text-sm font-bold text-white transition hover:bg-[#1d6045]">등록된 서버 전체 보기</Link>
                 </section>
                 {unrankedPreview.length > 0 ? <section aria-labelledby="unranked-server-preview-title" className="divide-y divide-[#aaa79e]/55 border-b border-[#aaa79e]/55">
                   <h2 id="unranked-server-preview-title" className="sr-only">순위 집계 전 등록 서버</h2>
@@ -503,7 +503,7 @@ export function ServerListExplorer({
                 <button
                   type="button"
                   onClick={resetFilters}
-                  className="rounded-lg bg-[#252529] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#33363d]"
+                  className="theme-on-brand rounded-lg bg-[#252529] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#33363d]"
                 >
                   필터 초기화
                 </button>

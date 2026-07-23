@@ -4,6 +4,7 @@ import { Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 type Theme = 'light' | 'dark';
+const THEME_EVENT = 'minewiki:theme-change';
 
 function resolveTheme(): Theme {
   if (typeof window === 'undefined') return 'dark';
@@ -12,22 +13,48 @@ function resolveTheme(): Theme {
   return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
+function applyTheme(theme: Theme, persist = false) {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  if (persist) window.localStorage.setItem('minewiki-theme', theme);
+}
+
 export function ThemeToggle({ paper = false }: { readonly paper?: boolean }) {
   const [theme, setTheme] = useState<Theme>('dark');
 
   useEffect(() => {
     const resolved = resolveTheme();
-    document.documentElement.dataset.theme = resolved;
-    document.documentElement.style.colorScheme = resolved;
+    applyTheme(resolved);
     setTheme(resolved);
+
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const synchronize = () => {
+      const next = resolveTheme();
+      applyTheme(next);
+      setTheme(next);
+    };
+    const handleThemeEvent = (event: Event) => {
+      const next = (event as CustomEvent<Theme>).detail;
+      if (next === 'light' || next === 'dark') setTheme(next);
+    };
+    const handleMediaChange = () => {
+      if (!window.localStorage.getItem('minewiki-theme')) synchronize();
+    };
+    window.addEventListener('storage', synchronize);
+    window.addEventListener(THEME_EVENT, handleThemeEvent);
+    media.addEventListener('change', handleMediaChange);
+    return () => {
+      window.removeEventListener('storage', synchronize);
+      window.removeEventListener(THEME_EVENT, handleThemeEvent);
+      media.removeEventListener('change', handleMediaChange);
+    };
   }, []);
 
   const toggle = () => {
     const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    document.documentElement.style.colorScheme = next;
-    window.localStorage.setItem('minewiki-theme', next);
+    applyTheme(next, true);
     setTheme(next);
+    window.dispatchEvent(new CustomEvent<Theme>(THEME_EVENT, { detail: next }));
   };
 
   return (

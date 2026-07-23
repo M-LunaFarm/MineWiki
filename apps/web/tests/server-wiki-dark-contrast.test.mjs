@@ -10,6 +10,25 @@ test('server wiki rendered content overrides light ink in dark mode', () => {
   assert.ok(contrastRatio('#dce5ee', '#0b1118') >= 7, 'body copy must meet WCAG AAA contrast');
 });
 
+test('tenant accent colors are normalized for both themes and focus states', async () => {
+  const [helper, article, workspace, header, settings] = await Promise.all([
+    readFile(new URL('../lib/server-wiki-theme-colors.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../components/wiki/server-wiki-article-view.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/wiki/server-wiki-workspace.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/wiki/server-wiki-header.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/wiki/server-wiki-settings.tsx', import.meta.url), 'utf8'),
+  ]);
+  assert.match(helper, /contrast\(color, surface\) >= 4\.5/u);
+  assert.match(helper, /--server-wiki-accent-light/u);
+  assert.match(helper, /--server-wiki-accent-dark/u);
+  assert.match(article, /serverWikiThemeStyle/u);
+  assert.match(workspace, /serverWikiThemeStyle/u);
+  assert.match(header, /server-wiki-accent-chip/u);
+  assert.match(styles, /\.server-wiki-layout :is\(a, button, input, select, textarea, summary\):focus-visible/u);
+  assert.match(settings, /server-wiki-settings-savebar/u);
+  assert.match(styles, /html\[data-theme='light'\] \.server-wiki-settings-savebar/u);
+});
+
 function contrastRatio(foreground, background) {
   const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
   return (lighter + 0.05) / (darker + 0.05);

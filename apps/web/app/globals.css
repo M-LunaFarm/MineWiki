@@ -63,22 +63,44 @@ html[data-theme='dark'] .paper-directory aside button:not([class~='bg-[#13ec80]'
   color: #b9c2bb;
 }
 
-html[data-theme='dark'] .paper-directory aside [class*='text-[#2'],
-html[data-theme='dark'] .paper-directory aside [class*='text-[#3'],
-html[data-theme='dark'] .paper-directory aside [class*='text-[#4'],
-html[data-theme='dark'] .paper-directory aside [class*='text-[#5'],
-html[data-theme='dark'] .paper-directory aside [class*='text-[#6'],
-html[data-theme='dark'] .paper-directory aside [class*='text-[#7'] {
+html[data-theme='dark'] .paper-directory aside :is(
+  [class~='text-[#20231f]'],
+  [class~='text-[#20251f]'],
+  [class~='text-[#242824]'],
+  [class~='text-[#252925]'],
+  [class~='text-[#262b25]'],
+  [class~='text-[#343a34]'],
+  [class~='text-[#424841]'],
+  [class~='text-[#4e544d]'],
+  [class~='text-[#555b54]'],
+  [class~='text-[#5e655d]'],
+  [class~='text-[#5f666f]'],
+  [class~='text-[#666b63]'],
+  [class~='text-[#676c64]'],
+  [class~='text-[#6f7680]'],
+  [class~='text-[#72766e]'],
+  [class~='text-[#74786f]'],
+  [class~='text-[#777]'],
+  [class~='text-[#777b73]']
+) {
   color: #b9c2bb;
 }
 
 html[data-theme='dark'] .paper-directory .paper-server-row p,
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-gray-3'],
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-gray-4'],
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-gray-5'],
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-[#4'],
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-[#6'],
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-[#7'] {
+html[data-theme='dark'] .paper-directory .paper-server-row [class~='text-gray-300'],
+html[data-theme='dark'] .paper-directory .paper-server-row [class~='text-gray-400'],
+html[data-theme='dark'] .paper-directory .paper-server-row [class~='text-gray-500'],
+html[data-theme='dark'] .paper-directory .paper-server-row :is(
+  [class~='text-[#424841]'],
+  [class~='text-[#4e544d]'],
+  [class~='text-[#666b63]'],
+  [class~='text-[#676c64]'],
+  [class~='text-[#6f7680]'],
+  [class~='text-[#72766e]'],
+  [class~='text-[#74786f]'],
+  [class~='text-[#777]'],
+  [class~='text-[#777b73]']
+) {
   color: #aeb8b0;
 }
 
@@ -182,6 +204,11 @@ html[data-theme='light'] [class~='text-slate-50'],
 html[data-theme='light'] [class~='text-slate-100'],
 html[data-theme='light'] [class~='text-gray-100'] {
   color: #202820;
+}
+
+/* Solid brand and action surfaces retain their intentional on-color foreground. */
+.theme-on-brand {
+  color: #ffffff !important;
 }
 
 html[data-theme='light'] [class~='text-slate-300'],
@@ -693,13 +720,26 @@ html[data-theme='dark'] .paper-server-row {
   color: #e5e9e3;
 }
 
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-[#2'],
+html[data-theme='dark'] .paper-directory .paper-server-row :is(
+  [class~='text-[#20231f]'],
+  [class~='text-[#20251f]'],
+  [class~='text-[#242824]'],
+  [class~='text-[#252925]'],
+  [class~='text-[#262b25]']
+),
 html[data-theme='dark'] .paper-directory .paper-server-row a {
   color: #edf2ec;
 }
 
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-[#6'],
-html[data-theme='dark'] .paper-directory .paper-server-row [class*='text-[#7'] {
+html[data-theme='dark'] .paper-directory .paper-server-row :is(
+  [class~='text-[#666b63]'],
+  [class~='text-[#676c64]'],
+  [class~='text-[#6f7680]'],
+  [class~='text-[#72766e]'],
+  [class~='text-[#74786f]'],
+  [class~='text-[#777]'],
+  [class~='text-[#777b73]']
+) {
   color: #a4aea6;
 }
 
@@ -709,9 +749,16 @@ html[data-theme='dark'] .paper-directory > header {
   color: #e5e9e3;
 }
 
-html[data-theme='dark'] .paper-directory > header [class*='text-[#2'],
-html[data-theme='dark'] .paper-directory > header [class*='text-[#3'],
-html[data-theme='dark'] .paper-directory > header [class*='text-[#4'] {
+html[data-theme='dark'] .paper-directory > header :is(
+  [class~='text-[#20231f]'],
+  [class~='text-[#20251f]'],
+  [class~='text-[#242824]'],
+  [class~='text-[#252925]'],
+  [class~='text-[#262b25]'],
+  [class~='text-[#343a34]'],
+  [class~='text-[#424841]'],
+  [class~='text-[#4e544d]']
+) {
   color: #e5e9e3;
 }
 
@@ -756,7 +803,13 @@ html[data-theme='dark'] .paper-directory > footer {
   color: #aeb7b0;
 }
 
-html[data-theme='dark'] .paper-directory > footer [class*='text-[#2'] {
+html[data-theme='dark'] .paper-directory > footer :is(
+  [class~='text-[#20231f]'],
+  [class~='text-[#20251f]'],
+  [class~='text-[#242824]'],
+  [class~='text-[#252925]'],
+  [class~='text-[#262b25]']
+) {
   color: #edf2ec;
 }
 
@@ -778,7 +831,13 @@ html[data-theme='dark'] .paper-directory main > section:first-child {
 }
 
 html[data-theme='dark'] .paper-directory main > section:first-child strong,
-html[data-theme='dark'] .paper-directory main > section:first-child [class*='text-[#2'] {
+html[data-theme='dark'] .paper-directory main > section:first-child :is(
+  [class~='text-[#20231f]'],
+  [class~='text-[#20251f]'],
+  [class~='text-[#242824]'],
+  [class~='text-[#252925]'],
+  [class~='text-[#262b25]']
+) {
   color: #edf2ec;
 }
 
@@ -789,13 +848,27 @@ html[data-theme='dark'] .paper-directory main > section:first-child button[class
 }
 
 html[data-theme='dark'] .paper-mobile-filter h2,
-html[data-theme='dark'] .paper-mobile-filter [class*='text-[#2'],
-html[data-theme='dark'] .paper-mobile-filter [class*='text-[#3'],
-html[data-theme='dark'] .paper-mobile-filter [class*='text-[#4'],
-html[data-theme='dark'] .paper-mobile-filter [class*='text-[#5'],
-html[data-theme='dark'] .paper-mobile-filter [class*='text-[#6'],
-html[data-theme='dark'] .paper-mobile-filter [class*='text-[#7'],
-html[data-theme='dark'] .paper-mobile-filter [class*='text-gray-5'] {
+html[data-theme='dark'] .paper-mobile-filter :is(
+  [class~='text-[#20231f]'],
+  [class~='text-[#20251f]'],
+  [class~='text-[#242824]'],
+  [class~='text-[#252925]'],
+  [class~='text-[#262b25]'],
+  [class~='text-[#343a34]'],
+  [class~='text-[#424841]'],
+  [class~='text-[#4e544d]'],
+  [class~='text-[#555b54]'],
+  [class~='text-[#5e655d]'],
+  [class~='text-[#5f666f]'],
+  [class~='text-[#666b63]'],
+  [class~='text-[#676c64]'],
+  [class~='text-[#6f7680]'],
+  [class~='text-[#72766e]'],
+  [class~='text-[#74786f]'],
+  [class~='text-[#777]'],
+  [class~='text-[#777b73]']
+),
+html[data-theme='dark'] .paper-mobile-filter [class~='text-gray-500'] {
   color: #c1cbc3;
 }
 
@@ -1415,12 +1488,12 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
     color: #20251f;
   }
 
-  .paper-directory .paper-server-row [class*='text-gray-4'],
-  .paper-directory .paper-server-row [class*='text-gray-5'] {
+  .paper-directory .paper-server-row [class~='text-gray-400'],
+  .paper-directory .paper-server-row [class~='text-gray-500'] {
     color: #676c64;
   }
 
-  .paper-directory .paper-server-row [class*='text-gray-3'] {
+  .paper-directory .paper-server-row [class~='text-gray-300'] {
     color: #454b44;
   }
 
@@ -1635,8 +1708,11 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
     @apply inline-flex items-center justify-center gap-2 rounded-lg bg-[#14c794] px-4 text-sm font-bold text-[#06140d] transition-all hover:bg-[#1ee6a4];
     box-shadow: 0 8px 20px -10px rgba(20, 199, 148, 0.55);
   }
-  .btn-primary:hover {
+  .btn-primary:not(:disabled):hover {
     box-shadow: 0 12px 26px -10px rgba(20, 199, 148, 0.75);
+  }
+  .btn-primary:disabled {
+    box-shadow: none;
   }
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 rounded-lg border border-white/[.12] bg-white/[0.03] px-4 text-sm font-semibold text-slate-200 transition-colors hover:border-white/25 hover:bg-white/[0.06] hover:text-white;
@@ -2099,7 +2175,7 @@ html[data-theme='dark'] :is(input, textarea)[class~='placeholder:text-slate-600'
   transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
 }
 
-.btn-secondary:hover {
+.btn-secondary:not(:disabled):hover {
   border-color: rgba(52, 211, 153, 0.42);
   background-color: #17232a;
   color: #f8fafc;
@@ -2127,7 +2203,7 @@ html[data-theme='light'] .btn-secondary {
   color: #344139;
 }
 
-html[data-theme='light'] .btn-secondary:hover {
+html[data-theme='light'] .btn-secondary:not(:disabled):hover {
   border-color: rgba(8, 119, 90, 0.34);
   background-color: #eef5ef;
   color: #065f46;
@@ -2140,6 +2216,32 @@ html[data-theme='light'] .btn-secondary:focus-visible {
 /* Server documentation uses an intentionally restrained GitBook-like palette. Keep
    that hierarchy in both themes without treating hover/focus utility tokens as
    always-active colors. */
+.server-wiki-layout {
+  --server-wiki-accent: var(--server-wiki-accent-light, #2856b1);
+  --server-wiki-accent-foreground: var(--server-wiki-accent-foreground-light, #ffffff);
+}
+
+.server-wiki-accent-chip {
+  background-color: var(--server-wiki-accent);
+  color: var(--server-wiki-accent-foreground);
+}
+
+html[data-theme='dark'] .server-wiki-layout {
+  --server-wiki-accent: var(--server-wiki-accent-dark, #8ab4ff);
+  --server-wiki-accent-foreground: var(--server-wiki-accent-foreground-dark, #07100b);
+}
+
+.server-wiki-layout :is(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--server-wiki-accent, #346ddb);
+  outline-offset: 2px;
+}
+
+html[data-theme='light'] .server-wiki-settings-savebar {
+  border-color: var(--theme-border);
+  background-color: rgba(255, 255, 255, 0.96);
+  color: var(--theme-ink);
+}
+
 html[data-theme='light'] .server-wiki-layout [class~='text-[#777]'],
 html[data-theme='light'] .server-wiki-layout [class~='text-[#7a7a7a]'],
 html[data-theme='light'] .server-wiki-layout [class~='text-[#888]'],

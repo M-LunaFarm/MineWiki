@@ -262,14 +262,14 @@ export function AccountDropdown({
               </div>
               <Link
                 href={`/login?returnTo=${encodeURIComponent(pathname || '/')}`}
-                className="w-full rounded-md border border-white/10 bg-[#4752c4] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#3c45a5] disabled:opacity-50"
+                className="theme-on-brand w-full rounded-md border border-white/10 bg-[#4752c4] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#3c45a5] disabled:opacity-50"
                 onClick={() => setDropdownOpen(false)}
               >
                 Discord 로그인
               </Link>
               <Link
                 href={`/login?returnTo=${encodeURIComponent(pathname || '/')}`}
-                className="w-full rounded-md border border-white/10 bg-[#087a42] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#066534] disabled:opacity-50"
+                className="theme-on-brand w-full rounded-md border border-white/10 bg-[#087a42] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[#066534] disabled:opacity-50"
                 onClick={() => setDropdownOpen(false)}
               >
                 NAVER 로그인

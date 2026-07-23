@@ -84,7 +84,7 @@ export function ServerWikiDirectoryOverview({ name, address, overview }: ServerW
           ) : <span className="text-sm text-[#777]">공개 접속 주소가 없습니다.</span>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Link href={overview.path} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#346ddb] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2458bd]">
+          <Link href={overview.path} className="theme-on-brand inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#346ddb] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#2458bd]">
             서버 상세·리뷰
           </Link>
           <Link href={`${overview.path}?vote=1`} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#b9c9e7] bg-white px-4 py-2 text-sm font-semibold text-[#2458bd] transition hover:border-[#346ddb] hover:bg-[#f7f9ff]">

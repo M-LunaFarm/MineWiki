@@ -330,7 +330,7 @@ function ContentSettingsForm({ serverId, onAccessLoaded }: { readonly serverId: 
         <input type="checkbox" checked={form.requireContributionPolicyAck} disabled={!form.contributionPolicySource?.trim()} onChange={(event) => setForm((current) => ({ ...current, requireContributionPolicyAck: event.target.checked }))} className="mt-0.5 h-5 w-5 accent-emerald-400" />
         <span className="text-sm text-slate-200"><strong className="text-white">편집 전 기여 정책 동의 필수</strong><span className="mt-1 block text-xs leading-5 text-slate-400">정책 내용이나 필수 여부를 변경하면 정책 버전이 올라가며, 열린 편집 요청도 최신 버전 확인이 필요합니다.</span></span>
       </label>
-      <div className="sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border border-white/10 bg-[#10161e]/95 p-4 shadow-2xl backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+      <div className="server-wiki-settings-savebar sticky bottom-4 z-10 flex flex-col gap-3 rounded-xl border border-white/10 bg-[#10161e]/95 p-4 shadow-2xl backdrop-blur sm:flex-row sm:items-center sm:justify-between">
         <p className={`text-xs ${invalid || totalBytes > 20 * 1024 ? 'text-red-300' : 'text-slate-400'}`}>전체 {totalBytes.toLocaleString()} / 20,480 bytes · 설정 v{settings.version} · 정책 v{settings.contributionPolicyVersion}</p>
         <button type="button" onClick={() => void save()} disabled={!dirty || invalid || totalBytes > 20 * 1024 || saving} className="btn-primary min-h-11 min-w-36 disabled:cursor-not-allowed disabled:opacity-50">{saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}설정 저장</button>
       </div>

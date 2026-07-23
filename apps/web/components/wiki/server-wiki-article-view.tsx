@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import type { CSSProperties } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -21,6 +20,7 @@ import { ServerWikiSidebar } from './server-wiki-sidebar';
 import { ServerWikiHeader } from './server-wiki-header';
 import { WikiPageTools } from './wiki-page-tools';
 import { buildServerWikiToolPath } from '../../lib/wiki-routes.mjs';
+import { serverWikiThemeStyle } from '../../lib/server-wiki-theme-colors';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
 import { WikiReaderInteractionHydrator } from './wiki-reader-interaction-hydrator';
 import { serverWikiDocumentTitle } from '../../lib/server-wiki-navigation.mjs';
@@ -92,7 +92,7 @@ export async function ServerWikiArticleView({ page, routePath, routeContext }: S
     : [];
 
   return (
-    <div className="server-wiki-layout min-h-screen bg-white text-[#333]" style={{ '--server-wiki-accent': presentation?.branding?.accentColor ?? '#346ddb' } as CSSProperties}>
+    <div className="server-wiki-layout min-h-screen bg-white text-[#333]" style={serverWikiThemeStyle(presentation?.branding?.accentColor)}>
       <ServerWikiHeader page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />
       {wiki.publicationStatus !== 'published' ? (
         <aside className="border-y border-amber-300/40 bg-amber-50 px-4 py-3 text-center text-sm font-semibold text-amber-950" role="status">

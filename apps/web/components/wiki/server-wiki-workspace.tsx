@@ -1,10 +1,11 @@
 import Link from 'next/link';
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { WikiPageResponse } from '../../lib/wiki-api';
 import { ServerWikiHeader } from './server-wiki-header';
 import { ServerWikiSidebar } from './server-wiki-sidebar';
 import { fetchPublicServerWikiNavigation, fetchPublicServerWikiPresentation, fetchServerWikiNavigation, fetchServerWikiPresentation } from '../../lib/wiki-server-api';
 import { serverWikiPublicPath, type ServerWikiPublicRouteContext } from '../../lib/server-wiki-public-route';
+import { serverWikiThemeStyle } from '../../lib/server-wiki-theme-colors';
 
 export async function ServerWikiWorkspace({
   page,
@@ -37,7 +38,7 @@ export async function ServerWikiWorkspace({
     },
   } : page;
   return (
-    <div className="server-wiki-layout min-h-screen bg-white text-[#333]" style={{ '--server-wiki-accent': presentation?.branding?.accentColor ?? '#346ddb' } as CSSProperties}>
+    <div className="server-wiki-layout min-h-screen bg-white text-[#333]" style={serverWikiThemeStyle(presentation?.branding?.accentColor)}>
       <ServerWikiHeader page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />
       <main className="server-wiki-main mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] lg:grid-cols-[288px_minmax(0,1fr)]">
         <ServerWikiSidebar page={pageWithNavigation} presentation={presentation} routeContext={routeContext} />

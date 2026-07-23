@@ -38,7 +38,7 @@ export function ServerWikiHeader({ page, presentation, routeContext }: { readonl
           href={rootPath}
           className="flex min-w-0 items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30"
         >
-          {brand?.logoUrl ? <img src={brand.logoUrl} alt="" referrerPolicy="no-referrer" className="size-8 shrink-0 rounded-lg object-contain" /> : <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#346ddb] text-white" style={{ backgroundColor: brand?.accentColor ?? undefined }}><BookOpen className="size-4.5" aria-hidden="true" /></span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
+          {brand?.logoUrl ? <img src={brand.logoUrl} alt="" referrerPolicy="no-referrer" className="size-8 shrink-0 rounded-lg object-contain" /> : <span className="server-wiki-accent-chip grid size-8 shrink-0 place-items-center rounded-lg"><BookOpen className="size-4.5" aria-hidden="true" /></span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold text-[#202020] sm:text-base">{displayName}</span>
             <span className="hidden text-[11px] text-[#7a7a7a] sm:block">Documentation</span>

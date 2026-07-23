@@ -39,18 +39,36 @@ test('light theme covers shared authenticated and admin surface palettes', async
 });
 
 test('light theme preserves branded and destructive button labels', async () => {
-  const css = await readFile(new URL('../app/globals.css', import.meta.url), 'utf8');
+  const [css, dropdown, serverList, serverSearch, directoryOverview] = await Promise.all([
+    readFile(new URL('../app/globals.css', import.meta.url), 'utf8'),
+    readFile(new URL('../components/account/account-dropdown.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/servers/server-list-explorer.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/wiki/server-wiki-search-page.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/wiki/server-wiki-directory-overview.tsx', import.meta.url), 'utf8'),
+  ]);
 
   assert.match(css, /bg-\[#5865f2\]/u);
   assert.match(css, /bg-\[#5865F2\]/u);
   assert.match(css, /bg-red-/u);
-  assert.match(css, /color: #ffffff/u);
+  assert.match(css, /\.theme-on-brand\s*\{[^}]*color: #ffffff !important;/su);
+  for (const source of [dropdown, serverList, serverSearch, directoryOverview]) {
+    assert.match(source, /theme-on-brand/u);
+  }
 });
 
 test('theme toggle synchronizes the saved theme with the document root', async () => {
   const toggle = await readFile(new URL('../components/layout/theme-toggle.tsx', import.meta.url), 'utf8');
-  assert.match(toggle, /document\.documentElement\.dataset\.theme = resolved/u);
-  assert.match(toggle, /document\.documentElement\.style\.colorScheme = resolved/u);
+  assert.match(toggle, /function applyTheme/u);
+  assert.match(toggle, /document\.documentElement\.dataset\.theme = theme/u);
+  assert.match(toggle, /window\.addEventListener\('storage'/u);
+  assert.match(toggle, /media\.addEventListener\('change'/u);
+  assert.match(toggle, /minewiki:theme-change/u);
+});
+
+test('theme selectors do not promote Tailwind hover colors into base colors', async () => {
+  const css = await readFile(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /\[class\*='text-\[#/u);
+  assert.doesNotMatch(css, /\[class\*='text-gray-/u);
 });
 
 test('wiki article uses the full mobile viewport width', async () => {

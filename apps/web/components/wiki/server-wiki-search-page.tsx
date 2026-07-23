@@ -48,7 +48,7 @@ export async function ServerWikiSearchPage({
           <option value="title">제목만</option>
           <option value="content">본문만</option>
         </select>
-        <button type="submit" className="h-12 rounded-lg bg-[#346ddb] px-6 text-sm font-semibold text-white transition hover:bg-[#2458bd]">검색</button>
+        <button type="submit" className="theme-on-brand h-12 rounded-lg bg-[#346ddb] px-6 text-sm font-semibold text-white transition hover:bg-[#2458bd]">검색</button>
       </form>
 
       {query ? (
