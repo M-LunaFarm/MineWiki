@@ -11,11 +11,12 @@ test('server wiki rendered content overrides light ink in dark mode', () => {
 });
 
 test('tenant accent colors are normalized for both themes and focus states', async () => {
-  const [helper, article, workspace, header, settings] = await Promise.all([
+  const [helper, article, workspace, header, sidebar, settings] = await Promise.all([
     readFile(new URL('../lib/server-wiki-theme-colors.ts', import.meta.url), 'utf8'),
     readFile(new URL('../components/wiki/server-wiki-article-view.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/wiki/server-wiki-workspace.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/wiki/server-wiki-header.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../components/wiki/server-wiki-sidebar.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../components/wiki/server-wiki-settings.tsx', import.meta.url), 'utf8'),
   ]);
   assert.match(helper, /contrast\(color, surface\) >= 4\.5/u);
@@ -24,8 +25,12 @@ test('tenant accent colors are normalized for both themes and focus states', asy
   assert.match(article, /serverWikiThemeStyle/u);
   assert.match(workspace, /serverWikiThemeStyle/u);
   assert.match(header, /server-wiki-accent-chip/u);
+  assert.match(sidebar, /server-wiki-accent-text/u);
+  assert.doesNotMatch(sidebar, /style=\{\{ color: brand\?\.accentColor/u);
   assert.match(styles, /\.server-wiki-layout :is\(a, button, input, select, textarea, summary\):focus-visible/u);
   assert.match(settings, /server-wiki-settings-savebar/u);
+  assert.match(settings, /server-wiki-accent-preview/u);
+  assert.match(settings, /serverWikiThemeStyle\(form\.brandAccentColor\)/u);
   assert.match(styles, /html\[data-theme='light'\] \.server-wiki-settings-savebar/u);
 });
 

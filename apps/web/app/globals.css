@@ -2216,9 +2216,14 @@ html[data-theme='light'] .btn-secondary:focus-visible {
 /* Server documentation uses an intentionally restrained GitBook-like palette. Keep
    that hierarchy in both themes without treating hover/focus utility tokens as
    always-active colors. */
-.server-wiki-layout {
+.server-wiki-layout,
+.server-wiki-accent-preview {
   --server-wiki-accent: var(--server-wiki-accent-light, #2856b1);
   --server-wiki-accent-foreground: var(--server-wiki-accent-foreground-light, #ffffff);
+}
+
+.server-wiki-accent-text {
+  color: var(--server-wiki-accent);
 }
 
 .server-wiki-accent-chip {
@@ -2226,7 +2231,7 @@ html[data-theme='light'] .btn-secondary:focus-visible {
   color: var(--server-wiki-accent-foreground);
 }
 
-html[data-theme='dark'] .server-wiki-layout {
+html[data-theme='dark'] :is(.server-wiki-layout, .server-wiki-accent-preview) {
   --server-wiki-accent: var(--server-wiki-accent-dark, #8ab4ff);
   --server-wiki-accent-foreground: var(--server-wiki-accent-foreground-dark, #07100b);
 }
@@ -2240,6 +2245,11 @@ html[data-theme='light'] .server-wiki-settings-savebar {
   border-color: var(--theme-border);
   background-color: rgba(255, 255, 255, 0.96);
   color: var(--theme-ink);
+}
+
+.server-wiki-accent-preview {
+  border-left-color: var(--server-wiki-accent) !important;
+  border-left-width: 4px;
 }
 
 html[data-theme='light'] .server-wiki-layout [class~='text-[#777]'],

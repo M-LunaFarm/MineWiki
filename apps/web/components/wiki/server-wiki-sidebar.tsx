@@ -17,7 +17,7 @@ export function ServerWikiSidebar({ page, presentation, routeContext }: { readon
     <aside className="server-wiki-sidebar hidden min-w-0 border-[#e8e8e8] bg-[#fbfbfb] lg:sticky lg:top-16 lg:block lg:h-[calc(100vh-4rem)] lg:border-r">
       <div className="border-b border-[#e8e8e8] px-6 py-6">
         <Link href={rootPath} className="flex items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#346ddb]/30">
-          {brand?.logoUrl ? <img src={brand.logoUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-9 rounded-lg object-contain" /> : <span className="rounded-lg bg-[#eef3ff] p-2 text-[#346ddb]" style={{ color: brand?.accentColor ?? undefined }}><BookOpen className="size-5" /></span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
+          {brand?.logoUrl ? <img src={brand.logoUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-9 rounded-lg object-contain" /> : <span className="server-wiki-accent-text rounded-lg bg-[#eef3ff] p-2"><BookOpen className="size-5" /></span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
           <span className="min-w-0">
             <span className="block truncate text-base font-semibold text-[#242424]">{displayName}</span>
             <span className="mt-0.5 block text-xs text-[#777]">서버 위키</span>

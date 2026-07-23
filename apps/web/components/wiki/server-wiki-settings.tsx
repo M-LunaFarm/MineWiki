@@ -6,6 +6,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { csrfHeaders } from '../../lib/csrf';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
+import { serverWikiThemeStyle } from '../../lib/server-wiki-theme-colors';
 import { PrivilegedActionGate } from '../auth/privileged-action-gate';
 import { ServerWikiCollaboratorsContent } from './server-wiki-collaborators';
 import { ServerWikiLayoutPlansContent } from './server-wiki-layout-plans';
@@ -306,8 +307,8 @@ function ContentSettingsForm({ serverId, onAccessLoaded }: { readonly serverId: 
           <label className="grid gap-2 text-sm text-slate-300">로고 이미지 URL<input type="url" value={form.brandLogoUrl ?? ''} onChange={(event) => setForm((current) => ({ ...current, brandLogoUrl: event.target.value }))} maxLength={512} placeholder="https://… 또는 /uploads/…" className="input min-h-11" /></label>
           <label className="grid gap-2 text-sm text-slate-300">파비콘 이미지 URL<input type="url" value={form.brandFaviconUrl ?? ''} onChange={(event) => setForm((current) => ({ ...current, brandFaviconUrl: event.target.value }))} maxLength={512} placeholder="https://… 또는 /uploads/…" className="input min-h-11" /></label>
         </div>
-        <div className="mt-4 flex items-center gap-3 rounded-lg border border-white/10 bg-[#0d1219] p-4" style={{ borderLeftColor: form.brandAccentColor ?? '#346ddb', borderLeftWidth: 4 }}>
-          {form.brandLogoUrl ? <img src={form.brandLogoUrl} alt="" referrerPolicy="no-referrer" className="size-10 rounded-lg object-contain" /> : <span className="grid size-10 place-items-center rounded-lg text-sm font-bold text-white" style={{ backgroundColor: form.brandAccentColor ?? '#346ddb' }}>B</span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
+        <div className="server-wiki-accent-preview mt-4 flex items-center gap-3 rounded-lg border border-white/10 bg-[#0d1219] p-4" style={serverWikiThemeStyle(form.brandAccentColor)}>
+          {form.brandLogoUrl ? <img src={form.brandLogoUrl} alt="" referrerPolicy="no-referrer" className="size-10 rounded-lg object-contain" /> : <span className="server-wiki-accent-chip grid size-10 place-items-center rounded-lg text-sm font-bold">B</span>} {/* eslint-disable-line @next/next/no-img-element -- tenant-controlled HTTPS assets cannot use a static Next image allowlist */}
           <span><strong className="block text-sm text-white">{form.brandName?.trim() || '서버 이름'}</strong><span className="text-xs text-slate-400">Documentation</span></span>
         </div>
       </section> : null}
