@@ -555,11 +555,6 @@ export default function ServerRegisterPage() {
       done: form.shortDescription.trim().length > 0 && trimmedLongDescription.length > 0,
       helper: '목록 문구와 상세 설명을 채우세요.',
     },
-    {
-      label: '검증 이동',
-      done: registeredServer !== null,
-      helper: '등록 후 MOTD 검증으로 이동합니다.',
-    },
   ];
   const completedReadiness = readinessItems.filter((item) => item.done).length;
   const readinessPercent = Math.round((completedReadiness / readinessItems.length) * 100);
@@ -603,7 +598,12 @@ export default function ServerRegisterPage() {
             <div className="h-1 w-full overflow-hidden rounded-full bg-[#333333]">
               <div
                 className="h-full bg-[#13ec80]"
-                style={{ width: `${Math.max(readinessPercent, 20)}%` }}
+                aria-label="전체 등록 흐름 3단계 중 1단계"
+                role="progressbar"
+                aria-valuemin={1}
+                aria-valuemax={3}
+                aria-valuenow={1}
+                style={{ width: '33.333%' }}
               />
             </div>
           </div>
@@ -626,10 +626,16 @@ export default function ServerRegisterPage() {
 
                   <div className="space-y-6">
                     <div>
-                      <label className="mb-1.5 block text-sm font-medium text-[#A0A0A0]">
+                      <label
+                        htmlFor="server-name"
+                        className="mb-1.5 block text-sm font-medium text-[#A0A0A0]"
+                      >
                         서버 이름
                       </label>
                       <input
+                        id="server-name"
+                        name="name"
+                        aria-describedby="server-name-help"
                         className="w-full rounded-lg border border-[#333333] bg-[#121212] px-4 py-3 text-sm text-white outline-none transition focus:border-[#13ec80]"
                         placeholder="예: 마인크래프트 야생 서버"
                         type="text"
@@ -638,17 +644,23 @@ export default function ServerRegisterPage() {
                         maxLength={32}
                         required
                       />
-                      <p className="mt-1.5 text-xs text-[#6f7680]">
+                      <p id="server-name-help" className="mt-1.5 text-xs text-[#6f7680]">
                         목록 카드와 상세 페이지 제목에 그대로 표시됩니다.
                       </p>
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                       <div className="md:col-span-3">
-                        <label className="mb-1.5 block text-sm font-medium text-[#A0A0A0]">
+                        <label
+                          htmlFor="server-join-host"
+                          className="mb-1.5 block text-sm font-medium text-[#A0A0A0]"
+                        >
                           접속 주소
                         </label>
                         <input
+                          id="server-join-host"
+                          name="joinHost"
+                          aria-describedby="server-join-host-help"
                           className="w-full rounded-lg border border-[#333333] bg-[#121212] px-4 py-3 text-sm text-white outline-none transition focus:border-[#13ec80]"
                           placeholder="mc.example.com"
                           type="text"
@@ -656,15 +668,20 @@ export default function ServerRegisterPage() {
                           onChange={handleChange('joinHost')}
                           required
                         />
-                        <p className="mt-1.5 text-xs text-[#6f7680]">
+                        <p id="server-join-host-help" className="mt-1.5 text-xs text-[#6f7680]">
                           숫자 IP 또는 도메인을 입력하세요. 프로토콜은 넣지 않습니다.
                         </p>
                       </div>
                       <div>
-                        <label className="mb-1.5 block text-sm font-medium text-[#A0A0A0]">
+                        <label
+                          htmlFor="server-join-port"
+                          className="mb-1.5 block text-sm font-medium text-[#A0A0A0]"
+                        >
                           포트
                         </label>
                         <input
+                          id="server-join-port"
+                          name="joinPort"
                           className="w-full rounded-lg border border-[#333333] bg-[#121212] px-4 py-3 text-sm text-white outline-none transition focus:border-[#13ec80]"
                           type="number"
                           min={1}
@@ -677,12 +694,20 @@ export default function ServerRegisterPage() {
                     </div>
 
                     <div>
-                      <label className="mb-3 block text-sm font-medium text-[#A0A0A0]">
+                      <div
+                        id="server-edition-label"
+                        className="mb-3 block text-sm font-medium text-[#A0A0A0]"
+                      >
                         에디션
-                      </label>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      </div>
+                      <div
+                        role="radiogroup"
+                        aria-labelledby="server-edition-label"
+                        className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+                      >
                         <label className="cursor-pointer">
                           <input
+                            id="server-edition-java"
                             className="peer sr-only"
                             name="edition"
                             type="radio"
@@ -724,6 +749,7 @@ export default function ServerRegisterPage() {
                         </label>
                         <label className="cursor-pointer">
                           <input
+                            id="server-edition-bedrock"
                             className="peer sr-only"
                             name="edition"
                             type="radio"
@@ -768,12 +794,20 @@ export default function ServerRegisterPage() {
 
                     <div>
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <label className="block text-sm font-medium text-[#A0A0A0]">
+                        <span
+                          id="supported-versions-label"
+                          className="block text-sm font-medium text-[#A0A0A0]"
+                        >
                           지원 버전
-                        </label>
+                        </span>
                         <span className="text-xs text-[#8f949d]">{selectedVersionSummary}</span>
                       </div>
-                      <div className="space-y-3 rounded-lg border border-[#333333] bg-[#121212] p-3">
+                      <div
+                        role="group"
+                        aria-labelledby="supported-versions-label"
+                        aria-describedby="supported-versions-help"
+                        className="space-y-3 rounded-lg border border-[#333333] bg-[#121212] p-3"
+                      >
                         <div className="flex flex-wrap gap-2">
                           {availableVersions.map((version) => {
                             const selected = form.supportedVersions.includes(version);
@@ -781,6 +815,7 @@ export default function ServerRegisterPage() {
                               <button
                                 key={version}
                                 type="button"
+                                aria-pressed={selected}
                                 onClick={() => handleToggleVersion(version)}
                                 className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
                                   selected
@@ -821,6 +856,11 @@ export default function ServerRegisterPage() {
 
                         <div className="flex flex-col gap-2 sm:flex-row">
                           <input
+                            id="server-custom-version"
+                            name="customVersion"
+                            aria-label="목록에 없는 지원 버전 직접 입력"
+                            aria-invalid={Boolean(versionError)}
+                            aria-describedby={versionError ? 'supported-versions-error' : undefined}
                             className="w-full rounded-lg border border-[#333333] bg-[#1A1A1A] px-3 py-2 text-sm text-white outline-none focus:border-[#13ec80]"
                             placeholder="버전 입력 (Enter로 추가)"
                             type="text"
@@ -837,18 +877,23 @@ export default function ServerRegisterPage() {
                           </button>
                         </div>
                       </div>
-                      <p className="mt-1.5 text-xs text-[#A0A0A0]">
+                      <p id="supported-versions-help" className="mt-1.5 text-xs text-[#A0A0A0]">
                         목록에 없는 버전은 직접 입력할 수 있습니다. 최대 {MAX_SUPPORTED_VERSIONS}
                         개까지 등록됩니다.
                       </p>
                       {versionError ? (
-                        <p className="mt-1.5 text-xs text-red-400">{versionError}</p>
+                        <p id="supported-versions-error" className="mt-1.5 text-xs text-red-400">
+                          {versionError}
+                        </p>
                       ) : null}
                     </div>
 
                     <div>
                       <div className="flex justify-between">
-                        <label className="mb-1.5 block text-sm font-medium text-[#A0A0A0]">
+                        <label
+                          htmlFor="server-short-description"
+                          className="mb-1.5 block text-sm font-medium text-[#A0A0A0]"
+                        >
                           짧은 소개
                         </label>
                         <span className="text-xs text-[#A0A0A0]">
@@ -856,6 +901,9 @@ export default function ServerRegisterPage() {
                         </span>
                       </div>
                       <input
+                        id="server-short-description"
+                        name="shortDescription"
+                        aria-describedby="server-short-description-help"
                         className="w-full rounded-lg border border-[#333333] bg-[#121212] px-4 py-3 text-sm text-white outline-none transition focus:border-[#13ec80]"
                         maxLength={160}
                         placeholder="서버 목록 카드에 표시될 한 줄 소개입니다."
@@ -864,13 +912,19 @@ export default function ServerRegisterPage() {
                         onChange={handleChange('shortDescription')}
                         required
                       />
-                      <p className="mt-1.5 text-xs text-[#6f7680]">
+                      <p
+                        id="server-short-description-help"
+                        className="mt-1.5 text-xs text-[#6f7680]"
+                      >
                         과장보다 서버의 핵심 모드, 운영 방식, 접속 대상을 짧게 쓰는 편이 좋습니다.
                       </p>
                     </div>
 
                     <div>
-                      <label className="mb-1.5 block text-sm font-medium text-[#A0A0A0]">
+                      <label
+                        htmlFor="server-long-description"
+                        className="mb-1.5 block text-sm font-medium text-[#A0A0A0]"
+                      >
                         상세 설명
                       </label>
                       <ServerDescriptionEditor
@@ -878,7 +932,13 @@ export default function ServerRegisterPage() {
                         onChange={handleLongDescriptionChange}
                         apiBaseUrl={apiBaseUrl}
                         disabled={submitting}
+                        textareaId="server-long-description"
+                        textareaName="longDescription"
+                        ariaDescribedBy="server-long-description-help"
                       />
+                      <p id="server-long-description-help" className="sr-only">
+                        서버 특징, 운영 규칙과 접속 전 안내를 입력하세요.
+                      </p>
                     </div>
                   </div>
                 </section>
@@ -898,27 +958,38 @@ export default function ServerRegisterPage() {
 
                   <div className="space-y-6">
                     <div>
-                      <label className="mb-1.5 block text-sm font-medium text-[#A0A0A0]">
+                      <label
+                        htmlFor="server-tags"
+                        className="mb-1.5 block text-sm font-medium text-[#A0A0A0]"
+                      >
                         태그
                       </label>
                       <input
+                        id="server-tags"
+                        name="tags"
+                        aria-describedby="server-tags-help"
                         className="w-full rounded-lg border border-[#333333] bg-[#121212] px-4 py-3 text-sm text-white outline-none transition focus:border-[#13ec80]"
                         placeholder="#야생 #RPG #경제 (쉼표/공백 구분)"
                         type="text"
                         value={form.tags}
                         onChange={handleChange('tags')}
                       />
-                      <p className="mt-1.5 text-xs text-[#6f7680]">
+                      <p id="server-tags-help" className="mt-1.5 text-xs text-[#6f7680]">
                         예: 야생, 경제, RPG. 검색 필터에 쓰이므로 실제 콘텐츠 기준으로 적어주세요.
                       </p>
                     </div>
 
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                       <div>
-                        <label className="mb-1.5 block text-sm font-medium text-[#A0A0A0]">
+                        <label
+                          htmlFor="server-website-url"
+                          className="mb-1.5 block text-sm font-medium text-[#A0A0A0]"
+                        >
                           웹사이트 URL
                         </label>
                         <input
+                          id="server-website-url"
+                          name="websiteUrl"
                           className="w-full rounded-lg border border-[#333333] bg-[#121212] px-4 py-3 text-sm text-white outline-none transition focus:border-[#13ec80]"
                           placeholder="https://"
                           type="url"
@@ -927,10 +998,15 @@ export default function ServerRegisterPage() {
                         />
                       </div>
                       <div>
-                        <label className="mb-1.5 block text-sm font-medium text-[#A0A0A0]">
+                        <label
+                          htmlFor="server-discord-url"
+                          className="mb-1.5 block text-sm font-medium text-[#A0A0A0]"
+                        >
                           디스코드 초대 링크
                         </label>
                         <input
+                          id="server-discord-url"
+                          name="discordUrl"
                           className="w-full rounded-lg border border-[#333333] bg-[#121212] px-4 py-3 text-sm text-white outline-none transition focus:border-[#13ec80]"
                           placeholder="https://discord.gg/"
                           type="url"
@@ -944,7 +1020,7 @@ export default function ServerRegisterPage() {
               </div>
 
               <div className="space-y-6">
-                <section className="sticky top-24 rounded-xl border border-[#333333] bg-[#1A1A1A] p-5 shadow-sm">
+                <section className="rounded-xl border border-[#333333] bg-[#1A1A1A] p-5 shadow-sm lg:sticky lg:top-24">
                   <div className="mb-4 flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-bold text-white">서버 배너</h3>
@@ -989,7 +1065,7 @@ export default function ServerRegisterPage() {
                             className={`absolute inset-0 ${getServerPreviewFallbackClass(bannerPreviewSeed)}`}
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent" />
-                          <div className="relative z-10 flex h-full flex-col justify-between p-4 text-left">
+                          <div className="relative z-10 flex h-full flex-col justify-between p-4 pb-12 text-left">
                             <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-white/20 bg-black/35 text-2xl font-black text-white">
                               {getServerPreviewInitial(bannerPreviewName)}
                             </div>
@@ -1014,6 +1090,9 @@ export default function ServerRegisterPage() {
                     </button>
                     <input
                       ref={bannerInputRef}
+                      id="server-banner"
+                      name="banner"
+                      aria-label="서버 배너 이미지 업로드"
                       accept="image/png,image/jpeg,image/webp"
                       className="hidden"
                       onChange={handleBannerSelect}
@@ -1160,6 +1239,9 @@ export default function ServerRegisterPage() {
                   </div>
 
                   <button
+                    aria-describedby={
+                      captchaRequired && !captchaToken ? 'server-submit-status' : undefined
+                    }
                     className="group flex w-full items-center justify-center gap-2 rounded-xl bg-[#13ec80] px-6 py-3.5 text-sm font-bold text-black transition hover:bg-[#0fb865] disabled:cursor-not-allowed disabled:opacity-60"
                     type="submit"
                     disabled={submitting || (captchaRequired && !captchaToken)}
@@ -1175,6 +1257,14 @@ export default function ServerRegisterPage() {
                       />
                     ) : null}
                   </button>
+                  {captchaRequired && !captchaToken ? (
+                    <p
+                      id="server-submit-status"
+                      className="mt-2 text-center text-xs text-[#A0A0A0]"
+                    >
+                      위 보안 확인을 완료하면 서버 등록 버튼이 활성화됩니다.
+                    </p>
+                  ) : null}
 
                   {registeredServer ? (
                     <div className="mt-4 rounded-lg border border-[#13ec80]/20 bg-[#13ec80]/10 p-3">

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
@@ -50,6 +50,11 @@ interface QueryServerTarget {
   readonly name: string;
 }
 
+interface ClaimStep {
+  readonly text: string;
+  readonly codeValues?: readonly string[];
+}
+
 const METHOD_OPTIONS: Array<{
   readonly method: ClaimMethod;
   readonly title: string;
@@ -59,7 +64,7 @@ const METHOD_OPTIONS: Array<{
   readonly featured?: boolean;
   readonly summary: string;
   readonly recommendedWhen: string;
-  readonly steps: readonly string[];
+  readonly steps: readonly ClaimStep[];
   readonly helper: string;
 }> = [
   {
@@ -71,10 +76,13 @@ const METHOD_OPTIONS: Array<{
     summary: '서버 도메인에 TXT 레코드를 추가하여 도메인 관리 권한을 증명합니다.',
     recommendedWhen: '도메인 DNS 권한이 있고, 장기적으로 안정적인 소유 증명이 필요한 경우',
     steps: [
-      'DNS 관리자에서 TXT 레코드를 추가합니다.',
-      '호스트는 서버 접속 주소 기준 `_cvverify`, `_minewiki`, `_claim` 또는 루트 도메인을 사용할 수 있습니다.',
-      '값: 아래 발급된 토큰 문자열을 그대로 입력합니다.',
-      '전파 완료 후 소유권 검증을 실행합니다.',
+      { text: 'DNS 관리자에서 TXT 레코드를 추가합니다.' },
+      {
+        text: '호스트는 서버 접속 주소 기준 아래 값 중 하나 또는 루트 도메인을 사용할 수 있습니다.',
+        codeValues: ['_cvverify', '_minewiki', '_claim'],
+      },
+      { text: '값에는 아래 발급된 토큰 문자열을 그대로 입력합니다.' },
+      { text: '전파 완료 후 소유권 검증을 실행합니다.' },
     ],
     helper:
       'DNS 제공업체에 따라 전파까지 최대 10분이 걸릴 수 있습니다. 반영 후 검증을 실행해 주세요.',
@@ -88,9 +96,11 @@ const METHOD_OPTIONS: Array<{
     summary: '서버 MOTD(접속 안내 문구)에 토큰을 삽입하여 서버 설정 권한을 확인합니다.',
     recommendedWhen: '서버 설정에 접근 가능하며 빠른 1회 검증이 필요한 경우',
     steps: [
-      '서버 목록에 표시되는 MOTD 텍스트를 서버 설정 파일 또는 MOTD 플러그인에서 수정합니다.',
-      'MOTD 안에 아래 토큰 문자열을 공백 없이 그대로 포함합니다.',
-      '서버를 재시작하거나 MOTD가 새로고침되도록 한 뒤 검증을 실행합니다.',
+      {
+        text: '서버 목록에 표시되는 MOTD 텍스트를 서버 설정 파일 또는 MOTD 플러그인에서 수정합니다.',
+      },
+      { text: 'MOTD 안에 아래 토큰 문자열을 공백 없이 그대로 포함합니다.' },
+      { text: '서버를 재시작하거나 MOTD가 새로고침되도록 한 뒤 검증을 실행합니다.' },
     ],
     helper:
       'MOTD는 색 코드와 함께 사용할 수 있으나 토큰 문자열 자체는 줄바꿈, 색 코드, 공백으로 나누지 않아야 합니다.',
@@ -106,6 +116,7 @@ const NOTE_COPY: Record<string, string> = {
   token_expired: '검증 만료 기간이 지나 만료되었습니다.',
 };
 const CLAIM_LOGS_HIDDEN_AFTER_KEY_PREFIX = 'minewiki_claim_logs_hidden_after';
+const CLAIM_SELECTED_METHOD_KEY_PREFIX = 'minewiki_claim_selected_method';
 
 function getClaimLogsHiddenAfterStorageKey(accountId: string, serverId: string): string {
   return `${CLAIM_LOGS_HIDDEN_AFTER_KEY_PREFIX}:${accountId}:${serverId}`;
@@ -147,6 +158,47 @@ function persistClaimLogsHiddenAfter(
   } catch {
     // ignore localStorage write failures (e.g., private mode)
   }
+}
+
+function getSelectedMethodStorageKey(accountId: string, serverId: string): string {
+  return `${CLAIM_SELECTED_METHOD_KEY_PREFIX}:${accountId}:${serverId}`;
+}
+
+function loadSelectedMethod(accountId: string, serverId: string): ClaimMethod | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const value = window.localStorage.getItem(getSelectedMethodStorageKey(accountId, serverId));
+    return SUPPORTED_CLAIM_METHODS.find((method) => method === value) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function persistSelectedMethod(accountId: string, serverId: string, method: ClaimMethod): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(getSelectedMethodStorageKey(accountId, serverId), method);
+  } catch {
+    // Selection persistence is optional when browser storage is unavailable.
+  }
+}
+
+function preferredClaimMethod(methods: readonly ClaimMethodStatus[]): ClaimMethod | null {
+  const ranked = methods
+    .filter((method) => method.status !== 'expired')
+    .map((method) => ({
+      method: method.method,
+      timestamp: [method.lastCheckedAt, method.verifiedAt, method.issuedAt]
+        .map((value) => Date.parse(value ?? ''))
+        .filter(Number.isFinite)
+        .reduce((latest, value) => Math.max(latest, value), 0),
+    }))
+    .sort((left, right) => right.timestamp - left.timestamp);
+  return ranked[0]?.method ?? null;
 }
 
 function mergeMethods(
@@ -280,30 +332,37 @@ function formatVerificationStatus(grade?: 'Verified' | 'Unverified'): string {
   return grade === 'Verified' ? '검증 완료' : '미검증';
 }
 
-function formatVerificationValidity(status?: ClaimMethodState, expiresAt?: string): string {
+function formatVerificationValidity(
+  status?: ClaimMethodState,
+  expiresAt?: string,
+  tokenAvailable = false,
+): string {
   if (!status) {
     return '토큰을 발급한 뒤 선택한 검증 위치에 그대로 입력해 주세요.';
   }
   if (status === 'expired') {
     return '검증 상태가 만료되었습니다. 토큰을 재발급해 다시 검증해 주세요.';
   }
-  if (status !== 'verified') {
-    return '토큰을 검증 위치에 그대로 입력해 주세요. 검증 완료 후 상태가 24시간 유지됩니다.';
+  if (status === 'verified') {
+    return '소유권 검증이 완료되었습니다. 검증 상태는 정기 재점검으로 유지됩니다.';
+  }
+  if (!tokenAvailable) {
+    return '보안을 위해 이전 토큰은 다시 표시하지 않습니다. 계속하려면 새 토큰을 재발급해 주세요.';
   }
   if (!expiresAt) {
-    return '검증 유지 기간 정보를 확인할 수 없습니다.';
+    return '토큰을 검증 위치에 그대로 입력한 뒤 검증을 실행해 주세요.';
   }
   const diff = new Date(expiresAt).getTime() - Date.now();
   if (Number.isNaN(diff)) {
-    return '검증 유지 기간 정보를 확인할 수 없습니다.';
+    return '토큰 만료 시간을 확인할 수 없습니다. 문제가 계속되면 토큰을 재발급해 주세요.';
   }
   if (diff <= 0) {
-    return '검증 상태가 만료되었습니다. 토큰을 재발급해 다시 검증해 주세요.';
+    return '토큰이 만료되었습니다. 새 토큰을 발급해 다시 검증해 주세요.';
   }
   const minutes = Math.floor(diff / 1000 / 60);
   const hours = Math.floor(minutes / 60);
   const remainMinutes = minutes % 60;
-  return `검증 상태가 약 ${hours}시간 ${remainMinutes}분 후 만료됩니다.`;
+  return `이 토큰은 약 ${hours}시간 ${remainMinutes}분 후 만료됩니다.`;
 }
 
 async function readApiErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -360,6 +419,7 @@ export function ClaimWorkflow() {
   const [claimedRequestedServerIds, setClaimedRequestedServerIds] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
+  const selectedMethodResolvedForRef = useRef<string | null>(null);
 
   const apiBase = getApiBaseUrl();
   const [queryServerLookup, setQueryServerLookup] = useState<string | null>(null);
@@ -487,10 +547,31 @@ export function ClaimWorkflow() {
   useEffect(() => {
     if (!accountId || !serverId) {
       setLogsHiddenAfter(null);
+      selectedMethodResolvedForRef.current = null;
       return;
     }
     setLogsHiddenAfter(loadClaimLogsHiddenAfter(accountId, serverId));
+    setStatus(null);
+    const storedMethod = loadSelectedMethod(accountId, serverId);
+    setSelectedMethod(storedMethod ?? 'dns');
+    selectedMethodResolvedForRef.current = storedMethod ? `${accountId}:${serverId}` : null;
   }, [accountId, serverId]);
+
+  useEffect(() => {
+    if (!accountId || !serverId || !status) {
+      return;
+    }
+    const selectionKey = `${accountId}:${serverId}`;
+    if (selectedMethodResolvedForRef.current === selectionKey) {
+      return;
+    }
+    const preferredMethod = preferredClaimMethod(status.methods);
+    if (preferredMethod) {
+      setSelectedMethod(preferredMethod);
+      persistSelectedMethod(accountId, serverId, preferredMethod);
+    }
+    selectedMethodResolvedForRef.current = selectionKey;
+  }, [accountId, serverId, status]);
 
   const activeMethod = useMemo(() => {
     return METHOD_OPTIONS.find((option) => option.method === selectedMethod) ?? METHOD_OPTIONS[0];
@@ -650,6 +731,10 @@ export function ClaimWorkflow() {
 
   const handleSelectMethod = (method: ClaimMethod) => {
     setSelectedMethod(method);
+    if (accountId && serverId) {
+      persistSelectedMethod(accountId, serverId, method);
+      selectedMethodResolvedForRef.current = `${accountId}:${serverId}`;
+    }
     setError(null);
     setNotice(null);
   };
@@ -802,6 +887,13 @@ export function ClaimWorkflow() {
   }
 
   const tokenString = activeMethodStatus?.token ?? '';
+  const tokenDisplayText = tokenString
+    ? tokenString
+    : activeMethodStatus?.status === 'verified'
+      ? '검증이 완료되어 토큰을 다시 표시하지 않습니다.'
+      : activeMethodStatus
+        ? '이전 토큰은 다시 표시되지 않습니다. 새 토큰을 재발급해 주세요.'
+        : '토큰을 발급하면 여기에 표시됩니다.';
   const tokenIssuedAt = activeMethodStatus?.issuedAt
     ? new Date(activeMethodStatus.issuedAt).toLocaleString('ko-KR')
     : null;
@@ -845,6 +937,8 @@ export function ClaimWorkflow() {
       ? '검증 상태 새로고침'
       : activeMethodStatus?.status === 'expired'
         ? '검증 토큰 재발급'
+        : activeMethodStatus && !tokenString
+          ? '검증 토큰 재발급'
         : tokenString
             ? activeMethodStatus?.status === 'failed'
               ? '다시 검증 실행'
@@ -1119,7 +1213,7 @@ export function ClaimWorkflow() {
                         : 'border-dashed border-[#333333] bg-[#121212] text-[#777777]'
                     }`}
                   >
-                    {tokenString || '토큰을 발급하면 여기에 표시됩니다.'}
+                    {tokenDisplayText}
                   </code>
                   <button
                     type="button"
@@ -1137,6 +1231,7 @@ export function ClaimWorkflow() {
                   {formatVerificationValidity(
                     activeMethodStatus?.status,
                     activeMethodStatus?.expiresAt,
+                    Boolean(tokenString),
                   )}
                 </p>
               </div>
@@ -1146,7 +1241,7 @@ export function ClaimWorkflow() {
                   const isComplete = Boolean(tokenString) && index === 0;
                   return (
                     <div
-                      key={step}
+                      key={step.text}
                       className="flex items-start gap-3 rounded-lg border border-[#333333] bg-[#121212] p-4"
                     >
                       <div
@@ -1158,7 +1253,21 @@ export function ClaimWorkflow() {
                       >
                         {isComplete ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
                       </div>
-                      <p className="min-w-0 text-sm font-medium leading-5 text-white">{step}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium leading-5 text-white">{step.text}</p>
+                        {step.codeValues ? (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                            {step.codeValues.map((value) => (
+                              <code
+                                key={value}
+                                className="min-w-0 overflow-x-auto rounded-md border border-[#333333] bg-[#090909] px-3 py-2 font-mono text-xs text-[#13ec80]"
+                              >
+                                {value}
+                              </code>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })}

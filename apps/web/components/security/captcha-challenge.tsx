@@ -44,7 +44,7 @@ export function CaptchaChallenge({
           onSuccess={onTokenChange}
           onExpire={() => onTokenChange(null)}
           onError={() => onTokenChange(null)}
-          options={{ theme: 'auto' }}
+          options={{ theme: 'auto', language: 'ko' }}
         />
       ) : hcaptchaSiteKey ? (
         <HCaptcha

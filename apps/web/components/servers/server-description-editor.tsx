@@ -33,6 +33,9 @@ interface ServerDescriptionEditorProps {
   readonly onChange: (nextValue: string) => void;
   readonly apiBaseUrl: string;
   readonly disabled?: boolean;
+  readonly textareaId?: string;
+  readonly textareaName?: string;
+  readonly ariaDescribedBy?: string;
 }
 
 interface UploadState {
@@ -45,6 +48,9 @@ export function ServerDescriptionEditor({
   onChange,
   apiBaseUrl,
   disabled = false,
+  textareaId,
+  textareaName,
+  ariaDescribedBy,
 }: ServerDescriptionEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -344,6 +350,9 @@ export function ServerDescriptionEditor({
           <div className="relative">
             <textarea
               ref={textareaRef}
+              id={textareaId}
+              name={textareaName}
+              aria-describedby={ariaDescribedBy}
               className="h-72 w-full resize-y border-0 bg-transparent px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-[#5f666f] focus:ring-0"
               placeholder={
                 '예시:\n## 서버 특징\n- 야생 중심 운영\n- 초보자 보호 구역 제공\n\n## 접속 전 안내\n규칙과 디스코드 공지를 확인해 주세요.'
@@ -413,6 +422,7 @@ export function ServerDescriptionEditor({
       <input
         ref={fileInputRef}
         type="file"
+        aria-label="상세 설명 이미지 업로드"
         accept="image/png,image/jpeg,image/webp,image/gif"
         className="hidden"
         onChange={handleImageSelect}
