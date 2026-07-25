@@ -12,11 +12,13 @@ import { randomUUID } from 'node:crypto';
 import { ApiExceptionFilter } from './common/api-exception.filter';
 import { runInHttpRequestContext } from './common/http/request-context';
 import { isLoopbackIp } from './common/http/client-ip';
+import { API_JSON_BODY_LIMIT_BYTES } from './common/http/body-limits';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
+      bodyLimit: API_JSON_BODY_LIMIT_BYTES,
       logger: false,
       trustProxy: (address) => isLoopbackIp(address),
     }),

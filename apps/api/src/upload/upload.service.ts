@@ -13,8 +13,8 @@ import {
   type SanitizedImage,
   type ValidatedVideo,
 } from '@minewiki/security';
+import { MAX_IMAGE_UPLOAD_BYTES } from '../common/http/body-limits';
 
-const MAX_BYTES = 2 * 1024 * 1024; // 2MB cap
 const MAX_DIMENSION = 2048; // px
 const UPLOAD_PREFIX = 'uploads';
 const PUBLIC_UPLOAD_PREFIX = `${UPLOAD_PREFIX}/public`;
@@ -96,7 +96,7 @@ export class UploadService {
     let sanitized: SanitizedImage;
     try {
       sanitized = await validateImageUpload(input.buffer, input.filename ?? 'upload', {
-        maxBytes: MAX_BYTES,
+        maxBytes: MAX_IMAGE_UPLOAD_BYTES,
         maxDimension: MAX_DIMENSION
       });
     } catch (error) {
