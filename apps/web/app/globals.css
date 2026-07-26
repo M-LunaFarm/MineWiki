@@ -620,6 +620,21 @@ html[data-theme='light'] .wiki-rail-content {
   border-color: rgba(78, 91, 79, 0.16);
 }
 
+.wiki-document-context {
+  border-color: rgba(118, 153, 132, 0.16);
+}
+
+html[data-theme='light'] .wiki-document-context {
+  border-color: rgba(78, 91, 79, 0.18);
+}
+
+@media (max-width: 639px) {
+  .wiki-document-activity-row:nth-child(n + 4),
+  .wiki-document-list li:nth-child(n + 5) {
+    display: none;
+  }
+}
+
 html[data-theme='light'] .auth-shell {
   background: #eef1ed;
   color: #202820;

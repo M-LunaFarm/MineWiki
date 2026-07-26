@@ -24,6 +24,8 @@ test('ordinary wiki documents expose recent public revision activity', () => {
   assert.match(context, /최근 문서 활동/u);
   assert.match(context, /buildWikiRevisionPath/u);
   assert.match(context, /formatSizeDelta/u);
+  assert.match(context, /wiki-document-activity-row/u);
+  assert.doesNotMatch(context, /rounded-2xl border border-white\/10 bg-white\/\[0\.02\]/u);
 });
 
 test('ordinary wiki documents place ACL-filtered recent changes in the responsive right rail', () => {

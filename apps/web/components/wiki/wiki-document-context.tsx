@@ -25,7 +25,7 @@ export function WikiDocumentContext({
   if (uniqueRelated.length === 0 && visibleBacklinks.length === 0 && visibleRevisions.length === 0) return null;
 
   return (
-    <section className="space-y-5 border-t border-white/10 pt-8" aria-label="문서 활동과 연결된 문서">
+    <section className="wiki-document-context space-y-8 border-t border-white/10 pt-8" aria-label="문서 활동과 연결된 문서">
       {visibleRevisions.length > 0 ? <RevisionActivity routePath={routePath} revisions={visibleRevisions} /> : null}
       {uniqueRelated.length > 0 || visibleBacklinks.length > 0 ? <div className="grid gap-5 lg:grid-cols-2"><DocumentList
         icon={<Network className="size-4" aria-hidden="true" />}
@@ -48,9 +48,9 @@ export function WikiDocumentContext({
 function RevisionActivity({ routePath, revisions }: { readonly routePath: string; readonly revisions: readonly WikiRevisionSummary[] }) {
   const contributors = new Set(revisions.map(revisionAuthor).filter(Boolean));
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5" aria-labelledby="document-activity-title">
+    <section className="wiki-document-activity px-1 py-2 sm:px-3" aria-labelledby="document-activity-title">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-400/10 text-emerald-300"><Clock3 className="size-4" aria-hidden="true" /></span><div><p className="text-[11px] font-bold uppercase tracking-[0.15em] text-emerald-300">Document activity</p><h2 id="document-activity-title" className="mt-1 text-lg font-bold text-white">최근 문서 활동</h2><p className="mt-1 text-sm leading-6 text-slate-500">공개된 최근 판과 편집 흐름을 한눈에 확인하세요.</p></div></div><div className="flex flex-wrap gap-2 text-xs"><span className="chip chip-muted">최근 {revisions.length}개 판</span><span className="chip chip-muted inline-flex items-center gap-1.5"><UsersRound className="size-3.5" aria-hidden="true" />기여자 {contributors.size}명</span></div></div>
-      <ol className="mt-5 divide-y divide-white/[0.07]">{revisions.map((revision) => { const author = revisionAuthor(revision) || '알 수 없는 사용자'; const summary = revision.editSummary?.trim() || '편집 요약 없음'; return <li key={revision.id} className="flex min-h-16 flex-col gap-1 py-3 sm:flex-row sm:items-center sm:gap-4"><Link href={buildWikiRevisionPath(revision.id, routePath)} className="min-w-0 flex-1 group"><span className="block truncate text-sm font-semibold text-slate-300 group-hover:text-white">rev {revision.revisionNo} · {summary}</span><span className="mt-1 block text-xs text-slate-500">{author} · {formatActivityTime(revision.createdAt)}</span></Link>{revision.sizeDelta !== null ? <span className={`shrink-0 font-mono text-xs ${revision.sizeDelta > 0 ? 'text-emerald-300' : revision.sizeDelta < 0 ? 'text-red-300' : 'text-slate-500'}`}>{formatSizeDelta(revision.sizeDelta)}</span> : null}</li>; })}</ol>
+      <ol className="mt-4 divide-y divide-white/[0.07]">{revisions.map((revision) => { const author = revisionAuthor(revision) || '알 수 없는 사용자'; const summary = revision.editSummary?.trim() || '편집 요약 없음'; return <li key={revision.id} className="wiki-document-activity-row flex min-h-14 flex-col gap-1 py-2.5 sm:flex-row sm:items-center sm:gap-4"><Link href={buildWikiRevisionPath(revision.id, routePath)} className="min-w-0 flex-1 group"><span className="block truncate text-sm font-semibold text-slate-300 group-hover:text-white">rev {revision.revisionNo} · {summary}</span><span className="mt-1 block text-xs text-slate-500">{author} · {formatActivityTime(revision.createdAt)}</span></Link>{revision.sizeDelta !== null ? <span className={`shrink-0 font-mono text-xs ${revision.sizeDelta > 0 ? 'text-emerald-300' : revision.sizeDelta < 0 ? 'text-red-300' : 'text-slate-500'}`}>{formatSizeDelta(revision.sizeDelta)}</span> : null}</li>; })}</ol>
       <Link href={buildWikiHistoryPath(routePath)} className="mt-4 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-emerald-300 hover:text-emerald-200">전체 역사 보기<ArrowRight className="size-4" aria-hidden="true" /></Link>
     </section>
   );
@@ -82,7 +82,7 @@ function DocumentList({
   readonly items: ReadonlyArray<{ readonly pageId?: string; readonly sourcePageId?: string; readonly routePath: string; readonly displayTitle: string; readonly namespace: string; readonly categoryLabel?: string | null }>;
 }) {
   return (
-    <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+    <section className="wiki-document-list px-1 py-2 sm:px-3">
       <div className="flex items-start gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-emerald-400/10 text-emerald-300">{icon}</span>
         <div>
@@ -92,10 +92,10 @@ function DocumentList({
         </div>
       </div>
       {items.length > 0 ? (
-        <ul className="mt-4 divide-y divide-white/[0.07]">
+        <ul className="mt-3 divide-y divide-white/[0.07]">
           {items.map((item) => (
             <li key={`${item.namespace}:${item.pageId ?? item.sourcePageId ?? item.routePath}`}>
-              <Link href={item.routePath} className="group flex min-h-14 items-center gap-3 py-3">
+              <Link href={item.routePath} className="group flex min-h-12 items-center gap-3 py-2">
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-300 group-hover:text-white">{item.categoryLabel ?? item.displayTitle}</span>
                 <span className="shrink-0 text-[11px] uppercase tracking-wide text-slate-600">{item.namespace}</span>
                 <ArrowRight className="size-3.5 shrink-0 text-slate-700 group-hover:text-emerald-300" aria-hidden="true" />
