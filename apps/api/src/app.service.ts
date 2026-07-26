@@ -21,6 +21,17 @@ export interface ReadinessReport {
   readonly checkedAt: string;
 }
 
+export interface PublicReadinessReport {
+  readonly status: 'ok' | 'error';
+  readonly service: 'minewiki-api';
+  readonly checks: {
+    readonly database: DependencyCheck;
+    readonly redis: DependencyCheck;
+    readonly worker: Pick<WorkerReadinessCheck, 'status' | 'latencyMs' | 'message'>;
+  };
+  readonly checkedAt: string;
+}
+
 @Injectable()
 export class AppService implements OnModuleDestroy {
   private readonly redis?: Redis;
@@ -86,6 +97,10 @@ export class AppService implements OnModuleDestroy {
     };
   }
 
+  async getPublicReadiness(): Promise<PublicReadinessReport> {
+    return publicReadinessReport(await this.getReadiness());
+  }
+
   async onModuleDestroy(): Promise<void> {
     if (this.redis && this.redis.status !== 'end') {
       if (this.redis.status === 'ready') {
@@ -95,6 +110,23 @@ export class AppService implements OnModuleDestroy {
       }
     }
   }
+}
+
+export function publicReadinessReport(report: ReadinessReport): PublicReadinessReport {
+  return {
+    status: report.status,
+    service: report.service,
+    checks: {
+      database: report.checks.database,
+      redis: report.checks.redis,
+      worker: {
+        status: report.checks.worker.status,
+        latencyMs: report.checks.worker.latencyMs,
+        ...(report.checks.worker.message ? { message: report.checks.worker.message } : {}),
+      },
+    },
+    checkedAt: report.checkedAt,
+  };
 }
 
 async function checkDependency(operation: () => Promise<unknown>): Promise<DependencyCheck> {

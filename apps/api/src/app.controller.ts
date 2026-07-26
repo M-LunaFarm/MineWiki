@@ -26,7 +26,7 @@ export class AppController {
   }
 
   private async assertReady() {
-    const report = await this.appService.getReadiness();
+    const report = await this.appService.getPublicReadiness();
     if (report.status !== 'ok') {
       throw new ServiceUnavailableException({
         code: 'service_not_ready',

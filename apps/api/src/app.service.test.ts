@@ -86,6 +86,28 @@ test('readiness exposes recent terminal queue failures as a degraded worker', as
   assert.equal(readiness.checks.worker.recentFailedJobs, 18);
 });
 
+test('public readiness omits queue topology and retained failure history', async () => {
+  const service = new AppService(
+    { $queryRawUnsafe: async () => [{ healthy: 1 }] } as never,
+    new ConfigService({} as NodeJS.ProcessEnv),
+  );
+  Object.assign(service, { redis: redisWithHeartbeat({ failed: 500, recentFailed: 3 }) });
+
+  const readiness = await service.getPublicReadiness();
+  const worker = readiness.checks.worker as Record<string, unknown>;
+
+  assert.deepEqual(worker, {
+    status: 'degraded',
+    latencyMs: worker.latencyMs,
+    message: 'worker_queue_recent_failures',
+  });
+  assert.equal('failedJobs' in worker, false);
+  assert.equal('recentFailedJobs' in worker, false);
+  assert.equal('queues' in worker, false);
+  assert.equal('instanceId' in worker, false);
+  assert.equal('updatedAt' in worker, false);
+});
+
 test('an overdue waiting job degrades worker health without withdrawing the foreground API', async () => {
   const service = new AppService(
     { $queryRawUnsafe: async () => [{ healthy: 1 }] } as never,
