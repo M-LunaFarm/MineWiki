@@ -19,6 +19,10 @@ const routes = [
   { name: 'editor', path: '/wiki/_tools/edit/%EC%95%84%EB%A5%B4%EB%A7%88%EB%94%9C%EB%A1%9C', heading: '아르마딜로 편집', mobileOnly: true },
   { name: 'search', path: '/search?q=%EB%8A%91%EB%8C%80', heading: '서버와 지식을 한 번에', mobileOnly: true },
   { name: 'recent', path: '/recent', heading: '최근 변경', mobileOnly: true },
+  { name: 'history', path: '/wiki/_tools/history/%EC%95%84%EB%A5%B4%EB%A7%88%EB%94%9C%EB%A1%9C', heading: '아르마딜로', mobileOnly: true },
+  { name: 'discussions', path: '/wiki/discussions', heading: '최근 토론', mobileOnly: true },
+  { name: 'category', path: '/wiki/category/%EB%8F%99%EB%AC%BC', mobileOnly: true },
+  { name: 'special', path: '/wiki/special', heading: '특수 문서', mobileOnly: true },
 ];
 const viewports = [
   { name: 'desktop', width: 1440, height: 1000 },
@@ -99,7 +103,11 @@ try {
             waitUntil: 'domcontentloaded',
             timeout: 45_000,
           });
-          await page.getByRole('heading', { name: route.heading, exact: true }).first().waitFor({ timeout: 30_000 });
+          if (route.heading) {
+            await page.getByRole('heading', { name: route.heading, exact: true }).first().waitFor({ timeout: 30_000 });
+          } else {
+            await page.locator('h1').first().waitFor({ timeout: 30_000 });
+          }
           const audit = await page.evaluate(({ pageName, viewportName }) => {
             const visibleDetails = [...document.querySelectorAll('.wiki-reader-rail details')].filter((element) => {
               const style = getComputedStyle(element);
