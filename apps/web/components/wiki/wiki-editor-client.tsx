@@ -627,7 +627,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <div className="wiki-editor-shell mx-auto flex min-w-0 w-full max-w-6xl flex-col gap-6 px-3 sm:px-0">
       <header className="border-b border-white/10 pb-5">
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-slate-400">
           <Link href={routePath} onClick={confirmEditorNavigation} className="hover:text-emerald-200">
@@ -698,8 +698,8 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
         </section>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <section className="space-y-4">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <section className="min-w-0 space-y-4">
           {editConflict ? (
             <div className="rounded-lg border border-amber-300/30 bg-amber-500/10 p-4 text-sm text-amber-50" role="alert">
               <div className="flex gap-3">
@@ -736,7 +736,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
             }}
             onKeyDown={handleEditorKeyDown}
             disabled={loadingRevision || saving}
-            className="min-h-[520px] w-full resize-y rounded-lg border border-white/10 bg-[#0d1219] p-4 font-mono text-sm leading-6 text-slate-100 outline-none transition focus:border-emerald-300/50"
+            className="min-h-[520px] max-w-full w-full resize-y rounded-lg border border-white/10 bg-[#0d1219] p-4 font-mono text-sm leading-6 text-slate-100 outline-none transition focus:border-emerald-300/50"
             spellCheck={false}
           />
           <p className="min-h-5 text-xs text-slate-500" role="status" aria-live="polite">
@@ -932,7 +932,7 @@ export function WikiEditorClient({ page, namespace, title, createSpaceId, routeP
           ) : null}
         </section>
 
-        <aside className="space-y-4">
+        <aside className="min-w-0 space-y-4">
           {!page ? (
             <section className="surface-flat p-4">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><LayoutTemplate className="size-4 text-emerald-300" /> 문서 양식</h2>

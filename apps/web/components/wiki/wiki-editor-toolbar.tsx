@@ -40,7 +40,7 @@ export function WikiEditorToolbar({
   readonly onApply: (action: WikiEditorFormatAction) => void;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-white/10 bg-[#0d1219] p-2" role="toolbar" aria-label="위키 본문 서식">
+    <div className="wiki-editor-toolbar w-full max-w-full overflow-x-auto rounded-lg border border-white/10 bg-[#0d1219] p-2" role="toolbar" aria-label="위키 본문 서식">
       <div className="flex min-w-max items-center gap-1.5">
         <FormatButton action="heading2" label="큰 제목" shortcut="H2" disabled={disabled} onApply={onApply}><Heading2 className="size-4" /></FormatButton>
         <FormatButton action="heading3" label="작은 제목" shortcut="H3" disabled={disabled} onApply={onApply}><Heading3 className="size-4" /></FormatButton>

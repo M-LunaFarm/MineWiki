@@ -628,6 +628,15 @@ html[data-theme='light'] .wiki-document-context {
   border-color: rgba(78, 91, 79, 0.18);
 }
 
+.wiki-editor-shell :is(textarea, input, select) {
+  max-width: 100%;
+}
+
+.wiki-editor-toolbar {
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
 @media (max-width: 639px) {
   .wiki-document-activity-row:nth-child(n + 4),
   .wiki-document-list li:nth-child(n + 5) {
