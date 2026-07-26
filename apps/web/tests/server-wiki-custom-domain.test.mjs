@@ -12,6 +12,8 @@ test('custom server wiki hosts resolve through a fail-closed anonymous middlewar
 
   assert.match(middleware, /request\.headers\.get\('host'\)/u);
   assert.doesNotMatch(middleware, /x-forwarded-host/u);
+  assert.match(middleware, /'verify\.minewiki\.kr'/u);
+  assert.match(middleware, /NEXT_PUBLIC_VERIFY_URL/u);
   assert.match(middleware, /\/v1\/wiki\/domain-routes\//u);
   assert.match(middleware, /cache: 'no-store'/u);
   assert.match(middleware, /requestHeaders\.delete\(header\)/u);

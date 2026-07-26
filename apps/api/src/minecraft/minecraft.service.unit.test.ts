@@ -5,7 +5,7 @@ import { MinecraftService } from './minecraft.service';
 
 test('Microsoft authorization uses the fixed callback and keeps PKCE verifier server-side', async () => {
   const accountId = randomUUID();
-  const redirectUri = 'https://minewiki.kr/minecraft/callback';
+  const redirectUri = 'https://verify.minewiki.kr/minecraft/callback';
   const createdAuthorizations: Array<{
     state: string;
     accountId: string;

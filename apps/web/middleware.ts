@@ -92,16 +92,30 @@ function normalizeRequestHostname(host: string | null): string | null {
 }
 
 function platformHostnames(): ReadonlySet<string> {
-  const hosts = new Set(['minewiki.kr', 'www.minewiki.kr', 'localhost', '127.0.0.1', '::1']);
+  const hosts = new Set([
+    'minewiki.kr',
+    'www.minewiki.kr',
+    'verify.minewiki.kr',
+    'localhost',
+    '127.0.0.1',
+    '::1',
+  ]);
+  addConfiguredHostname(hosts, process.env.NEXT_PUBLIC_VERIFY_URL);
+  addConfiguredHostname(hosts, process.env.NEXT_PUBLIC_MAIN_SITE_URL);
+  addConfiguredHostname(hosts, process.env.NEXT_PUBLIC_SITE_URL);
+  return hosts;
+}
+
+function addConfiguredHostname(hosts: Set<string>, value: string | undefined): void {
   try {
-    const configured = new URL(process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://minewiki.kr').hostname.toLowerCase();
+    if (!value?.trim()) return;
+    const configured = new URL(value.trim()).hostname.toLowerCase();
     hosts.add(configured);
     if (configured.startsWith('www.')) hosts.add(configured.slice(4));
     else hosts.add(`www.${configured}`);
   } catch {
     // The deployment validator reports malformed public origins; fail closed here.
   }
-  return hosts;
 }
 
 function customDomainNotFound(): NextResponse {

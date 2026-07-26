@@ -30,7 +30,7 @@ Production startup fails when required secrets are empty or still use placeholde
 
 - `MICROSOFT_CLIENT_ID`: Microsoft OAuth client id for Minecraft account linking.
 - `MICROSOFT_CLIENT_SECRET`: Microsoft OAuth client secret.
-- `MICROSOFT_REDIRECT_URI`: Microsoft callback URL, for example `https://minewiki.kr/minecraft/callback`.
+- `MICROSOFT_REDIRECT_URI`: Microsoft callback URL, exactly `https://verify.minewiki.kr/minecraft/callback` in production.
 - `NAVER_CLIENT_ID`: Naver OAuth client id.
 - `NAVER_CLIENT_SECRET`: Naver OAuth client secret.
 - `NAVER_REDIRECT_URI`: Naver OAuth callback, for example `https://minewiki.kr/auth/callback/naver`.

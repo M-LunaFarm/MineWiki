@@ -171,7 +171,7 @@ if (!hasDatabase) {
     });
     const thirdId = await createAccount();
     const redirectUri = 'https://minewiki.kr/auth/callback/discord';
-    const microsoftRedirectUri = 'https://minewiki.kr/minecraft/callback';
+    const microsoftRedirectUri = 'https://verify.minewiki.kr/minecraft/callback';
     const config = {
       getOptional: (key: string) => {
         if (key === 'ACCOUNT_LINKING_ENABLED') return 'true';
