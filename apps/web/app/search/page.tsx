@@ -1,6 +1,7 @@
 import Link from 'next/link';
-import { BookOpen, Search, Server, ShieldCheck, Users, Vote } from 'lucide-react';
+import { BookOpen, Server, ShieldCheck, Users, Vote } from 'lucide-react';
 import type { ServerSummary } from '@minewiki/schemas';
+import { WikiSearchSuggestForm } from '../../components/wiki/wiki-search-suggest-form';
 import { fetchServerRankings } from '../../lib/api';
 import { buildServerPath } from '../../lib/server-routes';
 import type { WikiSearchResult } from '../../lib/wiki-api';
@@ -73,48 +74,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </p>
       </header>
 
-      <form action="/search" className="surface-card grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_14rem_12rem_auto]">
-        <label className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <input
-            name="q"
-            type="search"
-            maxLength={100}
-            defaultValue={query}
-            aria-label="서버와 위키 통합 검색"
-            placeholder="서버명, 주소, 문서 제목, 본문 검색"
-            className="h-12 w-full rounded-xl border border-white/10 bg-black/20 pl-10 pr-3 text-sm text-white placeholder:text-slate-500 focus:border-[#35e5b7]/50 focus:outline-none focus:ring-2 focus:ring-[#35e5b7]/10"
-          />
-        </label>
-        <select
-          name="target"
-          aria-label="위키 검색 대상"
-          defaultValue={target}
-          className="h-12 rounded-xl border border-white/10 bg-[#0d1219] px-3 text-sm text-white focus:border-[#35e5b7]/50 focus:outline-none"
-        >
-          <option value="all">제목 우선 · 없으면 본문</option>
-          <option value="title">제목만</option>
-          <option value="content">본문만</option>
-        </select>
-        <select
-          name="namespace"
-          aria-label="위키 이름공간"
-          defaultValue={namespace}
-          className="h-12 rounded-xl border border-white/10 bg-[#0d1219] px-3 text-sm text-white focus:border-[#35e5b7]/50 focus:outline-none"
-        >
-          <option value="">위키 전체</option>
-          <option value="main">일반</option>
-          <option value="server">서버 위키</option>
-          <option value="mod">모드</option>
-          <option value="modpack">모드팩</option>
-          <option value="dev">개발</option>
-          <option value="help">도움말</option>
-          <option value="project">프로젝트</option>
-          <option value="template">틀</option>
-          <option value="file">파일</option>
-        </select>
-        <button type="submit" className="btn-primary h-12 px-6">검색</button>
-      </form>
+      <WikiSearchSuggestForm query={query} target={target} namespace={namespace} />
 
       {!query ? (
         <EmptySearch />

@@ -3,14 +3,16 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const pageSource = await readFile(new URL('../app/search/page.tsx', import.meta.url), 'utf8');
+const suggestFormSource = await readFile(new URL('../components/wiki/wiki-search-suggest-form.tsx', import.meta.url), 'utf8');
 const browserApiSource = await readFile(new URL('../lib/wiki-api.ts', import.meta.url), 'utf8');
 const serverApiSource = await readFile(new URL('../lib/wiki-server-api.ts', import.meta.url), 'utf8');
+const uiSource = `${pageSource}\n${suggestFormSource}`;
 
 test('unified search preserves target filters across server requests and pagination', () => {
-  assert.match(pageSource, /name="target"/u);
-  assert.match(pageSource, /제목 우선 · 없으면 본문/u);
-  assert.match(pageSource, /<option value="title">제목만<\/option>/u);
-  assert.match(pageSource, /<option value="content">본문만<\/option>/u);
+  assert.match(uiSource, /name="target"/u);
+  assert.match(uiSource, /제목 우선 · 없으면 본문/u);
+  assert.match(uiSource, /<option value="title">제목만<\/option>/u);
+  assert.match(uiSource, /<option value="content">본문만<\/option>/u);
   assert.match(pageSource, /target=\$\{encodeURIComponent\(wikiResult\.resolvedTarget\)\}/u);
   assert.match(pageSource, /await run\('title'\)/u);
   assert.match(pageSource, /await run\('content'\)/u);

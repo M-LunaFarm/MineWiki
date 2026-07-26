@@ -377,6 +377,35 @@ html[data-theme='light'] .site-header .header-search-result[aria-selected='true'
   background-color: #eef5ef;
 }
 
+html[data-theme='light'] .wiki-search-suggest-results {
+  border-color: var(--theme-border);
+  background-color: #ffffff;
+  color: var(--theme-ink);
+}
+
+html[data-theme='light'] .wiki-search-suggest-result {
+  border-color: rgba(37, 49, 41, 0.1);
+}
+
+html[data-theme='light'] .wiki-search-suggest-result:hover,
+html[data-theme='light'] .wiki-search-suggest-result[aria-selected='true'] {
+  background-color: #eef5ef;
+}
+
+html[data-theme='light'] .wiki-search-suggest-meta,
+html[data-theme='light'] .wiki-search-suggest-hint {
+  color: #667168;
+}
+
+html[data-theme='light'] .wiki-search-suggest-hint {
+  border-color: rgba(37, 49, 41, 0.1);
+}
+
+html[data-theme='light'] .wiki-search-suggest-badge {
+  background-color: #e7f8f1;
+  color: #087f5b;
+}
+
 /* Keep branded and destructive actions legible after global light-theme text remapping. */
 html[data-theme='light'] [class~='bg-[#5865f2]'][class~='text-white'],
 html[data-theme='light'] [class~='bg-[#5865F2]'][class~='text-white'],
