@@ -515,11 +515,23 @@ export class AuthService {
 
   getOAuthProviderAvailability(): { discord: boolean; naver: boolean } {
     const discord =
-      Boolean(this.config.getOptional('DISCORD_CLIENT_ID')) &&
-      Boolean(this.config.getOptional('DISCORD_CLIENT_SECRET'));
+      Boolean(
+        this.config.getOptional('DISCORD_OAUTH_CLIENT_ID')
+        ?? this.config.getOptional('DISCORD_CLIENT_ID'),
+      ) &&
+      Boolean(
+        this.config.getOptional('DISCORD_OAUTH_CLIENT_SECRET')
+        ?? this.config.getOptional('DISCORD_CLIENT_SECRET'),
+      );
     const naver =
-      Boolean(this.config.getOptional('NAVER_CLIENT_ID')) &&
-      Boolean(this.config.getOptional('NAVER_CLIENT_SECRET'));
+      Boolean(
+        this.config.getOptional('NAVER_OAUTH_CLIENT_ID')
+        ?? this.config.getOptional('NAVER_CLIENT_ID'),
+      ) &&
+      Boolean(
+        this.config.getOptional('NAVER_OAUTH_CLIENT_SECRET')
+        ?? this.config.getOptional('NAVER_CLIENT_SECRET'),
+      );
     return { discord, naver };
   }
 

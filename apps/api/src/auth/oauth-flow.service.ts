@@ -243,7 +243,9 @@ export class OAuthFlowService {
   }
 
   private createDiscordAuthorizationUrl(state: string, redirectUri: string): string {
-    const clientId = this.config.getOptional('DISCORD_CLIENT_ID');
+    const clientId =
+      this.config.getOptional('DISCORD_OAUTH_CLIENT_ID')
+      ?? this.config.getOptional('DISCORD_CLIENT_ID');
     if (!clientId) {
       throw new InternalServerErrorException('DISCORD_CLIENT_ID가 설정되지 않았습니다.');
     }
@@ -260,8 +262,12 @@ export class OAuthFlowService {
     code: string,
     redirectUri: string
   ): Promise<OAuthProfile & { credential: OAuthCredentialSnapshot }> {
-    const clientId = this.config.getOptional('DISCORD_CLIENT_ID');
-    const clientSecret = this.config.getOptional('DISCORD_CLIENT_SECRET');
+    const clientId =
+      this.config.getOptional('DISCORD_OAUTH_CLIENT_ID')
+      ?? this.config.getOptional('DISCORD_CLIENT_ID');
+    const clientSecret =
+      this.config.getOptional('DISCORD_OAUTH_CLIENT_SECRET')
+      ?? this.config.getOptional('DISCORD_CLIENT_SECRET');
     if (!clientId || !clientSecret) {
       throw new InternalServerErrorException('Discord OAuth 환경 변수가 설정되지 않았습니다.');
     }
@@ -396,7 +402,9 @@ export class OAuthFlowService {
   }
 
   private createNaverAuthorizationUrl(state: string, redirectUri: string): string {
-    const clientId = this.config.getOptional('NAVER_CLIENT_ID');
+    const clientId =
+      this.config.getOptional('NAVER_OAUTH_CLIENT_ID')
+      ?? this.config.getOptional('NAVER_CLIENT_ID');
     if (!clientId) {
       throw new InternalServerErrorException('NAVER_CLIENT_ID가 설정되지 않았습니다.');
     }
@@ -414,8 +422,12 @@ export class OAuthFlowService {
     state: string,
     redirectUri: string
   ): Promise<OAuthProfile> {
-    const clientId = this.config.getOptional('NAVER_CLIENT_ID');
-    const clientSecret = this.config.getOptional('NAVER_CLIENT_SECRET');
+    const clientId =
+      this.config.getOptional('NAVER_OAUTH_CLIENT_ID')
+      ?? this.config.getOptional('NAVER_CLIENT_ID');
+    const clientSecret =
+      this.config.getOptional('NAVER_OAUTH_CLIENT_SECRET')
+      ?? this.config.getOptional('NAVER_CLIENT_SECRET');
     if (!clientId || !clientSecret) {
       throw new InternalServerErrorException('NAVER OAuth 환경 변수가 설정되지 않았습니다.');
     }

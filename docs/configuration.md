@@ -20,8 +20,10 @@ Production startup fails when required secrets are empty or still use placeholde
 ## Discord And Plugin Sync
 
 - `DISCORD_BOT_TOKEN`: Token for `minewiki-bot` and worker-side Discord delivery.
-- `DISCORD_CLIENT_ID`: Discord OAuth application client id.
-- `DISCORD_CLIENT_SECRET`: Discord OAuth client secret.
+- `DISCORD_CLIENT_ID`: Discord bot application client id.
+- `DISCORD_CLIENT_SECRET`: Legacy shared Discord secret, retained as an OAuth fallback.
+- `DISCORD_OAUTH_CLIENT_ID`: Optional dedicated Discord login OAuth application client id.
+- `DISCORD_OAUTH_CLIENT_SECRET`: Optional dedicated Discord login OAuth client secret.
 - `DISCORD_REDIRECT_URI`: Discord OAuth callback, for example `https://minewiki.kr/auth/callback/discord`.
 - `INTERNAL_BOT_API_TOKEN`: Shared token for internal bot-to-API calls.
 - `PLUGIN_SYNC_TOKEN`: Shared plugin sync secret for legacy/internal plugin integrations.
@@ -33,6 +35,8 @@ Production startup fails when required secrets are empty or still use placeholde
 - `MICROSOFT_REDIRECT_URI`: Microsoft callback URL, exactly `https://verify.minewiki.kr/minecraft/callback` in production.
 - `NAVER_CLIENT_ID`: Naver OAuth client id.
 - `NAVER_CLIENT_SECRET`: Naver OAuth client secret.
+- `NAVER_OAUTH_CLIENT_ID`: Optional dedicated Naver login OAuth client id.
+- `NAVER_OAUTH_CLIENT_SECRET`: Optional dedicated Naver login OAuth client secret.
 - `NAVER_REDIRECT_URI`: Naver OAuth callback, for example `https://minewiki.kr/auth/callback/naver`.
 
 ## Anti-Abuse

@@ -154,8 +154,12 @@ export class GuildAccessService {
   private async refreshDiscordCredential(
     credential: OAuthCredentialRecord,
   ): Promise<OAuthCredentialRecord> {
-    const clientId = this.config.getOptional('DISCORD_CLIENT_ID');
-    const clientSecret = this.config.getOptional('DISCORD_CLIENT_SECRET');
+    const clientId =
+      this.config.getOptional('DISCORD_OAUTH_CLIENT_ID')
+      ?? this.config.getOptional('DISCORD_CLIENT_ID');
+    const clientSecret =
+      this.config.getOptional('DISCORD_OAUTH_CLIENT_SECRET')
+      ?? this.config.getOptional('DISCORD_CLIENT_SECRET');
     if (!clientId || !clientSecret) {
       throw new UnauthorizedException('Discord OAuth refresh is not configured.');
     }

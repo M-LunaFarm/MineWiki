@@ -70,6 +70,8 @@ const envSchema = z.object({
   DISCORD_BOT_TOKEN: z.string().optional(),
   DISCORD_CLIENT_ID: z.string().optional(),
   DISCORD_CLIENT_SECRET: z.string().optional(),
+  DISCORD_OAUTH_CLIENT_ID: z.string().optional(),
+  DISCORD_OAUTH_CLIENT_SECRET: z.string().optional(),
   DISCORD_REDIRECT_URI: optionalUrl,
   INTERNAL_BOT_API_TOKEN: z.string().optional(),
   PLUGIN_SYNC_TOKEN: z.string().optional(),
@@ -105,6 +107,8 @@ const envSchema = z.object({
   MICROSOFT_REDIRECT_URI: optionalUrl,
   NAVER_CLIENT_ID: z.string().optional(),
   NAVER_CLIENT_SECRET: z.string().optional(),
+  NAVER_OAUTH_CLIENT_ID: z.string().optional(),
+  NAVER_OAUTH_CLIENT_SECRET: z.string().optional(),
   NAVER_REDIRECT_URI: optionalUrl,
   OBSERVABILITY_ENDPOINT: optionalUrl,
   OBSERVABILITY_API_KEY: z.string().optional(),
@@ -295,18 +299,36 @@ function validateProductionEnvironment(env: EnvSchema): void {
         failures.push('NEXT_PUBLIC_WIKI_ANONYMOUS_EDIT_REQUESTS_ENABLED must be true when anonymous wiki edit requests are enabled');
       }
     }
-    validateOptionalGroup(
-      env,
-      ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI'],
-      'Discord OAuth',
-      failures
-    );
-    validateOptionalGroup(
-      env,
-      ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET', 'NAVER_REDIRECT_URI'],
-      'NAVER OAuth',
-      failures
-    );
+    if (!isBlank(env.DISCORD_OAUTH_CLIENT_ID) || !isBlank(env.DISCORD_OAUTH_CLIENT_SECRET)) {
+      validateRequiredGroup(
+        env,
+        ['DISCORD_OAUTH_CLIENT_ID', 'DISCORD_OAUTH_CLIENT_SECRET', 'DISCORD_REDIRECT_URI'],
+        'Discord OAuth',
+        failures,
+      );
+    } else {
+      validateOptionalGroup(
+        env,
+        ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI'],
+        'Discord OAuth',
+        failures
+      );
+    }
+    if (!isBlank(env.NAVER_OAUTH_CLIENT_ID) || !isBlank(env.NAVER_OAUTH_CLIENT_SECRET)) {
+      validateRequiredGroup(
+        env,
+        ['NAVER_OAUTH_CLIENT_ID', 'NAVER_OAUTH_CLIENT_SECRET', 'NAVER_REDIRECT_URI'],
+        'NAVER OAuth',
+        failures,
+      );
+    } else {
+      validateOptionalGroup(
+        env,
+        ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET', 'NAVER_REDIRECT_URI'],
+        'NAVER OAuth',
+        failures
+      );
+    }
     validateMicrosoftRedirectUri(env, failures);
     validateOptionalGroup(env, ['SMTP_USER', 'SMTP_PASS'], 'SMTP authentication', failures);
     if (env.PADDLE_MODE === 'shadow' && isBlank(env.PADDLE_WEBHOOK_SECRET)) {

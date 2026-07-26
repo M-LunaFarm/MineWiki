@@ -13,8 +13,10 @@ test('OAuth start pins provider redirects to the configured production callbacks
   const config = {
     getOptional(key: string) {
       if (key === 'DISCORD_CLIENT_ID') return 'discord-client';
+      if (key === 'DISCORD_OAUTH_CLIENT_ID') return 'discord-oauth-client';
       if (key === 'DISCORD_REDIRECT_URI') return 'https://minewiki.kr/auth/callback/discord';
       if (key === 'NAVER_CLIENT_ID') return 'naver-client';
+      if (key === 'NAVER_OAUTH_CLIENT_ID') return 'naver-oauth-client';
       if (key === 'NAVER_REDIRECT_URI') return 'https://minewiki.kr/auth/callback/naver';
       return undefined;
     },
@@ -56,8 +58,16 @@ test('OAuth start pins provider redirects to the configured production callbacks
     'https://minewiki.kr/auth/callback/discord',
   );
   assert.equal(
+    new URL(discord.authorizationUrl).searchParams.get('client_id'),
+    'discord-oauth-client',
+  );
+  assert.equal(
     new URL(naver.authorizationUrl).searchParams.get('redirect_uri'),
     'https://minewiki.kr/auth/callback/naver',
+  );
+  assert.equal(
+    new URL(naver.authorizationUrl).searchParams.get('client_id'),
+    'naver-oauth-client',
   );
   assert.deepEqual(created, [
     { provider: 'discord', redirectUri: 'https://minewiki.kr/auth/callback/discord' },
