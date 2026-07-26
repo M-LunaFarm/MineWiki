@@ -99,10 +99,20 @@ try {
           page.on('response', (response) => {
             if (response.status() >= 500) failedResponses.push({ status: response.status(), url: response.url() });
           });
-          const response = await page.goto(`${baseUrl}${route.path}`, {
-            waitUntil: 'domcontentloaded',
-            timeout: 45_000,
-          });
+          let response;
+          try {
+            response = await page.goto(`${baseUrl}${route.path}`, {
+              waitUntil: 'domcontentloaded',
+              timeout: 45_000,
+            });
+          } catch (error) {
+            if (!(error instanceof Error) || !error.message.includes('ERR_ABORTED')) throw error;
+            await page.waitForTimeout(300);
+            response = await page.goto(`${baseUrl}${route.path}`, {
+              waitUntil: 'domcontentloaded',
+              timeout: 45_000,
+            });
+          }
           if (route.heading) {
             await page.getByRole('heading', { name: route.heading, exact: true }).first().waitFor({ timeout: 30_000 });
           } else {
