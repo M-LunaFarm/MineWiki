@@ -1881,7 +1881,7 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
     @apply absolute inset-x-0 top-[calc(100%+0.5rem)] z-40 max-h-80 overflow-y-auto rounded-xl border border-white/10 bg-[#10151b] text-slate-100 shadow-2xl;
   }
   .wiki-rendered .front-wiki-search .front-wiki-search-suggest-result {
-    @apply block border-b border-white/[0.07] px-4 py-3 text-left no-underline transition last:border-0 hover:bg-white/[0.05] hover:text-inherit aria-selected:bg-emerald-300/10;
+    @apply block border-b border-white/[0.07] px-4 py-3 text-left text-inherit no-underline transition last:border-0 hover:bg-white/[0.05] hover:text-inherit aria-selected:bg-emerald-300/10;
   }
   .wiki-rendered .front-wiki-search .front-wiki-search-suggest-title {
     @apply flex min-w-0 items-center gap-2;
