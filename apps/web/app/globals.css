@@ -2647,3 +2647,40 @@ html[data-theme='dark'] .server-wiki-layout [class~='hover:text-[#2458bd]']:hove
 html[data-theme='dark'] .server-wiki-layout [class~='hover:text-[#346ddb]']:hover {
   color: #8ab4ff;
 }
+
+/* Rendered front-page search is hydrated after wiki HTML is inserted. Keep its
+   suggestion surface aligned with the active light theme despite wiki link rules. */
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-results {
+  border-color: var(--theme-border);
+  background-color: #ffffff;
+  color: var(--theme-ink);
+}
+
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-result {
+  border-color: rgba(37, 49, 41, 0.1);
+  color: var(--theme-ink);
+}
+
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-result:hover,
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-result[aria-selected='true'] {
+  background-color: #eef5ef;
+  color: var(--theme-ink);
+}
+
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-title-text {
+  color: var(--theme-ink);
+}
+
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-meta,
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-hint {
+  color: #667168;
+}
+
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-hint {
+  border-color: rgba(37, 49, 41, 0.1);
+}
+
+html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-badge {
+  background-color: #e7f8f1;
+  color: #087f5b;
+}
