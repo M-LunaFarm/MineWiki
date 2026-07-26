@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { SupportService } from './support.service';
+import { calculateSupportTicketSla, SupportService } from './support.service';
 
 type AccessProbe = {
   ensureTicketAccess(
@@ -49,6 +49,35 @@ test('guest access codes are stored as one-way SHA-256 digests', () => {
 
   assert.equal(digest.length, 64);
   assert.notEqual(digest, accessCode);
+});
+
+test('support SLA targets are priority-aware and stop breaching after a public response', () => {
+  const base = {
+    createdAt: '2026-07-26T00:00:00.000Z',
+    lastCustomerMessageAt: '2026-07-26T00:00:00.000Z',
+    lastAgentMessageAt: null,
+    resolvedAt: null,
+  } as const;
+
+  const urgent = calculateSupportTicketSla(
+    { ...base, priority: 'urgent', firstResponseAt: null },
+    Date.parse('2026-07-26T01:00:01.000Z'),
+  );
+  const responded = calculateSupportTicketSla(
+    {
+      ...base,
+      priority: 'normal',
+      firstResponseAt: '2026-07-26T00:30:00.000Z',
+      lastAgentMessageAt: '2026-07-26T00:30:00.000Z',
+    },
+    Date.parse('2026-07-28T00:00:00.000Z'),
+  );
+
+  assert.equal(urgent.targetMinutes, 60);
+  assert.equal(urgent.responseDueAt, '2026-07-26T01:00:00.000Z');
+  assert.equal(urgent.breached, true);
+  assert.equal(responded.targetMinutes, 1_440);
+  assert.equal(responded.breached, false);
 });
 
 test('hidden servers can only be attached by their owner, registrant, or support staff', async () => {

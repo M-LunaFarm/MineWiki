@@ -759,6 +759,16 @@ export const supportMessageSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+export const supportTicketSlaSchema = z.object({
+  targetMinutes: z.number().int().positive(),
+  responseDueAt: z.string().datetime(),
+  firstResponseAt: z.string().datetime().nullable(),
+  lastCustomerMessageAt: z.string().datetime().nullable(),
+  lastAgentMessageAt: z.string().datetime().nullable(),
+  resolvedAt: z.string().datetime().nullable(),
+  breached: z.boolean(),
+});
+
 export const supportTicketSchema = z.object({
   id: z.string().uuid(),
   subject: z.string().min(1).max(160),
@@ -778,6 +788,7 @@ export const supportTicketSchema = z.object({
   contactEmail: z.string().email().nullable(),
   latestMessagePreview: z.string().nullable(),
   messageCount: z.number().int().nonnegative(),
+  sla: supportTicketSlaSchema,
 });
 
 export const supportTicketListResponseSchema = z.object({

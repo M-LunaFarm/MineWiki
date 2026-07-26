@@ -54,6 +54,15 @@ test('support ticket schemas accept operational context fields', () => {
     },
     latestMessagePreview: null,
     messageCount: 1,
+    sla: {
+      targetMinutes: 240,
+      responseDueAt: '2026-07-06T04:00:00.000Z',
+      firstResponseAt: null,
+      lastCustomerMessageAt: '2026-07-06T00:00:00.000Z',
+      lastAgentMessageAt: null,
+      resolvedAt: null,
+      breached: true,
+    },
   });
 
   assert.equal(ticket.pageId, '42');

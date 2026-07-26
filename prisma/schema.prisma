@@ -968,6 +968,10 @@ model SupportTicket {
   guestEmail             String?
   guestAccessHash        String?
   guestAccessExpiresAt   DateTime?
+  firstResponseAt        DateTime?
+  resolvedAt             DateTime?
+  lastCustomerMessageAt  DateTime?
+  lastAgentMessageAt     DateTime?
   lastMessageAt          DateTime              @default(now())
   createdAt              DateTime              @default(now())
   updatedAt              DateTime              @updatedAt
@@ -981,6 +985,7 @@ model SupportTicket {
   @@index([requesterAccountId, createdAt])
   @@index([assigneeAccountId, status])
   @@index([status, lastMessageAt])
+  @@index([status, priority, firstResponseAt])
   @@index([serverId])
   @@index([pageId])
   @@index([verifySessionId])

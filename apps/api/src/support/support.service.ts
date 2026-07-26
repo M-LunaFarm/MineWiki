@@ -59,6 +59,10 @@ interface TicketRow {
   guestEmail: string | null;
   guestAccessHash: string | null;
   guestAccessExpiresAt: Date | string | null;
+  firstResponseAt: Date | string | null;
+  resolvedAt: Date | string | null;
+  lastCustomerMessageAt: Date | string | null;
+  lastAgentMessageAt: Date | string | null;
   lastMessageAt: Date | string;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -226,6 +230,10 @@ export class SupportService {
         t.guestEmail,
         t.guestAccessHash,
         t.guestAccessExpiresAt,
+        t.firstResponseAt,
+        t.resolvedAt,
+        t.lastCustomerMessageAt,
+        t.lastAgentMessageAt,
         t.lastMessageAt,
         t.createdAt,
         t.updatedAt,
@@ -483,7 +491,12 @@ export class SupportService {
       `,
       this.prisma.$executeRaw`
         UPDATE \`SupportTicket\`
-        SET lastMessageAt = ${now}, status = ${nextStatus}, updatedAt = ${now}
+        SET
+          lastMessageAt = ${now},
+          lastCustomerMessageAt = ${now},
+          resolvedAt = ${null},
+          status = ${nextStatus},
+          updatedAt = ${now}
         WHERE id = ${ticketId}
       `,
     ]);
@@ -548,7 +561,21 @@ export class SupportService {
       `,
       this.prisma.$executeRaw`
         UPDATE \`SupportTicket\`
-        SET lastMessageAt = ${now}, status = ${nextStatus}, updatedAt = ${now}
+        SET
+          lastMessageAt = ${now},
+          status = ${nextStatus},
+          updatedAt = ${now}
+          ${
+            isAgent && !isInternal
+              ? Prisma.sql`,
+                firstResponseAt = COALESCE(firstResponseAt, ${now}),
+                lastAgentMessageAt = ${now}`
+              : !isAgent
+                ? Prisma.sql`,
+                  lastCustomerMessageAt = ${now},
+                  resolvedAt = ${null}`
+                : Prisma.empty
+          }
         WHERE id = ${ticketId}
       `,
     ]);
@@ -585,6 +612,11 @@ export class SupportService {
 
     if (parsed.status !== undefined) {
       updates.push(Prisma.sql`status = ${parsed.status}`);
+      updates.push(
+        parsed.status === 'resolved' || parsed.status === 'closed'
+          ? Prisma.sql`resolvedAt = COALESCE(resolvedAt, ${now})`
+          : Prisma.sql`resolvedAt = ${null}`,
+      );
     }
     if (parsed.priority !== undefined) {
       updates.push(Prisma.sql`priority = ${parsed.priority}`);
@@ -657,6 +689,7 @@ export class SupportService {
           guestEmail,
           guestAccessHash,
           guestAccessExpiresAt,
+          lastCustomerMessageAt,
           lastMessageAt,
           createdAt,
           updatedAt
@@ -681,6 +714,7 @@ export class SupportService {
           ${input.guestEmail ?? null},
           ${input.guestAccessHash ?? null},
           ${input.guestAccessExpiresAt ?? null},
+          ${now},
           ${now},
           ${now},
           ${now}
@@ -915,6 +949,10 @@ export class SupportService {
         t.guestEmail,
         t.guestAccessHash,
         t.guestAccessExpiresAt,
+        t.firstResponseAt,
+        t.resolvedAt,
+        t.lastCustomerMessageAt,
+        t.lastAgentMessageAt,
         t.lastMessageAt,
         t.createdAt,
         t.updatedAt,
@@ -1030,6 +1068,7 @@ export class SupportService {
         ? clampText(row.latestMessagePreview, 180)
         : null,
       messageCount: toCount(row.messageCount),
+      sla: calculateSupportTicketSla(row),
     };
   }
 
@@ -1068,6 +1107,42 @@ function normalizePriority(value: string): TicketPriority {
     return value;
   }
   return 'normal';
+}
+
+const SUPPORT_FIRST_RESPONSE_TARGET_MINUTES: Readonly<Record<TicketPriority, number>> = {
+  urgent: 60,
+  high: 4 * 60,
+  normal: 24 * 60,
+  low: 48 * 60,
+};
+
+export function calculateSupportTicketSla(
+  row: Pick<
+    TicketRow,
+    | 'priority'
+    | 'createdAt'
+    | 'firstResponseAt'
+    | 'lastCustomerMessageAt'
+    | 'lastAgentMessageAt'
+    | 'resolvedAt'
+  >,
+  now = Date.now(),
+): SupportTicket['sla'] {
+  const priority = normalizePriority(row.priority);
+  const targetMinutes = SUPPORT_FIRST_RESPONSE_TARGET_MINUTES[priority];
+  const createdAt = new Date(row.createdAt);
+  const responseDueAt = new Date(createdAt.getTime() + targetMinutes * 60_000);
+  const firstResponseAt = toNullableIsoString(row.firstResponseAt);
+
+  return {
+    targetMinutes,
+    responseDueAt: responseDueAt.toISOString(),
+    firstResponseAt,
+    lastCustomerMessageAt: toNullableIsoString(row.lastCustomerMessageAt),
+    lastAgentMessageAt: toNullableIsoString(row.lastAgentMessageAt),
+    resolvedAt: toNullableIsoString(row.resolvedAt),
+    breached: firstResponseAt === null && now > responseDueAt.getTime(),
+  };
 }
 
 function normalizeAuthorRole(value: string): MessageAuthorRole {
@@ -1149,6 +1224,10 @@ function toNullableNumber(value: number | bigint | string | null): number | null
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toNullableIsoString(value: Date | string | null): string | null {
+  return value === null ? null : toIsoString(value);
 }
 
 function normalizeServerEdition(value: string | null): 'java' | 'bedrock' | null {

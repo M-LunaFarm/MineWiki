@@ -2200,6 +2200,40 @@ function SupportAgentContextPanel({
             value={ticket.assignee?.displayName ?? '미배정'}
             detail={ticket.assignee ? '현재 담당 상담원' : '인박스에서 배정 대기 중'}
           />
+          <div
+            className={`rounded-lg border p-3 ${
+              ticket.sla.breached
+                ? 'border-red-500/35 bg-red-500/10'
+                : 'border-[#34363A] bg-[#18191C]'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold text-[#85878D]">첫 응답 SLA</p>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                  ticket.sla.firstResponseAt
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                    : ticket.sla.breached
+                      ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                      : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                }`}
+              >
+                {ticket.sla.firstResponseAt
+                  ? '응답 완료'
+                  : ticket.sla.breached
+                    ? '기한 초과'
+                    : '응답 대기'}
+              </span>
+            </div>
+            <p className="mt-2 text-xs font-medium text-white">
+              {ticket.sla.firstResponseAt
+                ? formatDateTime(ticket.sla.firstResponseAt)
+                : `마감 ${formatDateTime(ticket.sla.responseDueAt)}`}
+            </p>
+            <p className="mt-1 text-[11px] text-[#A7A9AF]">
+              {formatSlaTarget(ticket.sla.targetMinutes)} 내 첫 공개 답변
+            </p>
+          </div>
           <div className="rounded-lg border border-[#34363A] bg-[#18191C] p-3">
             <p className="text-[11px] font-semibold text-[#85878D]">연결 서버</p>
             {ticket.server ? (
@@ -2311,6 +2345,26 @@ function formatDate(value: string): string {
     return '-';
   }
   return new Date(parsed).toLocaleDateString('ko-KR');
+}
+
+function formatDateTime(value: string): string {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return '-';
+  }
+  return new Date(parsed).toLocaleString('ko-KR', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatSlaTarget(minutes: number): string {
+  if (minutes < 60) {
+    return `${minutes}분`;
+  }
+  return `${minutes / 60}시간`;
 }
 
 function formatTime(value: string): string {
