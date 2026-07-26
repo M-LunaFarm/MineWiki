@@ -55,14 +55,19 @@ export async function WikiRoutePage({ prefix, segments = [], followRedirects = t
       <WikiArticleView
         page={page}
         routePath={routePath}
+        recentChanges={recent}
         afterContent={<WikiNamespaceFrontPage namespace={namespace} routePath={routePath} pageCount={pageCount} recent={recent} featured={featured} showSearch={!page.html.includes('class="search-page"')} />}
       />
     );
   }
-  const [backlinksResults, categoryResults, revisionsResult] = await Promise.all([
+  const [backlinksResults, categoryResults, revisionsResult, recentResult] = await Promise.all([
     Promise.allSettled([fetchWikiBacklinks(page.id, 8)]),
     Promise.allSettled(page.categories.slice(0, 3).map((category) => fetchWikiCategory({ category, limit: 8 }))),
     fetchWikiRevisions(page.id, 6).then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (reason) => ({ status: 'rejected' as const, reason }),
+    ),
+    fetchWikiRecent({ limit: 10 }).then(
       (value) => ({ status: 'fulfilled' as const, value }),
       (reason) => ({ status: 'rejected' as const, reason }),
     ),
@@ -71,10 +76,12 @@ export async function WikiRoutePage({ prefix, segments = [], followRedirects = t
   const backlinks = backlinksResult.status === 'fulfilled' ? backlinksResult.value.items : [];
   const related = categoryResults.flatMap((result) => result.status === 'fulfilled' ? result.value.items : []);
   const revisions = revisionsResult.status === 'fulfilled' ? revisionsResult.value.items : [];
+  const recentChanges = recentResult.status === 'fulfilled' ? recentResult.value.items : [];
   return (
     <WikiArticleView
       page={page}
       routePath={routePath}
+      recentChanges={recentChanges}
       afterContent={<WikiDocumentContext currentPageId={page.id} routePath={routePath} backlinks={backlinks} related={related} revisions={revisions} />}
     />
   );

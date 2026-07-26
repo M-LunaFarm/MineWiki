@@ -135,11 +135,27 @@ export class WikiProfileService {
         return legacyByEmail;
       }
       if (legacyByEmail) {
-        return this.createWikiProfile(account, null);
+        return this.createWikiProfileSafely(account, null);
       }
     }
 
-    return this.createWikiProfile(account, account.email);
+    return this.createWikiProfileSafely(account, account.email);
+  }
+
+  private async createWikiProfileSafely(
+    account: { id: string; provider: string; displayName: string | null; email: string | null },
+    profileEmail: string | null
+  ) {
+    try {
+      return await this.createWikiProfile(account, profileEmail);
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const concurrentlyCreated = await this.prisma.wikiProfile.findUnique({
+        where: { accountId: account.id }
+      });
+      if (!concurrentlyCreated) throw error;
+      return this.resolveCanonicalProfile(concurrentlyCreated);
+    }
   }
 
   private createWikiProfile(
@@ -188,4 +204,8 @@ export class WikiProfileService {
     const candidate = displayName?.trim() || email?.split('@')[0]?.trim() || fallback || 'MineWiki User';
     return candidate.slice(0, 64);
   }
+}
+
+function isUniqueConstraintError(error: unknown): error is { readonly code: 'P2002' } {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
 }

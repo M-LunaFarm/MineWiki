@@ -1887,9 +1887,11 @@ export async function fetchWikiRecent(
     namespace?: string;
     spaceId?: string;
     minor?: string;
+    limit?: number;
   } = {},
 ): Promise<WikiRecentChangeListResponse> {
-  const params = new URLSearchParams({ limit: '30' });
+  const limit = Math.max(1, Math.min(50, Math.trunc(input.limit ?? 30)));
+  const params = new URLSearchParams({ limit: String(limit) });
   if (input.cursor) params.set('cursor', input.cursor);
   if (input.changeType) params.set('changeType', input.changeType);
   if (input.namespace) params.set('namespace', input.namespace);

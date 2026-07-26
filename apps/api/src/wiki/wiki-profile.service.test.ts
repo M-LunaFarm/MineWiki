@@ -74,6 +74,87 @@ test('a fresh wiki profile retains the account email when it is unused', async (
   assert.equal(createdData?.email, account.email);
 });
 
+test('ensureWikiProfile recovers when a concurrent request creates the same profile', async () => {
+  const concurrentAccount = {
+    id: '33333333-3333-4333-8333-333333333333',
+    provider: 'local',
+    displayName: 'Concurrent user',
+    email: null,
+  };
+  const profile = {
+    id: 42n,
+    accountId: concurrentAccount.id,
+    username: 'local_333333333333433383333333',
+    displayName: concurrentAccount.displayName,
+    email: null,
+    emailVerifiedAt: null,
+    emailVerificationSentAt: null,
+    passwordHash: null,
+    status: 'active',
+    mergedIntoProfileId: null,
+    mergedAt: null,
+    usernameChangedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  let profileLookupCount = 0;
+  const prisma = {
+    account: {
+      async findUnique() {
+        return concurrentAccount;
+      },
+    },
+    wikiProfile: {
+      async findUnique() {
+        profileLookupCount += 1;
+        return profileLookupCount === 1 ? null : profile;
+      },
+      async create() {
+        throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+      },
+    },
+    wikiProfileAlias: {
+      async findUnique() {
+        return null;
+      },
+    },
+  } as unknown as PrismaService;
+
+  const result = await new WikiProfileService(prisma).ensureWikiProfile(concurrentAccount.id);
+
+  assert.equal(result.id, profile.id);
+  assert.equal(profileLookupCount, 2);
+});
+
+test('ensureWikiProfile does not hide unrelated persistence failures', async () => {
+  const failure = new Error('database unavailable');
+  const prisma = {
+    account: {
+      async findUnique() {
+        return {
+          id: '22222222-2222-4222-8222-222222222222',
+          provider: 'local',
+          displayName: 'Failure user',
+          email: null,
+        };
+      },
+    },
+    wikiProfile: {
+      async findUnique() {
+        return null;
+      },
+      async create() {
+        throw failure;
+      },
+    },
+  } as unknown as PrismaService;
+
+  await assert.rejects(
+    () => new WikiProfileService(prisma).ensureWikiProfile('22222222-2222-4222-8222-222222222222'),
+    (error) => error === failure,
+  );
+});
+
 test('public profiles resolve a preserved username alias to the canonical profile', async () => {
   const profile = {
     id: 42n,

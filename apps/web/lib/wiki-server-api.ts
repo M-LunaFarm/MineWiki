@@ -146,8 +146,9 @@ export async function fetchServerWikiReleaseCandidateDiff(candidateId: string, p
   return readWikiResponse<WikiRevisionDiffResponse>(response, 'Failed to load release candidate diff.');
 }
 
-export async function fetchWikiRecent(input: { readonly cursor?: string; readonly changeType?: string; readonly namespace?: string; readonly spaceId?: string; readonly minor?: string } = {}): Promise<WikiRecentChangeListResponse> {
-  const params = new URLSearchParams({ limit: '30' });
+export async function fetchWikiRecent(input: { readonly cursor?: string; readonly changeType?: string; readonly namespace?: string; readonly spaceId?: string; readonly minor?: string; readonly limit?: number } = {}): Promise<WikiRecentChangeListResponse> {
+  const limit = Math.max(1, Math.min(50, Math.trunc(input.limit ?? 30)));
+  const params = new URLSearchParams({ limit: String(limit) });
   if (input.cursor) params.set('cursor', input.cursor);
   if (input.changeType) params.set('changeType', input.changeType);
   if (input.namespace) params.set('namespace', input.namespace);

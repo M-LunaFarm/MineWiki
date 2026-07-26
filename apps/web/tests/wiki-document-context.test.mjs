@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const route = await readFile(new URL('../components/wiki/wiki-route-page.tsx', import.meta.url), 'utf8');
 const context = await readFile(new URL('../components/wiki/wiki-document-context.tsx', import.meta.url), 'utf8');
+const article = await readFile(new URL('../components/wiki/wiki-article-view.tsx', import.meta.url), 'utf8');
 const serverApi = await readFile(new URL('../lib/wiki-server-api.ts', import.meta.url), 'utf8');
 
 test('ordinary wiki documents enrich the body with ACL-filtered backlinks and category peers', () => {
@@ -23,6 +24,15 @@ test('ordinary wiki documents expose recent public revision activity', () => {
   assert.match(context, /최근 문서 활동/u);
   assert.match(context, /buildWikiRevisionPath/u);
   assert.match(context, /formatSizeDelta/u);
+});
+
+test('ordinary wiki documents place ACL-filtered recent changes in the responsive right rail', () => {
+  assert.match(route, /fetchWikiRecent\(\{ limit: 10 \}\)/u);
+  assert.match(route, /recentChanges=\{recentChanges\}/u);
+  assert.match(article, /<RecentChangesSidebar changes=\{recentChanges\}/u);
+  assert.match(article, /wiki-recent-sidebar-title/u);
+  assert.match(article, /href="\/recent"/u);
+  assert.match(article, /lg:sticky lg:top-24/u);
 });
 
 test('server wiki keeps its dedicated GitBook shell instead of receiving the global context cards', () => {

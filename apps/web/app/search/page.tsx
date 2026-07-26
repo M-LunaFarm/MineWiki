@@ -30,12 +30,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const cursor = params.cursor?.trim() ?? '';
   const [wikiResult, serverResult] = query
     ? await Promise.all([
-        searchWiki({ q: query, namespace: namespace || undefined, target, cursor: cursor || undefined, limit: 30 })
-          .then((result) => ({ ...result, available: true }))
-          .catch((error) => {
-            console.error('Unified search failed to load wiki results', error);
-            return { items: [] as WikiSearchResult[], nextCursor: null, available: false };
-          }),
+        searchWikiTitleFirst({
+          query,
+          namespace: namespace || undefined,
+          requestedTarget: target,
+          cursor: cursor || undefined,
+        }),
         fetchServerRankings({ search: query, page: 1, pageSize: 8 })
           .then((result) => ({ items: result.items, total: result.total, available: true }))
           .catch((error) => {
@@ -44,7 +44,13 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           }),
       ])
     : [
-        { items: [] as WikiSearchResult[], nextCursor: null, available: true },
+        {
+          items: [] as WikiSearchResult[],
+          nextCursor: null,
+          available: true,
+          resolvedTarget: target,
+          usedContentFallback: false,
+        },
         { items: [] as ServerSummary[], total: 0, available: true },
       ];
   const wikiHasMore = Boolean(wikiResult.nextCursor);
@@ -67,7 +73,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         </p>
       </header>
 
-      <form action="/search" className="surface-card grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_10rem_12rem_auto]">
+      <form action="/search" className="surface-card grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_14rem_12rem_auto]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
@@ -86,7 +92,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           defaultValue={target}
           className="h-12 rounded-xl border border-white/10 bg-[#0d1219] px-3 text-sm text-white focus:border-[#35e5b7]/50 focus:outline-none"
         >
-          <option value="all">제목 + 본문</option>
+          <option value="all">제목 우선 · 없으면 본문</option>
           <option value="title">제목만</option>
           <option value="content">본문만</option>
         </select>
@@ -143,12 +149,17 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             available={wikiResult.available}
             unavailableMessage="위키 검색에 일시적으로 연결할 수 없습니다."
           >
+            {wikiResult.usedContentFallback ? (
+              <p className="wiki-search-fallback mb-4 rounded-lg border px-4 py-3 text-sm">
+                제목과 일치하는 문서가 없어 본문 내용에서 찾았습니다.
+              </p>
+            ) : null}
             <div className="divide-y divide-white/[0.08] border-y border-white/[0.08]">
               {wikiResult.items.map((result) => <WikiResult key={result.pageId} result={result} />)}
             </div>
             {wikiResult.nextCursor ? (
               <Link
-                href={`/search?q=${encodeURIComponent(query)}${namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''}&target=${encodeURIComponent(target)}&cursor=${encodeURIComponent(wikiResult.nextCursor)}`}
+                href={`/search?q=${encodeURIComponent(query)}${namespace ? `&namespace=${encodeURIComponent(namespace)}` : ''}&target=${encodeURIComponent(wikiResult.resolvedTarget)}&cursor=${encodeURIComponent(wikiResult.nextCursor)}`}
                 className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-white/10 px-4 py-2 text-sm font-semibold text-[#35e5b7] transition hover:border-[#35e5b7]/40 hover:bg-[#35e5b7]/[.06]"
               >
                 다음 위키 검색 결과
@@ -159,6 +170,63 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       )}
     </div>
   );
+}
+
+async function searchWikiTitleFirst({
+  query,
+  namespace,
+  requestedTarget,
+  cursor,
+}: {
+  readonly query: string;
+  readonly namespace?: string;
+  readonly requestedTarget: 'all' | 'title' | 'content';
+  readonly cursor?: string;
+}): Promise<{
+  readonly items: WikiSearchResult[];
+  readonly nextCursor: string | null;
+  readonly available: boolean;
+  readonly resolvedTarget: 'title' | 'content';
+  readonly usedContentFallback: boolean;
+}> {
+  const run = async (target: 'title' | 'content') =>
+    searchWiki({ q: query, namespace, target, cursor, limit: 30 });
+  try {
+    if (requestedTarget === 'title' || requestedTarget === 'content') {
+      const result = await run(requestedTarget);
+      return {
+        ...result,
+        available: true,
+        resolvedTarget: requestedTarget,
+        usedContentFallback: false,
+      };
+    }
+    const titleResult = await run('title');
+    if (titleResult.items.length > 0 || titleResult.nextCursor) {
+      return {
+        ...titleResult,
+        available: true,
+        resolvedTarget: 'title',
+        usedContentFallback: false,
+      };
+    }
+    const contentResult = await run('content');
+    return {
+      ...contentResult,
+      available: true,
+      resolvedTarget: 'content',
+      usedContentFallback: true,
+    };
+  } catch (error) {
+    console.error('Unified search failed to load wiki results', error);
+    return {
+      items: [],
+      nextCursor: null,
+      available: false,
+      resolvedTarget: requestedTarget === 'content' ? 'content' : 'title',
+      usedContentFallback: false,
+    };
+  }
 }
 
 function EmptySearch() {

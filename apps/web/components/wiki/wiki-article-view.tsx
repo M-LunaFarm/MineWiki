@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { History, MessageSquareText, Pencil, PencilLine, Star } from 'lucide-react';
-import type { WikiPageResponse } from '../../lib/wiki-api';
+import { Clock3, History, MessageSquareText, Pencil, PencilLine, Star } from 'lucide-react';
+import type { WikiPageResponse, WikiRecentChangeSummary } from '../../lib/wiki-api';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath, buildWikiHistoryPath, buildWikiRevisionPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
 import { WikiDynamicTimeHydrator } from './wiki-dynamic-time-hydrator';
@@ -13,9 +13,10 @@ interface WikiArticleViewProps {
   readonly routePath: string;
   readonly beforeContent?: ReactNode;
   readonly afterContent?: ReactNode;
+  readonly recentChanges?: readonly WikiRecentChangeSummary[];
 }
 
-export function WikiArticleView({ page, routePath, beforeContent, afterContent }: WikiArticleViewProps) {
+export function WikiArticleView({ page, routePath, beforeContent, afterContent, recentChanges = [] }: WikiArticleViewProps) {
   const contentId = `wiki-content-${page.id}`;
   const isCategoryDocument = routePath.startsWith('/wiki/category/');
   const editPath = routePath.startsWith('/server/') || routePath.startsWith('/serverWiki/')
@@ -110,6 +111,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
               <Star className="h-4 w-4 text-amber-100" />
             </Link>
           ) : null}
+          <RecentChangesSidebar changes={recentChanges} />
           {page.headings.length > 0 ? (
             <nav className="surface-flat hidden p-4 lg:block" aria-label="문서 목차">
               <h2 className="text-sm font-semibold text-white">목차</h2>
@@ -193,6 +195,65 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent }
       {afterContent}
     </main>
   );
+}
+
+function RecentChangesSidebar({
+  changes,
+}: {
+  readonly changes: readonly WikiRecentChangeSummary[];
+}) {
+  const uniqueChanges = Array.from(
+    changes.reduce((items, change) => {
+      if (!items.has(change.routePath)) items.set(change.routePath, change);
+      return items;
+    }, new Map<string, WikiRecentChangeSummary>()).values(),
+  ).slice(0, 8);
+  if (uniqueChanges.length === 0) return null;
+
+  return (
+    <section className="surface-flat p-4" aria-labelledby="wiki-recent-sidebar-title">
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="wiki-recent-sidebar-title" className="flex items-center gap-2 text-sm font-semibold text-white">
+          <Clock3 className="size-4 text-emerald-300" aria-hidden="true" />
+          최근 변경
+        </h2>
+        <Link href="/recent" className="text-xs font-semibold text-emerald-300 hover:text-emerald-200">
+          더 보기
+        </Link>
+      </div>
+      <ol className="mt-3 divide-y divide-white/[0.07]">
+        {uniqueChanges.map((change) => (
+          <li key={change.id}>
+            <Link
+              href={change.routePath}
+              className="group flex min-h-11 items-center justify-between gap-3 py-2 text-sm"
+            >
+              <span className="min-w-0 truncate text-slate-300 transition group-hover:text-emerald-200">
+                {change.title}
+              </span>
+              <time
+                dateTime={change.createdAt}
+                className="shrink-0 text-[11px] tabular-nums text-slate-500"
+              >
+                {formatRecentTime(change.createdAt)}
+              </time>
+            </Link>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function formatRecentTime(value: string): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Seoul',
+  }).format(new Date(value));
 }
 
 function protectionLabel(value: string): string {

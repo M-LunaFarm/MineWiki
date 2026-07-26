@@ -8,9 +8,13 @@ const serverApiSource = await readFile(new URL('../lib/wiki-server-api.ts', impo
 
 test('unified search preserves target filters across server requests and pagination', () => {
   assert.match(pageSource, /name="target"/u);
+  assert.match(pageSource, /제목 우선 · 없으면 본문/u);
   assert.match(pageSource, /<option value="title">제목만<\/option>/u);
   assert.match(pageSource, /<option value="content">본문만<\/option>/u);
-  assert.match(pageSource, /target=\$\{encodeURIComponent\(target\)\}/u);
+  assert.match(pageSource, /target=\$\{encodeURIComponent\(wikiResult\.resolvedTarget\)\}/u);
+  assert.match(pageSource, /await run\('title'\)/u);
+  assert.match(pageSource, /await run\('content'\)/u);
+  assert.match(pageSource, /제목과 일치하는 문서가 없어 본문 내용에서 찾았습니다/u);
   assert.match(browserApiSource, /params\.set\('target', input\.target\)/u);
   assert.match(serverApiSource, /params\.set\('target', input\.target\)/u);
 });
