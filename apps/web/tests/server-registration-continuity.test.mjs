@@ -2,14 +2,16 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const [registration, claim, controller, service, editor, captcha] = await Promise.all([
+const [registration, claim, claimPreference, controller, service, editor, captcha] =
+  await Promise.all([
   readFile(new URL('../app/servers/register/page.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../components/claim/claim-workflow.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../lib/claim-method-preference.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../api/src/server/server.controller.ts', import.meta.url), 'utf8'),
   readFile(new URL('../../api/src/server/server.service.ts', import.meta.url), 'utf8'),
   readFile(new URL('../components/servers/server-description-editor.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../components/security/captcha-challenge.tsx', import.meta.url), 'utf8'),
-]);
+  ]);
 
 test('server registration preserves account-scoped drafts and clears them only after creation', () => {
   assert.match(registration, /minewiki:server-registration-draft/u);
@@ -18,12 +20,11 @@ test('server registration preserves account-scoped drafts and clears them only a
   assert.match(registration, /localStorage\.removeItem/u);
 });
 
-test('optional banner upload has a bounded handoff and a visible recovery path', () => {
-  assert.match(registration, /signal: AbortSignal\.timeout\(15_000\)/u);
-  assert.match(registration, /bannerUploaded = await uploadBanner/u);
-  assert.match(registration, /registrationBanner=failed/u);
-  assert.match(claim, /params\.get\('registrationBanner'\) === 'failed'/u);
-  assert.match(claim, /소유권 검증 후 서버 관리 화면에서 다시 업로드/u);
+test('registration prioritizes verification and defers banner work to server settings', () => {
+  assert.doesNotMatch(registration, /id="server-banner"/u);
+  assert.doesNotMatch(registration, /uploadBanner/u);
+  assert.match(registration, /다음: 소유권 검증/u);
+  assert.match(registration, /배너\/태그 확인/u);
 });
 
 test('registration is authenticated, captcha protected, throttled and reserves canonical endpoints', () => {
@@ -57,17 +58,25 @@ test('registration keeps mobile actions visible and connects labels to every pri
   assert.match(editor, /id=\{textareaId\}/u);
 });
 
-test('registration progress, banner preview and captcha copy match the real flow', () => {
+test('registration hierarchy separates completeness from trust and previews the next step', () => {
   assert.doesNotMatch(registration, /label: '검증 이동'/u);
   assert.doesNotMatch(registration, /등록 후 MOTD 검증으로 이동합니다/u);
-  assert.match(registration, /aria-label="전체 등록 흐름 3단계 중 1단계"/u);
-  assert.match(registration, /p-4 pb-12 text-left/u);
-  assert.match(registration, /보안 확인을 완료하면 서버 등록 버튼이 활성화됩니다/u);
+  assert.match(registration, /정보 완성도/u);
+  assert.match(registration, /소유권 신뢰/u);
+  assert.match(registration, /어떤 방식으로 소유권을 증명할 수 있나요/u);
+  assert.match(registration, /title="DNS TXT"/u);
+  assert.match(registration, /서버 MOTD/u);
+  assert.match(registration, /2\. 소유권 검증/u);
+  assert.match(registration, /fixed inset-x-0 bottom-0/u);
   assert.match(captcha, /language: 'ko'/u);
 });
 
 test('claim recovery restores the active method and explains secure token reissuance', () => {
-  assert.match(claim, /minewiki_claim_selected_method/u);
+  assert.ok(claim.includes('router.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`)'));
+  assert.match(claim, /window\.location\.pathname.*window\.location\.search/u);
+  assert.match(claimPreference, /minewiki_claim_selected_method/u);
+  assert.match(registration, /persistClaimMethodPreference/u);
+  assert.match(claim, /loadClaimMethodPreference/u);
   assert.match(claim, /preferredClaimMethod\(status\.methods\)/u);
   assert.match(claim, /이전 토큰은 다시 표시되지 않습니다\. 새 토큰을 재발급해 주세요/u);
   assert.match(claim, /검증 토큰 재발급/u);

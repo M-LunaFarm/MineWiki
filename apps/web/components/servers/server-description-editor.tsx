@@ -36,6 +36,7 @@ interface ServerDescriptionEditorProps {
   readonly textareaId?: string;
   readonly textareaName?: string;
   readonly ariaDescribedBy?: string;
+  readonly compact?: boolean;
 }
 
 interface UploadState {
@@ -51,6 +52,7 @@ export function ServerDescriptionEditor({
   textareaId,
   textareaName,
   ariaDescribedBy,
+  compact = false,
 }: ServerDescriptionEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -353,7 +355,7 @@ export function ServerDescriptionEditor({
               id={textareaId}
               name={textareaName}
               aria-describedby={ariaDescribedBy}
-              className="h-72 w-full resize-y border-0 bg-transparent px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-[#5f666f] focus:ring-0"
+              className={`${compact ? 'h-40' : 'h-72'} w-full resize-y border-0 bg-transparent px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-[#5f666f] focus:ring-0`}
               placeholder={
                 '예시:\n## 서버 특징\n- 야생 중심 운영\n- 초보자 보호 구역 제공\n\n## 접속 전 안내\n규칙과 디스코드 공지를 확인해 주세요.'
               }
@@ -369,7 +371,7 @@ export function ServerDescriptionEditor({
             ) : null}
           </div>
         ) : (
-          <div className="min-h-72 space-y-5 px-4 py-3">
+          <div className={`${compact ? 'min-h-40' : 'min-h-72'} space-y-5 px-4 py-3`}>
             {previewHtml ? (
               <div
                 className="prose prose-invert max-w-none space-y-3 text-[14px] leading-relaxed text-[#d1d5db]"

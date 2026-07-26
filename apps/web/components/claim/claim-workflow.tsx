@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -22,6 +23,10 @@ import { getApiBaseUrl } from '../../lib/runtime-config';
 import { useAuth } from '../providers/auth-context';
 import { fetchDashboardOverview, type DashboardServerSummary } from '../../lib/dashboard-api';
 import { csrfHeaders } from '../../lib/csrf';
+import {
+  loadClaimMethodPreference,
+  persistClaimMethodPreference,
+} from '../../lib/claim-method-preference';
 import { SUPPORTED_CLAIM_METHODS, type ClaimMethod } from '@minewiki/schemas/claim-methods';
 
 type ClaimMethodState = 'pending' | 'verified' | 'expired' | 'failed';
@@ -116,7 +121,6 @@ const NOTE_COPY: Record<string, string> = {
   token_expired: '검증 만료 기간이 지나 만료되었습니다.',
 };
 const CLAIM_LOGS_HIDDEN_AFTER_KEY_PREFIX = 'minewiki_claim_logs_hidden_after';
-const CLAIM_SELECTED_METHOD_KEY_PREFIX = 'minewiki_claim_selected_method';
 
 function getClaimLogsHiddenAfterStorageKey(accountId: string, serverId: string): string {
   return `${CLAIM_LOGS_HIDDEN_AFTER_KEY_PREFIX}:${accountId}:${serverId}`;
@@ -157,33 +161,6 @@ function persistClaimLogsHiddenAfter(
     window.localStorage.setItem(key, String(value));
   } catch {
     // ignore localStorage write failures (e.g., private mode)
-  }
-}
-
-function getSelectedMethodStorageKey(accountId: string, serverId: string): string {
-  return `${CLAIM_SELECTED_METHOD_KEY_PREFIX}:${accountId}:${serverId}`;
-}
-
-function loadSelectedMethod(accountId: string, serverId: string): ClaimMethod | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  try {
-    const value = window.localStorage.getItem(getSelectedMethodStorageKey(accountId, serverId));
-    return SUPPORTED_CLAIM_METHODS.find((method) => method === value) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function persistSelectedMethod(accountId: string, serverId: string, method: ClaimMethod): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  try {
-    window.localStorage.setItem(getSelectedMethodStorageKey(accountId, serverId), method);
-  } catch {
-    // Selection persistence is optional when browser storage is unavailable.
   }
 }
 
@@ -406,6 +383,7 @@ interface VerificationLogItem {
 
 export function ClaimWorkflow() {
   const { account, loading } = useAuth();
+  const router = useRouter();
   const [ownedServers, setOwnedServers] = useState<DashboardServerSummary[]>([]);
   const [serversLoading, setServersLoading] = useState(false);
   const [serverId, setServerId] = useState('');
@@ -426,6 +404,15 @@ export function ClaimWorkflow() {
   const [queryServerTarget, setQueryServerTarget] = useState<QueryServerTarget | null>(null);
   const [queryServerLoading, setQueryServerLoading] = useState(false);
   const accountId = account?.id ?? null;
+
+  useEffect(() => {
+    if (loading || account) {
+      return;
+    }
+    const returnTo =
+      typeof window === 'undefined' ? '/claim' : `${window.location.pathname}${window.location.search}`;
+    router.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
+  }, [account, loading, router]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -552,7 +539,7 @@ export function ClaimWorkflow() {
     }
     setLogsHiddenAfter(loadClaimLogsHiddenAfter(accountId, serverId));
     setStatus(null);
-    const storedMethod = loadSelectedMethod(accountId, serverId);
+    const storedMethod = loadClaimMethodPreference(accountId, serverId);
     setSelectedMethod(storedMethod ?? 'dns');
     selectedMethodResolvedForRef.current = storedMethod ? `${accountId}:${serverId}` : null;
   }, [accountId, serverId]);
@@ -568,7 +555,7 @@ export function ClaimWorkflow() {
     const preferredMethod = preferredClaimMethod(status.methods);
     if (preferredMethod) {
       setSelectedMethod(preferredMethod);
-      persistSelectedMethod(accountId, serverId, preferredMethod);
+      persistClaimMethodPreference(accountId, serverId, preferredMethod);
     }
     selectedMethodResolvedForRef.current = selectionKey;
   }, [accountId, serverId, status]);
@@ -732,7 +719,7 @@ export function ClaimWorkflow() {
   const handleSelectMethod = (method: ClaimMethod) => {
     setSelectedMethod(method);
     if (accountId && serverId) {
-      persistSelectedMethod(accountId, serverId, method);
+      persistClaimMethodPreference(accountId, serverId, method);
       selectedMethodResolvedForRef.current = `${accountId}:${serverId}`;
     }
     setError(null);
@@ -866,22 +853,15 @@ export function ClaimWorkflow() {
   if (!account) {
     return (
       <div className="rounded-xl border border-[#333333] bg-[#1A1A1A] p-6 text-sm text-[#A0A0A0]">
-        <div className="flex items-start gap-3">
-          <ShieldCheck className="mt-0.5 h-5 w-5 text-[#13ec80]" />
+        <div className="flex items-center gap-3">
+          <Loader2 className="h-5 w-5 animate-spin text-[#13ec80]" />
           <div>
-            <p className="font-medium text-white">로그인이 필요합니다.</p>
+            <p className="font-medium text-white">로그인 화면으로 이동하고 있습니다.</p>
             <p className="mt-1">
-              서버 소유권 검증은 인증된 계정에서만 사용할 수 있습니다. Discord, Naver 또는 Email
-              계정으로 로그인한 뒤 다시 진행해 주세요.
+              로그인 후 선택한 서버의 소유권 검증 화면으로 돌아옵니다.
             </p>
           </div>
         </div>
-        <Link
-          className="mt-4 inline-flex text-xs font-medium text-[#13ec80] hover:underline"
-          href="/me"
-        >
-          계정 페이지로 이동
-        </Link>
       </div>
     );
   }
