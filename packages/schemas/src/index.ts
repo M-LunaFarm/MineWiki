@@ -350,6 +350,46 @@ export const playerMetricSourceSchema = z.enum(['status_ping']);
 export const claimMethodSchema = z.enum(SUPPORTED_CLAIM_METHODS);
 export const PUBLIC_SERVER_LISTING_STATUS = 'active' as const;
 
+export const MINECRAFT_VERSION_OPTIONS = {
+  java: [
+    '26.2',
+    '26.1',
+    '26',
+    '1.21.1',
+    '1.21',
+    '1.20.6',
+    '1.20.4',
+    '1.20.2',
+    '1.20.1',
+    '1.19.4',
+    '1.19.3',
+    '1.19.2',
+    '1.18.2',
+    '1.17.1',
+    '1.16.5',
+    '1.15.2',
+    '1.14.4',
+    '1.12.2',
+  ],
+  bedrock: [
+    '26.2',
+    '26.1',
+    '26',
+    '1.21.30',
+    '1.21.20',
+    '1.21.2',
+    '1.20.81',
+    '1.20.80',
+    '1.20.73',
+    '1.20.62',
+    '1.20.51',
+    '1.19.83',
+    '1.18.32',
+    '1.17.41',
+    '1.16.221',
+  ],
+} as const;
+
 export const serverSummarySchema = z.object({
   id: z.string().uuid(),
   shortCode: z.string().min(5).max(12).regex(/^[a-z0-9]+$/).nullable().optional(),
@@ -671,9 +711,41 @@ export const supportTicketAccountSchema = z.object({
   displayName: z.string().min(1).max(64),
 });
 
-export const supportTicketServerSchema = z.object({
+export const supportServerListingStatusSchema = z.enum([
+  'pending',
+  'active',
+  'suspended',
+  'deleted',
+]);
+
+export const supportServerRelationshipSchema = z.enum([
+  'public',
+  'owner',
+  'registrant',
+  'staff',
+]);
+
+export const supportServerOptionSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(64),
+  joinHost: z.string().min(1).max(255),
+  joinPort: z.number().int().min(1).max(65535),
+  edition: z.enum(['java', 'bedrock']),
+  listingStatus: supportServerListingStatusSchema.exclude(['deleted']),
+  relationship: supportServerRelationshipSchema,
+});
+
+export const supportServerOptionsResponseSchema = z.object({
+  items: z.array(supportServerOptionSchema),
+});
+
+export const supportTicketServerSchema = z.object({
+  id: z.string().uuid().nullable(),
+  name: z.string().min(1).max(64),
+  joinHost: z.string().min(1).max(255).nullable(),
+  joinPort: z.number().int().min(1).max(65535).nullable(),
+  edition: z.enum(['java', 'bedrock']).nullable(),
+  listingStatus: supportServerListingStatusSchema,
 });
 
 export const supportMessageSchema = z.object({
@@ -942,6 +1014,10 @@ export type SupportTicketStatus = z.infer<typeof supportTicketStatusSchema>;
 export type SupportTicketPriority = z.infer<typeof supportTicketPrioritySchema>;
 export type SupportMessageAuthorRole = z.infer<typeof supportMessageAuthorRoleSchema>;
 export type SupportTicketAccount = z.infer<typeof supportTicketAccountSchema>;
+export type SupportServerListingStatus = z.infer<typeof supportServerListingStatusSchema>;
+export type SupportServerRelationship = z.infer<typeof supportServerRelationshipSchema>;
+export type SupportServerOption = z.infer<typeof supportServerOptionSchema>;
+export type SupportServerOptionsResponse = z.infer<typeof supportServerOptionsResponseSchema>;
 export type SupportTicketServer = z.infer<typeof supportTicketServerSchema>;
 export type SupportMessage = z.infer<typeof supportMessageSchema>;
 export type SupportTicket = z.infer<typeof supportTicketSchema>;

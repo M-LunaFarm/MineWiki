@@ -7,14 +7,14 @@ import {
   guestSupportRecoveryResultSchema,
   guestSupportRecoverySchema,
   guestSupportTicketResultSchema,
-  serverSummarySchema,
+  supportServerOptionsResponseSchema,
   supportTicketDetailSchema,
   supportTicketListResponseSchema,
   updateSupportTicketSchema,
   type CreateGuestSupportTicketPayload,
   type CreateSupportMessagePayload,
   type CreateSupportTicketPayload,
-  type ServerSummary,
+  type SupportServerOption,
   type SupportTicket,
   type SupportTicketDetail,
   type SupportTicketListResponse,
@@ -43,13 +43,6 @@ export interface GuestSupportRecoveryResult {
   readonly accessCode: string;
   readonly accessExpiresAt: string;
   readonly detail: SupportTicketDetail;
-}
-
-export interface SupportServerOption {
-  readonly id: string;
-  readonly name: string;
-  readonly joinHost: string;
-  readonly edition: ServerSummary['edition'];
 }
 
 async function parseJsonError(response: Response, fallback: string): Promise<never> {
@@ -278,25 +271,24 @@ export async function fetchSupportServerOptions(
   search?: string,
 ): Promise<SupportServerOption[]> {
   const params = new URLSearchParams();
-  params.set('sort', 'votes24h_desc');
   const keyword = search?.trim();
   if (keyword) {
     params.set('search', keyword);
   }
 
-  const response = await fetch(`${API_BASE}/v1/servers?${params.toString()}`);
+  const query = params.toString();
+  const response = await fetch(
+    `${API_BASE}/v1/support/server-options${query ? `?${query}` : ''}`,
+    {
+      credentials: 'include',
+      cache: 'no-store',
+    },
+  );
   if (!response.ok) {
     await parseJsonError(response, '서버 목록을 불러오지 못했습니다.');
   }
 
-  const payload = await response.json();
-  const items = serverSummarySchema.array().parse(payload);
-  return items.map((server) => ({
-    id: server.id,
-    name: server.name,
-    joinHost: server.joinHost,
-    edition: server.edition,
-  }));
+  return supportServerOptionsResponseSchema.parse(await response.json()).items;
 }
 
 export type {
@@ -307,5 +299,6 @@ export type {
   SupportTicketDetail,
   SupportTicketListResponse,
   SupportTicketStatus,
+  SupportServerOption,
   UpdateSupportTicketPayload,
 };

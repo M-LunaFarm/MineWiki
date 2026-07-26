@@ -948,25 +948,29 @@ model SupportAgent {
 }
 
 model SupportTicket {
-  id                   String                @id @default(uuid())
-  requesterAccountId   String
-  assigneeAccountId    String?
-  serverId             String?
-  subject              String
-  status               SupportTicketStatus   @default(open)
-  priority             SupportTicketPriority @default(normal)
-  category             String?
-  pageId               String?
-  verifySessionId      String?
-  pluginServerId       String?
-  fileId               String?
-  guestName            String?
-  guestEmail           String?
-  guestAccessHash      String?
-  guestAccessExpiresAt DateTime?
-  lastMessageAt        DateTime              @default(now())
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
+  id                     String                @id @default(uuid())
+  requesterAccountId     String
+  assigneeAccountId      String?
+  serverId               String?
+  serverNameSnapshot     String?
+  serverJoinHostSnapshot String?
+  serverJoinPortSnapshot Int?
+  serverEditionSnapshot  ServerEdition?
+  subject                String
+  status                 SupportTicketStatus   @default(open)
+  priority               SupportTicketPriority @default(normal)
+  category               String?
+  pageId                 String?
+  verifySessionId        String?
+  pluginServerId         String?
+  fileId                 String?
+  guestName              String?
+  guestEmail             String?
+  guestAccessHash        String?
+  guestAccessExpiresAt   DateTime?
+  lastMessageAt          DateTime              @default(now())
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
 
   requesterAccount    Account              @relation("SupportTicketRequester", fields: [requesterAccountId], references: [id], onDelete: Cascade)
   assigneeAccount     Account?             @relation("SupportTicketAssignee", fields: [assigneeAccountId], references: [id], onDelete: SetNull)

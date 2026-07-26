@@ -11,6 +11,16 @@ type AccessProbe = {
   ): void;
 };
 
+type RoutingProbe = {
+  resolveTicketRouting(
+    serverId: string | null | undefined,
+    actorAccountId?: string,
+  ): Promise<{
+    serverId: string | null;
+    serverNameSnapshot: string | null;
+  }>;
+};
+
 test('historical support assignment is not an authorization grant', () => {
   const service = new SupportService(
     {} as never,
@@ -39,4 +49,44 @@ test('guest access codes are stored as one-way SHA-256 digests', () => {
 
   assert.equal(digest.length, 64);
   assert.notEqual(digest, accessCode);
+});
+
+test('hidden servers can only be attached by their owner, registrant, or support staff', async () => {
+  const hiddenServer = {
+    id: '11111111-1111-4111-8111-111111111111',
+    name: '검증 중 서버',
+    joinHost: 'verify.example.com',
+    joinPort: 25565,
+    edition: 'java',
+    listingStatus: 'pending',
+    ownerAccountId: 'owner',
+    registrantAccountId: 'registrant',
+  };
+  const service = new SupportService(
+    {
+      server: {
+        findUnique: async () => hiddenServer,
+      },
+      $queryRaw: async () => [],
+    } as never,
+    { isCaptchaRequired: () => false } as never,
+    {
+      hasPermission: async (accountId: string) => accountId === 'staff',
+    } as never,
+  ) as unknown as RoutingProbe;
+
+  await assert.rejects(
+    () => service.resolveTicketRouting(hiddenServer.id),
+    /이 문의에 연결할 수 없는 서버입니다/,
+  );
+  await assert.rejects(
+    () => service.resolveTicketRouting(hiddenServer.id, 'outsider'),
+    /이 문의에 연결할 수 없는 서버입니다/,
+  );
+  const ownerRouting = await service.resolveTicketRouting(hiddenServer.id, 'owner');
+  const staffRouting = await service.resolveTicketRouting(hiddenServer.id, 'staff');
+
+  assert.equal(ownerRouting.serverId, hiddenServer.id);
+  assert.equal(ownerRouting.serverNameSnapshot, hiddenServer.name);
+  assert.equal(staffRouting.serverId, hiddenServer.id);
 });

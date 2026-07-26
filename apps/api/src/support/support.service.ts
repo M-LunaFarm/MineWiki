@@ -17,6 +17,7 @@ import {
   supportTicketStatusSchema,
   updateSupportTicketSchema,
   type SupportMessage,
+  type SupportServerOption,
   type SupportTicket,
   type SupportTicketDetail,
   type SupportTicketListResponse,
@@ -69,6 +70,14 @@ interface TicketRow {
   assigneeProviderUserId: string | null;
   serverId: string | null;
   serverName: string | null;
+  serverJoinHost: string | null;
+  serverJoinPort: number | bigint | string | null;
+  serverEdition: string | null;
+  serverListingStatus: string | null;
+  serverNameSnapshot: string | null;
+  serverJoinHostSnapshot: string | null;
+  serverJoinPortSnapshot: number | bigint | string | null;
+  serverEditionSnapshot: string | null;
   latestMessagePreview: string | null;
   messageCount: number | bigint | string;
 }
@@ -100,6 +109,76 @@ export class SupportService {
 
   async getViewerState(accountId: string): Promise<{ isAgent: boolean }> {
     return { isAgent: await this.isAgent(accountId) };
+  }
+
+  async listServerOptions(
+    accountId?: string,
+    search?: string,
+  ): Promise<{ items: SupportServerOption[] }> {
+    const keyword = search?.trim().slice(0, 80);
+    const isAgent = accountId ? await this.isAgent(accountId) : false;
+    const identityFilter = accountId
+      ? Prisma.sql`(s.ownerAccountId = ${accountId} OR s.registrantAccountId = ${accountId})`
+      : Prisma.sql`FALSE`;
+    const visibilityFilter = isAgent
+      ? Prisma.sql`TRUE`
+      : keyword
+        ? Prisma.sql`(s.listingStatus = 'active' OR ${identityFilter})`
+        : identityFilter;
+    const searchFilter = keyword
+      ? Prisma.sql`AND (s.name LIKE ${`%${keyword}%`} OR s.joinHost LIKE ${`%${keyword}%`})`
+      : Prisma.empty;
+
+    const rows = await this.prisma.$queryRaw<Array<{
+      id: string;
+      name: string;
+      joinHost: string;
+      joinPort: number | bigint | string;
+      edition: string;
+      listingStatus: string;
+      ownerAccountId: string | null;
+      registrantAccountId: string | null;
+    }>>(Prisma.sql`
+      SELECT
+        s.id,
+        s.name,
+        s.joinHost,
+        s.joinPort,
+        s.edition,
+        s.listingStatus,
+        s.ownerAccountId,
+        s.registrantAccountId
+      FROM \`Server\` s
+      WHERE ${visibilityFilter}
+      ${searchFilter}
+      ORDER BY
+        CASE
+          WHEN s.ownerAccountId = ${accountId ?? ''} THEN 0
+          WHEN s.registrantAccountId = ${accountId ?? ''} THEN 1
+          WHEN s.listingStatus = 'active' THEN 2
+          ELSE 3
+        END,
+        s.name ASC
+      LIMIT 25
+    `);
+
+    return {
+      items: rows.map((server) => ({
+        id: server.id,
+        name: server.name,
+        joinHost: server.joinHost,
+        joinPort: Number(server.joinPort),
+        edition: server.edition === 'bedrock' ? 'bedrock' : 'java',
+        listingStatus: normalizeServerListingStatus(server.listingStatus),
+        relationship: isAgent
+          ? 'staff'
+          : server.ownerAccountId === accountId
+            ? 'owner'
+            : server.registrantAccountId === accountId
+              ? 'registrant'
+              : 'public',
+      })),
+    };
   }
 
   async listTickets(
@@ -158,6 +237,14 @@ export class SupportService {
         ass.providerUserId AS assigneeProviderUserId,
         srv.id AS serverId,
         srv.name AS serverName,
+        srv.joinHost AS serverJoinHost,
+        srv.joinPort AS serverJoinPort,
+        srv.edition AS serverEdition,
+        srv.listingStatus AS serverListingStatus,
+        t.serverNameSnapshot,
+        t.serverJoinHostSnapshot,
+        t.serverJoinPortSnapshot,
+        t.serverEditionSnapshot,
         (
           SELECT m.body
           FROM \`SupportMessage\` m
@@ -227,7 +314,7 @@ export class SupportService {
       throw new BadRequestException('문의 내용을 입력해 주세요.');
     }
 
-    const { assigneeAccountId, serverId } = await this.resolveTicketRouting(parsed.serverId);
+    const routing = await this.resolveTicketRouting(parsed.serverId, session.userId);
 
     const ticketId = await this.createTicketRecords({
       requesterAccountId: session.userId,
@@ -236,9 +323,8 @@ export class SupportService {
       body,
       category,
       priority: parsed.priority ?? 'normal',
-      serverId,
+      ...routing,
       ...ticketContext,
-      assigneeAccountId,
       authorRole: 'customer',
     });
 
@@ -269,7 +355,7 @@ export class SupportService {
 
     await this.verifyCaptchaToken(parsed.captchaToken, context.ipAddress);
 
-    const { assigneeAccountId, serverId } = await this.resolveTicketRouting(parsed.serverId);
+    const routing = await this.resolveTicketRouting(parsed.serverId);
     const requesterAccountId = await this.resolveGuestRequesterAccountId();
 
     const guestName = parsed.guestName?.trim() || null;
@@ -285,9 +371,8 @@ export class SupportService {
       body,
       category,
       priority: parsed.priority ?? 'normal',
-      serverId,
+      ...routing,
       ...ticketContext,
-      assigneeAccountId,
       authorRole: 'customer',
       guestName,
       guestEmail,
@@ -530,6 +615,10 @@ export class SupportService {
     category: string | null;
     priority: TicketPriority;
     serverId: string | null;
+    serverNameSnapshot: string | null;
+    serverJoinHostSnapshot: string | null;
+    serverJoinPortSnapshot: number | null;
+    serverEditionSnapshot: 'java' | 'bedrock' | null;
     pageId: string | null;
     verifySessionId: string | null;
     pluginServerId: string | null;
@@ -552,6 +641,10 @@ export class SupportService {
           requesterAccountId,
           assigneeAccountId,
           serverId,
+          serverNameSnapshot,
+          serverJoinHostSnapshot,
+          serverJoinPortSnapshot,
+          serverEditionSnapshot,
           subject,
           status,
           priority,
@@ -572,6 +665,10 @@ export class SupportService {
           ${input.requesterAccountId},
           ${input.assigneeAccountId},
           ${input.serverId},
+          ${input.serverNameSnapshot},
+          ${input.serverJoinHostSnapshot},
+          ${input.serverJoinPortSnapshot},
+          ${input.serverEditionSnapshot},
           ${input.subject},
           ${'open'},
           ${input.priority},
@@ -616,22 +713,54 @@ export class SupportService {
 
   private async resolveTicketRouting(
     serverId: string | null | undefined,
-  ): Promise<{ assigneeAccountId: string | null; serverId: string | null }> {
+    actorAccountId?: string,
+  ): Promise<{
+    assigneeAccountId: string | null;
+    serverId: string | null;
+    serverNameSnapshot: string | null;
+    serverJoinHostSnapshot: string | null;
+    serverJoinPortSnapshot: number | null;
+    serverEditionSnapshot: 'java' | 'bedrock' | null;
+  }> {
     let assigneeAccountId: string | null = null;
     let normalizedServerId: string | null = null;
+    let serverNameSnapshot: string | null = null;
+    let serverJoinHostSnapshot: string | null = null;
+    let serverJoinPortSnapshot: number | null = null;
+    let serverEditionSnapshot: 'java' | 'bedrock' | null = null;
 
     if (serverId) {
       const server = await this.prisma.server.findUnique({
         where: { id: serverId },
         select: {
           id: true,
+          name: true,
+          joinHost: true,
+          joinPort: true,
+          edition: true,
+          listingStatus: true,
           ownerAccountId: true,
+          registrantAccountId: true,
         },
       });
       if (!server) {
         throw new NotFoundException('연결할 서버를 찾을 수 없습니다.');
       }
+      const actorIsAgent = actorAccountId ? await this.isAgent(actorAccountId) : false;
+      const canReference =
+        server.listingStatus === 'active' ||
+        actorIsAgent ||
+        (Boolean(actorAccountId) &&
+          (server.ownerAccountId === actorAccountId ||
+            server.registrantAccountId === actorAccountId));
+      if (!canReference) {
+        throw new ForbiddenException('이 문의에 연결할 수 없는 서버입니다.');
+      }
       normalizedServerId = server.id;
+      serverNameSnapshot = server.name;
+      serverJoinHostSnapshot = server.joinHost;
+      serverJoinPortSnapshot = server.joinPort;
+      serverEditionSnapshot = server.edition;
       if (server.ownerAccountId && (await this.isAgent(server.ownerAccountId))) {
         assigneeAccountId = server.ownerAccountId;
       }
@@ -640,6 +769,10 @@ export class SupportService {
     return {
       assigneeAccountId,
       serverId: normalizedServerId,
+      serverNameSnapshot,
+      serverJoinHostSnapshot,
+      serverJoinPortSnapshot,
+      serverEditionSnapshot,
     };
   }
 
@@ -793,6 +926,14 @@ export class SupportService {
         ass.providerUserId AS assigneeProviderUserId,
         srv.id AS serverId,
         srv.name AS serverName,
+        srv.joinHost AS serverJoinHost,
+        srv.joinPort AS serverJoinPort,
+        srv.edition AS serverEdition,
+        srv.listingStatus AS serverListingStatus,
+        t.serverNameSnapshot,
+        t.serverJoinHostSnapshot,
+        t.serverJoinPortSnapshot,
+        t.serverEditionSnapshot,
         (
           SELECT m.body
           FROM \`SupportMessage\` m
@@ -872,10 +1013,16 @@ export class SupportService {
             ),
           }
         : null,
-      server: row.serverId
+      server: row.serverId || row.serverNameSnapshot
         ? {
             id: row.serverId,
-            name: row.serverName ?? '연결된 서버',
+            name: row.serverName ?? row.serverNameSnapshot ?? '삭제된 서버',
+            joinHost: row.serverJoinHost ?? row.serverJoinHostSnapshot,
+            joinPort: toNullableNumber(row.serverJoinPort ?? row.serverJoinPortSnapshot),
+            edition: normalizeServerEdition(row.serverEdition ?? row.serverEditionSnapshot),
+            listingStatus: row.serverId
+              ? normalizeServerListingStatus(row.serverListingStatus)
+              : 'deleted',
           }
         : null,
       contactEmail: row.guestEmail,
@@ -994,6 +1141,30 @@ function toCount(value: number | bigint | string): number {
     return Number(value);
   }
   return Number.isFinite(value) ? value : 0;
+}
+
+function toNullableNumber(value: number | bigint | string | null): number | null {
+  if (value === null) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeServerEdition(value: string | null): 'java' | 'bedrock' | null {
+  if (value === 'java' || value === 'bedrock') {
+    return value;
+  }
+  return null;
+}
+
+function normalizeServerListingStatus(
+  value: string | null,
+): 'pending' | 'active' | 'suspended' {
+  if (value === 'active' || value === 'suspended') {
+    return value;
+  }
+  return 'pending';
 }
 
 function toBoolean(value: boolean | number | bigint | string): boolean {

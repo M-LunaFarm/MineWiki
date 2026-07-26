@@ -5,6 +5,7 @@ import {
   createSupportTicketSchema,
   guestSupportAccessSchema,
   guestSupportRecoverySchema,
+  supportServerOptionsResponseSchema,
   supportTicketSchema,
 } from '@minewiki/schemas';
 
@@ -46,6 +47,10 @@ test('support ticket schemas accept operational context fields', () => {
     server: {
       id: createPayload.serverId,
       name: 'Test Server',
+      joinHost: 'play.example.com',
+      joinPort: 25565,
+      edition: 'java',
+      listingStatus: 'active',
     },
     latestMessagePreview: null,
     messageCount: 1,
@@ -55,6 +60,35 @@ test('support ticket schemas accept operational context fields', () => {
   assert.equal(ticket.verifySessionId, 'verify-session-1');
   assert.equal(ticket.pluginServerId, 'plugin-server-1');
   assert.equal(ticket.fileId, 'file-1');
+});
+
+test('support server options expose lifecycle and relationship metadata', () => {
+  const response = supportServerOptionsResponseSchema.parse({
+    items: [
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        name: '검증 중 서버',
+        joinHost: 'verify.example.com',
+        joinPort: 25565,
+        edition: 'java',
+        listingStatus: 'pending',
+        relationship: 'registrant',
+      },
+    ],
+  });
+
+  assert.equal(response.items[0]?.listingStatus, 'pending');
+  assert.equal(response.items[0]?.relationship, 'registrant');
+  assert.throws(() =>
+    supportServerOptionsResponseSchema.parse({
+      items: [
+        {
+          ...response.items[0],
+          listingStatus: 'deleted',
+        },
+      ],
+    }),
+  );
 });
 
 test('guest support schemas require bounded credentials and recovery identity', () => {

@@ -443,6 +443,9 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   }, [pathname, router, searchParams]);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
     let cancelled = false;
 
     const loadServerList = async () => {
@@ -468,7 +471,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [account?.id, authLoading]);
 
   useEffect(() => {
     if (authLoading) {
@@ -923,6 +926,55 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
     }
   }, [pathname, selectedTicketId]);
 
+  useEffect(() => {
+    if (mode !== 'agent') {
+      return;
+    }
+    const handleTriageShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.isContentEditable ||
+        ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target?.tagName ?? '')
+      ) {
+        return;
+      }
+      if (event.key === 'Enter' && selectedTicketId) {
+        event.preventDefault();
+        document.getElementById('support-agent-reply')?.focus();
+        return;
+      }
+      if (event.key !== 'j' && event.key !== 'k') {
+        return;
+      }
+      const currentIndex = filteredTickets.findIndex(
+        (ticket) => ticket.id === selectedTicketId,
+      );
+      const nextIndex =
+        event.key === 'j'
+          ? Math.min(filteredTickets.length - 1, currentIndex + 1)
+          : Math.max(0, currentIndex <= 0 ? 0 : currentIndex - 1);
+      const nextTicket = filteredTickets[nextIndex];
+      if (!nextTicket) {
+        return;
+      }
+      event.preventDefault();
+      setSelectedTicketId(nextTicket.id);
+      setMobileTicketDetailOpen(true);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('ticket', nextTicket.id);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    };
+    window.addEventListener('keydown', handleTriageShortcut);
+    return () => window.removeEventListener('keydown', handleTriageShortcut);
+  }, [
+    filteredTickets,
+    mode,
+    pathname,
+    router,
+    searchParams,
+    selectedTicketId,
+  ]);
+
   return (
     <div className="support-surface min-h-screen bg-[#111214] pt-16 text-[#F4F4F5]">
       <main>
@@ -1093,7 +1145,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                   </div>
                 </div>
 
-                <div className="grid min-h-[520px] min-w-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[320px_minmax(0,1fr)]">
+                <div className="grid min-h-[520px] min-w-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_280px]">
                   <aside
                     className={`min-w-0 border-b border-[#2C2D30] lg:block lg:border-b-0 lg:border-r ${
                       mobileTicketDetailOpen ? 'hidden' : 'block'
@@ -1373,7 +1425,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                                   className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
                                     isAgent
                                       ? 'bg-[#13ec80] text-[#101211]'
-                                      : 'bg-[#2B4C7E] text-white'
+                                      : 'theme-on-brand bg-[#2B4C7E] text-white'
                                   }`}
                                 >
                                   {isAgent ? (
@@ -1436,6 +1488,8 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                       onSubmit={(event) => void handleSendMessage(event)}
                     >
                       <textarea
+                        id={mode === 'agent' ? 'support-agent-reply' : undefined}
+                        aria-keyshortcuts={mode === 'agent' ? 'Enter' : undefined}
                         className="min-h-[96px] w-full resize-y rounded-lg border border-[#34363A] bg-[#111214] px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-[#73757C] focus:border-[#13ec80]/60 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={!canSendMessage || submittingMessage}
                         placeholder={
@@ -1484,6 +1538,9 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                       </div>
                     </form>
                   </section>
+                  {mode === 'agent' ? (
+                    <SupportAgentContextPanel ticket={selectedTicket} />
+                  ) : null}
                 </div>
               </section>
 
@@ -2032,7 +2089,8 @@ function SupportServerSelect(props: {
         <option value="">{props.loading ? '서버 목록 확인 중' : '선택하지 않음'}</option>
         {props.servers.map((server) => (
           <option key={server.id} value={server.id}>
-            {server.name} ({server.joinHost})
+            {server.name} ({server.joinHost}:{server.joinPort}) ·{' '}
+            {supportServerStatusLabel(server.listingStatus)}
           </option>
         ))}
       </select>
@@ -2051,6 +2109,16 @@ function statusLabel(status: SupportTicketStatus): string {
     return '해결';
   }
   return '종료';
+}
+
+function supportServerStatusLabel(status: SupportServerOption['listingStatus']): string {
+  if (status === 'active') {
+    return '공개';
+  }
+  if (status === 'suspended') {
+    return '숨김';
+  }
+  return '검증 대기';
 }
 
 function statusBadgeClass(status: SupportTicketStatus): string {
@@ -2098,6 +2166,135 @@ function SupportContextBadges({ ticket }: { readonly ticket: SupportTicket }) {
       ))}
     </div>
   );
+}
+
+function SupportAgentContextPanel({
+  ticket,
+}: {
+  readonly ticket: SupportTicket | null;
+}) {
+  return (
+    <aside className="border-t border-[#2C2D30] bg-[#151619] p-4 lg:col-start-2 xl:col-auto xl:border-l xl:border-t-0">
+      <h3 className="text-sm font-semibold text-white">문의 컨텍스트</h3>
+      <p className="mt-1 text-[11px] leading-4 text-[#85878D]">
+        고객과 연결 대상의 현재 상태를 확인한 뒤 처리하세요.
+      </p>
+      <div className="mt-3 flex gap-1.5 text-[10px] text-[#A7A9AF]">
+        <kbd className="rounded border border-[#34363A] bg-[#18191C] px-1.5 py-0.5">J</kbd>
+        <kbd className="rounded border border-[#34363A] bg-[#18191C] px-1.5 py-0.5">K</kbd>
+        <span>문의 이동</span>
+        <kbd className="ml-1 rounded border border-[#34363A] bg-[#18191C] px-1.5 py-0.5">
+          Enter
+        </kbd>
+        <span>답변</span>
+      </div>
+      {ticket ? (
+        <div className="mt-5 space-y-5">
+          <ContextDefinition
+            label="요청자"
+            value={ticket.requester.displayName}
+            detail={ticket.contactEmail ?? '회원 계정 문의'}
+          />
+          <ContextDefinition
+            label="담당자"
+            value={ticket.assignee?.displayName ?? '미배정'}
+            detail={ticket.assignee ? '현재 담당 상담원' : '인박스에서 배정 대기 중'}
+          />
+          <div className="rounded-lg border border-[#34363A] bg-[#18191C] p-3">
+            <p className="text-[11px] font-semibold text-[#85878D]">연결 서버</p>
+            {ticket.server ? (
+              <>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <p className="truncate text-sm font-semibold text-white">
+                    {ticket.server.name}
+                  </p>
+                  <span className={supportServerLifecycleBadge(ticket.server.listingStatus)}>
+                    {supportServerLifecycleLabel(ticket.server.listingStatus)}
+                  </span>
+                </div>
+                <p className="mt-2 break-all font-mono text-[11px] text-[#A7A9AF]">
+                  {ticket.server.joinHost
+                    ? `${ticket.server.joinHost}${
+                        ticket.server.joinPort ? `:${ticket.server.joinPort}` : ''
+                      }`
+                    : '접속 주소 기록 없음'}
+                </p>
+                <p className="mt-2 text-[11px] text-[#85878D]">
+                  {ticket.server.edition === 'bedrock' ? 'Bedrock Edition' : 'Java Edition'}
+                  {ticket.server.id ? '' : ' · 삭제 당시 정보'}
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-xs leading-5 text-[#A7A9AF]">
+                이 문의에는 서버가 연결되지 않았습니다.
+              </p>
+            )}
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-[#85878D]">운영 식별자</p>
+            <div className="mt-2 space-y-2">
+              {[
+                ['티켓', ticket.id],
+                ['페이지', ticket.pageId],
+                ['검증', ticket.verifySessionId],
+                ['플러그인', ticket.pluginServerId],
+                ['파일', ticket.fileId],
+              ].map(([label, value]) =>
+                value ? (
+                  <div key={label} className="rounded border border-[#34363A] px-2.5 py-2">
+                    <p className="text-[10px] text-[#85878D]">{label}</p>
+                    <p className="mt-1 break-all font-mono text-[10px] text-[#D8D9DC]">
+                      {value}
+                    </p>
+                  </div>
+                ) : null,
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-5 text-xs leading-5 text-[#A7A9AF]">
+          문의를 선택하면 고객·서버·운영 식별자가 표시됩니다.
+        </p>
+      )}
+    </aside>
+  );
+}
+
+function ContextDefinition(props: {
+  readonly label: string;
+  readonly value: string;
+  readonly detail: string;
+}) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold text-[#85878D]">{props.label}</p>
+      <p className="mt-1 text-sm font-medium text-white">{props.value}</p>
+      <p className="mt-1 text-[11px] text-[#A7A9AF]">{props.detail}</p>
+    </div>
+  );
+}
+
+function supportServerLifecycleLabel(
+  status: NonNullable<SupportTicket['server']>['listingStatus'],
+): string {
+  if (status === 'active') return '공개';
+  if (status === 'pending') return '검증 대기';
+  if (status === 'suspended') return '숨김';
+  return '삭제됨';
+}
+
+function supportServerLifecycleBadge(
+  status: NonNullable<SupportTicket['server']>['listingStatus'],
+): string {
+  const base = 'shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold';
+  if (status === 'active') {
+    return `${base} border-emerald-500/30 bg-emerald-500/10 text-emerald-300`;
+  }
+  if (status === 'pending') {
+    return `${base} border-amber-500/30 bg-amber-500/10 text-amber-300`;
+  }
+  return `${base} border-red-500/30 bg-red-500/10 text-red-200`;
 }
 
 function displayInitial(value: string): string {

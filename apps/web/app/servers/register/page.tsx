@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  MINECRAFT_VERSION_OPTIONS,
   serverRegistrationSchema,
   type ServerRegistrationPayload,
   type ServerDetail,
@@ -78,40 +79,6 @@ const MAX_SUPPORTED_VERSIONS = 8;
 const REGISTRATION_DRAFT_KEY_PREFIX = 'minewiki:server-registration-draft';
 const REGISTRATION_METHOD_KEY_PREFIX = 'minewiki:server-registration-method';
 
-const VERSION_OPTIONS: Record<FormState['edition'], string[]> = {
-  java: [
-    '1.21.1',
-    '1.21',
-    '1.20.6',
-    '1.20.4',
-    '1.20.2',
-    '1.20.1',
-    '1.19.4',
-    '1.19.3',
-    '1.19.2',
-    '1.18.2',
-    '1.17.1',
-    '1.16.5',
-    '1.15.2',
-    '1.14.4',
-    '1.12.2',
-  ],
-  bedrock: [
-    '1.21.30',
-    '1.21.20',
-    '1.21.2',
-    '1.20.81',
-    '1.20.80',
-    '1.20.73',
-    '1.20.62',
-    '1.20.51',
-    '1.19.83',
-    '1.18.32',
-    '1.17.41',
-    '1.16.221',
-  ],
-};
-
 type ReadinessItem = {
   label: string;
   done: boolean;
@@ -141,7 +108,10 @@ export default function ServerRegisterPage() {
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [draftOwnerId, setDraftOwnerId] = useState<string | null>(null);
   const captchaRequired = isCaptchaConfigured();
-  const availableVersions = useMemo(() => VERSION_OPTIONS[form.edition], [form.edition]);
+  const availableVersions = useMemo(
+    () => MINECRAFT_VERSION_OPTIONS[form.edition],
+    [form.edition],
+  );
   const errorSummaryRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {

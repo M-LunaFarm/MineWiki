@@ -14,6 +14,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { FastifyRequest } from 'fastify';
 import { extractClientIp } from '../common/http/client-ip';
 import { CurrentSession } from '../session/session.decorator';
+import { OptionalSessionGuard } from '../session/optional-session.guard';
 import { SessionGuard } from '../session/session.guard';
 import type { SessionPayload } from '../session/session.service';
 import { SupportService } from './support.service';
@@ -21,6 +22,12 @@ import { SupportService } from './support.service';
 @Controller('v1/support')
 export class SupportController {
   constructor(private readonly support: SupportService) {}
+
+  @UseGuards(OptionalSessionGuard)
+  @Get('server-options')
+  serverOptions(@Req() request: FastifyRequest, @Query('search') search?: string) {
+    return this.support.listServerOptions(request.sessionPayload?.userId, search);
+  }
 
   @UseGuards(SessionGuard)
   @Get('agents/me')

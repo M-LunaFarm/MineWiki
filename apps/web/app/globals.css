@@ -179,6 +179,21 @@ html[data-theme='light'] .server-registration-version-token {
   color: #26382d;
 }
 
+html[data-theme='light'] .support-surface {
+  background-color: var(--theme-page);
+  color: var(--theme-ink);
+}
+
+html[data-theme='light'] .support-surface [class~='bg-[#1C2A23]'],
+html[data-theme='light'] .support-surface [class~='bg-[#13251c]'] {
+  background-color: #e5f5eb;
+}
+
+html[data-theme='light'] .support-surface [class~='text-[#F3FFF8]'],
+html[data-theme='light'] .support-surface [class~='text-[#E8E9EC]'] {
+  color: #243329;
+}
+
 html[data-theme='light'] [class~='bg-[#121212]'],
 html[data-theme='light'] [class~='bg-[#07090c]'],
 html[data-theme='light'] [class~='bg-[#070a0c]'],
