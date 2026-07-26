@@ -126,6 +126,18 @@ function normalizeSiteKey(value: string | undefined): string | undefined {
   return trimmed;
 }
 
+function normalizeTicketCounts(
+  counts: Partial<TicketCounts> | undefined,
+): TicketCounts {
+  return {
+    all: counts?.all ?? 0,
+    open: counts?.open ?? 0,
+    pending: counts?.pending ?? 0,
+    resolved: counts?.resolved ?? 0,
+    closed: counts?.closed ?? 0,
+  };
+}
+
 export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: SupportMode }) {
   const { account, loading: authLoading } = useAuth();
   const pathname = usePathname();
@@ -289,7 +301,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         setIsAgent(response.viewer.isAgent);
         setTickets(nextTickets);
         setNextCursor(response.nextCursor);
-        setTicketCounts(response.counts);
+        setTicketCounts(normalizeTicketCounts(response.counts));
 
         setSelectedTicketId((current) => {
           const candidate = preferredTicketId ?? current;
@@ -339,7 +351,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         return [...current, ...response.items.filter((ticket) => !knownIds.has(ticket.id))];
       });
       setNextCursor(response.nextCursor);
-      setTicketCounts(response.counts);
+      setTicketCounts(normalizeTicketCounts(response.counts));
     } catch (listError) {
       setError(
         listError instanceof Error ? listError.message : '문의 목록을 더 불러오지 못했습니다.',
