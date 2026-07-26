@@ -1,9 +1,18 @@
-/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ComponentType } from 'react';
 import type { ServerDetail, ServerStats } from '@minewiki/schemas';
-import { BadgeCheck, ExternalLink, Gauge, Server, UsersRound } from 'lucide-react';
+import {
+  BadgeCheck,
+  CheckCircle2,
+  Copy,
+  Gauge,
+  MessageSquareText,
+  Server,
+  ShieldCheck,
+  UsersRound,
+  Vote,
+} from 'lucide-react';
 import { VoteModal } from '../voting/vote-modal';
 import { CopyAddressButton } from './copy-address-button';
 import { normalizeApiBaseUrl } from '../../lib/runtime-config';
@@ -25,14 +34,15 @@ interface ServerHeroLiveProps {
 export function ServerHeroLive({
   detail,
   serverId,
-  serverPath,
   apiBaseUrl,
   initialStats,
   initialVoteOpen = false,
 }: ServerHeroLiveProps) {
   const [stats, setStats] = useState<ServerStats | null>(initialStats ?? null);
+  const [activeActionTab, setActiveActionTab] = useState<'join' | 'trust' | 'participate'>(
+    initialVoteOpen ? 'participate' : 'join',
+  );
   const refreshingRef = useRef(false);
-  const [origin, setOrigin] = useState('');
 
   const editionLabel = detail.edition === 'java' ? 'Java Edition' : 'Bedrock Edition';
   const versionLabel = detail.supportedVersions.join(', ');
@@ -67,10 +77,6 @@ export function ServerHeroLive({
   useEffect(() => {
     void refreshStats();
   }, [refreshStats]);
-
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
 
   const pingSamples = stats?.pingSamples ?? [];
   const latestPingSample = pingSamples.length > 0 ? pingSamples[pingSamples.length - 1] : null;
@@ -122,8 +128,6 @@ export function ServerHeroLive({
 
   const joinPort = detail.joinPort ?? 25565;
   const joinAddress = joinPort === 25565 ? detail.joinHost : `${detail.joinHost}:${joinPort}`;
-  const sharePath = serverPath.startsWith('/') ? serverPath : `/${serverPath}`;
-  const shareUrl = origin ? `${origin}${sharePath}` : sharePath;
   const playerRatio =
     playersMax > 0 ? Math.min(100, Math.round((playersOnline / playersMax) * 100)) : 0;
   const playerSummary =
@@ -134,8 +138,12 @@ export function ServerHeroLive({
       : statusTone === 'offline'
         ? '오프라인'
         : '확인 중';
-  const serverInitial = detail.name.charAt(0).toUpperCase();
   const showVerification = detail.verificationGrade === 'Verified';
+  const actionTabs = [
+    { id: 'join' as const, label: '접속' },
+    { id: 'trust' as const, label: '신뢰' },
+    { id: 'participate' as const, label: '참여' },
+  ];
 
   return (
     <section className="space-y-6">
@@ -160,13 +168,7 @@ export function ServerHeroLive({
           <div className="server-hero-overlay-secondary absolute inset-0 bg-[linear-gradient(0deg,#0d1219_0%,rgba(13,18,25,0)_55%,rgba(13,18,25,0.55)_100%)]" />
         </div>
 
-        <div className="relative grid gap-7 px-5 py-6 lg:grid-cols-[96px_minmax(0,1fr)_300px] lg:items-center lg:px-8 lg:py-8">
-          <div className="relative z-10 flex-shrink-0">
-            <div className="server-hero-mark flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-[#1a2230] to-[#0d1219] text-4xl font-black text-white shadow-xl shadow-black/40">
-              {serverInitial}
-            </div>
-          </div>
-
+        <div className="relative grid gap-7 px-5 py-6 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-stretch lg:px-8 lg:py-8">
           <div className="relative z-10 min-w-0">
             <p className="server-hero-chip mb-3 inline-flex rounded-md border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300 backdrop-blur">
               {editionLabel}
@@ -190,73 +192,130 @@ export function ServerHeroLive({
                 </span>
               ) : null}
             </div>
-            <p className="max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
-              {detail.shortDescription}
-            </p>
-
-            <div className="mt-5 grid max-w-3xl gap-2 sm:grid-cols-3">
-              <HeroInfo icon={UsersRound} label="접속자" value={playerSummary} />
-              <HeroInfo icon={Gauge} label="지연시간" value={latencyLabel} />
-              <HeroInfo icon={Server} label="버전" value={versionLabel || '미설정'} />
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-4">
-              <VoteModal
-                serverId={serverId}
-                apiBaseUrl={apiBaseUrl}
-                requiresOwnership={detail.voteRequiresOwnership ?? false}
-                initialOpen={initialVoteOpen}
-                triggerClassName="inline-flex items-center gap-3 rounded-xl bg-[#14c794] px-8 py-3.5 text-base font-bold text-[#06140d] shadow-lg shadow-[#14c794]/25 transition hover:bg-[#1ee6a4] active:scale-[0.99]"
-              />
-              <div className="server-hero-chip group flex min-w-0 items-center gap-4 rounded-xl border border-white/[0.08] bg-white/[0.04] p-1.5 pl-4 pr-2 backdrop-blur">
-                <span className="min-w-0">
-                  <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    주소
-                  </span>
-                  <span className="block truncate font-mono text-sm font-semibold tracking-wide text-white md:text-base">
-                    {joinAddress}
-                  </span>
-                </span>
-                <CopyAddressButton
-                  address={joinAddress}
-                  className="server-hero-copy shrink-0 whitespace-nowrap rounded-lg bg-white/[0.06] p-2.5 text-slate-300 transition hover:bg-white hover:text-black"
-                  idleLabel=""
-                  copiedLabel="OK"
-                >
-                  복사
-                </CopyAddressButton>
-              </div>
-              {detail.shortCode ? (
-                <div className="server-hero-chip group flex min-w-0 items-center gap-4 rounded-xl border border-white/[0.08] bg-white/[0.04] p-1.5 pl-4 pr-2 backdrop-blur">
-                  <span className="min-w-0">
-                    <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      짧은 URL
-                    </span>
-                    <span className="block truncate font-mono text-sm font-semibold tracking-wide text-white md:text-base">
-                      {shareUrl}
-                    </span>
-                  </span>
-                  <CopyAddressButton
-                    address={shareUrl}
-                    className="server-hero-copy shrink-0 whitespace-nowrap rounded-lg bg-white/[0.06] p-2.5 text-slate-300 transition hover:bg-white hover:text-black"
-                    idleLabel=""
-                    copiedLabel="OK"
+            <div className="server-hero-actions mt-5 overflow-hidden rounded-xl border border-white/[0.1] bg-[#0d1219]/80 backdrop-blur">
+              <div
+                className="grid grid-cols-3 border-b border-white/[0.1]"
+                role="tablist"
+                aria-label="서버 행동"
+              >
+                {actionTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    id={`server-action-tab-${tab.id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeActionTab === tab.id}
+                    aria-controls={`server-action-panel-${tab.id}`}
+                    className={`relative min-h-12 px-3 text-sm font-semibold transition ${
+                      activeActionTab === tab.id
+                        ? 'text-[#14c794]'
+                        : 'text-slate-400 hover:bg-white/[0.03] hover:text-white'
+                    }`}
+                    onClick={() => setActiveActionTab(tab.id)}
                   >
-                    복사
-                  </CopyAddressButton>
-                </div>
-              ) : null}
-              {detail.websiteUrl ? (
-                <a
-                  className="server-hero-chip inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-5 py-3.5 font-semibold text-white backdrop-blur-sm transition hover:border-white/20"
-                  href={detail.websiteUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  공식 사이트
-                </a>
-              ) : null}
+                    {tab.label}
+                    {activeActionTab === tab.id ? (
+                      <span className="absolute inset-x-0 bottom-0 h-0.5 bg-[#14c794]" />
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+
+              <div
+                id={`server-action-panel-${activeActionTab}`}
+                role="tabpanel"
+                aria-labelledby={`server-action-tab-${activeActionTab}`}
+                className="p-4"
+              >
+                {activeActionTab === 'join' ? (
+                  <div className="space-y-4">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <HeroInfo icon={UsersRound} label="온라인" value={playerSummary} />
+                      <HeroInfo icon={Server} label="버전" value={versionLabel || '미설정'} />
+                      <HeroInfo icon={Gauge} label="지연" value={latencyLabel} />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
+                      <div className="server-hero-chip flex min-h-14 min-w-0 items-center rounded-xl border border-white/[0.08] bg-white/[0.04] px-5">
+                        <span className="truncate font-mono text-lg font-bold tracking-wide text-white md:text-xl">
+                          {joinAddress}
+                        </span>
+                      </div>
+                      <CopyAddressButton
+                        address={joinAddress}
+                        className="server-hero-copy theme-on-brand inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-[#14c794] px-5 text-sm font-bold text-[#06140d] shadow-lg shadow-[#14c794]/20 transition hover:bg-[#1ee6a4] active:scale-[0.99]"
+                        copiedLabel="복사 완료"
+                      >
+                        <Copy className="h-4 w-4" aria-hidden="true" />
+                        주소 복사
+                      </CopyAddressButton>
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeActionTab === 'trust' ? (
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 rounded-lg bg-cyan-500/10 p-2 text-cyan-200">
+                        {showVerification ? (
+                          <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
+                        ) : (
+                          <ShieldCheck className="h-5 w-5" aria-hidden="true" />
+                        )}
+                      </span>
+                      <div>
+                        <p className="font-bold text-white">
+                          {showVerification ? '소유권 검증 완료' : '아직 소유권이 검증되지 않았습니다'}
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-slate-400">
+                          {showVerification
+                            ? '운영자 확인을 마친 서버로 신뢰 정보를 계속 관리할 수 있습니다.'
+                            : '도메인 DNS 또는 서버 설정으로 운영 권한을 확인할 수 있습니다.'}
+                        </p>
+                      </div>
+                    </div>
+                    {!showVerification ? (
+                      <a
+                        href={`/claim?serverId=${encodeURIComponent(serverId)}`}
+                        className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[#14c794] px-5 text-sm font-bold text-[#06140d] transition hover:bg-[#1ee6a4]"
+                      >
+                        운영자 인증하기
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {activeActionTab === 'participate' ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="server-hero-chip rounded-xl border border-white/[0.08] bg-white/[0.04] p-4">
+                      <Vote className="h-5 w-5 text-[#14c794]" aria-hidden="true" />
+                      <p className="mt-3 font-bold text-white">오늘의 서버 투표</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-400">
+                        하루 한 번 응원하고 서버 순위에 힘을 보태세요.
+                      </p>
+                      <VoteModal
+                        serverId={serverId}
+                        apiBaseUrl={apiBaseUrl}
+                        requiresOwnership={detail.voteRequiresOwnership ?? false}
+                        initialOpen={initialVoteOpen}
+                        triggerClassName="theme-on-brand mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-lg bg-[#14c794] px-4 text-sm font-bold text-[#06140d] transition hover:bg-[#1ee6a4]"
+                      />
+                    </div>
+                    <div className="server-hero-chip rounded-xl border border-white/[0.08] bg-white/[0.04] p-4">
+                      <MessageSquareText className="h-5 w-5 text-cyan-200" aria-hidden="true" />
+                      <p className="mt-3 font-bold text-white">이용 경험 공유</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-400">
+                        실제 플레이 경험을 리뷰로 남겨 다음 이용자에게 알려주세요.
+                      </p>
+                      <a
+                        href="#server-reviews"
+                        className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-lg border border-white/[0.1] px-4 text-sm font-bold text-white transition hover:border-[#14c794]/50 hover:text-[#14c794]"
+                      >
+                        리뷰 보기
+                      </a>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 
