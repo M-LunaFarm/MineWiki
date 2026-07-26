@@ -43,6 +43,7 @@
     "backup": "node scripts/backup-minewiki.mjs",
     "backup:verify": "node scripts/verify-minewiki-backup.mjs",
     "backup:drill": "node scripts/drill-minewiki-backup.mjs",
+    "backup:drill-latest": "node scripts/drill-latest-minewiki-backup.mjs",
     "pm2:validate": "node scripts/validate-pm2-config.mjs",
     "gateway:validate": "node scripts/validate-upload-gateway.mjs",
     "seed": "node scripts/seed.mjs",

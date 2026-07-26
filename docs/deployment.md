@@ -175,7 +175,10 @@ tar -xzf /var/backups/minewiki/SNAPSHOT/uploads.tar.gz -C /srv/minewiki-restore/
 DATABASE_URL=mysql://.../minewiki_restore UPLOAD_STORAGE_ROOT=/srv/minewiki-restore/uploads pnpm data:validate
 ```
 
-Install `infra/systemd/minewiki-backup.{service,timer}` for nightly snapshots. Alert on a failed unit and perform a full isolated restore drill at least monthly; checksum verification alone does not prove MySQL restore compatibility.
+Install `infra/systemd/minewiki-backup.{service,timer}` for nightly snapshots and
+`infra/systemd/minewiki-backup-drill.{service,timer}` for a monthly isolated restore
+drill against the newest verified snapshot. Alert on either failed unit; checksum
+verification alone does not prove MySQL restore compatibility.
 
 ## Rollback
 
