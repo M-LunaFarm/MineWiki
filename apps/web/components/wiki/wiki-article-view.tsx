@@ -105,36 +105,16 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
             </Link>
           ) : null}
           {page.headings.length > 0 ? (
-            <details className="wiki-rail-panel" open>
-              <summary>
-                <span className="wiki-rail-panel-label"><ListTree className="size-4" aria-hidden="true" />목차</span>
-                <ChevronDown className="wiki-rail-chevron size-4" aria-hidden="true" />
-              </summary>
-              <nav className="wiki-rail-content" aria-label="문서 목차">
-                <ol className="space-y-0.5 text-sm">
-                {page.headings.map((heading, index) => (
-                  <li
-                    key={`${heading.anchor}-${index}`}
-                    style={{ paddingInlineStart: `${Math.max(0, heading.level - 2) * 0.75}rem` }}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-w-0 flex-1 truncate text-slate-400 transition hover:text-emerald-200">
-                        {heading.title}
-                      </a>
-                      <Link
-                        href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`}
-                        className="grid size-11 shrink-0 place-items-center rounded text-slate-600 transition hover:bg-white/[0.05] hover:text-emerald-200"
-                        aria-label={`${heading.title} 섹션 편집`}
-                        title="섹션 편집"
-                      >
-                        <Pencil className="size-3.5" />
-                      </Link>
-                    </span>
-                  </li>
-                ))}
-                </ol>
-              </nav>
-            </details>
+            <>
+              <details className="wiki-rail-panel lg:hidden">
+                <WikiTocSummary />
+                <WikiTocContent headings={page.headings} editPath={editPath} keySuffix="mobile" />
+              </details>
+              <details className="wiki-rail-panel hidden lg:block" open>
+                <WikiTocSummary />
+                <WikiTocContent headings={page.headings} editPath={editPath} keySuffix="desktop" />
+              </details>
+            </>
           ) : null}
           <RecentChangesSidebar changes={recentChanges} />
           <details className="wiki-rail-panel">
@@ -212,6 +192,52 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
       </div>
       {afterContent}
     </main>
+  );
+}
+
+function WikiTocSummary() {
+  return (
+    <summary>
+      <span className="wiki-rail-panel-label"><ListTree className="size-4" aria-hidden="true" />목차</span>
+      <ChevronDown className="wiki-rail-chevron size-4" aria-hidden="true" />
+    </summary>
+  );
+}
+
+function WikiTocContent({
+  headings,
+  editPath,
+  keySuffix,
+}: {
+  readonly headings: WikiPageResponse['headings'];
+  readonly editPath: string;
+  readonly keySuffix: string;
+}) {
+  return (
+    <nav className="wiki-rail-content" aria-label="문서 목차">
+      <ol className="space-y-0.5 text-sm">
+        {headings.map((heading, index) => (
+          <li
+            key={`${heading.anchor}-${keySuffix}-${index}`}
+            style={{ paddingInlineStart: `${Math.max(0, heading.level - 2) * 0.75}rem` }}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <a href={`#${encodeURIComponent(heading.anchor)}`} className="min-w-0 flex-1 truncate text-slate-400 transition hover:text-emerald-200">
+                {heading.title}
+              </a>
+              <Link
+                href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`}
+                className="grid size-11 shrink-0 place-items-center rounded text-slate-600 transition hover:bg-white/[0.05] hover:text-emerald-200"
+                aria-label={`${heading.title} 섹션 편집`}
+                title="섹션 편집"
+              >
+                <Pencil className="size-3.5" />
+              </Link>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </nav>
   );
 }
 
