@@ -1,6 +1,7 @@
 ﻿import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -90,8 +91,12 @@ export class OAuthFlowService {
     const state = this.generateState();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + STATE_TTL_MS);
-    const normalizedRedirect =
-      redirectUri ?? this.getFallbackRedirect(provider) ?? this.throwMissingRedirect(provider);
+    const configuredRedirect =
+      this.getFallbackRedirect(provider) ?? this.throwMissingRedirect(provider);
+    if (redirectUri && redirectUri !== configuredRedirect) {
+      throw new ForbiddenException('허용되지 않은 OAuth 콜백 주소입니다.');
+    }
+    const normalizedRedirect = configuredRedirect;
     const url =
       provider === 'discord'
         ? this.createDiscordAuthorizationUrl(state, normalizedRedirect)

@@ -8,6 +8,76 @@ const binding = 'a'.repeat(43);
 const state = 'state-value-123456';
 const redirectUri = 'https://minewiki.kr/auth/callback/discord';
 
+test('OAuth start pins provider redirects to the configured production callbacks', async () => {
+  const created: Array<{ provider: string; redirectUri: string }> = [];
+  const config = {
+    getOptional(key: string) {
+      if (key === 'DISCORD_CLIENT_ID') return 'discord-client';
+      if (key === 'DISCORD_REDIRECT_URI') return 'https://minewiki.kr/auth/callback/discord';
+      if (key === 'NAVER_CLIENT_ID') return 'naver-client';
+      if (key === 'NAVER_REDIRECT_URI') return 'https://minewiki.kr/auth/callback/naver';
+      return undefined;
+    },
+  };
+  const prisma = {
+    oAuthState: {
+      deleteMany: async () => ({ count: 0 }),
+      create: async ({ data }: { data: { provider: string; redirectUri: string } }) => {
+        created.push({ provider: data.provider, redirectUri: data.redirectUri });
+        return data;
+      },
+    },
+  };
+  const service = new OAuthFlowService(config as never, prisma as never);
+
+  const discord = await service.start(
+    'discord',
+    'https://minewiki.kr/auth/callback/discord',
+    undefined,
+    'login',
+    undefined,
+    false,
+    false,
+    hashOAuthBrowserBinding(binding),
+  );
+  const naver = await service.start(
+    'naver',
+    undefined,
+    undefined,
+    'login',
+    undefined,
+    false,
+    false,
+    hashOAuthBrowserBinding(binding),
+  );
+
+  assert.equal(
+    new URL(discord.authorizationUrl).searchParams.get('redirect_uri'),
+    'https://minewiki.kr/auth/callback/discord',
+  );
+  assert.equal(
+    new URL(naver.authorizationUrl).searchParams.get('redirect_uri'),
+    'https://minewiki.kr/auth/callback/naver',
+  );
+  assert.deepEqual(created, [
+    { provider: 'discord', redirectUri: 'https://minewiki.kr/auth/callback/discord' },
+    { provider: 'naver', redirectUri: 'https://minewiki.kr/auth/callback/naver' },
+  ]);
+  await assert.rejects(
+    service.start(
+      'naver',
+      'https://www.minewiki.kr/auth/callback/naver',
+      undefined,
+      'login',
+      undefined,
+      false,
+      false,
+      hashOAuthBrowserBinding(binding),
+    ),
+    /허용되지 않은 OAuth 콜백 주소/u,
+  );
+});
+
 test('OAuth state is consumed only by the browser binding that created it', async () => {
   let exchangeCalls = 0;
   let consumed = false;
