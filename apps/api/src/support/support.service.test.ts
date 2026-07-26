@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { calculateSupportTicketSla, SupportService } from './support.service';
+import {
+  calculateSupportTicketSla,
+  decodeSupportTicketCursor,
+  encodeSupportTicketCursor,
+  normalizeTicketListLimit,
+  normalizeTicketSearch,
+  SupportService,
+} from './support.service';
 
 type AccessProbe = {
   ensureTicketAccess(
@@ -78,6 +85,37 @@ test('support SLA targets are priority-aware and stop breaching after a public r
   assert.equal(urgent.breached, true);
   assert.equal(responded.targetMinutes, 1_440);
   assert.equal(responded.breached, false);
+});
+
+test('support ticket list cursors preserve stable timestamp and id boundaries', () => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  const timestamp = '2026-07-26T12:34:56.789Z';
+  const cursor = encodeSupportTicketCursor(timestamp, id);
+  const decoded = decodeSupportTicketCursor(cursor);
+
+  assert.equal(decoded?.lastMessageAt.toISOString(), timestamp);
+  assert.equal(decoded?.id, id);
+  assert.equal(decodeSupportTicketCursor(undefined), null);
+  assert.throws(() => decodeSupportTicketCursor('not-a-cursor'), /유효하지 않은/);
+  assert.throws(
+    () =>
+      decodeSupportTicketCursor(
+        Buffer.from(
+          JSON.stringify({ v: 1, lastMessageAt: timestamp, id: 'not-a-uuid' }),
+        ).toString('base64url'),
+      ),
+    /유효하지 않은/,
+  );
+});
+
+test('support ticket list query inputs are bounded for predictable service cost', () => {
+  assert.equal(normalizeTicketListLimit(undefined), 50);
+  assert.equal(normalizeTicketListLimit('25'), 25);
+  assert.equal(normalizeTicketListLimit('1000'), 100);
+  assert.throws(() => normalizeTicketListLimit('0'), /1 이상의 정수/);
+  assert.throws(() => normalizeTicketListLimit('1.5'), /1 이상의 정수/);
+  assert.equal(normalizeTicketSearch(`  ${'가'.repeat(100)}  `)?.length, 80);
+  assert.equal(normalizeTicketSearch('   '), null);
 });
 
 test('hidden servers can only be attached by their owner, registrant, or support staff', async () => {

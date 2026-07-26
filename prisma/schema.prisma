@@ -983,8 +983,11 @@ model SupportTicket {
   accountMergeRequest AccountMergeRequest?
 
   @@index([requesterAccountId, createdAt])
+  @@index([requesterAccountId, lastMessageAt, id])
   @@index([assigneeAccountId, status])
+  @@index([assigneeAccountId, lastMessageAt, id])
   @@index([status, lastMessageAt])
+  @@index([lastMessageAt, id])
   @@index([status, priority, firstResponseAt])
   @@index([serverId])
   @@index([pageId])

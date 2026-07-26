@@ -6,6 +6,7 @@ import {
   guestSupportAccessSchema,
   guestSupportRecoverySchema,
   supportServerOptionsResponseSchema,
+  supportTicketListResponseSchema,
   supportTicketSchema,
 } from '@minewiki/schemas';
 
@@ -69,6 +70,17 @@ test('support ticket schemas accept operational context fields', () => {
   assert.equal(ticket.verifySessionId, 'verify-session-1');
   assert.equal(ticket.pluginServerId, 'plugin-server-1');
   assert.equal(ticket.fileId, 'file-1');
+
+  const list = supportTicketListResponseSchema.parse({
+    items: [ticket],
+    nextCursor: 'opaque-cursor',
+    pageSize: 50,
+    counts: { all: 1, open: 1, pending: 0, resolved: 0, closed: 0 },
+    viewer: { isAgent: true },
+  });
+  assert.equal(list.nextCursor, 'opaque-cursor');
+  assert.equal(list.pageSize, 50);
+  assert.equal(list.counts.open, 1);
 });
 
 test('support server options expose lifecycle and relationship metadata', () => {

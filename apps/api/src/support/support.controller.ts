@@ -41,8 +41,11 @@ export class SupportController {
     @CurrentSession() session: SessionPayload,
     @Query('view') view?: string,
     @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.support.listTickets(session, { view, status });
+    return this.support.listTickets(session, { view, status, search, cursor, limit });
   }
 
   @UseGuards(SessionGuard)

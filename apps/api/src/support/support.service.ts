@@ -32,6 +32,9 @@ import { RoleService } from '../roles/role.service';
 interface ListTicketOptions {
   readonly view?: string;
   readonly status?: string;
+  readonly search?: string;
+  readonly cursor?: string;
+  readonly limit?: string | number;
 }
 
 interface GuestTicketContext {
@@ -96,6 +99,14 @@ interface MessageRow {
   createdAt: Date | string;
   authorDisplayName: string | null;
   authorProviderUserId: string | null;
+}
+
+interface TicketCountRow {
+  allCount: number | bigint | string;
+  openCount: number | bigint | string;
+  pendingCount: number | bigint | string;
+  resolvedCount: number | bigint | string;
+  closedCount: number | bigint | string;
 }
 
 @Injectable()
@@ -192,16 +203,51 @@ export class SupportService {
     const isAgent = await this.isAgent(session.userId);
     const view = this.normalizeView(options.view, isAgent);
     const status = this.parseStatus(options.status);
+    const keyword = normalizeTicketSearch(options.search);
+    const cursor = decodeSupportTicketCursor(options.cursor);
+    const limit = normalizeTicketListLimit(options.limit);
 
-    const whereClauses: Prisma.Sql[] = [];
+    const scopeClauses: Prisma.Sql[] = [];
+    if (!isAgent || view === 'mine') {
+      scopeClauses.push(Prisma.sql`t.requesterAccountId = ${session.userId}`);
+    } else if (view === 'assigned') {
+      scopeClauses.push(Prisma.sql`t.assigneeAccountId = ${session.userId}`);
+    }
+
+    if (keyword) {
+      const messageVisibility = isAgent ? Prisma.empty : Prisma.sql`AND sm.isInternal = false`;
+      scopeClauses.push(Prisma.sql`(
+        LOCATE(${keyword}, COALESCE(t.subject, '')) > 0
+        OR LOCATE(${keyword}, COALESCE(t.category, '')) > 0
+        OR LOCATE(${keyword}, COALESCE(t.guestName, '')) > 0
+        OR LOCATE(${keyword}, COALESCE(req.displayName, '')) > 0
+        OR LOCATE(${keyword}, COALESCE(srv.name, '')) > 0
+        OR LOCATE(${keyword}, COALESCE(srv.joinHost, '')) > 0
+        OR LOCATE(${keyword}, COALESCE(t.serverNameSnapshot, '')) > 0
+        OR LOCATE(${keyword}, COALESCE(t.serverJoinHostSnapshot, '')) > 0
+        OR EXISTS (
+          SELECT 1
+          FROM \`SupportMessage\` sm
+          WHERE sm.ticketId = t.id
+          ${messageVisibility}
+          AND LOCATE(${keyword}, sm.body) > 0
+        )
+      )`);
+    }
+
+    const countWhereSql =
+      scopeClauses.length > 0
+        ? Prisma.sql`WHERE ${Prisma.join(scopeClauses, ' AND ')}`
+        : Prisma.empty;
+    const whereClauses = [...scopeClauses];
     if (status) {
       whereClauses.push(Prisma.sql`t.status = ${status}`);
     }
-
-    if (!isAgent || view === 'mine') {
-      whereClauses.push(Prisma.sql`t.requesterAccountId = ${session.userId}`);
-    } else if (view === 'assigned') {
-      whereClauses.push(Prisma.sql`t.assigneeAccountId = ${session.userId}`);
+    if (cursor) {
+      whereClauses.push(Prisma.sql`(
+        t.lastMessageAt < ${cursor.lastMessageAt}
+        OR (t.lastMessageAt = ${cursor.lastMessageAt} AND t.id < ${cursor.id})
+      )`);
     }
 
     const whereSql =
@@ -213,71 +259,102 @@ export class SupportService {
       ? Prisma.empty
       : Prisma.sql`AND m.isInternal = false`;
 
-    const rows = await this.prisma.$queryRaw<TicketRow[]>(Prisma.sql`
-      SELECT
-        t.id,
-        t.requesterAccountId,
-        t.assigneeAccountId,
-        t.subject,
-        t.status,
-        t.priority,
-        t.category,
-        t.pageId,
-        t.verifySessionId,
-        t.pluginServerId,
-        t.fileId,
-        t.guestName,
-        t.guestEmail,
-        t.guestAccessHash,
-        t.guestAccessExpiresAt,
-        t.firstResponseAt,
-        t.resolvedAt,
-        t.lastCustomerMessageAt,
-        t.lastAgentMessageAt,
-        t.lastMessageAt,
-        t.createdAt,
-        t.updatedAt,
-        req.id AS requesterId,
-        req.displayName AS requesterDisplayName,
-        req.providerUserId AS requesterProviderUserId,
-        ass.id AS assigneeId,
-        ass.displayName AS assigneeDisplayName,
-        ass.providerUserId AS assigneeProviderUserId,
-        srv.id AS serverId,
-        srv.name AS serverName,
-        srv.joinHost AS serverJoinHost,
-        srv.joinPort AS serverJoinPort,
-        srv.edition AS serverEdition,
-        srv.listingStatus AS serverListingStatus,
-        t.serverNameSnapshot,
-        t.serverJoinHostSnapshot,
-        t.serverJoinPortSnapshot,
-        t.serverEditionSnapshot,
-        (
-          SELECT m.body
-          FROM \`SupportMessage\` m
-          WHERE m.ticketId = t.id
-          ${visibilitySql}
-          ORDER BY m.createdAt DESC
-          LIMIT 1
-        ) AS latestMessagePreview,
-        (
-          SELECT COUNT(*)
-          FROM \`SupportMessage\` m
-          WHERE m.ticketId = t.id
-          ${visibilitySql}
-        ) AS messageCount
-      FROM \`SupportTicket\` t
-      INNER JOIN \`Account\` req ON req.id = t.requesterAccountId
-      LEFT JOIN \`Account\` ass ON ass.id = t.assigneeAccountId
-      LEFT JOIN \`Server\` srv ON srv.id = t.serverId
-      ${whereSql}
-      ORDER BY t.lastMessageAt DESC, t.createdAt DESC
-      LIMIT 100
-    `);
+    const [rows, countRows] = await Promise.all([
+      this.prisma.$queryRaw<TicketRow[]>(Prisma.sql`
+        SELECT
+          t.id,
+          t.requesterAccountId,
+          t.assigneeAccountId,
+          t.subject,
+          t.status,
+          t.priority,
+          t.category,
+          t.pageId,
+          t.verifySessionId,
+          t.pluginServerId,
+          t.fileId,
+          t.guestName,
+          t.guestEmail,
+          t.guestAccessHash,
+          t.guestAccessExpiresAt,
+          t.firstResponseAt,
+          t.resolvedAt,
+          t.lastCustomerMessageAt,
+          t.lastAgentMessageAt,
+          t.lastMessageAt,
+          t.createdAt,
+          t.updatedAt,
+          req.id AS requesterId,
+          req.displayName AS requesterDisplayName,
+          req.providerUserId AS requesterProviderUserId,
+          ass.id AS assigneeId,
+          ass.displayName AS assigneeDisplayName,
+          ass.providerUserId AS assigneeProviderUserId,
+          srv.id AS serverId,
+          srv.name AS serverName,
+          srv.joinHost AS serverJoinHost,
+          srv.joinPort AS serverJoinPort,
+          srv.edition AS serverEdition,
+          srv.listingStatus AS serverListingStatus,
+          t.serverNameSnapshot,
+          t.serverJoinHostSnapshot,
+          t.serverJoinPortSnapshot,
+          t.serverEditionSnapshot,
+          (
+            SELECT m.body
+            FROM \`SupportMessage\` m
+            WHERE m.ticketId = t.id
+            ${visibilitySql}
+            ORDER BY m.createdAt DESC
+            LIMIT 1
+          ) AS latestMessagePreview,
+          (
+            SELECT COUNT(*)
+            FROM \`SupportMessage\` m
+            WHERE m.ticketId = t.id
+            ${visibilitySql}
+          ) AS messageCount
+        FROM \`SupportTicket\` t
+        INNER JOIN \`Account\` req ON req.id = t.requesterAccountId
+        LEFT JOIN \`Account\` ass ON ass.id = t.assigneeAccountId
+        LEFT JOIN \`Server\` srv ON srv.id = t.serverId
+        ${whereSql}
+        ORDER BY t.lastMessageAt DESC, t.id DESC
+        LIMIT ${limit + 1}
+      `),
+      this.prisma.$queryRaw<TicketCountRow[]>(Prisma.sql`
+        SELECT
+          COUNT(*) AS allCount,
+          SUM(t.status = 'open') AS openCount,
+          SUM(t.status = 'pending') AS pendingCount,
+          SUM(t.status = 'resolved') AS resolvedCount,
+          SUM(t.status = 'closed') AS closedCount
+        FROM \`SupportTicket\` t
+        INNER JOIN \`Account\` req ON req.id = t.requesterAccountId
+        LEFT JOIN \`Server\` srv ON srv.id = t.serverId
+        ${countWhereSql}
+      `),
+    ]);
+    const [countRow] = countRows;
+
+    const hasNextPage = rows.length > limit;
+    const pageRows = hasNextPage ? rows.slice(0, limit) : rows;
+    const lastRow = pageRows.at(-1);
 
     return {
-      items: rows.map((row) => this.toTicket(row)),
+      items: pageRows.map((row) => this.toTicket(row)),
+      nextCursor:
+        hasNextPage && lastRow
+          ? encodeSupportTicketCursor(lastRow.lastMessageAt, lastRow.id)
+          : null,
+      pageSize: limit,
+      counts: {
+        all: toCount(countRow?.allCount ?? 0),
+        open: toCount(countRow?.openCount ?? 0),
+        pending: toCount(countRow?.pendingCount ?? 0),
+        resolved: toCount(countRow?.resolvedCount ?? 0),
+        closed: toCount(countRow?.closedCount ?? 0),
+      },
       viewer: { isAgent },
     };
   }
@@ -1093,6 +1170,76 @@ export class SupportService {
 
 function hashGuestAccessCode(accessCode: string): string {
   return createHash('sha256').update(accessCode, 'utf8').digest('hex');
+}
+
+const SUPPORT_TICKET_DEFAULT_PAGE_SIZE = 50;
+const SUPPORT_TICKET_MAX_PAGE_SIZE = 100;
+const SUPPORT_TICKET_CURSOR_MAX_LENGTH = 512;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+interface SupportTicketCursor {
+  readonly lastMessageAt: Date;
+  readonly id: string;
+}
+
+export function normalizeTicketListLimit(value: string | number | undefined): number {
+  if (value === undefined || value === '') {
+    return SUPPORT_TICKET_DEFAULT_PAGE_SIZE;
+  }
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new BadRequestException('limit은 1 이상의 정수여야 합니다.');
+  }
+  return Math.min(parsed, SUPPORT_TICKET_MAX_PAGE_SIZE);
+}
+
+export function normalizeTicketSearch(value: string | undefined): string | null {
+  const keyword = value?.trim();
+  return keyword ? keyword.slice(0, 80) : null;
+}
+
+export function encodeSupportTicketCursor(lastMessageAt: Date | string, id: string): string {
+  return Buffer.from(
+    JSON.stringify({
+      v: 1,
+      lastMessageAt: toIsoString(lastMessageAt),
+      id,
+    }),
+    'utf8',
+  ).toString('base64url');
+}
+
+export function decodeSupportTicketCursor(value: string | undefined): SupportTicketCursor | null {
+  if (!value) {
+    return null;
+  }
+  if (value.length > SUPPORT_TICKET_CURSOR_MAX_LENGTH) {
+    throw new BadRequestException('유효하지 않은 티켓 목록 커서입니다.');
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
+      v?: unknown;
+      lastMessageAt?: unknown;
+      id?: unknown;
+    };
+    if (
+      parsed.v !== 1 ||
+      typeof parsed.lastMessageAt !== 'string' ||
+      typeof parsed.id !== 'string' ||
+      !UUID_PATTERN.test(parsed.id)
+    ) {
+      throw new Error('invalid cursor');
+    }
+    const lastMessageAt = new Date(parsed.lastMessageAt);
+    if (!Number.isFinite(lastMessageAt.getTime())) {
+      throw new Error('invalid cursor date');
+    }
+    return { lastMessageAt, id: parsed.id };
+  } catch {
+    throw new BadRequestException('유효하지 않은 티켓 목록 커서입니다.');
+  }
 }
 
 function normalizeStatus(value: string): SupportTicketStatus {

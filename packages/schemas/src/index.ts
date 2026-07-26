@@ -793,6 +793,15 @@ export const supportTicketSchema = z.object({
 
 export const supportTicketListResponseSchema = z.object({
   items: z.array(supportTicketSchema),
+  nextCursor: z.string().min(1).nullable(),
+  pageSize: z.number().int().positive().max(100),
+  counts: z.object({
+    all: z.number().int().nonnegative(),
+    open: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+    resolved: z.number().int().nonnegative(),
+    closed: z.number().int().nonnegative(),
+  }),
   viewer: z.object({
     isAgent: z.boolean(),
   }),

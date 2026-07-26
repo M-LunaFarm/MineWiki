@@ -27,6 +27,7 @@ type TicketPriority = SupportTicket['priority'];
 type InquiryTab = 'member' | 'guest';
 type SupportMode = 'customer' | 'agent';
 type TicketView = 'mine' | 'assigned' | 'inbox';
+type TicketCounts = Record<'all' | SupportTicketStatus, number>;
 
 const AUTO_REFRESH_INTERVAL_MS = 20_000;
 const GUEST_SUPPORT_ACCESS_KEY = 'minewiki:support:guest-access';
@@ -135,12 +136,21 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [ticketCounts, setTicketCounts] = useState<TicketCounts>({
+    all: 0,
+    open: 0,
+    pending: 0,
+    resolved: 0,
+    closed: 0,
+  });
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [mobileTicketDetailOpen, setMobileTicketDetailOpen] = useState(() =>
     Boolean(searchParams.get('ticket')),
   );
   const [detail, setDetail] = useState<SupportTicketDetail | null>(null);
   const [listLoading, setListLoading] = useState(false);
+  const [listLoadingMore, setListLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ticketView, setTicketView] = useState<TicketView>(mode === 'agent' ? 'inbox' : 'mine');
@@ -149,6 +159,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
 
   const [statusFilter, setStatusFilter] = useState<TicketStatusFilter>('all');
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [ticketSearchKeyword, setTicketSearchKeyword] = useState('');
 
   const [messageBody, setMessageBody] = useState('');
   const [messageInternal, setMessageInternal] = useState(false);
@@ -254,6 +265,8 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
     async (preferredTicketId?: string | null, silent = false) => {
       if (!account) {
         setTickets([]);
+        setNextCursor(null);
+        setTicketCounts({ all: 0, open: 0, pending: 0, resolved: 0, closed: 0 });
         if (!silent) {
           setListLoading(false);
         }
@@ -269,10 +282,14 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         const response = await fetchSupportTickets({
           view: mode === 'agent' ? ticketView : 'mine',
           status: statusFilter === 'all' ? undefined : statusFilter,
+          search: ticketSearchKeyword || undefined,
+          limit: 50,
         });
         const nextTickets = response.items;
         setIsAgent(response.viewer.isAgent);
         setTickets(nextTickets);
+        setNextCursor(response.nextCursor);
+        setTicketCounts(response.counts);
 
         setSelectedTicketId((current) => {
           const candidate = preferredTicketId ?? current;
@@ -288,6 +305,8 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
           setError(message === 'UNAUTHORIZED' ? '로그인이 필요합니다.' : message);
         }
         setTickets([]);
+        setNextCursor(null);
+        setTicketCounts({ all: 0, open: 0, pending: 0, resolved: 0, closed: 0 });
         setSelectedTicketId(null);
         setDetail(null);
       } finally {
@@ -296,8 +315,54 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         }
       }
     },
-    [account, mode, statusFilter, ticketView],
+    [account, mode, statusFilter, ticketSearchKeyword, ticketView],
   );
+
+  const loadMoreTickets = useCallback(async () => {
+    if (!account || !nextCursor || listLoadingMore) {
+      return;
+    }
+
+    setListLoadingMore(true);
+    setError(null);
+    try {
+      const response = await fetchSupportTickets({
+        view: mode === 'agent' ? ticketView : 'mine',
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        search: ticketSearchKeyword || undefined,
+        cursor: nextCursor,
+        limit: 50,
+      });
+      setIsAgent(response.viewer.isAgent);
+      setTickets((current) => {
+        const knownIds = new Set(current.map((ticket) => ticket.id));
+        return [...current, ...response.items.filter((ticket) => !knownIds.has(ticket.id))];
+      });
+      setNextCursor(response.nextCursor);
+      setTicketCounts(response.counts);
+    } catch (listError) {
+      setError(
+        listError instanceof Error ? listError.message : '문의 목록을 더 불러오지 못했습니다.',
+      );
+    } finally {
+      setListLoadingMore(false);
+    }
+  }, [
+    account,
+    listLoadingMore,
+    mode,
+    nextCursor,
+    statusFilter,
+    ticketSearchKeyword,
+    ticketView,
+  ]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setTicketSearchKeyword(searchKeyword.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchKeyword]);
 
   useEffect(() => {
     if (hydratedFromQueryRef.current) {
@@ -562,16 +627,6 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         .includes(keyword),
     );
   }, [searchKeyword]);
-
-  const statusCount = useMemo(() => {
-    return tickets.reduce<Record<SupportTicketStatus, number>>(
-      (acc, ticket) => {
-        acc[ticket.status] += 1;
-        return acc;
-      },
-      { open: 0, pending: 0, resolved: 0, closed: 0 },
-    );
-  }, [tickets]);
 
   const selectedTicket = useMemo(() => {
     if (detail?.ticket && detail.ticket.id === selectedTicketId) {
@@ -1025,18 +1080,20 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
               <dl className="mt-5 grid grid-cols-3 gap-2 text-center">
                 <div className="rounded-md border border-[#2C2D30] bg-[#18191C] px-2 py-3">
                   <dt className="text-[11px] text-[#85878D]">열림</dt>
-                  <dd className="mt-1 text-lg font-semibold text-cyan-300">{statusCount.open}</dd>
+                  <dd className="mt-1 text-lg font-semibold text-cyan-300">
+                    {ticketCounts.open}
+                  </dd>
                 </div>
                 <div className="rounded-md border border-[#2C2D30] bg-[#18191C] px-2 py-3">
                   <dt className="text-[11px] text-[#85878D]">대기</dt>
                   <dd className="mt-1 text-lg font-semibold text-amber-300">
-                    {statusCount.pending}
+                    {ticketCounts.pending}
                   </dd>
                 </div>
                 <div className="rounded-md border border-[#2C2D30] bg-[#18191C] px-2 py-3">
                   <dt className="text-[11px] text-[#85878D]">해결</dt>
                   <dd className="mt-1 text-lg font-semibold text-emerald-300">
-                    {statusCount.resolved}
+                    {ticketCounts.resolved}
                   </dd>
                 </div>
               </dl>
@@ -1211,46 +1268,65 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                           </p>
                         </div>
                       ) : (
-                        filteredTickets.map((ticket) => {
-                          const selected = ticket.id === selectedTicketId;
-                          return (
-                            <button
-                              key={ticket.id}
-                              className={`w-full border-b border-[#2C2D30] px-4 py-3 text-left transition ${
-                                selected ? 'bg-[#1C2A23]' : 'hover:bg-[#202124]'
-                              }`}
-                              type="button"
-                              onClick={() => {
-                                setSelectedTicketId(ticket.id);
-                                setMobileTicketDetailOpen(true);
-                                const params = new URLSearchParams(searchParams.toString());
-                                params.set('ticket', ticket.id);
-                                router.replace(`${pathname}?${params.toString()}`, {
-                                  scroll: false,
-                                });
-                              }}
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <span className={statusBadgeClass(ticket.status)}>
-                                  {statusLabel(ticket.status)}
-                                </span>
-                                <span className="text-[11px] text-[#85878D]">
-                                  {formatRelativeTime(ticket.lastMessageAt)}
-                                </span>
-                              </div>
-                              <h3 className="mt-2 truncate text-sm font-semibold text-white">
-                                {ticket.subject}
-                              </h3>
-                              <p className="mt-1 truncate text-xs text-[#A7A9AF]">
-                                {ticket.latestMessagePreview ?? '아직 등록된 메시지가 없습니다.'}
-                              </p>
-                              <p className="mt-2 truncate text-[11px] text-[#85878D]">
-                                {ticket.server?.name ?? '연결 서버 없음'} ·{' '}
-                                {categoryLabel(ticket.category)}
-                              </p>
-                            </button>
-                          );
-                        })
+                        <>
+                          {filteredTickets.map((ticket) => {
+                            const selected = ticket.id === selectedTicketId;
+                            return (
+                              <button
+                                key={ticket.id}
+                                className={`w-full border-b border-[#2C2D30] px-4 py-3 text-left transition ${
+                                  selected ? 'bg-[#1C2A23]' : 'hover:bg-[#202124]'
+                                }`}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedTicketId(ticket.id);
+                                  setMobileTicketDetailOpen(true);
+                                  const params = new URLSearchParams(searchParams.toString());
+                                  params.set('ticket', ticket.id);
+                                  router.replace(`${pathname}?${params.toString()}`, {
+                                    scroll: false,
+                                  });
+                                }}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className={statusBadgeClass(ticket.status)}>
+                                    {statusLabel(ticket.status)}
+                                  </span>
+                                  <span className="text-[11px] text-[#85878D]">
+                                    {formatRelativeTime(ticket.lastMessageAt)}
+                                  </span>
+                                </div>
+                                <h3 className="mt-2 truncate text-sm font-semibold text-white">
+                                  {ticket.subject}
+                                </h3>
+                                <p className="mt-1 truncate text-xs text-[#A7A9AF]">
+                                  {ticket.latestMessagePreview ?? '아직 등록된 메시지가 없습니다.'}
+                                </p>
+                                <p className="mt-2 truncate text-[11px] text-[#85878D]">
+                                  {ticket.server?.name ?? '연결 서버 없음'} ·{' '}
+                                  {categoryLabel(ticket.category)}
+                                </p>
+                              </button>
+                            );
+                          })}
+                          {nextCursor ? (
+                            <div className="border-t border-[#2C2D30] p-3">
+                              <button
+                                className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-[#34363A] bg-[#151619] px-4 py-2 text-xs font-semibold text-[#D8D9DC] transition hover:border-[#13ec80]/50 hover:text-white disabled:cursor-wait disabled:opacity-60"
+                                type="button"
+                                disabled={listLoadingMore}
+                                onClick={() => void loadMoreTickets()}
+                              >
+                                {listLoadingMore ? (
+                                  <span className="material-symbols-outlined animate-spin text-[16px]">
+                                    progress_activity
+                                  </span>
+                                ) : null}
+                                {listLoadingMore ? '불러오는 중' : '문의 더 불러오기'}
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </div>
                   </aside>

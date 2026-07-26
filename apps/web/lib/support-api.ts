@@ -29,6 +29,9 @@ const API_BASE = normalizeApiBaseUrl();
 interface TicketListOptions {
   readonly view?: 'mine' | 'assigned' | 'inbox';
   readonly status?: SupportTicketStatus;
+  readonly search?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
 }
 
 export interface GuestSupportTicketResult {
@@ -72,6 +75,15 @@ export async function fetchSupportTickets(
   }
   if (options.status) {
     params.set('status', options.status);
+  }
+  if (options.search) {
+    params.set('search', options.search);
+  }
+  if (options.cursor) {
+    params.set('cursor', options.cursor);
+  }
+  if (options.limit) {
+    params.set('limit', String(options.limit));
   }
 
   const response = await fetch(`${API_BASE}/v1/support/tickets?${params.toString()}`, {
