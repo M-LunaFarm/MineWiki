@@ -57,6 +57,11 @@ async function bootstrap(): Promise<void> {
       : requestIdHeader || randomUUID();
     request.requestId = requestId;
     reply.header('x-request-id', requestId);
+    reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('x-frame-options', 'DENY');
+    reply.header('referrer-policy', 'no-referrer');
+    reply.header('permissions-policy', 'camera=(), geolocation=(), microphone=(), usb=()');
     done();
   });
   app.getHttpAdapter().getInstance().addHook('onRequest', runInHttpRequestContext);
