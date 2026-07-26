@@ -6,11 +6,14 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   createGuestSupportTicketSchema,
   createSupportMessageSchema,
   createSupportTicketSchema,
+  guestSupportAccessSchema,
+  guestSupportMessageSchema,
+  guestSupportRecoverySchema,
   supportTicketStatusSchema,
   updateSupportTicketSchema,
   type SupportMessage,
@@ -51,6 +54,10 @@ interface TicketRow {
   verifySessionId: string | null;
   pluginServerId: string | null;
   fileId: string | null;
+  guestName: string | null;
+  guestEmail: string | null;
+  guestAccessHash: string | null;
+  guestAccessExpiresAt: Date | string | null;
   lastMessageAt: Date | string;
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -136,6 +143,10 @@ export class SupportService {
         t.verifySessionId,
         t.pluginServerId,
         t.fileId,
+        t.guestName,
+        t.guestEmail,
+        t.guestAccessHash,
+        t.guestAccessExpiresAt,
         t.lastMessageAt,
         t.createdAt,
         t.updatedAt,
@@ -237,7 +248,12 @@ export class SupportService {
   async createGuestTicket(
     payload: unknown,
     context: GuestTicketContext = {},
-  ): Promise<{ accepted: true; ticketId: string }> {
+  ): Promise<{
+    accepted: true;
+    ticketId: string;
+    accessCode: string;
+    accessExpiresAt: string;
+  }> {
     const parsed = createGuestSupportTicketSchema.parse(payload);
     const subject = parsed.subject.trim();
     const body = parsed.body.trim();
@@ -258,26 +274,25 @@ export class SupportService {
 
     const guestName = parsed.guestName?.trim() || null;
     const guestEmail = parsed.guestEmail?.trim() || null;
-    const guestMetaLines = [
-      '[비로그인 문의]',
-      `이름: ${guestName ?? '미입력'}`,
-      `회신 이메일: ${guestEmail ?? '미입력'}`,
-      '',
-      body,
-    ];
-    const guestBody = clampText(guestMetaLines.join('\n'), 2000);
+    const accessCode = randomBytes(32).toString('base64url');
+    const guestAccessHash = hashGuestAccessCode(accessCode);
+    const guestAccessExpiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90);
 
     const ticketId = await this.createTicketRecords({
       requesterAccountId,
       authorAccountId: null,
       subject: `[비회원] ${subject}`,
-      body: guestBody,
+      body,
       category,
       priority: parsed.priority ?? 'normal',
       serverId,
       ...ticketContext,
       assigneeAccountId,
       authorRole: 'customer',
+      guestName,
+      guestEmail,
+      guestAccessHash,
+      guestAccessExpiresAt,
     });
 
     this.logger.log(`Guest support ticket created: ${ticketId}`);
@@ -285,7 +300,113 @@ export class SupportService {
     return {
       accepted: true,
       ticketId,
+      accessCode,
+      accessExpiresAt: guestAccessExpiresAt.toISOString(),
     };
+  }
+
+  async getGuestTicketDetail(payload: unknown): Promise<SupportTicketDetail> {
+    const parsed = guestSupportAccessSchema.parse(payload);
+    const ticket = await this.requireGuestTicketAccess(parsed.ticketId, parsed.accessCode);
+    const messages = await this.fetchMessages(parsed.ticketId, false);
+
+    return {
+      ticket: this.toTicket(ticket),
+      messages: messages.map((message) => this.toMessage(message)),
+      viewer: {
+        isAgent: false,
+        canManage: false,
+      },
+    };
+  }
+
+  async recoverGuestTicket(
+    payload: unknown,
+    context: GuestTicketContext = {},
+  ): Promise<{
+    ticketId: string;
+    accessCode: string;
+    accessExpiresAt: string;
+    detail: SupportTicketDetail;
+  }> {
+    const parsed = guestSupportRecoverySchema.parse(payload);
+    await this.verifyCaptchaToken(parsed.captchaToken, context.ipAddress);
+
+    const ticket = await this.fetchTicketRow(parsed.ticketId, false);
+    const storedEmail = ticket?.guestEmail?.trim().toLowerCase();
+    const suppliedEmail = parsed.email.trim().toLowerCase();
+    if (!ticket || !storedEmail || storedEmail !== suppliedEmail) {
+      throw new ForbiddenException('문의 번호 또는 회신 이메일이 올바르지 않습니다.');
+    }
+
+    const accessCode = randomBytes(32).toString('base64url');
+    const accessHash = hashGuestAccessCode(accessCode);
+    const accessExpiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90);
+    await this.prisma.$executeRaw`
+      UPDATE \`SupportTicket\`
+      SET
+        guestAccessHash = ${accessHash},
+        guestAccessExpiresAt = ${accessExpiresAt},
+        updatedAt = ${new Date()}
+      WHERE id = ${parsed.ticketId}
+    `;
+
+    return {
+      ticketId: parsed.ticketId,
+      accessCode,
+      accessExpiresAt: accessExpiresAt.toISOString(),
+      detail: await this.getGuestTicketDetail({
+        ticketId: parsed.ticketId,
+        accessCode,
+      }),
+    };
+  }
+
+  async createGuestMessage(ticketId: string, payload: unknown): Promise<SupportTicketDetail> {
+    const parsed = guestSupportMessageSchema.parse(payload);
+    const ticket = await this.requireGuestTicketAccess(ticketId, parsed.accessCode);
+    const body = parsed.body.trim();
+    if (!body) {
+      throw new BadRequestException('메시지 내용을 입력해 주세요.');
+    }
+
+    const now = new Date();
+    const nextStatus: SupportTicketStatus =
+      ticket.status === 'resolved' || ticket.status === 'closed'
+        ? 'open'
+        : normalizeStatus(ticket.status);
+
+    await this.prisma.$transaction([
+      this.prisma.$executeRaw`
+        INSERT INTO \`SupportMessage\` (
+          id,
+          ticketId,
+          authorAccountId,
+          authorRole,
+          body,
+          isInternal,
+          createdAt
+        ) VALUES (
+          ${randomUUID()},
+          ${ticketId},
+          ${null},
+          ${'customer'},
+          ${body},
+          ${false},
+          ${now}
+        )
+      `,
+      this.prisma.$executeRaw`
+        UPDATE \`SupportTicket\`
+        SET lastMessageAt = ${now}, status = ${nextStatus}, updatedAt = ${now}
+        WHERE id = ${ticketId}
+      `,
+    ]);
+
+    return this.getGuestTicketDetail({
+      ticketId,
+      accessCode: parsed.accessCode,
+    });
   }
 
   async createMessage(
@@ -415,6 +536,10 @@ export class SupportService {
     fileId: string | null;
     assigneeAccountId: string | null;
     authorRole: MessageAuthorRole;
+    guestName?: string | null;
+    guestEmail?: string | null;
+    guestAccessHash?: string | null;
+    guestAccessExpiresAt?: Date | null;
   }): Promise<string> {
     const now = new Date();
     const ticketId = randomUUID();
@@ -435,6 +560,10 @@ export class SupportService {
           verifySessionId,
           pluginServerId,
           fileId,
+          guestName,
+          guestEmail,
+          guestAccessHash,
+          guestAccessExpiresAt,
           lastMessageAt,
           createdAt,
           updatedAt
@@ -451,6 +580,10 @@ export class SupportService {
           ${input.verifySessionId},
           ${input.pluginServerId},
           ${input.fileId},
+          ${input.guestName ?? null},
+          ${input.guestEmail ?? null},
+          ${input.guestAccessHash ?? null},
+          ${input.guestAccessExpiresAt ?? null},
           ${now},
           ${now},
           ${now}
@@ -599,6 +732,31 @@ export class SupportService {
     throw new ForbiddenException('해당 티켓에 접근할 권한이 없습니다.');
   }
 
+  private async requireGuestTicketAccess(
+    ticketId: string,
+    accessCode: string,
+  ): Promise<TicketRow> {
+    const ticket = await this.fetchTicketRow(ticketId, false);
+    if (!ticket?.guestAccessHash || !ticket.guestAccessExpiresAt) {
+      throw new NotFoundException('조회 가능한 비회원 문의를 찾을 수 없습니다.');
+    }
+
+    const expiresAt = new Date(ticket.guestAccessExpiresAt);
+    if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+      throw new ForbiddenException('비회원 문의 조회 기간이 만료되었습니다.');
+    }
+
+    const expected = Buffer.from(ticket.guestAccessHash, 'hex');
+    const actual = Buffer.from(hashGuestAccessCode(accessCode), 'hex');
+    if (
+      expected.length !== actual.length ||
+      !timingSafeEqual(expected, actual)
+    ) {
+      throw new ForbiddenException('문의 번호 또는 조회 코드가 올바르지 않습니다.');
+    }
+    return ticket;
+  }
+
   private async fetchTicketRow(
     ticketId: string,
     isAgent: boolean,
@@ -620,6 +778,10 @@ export class SupportService {
         t.verifySessionId,
         t.pluginServerId,
         t.fileId,
+        t.guestName,
+        t.guestEmail,
+        t.guestAccessHash,
+        t.guestAccessExpiresAt,
         t.lastMessageAt,
         t.createdAt,
         t.updatedAt,
@@ -695,7 +857,7 @@ export class SupportService {
       requester: {
         id: row.requesterId,
         displayName: toAccountDisplayName(
-          row.requesterDisplayName,
+          row.guestName ?? row.requesterDisplayName,
           row.requesterProviderUserId,
           '고객',
         ),
@@ -716,6 +878,7 @@ export class SupportService {
             name: row.serverName ?? '연결된 서버',
           }
         : null,
+      contactEmail: row.guestEmail,
       latestMessagePreview: row.latestMessagePreview
         ? clampText(row.latestMessagePreview, 180)
         : null,
@@ -740,6 +903,10 @@ export class SupportService {
       createdAt: toIsoString(row.createdAt),
     };
   }
+}
+
+function hashGuestAccessCode(accessCode: string): string {
+  return createHash('sha256').update(accessCode, 'utf8').digest('hex');
 }
 
 function normalizeStatus(value: string): SupportTicketStatus {

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { SupportService } from './support.service';
 
 type AccessProbe = {
@@ -30,4 +31,12 @@ test('historical support assignment is not an authorization grant', () => {
     () => service.ensureTicketAccess(ticket, 'outsider', false),
     /해당 티켓에 접근할 권한이 없습니다/,
   );
+});
+
+test('guest access codes are stored as one-way SHA-256 digests', () => {
+  const accessCode = 'sample-guest-access-code-that-is-long-enough';
+  const digest = createHash('sha256').update(accessCode, 'utf8').digest('hex');
+
+  assert.equal(digest.length, 64);
+  assert.notEqual(digest, accessCode);
 });

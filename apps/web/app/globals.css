@@ -144,6 +144,41 @@ html[data-theme='light'] body {
   background-image: none;
 }
 
+.wiki-search-fallback {
+  border-color: rgba(125, 211, 252, 0.28);
+  background-color: rgba(125, 211, 252, 0.08);
+  color: #bae6fd;
+}
+
+html[data-theme='light'] .wiki-search-fallback {
+  border-color: #b8dbe8;
+  background-color: #eef8fb;
+  color: #35596a;
+}
+
+html[data-theme='light'] .server-registration-next-chip {
+  border-color: #b8ddc8;
+  background-color: #edf8f1;
+  color: #17633f;
+}
+
+html[data-theme='light'] .server-registration-draft-notice {
+  border-color: #b8ddc8;
+  background-color: #edf8f1;
+  color: #1d5f3f;
+}
+
+html[data-theme='light'] .server-registration-version-picker {
+  border-color: var(--theme-border);
+  background-color: #ffffff;
+}
+
+html[data-theme='light'] .server-registration-version-token {
+  border: 1px solid #dce5dd;
+  background-color: #eef3ef;
+  color: #26382d;
+}
+
 html[data-theme='light'] [class~='bg-[#121212]'],
 html[data-theme='light'] [class~='bg-[#07090c]'],
 html[data-theme='light'] [class~='bg-[#070a0c]'],
@@ -164,6 +199,8 @@ html[data-theme='light'] [class~='bg-[#17191c]'],
 html[data-theme='light'] [class~='bg-[#15181b]'],
 html[data-theme='light'] [class~='bg-[#151922]'],
 html[data-theme='light'] [class~='bg-[#151619]'],
+html[data-theme='light'] [class~='bg-[#161616]'],
+html[data-theme='light'] [class~='bg-[#161618]'],
 html[data-theme='light'] [class~='bg-[#15171b]'],
 html[data-theme='light'] [class~='bg-[#141416]'],
 html[data-theme='light'] [class~='bg-[#111315]'],
@@ -187,6 +224,7 @@ html[data-theme='light'] [class~='bg-popover'] {
 
 html[data-theme='light'] [class~='bg-[#202124]'],
 html[data-theme='light'] [class~='bg-[#202632]'],
+html[data-theme='light'] [class~='bg-[#162019]'],
 html[data-theme='light'] [class~='bg-[#23272b]'],
 html[data-theme='light'] [class~='bg-[#26312d]'],
 html[data-theme='light'] [class~='bg-[#2d2d2d]'],
@@ -237,6 +275,7 @@ html[data-theme='light'] [class~='text-[#F4F4F5]'],
 html[data-theme='light'] [class~='text-[#D8D9DC]'],
 html[data-theme='light'] [class~='text-[#d8dee5]'],
 html[data-theme='light'] [class~='text-[#d1d5db]'],
+html[data-theme='light'] [class~='text-[#c4c7ce]'],
 html[data-theme='light'] [class~='text-[#c5ccd3]'],
 html[data-theme='light'] [class~='text-[#b8c0c8]'],
 html[data-theme='light'] [class~='text-[#A7A9AF]'],
@@ -626,6 +665,10 @@ html[data-theme='light'] .support-surface [class~='bg-[#202124]'] {
   background-color: #e7ebe6;
 }
 
+html[data-theme='light'] .support-surface [class~='bg-[#1C2A23]'] {
+  background-color: #e0f3e8;
+}
+
 html[data-theme='light'] .support-surface [class~='border-[#2C2D30]'],
 html[data-theme='light'] .support-surface [class~='border-[#34363A]'],
 html[data-theme='light'] .support-surface [class~='border-[#55585F]'] {
@@ -633,8 +676,14 @@ html[data-theme='light'] .support-surface [class~='border-[#55585F]'] {
 }
 
 html[data-theme='light'] .support-surface [class~='text-[#F4F4F5]'],
-html[data-theme='light'] .support-surface [class~='text-[#D8D9DC]'] {
+html[data-theme='light'] .support-surface [class~='text-[#D8D9DC]'],
+html[data-theme='light'] .support-surface [class~='text-[#E8E9EC]'],
+html[data-theme='light'] .support-surface [class~='text-white'] {
   color: #202820;
+}
+
+html[data-theme='light'] .support-surface [class~='text-[#F3FFF8]'] {
+  color: #174d32;
 }
 
 html[data-theme='light'] .support-surface [class~='text-[#B6B7BA]'],
@@ -642,6 +691,10 @@ html[data-theme='light'] .support-surface [class~='text-[#A7A9AF]'],
 html[data-theme='light'] .support-surface [class~='text-[#85878D]'],
 html[data-theme='light'] .support-surface [class~='text-[#73757C]'] {
   color: #657067;
+}
+
+html[data-theme='light'] .support-surface [class~='text-emerald-100'] {
+  color: #17633f;
 }
 
 html[data-theme='light'] .support-surface input,
@@ -2070,9 +2123,15 @@ html[data-theme='light'] .server-hero-verification {
   color: var(--theme-ink);
 }
 
-html[data-theme='light'] .server-hero-copy {
-  background-color: #ffffff;
-  color: #344139;
+html[data-theme='light'] .server-hero-actions {
+  border-color: var(--theme-border);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+html[data-theme='light'] .server-hero-copy.theme-on-brand {
+  background-color: #14c794;
+  color: #06140d !important;
+  box-shadow: 0 12px 24px -16px rgba(8, 119, 90, 0.7);
 }
 
 html[data-theme='light'] .server-detail-surface a[class~='hover:text-amber-100']:not(:hover),

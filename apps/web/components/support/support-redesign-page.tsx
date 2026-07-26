@@ -6,11 +6,14 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createSupportGuestTicket,
+  createGuestSupportMessage,
   createSupportMessage,
   createSupportTicket,
+  fetchGuestSupportTicket,
   fetchSupportServerOptions,
   fetchSupportTicketDetail,
   fetchSupportTickets,
+  recoverGuestSupportTicket,
   updateSupportTicket,
   type SupportServerOption,
   type SupportTicket,
@@ -26,6 +29,17 @@ type SupportMode = 'customer' | 'agent';
 type TicketView = 'mine' | 'assigned' | 'inbox';
 
 const AUTO_REFRESH_INTERVAL_MS = 20_000;
+const GUEST_SUPPORT_ACCESS_KEY = 'minewiki:support:guest-access';
+const THEME_EVENT = 'minewiki:theme-change';
+
+type GuestWalletItem = {
+  ticketId: string;
+  accessCode: string;
+  accessExpiresAt?: string;
+  subject?: string;
+  status?: SupportTicketStatus;
+  updatedAt?: string;
+};
 
 const CATEGORY_OPTIONS = [
   { value: 'account', label: '계정 및 로그인' },
@@ -122,6 +136,9 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
 
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const [mobileTicketDetailOpen, setMobileTicketDetailOpen] = useState(() =>
+    Boolean(searchParams.get('ticket')),
+  );
   const [detail, setDetail] = useState<SupportTicketDetail | null>(null);
   const [listLoading, setListLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -168,6 +185,19 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   const [guestSubmitting, setGuestSubmitting] = useState(false);
   const [guestCaptchaToken, setGuestCaptchaToken] = useState<string | null>(null);
   const [guestCaptchaKey, setGuestCaptchaKey] = useState(0);
+  const [guestTrackingId, setGuestTrackingId] = useState('');
+  const [guestAccessCode, setGuestAccessCode] = useState('');
+  const [guestLookupLoading, setGuestLookupLoading] = useState(false);
+  const [guestWallet, setGuestWallet] = useState<GuestWalletItem[]>([]);
+  const [guestRecoveryEmail, setGuestRecoveryEmail] = useState('');
+  const [guestRecoveryCaptchaToken, setGuestRecoveryCaptchaToken] = useState<string | null>(null);
+  const [guestRecoveryCaptchaKey, setGuestRecoveryCaptchaKey] = useState(0);
+  const [guestReceipt, setGuestReceipt] = useState<{
+    ticketId: string;
+    accessCode: string;
+    accessExpiresAt: string;
+  } | null>(null);
+  const [captchaTheme, setCaptchaTheme] = useState<'light' | 'dark'>('dark');
 
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
@@ -176,6 +206,26 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   const hcaptchaSiteKey = normalizeSiteKey(process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY);
   const captchaMode = turnstileSiteKey ? 'turnstile' : hcaptchaSiteKey ? 'hcaptcha' : 'none';
   const captchaRequired = captchaMode !== 'none';
+
+  useEffect(() => {
+    const synchronizeCaptchaTheme = (event?: Event) => {
+      const eventTheme = (event as CustomEvent<'light' | 'dark'> | undefined)?.detail;
+      const nextTheme =
+        eventTheme === 'light' || eventTheme === 'dark'
+          ? eventTheme
+          : document.documentElement.dataset.theme === 'light'
+            ? 'light'
+            : 'dark';
+      setCaptchaTheme(nextTheme);
+    };
+    synchronizeCaptchaTheme();
+    window.addEventListener(THEME_EVENT, synchronizeCaptchaTheme);
+    window.addEventListener('storage', synchronizeCaptchaTheme);
+    return () => {
+      window.removeEventListener(THEME_EVENT, synchronizeCaptchaTheme);
+      window.removeEventListener('storage', synchronizeCaptchaTheme);
+    };
+  }, []);
 
   const loadDetail = useCallback(async (ticketId: string, silent = false) => {
     if (!silent) {
@@ -204,8 +254,6 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
     async (preferredTicketId?: string | null, silent = false) => {
       if (!account) {
         setTickets([]);
-        setSelectedTicketId(null);
-        setDetail(null);
         if (!silent) {
           setListLoading(false);
         }
@@ -257,19 +305,22 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
     }
     hydratedFromQueryRef.current = true;
 
-    const queryTicket = searchParams.get('ticket');
+    const initialSearchParams = new URLSearchParams(window.location.search);
+    const queryTicket = initialSearchParams.get('ticket');
     if (queryTicket) {
       setSelectedTicketId(queryTicket);
+      setMobileTicketDetailOpen(true);
     }
 
-    const querySubject = searchParams.get('subject');
-    const queryBody = searchParams.get('body');
-    const queryCategory = searchParams.get('category') ?? searchParams.get('type');
-    const queryServerId = searchParams.get('serverId');
-    const queryPageId = searchParams.get('pageId');
-    const queryVerifySessionId = searchParams.get('verifySessionId');
-    const queryPluginServerId = searchParams.get('pluginServerId');
-    const queryFileId = searchParams.get('fileId');
+    const querySubject = initialSearchParams.get('subject');
+    const queryBody = initialSearchParams.get('body');
+    const queryCategory =
+      initialSearchParams.get('category') ?? initialSearchParams.get('type');
+    const queryServerId = initialSearchParams.get('serverId');
+    const queryPageId = initialSearchParams.get('pageId');
+    const queryVerifySessionId = initialSearchParams.get('verifySessionId');
+    const queryPluginServerId = initialSearchParams.get('pluginServerId');
+    const queryFileId = initialSearchParams.get('fileId');
     const normalizedCategory = CATEGORY_OPTIONS.some((item) => item.value === queryCategory)
       ? queryCategory
       : undefined;
@@ -315,6 +366,52 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   }, [account]);
 
   useEffect(() => {
+    if (account) {
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem(GUEST_SUPPORT_ACCESS_KEY);
+      if (!stored) {
+        return;
+      }
+      const parsed = JSON.parse(stored) as GuestWalletItem | GuestWalletItem[];
+      const wallet = (Array.isArray(parsed) ? parsed : [parsed]).filter(
+        (item) => item.ticketId && item.accessCode,
+      );
+      const latest = wallet[0];
+      if (!latest) {
+        return;
+      }
+        setGuestWallet(wallet);
+        setGuestTrackingId(latest.ticketId);
+        setGuestAccessCode(latest.accessCode);
+      void fetchGuestSupportTicket(latest.ticketId, latest.accessCode)
+        .then((payload) => {
+          setSelectedTicketId(payload.ticket.id);
+          setMobileTicketDetailOpen(true);
+          setDetail(payload);
+          const refreshed = wallet.map((item) =>
+            item.ticketId === payload.ticket.id
+              ? {
+                  ...item,
+                  subject: payload.ticket.subject,
+                  status: payload.ticket.status,
+                  updatedAt: payload.ticket.updatedAt,
+                }
+              : item,
+          );
+          setGuestWallet(refreshed);
+          window.localStorage.setItem(GUEST_SUPPORT_ACCESS_KEY, JSON.stringify(refreshed));
+        })
+        .catch(() => {
+          window.localStorage.removeItem(GUEST_SUPPORT_ACCESS_KEY);
+        });
+    } catch {
+      window.localStorage.removeItem(GUEST_SUPPORT_ACCESS_KEY);
+    }
+  }, [account]);
+
+  useEffect(() => {
     if (!pathname || !hydratedFromQueryRef.current) {
       return;
     }
@@ -344,27 +441,6 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
     const query = params.toString();
     router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
   }, [pathname, router, searchParams]);
-
-  useEffect(() => {
-    if (!pathname) {
-      return;
-    }
-
-    const current = searchParams.get('ticket');
-    if ((current ?? null) === selectedTicketId) {
-      return;
-    }
-
-    const params = new URLSearchParams(searchParams.toString());
-    if (selectedTicketId) {
-      params.set('ticket', selectedTicketId);
-    } else {
-      params.delete('ticket');
-    }
-
-    const query = params.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  }, [pathname, router, searchParams, selectedTicketId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -411,21 +487,33 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   }, [account, loadDetail, selectedTicketId]);
 
   useEffect(() => {
-    if (!account || !autoRefresh) {
+    if ((!account && (!guestTrackingId || !guestAccessCode)) || !autoRefresh) {
       return;
     }
 
     const timer = window.setInterval(() => {
-      void loadTickets(undefined, true);
-      if (selectedTicketId) {
+      if (account) {
+        void loadTickets(undefined, true);
+      }
+      if (account && selectedTicketId) {
         void loadDetail(selectedTicketId, true);
+      } else if (!account && guestTrackingId && guestAccessCode) {
+        void fetchGuestSupportTicket(guestTrackingId, guestAccessCode).then(setDetail).catch(() => {});
       }
     }, AUTO_REFRESH_INTERVAL_MS);
 
     return () => {
       window.clearInterval(timer);
     };
-  }, [account, autoRefresh, loadDetail, loadTickets, selectedTicketId]);
+  }, [
+    account,
+    autoRefresh,
+    guestAccessCode,
+    guestTrackingId,
+    loadDetail,
+    loadTickets,
+    selectedTicketId,
+  ]);
 
   useEffect(() => {
     if (!messageListRef.current) {
@@ -493,7 +581,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
   const selectedTicketLabel = selectedTicket ? `#${selectedTicket.id.slice(0, 8)}` : null;
   const canManageTicket = Boolean(mode === 'agent' && isAgent && detail?.viewer.canManage);
   const canSendMessage = Boolean(
-    account &&
+    (account || (guestTrackingId && guestAccessCode)) &&
       selectedTicket &&
       (canManageTicket ||
         (selectedTicket.status !== 'closed' && selectedTicket.status !== 'resolved')),
@@ -526,14 +614,19 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
       setSubmittingMessage(true);
       setError(null);
       try {
-        const next = await createSupportMessage(selectedTicketId, {
-          body,
-          isInternal: canManageTicket ? messageInternal : false,
-        });
+        const next =
+          !account && guestAccessCode
+            ? await createGuestSupportMessage(selectedTicketId, guestAccessCode, body)
+            : await createSupportMessage(selectedTicketId, {
+                body,
+                isInternal: canManageTicket ? messageInternal : false,
+              });
         setMessageBody('');
         setMessageInternal(false);
         setDetail(next);
-        await loadTickets(next.ticket.id, true);
+        if (account) {
+          await loadTickets(next.ticket.id, true);
+        }
       } catch (sendError) {
         const message =
           sendError instanceof Error ? sendError.message : '메시지 전송에 실패했습니다.';
@@ -542,7 +635,16 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         setSubmittingMessage(false);
       }
     },
-    [canManageTicket, canSendMessage, loadTickets, messageBody, messageInternal, selectedTicketId],
+    [
+      account,
+      canManageTicket,
+      canSendMessage,
+      guestAccessCode,
+      loadTickets,
+      messageBody,
+      messageInternal,
+      selectedTicketId,
+    ],
   );
 
   const handleUpdateTicket = useCallback(
@@ -582,7 +684,6 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         setFormSuccess(null);
         return;
       }
-
       if (!account) {
         setFormError('회원 문의는 로그인 후 접수할 수 있습니다.');
         setFormSuccess(null);
@@ -651,6 +752,11 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         setFormSuccess(null);
         return;
       }
+      if (!guestEmail.trim()) {
+        setFormError('답변 수신과 다른 기기 조회를 위해 회신 이메일을 입력해 주세요.');
+        setFormSuccess(null);
+        return;
+      }
 
       if (captchaRequired && !guestCaptchaToken) {
         setFormError('보안 확인을 완료해 주세요.');
@@ -690,7 +796,25 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
         setGuestCaptchaToken(null);
         setGuestCaptchaKey((current) => current + 1);
 
-        setFormSuccess(`문의가 접수되었습니다. 문의 번호: ${created.ticketId}`);
+        setGuestReceipt(created);
+        setGuestTrackingId(created.ticketId);
+        setGuestAccessCode(created.accessCode);
+        const guestTicket = await fetchGuestSupportTicket(created.ticketId, created.accessCode);
+        const nextWallet = [
+          {
+            ...created,
+            subject: guestTicket.ticket.subject,
+            status: guestTicket.ticket.status,
+            updatedAt: guestTicket.ticket.updatedAt,
+          },
+          ...guestWallet.filter((item) => item.ticketId !== created.ticketId),
+        ].slice(0, 20);
+        setGuestWallet(nextWallet);
+        window.localStorage.setItem(GUEST_SUPPORT_ACCESS_KEY, JSON.stringify(nextWallet));
+        setSelectedTicketId(created.ticketId);
+        setMobileTicketDetailOpen(true);
+        setDetail(guestTicket);
+        setFormSuccess('문의가 접수되었습니다. 아래 조회 코드를 안전하게 보관해 주세요.');
       } catch (submitError) {
         const message =
           submitError instanceof Error ? submitError.message : '비회원 문의 접수에 실패했습니다.';
@@ -713,7 +837,71 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
       guestServerId,
       guestSubject,
       guestVerifySessionId,
+      guestWallet,
       captchaRequired,
+    ],
+  );
+
+  const handleRecoverGuestTicket = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const ticketId = guestTrackingId.trim();
+      const email = guestRecoveryEmail.trim();
+      if (!ticketId || !email) {
+        setFormError('문의 번호와 회신 이메일을 모두 입력해 주세요.');
+        return;
+      }
+      if (captchaRequired && !guestRecoveryCaptchaToken) {
+        setFormError('비회원 문의 조회를 위한 보안 확인을 완료해 주세요.');
+        return;
+      }
+
+      setGuestLookupLoading(true);
+      setFormError(null);
+      try {
+        const recovered = await recoverGuestSupportTicket(
+          ticketId,
+          email,
+          guestRecoveryCaptchaToken ?? undefined,
+        );
+        setSelectedTicketId(recovered.detail.ticket.id);
+        setMobileTicketDetailOpen(true);
+        setDetail(recovered.detail);
+        setGuestTrackingId(recovered.ticketId);
+        setGuestAccessCode(recovered.accessCode);
+        const nextWallet = [
+          {
+            ticketId: recovered.ticketId,
+            accessCode: recovered.accessCode,
+            accessExpiresAt: recovered.accessExpiresAt,
+            subject: recovered.detail.ticket.subject,
+            status: recovered.detail.ticket.status,
+            updatedAt: recovered.detail.ticket.updatedAt,
+          },
+          ...guestWallet.filter((item) => item.ticketId !== recovered.ticketId),
+        ].slice(0, 20);
+        setGuestWallet(nextWallet);
+        window.localStorage.setItem(GUEST_SUPPORT_ACCESS_KEY, JSON.stringify(nextWallet));
+        setGuestRecoveryCaptchaToken(null);
+        setGuestRecoveryCaptchaKey((current) => current + 1);
+      } catch (lookupError) {
+        setFormError(
+          lookupError instanceof Error
+            ? lookupError.message
+            : '비회원 문의를 복구하지 못했습니다.',
+        );
+        setGuestRecoveryCaptchaToken(null);
+        setGuestRecoveryCaptchaKey((current) => current + 1);
+      } finally {
+        setGuestLookupLoading(false);
+      }
+    },
+    [
+      captchaRequired,
+      guestRecoveryCaptchaToken,
+      guestRecoveryEmail,
+      guestTrackingId,
+      guestWallet,
     ],
   );
 
@@ -812,7 +1000,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
           ) : null}
 
           <div className={mode === 'agent' ? 'grid gap-6' : 'grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]'}>
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               {mode === 'customer' ? (
               <section className="rounded-lg border border-[#34363A] bg-[#18191C]">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#2C2D30] px-5 py-4">
@@ -905,8 +1093,12 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                   </div>
                 </div>
 
-                <div className="grid min-h-[520px] lg:grid-cols-[320px_minmax(0,1fr)]">
-                  <aside className="border-b border-[#2C2D30] lg:border-b-0 lg:border-r">
+                <div className="grid min-h-[520px] min-w-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[320px_minmax(0,1fr)]">
+                  <aside
+                    className={`min-w-0 border-b border-[#2C2D30] lg:block lg:border-b-0 lg:border-r ${
+                      mobileTicketDetailOpen ? 'hidden' : 'block'
+                    }`}
+                  >
                     <div className="space-y-3 border-b border-[#2C2D30] p-4">
                       {mode === 'agent' ? (
                         <div className="flex gap-2 overflow-x-auto pb-1">
@@ -976,7 +1168,15 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                                 selected ? 'bg-[#1C2A23]' : 'hover:bg-[#202124]'
                               }`}
                               type="button"
-                              onClick={() => setSelectedTicketId(ticket.id)}
+                              onClick={() => {
+                                setSelectedTicketId(ticket.id);
+                                setMobileTicketDetailOpen(true);
+                                const params = new URLSearchParams(searchParams.toString());
+                                params.set('ticket', ticket.id);
+                                router.replace(`${pathname}?${params.toString()}`, {
+                                  scroll: false,
+                                });
+                              }}
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <span className={statusBadgeClass(ticket.status)}>
@@ -1003,8 +1203,28 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                     </div>
                   </aside>
 
-                  <section className="flex min-w-0 flex-col">
-                    <header className="border-b border-[#2C2D30] p-5">
+                  <section
+                    className={`min-w-0 flex-col lg:flex ${
+                      mobileTicketDetailOpen ? 'flex' : 'hidden'
+                    }`}
+                  >
+                    <header className="border-b border-[#2C2D30] p-4 sm:p-5">
+                      <button
+                        className="mb-4 inline-flex items-center gap-2 rounded-md border border-[#34363A] px-3 py-2 text-xs font-medium text-[#D8D9DC] transition hover:border-[#13ec80]/50 hover:text-white lg:hidden"
+                        type="button"
+                        onClick={() => {
+                          setMobileTicketDetailOpen(false);
+                          const params = new URLSearchParams(searchParams.toString());
+                          params.delete('ticket');
+                          const query = params.toString();
+                          router.replace(query ? `${pathname}?${query}` : pathname, {
+                            scroll: false,
+                          });
+                        }}
+                      >
+                        <span className="material-symbols-outlined text-[17px]">arrow_back</span>
+                        문의 목록
+                      </button>
                       {selectedTicket ? (
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -1088,21 +1308,23 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                                 ) : null}
                               </>
                             ) : null}
-                            <button
-                            className="inline-flex items-center gap-2 rounded-md border border-[#34363A] px-3 py-2 text-xs text-[#D8D9DC] transition hover:border-[#13ec80]/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                            type="button"
-                            disabled={!selectedTicketId}
-                            onClick={() => void handleCopyTicketLink()}
-                          >
-                            <span className="material-symbols-outlined text-[16px]">
-                              content_copy
-                            </span>
-                            {copyState === 'copied'
-                              ? '복사됨'
-                              : copyState === 'failed'
-                                ? '복사 실패'
-                                : '링크 복사'}
-                          </button>
+                            {account ? (
+                              <button
+                                className="inline-flex items-center gap-2 rounded-md border border-[#34363A] px-3 py-2 text-xs text-[#D8D9DC] transition hover:border-[#13ec80]/50 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                type="button"
+                                disabled={!selectedTicketId}
+                                onClick={() => void handleCopyTicketLink()}
+                              >
+                                <span className="material-symbols-outlined text-[16px]">
+                                  content_copy
+                                </span>
+                                {copyState === 'copied'
+                                  ? '복사됨'
+                                  : copyState === 'failed'
+                                    ? '복사 실패'
+                                    : '링크 복사'}
+                              </button>
+                            ) : null}
                           </div>
                         </div>
                       ) : (
@@ -1117,7 +1339,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
 
                     <div
                       ref={messageListRef}
-                      className="min-h-[300px] flex-1 space-y-4 overflow-y-auto p-5"
+                      className="min-h-[260px] min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto p-4 sm:min-h-[300px] sm:p-5"
                     >
                       {detailLoading ? (
                         <MessageSkeleton />
@@ -1145,7 +1367,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                             return (
                               <article
                                 key={message.id}
-                                className={`flex gap-3 ${isAgent ? 'flex-row-reverse' : ''}`}
+                                className={`flex min-w-0 gap-3 ${isAgent ? 'flex-row-reverse' : ''}`}
                               >
                                 <div
                                   className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
@@ -1163,10 +1385,14 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                                   )}
                                 </div>
                                 <div
-                                  className={`min-w-0 max-w-[82%] ${isAgent ? 'text-right' : ''}`}
+                                  className={`min-w-0 max-w-[calc(100%-3rem)] sm:max-w-[82%] ${
+                                    isAgent ? 'text-right' : ''
+                                  }`}
                                 >
                                   <div
-                                    className={`mb-1 flex items-center gap-2 ${isAgent ? 'justify-end' : ''}`}
+                                    className={`mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 ${
+                                      isAgent ? 'justify-end' : ''
+                                    }`}
                                   >
                                     <span className="text-xs font-semibold text-white">
                                       {message.authorDisplayName}
@@ -1206,7 +1432,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                     </div>
 
                     <form
-                      className="border-t border-[#2C2D30] p-5"
+                      className="border-t border-[#2C2D30] p-4 sm:p-5"
                       onSubmit={(event) => void handleSendMessage(event)}
                     >
                       <textarea
@@ -1260,10 +1486,163 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                   </section>
                 </div>
               </section>
+
+              {mode === 'customer' ? (
+                <section className="min-w-0 overflow-hidden rounded-lg border-2 border-[#13ec80]/70 bg-[#18191C]">
+                  <div className="grid lg:grid-cols-2">
+                    <div className="min-w-0 border-b border-[#2C2D30] p-5 lg:border-b-0 lg:border-r">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-base font-semibold text-white">
+                          이 기기에서 내 비회원 문의
+                        </h2>
+                        <span className="rounded-full border border-[#13ec80]/30 bg-[#13ec80]/10 px-2 py-0.5 text-[10px] font-semibold text-[#13ec80]">
+                          자동 저장
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-[#A7A9AF]">
+                        이 기기에 저장된 문의 목록입니다. 브라우저 데이터를 삭제하면 목록이
+                        사라질 수 있어요.
+                      </p>
+
+                      <div className="mt-4 overflow-x-auto rounded-md border border-[#34363A]">
+                        <div className="min-w-[520px]">
+                          <div className="grid grid-cols-[110px_minmax(0,1fr)_64px_98px] gap-2 bg-[#151619] px-3 py-2 text-[10px] font-semibold text-[#85878D]">
+                            <span>문의번호</span>
+                            <span>제목</span>
+                            <span>상태</span>
+                            <span>최근 업데이트</span>
+                          </div>
+                          {guestWallet.length > 0 ? (
+                            guestWallet.map((item) => (
+                              <button
+                                key={item.ticketId}
+                                type="button"
+                                className="grid w-full grid-cols-[110px_minmax(0,1fr)_64px_98px] items-center gap-2 border-t border-[#2C2D30] px-3 py-3 text-left text-[11px] transition hover:bg-[#202124]"
+                                onClick={() => {
+                                  setGuestTrackingId(item.ticketId);
+                                  setGuestAccessCode(item.accessCode);
+                                  setGuestLookupLoading(true);
+                                  void fetchGuestSupportTicket(item.ticketId, item.accessCode)
+                                    .then((payload) => {
+                                      setSelectedTicketId(payload.ticket.id);
+                                      setDetail(payload);
+                                    })
+                                    .catch((lookupError) => {
+                                      setFormError(
+                                        lookupError instanceof Error
+                                          ? lookupError.message
+                                          : '비회원 문의를 조회하지 못했습니다.',
+                                      );
+                                    })
+                                    .finally(() => setGuestLookupLoading(false));
+                                }}
+                              >
+                                <span className="truncate font-mono text-[#A7A9AF]">
+                                  {item.ticketId.slice(0, 8)}
+                                </span>
+                                <span className="truncate text-[#D8D9DC]">
+                                  {item.subject ?? '저장된 비회원 문의'}
+                                </span>
+                                <span
+                                  className={
+                                    item.status
+                                      ? statusBadgeClass(item.status)
+                                      : 'text-[#A7A9AF]'
+                                  }
+                                >
+                                  {item.status ? statusLabel(item.status) : '확인'}
+                                </span>
+                                <span className="truncate text-[#85878D]">
+                                  {item.updatedAt ? formatRelativeTime(item.updatedAt) : '저장됨'}
+                                </span>
+                              </button>
+                            ))
+                          ) : (
+                            <div className="border-t border-[#2C2D30] px-3 py-5 text-xs text-[#85878D]">
+                              이 기기에 저장된 비회원 문의가 없습니다.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <p className="mt-3 text-[11px] text-[#85878D]">
+                        목록을 클릭하면 상세 내용과 답변을 확인할 수 있습니다.
+                      </p>
+                    </div>
+
+                    <form
+                      className="p-5"
+                      onSubmit={(event) => void handleRecoverGuestTicket(event)}
+                    >
+                      <h2 className="text-base font-semibold text-white">다른 기기에서 조회</h2>
+                      <p className="mt-2 text-xs leading-5 text-[#A7A9AF]">
+                        다른 기기에서 접수했거나 이 기기에 저장되지 않은 문의를 조회합니다.
+                      </p>
+                      <label className="mt-4 block">
+                        <span className="text-xs font-medium text-[#D8D9DC]">문의번호</span>
+                        <input
+                          className="mt-1 h-10 w-full rounded-md border border-[#34363A] bg-[#111214] px-3 text-xs text-white outline-none focus:border-[#13ec80]/60"
+                          value={guestTrackingId}
+                          onChange={(event) => setGuestTrackingId(event.target.value)}
+                          placeholder="문의 UUID"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="mt-3 block">
+                        <span className="text-xs font-medium text-[#D8D9DC]">최신 이메일</span>
+                        <input
+                          className="mt-1 h-10 w-full rounded-md border border-[#34363A] bg-[#111214] px-3 text-xs text-white outline-none focus:border-[#13ec80]/60"
+                          value={guestRecoveryEmail}
+                          onChange={(event) => setGuestRecoveryEmail(event.target.value)}
+                          placeholder="이 문의를 접수할 때 사용한 이메일"
+                          type="email"
+                          autoComplete="email"
+                        />
+                      </label>
+                      <div className="mt-3 rounded-md border border-dashed border-[#34363A] bg-[#111214] p-3">
+                        <p className="text-xs font-medium text-[#D8D9DC]">본인 확인</p>
+                        <p className="mt-1 text-[11px] leading-4 text-[#85878D]">
+                          문의 정보가 맞지 않으면 상세 내용은 표시하지 않습니다.
+                        </p>
+                        {captchaMode === 'turnstile' && turnstileSiteKey ? (
+                          <div className="mt-3">
+                            <Turnstile
+                              key={`support-recovery-turnstile-${captchaTheme}-${guestRecoveryCaptchaKey}`}
+                              siteKey={turnstileSiteKey}
+                              onSuccess={(token) => setGuestRecoveryCaptchaToken(token)}
+                              onExpire={() => setGuestRecoveryCaptchaToken(null)}
+                              options={{ theme: captchaTheme }}
+                            />
+                          </div>
+                        ) : null}
+                        {captchaMode === 'hcaptcha' && hcaptchaSiteKey ? (
+                          <div className="mt-3">
+                            <HCaptcha
+                              key={`support-recovery-hcaptcha-${captchaTheme}-${guestRecoveryCaptchaKey}`}
+                              sitekey={hcaptchaSiteKey}
+                              theme={captchaTheme}
+                              onVerify={(token) => setGuestRecoveryCaptchaToken(token)}
+                              onExpire={() => setGuestRecoveryCaptchaToken(null)}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          type="submit"
+                          disabled={guestLookupLoading}
+                          className="inline-flex min-h-10 items-center justify-center rounded-md bg-[#13ec80] px-5 text-sm font-semibold text-[#101211] transition hover:bg-[#10ce70] disabled:opacity-60"
+                        >
+                          {guestLookupLoading ? '조회 중' : '조회'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </section>
+              ) : null}
             </div>
 
             {mode === 'customer' ? (
-            <aside className="space-y-6">
+            <aside className="min-w-0 space-y-6">
               <section
                 id="support-request-form"
                 className="scroll-mt-24 rounded-lg border border-[#34363A] bg-[#18191C]"
@@ -1303,6 +1682,26 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                 {formSuccess ? (
                   <div className="mx-5 mt-5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-100">
                     {formSuccess}
+                    {guestReceipt ? (
+                      <div className="mt-3 space-y-2 rounded-md border border-emerald-400/20 bg-black/10 p-3">
+                        <p>
+                          <span className="text-emerald-200">문의 번호</span>
+                          <code className="mt-1 block break-all text-white">
+                            {guestReceipt.ticketId}
+                          </code>
+                        </p>
+                        <p>
+                          <span className="text-emerald-200">조회 코드</span>
+                          <code className="mt-1 block break-all text-white">
+                            {guestReceipt.accessCode}
+                          </code>
+                        </p>
+                        <p className="leading-5 text-emerald-100">
+                          이 코드는 다시 표시할 수 없습니다. 현재 브라우저에는 안전하게
+                          저장되며, 다른 기기에서 조회하려면 직접 보관해야 합니다.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
                 {formError ? (
@@ -1397,8 +1796,8 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                         onChange={setGuestName}
                       />
                       <SupportTextInput
-                        label="회신 이메일"
-                        placeholder="선택 입력"
+                        label="회신 이메일 (필수)"
+                        placeholder="답변 및 다른 기기 조회에 사용"
                         type="email"
                         value={guestEmail}
                         onChange={setGuestEmail}
@@ -1440,18 +1839,18 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                         </div>
                         {captchaMode === 'turnstile' && turnstileSiteKey ? (
                           <Turnstile
-                            key={`support-guest-turnstile-${guestCaptchaKey}`}
+                              key={`support-guest-turnstile-${captchaTheme}-${guestCaptchaKey}`}
                             siteKey={turnstileSiteKey}
                             onSuccess={(token) => setGuestCaptchaToken(token)}
                             onExpire={() => setGuestCaptchaToken(null)}
-                            options={{ theme: 'dark' }}
+                              options={{ theme: captchaTheme }}
                           />
                         ) : null}
                         {captchaMode === 'hcaptcha' && hcaptchaSiteKey ? (
                           <HCaptcha
-                            key={`support-guest-hcaptcha-${guestCaptchaKey}`}
+                              key={`support-guest-hcaptcha-${captchaTheme}-${guestCaptchaKey}`}
                             sitekey={hcaptchaSiteKey}
-                            theme="dark"
+                              theme={captchaTheme}
                             onVerify={(token) => setGuestCaptchaToken(token)}
                             onExpire={() => setGuestCaptchaToken(null)}
                           />

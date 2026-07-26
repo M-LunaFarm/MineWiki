@@ -63,6 +63,30 @@ export class SupportController {
     });
   }
 
+  @Post('tickets/guest/lookup')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
+  getGuestTicket(@Body() body: unknown) {
+    return this.support.getGuestTicketDetail(body);
+  }
+
+  @Post('tickets/guest/recover')
+  @Throttle({ default: { limit: 5, ttl: 600 } })
+  recoverGuestTicket(@Body() body: unknown, @Req() request: FastifyRequest) {
+    return this.support.recoverGuestTicket(body, {
+      ipAddress: extractClientIp(request),
+      userAgent: request.headers['user-agent'] ?? null,
+    });
+  }
+
+  @Post('tickets/guest/:ticketId/messages')
+  @Throttle({ default: { limit: 10, ttl: 300 } })
+  createGuestMessage(
+    @Param('ticketId', new ParseUUIDPipe()) ticketId: string,
+    @Body() body: unknown,
+  ) {
+    return this.support.createGuestMessage(ticketId, body);
+  }
+
   @UseGuards(SessionGuard)
   @Post('tickets/:ticketId/messages')
   @Throttle({ default: { limit: 20, ttl: 300 } })

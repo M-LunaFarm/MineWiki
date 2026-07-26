@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  createGuestSupportTicketSchema,
   createSupportTicketSchema,
+  guestSupportAccessSchema,
+  guestSupportRecoverySchema,
   supportTicketSchema,
 } from '@minewiki/schemas';
 
@@ -39,6 +42,7 @@ test('support ticket schemas accept operational context fields', () => {
       displayName: 'Requester',
     },
     assignee: null,
+    contactEmail: null,
     server: {
       id: createPayload.serverId,
       name: 'Test Server',
@@ -51,4 +55,32 @@ test('support ticket schemas accept operational context fields', () => {
   assert.equal(ticket.verifySessionId, 'verify-session-1');
   assert.equal(ticket.pluginServerId, 'plugin-server-1');
   assert.equal(ticket.fileId, 'file-1');
+});
+
+test('guest support schemas require bounded credentials and recovery identity', () => {
+  const createPayload = createGuestSupportTicketSchema.parse({
+    subject: '로그인 없이 문의합니다',
+    body: '답변을 확인할 수 있어야 합니다.',
+    guestName: 'Guest',
+    guestEmail: 'guest@example.com',
+  });
+  const access = guestSupportAccessSchema.parse({
+    ticketId: '22222222-2222-4222-8222-222222222222',
+    accessCode: 'a'.repeat(43),
+  });
+  const recovery = guestSupportRecoverySchema.parse({
+    ticketId: access.ticketId,
+    email: createPayload.guestEmail,
+    captchaToken: 'verified-token',
+  });
+
+  assert.equal(createPayload.guestEmail, 'guest@example.com');
+  assert.equal(access.accessCode.length, 43);
+  assert.equal(recovery.captchaToken, 'verified-token');
+  assert.throws(() =>
+    guestSupportAccessSchema.parse({
+      ticketId: access.ticketId,
+      accessCode: 'too-short',
+    }),
+  );
 });

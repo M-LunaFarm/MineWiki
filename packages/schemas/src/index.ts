@@ -703,6 +703,7 @@ export const supportTicketSchema = z.object({
   requester: supportTicketAccountSchema,
   assignee: supportTicketAccountSchema.nullable(),
   server: supportTicketServerSchema.nullable(),
+  contactEmail: z.string().email().nullable(),
   latestMessagePreview: z.string().nullable(),
   messageCount: z.number().int().nonnegative(),
 });
@@ -740,6 +741,36 @@ export const createGuestSupportTicketSchema = createSupportTicketSchema.extend({
   guestEmail: z.string().email().max(120).optional(),
   captchaToken: z.string().trim().min(1).optional(),
 });
+
+export const guestSupportAccessSchema = z.object({
+  ticketId: z.string().uuid(),
+  accessCode: z.string().trim().min(32).max(128),
+});
+
+export const guestSupportRecoverySchema = z.object({
+  ticketId: z.string().uuid(),
+  email: z.string().trim().email().max(120),
+  captchaToken: z.string().trim().min(1).optional(),
+});
+
+export const guestSupportMessageSchema = guestSupportAccessSchema
+  .pick({ accessCode: true })
+  .extend({
+    body: z.string().min(1).max(2000),
+  });
+
+export const guestSupportTicketResultSchema = z.object({
+  accepted: z.literal(true),
+  ticketId: z.string().uuid(),
+  accessCode: z.string().min(32).max(128),
+  accessExpiresAt: z.string().datetime(),
+});
+
+export const guestSupportRecoveryResultSchema = guestSupportTicketResultSchema
+  .omit({ accepted: true })
+  .extend({
+    detail: supportTicketDetailSchema,
+  });
 
 export const createSupportMessageSchema = z.object({
   body: z.string().min(1).max(2000),
@@ -918,5 +949,10 @@ export type SupportTicketListResponse = z.infer<typeof supportTicketListResponse
 export type SupportTicketDetail = z.infer<typeof supportTicketDetailSchema>;
 export type CreateSupportTicketPayload = z.infer<typeof createSupportTicketSchema>;
 export type CreateGuestSupportTicketPayload = z.infer<typeof createGuestSupportTicketSchema>;
+export type GuestSupportAccessPayload = z.infer<typeof guestSupportAccessSchema>;
+export type GuestSupportRecoveryPayload = z.infer<typeof guestSupportRecoverySchema>;
+export type GuestSupportRecoveryResult = z.infer<typeof guestSupportRecoveryResultSchema>;
+export type GuestSupportMessagePayload = z.infer<typeof guestSupportMessageSchema>;
+export type GuestSupportTicketResult = z.infer<typeof guestSupportTicketResultSchema>;
 export type CreateSupportMessagePayload = z.infer<typeof createSupportMessageSchema>;
 export type UpdateSupportTicketPayload = z.infer<typeof updateSupportTicketSchema>;

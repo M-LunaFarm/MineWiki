@@ -2,6 +2,11 @@ import {
   createGuestSupportTicketSchema,
   createSupportMessageSchema,
   createSupportTicketSchema,
+  guestSupportAccessSchema,
+  guestSupportMessageSchema,
+  guestSupportRecoveryResultSchema,
+  guestSupportRecoverySchema,
+  guestSupportTicketResultSchema,
   serverSummarySchema,
   supportTicketDetailSchema,
   supportTicketListResponseSchema,
@@ -26,9 +31,18 @@ interface TicketListOptions {
   readonly status?: SupportTicketStatus;
 }
 
-interface GuestTicketResult {
+export interface GuestSupportTicketResult {
   readonly accepted: true;
   readonly ticketId: string;
+  readonly accessCode: string;
+  readonly accessExpiresAt: string;
+}
+
+export interface GuestSupportRecoveryResult {
+  readonly ticketId: string;
+  readonly accessCode: string;
+  readonly accessExpiresAt: string;
+  readonly detail: SupportTicketDetail;
 }
 
 export interface SupportServerOption {
@@ -122,7 +136,7 @@ export async function createSupportTicket(
 
 export async function createSupportGuestTicket(
   payload: CreateGuestSupportTicketPayload,
-): Promise<GuestTicketResult> {
+): Promise<GuestSupportTicketResult> {
   const parsed = createGuestSupportTicketSchema.parse(payload);
   const response = await fetch(`${API_BASE}/v1/support/tickets/guest`, {
     method: 'POST',
@@ -136,7 +150,78 @@ export async function createSupportGuestTicket(
   if (!response.ok) {
     await parseJsonError(response, '비회원 문의 접수에 실패했습니다.');
   }
-  return (await response.json()) as GuestTicketResult;
+  const result = guestSupportTicketResultSchema.parse(await response.json());
+  return {
+    accepted: true,
+    ticketId: result.ticketId,
+    accessCode: result.accessCode,
+    accessExpiresAt: result.accessExpiresAt,
+  };
+}
+
+export async function fetchGuestSupportTicket(
+  ticketId: string,
+  accessCode: string,
+): Promise<SupportTicketDetail> {
+  const parsed = guestSupportAccessSchema.parse({ ticketId, accessCode });
+  const response = await fetch(`${API_BASE}/v1/support/tickets/guest/lookup`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await csrfHeaders()),
+    },
+    body: JSON.stringify(parsed),
+  });
+  if (!response.ok) {
+    await parseJsonError(response, '비회원 문의를 조회하지 못했습니다.');
+  }
+  return supportTicketDetailSchema.parse(await response.json());
+}
+
+export async function recoverGuestSupportTicket(
+  ticketId: string,
+  email: string,
+  captchaToken?: string,
+): Promise<GuestSupportRecoveryResult> {
+  const parsed = guestSupportRecoverySchema.parse({ ticketId, email, captchaToken });
+  const response = await fetch(`${API_BASE}/v1/support/tickets/guest/recover`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await csrfHeaders()),
+    },
+    body: JSON.stringify(parsed),
+  });
+  if (!response.ok) {
+    await parseJsonError(response, '비회원 문의를 복구하지 못했습니다.');
+  }
+  const result = guestSupportRecoveryResultSchema.parse(await response.json());
+  return {
+    ticketId: result.ticketId,
+    accessCode: result.accessCode,
+    accessExpiresAt: result.accessExpiresAt,
+    detail: result.detail,
+  };
+}
+
+export async function createGuestSupportMessage(
+  ticketId: string,
+  accessCode: string,
+  body: string,
+): Promise<SupportTicketDetail> {
+  const parsed = guestSupportMessageSchema.parse({ accessCode, body });
+  const response = await fetch(`${API_BASE}/v1/support/tickets/guest/${ticketId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await csrfHeaders()),
+    },
+    body: JSON.stringify(parsed),
+  });
+  if (!response.ok) {
+    await parseJsonError(response, '비회원 문의 답변을 전송하지 못했습니다.');
+  }
+  return supportTicketDetailSchema.parse(await response.json());
 }
 
 export async function createSupportMessage(
