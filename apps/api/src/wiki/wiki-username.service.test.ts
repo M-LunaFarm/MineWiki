@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { renameUsernameTargetFields } from './wiki-username.service';
+import { renameUsernameTargetFields, validateWikiUsername } from './wiki-username.service';
+
+test('username validation accepts an explicit trailing underscore', () => {
+  assert.equal(validateWikiUsername('zene_'), 'zene_');
+});
+
+test('username validation still rejects route-like separators and reserved names', () => {
+  assert.throws(() => validateWikiUsername('_zene'));
+  assert.throws(() => validateWikiUsername('zene-'));
+  assert.throws(() => validateWikiUsername('admin'));
+});
 
 test('username rename retargets pending user-document creates away from the preserved alias tree', () => {
   assert.deepEqual(renameUsernameTargetFields({

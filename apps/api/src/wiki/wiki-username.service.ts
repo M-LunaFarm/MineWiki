@@ -277,13 +277,7 @@ export class WikiUsernameService {
   }
 
   private validateUsername(value?: string): string {
-    if (typeof value !== 'string' || value.normalize('NFKC') !== value || !USERNAME_PATTERN.test(value)) {
-      throw new BadRequestException({ code: 'wiki_username_invalid', message: '사용자명은 한글, 영문, 숫자, 밑줄, 하이픈으로 2~32자여야 합니다.' });
-    }
-    if (/^[_-]|[_-]$/u.test(value) || RESERVED_USERNAMES.has(value.toLocaleLowerCase('en-US'))) {
-      throw new BadRequestException({ code: 'wiki_username_reserved', message: '사용할 수 없는 사용자명입니다.' });
-    }
-    return value;
+    return validateWikiUsername(value);
   }
 
   private assertCooldown(changedAt: Date | null, now: Date): void {
@@ -354,6 +348,18 @@ export class WikiUsernameService {
       },
     );
   }
+}
+
+export function validateWikiUsername(value?: string): string {
+  if (typeof value !== 'string' || value.normalize('NFKC') !== value || !USERNAME_PATTERN.test(value)) {
+    throw new BadRequestException({ code: 'wiki_username_invalid', message: '사용자명은 한글, 영문, 숫자, 밑줄, 하이픈으로 2~32자여야 합니다.' });
+  }
+  // A trailing underscore is a valid, unambiguous user-page path. Leading
+  // separators and a trailing hyphen remain blocked to avoid route-like names.
+  if (/^[_-]|-$/u.test(value) || RESERVED_USERNAMES.has(value.toLocaleLowerCase('en-US'))) {
+    throw new BadRequestException({ code: 'wiki_username_reserved', message: '사용할 수 없는 사용자명입니다.' });
+  }
+  return value;
 }
 
 function replaceRoot(value: string, previous: string, next: string): string {
