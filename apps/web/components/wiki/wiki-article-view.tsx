@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { Clock3, History, MessageSquareText, Pencil, PencilLine, Star } from 'lucide-react';
+import { ChevronDown, Clock3, FileText, FolderClosed, History, ListTree, MessageSquareText, Pencil, PencilLine, Star, Wrench } from 'lucide-react';
 import type { WikiPageResponse, WikiRecentChangeSummary } from '../../lib/wiki-api';
 import { buildCategoryWikiToolPath, buildServerWikiToolPath, buildStandardWikiToolPath, buildWikiHistoryPath, buildWikiRevisionPath } from '../../lib/wiki-routes.mjs';
 import { WikiPageTools } from './wiki-page-tools';
@@ -35,7 +35,7 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
   }).format(new Date(page.updatedAt));
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-3 py-8 sm:px-6 lg:px-8">
+    <main className="wiki-reader-shell mx-auto flex w-full max-w-6xl flex-col gap-5 px-3 py-8 sm:px-6 lg:px-8">
       <nav aria-label="문서 경로" className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
         <Link href="/wiki/%EB%8C%80%EB%AC%B8" className="hover:text-emerald-200">
           MineWiki
@@ -48,8 +48,8 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
 
       {beforeContent}
 
-      <header className="border-b border-white/10 pb-6">
-        <div className="mb-4 flex flex-wrap gap-2">
+      <header className="wiki-reader-heading pb-3">
+        <div className="mb-3 flex flex-wrap gap-2">
           <span className="chip chip-accent">{page.namespace}</span>
           <span className="chip chip-muted">rev {page.revision.revisionNo}</span>
           <span className="chip chip-muted">{protectionLabel(page.protectionLevel)}</span>
@@ -62,8 +62,8 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
             에서 넘어왔습니다.
           </div>
         ) : null}
-        <h1 className="max-w-4xl text-3xl font-bold text-white sm:text-4xl">{page.displayTitle}</h1>
-        <p className="mt-3 text-sm text-slate-400">
+        <h1 className="max-w-4xl text-3xl font-bold tracking-[-0.025em] text-white sm:text-4xl">{page.displayTitle}</h1>
+        <p className="mt-2 text-sm text-slate-400">
           최근 수정 {updatedAt}
         </p>
         {page.redirectTarget ? (
@@ -85,23 +85,16 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
         </Link>
       </nav>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        {page.headings.length > 0 ? (
-          <details className="surface-flat p-4 lg:hidden">
-            <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-white">목차·섹션 편집</summary>
-            <ol className="mt-3 space-y-1 text-sm">
-              {page.headings.map((heading, index) => <li key={`${heading.anchor}-mobile-${index}`} style={{ paddingInlineStart: `${Math.max(0, heading.level - 2) * 0.75}rem` }} className="flex min-w-0 items-center gap-2"><a href={`#${encodeURIComponent(heading.anchor)}`} className="min-h-11 min-w-0 flex-1 py-3 text-slate-400 hover:text-emerald-200">{heading.title}</a><Link href={`${editPath}?section=${encodeURIComponent(heading.anchor)}`} className="grid size-11 shrink-0 place-items-center rounded text-slate-500 hover:bg-white/[0.05] hover:text-emerald-200" aria-label={`${heading.title} 섹션 편집`}><Pencil className="size-4" /></Link></li>)}
-            </ol>
-          </details>
-        ) : null}
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_19rem]">
         <article
           id={contentId}
-          className="wiki-rendered wiki-mobile-full min-w-0"
+          className="wiki-rendered wiki-mobile-full order-2 min-w-0 lg:order-1"
           dangerouslySetInnerHTML={{ __html: rewriteWikiRenderedMedia(page.html) }}
         />
         <WikiDynamicTimeHydrator targetId={contentId} revisionId={page.revision.id} />
         <WikiReaderInteractionHydrator targetId={contentId} revisionId={page.revision.id} />
-        <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+        <aside className="wiki-reader-rail order-1 rounded-xl border border-white/10 bg-white/[0.025] p-3 lg:sticky lg:top-24 lg:order-2 lg:self-start" aria-label="이 문서">
+          <h2 className="px-2 pb-3 pt-1 text-lg font-bold text-white">이 문서</h2>
           {page.namespace === 'server' && page.serverDirectoryPath ? (
             <Link
               href={page.serverDirectoryPath}
@@ -111,11 +104,14 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
               <Star className="h-4 w-4 text-amber-100" />
             </Link>
           ) : null}
-          <RecentChangesSidebar changes={recentChanges} />
           {page.headings.length > 0 ? (
-            <nav className="surface-flat hidden p-4 lg:block" aria-label="문서 목차">
-              <h2 className="text-sm font-semibold text-white">목차</h2>
-              <ol className="mt-3 space-y-1.5 text-sm">
+            <details className="wiki-rail-panel" open>
+              <summary>
+                <span className="wiki-rail-panel-label"><ListTree className="size-4" aria-hidden="true" />목차</span>
+                <ChevronDown className="wiki-rail-chevron size-4" aria-hidden="true" />
+              </summary>
+              <nav className="wiki-rail-content" aria-label="문서 목차">
+                <ol className="space-y-0.5 text-sm">
                 {page.headings.map((heading, index) => (
                   <li
                     key={`${heading.anchor}-${index}`}
@@ -136,12 +132,19 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
                     </span>
                   </li>
                 ))}
-              </ol>
-            </nav>
+                </ol>
+              </nav>
+            </details>
           ) : null}
-          <section className="surface-flat p-4">
-            <h2 className="text-sm font-semibold text-white">문서 정보</h2>
-            <dl className="mt-3 space-y-2 text-sm text-slate-300">
+          <RecentChangesSidebar changes={recentChanges} />
+          <details className="wiki-rail-panel">
+            <summary>
+              <span className="wiki-rail-panel-label"><FileText className="size-4" aria-hidden="true" />문서 정보</span>
+              <span className="ml-auto text-xs font-normal text-slate-500">문서 ID {page.id}</span>
+              <ChevronDown className="wiki-rail-chevron size-4" aria-hidden="true" />
+            </summary>
+            <div className="wiki-rail-content">
+            <dl className="space-y-2 text-sm text-slate-300">
               <div className="flex justify-between gap-4">
                 <dt className="text-slate-500">문서 ID</dt>
                 <dd>{page.id}</dd>
@@ -167,28 +170,43 @@ export function WikiArticleView({ page, routePath, beforeContent, afterContent, 
                 현재 판
               </Link>
             </div>
-          </section>
-          <WikiPageTools
-            pageId={page.id}
-            namespace={page.namespace}
-            spaceId={page.spaceId}
-            title={page.title}
-            displayTitle={page.displayTitle}
-            pageType={page.pageType}
-            currentRevisionId={page.revision.id}
-            routePath={routePath}
-          />
+            </div>
+          </details>
+          <details className="wiki-rail-panel">
+            <summary>
+              <span className="wiki-rail-panel-label"><Wrench className="size-4" aria-hidden="true" />도구</span>
+              <span className="ml-auto text-xs font-normal text-slate-500">열기</span>
+              <ChevronDown className="wiki-rail-chevron size-4" aria-hidden="true" />
+            </summary>
+            <div className="wiki-rail-content">
+              <WikiPageTools
+                pageId={page.id}
+                namespace={page.namespace}
+                spaceId={page.spaceId}
+                title={page.title}
+                displayTitle={page.displayTitle}
+                pageType={page.pageType}
+                currentRevisionId={page.revision.id}
+                routePath={routePath}
+                embedded
+              />
+            </div>
+          </details>
           {page.categoryTags.length > 0 ? (
-            <section className="surface-flat p-4">
-              <h2 className="text-sm font-semibold text-white">분류</h2>
-              <div className="mt-3 flex flex-wrap gap-2">
+            <details className="wiki-rail-panel">
+              <summary>
+                <span className="wiki-rail-panel-label"><FolderClosed className="size-4" aria-hidden="true" />분류</span>
+                <span className="ml-auto text-xs font-normal text-slate-500">{page.categoryTags.length}</span>
+                <ChevronDown className="wiki-rail-chevron size-4" aria-hidden="true" />
+              </summary>
+              <div className="wiki-rail-content flex flex-wrap gap-2">
                 {page.categoryTags.map((category) => (
                   <Link key={category.title} href={`/wiki/category/${encodeURIComponent(category.title)}`} className={`chip chip-muted hover:border-emerald-300/40 hover:text-emerald-100 ${category.blurred ? 'blur-sm transition-[filter] hover:blur-none focus:blur-none' : ''}`}>
                     {category.title}
                   </Link>
                 ))}
               </div>
-            </section>
+            </details>
           ) : null}
         </aside>
       </div>
@@ -211,17 +229,17 @@ function RecentChangesSidebar({
   if (uniqueChanges.length === 0) return null;
 
   return (
-    <section className="surface-flat p-4" aria-labelledby="wiki-recent-sidebar-title">
-      <div className="flex items-center justify-between gap-3">
-        <h2 id="wiki-recent-sidebar-title" className="flex items-center gap-2 text-sm font-semibold text-white">
-          <Clock3 className="size-4 text-emerald-300" aria-hidden="true" />
+    <details className="wiki-rail-panel" aria-labelledby="wiki-recent-sidebar-title">
+      <summary>
+        <span id="wiki-recent-sidebar-title" className="wiki-rail-panel-label">
+          <Clock3 className="size-4" aria-hidden="true" />
           최근 변경
-        </h2>
-        <Link href="/recent" className="text-xs font-semibold text-emerald-300 hover:text-emerald-200">
-          더 보기
-        </Link>
-      </div>
-      <ol className="mt-3 divide-y divide-white/[0.07]">
+        </span>
+        <span className="ml-auto rounded border border-white/10 px-1.5 py-0.5 text-[11px] text-slate-500">{uniqueChanges.length}</span>
+        <ChevronDown className="wiki-rail-chevron size-4" aria-hidden="true" />
+      </summary>
+      <div className="wiki-rail-content">
+      <ol className="divide-y divide-white/[0.07]">
         {uniqueChanges.map((change) => (
           <li key={change.id}>
             <Link
@@ -241,7 +259,11 @@ function RecentChangesSidebar({
           </li>
         ))}
       </ol>
-    </section>
+      <Link href="/recent" className="mt-3 inline-flex min-h-11 items-center text-xs font-semibold text-emerald-300 hover:text-emerald-200">
+        전체 변경 보기
+      </Link>
+      </div>
+    </details>
   );
 }
 

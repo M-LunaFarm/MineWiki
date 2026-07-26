@@ -25,9 +25,10 @@ interface WikiPageToolsProps {
   readonly currentRevisionId: string;
   readonly routePath: string;
   readonly serverWikiContentSlug?: string;
+  readonly embedded?: boolean;
 }
 
-export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle, pageType, currentRevisionId, routePath, serverWikiContentSlug }: WikiPageToolsProps) {
+export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle, pageType, currentRevisionId, routePath, serverWikiContentSlug, embedded = false }: WikiPageToolsProps) {
   const { account, loading: authLoading } = useAuth();
   const [nextTitle, setNextTitle] = useState(title);
   const [nextNamespace, setNextNamespace] = useState(namespace);
@@ -91,9 +92,9 @@ export function WikiPageTools({ pageId, namespace, spaceId, title, displayTitle,
   }
 
   return (
-    <section className="surface-flat p-4">
-      <h2 className="text-sm font-semibold text-white">문서 도구</h2>
-      <div className="mt-3 flex flex-wrap gap-2">
+    <section className={embedded ? 'wiki-page-tools' : 'surface-flat p-4'}>
+      {!embedded ? <h2 className="text-sm font-semibold text-white">문서 도구</h2> : null}
+      <div className={embedded ? 'flex flex-wrap gap-2' : 'mt-3 flex flex-wrap gap-2'}>
         <WikiWatchButton pageId={pageId} routePath={routePath} />
         <Link
           href={rawHref}
