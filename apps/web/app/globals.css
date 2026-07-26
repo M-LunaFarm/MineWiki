@@ -2656,6 +2656,16 @@ html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-su
   color: var(--theme-ink);
 }
 
+html[data-theme='light'] .wiki-rendered .front-wiki-search .search-page-input {
+  border-color: var(--theme-border);
+  background-color: #f8faf7;
+  color: var(--theme-ink);
+}
+
+html[data-theme='light'] .wiki-rendered .front-wiki-search .search-page-input::placeholder {
+  color: #7b867d;
+}
+
 html[data-theme='light'] .wiki-rendered .front-wiki-search .front-wiki-search-suggest-result {
   border-color: rgba(37, 49, 41, 0.1);
   color: var(--theme-ink);
