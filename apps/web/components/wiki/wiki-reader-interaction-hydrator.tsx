@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { hydrateWikiSearchSuggestions } from './wiki-search-suggestion-hydrator';
 
 interface WikiReaderInteractionHydratorProps {
   readonly targetId: string;
@@ -15,10 +16,12 @@ export function WikiReaderInteractionHydrator({ targetId, revisionId }: WikiRead
     if (!root) return;
     const cleanupHeadings = hydrateHeadingSections(root, revisionId);
     const cleanupDeferredFiles = hydrateDeferredFiles(root);
+    const cleanupSearchSuggestions = hydrateWikiSearchSuggestions(root);
     const references = Array.from(root.querySelectorAll<HTMLAnchorElement>('.wiki-footnote-ref > a[href^="#fn-"]'));
     if (references.length === 0) return () => {
       cleanupHeadings();
       cleanupDeferredFiles();
+      cleanupSearchSuggestions();
     };
 
     const popover = document.createElement('aside');
@@ -117,6 +120,7 @@ export function WikiReaderInteractionHydrator({ targetId, revisionId }: WikiRead
     return () => {
       cleanupHeadings();
       cleanupDeferredFiles();
+      cleanupSearchSuggestions();
       for (const cleanup of cleanups) cleanup();
       clearHideTimer();
       popover.remove();

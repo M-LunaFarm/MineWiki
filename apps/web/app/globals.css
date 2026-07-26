@@ -1871,8 +1871,35 @@ html[data-theme='light'] .site-header :is(a, button, input):focus-visible {
   .wiki-rendered .front-wiki-search .search-page {
     @apply flex flex-col gap-3 sm:flex-row;
   }
+  .wiki-rendered .front-wiki-search .search-page-field {
+    @apply relative min-w-0 flex-1;
+  }
   .wiki-rendered .front-wiki-search .search-page-input {
-    @apply min-h-12 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 text-base text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/60 focus:ring-2 focus:ring-emerald-300/10;
+    @apply min-h-12 w-full min-w-0 rounded-xl border border-white/10 bg-black/20 px-4 text-base text-white outline-none placeholder:text-slate-600 focus:border-emerald-300/60 focus:ring-2 focus:ring-emerald-300/10;
+  }
+  .wiki-rendered .front-wiki-search .front-wiki-search-suggest-results {
+    @apply absolute inset-x-0 top-[calc(100%+0.5rem)] z-40 max-h-80 overflow-y-auto rounded-xl border border-white/10 bg-[#10151b] text-slate-100 shadow-2xl;
+  }
+  .wiki-rendered .front-wiki-search .front-wiki-search-suggest-result {
+    @apply block border-b border-white/[0.07] px-4 py-3 text-left no-underline transition last:border-0 hover:bg-white/[0.05] hover:text-inherit aria-selected:bg-emerald-300/10;
+  }
+  .wiki-rendered .front-wiki-search .front-wiki-search-suggest-title {
+    @apply flex min-w-0 items-center gap-2;
+  }
+  .wiki-rendered .front-wiki-search .front-wiki-search-suggest-title-text {
+    @apply truncate text-sm font-semibold;
+  }
+  .wiki-rendered .front-wiki-search .front-wiki-search-suggest-badge {
+    @apply shrink-0 rounded-full bg-[#35e5b7]/10 px-2 py-0.5 text-[10px] font-bold text-[#35e5b7];
+  }
+  .wiki-rendered .front-wiki-search .front-wiki-search-suggest-meta {
+    @apply mt-1 block truncate text-[11px] text-slate-500;
+  }
+  .wiki-rendered .front-wiki-search .front-wiki-search-suggest-status {
+    @apply m-0 px-4 py-3 text-xs;
+  }
+  .wiki-rendered .front-wiki-search .front-wiki-search-suggest-hint {
+    @apply m-0 border-t border-white/[0.07] px-4 py-2 text-[11px] text-slate-500;
   }
   .wiki-rendered .front-wiki-search .search-page-submit {
     @apply min-h-12 rounded-xl bg-[#14c794] px-6 text-sm font-bold text-[#06140d] transition hover:bg-[#1ee6a4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b0e12];
