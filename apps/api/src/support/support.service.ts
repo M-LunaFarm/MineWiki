@@ -102,11 +102,11 @@ interface MessageRow {
 }
 
 interface TicketCountRow {
-  allCount: number | bigint | string;
-  openCount: number | bigint | string;
-  pendingCount: number | bigint | string;
-  resolvedCount: number | bigint | string;
-  closedCount: number | bigint | string;
+  allCount: number | bigint | string | Prisma.Decimal;
+  openCount: number | bigint | string | Prisma.Decimal;
+  pendingCount: number | bigint | string | Prisma.Decimal;
+  resolvedCount: number | bigint | string | Prisma.Decimal;
+  closedCount: number | bigint | string | Prisma.Decimal;
 }
 
 @Injectable()
@@ -1354,15 +1354,9 @@ function toAccountDisplayName(
   return `${fallback}-${suffix}`;
 }
 
-function toCount(value: number | bigint | string): number {
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (typeof value === 'bigint') {
-    return Number(value);
-  }
-  return Number.isFinite(value) ? value : 0;
+function toCount(value: number | bigint | string | Prisma.Decimal): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
 function toNullableNumber(value: number | bigint | string | null): number | null {
