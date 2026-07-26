@@ -34,7 +34,7 @@ export function WikiRecentChangesClient({ initial, filters }: WikiRecentChangesC
 
   return <div className="space-y-4">
     {error ? <p role="alert" className="border border-red-300/30 bg-red-300/10 p-4 text-sm text-red-100">{error}</p> : null}
-    <section className="divide-y divide-white/10 border border-white/10 bg-[#111821]">
+    <section className="surface-flat divide-y divide-white/10 overflow-hidden rounded-xl">
       {items.map((change) => <RecentChange key={change.id} change={change} />)}
       {items.length === 0 ? <p className="px-4 py-8 text-sm text-slate-400">조건에 맞는 최근 변경이 없습니다.</p> : null}
     </section>
@@ -43,7 +43,7 @@ export function WikiRecentChangesClient({ initial, filters }: WikiRecentChangesC
 }
 
 function RecentChange({ change }: { readonly change: WikiRecentChangeSummary }) {
-  return <article className="grid gap-3 px-4 py-4 md:grid-cols-[1fr_auto] md:items-center">
+  return <article className="wiki-recent-change-row grid gap-3 px-4 py-4 transition-colors hover:bg-white/[0.02] sm:px-5 md:grid-cols-[1fr_auto] md:items-center">
     <div className="min-w-0">
       <div className="mb-2 flex flex-wrap gap-2">
         <span className="chip chip-accent">{namespaceLabel(change.namespaceCode)}</span>
