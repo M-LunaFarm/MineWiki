@@ -132,6 +132,9 @@ async function createFixture() {
 async function removeFixture() {
   await prisma.supportTicket.deleteMany({ where: { id: fixture.ticketId } });
   await prisma.server.deleteMany({ where: { id: fixture.serverId } });
+  await prisma.wikiProfile.deleteMany({
+    where: { accountId: { in: [fixture.adminId, fixture.customerId] } },
+  });
   await prisma.account.deleteMany({
     where: { id: { in: [fixture.adminId, fixture.customerId] } },
   });

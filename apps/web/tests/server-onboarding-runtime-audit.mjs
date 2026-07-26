@@ -150,6 +150,7 @@ async function removeFixtures() {
     await prisma.server.deleteMany({ where: { id: fixtures.serverId } });
   }
   if (accountIds.length > 0) {
+    await prisma.wikiProfile.deleteMany({ where: { accountId: { in: accountIds } } });
     await prisma.account.deleteMany({ where: { id: { in: accountIds } } });
   }
 }
