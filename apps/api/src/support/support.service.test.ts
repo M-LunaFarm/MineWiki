@@ -28,6 +28,23 @@ type RoutingProbe = {
   }>;
 };
 
+type ReplyNotificationProbe = {
+  createMessage(
+    session: {
+      sessionId: string;
+      userId: string;
+      tokenVersion: number;
+      isElevated: boolean;
+      authenticatedAt: string;
+    },
+    ticketId: string,
+    payload: unknown,
+  ): Promise<unknown>;
+  isAgent(accountId: string): Promise<boolean>;
+  fetchTicketRow(ticketId: string, includePrivate: boolean): Promise<unknown>;
+  getTicketDetail(session: unknown, ticketId: string): Promise<unknown>;
+};
+
 test('historical support assignment is not an authorization grant', () => {
   const service = new SupportService(
     {} as never,
@@ -156,4 +173,67 @@ test('hidden servers can only be attached by their owner, registrant, or support
   assert.equal(ownerRouting.serverId, hiddenServer.id);
   assert.equal(ownerRouting.serverNameSnapshot, hiddenServer.name);
   assert.equal(staffRouting.serverId, hiddenServer.id);
+});
+
+test('only public agent replies enqueue customer notifications', async () => {
+  const notifications: Array<{
+    ticketId: string;
+    messageId: string;
+    preview: string;
+  }> = [];
+  const tx = {
+    async $executeRaw() {
+      return 1;
+    },
+  };
+  const service = new SupportService(
+    {
+      async $transaction(operation: (store: typeof tx) => Promise<void>) {
+        await operation(tx);
+      },
+    } as never,
+    { isCaptchaRequired: () => false } as never,
+    { hasPermission: async () => true } as never,
+    {
+      async notifySupportTicketReply(
+        _store: unknown,
+        input: { ticketId: string; messageId: string; preview: string },
+      ) {
+        notifications.push(input);
+      },
+    } as never,
+  ) as unknown as ReplyNotificationProbe;
+  service.isAgent = async () => true;
+  service.fetchTicketRow = async () => ({
+    id: '11111111-1111-4111-8111-111111111111',
+    requesterAccountId: 'customer',
+    assigneeAccountId: null,
+    guestEmail: null,
+    subject: '로그인 문의',
+    status: 'open',
+  });
+  service.getTicketDetail = async () => ({ ok: true });
+  const session = {
+    sessionId: 'session',
+    userId: 'agent',
+    tokenVersion: 1,
+    isElevated: false,
+    authenticatedAt: new Date().toISOString(),
+  };
+
+  await service.createMessage(
+    session,
+    '11111111-1111-4111-8111-111111111111',
+    { body: '  확인했습니다.\n다시 로그인해 주세요.  ', isInternal: false },
+  );
+  await service.createMessage(
+    session,
+    '11111111-1111-4111-8111-111111111111',
+    { body: '고객에게 숨길 내부 메모', isInternal: true },
+  );
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0]?.ticketId, '11111111-1111-4111-8111-111111111111');
+  assert.match(notifications[0]?.messageId ?? '', /^[0-9a-f-]{36}$/u);
+  assert.equal(notifications[0]?.preview, '확인했습니다. 다시 로그인해 주세요.');
 });

@@ -1627,7 +1627,10 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                     </form>
                   </section>
                   {mode === 'agent' ? (
-                    <SupportAgentContextPanel ticket={selectedTicket} />
+                    <SupportAgentContextPanel
+                      ticket={selectedTicket}
+                      showOnMobile={mobileTicketDetailOpen}
+                    />
                   ) : null}
                 </div>
               </section>
@@ -2258,11 +2261,17 @@ function SupportContextBadges({ ticket }: { readonly ticket: SupportTicket }) {
 
 function SupportAgentContextPanel({
   ticket,
+  showOnMobile,
 }: {
   readonly ticket: SupportTicket | null;
+  readonly showOnMobile: boolean;
 }) {
   return (
-    <aside className="border-t border-[#2C2D30] bg-[#151619] p-4 lg:col-start-2 xl:col-auto xl:border-l xl:border-t-0">
+    <aside
+      className={`border-t border-[#2C2D30] bg-[#151619] p-4 lg:col-start-2 lg:block xl:col-auto xl:border-l xl:border-t-0 ${
+        showOnMobile ? 'block' : 'hidden'
+      }`}
+    >
       <h3 className="text-sm font-semibold text-white">문의 컨텍스트</h3>
       <p className="mt-1 text-[11px] leading-4 text-[#85878D]">
         고객과 연결 대상의 현재 상태를 확인한 뒤 처리하세요.
