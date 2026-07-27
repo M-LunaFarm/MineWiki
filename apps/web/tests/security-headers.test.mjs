@@ -15,7 +15,13 @@ test('all web routes carry the production security header baseline', async () =>
   assert.equal(headers['x-content-type-options'], 'nosniff');
   assert.equal(headers['x-frame-options'], 'SAMEORIGIN');
   assert.equal(headers['referrer-policy'], 'strict-origin-when-cross-origin');
+  assert.match(headers['content-security-policy'], /default-src 'self'/u);
+  assert.match(headers['content-security-policy'], /object-src 'none'/u);
+  assert.match(headers['content-security-policy'], /frame-ancestors 'self'/u);
+  assert.match(headers['content-security-policy'], /challenges\.cloudflare\.com/u);
+  assert.match(headers['content-security-policy'], /hcaptcha\.com/u);
+  assert.doesNotMatch(headers['content-security-policy'], /unsafe-eval/u);
+  assert.doesNotMatch(headers['content-security-policy'], /paddle/u);
   assert.match(headers['permissions-policy'], /camera=\(\)/u);
   assert.match(headers['permissions-policy'], /microphone=\(\)/u);
 });
-
