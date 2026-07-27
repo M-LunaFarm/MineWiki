@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
+import nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 
 const MAX_ATTEMPTS = 10;
 const LEASE_MS = 5 * 60 * 1000;
@@ -20,7 +22,27 @@ interface DeliveryPayload {
   createdAt: string;
 }
 
-export async function processWikiNotificationOutbox(prisma: PrismaClient, workerId = `wiki-notification-${randomUUID()}`): Promise<number> {
+interface EmailDeliveryPayload {
+  to: string;
+  subject: string;
+  text: string;
+  messageId: string;
+}
+
+export interface WikiNotificationEmailConfig {
+  readonly host: string;
+  readonly port: number;
+  readonly secure: boolean;
+  readonly user?: string;
+  readonly pass?: string;
+  readonly from: string;
+}
+
+export async function processWikiNotificationOutbox(
+  prisma: PrismaClient,
+  workerId = `wiki-notification-${randomUUID()}`,
+  emailConfig?: WikiNotificationEmailConfig,
+): Promise<number> {
   const now = new Date();
   await prisma.wikiNotificationEvent.updateMany({
     where: { status: 'processing', lockedAt: { lt: new Date(now.getTime() - LEASE_MS) } },
@@ -43,6 +65,7 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
     if (!event) continue;
     try {
       const parsedDeliveries = parseDeliveries(event.payloadJson);
+      const emailDeliveries = parseEmailDeliveries(event.payloadJson);
       await prisma.$transaction(async (tx) => {
         const releaseAuthorized = await filterAuthorizedReleaseReviewDeliveries(tx, parsedDeliveries);
         const invitationAuthorized = await filterCurrentCollaboratorInvitationDeliveries(tx, releaseAuthorized);
@@ -108,10 +131,14 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
             skipDuplicates: true,
           });
         }
-        await tx.wikiNotificationEvent.updateMany({
-          where: { id: event.id, status: 'processing', lockedBy: workerId },
-          data: { status: 'processed', processedAt: new Date(), lockedAt: null, lockedBy: null, lastError: null }
-        });
+      });
+      if (emailDeliveries.length > 0) {
+        if (!emailConfig) throw new Error('SMTP is not configured for support notification delivery.');
+        await sendEmailDeliveries(emailConfig, emailDeliveries);
+      }
+      await prisma.wikiNotificationEvent.updateMany({
+        where: { id: event.id, status: 'processing', lockedBy: workerId },
+        data: { status: 'processed', processedAt: new Date(), lockedAt: null, lockedBy: null, lastError: null }
       });
       processed += 1;
     } catch (error) {
@@ -129,6 +156,33 @@ export async function processWikiNotificationOutbox(prisma: PrismaClient, worker
     }
   }
   return processed;
+}
+
+async function sendEmailDeliveries(
+  config: WikiNotificationEmailConfig,
+  deliveries: readonly EmailDeliveryPayload[],
+): Promise<void> {
+  const transporter: Transporter = nodemailer.createTransport({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    auth: config.user && config.pass ? { user: config.user, pass: config.pass } : undefined,
+    disableFileAccess: true,
+    disableUrlAccess: true,
+  });
+  try {
+    for (const delivery of deliveries) {
+      await transporter.sendMail({
+        from: config.from,
+        to: delivery.to,
+        subject: delivery.subject,
+        text: delivery.text,
+        messageId: delivery.messageId,
+      });
+    }
+  } finally {
+    transporter.close();
+  }
 }
 
 async function filterCurrentOwnershipTransferDeliveries(
@@ -298,5 +352,30 @@ function parseDeliveries(payload: unknown): DeliveryPayload[] {
       throw new Error('Invalid notification source version.');
     }
     return { ...item, pageId: item.pageId ?? null, actorProfileId: item.actorProfileId ?? null, message: item.message ?? null } as DeliveryPayload;
+  });
+}
+
+function parseEmailDeliveries(payload: unknown): EmailDeliveryPayload[] {
+  if (!payload || typeof payload !== 'object' || !('emailDeliveries' in payload)) return [];
+  if (!Array.isArray(payload.emailDeliveries)) {
+    throw new Error('Invalid notification email payload.');
+  }
+  return payload.emailDeliveries.map((value) => {
+    if (!value || typeof value !== 'object') throw new Error('Invalid notification email delivery.');
+    const item = value as Partial<EmailDeliveryPayload>;
+    if (
+      !item.to
+      || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(item.to)
+      || !item.subject
+      || !item.text
+      || !item.messageId
+      || !/^<support-[0-9a-f-]{36}@minewiki\.kr>$/iu.test(item.messageId)
+    ) {
+      throw new Error('Incomplete notification email delivery.');
+    }
+    if (item.to.length > 320 || item.subject.length > 255 || item.text.length > 4_000) {
+      throw new Error('Notification email delivery exceeds its size limit.');
+    }
+    return item as EmailDeliveryPayload;
   });
 }

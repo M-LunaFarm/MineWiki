@@ -28,6 +28,7 @@ import { CaptchaService } from '../captcha/captcha.service';
 import { PrismaService } from '../common/prisma.service';
 import type { SessionPayload } from '../session/session.service';
 import { RoleService } from '../roles/role.service';
+import { WikiNotificationService } from '../wiki/wiki-notification.service';
 
 interface ListTicketOptions {
   readonly view?: string;
@@ -118,6 +119,7 @@ export class SupportService {
     private readonly prisma: PrismaService,
     private readonly captchaService: CaptchaService,
     @Optional() private readonly roles?: RoleService,
+    @Optional() private readonly notifications?: WikiNotificationService,
   ) {
     this.captchaRequired = this.captchaService.isCaptchaRequired();
   }
@@ -615,9 +617,10 @@ export class SupportService {
 
     const authorRole: MessageAuthorRole = isAgent ? 'agent' : 'customer';
     const now = new Date();
+    const messageId = randomUUID();
 
-    await this.prisma.$transaction([
-      this.prisma.$executeRaw`
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
         INSERT INTO \`SupportMessage\` (
           id,
           ticketId,
@@ -627,7 +630,7 @@ export class SupportService {
           isInternal,
           createdAt
         ) VALUES (
-          ${randomUUID()},
+          ${messageId},
           ${ticketId},
           ${session.userId},
           ${authorRole},
@@ -635,8 +638,8 @@ export class SupportService {
           ${isAgent ? isInternal : false},
           ${now}
         )
-      `,
-      this.prisma.$executeRaw`
+      `;
+      await tx.$executeRaw`
         UPDATE \`SupportTicket\`
         SET
           lastMessageAt = ${now},
@@ -654,8 +657,20 @@ export class SupportService {
                 : Prisma.empty
           }
         WHERE id = ${ticketId}
-      `,
-    ]);
+      `;
+      if (isAgent && !isInternal && this.notifications) {
+        await this.notifications.notifySupportTicketReply(tx, {
+          ticketId,
+          messageId,
+          requesterAccountId: ticket.requesterAccountId,
+          guestEmail: ticket.guestEmail,
+          actorAccountId: session.userId,
+          subject: ticket.subject,
+          preview: supportReplyPreview(body),
+          repliedAt: now,
+        });
+      }
+    });
 
     return this.getTicketDetail(session, ticketId);
   }
@@ -1197,6 +1212,10 @@ export function normalizeTicketListLimit(value: string | number | undefined): nu
 export function normalizeTicketSearch(value: string | undefined): string | null {
   const keyword = value?.trim();
   return keyword ? keyword.slice(0, 80) : null;
+}
+
+export function supportReplyPreview(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim().slice(0, 240);
 }
 
 export function encodeSupportTicketCursor(lastMessageAt: Date | string, id: string): string {

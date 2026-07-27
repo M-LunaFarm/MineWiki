@@ -43,6 +43,13 @@ interface PendingNotificationDelivery {
   readonly createdAt: Date;
 }
 
+interface PendingEmailDelivery {
+  readonly to: string;
+  readonly subject: string;
+  readonly text: string;
+  readonly messageId: string;
+}
+
 const MAX_DISCUSSION_NOTIFICATION_RECIPIENTS = 500;
 const MAX_RELEASE_REVIEW_NOTIFICATION_RECIPIENTS = 500;
 const DISCUSSION_ACL_RECIPIENT_CHUNK = 20;
@@ -55,6 +62,81 @@ export class WikiNotificationService {
     private readonly profiles: WikiProfileService,
     private readonly permissions: WikiPermissionService
   ) {}
+
+  async notifySupportTicketReply(tx: Prisma.TransactionClient, input: {
+    readonly ticketId: string;
+    readonly messageId: string;
+    readonly requesterAccountId: string;
+    readonly guestEmail: string | null;
+    readonly actorAccountId: string;
+    readonly subject: string;
+    readonly preview: string;
+    readonly repliedAt: Date;
+  }): Promise<void> {
+    const [recipientAccount, recipientProfile, actorProfile] = await Promise.all([
+      tx.account.findUnique({
+        where: { id: input.requesterAccountId },
+        select: { email: true, lifecycleStatus: true },
+      }),
+      tx.wikiProfile.findFirst({
+        where: {
+          accountId: input.requesterAccountId,
+          status: 'active',
+          mergedIntoProfileId: null,
+        },
+        select: { id: true },
+      }),
+      tx.wikiProfile.findFirst({
+        where: {
+          accountId: input.actorAccountId,
+          status: 'active',
+          mergedIntoProfileId: null,
+        },
+        select: { id: true },
+      }),
+    ]);
+    const href = `/support?ticket=${encodeURIComponent(input.ticketId)}`;
+    const title = input.subject.slice(0, 255);
+    const message = input.preview.slice(0, 500);
+    const recipientEmail = input.guestEmail?.trim() || (
+      recipientAccount?.lifecycleStatus === 'active' ? recipientAccount.email?.trim() : null
+    );
+    const deliveries: PendingNotificationDelivery[] = recipientProfile ? [{
+      profileId: recipientProfile.id,
+      type: 'support_ticket_reply',
+      pageId: null,
+      actorProfileId: actorProfile?.id ?? null,
+      sourceType: 'support_message',
+      sourceId: input.messageId,
+      title,
+      message,
+      href,
+      dedupeKey: `support-ticket-reply:${input.messageId}:profile:${recipientProfile.id.toString()}`,
+      readAt: null,
+      createdAt: input.repliedAt,
+    }] : [];
+    const emails: PendingEmailDelivery[] = recipientEmail ? [{
+      to: recipientEmail,
+      subject: `[MineWiki 문의 답변] ${title}`.slice(0, 255),
+      text: [
+        '문의에 새 답변이 등록되었습니다.',
+        '',
+        `문의 제목: ${title}`,
+        `답변 요약: ${message}`,
+        `확인하기: https://minewiki.kr${href}`,
+        '',
+        '이 메일에는 계정 정보나 비공개 내부 메모가 포함되지 않습니다.',
+      ].join('\n'),
+      messageId: `<support-${input.messageId}@minewiki.kr>`,
+    }] : [];
+    await this.persistDeliveries(
+      tx,
+      `support-ticket-reply:${input.messageId}`,
+      'support_ticket_reply',
+      deliveries,
+      emails,
+    );
+  }
 
   async list(session: SessionPayload, cursor?: string, requestedLimit = 30, requestedState = 'all'): Promise<WikiNotificationListResponse> {
     const profile = await this.profiles.ensureWikiProfile(session.userId);
@@ -710,9 +792,10 @@ export class WikiNotificationService {
     tx: Prisma.TransactionClient,
     eventKey: string,
     eventType: string,
-    deliveries: PendingNotificationDelivery[]
+    deliveries: PendingNotificationDelivery[],
+    emailDeliveries: PendingEmailDelivery[] = [],
   ): Promise<void> {
-    if (deliveries.length === 0) return;
+    if (deliveries.length === 0 && emailDeliveries.length === 0) return;
     await tx.wikiNotificationEvent.createMany({
       data: [{
         eventKey,
@@ -724,7 +807,13 @@ export class WikiNotificationService {
             pageId: delivery.pageId?.toString() ?? null,
             actorProfileId: delivery.actorProfileId?.toString() ?? null,
             createdAt: delivery.createdAt.toISOString()
-          }))
+          })),
+          emailDeliveries: emailDeliveries.map((delivery) => ({
+            to: delivery.to,
+            subject: delivery.subject,
+            text: delivery.text,
+            messageId: delivery.messageId,
+          })),
         },
         status: 'pending', attempts: 0, availableAt: new Date(), lockedAt: null,
         lockedBy: null, processedAt: null, lastError: null, createdAt: new Date()

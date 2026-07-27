@@ -30,7 +30,10 @@ import {
 import { loadVoteDispatchExecutionJob } from './vote-job-loader';
 import { loadDiscordVerifyExecutionJob } from './discord-sync-job-loader';
 import { DiscordVerificationRepository } from './discord-verification.repository';
-import { processWikiNotificationOutbox } from './wiki-notification-outbox';
+import {
+  processWikiNotificationOutbox,
+  type WikiNotificationEmailConfig,
+} from './wiki-notification-outbox';
 import { processWebPushDeliveries, type WebPushDeliveryConfig } from './web-push-delivery';
 import { sweepWikiPushRetention } from './wiki-push-retention';
 import { rebuildWikiSpecialSnapshots } from './wiki-special-snapshots';
@@ -81,6 +84,19 @@ const webPushConfig: WebPushDeliveryConfig = {
   privateKey: config.getOptional('VAPID_PRIVATE_KEY') ?? '',
   subject: config.getOptional('VAPID_SUBJECT') ?? '',
 };
+const smtpHost = config.getOptional('SMTP_HOST');
+const smtpFrom = config.getOptional('SMTP_FROM');
+const smtpPort = config.getNumber('SMTP_PORT', 587);
+const smtpUser = config.getOptional('SMTP_USER');
+const smtpPass = config.getOptional('SMTP_PASS');
+const notificationEmailConfig: WikiNotificationEmailConfig | undefined = smtpHost && smtpFrom ? {
+  host: smtpHost,
+  port: smtpPort,
+  secure: config.getOptional('SMTP_SECURE') === 'true' || smtpPort === 465,
+  ...(smtpUser ? { user: smtpUser } : {}),
+  ...(smtpPass ? { pass: smtpPass } : {}),
+  from: smtpFrom,
+} : undefined;
 const redisUrl = config.get('REDIS_URL', 'redis://localhost:6379');
 const connection = new Redis(redisUrl, {
   maxRetriesPerRequest: null,
@@ -627,7 +643,7 @@ async function bootstrapWorker(): Promise<void> {
   scheduleInterval('claim-check', CLAIM_SCAN_INTERVAL_MS, enqueueClaimChecks);
   scheduleInterval('rank-aggregation', RANK_INTERVAL_MS, enqueueRankAggregation);
   scheduleInterval('wiki-notification-outbox', WIKI_NOTIFICATION_INTERVAL_MS, async () => {
-    const count = await processWikiNotificationOutbox(prisma);
+    const count = await processWikiNotificationOutbox(prisma, undefined, notificationEmailConfig);
     if (count > 0) Logger.info({ count }, 'Delivered wiki notification outbox events');
   });
   scheduleInterval('wiki-push-delivery', WIKI_PUSH_DELIVERY_INTERVAL_MS, async () => {

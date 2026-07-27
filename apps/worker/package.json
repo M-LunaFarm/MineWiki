@@ -26,10 +26,12 @@
     "ioredis": "5.10.1",
     "luxon": "^3.5.0",
     "minecraft-server-util": "^5.4.4",
+    "nodemailer": "^7.0.11",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^20.11.19",
+    "@types/nodemailer": "^7.0.4",
     "@types/web-push": "^3.6.4",
     "prisma": "^6.17.1",
     "tsx": "^4.7.0",

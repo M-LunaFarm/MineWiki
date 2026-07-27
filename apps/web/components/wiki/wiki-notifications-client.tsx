@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, CheckCheck, GitCommitHorizontal, Loader2, MailOpen, MessageSquareText, PenLine, RotateCcw, ShieldAlert, UserPlus } from 'lucide-react';
+import { Bell, CheckCheck, GitCommitHorizontal, Headphones, Loader2, MailOpen, MessageSquareText, PenLine, RotateCcw, ShieldAlert, UserPlus } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -131,6 +131,7 @@ export function WikiNotificationsClient() {
 function notificationIcon(type: string) {
   if (type === 'page_revision') return <GitCommitHorizontal className="size-4" />;
   if (type === 'discussion_reply' || type === 'discussion_mention') return <MessageSquareText className="size-4" />;
+  if (type === 'support_ticket_reply') return <Headphones className="size-4" />;
   if (type === 'server_wiki_collaborator_invited' || type.startsWith('server_wiki_collaborator_invitation_')) return <UserPlus className="size-4" />;
   if (type.startsWith('server_ownership_transfer_')) return <ShieldAlert className="size-4" />;
   return <PenLine className="size-4" />;
@@ -140,6 +141,7 @@ function notificationLabel(type: string) {
   if (type === 'page_revision') return '관심 문서가 변경되었습니다.';
   if (type === 'discussion_reply') return '참여한 토론에 새 댓글이 있습니다.';
   if (type === 'discussion_mention') return '토론 댓글에서 회원님을 언급했습니다.';
+  if (type === 'support_ticket_reply') return '문의에 새 답변이 등록되었습니다.';
   if (type === 'server_wiki_collaborator_invited') return '서버 위키 협업 초대가 도착했습니다.';
   if (type === 'server_wiki_collaborator_invitation_accepted') return '서버 위키 협업 초대가 수락되었습니다.';
   if (type === 'server_wiki_collaborator_invitation_declined') return '서버 위키 협업 초대가 거절되었습니다.';
