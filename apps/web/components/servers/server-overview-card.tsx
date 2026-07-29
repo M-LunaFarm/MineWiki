@@ -111,7 +111,7 @@ function isRenderableImageUrl(value: string): boolean {
   if (!trimmed) {
     return false;
   }
-  if (trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) {
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.includes('\\')) {
     return true;
   }
 

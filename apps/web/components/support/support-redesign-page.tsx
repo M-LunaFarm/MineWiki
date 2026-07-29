@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   createSupportGuestTicket,
   createGuestSupportMessage,
@@ -20,6 +20,7 @@ import {
   type SupportTicketDetail,
   type SupportTicketStatus,
 } from '../../lib/support-api';
+import { renderSafeMarkdown } from '../../lib/markdown';
 import { useAuth } from '../providers/auth-context';
 
 type TicketStatusFilter = 'all' | SupportTicketStatus;
@@ -1553,9 +1554,12 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                                         : 'border-[#34363A] bg-[#151619] text-[#E8E9EC]'
                                     }`}
                                   >
-                                    <p className="whitespace-pre-wrap break-words">
-                                      {message.body}
-                                    </p>
+                                    <div
+                                      className="support-markdown prose prose-invert max-w-none break-words text-sm leading-6"
+                                      dangerouslySetInnerHTML={{
+                                        __html: renderSafeMarkdown(message.body),
+                                      }}
+                                    />
                                   </div>
                                 </div>
                               </article>
@@ -1575,10 +1579,8 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                       className="border-t border-[#2C2D30] p-4 sm:p-5"
                       onSubmit={(event) => void handleSendMessage(event)}
                     >
-                      <textarea
+                      <SupportMarkdownEditor
                         id={mode === 'agent' ? 'support-agent-reply' : undefined}
-                        aria-keyshortcuts={mode === 'agent' ? 'Enter' : undefined}
-                        className="min-h-[96px] w-full resize-y rounded-lg border border-[#34363A] bg-[#111214] px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-[#73757C] focus:border-[#13ec80]/60 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={!canSendMessage || submittingMessage}
                         placeholder={
                           canSendMessage
@@ -1590,7 +1592,7 @@ export function SupportRedesignPage({ mode = 'customer' }: { readonly mode?: Sup
                               : '로그인 후 열린 문의에 답변할 수 있습니다.'
                         }
                         value={messageBody}
-                        onChange={(event) => setMessageBody(event.target.value)}
+                        onChange={setMessageBody}
                         onKeyDown={(event) => {
                           if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                             event.preventDefault();
@@ -2125,16 +2127,87 @@ function SupportTextarea(props: {
   readonly value: string;
   readonly onChange: (value: string) => void;
 }) {
+  return <SupportMarkdownEditor {...props} />;
+}
+
+function SupportMarkdownEditor(props: {
+  readonly label?: string;
+  readonly placeholder: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly id?: string;
+  readonly disabled?: boolean;
+  readonly onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+}) {
+  const [tab, setTab] = useState<'write' | 'preview'>('write');
+  const generatedId = useId();
+  const editorId = props.id ?? generatedId;
+  const previewHtml = useMemo(
+    () => (props.value.trim() ? renderSafeMarkdown(props.value) : ''),
+    [props.value],
+  );
+
   return (
-    <label className="block">
-      <span className="text-xs font-medium text-[#D8D9DC]">{props.label}</span>
-      <textarea
-        className="mt-1 min-h-[132px] w-full resize-y rounded-md border border-[#34363A] bg-[#111214] px-3 py-3 text-sm leading-6 text-white outline-none placeholder:text-[#73757C] focus:border-[#13ec80]/60"
-        placeholder={props.placeholder}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-    </label>
+    <div className="block">
+      <div className="flex items-end justify-between gap-3">
+        {props.label ? (
+          <label htmlFor={editorId} className="text-xs font-medium text-[#D8D9DC]">
+            {props.label}
+          </label>
+        ) : (
+          <span className="text-xs font-medium text-[#D8D9DC]">답변 내용</span>
+        )}
+        <div className="flex rounded-md border border-[#34363A] bg-[#111214] p-0.5">
+          <button
+            type="button"
+            className={`rounded px-2 py-1 text-[11px] font-medium ${
+              tab === 'write' ? 'bg-[#2C2D30] text-white' : 'text-[#A7A9AF]'
+            }`}
+            onClick={() => setTab('write')}
+          >
+            작성
+          </button>
+          <button
+            type="button"
+            className={`rounded px-2 py-1 text-[11px] font-medium ${
+              tab === 'preview' ? 'bg-[#2C2D30] text-white' : 'text-[#A7A9AF]'
+            }`}
+            onClick={() => setTab('preview')}
+          >
+            미리보기
+          </button>
+        </div>
+      </div>
+      {tab === 'write' ? (
+        <textarea
+          id={editorId}
+          aria-label={props.label ?? '답변 내용'}
+          aria-keyshortcuts={props.onKeyDown ? 'Control+Enter Meta+Enter' : undefined}
+          className="mt-1 min-h-[132px] w-full resize-y rounded-md border border-[#34363A] bg-[#111214] px-3 py-3 text-sm leading-6 text-white outline-none placeholder:text-[#73757C] focus:border-[#13ec80]/60 disabled:cursor-not-allowed disabled:opacity-60"
+          maxLength={2000}
+          disabled={props.disabled}
+          placeholder={props.placeholder}
+          value={props.value}
+          onChange={(event) => props.onChange(event.target.value)}
+          onKeyDown={props.onKeyDown}
+        />
+      ) : (
+        <div className="mt-1 min-h-[132px] rounded-md border border-[#34363A] bg-[#111214] px-3 py-3">
+          {previewHtml ? (
+            <div
+              className="support-markdown prose prose-invert max-w-none break-words text-sm leading-6 text-[#E8E9EC]"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          ) : (
+            <p className="text-sm text-[#73757C]">미리볼 내용이 없습니다.</p>
+          )}
+        </div>
+      )}
+      <div className="mt-1 flex items-center justify-between gap-3 text-[11px] text-[#85878D]">
+        <span>Markdown 지원 · HTML과 실행 가능한 링크는 제거됩니다.</span>
+        <span>{props.value.length.toLocaleString('ko-KR')} / 2,000</span>
+      </div>
+    </div>
   );
 }
 
